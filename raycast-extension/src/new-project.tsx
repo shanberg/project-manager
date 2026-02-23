@@ -1,9 +1,12 @@
+import path from "path";
 import { useState } from "react";
 import {
   Action,
   ActionPanel,
   Form,
   getPreferenceValues,
+  launchCommand,
+  LaunchType,
   showToast,
   Toast,
 } from "@raycast/api";
@@ -32,11 +35,22 @@ export default function Command() {
       if (stderr) {
         await showToast({ style: Toast.Style.Failure, title: "Error", message: stderr });
       } else {
+        const createdMsg = stdout.trim();
         await showToast({
           style: Toast.Style.Success,
           title: "Project created",
-          message: stdout.trim(),
+          message: createdMsg,
         });
+        const match = createdMsg.match(/^Created:\s*(.+)$/);
+        if (match) {
+          const projectPath = match[1].trim();
+          const projectName = path.basename(projectPath);
+          await launchCommand({
+            name: "view-project",
+            type: LaunchType.UserInitiated,
+            context: { projectName, basePath: prefs.activePath },
+          });
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

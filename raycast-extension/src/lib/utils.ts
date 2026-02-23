@@ -1,5 +1,74 @@
 import path from "path";
+import os from "os";
 import { existsSync } from "fs";
+import { formatSessionDate } from "project-manager/notes";
+import type { ProjectNotes } from "project-manager/notes";
+import { runPmWithPrefs } from "./pm";
+import type { PreferenceValues } from "./types";
+
+function expandPath(p: string): string {
+  return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
+}
+
+export interface ObsidianUriOptions {
+  heading?: string;
+  vault?: string;
+  vaultRoot?: string;
+}
+
+export function getObsidianUri(
+  notesPath: string,
+  options?: ObsidianUriOptions
+): string {
+  const absolute = path.resolve(notesPath);
+  const vault = options?.vault?.trim();
+  const vaultRootRaw = options?.vaultRoot?.trim();
+  const vaultRoot = vaultRootRaw ? path.resolve(expandPath(vaultRootRaw)) : null;
+  const heading = options?.heading?.trim();
+
+  if (vault && vaultRoot) {
+    const relative = path.relative(vaultRoot, absolute);
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+      const filepath = relative.replace(/\\/g, "/").replace(/\.md$/i, "");
+      const params = new URLSearchParams();
+      params.set("vault", vault);
+      params.set("filepath", filepath);
+      if (heading) params.set("heading", heading);
+      return `obsidian://advanced-uri?${params.toString()}`;
+    }
+  }
+
+  return `obsidian://open?path=${encodeURIComponent(absolute)}`;
+}
+
+export function getSessionHeading(date: string, label?: string): string {
+  return label ? `${date} · ${label}` : date;
+}
+
+export function buildObsidianOptions(
+  prefs: { obsidianVault?: string; obsidianVaultRoot?: string },
+  session?: { date: string; label: string } | null
+): ObsidianUriOptions | undefined {
+  if (!prefs.obsidianVault?.trim() || !prefs.obsidianVaultRoot?.trim()) return undefined;
+  const opts: ObsidianUriOptions = {
+    vault: prefs.obsidianVault.trim(),
+    vaultRoot: prefs.obsidianVaultRoot.trim(),
+  };
+  opts.heading = session ? getSessionHeading(session.date, session.label) : "Sessions";
+  return opts;
+}
+
+export async function ensureTodaySession(
+  projectName: string,
+  notes: ProjectNotes | null,
+  prefs: PreferenceValues
+): Promise<{ date: string; label: string }> {
+  const today = formatSessionDate(new Date());
+  const existing = notes?.sessions.find((s) => s.date === today);
+  if (existing) return existing;
+  await runPmWithPrefs(prefs, ["notes", "session", "add", projectName, ""]);
+  return { date: today, label: "" };
+}
 
 export function parseListAllOutput(stdout: string): { active: string[]; archive: string[] } {
   const lines = stdout.split("\n");
@@ -21,11 +90,6 @@ export function parseListAllOutput(stdout: string): { active: string[]; archive:
     }
   }
   return { active: activeList, archive: archiveList };
-}
-
-export function getObsidianUri(notesPath: string): string {
-  const absolute = path.resolve(notesPath);
-  return `obsidian://open?path=${encodeURIComponent(absolute)}`;
 }
 
 export function hasSrcDir(projectPath: string): boolean {

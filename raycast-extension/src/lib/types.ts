@@ -3,4 +3,6 @@ export interface PreferenceValues {
   archivePath: string;
   configPath?: string;
   pmCliPath?: string;
+  obsidianVault?: string;
+  obsidianVaultRoot?: string;
 }

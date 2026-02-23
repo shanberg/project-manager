@@ -144,6 +144,22 @@
       "title": "pm CLI Path",
       "description": "Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect.",
       "placeholder": "~/dev/project-manager/dist/cli.js"
+    },
+    {
+      "name": "obsidianVault",
+      "type": "textfield",
+      "required": false,
+      "title": "Obsidian Vault (Advanced URI)",
+      "description": "Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open.",
+      "placeholder": "My Vault"
+    },
+    {
+      "name": "obsidianVaultRoot",
+      "type": "textfield",
+      "required": false,
+      "title": "Obsidian Vault Root (Advanced URI)",
+      "description": "Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath.",
+      "placeholder": "~/Obsidian/Projects"
     }
   ],
   "dependencies": {

@@ -1,6 +1,8 @@
 import path from "path";
 import { readFile } from "fs/promises";
+import { getPreferenceValues } from "@raycast/api";
 import {
+  Color,
   Icon,
   MenuBarExtra,
   open,
@@ -26,9 +28,17 @@ import {
   getUndoState,
   clearUndoState,
 } from "./lib/undo-todo";
-import { getObsidianUri, hasSrcDir } from "./lib/utils";
+import {
+  getTaskTiming,
+  setTaskTiming,
+  clearTaskTiming,
+  taskKey as taskTimingKey,
+} from "./lib/task-timing";
+import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
+import type { PreferenceValues } from "./lib/types";
 
 export default function Command() {
+  const prefs = getPreferenceValues<PreferenceValues>();
   const { data, isLoading, revalidate } = useCachedPromise(
     async () => {
       const focusedKey = await getFocusedProject();
@@ -38,11 +48,31 @@ export default function Command() {
       const { basePath, name } = parsed;
       const projectPath = path.join(basePath, name);
       const notesPath = await resolveNotesPath(projectPath);
-      if (!notesPath) return { projectPath, name, basePath, notesPath: null, todos: [] };
+      if (!notesPath) {
+        await clearTaskTiming();
+        return { projectPath, name, basePath, notesPath: null, todos: [], notes: null, iconColor: undefined };
+      }
       const content = await readFile(notesPath, "utf-8");
       const notes = parseNotes(content);
       const todos = parseTodos(notes);
-      return { projectPath, name, basePath, notesPath, todos };
+      const openTodos = todos.filter((t) => !t.checked);
+      const nextTodo = openTodos[0] ?? null;
+      let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
+      if (nextTodo) {
+        const key = taskTimingKey(notesPath, nextTodo.rawLine);
+        const stored = await getTaskTiming();
+        const now = Date.now();
+        if (stored?.taskKey === key) {
+          const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
+          if (elapsedHours >= 2) iconColor = Color.Red;
+          else if (elapsedHours >= 1) iconColor = Color.Yellow;
+        } else {
+          await setTaskTiming(key);
+        }
+      } else {
+        await clearTaskTiming();
+      }
+      return { projectPath, name, basePath, notesPath, todos, notes, iconColor };
     },
     [],
     { execute: true }
@@ -112,7 +142,13 @@ export default function Command() {
 
   return (
     <MenuBarExtra
-      icon={nextTodo ? Icon.ArrowRightCircleFilled : Icon.Ellipsis}
+      icon={
+        nextTodo
+          ? data.iconColor
+            ? { source: Icon.ArrowRightCircleFilled, tintColor: data.iconColor }
+            : Icon.ArrowRightCircleFilled
+          : Icon.Ellipsis
+      }
       title={title}
       tooltip={tooltip}
       isLoading={isLoading}
@@ -139,7 +175,9 @@ export default function Command() {
                   title="Open in Obsidian"
                   onAction={async () => {
                     await onOpenProject();
-                    open(getObsidianUri(data.notesPath!));
+                    const session = await ensureTodaySession(data.name, data.notes ?? null, prefs);
+                    const opts = buildObsidianOptions(prefs, session);
+                    open(getObsidianUri(data.notesPath!, opts));
                   }}
                 />
               </>
@@ -153,7 +191,9 @@ export default function Command() {
                     title="Open in Obsidian"
                     onAction={async () => {
                       await onOpenProject();
-                      open(getObsidianUri(data.notesPath!));
+                      const session = await ensureTodaySession(data.name, data.notes ?? null, prefs);
+                      const opts = buildObsidianOptions(prefs, session);
+                      open(getObsidianUri(data.notesPath!, opts));
                     }}
                   />
                 )}

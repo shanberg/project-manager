@@ -21,8 +21,15 @@ async function fetchProjects(
   return parseListAllOutput(stdout);
 }
 
-export default function Command() {
+type LaunchContext = { projectName: string; basePath: string };
+
+export default function Command(props: { launchContext?: LaunchContext }) {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const direct = props.launchContext;
+
+  if (direct?.projectName && direct?.basePath) {
+    return <ProjectView projectName={direct.projectName} basePath={direct.basePath} />;
+  }
 
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjects,

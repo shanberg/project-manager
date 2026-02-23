@@ -34,7 +34,13 @@ import { DEFAULT_DOMAINS } from "project-manager/types";
 
 const DOMAIN_CODES = Object.keys(DEFAULT_DOMAINS);
 
-import { parseListAllOutput, getObsidianUri, hasSrcDir } from "./lib/utils";
+import {
+  parseListAllOutput,
+  getObsidianUri,
+  hasSrcDir,
+  buildObsidianOptions,
+  ensureTodaySession,
+} from "./lib/utils";
 
 function getDomain(name: string): string | null {
   const m = name.match(/^(M|DE|P|I)-\d+/);
@@ -212,15 +218,17 @@ export default function Command() {
     hasSrc,
     hasNotes,
     notesPath,
+    notes,
   }: {
     name: string;
     basePath: string;
     hasSrc: boolean;
     hasNotes: boolean;
     notesPath: string | null;
+    notes: ProjectNotes | null;
   }) {
     const projectPath = path.join(basePath, name);
-    const obsidianUri = getObsidianUri(notesPath ?? getNotesPath(projectPath));
+    const targetPath = notesPath ?? getNotesPath(projectPath);
 
     return (
       <ActionPanel>
@@ -257,7 +265,9 @@ export default function Command() {
             title="Open in Obsidian"
             onAction={async () => {
               await onOpenProject(basePath, name);
-              open(obsidianUri);
+              const session = await ensureTodaySession(name, notes, prefs);
+              const opts = buildObsidianOptions(prefs, session);
+              open(getObsidianUri(targetPath, opts));
             }}
           />
         )}
@@ -266,7 +276,9 @@ export default function Command() {
             title="Open in Obsidian"
             onAction={async () => {
               await onOpenProject(basePath, name);
-              open(obsidianUri);
+              const session = await ensureTodaySession(name, notes, prefs);
+              const opts = buildObsidianOptions(prefs, session);
+              open(getObsidianUri(targetPath, opts));
             }}
           />
         )}
@@ -334,7 +346,7 @@ export default function Command() {
                 keywords={[getDomain(name) ?? "", getProjectCode(name)]}
                 detail={renderDetail(notes, getProjectCode(name))}
                 actions={
-                  <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} />
+                  <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
                 }
               />
             ))}
@@ -348,7 +360,7 @@ export default function Command() {
                 keywords={[getDomain(name) ?? "", getProjectCode(name)]}
                 detail={renderDetail(notes, getProjectCode(name))}
                 actions={
-                  <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} />
+                  <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
                 }
               />
             ))}
@@ -363,13 +375,14 @@ export default function Command() {
               title={getReadableProjectName(name)}
               keywords={[getDomain(name) ?? "", getProjectCode(name)]}
               detail={renderDetail(notes, getProjectCode(name))}
-              actions={
+                actions={
                 <ProjectActions
                   name={name}
                   basePath={pathToShow}
                   hasSrc={hasSrc}
                   hasNotes={!!notes}
                   notesPath={notesPath}
+                  notes={notes}
                 />
               }
             />

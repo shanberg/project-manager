@@ -1,6 +1,6 @@
 import path from "path";
 import { readFile } from "fs/promises";
-import { getObsidianUri } from "./lib/utils";
+import { getObsidianUri, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
 import {
   getPreferenceValues,
   Icon,
@@ -49,14 +49,14 @@ export default function Command() {
       const { basePath, name } = parsed;
       const projectPath = path.join(basePath, name);
       const notesPath = await resolveNotesPath(projectPath);
-      if (!notesPath) return { projectPath, name, basePath, notesPath: null, done: 0, total: 0, links: [] };
+      if (!notesPath) return { projectPath, name, basePath, notesPath: null, done: 0, total: 0, links: [], notes: null };
       const content = await readFile(notesPath, "utf-8");
       const notes = parseNotes(content);
       const todos = parseTodos(notes);
       const total = todos.length;
       const done = todos.filter((t) => t.checked).length;
       const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
-      return { projectPath, name, basePath, notesPath, done, total, links };
+      return { projectPath, name, basePath, notesPath, done, total, links, notes };
     },
     [],
     { execute: true }
@@ -102,7 +102,9 @@ export default function Command() {
                 title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();
-                  open(getObsidianUri(data.notesPath!));
+                  const session = await ensureTodaySession(data.name, data.notes ?? null, prefs);
+                  const opts = buildObsidianOptions(prefs, session);
+                  open(getObsidianUri(data.notesPath!, opts));
                 }}
               />
             )}

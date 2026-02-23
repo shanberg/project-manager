@@ -15,7 +15,11 @@ type ExtensionPreferences = {
   /** Config Path Override - Override pm config location (default: ~/.config/pm). Leave empty to use default. */
   "configPath"?: string,
   /** pm CLI Path - Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect. */
-  "pmCliPath"?: string
+  "pmCliPath"?: string,
+  /** Obsidian Vault (Advanced URI) - Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open. */
+  "obsidianVault"?: string,
+  /** Obsidian Vault Root (Advanced URI) - Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath. */
+  "obsidianVaultRoot"?: string
 }
 
 /** Preferences accessible in all the extension's commands */

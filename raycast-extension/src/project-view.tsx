@@ -31,10 +31,15 @@ import AddTodoForm from "./add-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
-import { getObsidianUri, hasSrcDir } from "./lib/utils";
+import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
 
 function truncateSubtitle(s: string, max = 40): string {
   return s ? s.slice(0, max) + (s.length > max ? "…" : "") : "Empty";
+}
+
+function sectionDetail(content: string, emptyLabel: string) {
+  const markdown = content.trim() ? content : `_${emptyLabel}_`;
+  return <List.Item.Detail markdown={markdown} />;
 }
 
 interface Props {
@@ -154,7 +159,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
   }
 
   const hasSrc = hasSrcDir(projectPath);
-  const obsidianUri = notesPath ? getObsidianUri(notesPath) : getObsidianUri(getNotesPath(projectPath));
+  const targetPath = notesPath ?? getNotesPath(projectPath);
 
   return (
     <List
@@ -309,6 +314,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Edit Summary"
             icon={Icon.Document}
             subtitle={truncateSubtitle(notes.summary)}
+            detail={sectionDetail(notes.summary, "No summary yet.")}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -331,6 +337,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Edit Problem"
             icon={Icon.QuestionMarkCircle}
             subtitle={truncateSubtitle(notes.problem)}
+            detail={sectionDetail(notes.problem, "No problem statement yet.")}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -353,6 +360,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Edit Goals"
             icon={Icon.Target}
             subtitle={truncateSubtitle(notes.goals.filter(Boolean).join(", "))}
+            detail={sectionDetail(
+              notes.goals.filter(Boolean).map((g, i) => `${i + 1}. ${g}`).join("\n"),
+              "No goals yet."
+            )}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -372,6 +383,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Edit Approach"
             icon={Icon.List}
             subtitle={truncateSubtitle(notes.approach)}
+            detail={sectionDetail(notes.approach, "No approach yet.")}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -394,6 +406,14 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Add Link"
             icon={Icon.Link}
             subtitle={notes.links.filter((l) => l.label || l.url).length + " links"}
+            detail={sectionDetail(
+              notes.links
+                .filter((l) => l.label || l.url)
+                .map((l) => (l.label && l.url ? `- [${l.label}](${l.url})` : l.url ? `- ${l.url}` : ""))
+                .filter(Boolean)
+                .join("\n"),
+              "No links yet."
+            )}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -409,6 +429,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Edit Learnings"
             icon={Icon.LightBulb}
             subtitle={truncateSubtitle(notes.learnings.filter(Boolean).join(", "))}
+            detail={sectionDetail(
+              notes.learnings.filter(Boolean).map((l) => `- ${l}`).join("\n"),
+              "No learnings yet."
+            )}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -430,6 +454,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Open in Finder"
           icon="folder"
+          detail={sectionDetail(`Open the project folder in Finder.\n\n\`${projectPath}\``, "Project path unavailable")}
           actions={
             <ActionPanel>
               <Action
@@ -446,6 +471,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             title="Open in Cursor"
             icon="terminal"
+            detail={sectionDetail(`Open the project in Cursor.\n\n\`${projectPath}\``, "Project path unavailable")}
             actions={
               <ActionPanel>
                 <Action
@@ -462,13 +488,21 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Open in Obsidian"
           icon="document"
+          detail={sectionDetail(
+            `Open notes in Obsidian.\n\n\`${targetPath}\``,
+            "Notes path unavailable"
+          )}
           actions={
             <ActionPanel>
               <Action
                 title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();
-                  open(obsidianUri);
+                  const session = notes
+                    ? await ensureTodaySession(projectName, notes, prefs)
+                    : null;
+                  const opts = buildObsidianOptions(prefs, session);
+                  open(getObsidianUri(targetPath, opts));
                 }}
               />
             </ActionPanel>
@@ -477,6 +511,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Set as Focused Project"
           icon={Icon.Star}
+          detail={sectionDetail(
+            "Set this project as the focused project for quick access from the menu bar and View Focused Project.",
+            ""
+          )}
           actions={
             <ActionPanel>
               <Action
@@ -492,6 +530,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Add Session Note"
           icon="plus"
+          detail={sectionDetail("Add a new session note to the project notes file.", "")}
           actions={
             <ActionPanel>
               <Action.Push
@@ -505,6 +544,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             title="Add Todo"
             icon={Icon.ArrowRightCircleFilled}
+            detail={sectionDetail("Add a task to the current session in the project notes.", "")}
             actions={
               <ActionPanel>
                 <Action.Push
