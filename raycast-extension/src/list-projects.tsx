@@ -198,18 +198,9 @@ export default function Command() {
     setRecentKeys(await getRecentProjectKeys());
   }
 
-  function renderDetail(notes: ProjectNotes | null, code: string) {
+  function renderDetail(notes: ProjectNotes | null) {
     const markdown = notes ? formatNotesForDetail(notes) : formatNotesEmptyState();
-    return (
-      <List.Item.Detail
-        markdown={markdown}
-        metadata={
-          <List.Item.Detail.Metadata>
-            <List.Item.Detail.Metadata.Label title="Code" text={code} />
-          </List.Item.Detail.Metadata>
-        }
-      />
-    );
+    return <List.Item.Detail markdown={markdown} />;
   }
 
   function ProjectActions({
@@ -344,7 +335,7 @@ export default function Command() {
                 icon={getProgressIcon(total ? done / total : 1)}
                 title={getReadableProjectName(name)}
                 keywords={[getDomain(name) ?? "", getProjectCode(name)]}
-                detail={renderDetail(notes, getProjectCode(name))}
+                detail={renderDetail(notes)}
                 actions={
                   <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
                 }
@@ -358,7 +349,7 @@ export default function Command() {
                 icon={getProgressIcon(total ? done / total : 1)}
                 title={getReadableProjectName(name)}
                 keywords={[getDomain(name) ?? "", getProjectCode(name)]}
-                detail={renderDetail(notes, getProjectCode(name))}
+                detail={renderDetail(notes)}
                 actions={
                   <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
                 }
@@ -374,7 +365,7 @@ export default function Command() {
               icon={getProgressIcon(total ? done / total : 1)}
               title={getReadableProjectName(name)}
               keywords={[getDomain(name) ?? "", getProjectCode(name)]}
-              detail={renderDetail(notes, getProjectCode(name))}
+              detail={renderDetail(notes)}
                 actions={
                 <ProjectActions
                   name={name}
