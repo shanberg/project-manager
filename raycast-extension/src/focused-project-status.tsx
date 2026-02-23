@@ -2,12 +2,13 @@ import path from "path";
 import { readFile } from "fs/promises";
 import { getObsidianUri, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
 import {
+  Alert,
+  confirmAlert,
   getPreferenceValues,
   Icon,
   MenuBarExtra,
   open,
-  showToast,
-  Toast,
+  showHUD,
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon } from "@raycast/utils";
 import type { LinkEntry } from "project-manager/notes";
@@ -129,11 +130,11 @@ export default function Command() {
               {recentProjects.map((p) => (
                 <MenuBarExtra.Item
                   key={`${p.basePath}:${p.name}`}
-                  icon={Icon.Folder}
+                  icon={getProgressIcon(p.total ? p.done / p.total : 1)}
                   title={p.name}
                   onAction={async () => {
                     await setFocusedProject(p.basePath, p.name);
-                    await showToast({ style: Toast.Style.Success, title: "Focused", message: p.name });
+                    await showHUD(`Focused: ${p.name}`);
                     revalidate();
                   }}
                 />
@@ -155,8 +156,14 @@ export default function Command() {
               icon={Icon.Star}
               title="Clear Focused Project"
               onAction={async () => {
+                const confirmed = await confirmAlert({
+                  title: "Clear Focused Project",
+                  message: "Remove focus from the current project?",
+                  primaryAction: { title: "Clear" },
+                });
+                if (!confirmed) return;
                 await clearFocusedProject();
-                await showToast({ style: Toast.Style.Success, title: "Cleared" });
+                await showHUD("Cleared");
               }}
             />
           </MenuBarExtra.Section>

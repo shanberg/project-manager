@@ -1,6 +1,7 @@
 import {
   Action,
   ActionPanel,
+  confirmAlert,
   getPreferenceValues,
   List,
   open,
@@ -36,6 +37,12 @@ export default function Command() {
   );
 
   async function unarchiveProject(name: string) {
+    const confirmed = await confirmAlert({
+      title: "Unarchive Project",
+      message: `Move "${name}" back to active?`,
+      primaryAction: { title: "Unarchive" },
+    });
+    if (!confirmed) return;
     try {
       await mutate(
         runPmWithPrefs(prefs, ["unarchive", name]),

@@ -1,6 +1,8 @@
 import {
   Action,
   ActionPanel,
+  Alert,
+  confirmAlert,
   getPreferenceValues,
   List,
   showToast,
@@ -34,6 +36,12 @@ export default function Command() {
   );
 
   async function archiveProject(name: string) {
+    const confirmed = await confirmAlert({
+      title: "Archive Project",
+      message: `Move "${name}" to archive?`,
+      primaryAction: { title: "Archive", style: Alert.ActionStyle.Destructive },
+    });
+    if (!confirmed) return;
     try {
       await mutate(
         runPmWithPrefs(prefs, ["archive", name]),

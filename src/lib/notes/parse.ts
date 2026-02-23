@@ -18,13 +18,12 @@ function extractCallout(lines: string[], pattern: RegExp): string {
     }
     if (inBlock && CALLOUT_START.test(line)) break;
     if (inBlock && line.startsWith(">")) {
-      const rest = line.slice(1).replace(/^\s/, "");
-      content.push(rest);
+      content.push(line.slice(1));
       continue;
     }
     if (inBlock && !line.startsWith(">") && line.trim()) break;
   }
-  return content.join("\n").trim();
+  return content.join("\n");
 }
 
 function extractGoals(lines: string[]): string[] {
@@ -40,7 +39,7 @@ function extractGoals(lines: string[]): string[] {
     if (inBlock && CALLOUT_START.test(line)) break;
     if (inBlock && line.startsWith(">")) {
       const m = line.replace(/^>\s*/, "").match(/^\d+\.\s*(.*)$/);
-      if (m) goals.push(m[1]?.trim() ?? "");
+      if (m) goals.push(m[1] ?? "");
       continue;
     }
     if (inBlock && !line.startsWith(">")) break;
@@ -59,13 +58,18 @@ function parseLinksBlock(text: string): LinkEntry[] {
       i++;
       continue;
     }
-    const part = m[1].trim();
+    const part = m[1];
+    if (part.trim() === "") {
+      entries.push({ label: undefined, url: undefined });
+      i++;
+      continue;
+    }
     const colonIdx = part.indexOf(":");
     const isUrl = URL_PATTERN.test(part);
 
     if (colonIdx > 0 && !isUrl) {
-      const label = part.slice(0, colonIdx).trim();
-      const url = part.slice(colonIdx + 1).trim();
+      const label = part.slice(0, colonIdx);
+      const url = part.slice(colonIdx + 1);
       entries.push(url ? { label, url } : { label });
     } else if (isUrl) {
       entries.push({ url: part });
@@ -75,7 +79,7 @@ function parseLinksBlock(text: string): LinkEntry[] {
       while (i < lines.length) {
         const nm = lines[i].match(NESTED_LINK);
         if (!nm) break;
-        children.push({ url: nm[1].trim() });
+        children.push({ url: nm[1] });
         i++;
       }
       entries.push({ label: part, children });
@@ -89,7 +93,7 @@ function parseLinksBlock(text: string): LinkEntry[] {
 function parseLearningsBlock(text: string): string[] {
   const items = text
     .split("\n")
-    .map((l) => l.match(/^\s*-\s+(.*)$/)?.[1]?.trim() ?? "")
+    .map((l) => l.match(/^\s*-\s+(.*)$/)?.[1] ?? "")
     .filter((s) => s !== undefined);
   return items.length ? items : [""];
 }
@@ -106,21 +110,21 @@ function parseSessionsBlock(text: string): Session[] {
       continue;
     }
     const date = `${m[1]}, ${m[2]} ${m[3]}, ${m[4]}`;
-    const label = m[5]?.trim() ?? "";
+    const label = m[5] ?? "";
     const bodyLines: string[] = [];
     i++;
     while (i < lines.length && !lines[i].match(SESSION_HEADING) && !lines[i].match(/^##\s/)) {
       bodyLines.push(lines[i]);
       i++;
     }
-    sessions.push({ date, label, body: bodyLines.join("\n").trim() });
+    sessions.push({ date, label, body: bodyLines.join("\n") });
   }
   return sessions;
 }
 
 export function parseNotes(markdown: string): ProjectNotes {
   const lines = markdown.split("\n");
-  const title = lines.find((l) => l.startsWith("# "))?.replace(/^#\s+/, "").trim() ?? "";
+  const title = lines.find((l) => l.startsWith("# "))?.replace(/^#\s+/, "") ?? "";
 
   const summary = extractCallout(lines, /^>\s*\[!summary\]/i);
   const problem = extractCallout(lines, /^>\s*\[!question\]/i);

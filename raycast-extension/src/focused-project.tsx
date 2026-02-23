@@ -2,12 +2,13 @@ import path from "path";
 import { readFile } from "fs/promises";
 import { getPreferenceValues } from "@raycast/api";
 import {
+  Alert,
   Color,
   Icon,
   MenuBarExtra,
   open,
-  showToast,
-  Toast,
+  confirmAlert,
+  showHUD,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
@@ -114,10 +115,10 @@ export default function Command() {
       await toggleTodoInFile(data.notesPath, todo);
       await revalidate();
       await revalidateUndo();
-      await showToast({ style: Toast.Style.Success, title: "Done", message: todo.text.slice(0, 40) });
+      await showHUD(`Done: ${todo.text.slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showHUD(`Error: ${msg}`);
     }
   }
 
@@ -128,10 +129,10 @@ export default function Command() {
       await clearUndoState();
       await revalidate();
       await revalidateUndo();
-      await showToast({ style: Toast.Style.Success, title: "Undone", message: undoState.todo.text.slice(0, 40) });
+      await showHUD(`Undone: ${undoState.todo.text.slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showHUD(`Error: ${msg}`);
     }
   }
 
@@ -247,8 +248,14 @@ export default function Command() {
               icon={Icon.Star}
               title="Clear Focused Project"
               onAction={async () => {
+                const confirmed = await confirmAlert({
+                  title: "Clear Focused Project",
+                  message: "Remove focus from the current project?",
+                  primaryAction: { title: "Clear" },
+                });
+                if (!confirmed) return;
                 await clearFocusedProject();
-                await showToast({ style: Toast.Style.Success, title: "Cleared" });
+                await showHUD("Cleared");
               }}
             />
           </MenuBarExtra.Section>

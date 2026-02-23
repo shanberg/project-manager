@@ -1,11 +1,11 @@
 import path from "path";
-import { stat } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { runPmWithPrefs } from "./pm";
-import { resolveNotesPath } from "project-manager/notes";
+import { parseNotes, parseTodos, resolveNotesPath } from "project-manager/notes";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 
-export type RecentProject = { name: string; basePath: string; mtime: number };
+export type RecentProject = { name: string; basePath: string; mtime: number; done: number; total: number };
 
 export async function getRecentProjectsByEdit(
   prefs: PreferenceValues,
@@ -20,21 +20,34 @@ export async function getRecentProjectsByEdit(
     ...archiveNames.map((name) => ({ name, basePath: prefs.archivePath })),
   ];
 
-  const withMtime = await Promise.all(
+  const withMeta = await Promise.all(
     all.map(async ({ name, basePath }) => {
       const projectPath = path.join(basePath, name);
       const notesPath = await resolveNotesPath(projectPath);
       const mtime = notesPath
         ? (await stat(notesPath).catch(() => ({ mtime: 0 }))).mtime
         : (await stat(projectPath).catch(() => ({ mtime: 0 }))).mtime;
-      return { name, basePath, mtime };
+      let done = 0;
+      let total = 0;
+      if (notesPath) {
+        try {
+          const content = await readFile(notesPath, "utf-8");
+          const notes = parseNotes(content);
+          const todos = parseTodos(notes);
+          total = todos.length;
+          done = todos.filter((t) => t.checked).length;
+        } catch {
+          /* ignore */
+        }
+      }
+      return { name, basePath, mtime, done, total };
     })
   );
 
   const exclude = excludeKey ? new Set([excludeKey]) : new Set<string>();
   const key = (p: RecentProject) => `${p.basePath}:${p.name}`;
 
-  return withMtime
+  return withMeta
     .filter((p) => !exclude.has(key(p)))
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, limit);
