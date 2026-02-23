@@ -1,0 +1,88 @@
+import {
+  Action,
+  ActionPanel,
+  getPreferenceValues,
+  List,
+  open,
+  showToast,
+  Toast,
+} from "@raycast/api";
+import path from "path";
+import { useCachedPromise } from "@raycast/utils";
+import { runPmWithPrefs } from "./lib/pm";
+import type { PreferenceValues } from "./lib/types";
+
+async function fetchArchivedProjects(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined
+): Promise<string[]> {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const { stdout } = await runPmWithPrefs(prefs, ["list", "--archive"]);
+  return stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+export default function Command() {
+  const prefs = getPreferenceValues<PreferenceValues>();
+
+  const { data: projects = [], isLoading, revalidate, mutate } = useCachedPromise(
+    fetchArchivedProjects,
+    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    { keepPreviousData: true }
+  );
+
+  async function unarchiveProject(name: string) {
+    try {
+      await mutate(
+        runPmWithPrefs(prefs, ["unarchive", name]),
+        {
+          optimisticUpdate(data) {
+            return data.filter((p) => p !== name);
+          },
+        }
+      );
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Unarchived",
+        message: name,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+    }
+  }
+
+  return (
+    <List
+      isLoading={isLoading}
+      actions={
+        <ActionPanel>
+          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+        </ActionPanel>
+      }
+    >
+      {projects.map((name) => (
+        <List.Item
+          key={name}
+          title={name}
+          actions={
+            <ActionPanel>
+              <Action
+                title="Unarchive Project"
+                onAction={() => unarchiveProject(name)}
+              />
+              <Action
+                title="Open in Finder"
+                onAction={() => open(path.join(prefs.archivePath, name))}
+              />
+            </ActionPanel>
+          }
+        />
+      ))}
+    </List>
+  );
+}

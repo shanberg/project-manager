@@ -1,0 +1,381 @@
+import { useState, useEffect, useMemo } from "react";
+import path from "path";
+import { readFile, stat } from "fs/promises";
+import {
+  Action,
+  ActionPanel,
+  getPreferenceValues,
+  List,
+  open,
+  showToast,
+  Toast,
+} from "@raycast/api";
+import { useCachedPromise, getProgressIcon } from "@raycast/utils";
+import {
+  getNotesPath,
+  parseNotes,
+  parseTodos,
+  resolveNotesPath,
+  formatNotesForDetail,
+  formatNotesEmptyState,
+} from "project-manager/notes";
+import {
+  recordRecentProject,
+  getRecentProjectKeys,
+  projectKey,
+} from "./lib/recent-projects";
+import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
+import type { ProjectNotes } from "project-manager/notes";
+import { runPmWithPrefs } from "./lib/pm";
+import type { PreferenceValues } from "./lib/types";
+import AddSessionNoteForm from "./add-session-note-form";
+import ProjectView from "./project-view";
+import { DEFAULT_DOMAINS } from "project-manager/types";
+
+const DOMAIN_CODES = Object.keys(DEFAULT_DOMAINS);
+
+import { parseListAllOutput, getObsidianUri, hasSrcDir } from "./lib/utils";
+
+function getDomain(name: string): string | null {
+  const m = name.match(/^(M|DE|P|I)-\d+/);
+  return m ? m[1] : null;
+}
+
+function parseSearchToken(search: string): { domain: string | null; query: string } {
+  const trimmed = search.trim();
+  const upper = trimmed.toUpperCase();
+  for (const code of DOMAIN_CODES) {
+    if (upper === code || upper.startsWith(`${code} `)) {
+      return { domain: code, query: trimmed.slice(code.length).trim() };
+    }
+  }
+  return { domain: null, query: trimmed };
+}
+
+async function loadNotesForProject(
+  basePath: string,
+  projectName: string
+): Promise<{ notes: ProjectNotes; notesPath: string } | null> {
+  const projectPath = path.join(basePath, projectName);
+  const notesPath = await resolveNotesPath(projectPath);
+  if (!notesPath) return null;
+  try {
+    const content = await readFile(notesPath, "utf-8");
+    return { notes: parseNotes(content), notesPath };
+  } catch {
+    return null;
+  }
+}
+
+type ProjectWithMeta = {
+  name: string;
+  notes: ProjectNotes | null;
+  notesPath: string | null;
+  mtime: number;
+  hasSrc: boolean;
+  basePath: string;
+  domain: string | null;
+  done: number;
+  total: number;
+};
+
+async function fetchProjectsWithMeta(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined
+): Promise<{ active: ProjectWithMeta[]; archive: ProjectWithMeta[] }> {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
+  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
+
+  async function enrich(
+    names: string[],
+    basePath: string
+  ): Promise<ProjectWithMeta[]> {
+    const results = await Promise.all(
+      names.map(async (name) => {
+        const projectPath = path.join(basePath, name);
+        const [loaded, stats] = await Promise.all([
+          loadNotesForProject(basePath, name),
+          stat(projectPath).catch(() => ({ mtime: 0 })),
+        ]);
+        const notes = loaded?.notes ?? null;
+        const todos = notes ? parseTodos(notes) : [];
+        const done = todos.filter((t) => t.checked).length;
+        return {
+          name,
+          notes,
+          notesPath: loaded?.notesPath ?? null,
+          mtime: stats.mtime,
+          hasSrc: hasSrcDir(path.join(basePath, name)),
+          basePath,
+          domain: getDomain(name),
+          done,
+          total: todos.length,
+        };
+      })
+    );
+    return results;
+  }
+
+  const [active, archive] = await Promise.all([
+    enrich(activeNames, activePath),
+    enrich(archiveNames, archivePath),
+  ]);
+
+  return { active, archive };
+}
+
+function filterAndSort(
+  projects: ProjectWithMeta[],
+  domainFilter: string | null,
+  query: string,
+  recentKeys: string[]
+): ProjectWithMeta[] {
+  let filtered = projects;
+  if (domainFilter) {
+    filtered = filtered.filter((p) => p.domain === domainFilter);
+  }
+  if (query) {
+    const q = query.toLowerCase();
+    filtered = filtered.filter((p) => p.name.toLowerCase().includes(q));
+  }
+  const recentSet = new Set(recentKeys);
+  return filtered.sort((a, b) => {
+    const aRecent = recentSet.has(projectKey(a.basePath, a.name));
+    const bRecent = recentSet.has(projectKey(b.basePath, b.name));
+    if (aRecent && !bRecent) return -1;
+    if (!aRecent && bRecent) return 1;
+    if (aRecent && bRecent) {
+      const aIdx = recentKeys.indexOf(projectKey(a.basePath, a.name));
+      const bIdx = recentKeys.indexOf(projectKey(b.basePath, b.name));
+      return aIdx - bIdx;
+    }
+    return b.mtime - a.mtime;
+  });
+}
+
+export default function Command() {
+  const [scope, setScope] = useState<"active" | "archive" | "all">("active");
+  const [searchText, setSearchText] = useState("");
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
+  const prefs = getPreferenceValues<PreferenceValues>();
+
+  const { data, isLoading, revalidate } = useCachedPromise(
+    fetchProjectsWithMeta,
+    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    { keepPreviousData: true }
+  );
+
+  useEffect(() => {
+    getRecentProjectKeys().then(setRecentKeys);
+  }, []);
+
+  const active = data?.active ?? [];
+  const archive = data?.archive ?? [];
+  const pathToShow = scope === "active" ? prefs.activePath : prefs.archivePath;
+
+  const { domain: domainFilter, query } = parseSearchToken(searchText);
+
+  const displayActive = useMemo(
+    () => filterAndSort(active, domainFilter, query, recentKeys),
+    [active, domainFilter, query, recentKeys]
+  );
+  const displayArchive = useMemo(
+    () => filterAndSort(archive, domainFilter, query, recentKeys),
+    [archive, domainFilter, query, recentKeys]
+  );
+
+  async function onOpenProject(basePath: string, name: string) {
+    await recordRecentProject(projectKey(basePath, name));
+    setRecentKeys(await getRecentProjectKeys());
+  }
+
+  function renderDetail(notes: ProjectNotes | null, code: string) {
+    const markdown = notes ? formatNotesForDetail(notes) : formatNotesEmptyState();
+    return (
+      <List.Item.Detail
+        markdown={markdown}
+        metadata={
+          <List.Item.Detail.Metadata>
+            <List.Item.Detail.Metadata.Label title="Code" text={code} />
+          </List.Item.Detail.Metadata>
+        }
+      />
+    );
+  }
+
+  function ProjectActions({
+    name,
+    basePath,
+    hasSrc,
+    hasNotes,
+    notesPath,
+  }: {
+    name: string;
+    basePath: string;
+    hasSrc: boolean;
+    hasNotes: boolean;
+    notesPath: string | null;
+  }) {
+    const projectPath = path.join(basePath, name);
+    const obsidianUri = getObsidianUri(notesPath ?? getNotesPath(projectPath));
+
+    return (
+      <ActionPanel>
+        {!hasNotes ? (
+          <Action
+            title="Create Notes File"
+            onAction={async () => {
+              try {
+                await runPmWithPrefs(prefs, ["notes", "create", name]);
+                await showToast({ style: Toast.Style.Success, title: "Notes created" });
+                revalidate();
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+              }
+            }}
+          />
+        ) : (
+          <Action.Push
+            title="View Project"
+            target={<ProjectView projectName={name} basePath={basePath} />}
+          />
+        )}
+        {hasSrc ? (
+          <Action
+            title="Open in Cursor"
+            onAction={async () => {
+              await onOpenProject(basePath, name);
+              open(projectPath, "Cursor");
+            }}
+          />
+        ) : (
+          <Action
+            title="Open in Obsidian"
+            onAction={async () => {
+              await onOpenProject(basePath, name);
+              open(obsidianUri);
+            }}
+          />
+        )}
+        {hasSrc && (
+          <Action
+            title="Open in Obsidian"
+            onAction={async () => {
+              await onOpenProject(basePath, name);
+              open(obsidianUri);
+            }}
+          />
+        )}
+        <Action
+          title="Open in Finder"
+          onAction={async () => {
+            await onOpenProject(basePath, name);
+            open(projectPath);
+          }}
+        />
+        <Action
+          title="Set as Focused Project"
+          onAction={async () => {
+            await setFocusedProject(basePath, name);
+            await showToast({ style: Toast.Style.Success, title: "Focused", message: name });
+          }}
+        />
+        <Action.Push
+          title="Add Session Note"
+          target={
+            <AddSessionNoteForm projectName={name} />
+          }
+        />
+      </ActionPanel>
+    );
+  }
+
+  const searchPlaceholder = domainFilter
+    ? `Filtered to ${domainFilter}. Type to search…`
+    : `Search or type M, DE, P, I to filter by domain`;
+
+  return (
+    <List
+      isShowingDetail
+      isLoading={isLoading}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      searchBarPlaceholder={searchPlaceholder}
+      filtering={false}
+      searchBarAccessory={
+        <List.Dropdown
+          tooltip="Scope"
+          value={scope}
+          onChange={(v) => setScope(v as typeof scope)}
+        >
+          <List.Dropdown.Item value="active" title="Active" />
+          <List.Dropdown.Item value="archive" title="Archive" />
+          <List.Dropdown.Item value="all" title="All" />
+        </List.Dropdown>
+      }
+      actions={
+        <ActionPanel>
+          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+        </ActionPanel>
+      }
+    >
+      {scope === "all" ? (
+        <>
+          <List.Section title="Active">
+            {displayActive.map(({ name, notes, notesPath, hasSrc, done, total }) => (
+              <List.Item
+                key={`active:${name}`}
+                icon={getProgressIcon(total ? done / total : 1)}
+                title={getReadableProjectName(name)}
+                keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+                detail={renderDetail(notes, getProjectCode(name))}
+                actions={
+                  <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} />
+                }
+              />
+            ))}
+          </List.Section>
+          <List.Section title="Archive">
+            {displayArchive.map(({ name, notes, notesPath, hasSrc, done, total }) => (
+              <List.Item
+                key={`archive:${name}`}
+                icon={getProgressIcon(total ? done / total : 1)}
+                title={getReadableProjectName(name)}
+                keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+                detail={renderDetail(notes, getProjectCode(name))}
+                actions={
+                  <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} />
+                }
+              />
+            ))}
+          </List.Section>
+        </>
+      ) : (
+        (scope === "active" ? displayActive : displayArchive).map(
+          ({ name, notes, notesPath, hasSrc, done, total }) => (
+            <List.Item
+              key={name}
+              icon={getProgressIcon(total ? done / total : 1)}
+              title={getReadableProjectName(name)}
+              keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+              detail={renderDetail(notes, getProjectCode(name))}
+              actions={
+                <ProjectActions
+                  name={name}
+                  basePath={pathToShow}
+                  hasSrc={hasSrc}
+                  hasNotes={!!notes}
+                  notesPath={notesPath}
+                />
+              }
+            />
+          )
+        )
+      )}
+    </List>
+  );
+}
