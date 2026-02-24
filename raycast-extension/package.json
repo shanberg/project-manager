@@ -57,12 +57,11 @@
     {
       "name": "view-project",
       "title": "View Project",
-      "description": "View project todos and manage tasks",
+      "description": "View project tasks and manage tasks",
       "mode": "view",
       "keywords": [
         "view",
         "project",
-        "todos",
         "tasks",
         "pm"
       ]
@@ -91,7 +90,7 @@
     {
       "name": "focused-project",
       "title": "Focused Project",
-      "description": "Show focused project and next todo in menu bar",
+      "description": "Show focused project and next task in menu bar",
       "mode": "menu-bar",
       "interval": "1m"
     },
@@ -120,7 +119,6 @@
       "keywords": [
         "add",
         "task",
-        "todo",
         "pm"
       ]
     },
@@ -133,7 +131,6 @@
         "add",
         "prior",
         "task",
-        "todo",
         "pm"
       ]
     }

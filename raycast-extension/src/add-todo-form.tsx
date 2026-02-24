@@ -26,7 +26,7 @@ export default function AddTodoForm({ projectName, basePath, onSuccess }: Props)
       await addTodoToTodaySession(notesPath, text);
       await showToast({
         style: Toast.Style.Success,
-        title: "Todo added",
+        title: "Task added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();
@@ -62,7 +62,7 @@ export default function AddTodoForm({ projectName, basePath, onSuccess }: Props)
     >
       <Form.TextField
         id="text"
-        title="Todo"
+        title="Task"
         placeholder="e.g. Review PR, Call client"
         autoFocus
       />

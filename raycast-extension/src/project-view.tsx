@@ -146,7 +146,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
       await showToast({
         style: Toast.Style.Success,
         title: "Marked done",
-        message: `${unchecked.length} todo${unchecked.length === 1 ? "" : "s"} in session`,
+        message: `${unchecked.length} task${unchecked.length === 1 ? "" : "s"} in session`,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -165,7 +165,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     <List
       navigationTitle={projectName}
       isLoading={isLoading}
-      searchBarPlaceholder="Search todos…"
+      searchBarPlaceholder="Search tasks…"
       searchBarAccessory={
         <List.Dropdown
           tooltip="View"
@@ -173,7 +173,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           onChange={(v) => setViewMode(v as TodoViewMode)}
         >
           <List.Dropdown.Item value="next" title="Next up" icon={Icon.ArrowRightCircleFilled} />
-          <List.Dropdown.Item value="all" title="All todos" icon={Icon.List} />
+          <List.Dropdown.Item value="all" title="All tasks" icon={Icon.List} />
         </List.Dropdown>
       }
       actions={
@@ -181,7 +181,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
           {notes && (
             <Action.Push
-              title="Add Todo"
+              title="Add Task"
               target={
                 <AddTodoForm
                   projectName={projectName}
@@ -196,7 +196,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     >
       {todos.length === 0 ? (
         <List.EmptyView
-          title={notes ? "No todos" : "No notes file"}
+          title={notes ? "No tasks" : "No notes file"}
           description={
             notes
               ? "Add - [ ] task items in your session notes"
@@ -230,7 +230,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               />
               {notes && (
                 <Action.Push
-                  title="Add Todo"
+                  title="Add Task"
                   target={
                     <AddTodoForm
                       projectName={projectName}
@@ -263,7 +263,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     onAction={() => handleMarkAllInSessionDone(nextTodoContext)}
                   />
                 )}
-                <Action.CopyToClipboard content={nextTodo.text} title="Copy Todo" />
+                <Action.CopyToClipboard content={nextTodo.text} title="Copy Task" />
               </ActionPanel>
             }
           />
@@ -299,7 +299,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                           onAction={() => handleMarkAllInSessionDone(context)}
                         />
                       )}
-                      <Action.CopyToClipboard content={todo.text} title="Copy Todo" />
+                      <Action.CopyToClipboard content={todo.text} title="Copy Task" />
                     </ActionPanel>
                   }
                 />
@@ -542,13 +542,13 @@ export default function ProjectView({ projectName, basePath }: Props) {
         />
         {notes && (
           <List.Item
-            title="Add Todo"
+            title="Add Task"
             icon={Icon.ArrowRightCircleFilled}
             detail={sectionDetail("Add a task to the current session in the project notes.", "")}
             actions={
               <ActionPanel>
                 <Action.Push
-                  title="Add Todo"
+                  title="Add Task"
                   target={
                     <AddTodoForm
                       projectName={projectName}

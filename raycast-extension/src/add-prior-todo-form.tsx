@@ -16,7 +16,7 @@ export default function AddPriorTodoForm({ notesPath, beforeTodo, onSuccess }: P
       await addTodoBeforeInFile(notesPath, beforeTodo, text);
       await showToast({
         style: Toast.Style.Success,
-        title: "Todo added",
+        title: "Task added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();
@@ -52,7 +52,7 @@ export default function AddPriorTodoForm({ notesPath, beforeTodo, onSuccess }: P
     >
       <Form.TextField
         id="text"
-        title="Todo"
+        title="Task"
         placeholder="e.g. Review PR, Call client"
         autoFocus
       />
