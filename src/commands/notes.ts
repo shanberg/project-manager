@@ -18,8 +18,9 @@ async function resolveProjectPath(nameOrPrefix: string): Promise<string> {
   }
 
   const { activePath, archivePath } = resolvePaths(config);
-  const active = await getProjectFolders(activePath);
-  const archive = await getProjectFolders(archivePath);
+  const domainCodes = Object.keys(config.domains);
+  const active = await getProjectFolders(activePath, domainCodes);
+  const archive = await getProjectFolders(archivePath, domainCodes);
   const matched = matchProject([...active, ...archive], nameOrPrefix);
 
   if (!matched) {

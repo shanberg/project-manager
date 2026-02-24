@@ -12,7 +12,7 @@ export async function unarchiveProject(nameOrPrefix: string): Promise<void> {
 
   const { activePath, archivePath } = resolvePaths(config);
 
-  const folders = await getProjectFolders(archivePath);
+  const folders = await getProjectFolders(archivePath, Object.keys(config.domains));
   const matched = matchProject(folders, nameOrPrefix);
 
   if (!matched) {

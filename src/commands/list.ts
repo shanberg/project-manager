@@ -11,9 +11,10 @@ export async function listProjects(scope: ListScope = "active"): Promise<void> {
   }
 
   const { activePath, archivePath } = resolvePaths(config);
+  const domainCodes = Object.keys(config.domains);
 
   if (scope === "active" || scope === "all") {
-    const active = await getProjectFolders(activePath);
+    const active = await getProjectFolders(activePath, domainCodes);
     if (scope === "all") console.log("Active:");
     for (const name of active) {
       console.log(scope === "all" ? " " + name : name);
@@ -22,7 +23,7 @@ export async function listProjects(scope: ListScope = "active"): Promise<void> {
   }
 
   if (scope === "archive" || scope === "all") {
-    const archive = await getProjectFolders(archivePath);
+    const archive = await getProjectFolders(archivePath, domainCodes);
     if (scope === "all") console.log("\nArchive:");
     for (const name of archive) {
       console.log(scope === "all" ? " " + name : name);

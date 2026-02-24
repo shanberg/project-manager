@@ -1,13 +1,23 @@
 import { readdir } from "fs/promises";
-import path from "path";
+import { DEFAULT_DOMAINS } from "../types.js";
 
-const PROJECT_PATTERN = /^(M|DE|P|I)-\d+\s+.+$/;
+function buildProjectPattern(domainCodes: string[]): RegExp {
+  const sorted = [...domainCodes].sort((a, b) => b.length - a.length);
+  const escaped = sorted.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`^(${escaped.join("|")})-\\d+\\s+.+$`);
+}
 
-export async function getProjectFolders(basePath: string): Promise<string[]> {
+export async function getProjectFolders(
+  basePath: string,
+  domainCodes?: string[]
+): Promise<string[]> {
+  const codes = domainCodes ?? Object.keys(DEFAULT_DOMAINS);
+  if (codes.length === 0) return [];
+  const pattern = buildProjectPattern(codes);
   try {
     const entries = await readdir(basePath, { withFileTypes: true });
     return entries
-      .filter((e) => e.isDirectory() && PROJECT_PATTERN.test(e.name))
+      .filter((e) => e.isDirectory() && pattern.test(e.name))
       .map((e) => e.name)
       .sort();
   } catch {
