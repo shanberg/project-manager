@@ -41,15 +41,18 @@ TAG="v${VERSION}"
 
 echo "==> Set package.json to $VERSION"
 node -e "
-const p = require('./package.json');
+const fs = require('fs');
+const path = require('path');
+const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 p.version = process.env.VERSION;
-require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
-" VERSION="$VERSION"
-# Verify the write stuck (catches overwrites or bad cwd)
-[[ "$(node -p "require('./package.json').version")" == "$VERSION" ]] || {
-  echo "package.json version is missing or wrong after write. Check for tools that rewrite package.json." >&2
-  exit 1
+const out = JSON.stringify(p, null, 2) + '\n';
+fs.writeFileSync('package.json', out);
+const readBack = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+if (readBack.version !== process.env.VERSION) {
+  process.stderr.write('package.json version missing or wrong after write. Check for tools that rewrite package.json.\n');
+  process.exit(1);
 }
+" VERSION="$VERSION"
 
 echo "==> Commit and push"
 git add package.json
