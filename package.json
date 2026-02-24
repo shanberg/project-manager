@@ -1,6 +1,6 @@
 {
   "name": "@shanberg/project-manager",
-  "version": "--",
+  "version": "0.1.10",
   "description": "CLI for PARA-style project creation with domain-based numbering",
   "type": "module",
   "main": "dist/cli.js",
