@@ -97,6 +97,7 @@ fi
 UPLOAD_URL=$(echo "$RELEASE" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log((d.upload_url || '').replace(/\{.*\}/,'').trim());" 2>/dev/null)
 if [[ -z "$UPLOAD_URL" ]]; then
   echo "Could not get release upload_url. Check token and repo." >&2
+  echo "API response (first 400 chars): $(echo "$RELEASE" | head -c 400)" >&2
   rm -f "$TARBALL"
   exit 1
 fi

@@ -8,7 +8,11 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "declaration": true
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shanberg/project-schema": ["./node_modules/@shanberg/project-schema"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
