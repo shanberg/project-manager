@@ -206,11 +206,20 @@ export default function Command() {
               onAction={() => open("raycast://extensions/stuarthanberg/project-manager/view-focused-project")}
             />
             {data.notesPath && (
-              <MenuBarExtra.Item
-                icon={Icon.Plus}
-                title="Add task"
-                onAction={() => open("raycast://extensions/stuarthanberg/project-manager/add-focused-todo")}
-              />
+              <>
+                <MenuBarExtra.Item
+                  icon={Icon.Plus}
+                  title="Add task"
+                  onAction={() => open("raycast://extensions/stuarthanberg/project-manager/add-focused-todo")}
+                />
+                {nextTodo && (
+                  <MenuBarExtra.Item
+                    icon={Icon.ArrowUp}
+                    title="Add prior task"
+                    onAction={() => open("raycast://extensions/stuarthanberg/project-manager/add-focused-prior-todo")}
+                  />
+                )}
+              </>
             )}
           </MenuBarExtra.Section>
           {contextOrder.map((context) => (

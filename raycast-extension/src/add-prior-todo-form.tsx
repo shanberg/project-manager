@@ -1,29 +1,19 @@
-import path from "path";
 import { Form, Action, ActionPanel, showToast, Toast, useNavigation } from "@raycast/api";
-import { addTodoToTodaySession, resolveNotesPath } from "project-manager/notes";
+import { addTodoBeforeInFile } from "project-manager/notes";
+import type { Todo } from "project-manager/notes";
 
 interface Props {
-  projectName: string;
-  basePath: string;
+  notesPath: string;
+  beforeTodo: Todo;
   onSuccess?: () => void;
 }
 
-export default function AddTodoForm({ projectName, basePath, onSuccess }: Props) {
+export default function AddPriorTodoForm({ notesPath, beforeTodo, onSuccess }: Props) {
   const { push } = useNavigation();
 
   async function addTask(text: string): Promise<boolean> {
-    const projectPath = path.join(basePath, projectName);
-    const notesPath = await resolveNotesPath(projectPath);
-    if (!notesPath) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "No notes file",
-        message: "Create a notes file first",
-      });
-      return false;
-    }
     try {
-      await addTodoToTodaySession(notesPath, text);
+      await addTodoBeforeInFile(notesPath, beforeTodo, text);
       await showToast({
         style: Toast.Style.Success,
         title: "Todo added",
@@ -48,7 +38,7 @@ export default function AddTodoForm({ projectName, basePath, onSuccess }: Props)
     const text = values.text.trim();
     if (!text) return;
     const ok = await addTask(text);
-    if (ok) push(<AddTodoForm projectName={projectName} basePath={basePath} onSuccess={onSuccess} />);
+    if (ok) push(<AddPriorTodoForm notesPath={notesPath} beforeTodo={beforeTodo} onSuccess={onSuccess} />);
   }
 
   return (

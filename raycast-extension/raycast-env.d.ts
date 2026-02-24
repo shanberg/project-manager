@@ -46,6 +46,8 @@ declare namespace Preferences {
   export type ViewFocusedProject = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-todo` command */
   export type AddFocusedTodo = ExtensionPreferences & {}
+  /** Preferences accessible in the `add-focused-prior-todo` command */
+  export type AddFocusedPriorTodo = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -69,5 +71,7 @@ declare namespace Arguments {
   export type ViewFocusedProject = {}
   /** Arguments passed to the `add-focused-todo` command */
   export type AddFocusedTodo = {}
+  /** Arguments passed to the `add-focused-prior-todo` command */
+  export type AddFocusedPriorTodo = {}
 }
 

@@ -112,6 +112,19 @@
         "todo",
         "pm"
       ]
+    },
+    {
+      "name": "add-focused-prior-todo",
+      "title": "Add Prior Task",
+      "description": "Add a task before the active task",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "prior",
+        "task",
+        "todo",
+        "pm"
+      ]
     }
   ],
   "preferences": [

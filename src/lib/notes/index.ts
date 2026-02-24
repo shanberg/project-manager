@@ -145,6 +145,23 @@ export async function addLinkToNotes(
   await writeNotesFile(notesPath, { ...notes, links });
 }
 
+const TODO_PREFIX = /^(\s*-\s+)/;
+
+export async function addTodoBeforeInFile(
+  notesPath: string,
+  beforeTodo: Todo,
+  text: string
+): Promise<void> {
+  const content = await readFile(notesPath, "utf-8");
+  const prefix = beforeTodo.rawLine.match(TODO_PREFIX)?.[1] ?? "- ";
+  const newLine = `${prefix}[ ] ${text}`;
+  const updated = content.replace(beforeTodo.rawLine, `${newLine}\n${beforeTodo.rawLine}`);
+  if (updated === content) {
+    throw new Error("Todo line not found in file");
+  }
+  await writeFile(notesPath, updated, "utf-8");
+}
+
 export async function addTodoToTodaySession(
   notesPath: string,
   text: string
