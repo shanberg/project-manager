@@ -97,7 +97,7 @@
     },
     {
       "name": "focused-project-status",
-      "title": "Focused Project Status",
+      "title": "Focused task",
       "description": "Show focused project progress in menu bar",
       "mode": "menu-bar",
       "interval": "1m"
@@ -189,7 +189,7 @@
   "dependencies": {
     "@raycast/api": "^1.70.0",
     "@raycast/utils": "^1.10.0",
-    "project-manager": "file:.."
+    "project-manager": "github:stuarthanberg/project-manager"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.0",

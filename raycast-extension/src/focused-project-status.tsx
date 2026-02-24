@@ -114,6 +114,11 @@ export default function Command() {
               title="View Project"
               onAction={() => open("raycast://extensions/stuarthanberg/project-manager/view-focused-project")}
             />
+            <MenuBarExtra.Item
+              icon={Icon.Plus}
+              title="New Project"
+              onAction={() => open("raycast://extensions/stuarthanberg/project-manager/new-project")}
+            />
             {data.links.length > 0 &&
               data.links.map((link, i) => (
                 <MenuBarExtra.Item
