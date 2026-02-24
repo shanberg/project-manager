@@ -1,5 +1,7 @@
 # Release (project-manager)
 
+**When to release:** Run `release` when you want a new version that others can install (e.g. `brew upgrade`). That includes app/CLI changes and release-process changes (scripts, docs, CI)—if you only changed tooling, use `release -- patch` so the formula and checksum get updated and the next install has those changes. If you truly don't need a new installable version (nobody will `brew upgrade` yet), you can just commit and push.
+
 One command: bump version, push, tag, update Homebrew formula, push tap.
 
 From the **project-manager** repo, with `GITHUB_TOKEN` or `HOMEBREW_GITHUB_API_TOKEN` set:

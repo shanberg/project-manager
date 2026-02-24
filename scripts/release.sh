@@ -15,6 +15,13 @@ ARG="${1:?Usage: $0 <patch|minor|major|version>}"
 
 cd "$ROOT"
 
+# package.json must have a "version" field; the script updates it as part of the release
+CURRENT=$(node -p "require('./package.json').version" 2>/dev/null || true)
+if [[ -z "$CURRENT" || "$CURRENT" == "undefined" ]]; then
+  echo "package.json is missing a \"version\" field. Add one (e.g. \"0.1.0\") and run again." >&2
+  exit 1
+fi
+
 # Resolve VERSION: if arg is patch/minor/major, bump current; else use arg as version
 if [[ "$ARG" == patch || "$ARG" == minor || "$ARG" == major ]]; then
   VERSION=$(node -e "
@@ -25,7 +32,7 @@ if [[ "$ARG" == patch || "$ARG" == minor || "$ARG" == major ]]; then
     else if (bump === 'minor') console.log(major + '.' + (minor + 1) + '.0');
     else console.log(major + '.' + minor + '.' + (patch + 1));
   " BUMP="$ARG")
-  echo "==> Bump $ARG: $(node -p "require('./package.json').version") → $VERSION"
+  echo "==> Bump $ARG: $CURRENT → $VERSION"
 else
   VERSION="$ARG"
 fi

@@ -18,6 +18,12 @@ if [[ -z "$TAG" ]]; then
 fi
 
 VERSION="${TAG#v}"
+# Ensure version is safe for the formula (semver-like: digits and dots only)
+if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "Invalid version for formula: $VERSION (expected e.g. 0.1.2)" >&2
+  exit 1
+fi
+
 TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
 if [[ -z "$TOKEN" ]]; then
   echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN to download the private tarball." >&2
@@ -38,9 +44,18 @@ if [[ ! -f "$FORMULA" ]]; then
   exit 1
 fi
 
-# Update url ref, sha256, and version (portable: perl -i works on macOS and Linux)
+# Update url ref, sha256, and version (portable: perl -i works on macOS and Linux).
+# Use anchored regexes so we only touch the intended lines and never corrupt the formula.
 perl -i -pe "s|refs/tags/v[0-9.]+\\.tar\\.gz|refs/tags/${TAG}.tar.gz|" "$FORMULA"
-perl -i -pe 's/sha256 "\K[a-f0-9]+/'"$SHA256"'/' "$FORMULA"
-perl -i -pe 's/(version ")[\d.]+/$1'"$VERSION"'/' "$FORMULA"
+perl -i -pe 's/^(  sha256 ")\K[a-f0-9]{64}/'"$SHA256"'/' "$FORMULA"
+perl -i -pe 's/^(  version ")[\d.]+(")$/${1}'"$VERSION"'${2}/' "$FORMULA"
+
+# Verify formula syntax; fail fast if we broke it
+ruby_err="$(ruby -c "$FORMULA" 2>&1)" || {
+  echo "Formula syntax error after update:" >&2
+  echo "$ruby_err" >&2
+  echo "Revert $FORMULA and fix the script." >&2
+  exit 1
+}
 
 echo "Updated $FORMULA → version $VERSION, sha256 $SHA256"
