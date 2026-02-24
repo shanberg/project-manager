@@ -13,7 +13,7 @@ npm run release -- major    # 0.1.2 → 1.0.0 (breaking changes)
 npm run release -- 0.2.0    # or set an exact version
 ```
 
-The script bumps `package.json`, commits and pushes, tags and pushes the tag, downloads the tarball and updates the formula with the correct sha256, then commits and pushes the tap.
+The script reads the current version from `package.json`, bumps it (or uses the version you pass), writes it back, then commits and pushes, tags, downloads the tarball and updates the formula with the correct sha256, then commits and pushes the tap. **`package.json` must have a `"version"` field** (e.g. `"0.1.4"`) so the script can bump it; the script will fail with a clear message if it’s missing.
 
 **Tap location:** Default is `../homebrew-s`. Override with `TAP_DIR` if your tap lives elsewhere.
 

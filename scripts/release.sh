@@ -45,6 +45,11 @@ const p = require('./package.json');
 p.version = process.env.VERSION;
 require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
 " VERSION="$VERSION"
+# Verify the write stuck (catches overwrites or bad cwd)
+[[ "$(node -p "require('./package.json').version")" == "$VERSION" ]] || {
+  echo "package.json version is missing or wrong after write. Check for tools that rewrite package.json." >&2
+  exit 1
+}
 
 echo "==> Commit and push"
 git add package.json
