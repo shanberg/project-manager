@@ -1,32 +1,21 @@
-# Release checklist (project-manager)
+# Release (project-manager)
 
-Use this when cutting a new version (e.g. 0.2.0). Version exists in three places; the first two are manual, the tap can be updated with the script.
+One command: bump version, push, tag, update Homebrew formula, push tap.
 
-## 1. project-manager repo
-
-- [ ] Bump `version` in **package.json** (root).
-- [ ] Commit and push to `main`.
-- [ ] Create and push tag:  
-  `git tag v0.2.0 && git push origin v0.2.0`
-- [ ] Create a GitHub Release from the tag (so the publish workflow runs and, if configured, the Homebrew formula is updated).
-
-## 2. homebrew-s tap (run locally)
-
-From the **project-manager** repo, with `GITHUB_TOKEN` or `HOMEBREW_GITHUB_API_TOKEN` set (so the script can download the private tarball):
+From the **project-manager** repo, with `GITHUB_TOKEN` or `HOMEBREW_GITHUB_API_TOKEN` set:
 
 ```bash
-./scripts/update-homebrew-formula.sh v0.2.0
+npm run release -- patch    # 0.1.2 → 0.1.3 (bug fixes)
+npm run release -- minor    # 0.1.2 → 0.2.0 (new features)
+npm run release -- major    # 0.1.2 → 1.0.0 (breaking changes)
+npm run release -- 0.2.0    # or set an exact version
 ```
 
-Or omit the tag to use the version from `package.json`:
+The script bumps `package.json`, commits and pushes, tags and pushes the tag, downloads the tarball and updates the formula with the correct sha256, then commits and pushes the tap.
 
-```bash
-./scripts/update-homebrew-formula.sh
-```
+**Tap location:** Default is `../homebrew-s`. Override with `TAP_DIR` if your tap lives elsewhere.
 
-The script downloads the tarball, computes sha256, and updates `Formula/project-manager.rb` in the tap (default: `../homebrew-s`; override with `TAP_DIR`). Then commit and push in the tap repo.
-
-**Optional CI:** The **Update Homebrew formula** workflow does the same on release if you add a **TAP_PUSH_TOKEN** secret (PAT with `repo` for `shanberg/homebrew-s`). Use the script when you prefer to run it locally.
+**Optional:** To only update the formula (e.g. after releasing another way): `npm run update-homebrew-formula -- v0.1.3`
 
 ## 3. One-time per machine (new installs)
 

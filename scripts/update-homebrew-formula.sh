@@ -44,5 +44,3 @@ perl -i -pe 's/sha256 "\K[a-f0-9]+/'"$SHA256"'/' "$FORMULA"
 perl -i -pe 's/(version ")[\d.]+/$1'"$VERSION"'/' "$FORMULA"
 
 echo "Updated $FORMULA → version $VERSION, sha256 $SHA256"
-echo ""
-echo "In homebrew-s: git add Formula/project-manager.rb && git commit -m 'project-manager $VERSION' && git push"

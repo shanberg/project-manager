@@ -19,7 +19,9 @@
     "build": "npx tsc",
     "dev": "npx tsc --watch",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "release": "./scripts/release.sh",
+    "update-homebrew-formula": "./scripts/update-homebrew-formula.sh"
   },
   "keywords": [
     "cli",
