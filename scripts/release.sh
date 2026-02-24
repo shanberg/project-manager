@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Bump version, push, tag, update Homebrew formula, push tap.
-# Requires: GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN (for formula tarball), and git push access to both repos.
+# Requires: GitHub token for release upload and formula tarball — use one of:
+#   gh auth login   (then this script uses `gh auth token`)
+#   export GITHUB_TOKEN=... or HOMEBREW_GITHUB_API_TOKEN=...
 #
 # Usage: ./scripts/release.sh <version | bump>
 #   version   literal version, e.g. 0.2.0
@@ -12,6 +14,8 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PACKAGE_JSON="$ROOT/package.json"
 TAP_DIR="${TAP_DIR:-${ROOT}/../homebrew-s}"
+# Allow "npm run release -- patch" (npm passes -- as $1)
+if [[ "$1" == "--" && -n "${2:-}" ]]; then shift; fi
 ARG="${1:?Usage: $0 <patch|minor|major|version>}"
 
 cd "$ROOT"
@@ -80,8 +84,11 @@ echo "==> Create release asset (deterministic tarball)"
 TARBALL="project-manager-${VERSION}.tar.gz"
 git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" -o "$TARBALL"
 RELEASE_TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
+if [[ -z "$RELEASE_TOKEN" ]] && command -v gh >/dev/null 2>&1; then
+  RELEASE_TOKEN=$(gh auth token 2>/dev/null) || true
+fi
 if [[ -z "$RELEASE_TOKEN" ]]; then
-  echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN to upload the release asset." >&2
+  echo "Need a GitHub token: run \`gh auth login\` or set GITHUB_TOKEN / HOMEBREW_GITHUB_API_TOKEN." >&2
   rm -f "$TARBALL"
   exit 1
 fi
