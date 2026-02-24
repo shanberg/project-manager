@@ -72,45 +72,71 @@ fi
 
 echo "==> Commit and push"
 git add package.json
-git commit -m "Release $TAG"
-git push
+if ! git diff --staged --quiet; then
+  git commit -m "Release $TAG"
+  git push
+fi
 
 echo "==> Tag and push $TAG"
-git tag "$TAG"
-git push origin "$TAG"
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "Tag $TAG already exists."
+  read -r -p "Overwrite and push? (y/N) " reply
+  if [[ ! "$reply" =~ ^[yY]$ ]]; then
+    echo "Skipping tag; continuing to release upload."
+  else
+    git tag -f "$TAG"
+    git push origin "$TAG" --force
+  fi
+else
+  git tag "$TAG"
+  git push origin "$TAG"
+fi
 
 # Build deterministic tarball and upload as release asset (same sha256 everywhere)
 echo "==> Create release asset (deterministic tarball)"
 TARBALL="project-manager-${VERSION}.tar.gz"
+REPO="shanberg/project-manager"
 git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" -o "$TARBALL"
-RELEASE_TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
-if [[ -z "$RELEASE_TOKEN" ]] && command -v gh >/dev/null 2>&1; then
-  RELEASE_TOKEN=$(gh auth token 2>/dev/null) || true
-fi
-if [[ -z "$RELEASE_TOKEN" ]]; then
-  echo "Need a GitHub token: run \`gh auth login\` or set GITHUB_TOKEN / HOMEBREW_GITHUB_API_TOKEN." >&2
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "Using gh CLI for release (same auth as \`gh auth login\`)."
+  if ! gh release create "$TAG" "$TARBALL" --repo "$REPO" --title "$TAG" 2>/dev/null; then
+    # Release may already exist (e.g. we re-ran); upload asset
+    gh release upload "$TAG" "$TARBALL" --repo "$REPO" --clobber
+  fi
   rm -f "$TARBALL"
-  exit 1
-fi
-# Get or create release
-RELEASE=$(curl -sL -H "Authorization: token $RELEASE_TOKEN" -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/repos/shanberg/project-manager/releases/tags/$TAG")
-if echo "$RELEASE" | grep -q '"message":"Not Found"'; then
-  RELEASE=$(curl -sL -X POST -H "Authorization: token $RELEASE_TOKEN" -H "Accept: application/vnd.github+json" \
-    -H "Content-Type: application/json" \
-    -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" \
-    "https://api.github.com/repos/shanberg/project-manager/releases")
-fi
-UPLOAD_URL=$(echo "$RELEASE" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log((d.upload_url || '').replace(/\{.*\}/,'').trim());" 2>/dev/null)
-if [[ -z "$UPLOAD_URL" ]]; then
-  echo "Could not get release upload_url. Check token and repo." >&2
-  echo "API response (first 400 chars): $(echo "$RELEASE" | head -c 400)" >&2
+else
+  # No gh or not logged in: use token + curl (e.g. CI with GITHUB_TOKEN)
+  RELEASE_TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
+  if [[ -z "$RELEASE_TOKEN" ]]; then
+    echo "Need GitHub auth: run \`gh auth login\` or set GITHUB_TOKEN / HOMEBREW_GITHUB_API_TOKEN." >&2
+    rm -f "$TARBALL"
+    exit 1
+  fi
+  if [[ "$RELEASE_TOKEN" == github_pat_* ]]; then
+    AUTH_HEADER="Bearer $RELEASE_TOKEN"
+  else
+    AUTH_HEADER="token $RELEASE_TOKEN"
+  fi
+  RELEASE=$(curl -sL -H "Authorization: $AUTH_HEADER" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${REPO}/releases/tags/$TAG")
+  if echo "$RELEASE" | grep -q '"message":"Not Found"'; then
+    RELEASE=$(curl -sL -X POST -H "Authorization: $AUTH_HEADER" -H "Accept: application/vnd.github+json" \
+      -H "Content-Type: application/json" \
+      -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" \
+      "https://api.github.com/repos/${REPO}/releases")
+  fi
+  UPLOAD_URL=$(echo "$RELEASE" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log((d.upload_url || '').replace(/\{.*\}/,'').trim());" 2>/dev/null)
+  if [[ -z "$UPLOAD_URL" ]]; then
+    echo "Could not get release upload_url. Check token and repo." >&2
+    echo "API response (first 400 chars): $(echo "$RELEASE" | head -c 400)" >&2
+    rm -f "$TARBALL"
+    exit 1
+  fi
+  curl -sL -X POST -H "Authorization: $AUTH_HEADER" -H "Content-Type: application/gzip" \
+    --data-binary "@$TARBALL" "${UPLOAD_URL}?name=${TARBALL}"
   rm -f "$TARBALL"
-  exit 1
 fi
-curl -sL -X POST -H "Authorization: token $RELEASE_TOKEN" -H "Content-Type: application/gzip" \
-  --data-binary "@$TARBALL" "${UPLOAD_URL}?name=${TARBALL}"
-rm -f "$TARBALL"
 
 echo "==> Update Homebrew formula"
 "$ROOT/scripts/update-homebrew-formula.sh" "$TAG"

@@ -9,7 +9,7 @@ CLI for PARA-style project creation with domain-based numbering. **Raycast is th
 1. **One-time: auth for private repo and GitHub Packages**  
    The formula downloads source from this (private) repo and fetches `@shanberg/project-schema` from GitHub Packages. Use **one** [classic PAT](https://github.com/settings/tokens) with **repo** and **read:packages**, and put it in **both** places (one token, two config locations):
    - **Homebrew (private repo tarball):** `export HOMEBREW_GITHUB_API_TOKEN=YOUR_PAT` (or add to `~/.zshrc`).
-   - **npm (private deps):** add to `~/.npmrc`: `//npm.pkg.github.com/:_authToken=YOUR_PAT`
+   - **npm (private deps):** add to `~/.npmrc`: `@shanberg:registry=https://npm.pkg.github.com/` and `//npm.pkg.github.com/:_authToken=YOUR_PAT`
 
 2. **Tap and install:**
    ```bash
@@ -96,6 +96,7 @@ GitHub Packages does not support web-based or OAuth login for npm; auth is token
 1. **Create a classic PAT** (GitHub Packages npm does not support fine-grained tokens yet). GitHub → Settings → Developer settings → [Personal access tokens](https://github.com/settings/tokens) → **Tokens (classic)** → Generate new token. Enable **write:packages** (and **read:packages** if you install from Packages elsewhere).
 2. **Add the token to `~/.npmrc`** (create the file if it doesn’t exist):
    ```
+   @shanberg:registry=https://npm.pkg.github.com/
    //npm.pkg.github.com/:_authToken=YOUR_TOKEN
    ```
    No `npm login` or legacy auth needed.
