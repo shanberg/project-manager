@@ -75,6 +75,35 @@ echo "==> Tag and push $TAG"
 git tag "$TAG"
 git push origin "$TAG"
 
+# Build deterministic tarball and upload as release asset (same sha256 everywhere)
+echo "==> Create release asset (deterministic tarball)"
+TARBALL="project-manager-${VERSION}.tar.gz"
+git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" -o "$TARBALL"
+RELEASE_TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
+if [[ -z "$RELEASE_TOKEN" ]]; then
+  echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN to upload the release asset." >&2
+  rm -f "$TARBALL"
+  exit 1
+fi
+# Get or create release
+RELEASE=$(curl -sL -H "Authorization: token $RELEASE_TOKEN" -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/shanberg/project-manager/releases/tags/$TAG")
+if echo "$RELEASE" | grep -q '"message":"Not Found"'; then
+  RELEASE=$(curl -sL -X POST -H "Authorization: token $RELEASE_TOKEN" -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/json" \
+    -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" \
+    "https://api.github.com/repos/shanberg/project-manager/releases")
+fi
+UPLOAD_URL=$(echo "$RELEASE" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log((d.upload_url || '').replace(/\{.*\}/,'').trim());" 2>/dev/null)
+if [[ -z "$UPLOAD_URL" ]]; then
+  echo "Could not get release upload_url. Check token and repo." >&2
+  rm -f "$TARBALL"
+  exit 1
+fi
+curl -sL -X POST -H "Authorization: token $RELEASE_TOKEN" -H "Content-Type: application/gzip" \
+  --data-binary "@$TARBALL" "${UPLOAD_URL}?name=${TARBALL}"
+rm -f "$TARBALL"
+
 echo "==> Update Homebrew formula"
 "$ROOT/scripts/update-homebrew-formula.sh" "$TAG"
 
