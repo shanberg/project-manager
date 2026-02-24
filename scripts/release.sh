@@ -10,13 +10,14 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PACKAGE_JSON="$ROOT/package.json"
 TAP_DIR="${TAP_DIR:-${ROOT}/../homebrew-s}"
 ARG="${1:?Usage: $0 <patch|minor|major|version>}"
 
 cd "$ROOT"
 
 # package.json must have a "version" field; the script updates it as part of the release
-CURRENT=$(node -p "require('./package.json').version" 2>/dev/null || true)
+CURRENT=$(PACKAGE_JSON="$PACKAGE_JSON" node -p "require(process.env.PACKAGE_JSON).version" 2>/dev/null || true)
 if [[ -z "$CURRENT" || "$CURRENT" == "undefined" ]]; then
   echo "package.json is missing a \"version\" field. Add one (e.g. \"0.1.0\") and run again." >&2
   exit 1
@@ -42,17 +43,26 @@ TAG="v${VERSION}"
 echo "==> Set package.json to $VERSION"
 node -e "
 const fs = require('fs');
-const path = require('path');
-const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const pj = process.env.PACKAGE_JSON;
+const tmp = pj + '.release_tmp';
+const p = JSON.parse(fs.readFileSync(pj, 'utf8'));
 p.version = process.env.VERSION;
 const out = JSON.stringify(p, null, 2) + '\n';
-fs.writeFileSync('package.json', out);
-const readBack = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+fs.writeFileSync(tmp, out);
+fs.renameSync(tmp, pj);
+const readBack = JSON.parse(fs.readFileSync(pj, 'utf8'));
 if (readBack.version !== process.env.VERSION) {
-  process.stderr.write('package.json version missing or wrong after write. Check for tools that rewrite package.json.\n');
+  process.stderr.write('package.json version missing or wrong after write (got \"' + readBack.version + '\"). Close package.json in your editor and run again.\n');
   process.exit(1);
 }
-" VERSION="$VERSION"
+" VERSION="$VERSION" PACKAGE_JSON="$PACKAGE_JSON"
+
+# Verify again right before commit (editor may have overwritten after our write)
+ON_DISK=$(PACKAGE_JSON="$PACKAGE_JSON" node -p "require(process.env.PACKAGE_JSON).version" 2>/dev/null || true)
+if [[ "$ON_DISK" != "$VERSION" ]]; then
+  echo "package.json was changed before commit (on disk: \"$ON_DISK\", expected: \"$VERSION\"). Close package.json in your editor and run again." >&2
+  exit 1
+fi
 
 echo "==> Commit and push"
 git add package.json
