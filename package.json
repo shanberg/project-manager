@@ -42,5 +42,6 @@
   "dependencies": {
     "@shanberg/project-schema": "^1.0.0",
     "commander": "^11.1.0"
-  }
+  },
+  "version": "0.1.3"
 }
