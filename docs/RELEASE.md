@@ -23,5 +23,5 @@ The script reads the current version from `package.json`, bumps it (or uses the 
 
 Users need **one** PAT with **repo** and **read:packages**, in **both** places:
 
-- `HOMEBREW_GITHUB_API_TOKEN` (env or shell profile) — for the formula's private tarball.
+- `HOMEBREW_GITHUB_API_TOKEN` or `GITHUB_TOKEN` — **must be exported** (e.g. in `~/.zshrc`: `export HOMEBREW_GITHUB_API_TOKEN=ghp_...`) so `brew install` sees it. For the formula's private tarball and release asset.
 - `~/.npmrc`: `//npm.pkg.github.com/:_authToken=YOUR_PAT` — for `@shanberg/project-schema` during build.
