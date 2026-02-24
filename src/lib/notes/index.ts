@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { parseNotes } from "./parse.js";
 import { serializeNotes } from "./serialize.js";
-import type { ProjectNotes, Session, Todo } from "./types.js";
+import type { LinkEntry, ProjectNotes, Session, Todo } from "./types.js";
 
 export type { LinkEntry, ProjectNotes, Session, Todo } from "./types.js";
 export { parseTodos } from "./todos.js";
@@ -221,21 +221,21 @@ export function formatNotesForDetail(notes: ProjectNotes): string {
     parts.push(`### Goals\n${goalsList}\n`);
   }
   if (notes.approach) parts.push(`### Approach\n${truncate(notes.approach, MAX_CONTENT_LENGTH)}\n`);
-  if (notes.links.some((l) => l.label || l.url)) {
+  if (notes.links.some((l: LinkEntry) => l.label || l.url)) {
     const linkLines = notes.links.flatMap(formatLink).filter(Boolean);
     parts.push(`### Links\n${linkLines.join("\n")}\n`);
   }
   if (notes.learnings.some(Boolean)) {
     const learnList = notes.learnings
       .filter(Boolean)
-      .map((l) => `- ${truncate(l, MAX_CONTENT_LENGTH)}`)
+      .map((l: string) => `- ${truncate(l, MAX_CONTENT_LENGTH)}`)
       .join("\n");
     parts.push(`### Learnings\n${learnList}\n`);
   }
   if (notes.sessions.length) {
     const sessionLines = notes.sessions
       .slice(0, SESSION_LIMIT)
-      .map((s) => `- ${s.label ? `${s.date} · ${s.label}` : s.date}`);
+      .map((s: Session) => `- ${s.label ? `${s.date} · ${s.label}` : s.date}`);
     const more = notes.sessions.length > SESSION_LIMIT
       ? `\n_…${notes.sessions.length - SESSION_LIMIT} more_`
       : "";

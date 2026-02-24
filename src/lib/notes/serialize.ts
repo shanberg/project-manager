@@ -21,7 +21,7 @@ function serializeLinks(entries: LinkEntry[]): string {
   return entries
     .map((e) => {
       if (e.children?.length) {
-        const childLines = e.children.map((c) => (c.url ? `    - ${c.url}` : "")).filter(Boolean);
+        const childLines = e.children.map((c: { url?: string }) => (c.url ? `    - ${c.url}` : "")).filter(Boolean);
         return e.label ? `- ${e.label}\n${childLines.join("\n")}` : "";
       }
       if (e.label && e.url) return `- ${e.label}: ${e.url}`;
