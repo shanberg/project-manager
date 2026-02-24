@@ -1,32 +1,6 @@
-export interface LinkEntry {
-  label?: string;
-  url?: string;
-  children?: LinkEntry[];
-}
+import type { LinkEntry, ProjectNotes, Session, Todo } from "@shanberg/project-schema";
 
-export interface Session {
-  date: string;
-  label: string;
-  body: string;
-}
-
-export interface Todo {
-  text: string;
-  checked: boolean;
-  rawLine: string;
-  context: string;
-}
-
-export interface ProjectNotes {
-  title: string;
-  summary: string;
-  problem: string;
-  goals: string[];
-  approach: string;
-  links: LinkEntry[];
-  learnings: string[];
-  sessions: Session[];
-}
+export type { LinkEntry, ProjectNotes, Session, Todo };
 
 export function createEmptyNotes(title: string): ProjectNotes {
   return {

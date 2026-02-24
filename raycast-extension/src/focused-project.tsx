@@ -21,11 +21,9 @@ import type { Todo } from "project-manager/notes";
 import {
   getFocusedProject,
   parseProjectKey,
-  setFocusedProject,
   clearFocusedProject,
 } from "./lib/focused-project";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
-import { getRecentProjectsByEdit } from "./lib/recent-by-edit";
 import {
   saveUndoState,
   getUndoState,
@@ -83,13 +81,6 @@ export default function Command() {
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
     getUndoState,
     [],
-    { execute: true }
-  );
-
-  const focusedKey = data ? projectKey(data.basePath, data.name) : null;
-  const { data: recentProjects } = useCachedPromise(
-    () => getRecentProjectsByEdit(prefs, 10, focusedKey ?? undefined),
-    [prefs.activePath, prefs.archivePath, focusedKey],
     { execute: true }
   );
 
@@ -248,22 +239,6 @@ export default function Command() {
               ))}
             </MenuBarExtra.Section>
           ))}
-          {recentProjects && recentProjects.length > 0 && (
-            <MenuBarExtra.Section title="Recent">
-              {recentProjects.map((p) => (
-                <MenuBarExtra.Item
-                  key={`${p.basePath}:${p.name}`}
-                  icon={Icon.Folder}
-                  title={p.name}
-                  onAction={async () => {
-                    await setFocusedProject(p.basePath, p.name);
-                    await showHUD(`Focused: ${p.name}`);
-                    revalidate();
-                  }}
-                />
-              ))}
-            </MenuBarExtra.Section>
-          )}
           <MenuBarExtra.Section>
             <MenuBarExtra.Item
               icon={Icon.Folder}
