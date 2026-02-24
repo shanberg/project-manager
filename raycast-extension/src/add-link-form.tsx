@@ -1,5 +1,5 @@
 import { Form, Action, ActionPanel, showToast, Toast } from "@raycast/api";
-import { addLinkToNotes } from "project-manager/notes";
+import { addLinkToNotes } from "@shanberg/project-manager/notes";
 
 interface Props {
   notesPath: string;

@@ -1,5 +1,5 @@
 import { LocalStorage } from "@raycast/api";
-import type { Todo } from "project-manager/notes";
+import type { Todo } from "@shanberg/project-manager/notes";
 
 const KEY = "pm-undo-todo";
 

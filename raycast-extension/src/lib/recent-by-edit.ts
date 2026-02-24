@@ -1,7 +1,7 @@
 import path from "path";
 import { readFile, stat } from "fs/promises";
 import { runPmWithPrefs } from "./pm";
-import { parseNotes, parseTodos, resolveNotesPath } from "project-manager/notes";
+import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 

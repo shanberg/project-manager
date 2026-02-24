@@ -19,8 +19,8 @@ import {
   resolveNotesPath,
   toggleAllTodosInFile,
   toggleTodoInFile,
-} from "project-manager/notes";
-import type { Todo } from "project-manager/notes";
+} from "@shanberg/project-manager/notes";
+import type { Todo } from "@shanberg/project-manager/notes";
 import { runPmWithPrefs } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";

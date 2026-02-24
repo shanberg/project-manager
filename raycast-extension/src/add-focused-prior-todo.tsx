@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { List } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { parseNotes, parseTodos, resolveNotesPath } from "project-manager/notes";
+import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
 import AddPriorTodoForm from "./add-prior-todo-form";
 
 export default function Command() {

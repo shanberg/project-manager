@@ -1,5 +1,5 @@
 {
-  "name": "project-manager",
+  "name": "@shanberg/project-manager",
   "version": "0.1.0",
   "description": "CLI for PARA-style project creation with domain-based numbering",
   "type": "module",
@@ -10,8 +10,11 @@
     "./notes": "./dist/lib/notes/index.js"
   },
   "bin": {
-    "pm": "./dist/cli.js"
+    "pm": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -27,12 +30,16 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "@shanberg/project-schema": "file:../project-schema",
+    "@shanberg/project-schema": "^1.0.0",
     "commander": "^11.1.0"
   }
 }

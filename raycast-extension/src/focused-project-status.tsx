@@ -11,8 +11,8 @@ import {
   showHUD,
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon } from "@raycast/utils";
-import type { LinkEntry } from "project-manager/notes";
-import { parseNotes, parseTodos, resolveNotesPath } from "project-manager/notes";
+import type { LinkEntry } from "@shanberg/project-manager/notes";
+import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -112,12 +112,12 @@ export default function Command() {
             <MenuBarExtra.Item
               icon={Icon.Eye}
               title="View Project"
-              onAction={() => open("raycast://extensions/stuarthanberg/project-manager/view-focused-project")}
+              onAction={() => open("raycast://extensions/shanberg/project-manager/view-focused-project")}
             />
             <MenuBarExtra.Item
               icon={Icon.Plus}
               title="New Project"
-              onAction={() => open("raycast://extensions/stuarthanberg/project-manager/new-project")}
+              onAction={() => open("raycast://extensions/shanberg/project-manager/new-project")}
             />
             {data.links.length > 0 &&
               data.links.map((link, i) => (

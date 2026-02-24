@@ -1,6 +1,6 @@
 import path from "path";
 import { Form, Action, ActionPanel, showToast, Toast, useNavigation } from "@raycast/api";
-import { addTodoToTodaySession, resolveNotesPath } from "project-manager/notes";
+import { addTodoToTodaySession, resolveNotesPath } from "@shanberg/project-manager/notes";
 
 interface Props {
   projectName: string;

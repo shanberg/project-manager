@@ -4,7 +4,7 @@
   "title": "Project Manager",
   "description": "Create and manage PARA-style projects. Configure paths, create projects, list, and archive.",
   "icon": "icon.png",
-  "author": "stuarthanberg",
+  "author": "shanberg",
   "categories": [
     "Productivity"
   ],
@@ -186,7 +186,7 @@
   "dependencies": {
     "@raycast/api": "^1.70.0",
     "@raycast/utils": "^1.10.0",
-    "project-manager": "github:stuarthanberg/project-manager"
+    "@shanberg/project-manager": "file:.."
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.0",

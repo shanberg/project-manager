@@ -1,0 +1,33 @@
+# Optional: publish CLI to GitHub Packages when a release is created.
+# Requires NODE_AUTH_TOKEN (or NPM_TOKEN) repo secret with write:packages.
+name: Publish to GitHub Packages
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@shanberg"
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

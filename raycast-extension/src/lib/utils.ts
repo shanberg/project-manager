@@ -1,8 +1,8 @@
 import path from "path";
 import os from "os";
 import { existsSync } from "fs";
-import { formatSessionDate } from "project-manager/notes";
-import type { ProjectNotes } from "project-manager/notes";
+import { formatSessionDate } from "@shanberg/project-manager/notes";
+import type { ProjectNotes } from "@shanberg/project-manager/notes";
 import { runPmWithPrefs } from "./pm";
 import type { PreferenceValues } from "./types";
 

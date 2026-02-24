@@ -16,8 +16,8 @@ import {
   parseTodos,
   resolveNotesPath,
   toggleTodoInFile,
-} from "project-manager/notes";
-import type { Todo } from "project-manager/notes";
+} from "@shanberg/project-manager/notes";
+import type { Todo } from "@shanberg/project-manager/notes";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -203,25 +203,25 @@ export default function Command() {
             <MenuBarExtra.Item
               icon={Icon.Eye}
               title="View Project"
-              onAction={() => open("raycast://extensions/stuarthanberg/project-manager/view-focused-project")}
+              onAction={() => open("raycast://extensions/shanberg/project-manager/view-focused-project")}
             />
             <MenuBarExtra.Item
               icon={Icon.Plus}
               title="New Project"
-              onAction={() => open("raycast://extensions/stuarthanberg/project-manager/new-project")}
+              onAction={() => open("raycast://extensions/shanberg/project-manager/new-project")}
             />
             {data.notesPath && (
               <>
                 <MenuBarExtra.Item
                   icon={Icon.Plus}
                   title="Add task"
-                  onAction={() => open("raycast://extensions/stuarthanberg/project-manager/add-focused-todo")}
+                  onAction={() => open("raycast://extensions/shanberg/project-manager/add-focused-todo")}
                 />
                 {nextTodo && (
                   <MenuBarExtra.Item
                     icon={Icon.ArrowUp}
                     title="Add prior task"
-                    onAction={() => open("raycast://extensions/stuarthanberg/project-manager/add-focused-prior-todo")}
+                    onAction={() => open("raycast://extensions/shanberg/project-manager/add-focused-prior-todo")}
                   />
                 )}
               </>

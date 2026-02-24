@@ -1,6 +1,6 @@
 import { Form, Action, ActionPanel, showToast, Toast } from "@raycast/api";
-import { updateNotesSection } from "project-manager/notes";
-import type { NotesSectionUpdate } from "project-manager/notes";
+import { updateNotesSection } from "@shanberg/project-manager/notes";
+import type { NotesSectionUpdate } from "@shanberg/project-manager/notes";
 
 interface Props {
   notesPath: string;

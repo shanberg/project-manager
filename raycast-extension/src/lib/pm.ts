@@ -4,7 +4,7 @@ import path from "path";
 import os from "os";
 import { mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
-import { DEFAULT_DOMAINS, DEFAULT_SUBFOLDERS } from "project-manager/types";
+import { DEFAULT_DOMAINS, DEFAULT_SUBFOLDERS } from "@shanberg/project-manager/types";
 import type { PreferenceValues } from "./types";
 
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */

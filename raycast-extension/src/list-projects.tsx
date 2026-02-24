@@ -18,14 +18,14 @@ import {
   resolveNotesPath,
   formatNotesForDetail,
   formatNotesEmptyState,
-} from "project-manager/notes";
+} from "@shanberg/project-manager/notes";
 import {
   recordRecentProject,
   getRecentProjectKeys,
   projectKey,
 } from "./lib/recent-projects";
 import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
-import type { ProjectNotes } from "project-manager/notes";
+import type { ProjectNotes } from "@shanberg/project-manager/notes";
 import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";

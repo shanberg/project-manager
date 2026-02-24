@@ -1,6 +1,6 @@
 import { Form, Action, ActionPanel, showToast, Toast, useNavigation } from "@raycast/api";
-import { addTodoBeforeInFile } from "project-manager/notes";
-import type { Todo } from "project-manager/notes";
+import { addTodoBeforeInFile } from "@shanberg/project-manager/notes";
+import type { Todo } from "@shanberg/project-manager/notes";
 
 interface Props {
   notesPath: string;
