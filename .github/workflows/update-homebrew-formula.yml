@@ -1,0 +1,54 @@
+# On release, download the tarball, compute sha256, and update the Homebrew formula in homebrew-s.
+# Requires repo secret: TAP_PUSH_TOKEN (PAT with repo scope for shanberg/homebrew-s).
+name: Update Homebrew formula
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Get version from tag
+        id: tag
+        run: |
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download tarball and compute SHA256
+        id: tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          curl -sL -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/tarball/${tag}" \
+            -o tarball.tar.gz
+          sha256=$(shasum -a 256 tarball.tar.gz | awk '{print $1}')
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Clone tap and update formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          version="${{ steps.tag.outputs.version }}"
+          sha256="${{ steps.tarball.outputs.sha256 }}"
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/shanberg/homebrew-s.git" tap
+          cd tap
+
+          formula="Formula/project-manager.rb"
+          sed -i "s|refs/tags/v[0-9.]*\\.tar\\.gz|refs/tags/${tag}.tar.gz|" "$formula"
+          sed -i "s/sha256 \"[a-f0-9]*\"/sha256 \"${sha256}\"/" "$formula"
+          sed -i "s/version \"[0-9.]*\"/version \"${version}\"/" "$formula"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$formula"
+          git diff --staged --quiet || git commit -m "project-manager ${version}"
+          git push
