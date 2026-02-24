@@ -7,14 +7,14 @@ CLI for PARA-style project creation with domain-based numbering. **Raycast is th
 **On another computer (Homebrew only)**
 
 1. **One-time: auth for private repo and GitHub Packages**  
-   The formula downloads source from this (private) repo and fetches `@shanberg/project-schema` from GitHub Packages. On that machine, use one [classic PAT](https://github.com/settings/tokens) with **repo** (for the archive) and **read:packages** (for npm deps):
+   The formula downloads source from this (private) repo and fetches `@shanberg/project-schema` from GitHub Packages. Use **one** [classic PAT](https://github.com/settings/tokens) with **repo** and **read:packages**, and put it in **both** places (one token, two config locations):
    - **Homebrew (private repo tarball):** `export HOMEBREW_GITHUB_API_TOKEN=YOUR_PAT` (or add to `~/.zshrc`).
    - **npm (private deps):** add to `~/.npmrc`: `//npm.pkg.github.com/:_authToken=YOUR_PAT`
 
 2. **Tap and install:**
    ```bash
-   brew tap shanberg/shanberg
-   brew install shanberg/shanberg/project-manager
+   brew tap shanberg/s
+   brew install shanberg/s/project-manager
    ```
    Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Leave **pm CLI Path** empty so the extension uses `pm` from PATH.
 
