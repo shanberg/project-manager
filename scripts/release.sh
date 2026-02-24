@@ -43,22 +43,24 @@ TAG="v${VERSION}"
 echo "==> Set package.json to $VERSION"
 node -e "
 const fs = require('fs');
-const pj = process.env.PACKAGE_JSON;
+const pj = process.argv[1];
+const version = process.argv[2];
+if (!pj || !version) throw new Error('usage: node script package.json.path version');
 const tmp = pj + '.release_tmp';
 const p = JSON.parse(fs.readFileSync(pj, 'utf8'));
-p.version = process.env.VERSION;
+p.version = version;
 const out = JSON.stringify(p, null, 2) + '\n';
 fs.writeFileSync(tmp, out);
 fs.renameSync(tmp, pj);
 const readBack = JSON.parse(fs.readFileSync(pj, 'utf8'));
-if (readBack.version !== process.env.VERSION) {
+if (readBack.version !== version) {
   process.stderr.write('package.json version missing or wrong after write (got \"' + readBack.version + '\"). Close package.json in your editor and run again.\n');
   process.exit(1);
 }
-" VERSION="$VERSION" PACKAGE_JSON="$PACKAGE_JSON"
+" "$PACKAGE_JSON" "$VERSION"
 
 # Verify again right before commit (editor may have overwritten after our write)
-ON_DISK=$(PACKAGE_JSON="$PACKAGE_JSON" node -p "require(process.env.PACKAGE_JSON).version" 2>/dev/null || true)
+ON_DISK=$(node -p "require(process.argv[1]).version" "$PACKAGE_JSON" 2>/dev/null || true)
 if [[ "$ON_DISK" != "$VERSION" ]]; then
   echo "package.json was changed before commit (on disk: \"$ON_DISK\", expected: \"$VERSION\"). Close package.json in your editor and run again." >&2
   exit 1
