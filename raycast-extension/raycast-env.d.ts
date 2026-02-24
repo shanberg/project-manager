@@ -28,6 +28,8 @@ declare type Preferences = ExtensionPreferences
 declare namespace Preferences {
   /** Preferences accessible in the `configure` command */
   export type Configure = ExtensionPreferences & {}
+  /** Preferences accessible in the `edit-domains` command */
+  export type EditDomains = ExtensionPreferences & {}
   /** Preferences accessible in the `new-project` command */
   export type NewProject = ExtensionPreferences & {}
   /** Preferences accessible in the `list-projects` command */
@@ -53,6 +55,8 @@ declare namespace Preferences {
 declare namespace Arguments {
   /** Arguments passed to the `configure` command */
   export type Configure = {}
+  /** Arguments passed to the `edit-domains` command */
+  export type EditDomains = {}
   /** Arguments passed to the `new-project` command */
   export type NewProject = {}
   /** Arguments passed to the `list-projects` command */

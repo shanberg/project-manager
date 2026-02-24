@@ -22,6 +22,17 @@
       ]
     },
     {
+      "name": "edit-domains",
+      "title": "Edit Domains",
+      "description": "Edit domain codes and labels used for new projects",
+      "mode": "view",
+      "keywords": [
+        "domains",
+        "config",
+        "pm"
+      ]
+    },
+    {
       "name": "new-project",
       "title": "New Project",
       "description": "Create a new project",

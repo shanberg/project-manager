@@ -10,18 +10,22 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { runPmWithPrefs } from "./lib/pm";
+import { useCachedPromise } from "@raycast/utils";
+import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
-import { DEFAULT_DOMAINS } from "project-manager/types";
-
-const DOMAINS = Object.entries(DEFAULT_DOMAINS).map(([value, title]) => ({
-  value,
-  title: `${value} (${title})`,
-}));
 
 export default function Command() {
   const [loading, setLoading] = useState(false);
   const prefs = getPreferenceValues<PreferenceValues>();
+  const { data: domains = {}, isLoading: domainsLoading } = useCachedPromise(
+    getConfigDomains,
+    [prefs]
+  );
+  const domainOptions = Object.entries(domains).map(([value, label]) => ({
+    value,
+    title: `${value} (${label})`,
+  }));
+  const defaultDomain = domainOptions[0]?.value ?? "M";
 
   async function handleSubmit(values: { domain: string; title: string }) {
     setLoading(true);
@@ -62,15 +66,15 @@ export default function Command() {
 
   return (
     <Form
-      isLoading={loading}
+      isLoading={loading || domainsLoading}
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Create Project" onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >
-      <Form.Dropdown id="domain" title="Domain" defaultValue="M">
-        {DOMAINS.map((d) => (
+      <Form.Dropdown id="domain" title="Domain" defaultValue={defaultDomain}>
+        {domainOptions.map((d) => (
           <Form.Dropdown.Item key={d.value} value={d.value} title={d.title} />
         ))}
       </Form.Dropdown>

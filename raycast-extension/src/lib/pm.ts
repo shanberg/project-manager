@@ -7,6 +7,28 @@ import { existsSync } from "fs";
 import { DEFAULT_DOMAINS, DEFAULT_SUBFOLDERS } from "project-manager/types";
 import type { PreferenceValues } from "./types";
 
+/** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */
+export async function getConfigDomains(
+  prefs: Pick<PreferenceValues, "activePath" | "archivePath" | "configPath" | "pmCliPath">
+): Promise<Record<string, string>> {
+  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
+  const env = buildEnv(prefs as PreferenceValues);
+  try {
+    const { stdout } = await runPm(["config", "get", "domains"], env, prefs.pmCliPath);
+    const parsed = JSON.parse(stdout.trim()) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof k === "string" && typeof v === "string") out[k] = v;
+      }
+      if (Object.keys(out).length > 0) return out;
+    }
+  } catch {
+    // fall through to default
+  }
+  return { ...DEFAULT_DOMAINS };
+}
+
 const execAsync = promisify(exec);
 
 function resolvePmPath(cliPathOverride?: string): string {
@@ -87,11 +109,15 @@ export async function runPm(
   const fullEnv = { ...process.env, ...env };
   const pmPath = resolvePmPath(cliPathOverride);
 
+  /** Escape for zsh -c: wrap in single quotes, escape single quotes as '\'' */
+  function shellArg(a: string): string {
+    return `'${a.replace(/'/g, "'\\''")}'`;
+  }
   let innerCmd: string;
   if (pmPath === "pm") {
-    innerCmd = `pm ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`;
+    innerCmd = `pm ${args.map(shellArg).join(" ")}`;
   } else {
-    innerCmd = `node "${pmPath}" ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`;
+    innerCmd = `node ${shellArg(pmPath)} ${args.map(shellArg).join(" ")}`;
   }
   const cmd = `/bin/zsh -l -c ${JSON.stringify(innerCmd)}`;
 

@@ -26,13 +26,10 @@ import {
 } from "./lib/recent-projects";
 import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
 import type { ProjectNotes } from "project-manager/notes";
-import { runPmWithPrefs } from "./lib/pm";
+import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";
 import ProjectView from "./project-view";
-import { DEFAULT_DOMAINS } from "project-manager/types";
-
-const DOMAIN_CODES = Object.keys(DEFAULT_DOMAINS);
 
 import {
   parseListAllOutput,
@@ -42,15 +39,22 @@ import {
   ensureTodaySession,
 } from "./lib/utils";
 
-function getDomain(name: string): string | null {
-  const m = name.match(/^(M|DE|P|I)-\d+/);
+/** Match domain code at start of project name; use longer codes first so DE matches before D. */
+function getDomainFromCodes(name: string, domainCodes: string[]): string | null {
+  const sorted = [...domainCodes].sort((a, b) => b.length - a.length);
+  const escaped = sorted.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`^(${escaped.join("|")})-\\d+`);
+  const m = name.match(re);
   return m ? m[1] : null;
 }
 
-function parseSearchToken(search: string): { domain: string | null; query: string } {
+function parseSearchToken(
+  search: string,
+  domainCodes: string[]
+): { domain: string | null; query: string } {
   const trimmed = search.trim();
   const upper = trimmed.toUpperCase();
-  for (const code of DOMAIN_CODES) {
+  for (const code of domainCodes) {
     if (upper === code || upper.startsWith(`${code} `)) {
       return { domain: code, query: trimmed.slice(code.length).trim() };
     }
@@ -92,8 +96,11 @@ async function fetchProjectsWithMeta(
   pmCliPath: string | undefined
 ): Promise<{ active: ProjectWithMeta[]; archive: ProjectWithMeta[] }> {
   const prefs = { activePath, archivePath, configPath, pmCliPath };
-  const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
-  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
+  const [domains, { stdout }] = await Promise.all([
+    getConfigDomains(prefs),
+    runPmWithPrefs(prefs, ["list", "--all"]),
+  ]);
+  const domainCodes = Object.keys(domains);
 
   async function enrich(
     names: string[],
@@ -116,7 +123,7 @@ async function fetchProjectsWithMeta(
           mtime: stats.mtime,
           hasSrc: hasSrcDir(path.join(basePath, name)),
           basePath,
-          domain: getDomain(name),
+          domain: getDomainFromCodes(name, domainCodes),
           done,
           total: todos.length,
         };
@@ -125,6 +132,7 @@ async function fetchProjectsWithMeta(
     return results;
   }
 
+  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
   const [active, archive] = await Promise.all([
     enrich(activeNames, activePath),
     enrich(archiveNames, archivePath),
@@ -168,6 +176,9 @@ export default function Command() {
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
   const prefs = getPreferenceValues<PreferenceValues>();
 
+  const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
+  const domainCodes = Object.keys(domains);
+
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjectsWithMeta,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
@@ -182,7 +193,7 @@ export default function Command() {
   const archive = data?.archive ?? [];
   const pathToShow = scope === "active" ? prefs.activePath : prefs.archivePath;
 
-  const { domain: domainFilter, query } = parseSearchToken(searchText);
+  const { domain: domainFilter, query } = parseSearchToken(searchText, domainCodes);
 
   const displayActive = useMemo(
     () => filterAndSort(active, domainFilter, query, recentKeys),
@@ -299,7 +310,9 @@ export default function Command() {
 
   const searchPlaceholder = domainFilter
     ? `Filtered to ${domainFilter}. Type to search…`
-    : `Search or type M, DE, P, I to filter by domain`;
+    : domainCodes.length > 0
+      ? `Search or type ${domainCodes.join(", ")} to filter by domain`
+      : "Search projects…";
 
   return (
     <List
@@ -334,7 +347,7 @@ export default function Command() {
                 key={`active:${name}`}
                 icon={getProgressIcon(total ? done / total : 1)}
                 title={getReadableProjectName(name)}
-                keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+                keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
                 detail={renderDetail(notes)}
                 actions={
                   <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
@@ -348,7 +361,7 @@ export default function Command() {
                 key={`archive:${name}`}
                 icon={getProgressIcon(total ? done / total : 1)}
                 title={getReadableProjectName(name)}
-                keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+                keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
                 detail={renderDetail(notes)}
                 actions={
                   <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
@@ -364,7 +377,7 @@ export default function Command() {
               key={name}
               icon={getProgressIcon(total ? done / total : 1)}
               title={getReadableProjectName(name)}
-              keywords={[getDomain(name) ?? "", getProjectCode(name)]}
+              keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
               detail={renderDetail(notes)}
                 actions={
                 <ProjectActions
