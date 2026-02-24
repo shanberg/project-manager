@@ -1,6 +1,6 @@
 # Release checklist (project-manager)
 
-Use this when cutting a new version (e.g. 0.2.0). Version exists in three places; the first two are manual, the tap can be updated automatically.
+Use this when cutting a new version (e.g. 0.2.0). Version exists in three places; the first two are manual, the tap can be updated with the script.
 
 ## 1. project-manager repo
 
@@ -10,30 +10,27 @@ Use this when cutting a new version (e.g. 0.2.0). Version exists in three places
   `git tag v0.2.0 && git push origin v0.2.0`
 - [ ] Create a GitHub Release from the tag (so the publish workflow runs and, if configured, the Homebrew formula is updated).
 
-## 2. homebrew-s tap (optional if automation is set up)
+## 2. homebrew-s tap (run locally)
 
-If the repo has the **TAP_PUSH_TOKEN** secret (a PAT with `repo` for `shanberg/homebrew-s`), the workflow **Update Homebrew formula** runs on release and updates the formula (url ref, version, sha256) and pushes to the tap. No manual steps.
+From the **project-manager** repo, with `GITHUB_TOKEN` or `HOMEBREW_GITHUB_API_TOKEN` set (so the script can download the private tarball):
 
-If not using automation:
+```bash
+./scripts/update-homebrew-formula.sh v0.2.0
+```
 
-- [ ] In **Formula/project-manager.rb** update url ref, **version**, and **sha256**.
-- [ ] To get sha256: on a machine with `HOMEBREW_GITHUB_API_TOKEN` set, run  
-  `brew fetch shanberg/s/project-manager`  
-  and use the **Actual** value.
-- [ ] Commit and push the formula to the tap.
+Or omit the tag to use the version from `package.json`:
 
-## One-time: enable automatic formula updates
+```bash
+./scripts/update-homebrew-formula.sh
+```
 
-In this repo (project-manager): **Settings → Secrets and variables → Actions** → New repository secret:
+The script downloads the tarball, computes sha256, and updates `Formula/project-manager.rb` in the tap (default: `../homebrew-s`; override with `TAP_DIR`). Then commit and push in the tap repo.
 
-- **Name:** `TAP_PUSH_TOKEN`
-- **Value:** A classic PAT with **repo** scope (or fine-grained with read/write to `shanberg/homebrew-s`).
-
-The **Update Homebrew formula** workflow uses it to push formula changes to the tap on each release. No need to run `brew fetch` on another machine or paste checksums.
+**Optional CI:** The **Update Homebrew formula** workflow does the same on release if you add a **TAP_PUSH_TOKEN** secret (PAT with `repo` for `shanberg/homebrew-s`). Use the script when you prefer to run it locally.
 
 ## 3. One-time per machine (new installs)
 
-Users need one PAT with **repo** and **read:packages**, set in two places:
+Users need **one** PAT with **repo** and **read:packages**, in **both** places:
 
-- `HOMEBREW_GITHUB_API_TOKEN` (env or shell profile) — for the formula’s private tarball.
+- `HOMEBREW_GITHUB_API_TOKEN` (env or shell profile) — for the formula's private tarball.
 - `~/.npmrc`: `//npm.pkg.github.com/:_authToken=YOUR_PAT` — for `@shanberg/project-schema` during build.
