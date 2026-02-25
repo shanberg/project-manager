@@ -5,7 +5,8 @@
 # Usage: ./scripts/build-release-tarball.sh <version>
 #   version   e.g. 0.1.12
 #
-# Env:   GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN  for npm ci to fetch @shanberg/project-schema
+# Repo .npmrc has @shanberg:registry so public packages install without auth.
+# Optional: GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN if the registry requires auth.
 set -e
 
 VERSION="${1:?Usage: $0 <version>}"
@@ -15,23 +16,22 @@ TARBALL_PATH="$ROOT/$TARBALL_NAME"
 
 cd "$ROOT"
 
-TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
-if [[ -z "$TOKEN" ]]; then
-  echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN so npm ci can fetch @shanberg/project-schema." >&2
-  exit 1
-fi
-
-# Temporary .npmrc for this run only; TMPDIR created later
-NPMRC="$ROOT/.npmrc"
 TMPDIR=""
 cleanup() {
-  rm -f "$NPMRC"
   [[ -n "$TMPDIR" && -d "$TMPDIR" ]] && rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
 
-echo "//npm.pkg.github.com/:_authToken=$TOKEN" > "$NPMRC"
-echo "@shanberg:registry=https://npm.pkg.github.com" >> "$NPMRC"
+# Use repo .npmrc (scope only). If token is set, use temp userconfig so npm ci can auth.
+TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
+if [[ -n "$TOKEN" ]]; then
+  NPMRC_RELEASE=$(mktemp)
+  trap "rm -f '$NPMRC_RELEASE'; cleanup" EXIT
+  echo "//npm.pkg.github.com/:_authToken=$TOKEN" > "$NPMRC_RELEASE"
+  echo "@shanberg:registry=https://npm.pkg.github.com" >> "$NPMRC_RELEASE"
+  NPM_CONFIG_USERCONFIG="$NPMRC_RELEASE"
+  export NPM_CONFIG_USERCONFIG
+fi
 
 echo "==> npm ci"
 npm ci
