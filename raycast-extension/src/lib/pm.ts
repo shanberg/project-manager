@@ -29,6 +29,25 @@ export async function getConfigDomains(
   return { ...DEFAULT_DOMAINS };
 }
 
+/** Load subfolders (project structure) from pm config. Uses DEFAULT_SUBFOLDERS if config missing or invalid. */
+export async function getConfigSubfolders(
+  prefs: Pick<PreferenceValues, "activePath" | "archivePath" | "configPath" | "pmCliPath">
+): Promise<string[]> {
+  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
+  const env = buildEnv(prefs as PreferenceValues);
+  try {
+    const { stdout } = await runPm(["config", "get", "subfolders"], env, prefs.pmCliPath);
+    const parsed = JSON.parse(stdout.trim()) as unknown;
+    if (Array.isArray(parsed)) {
+      const out = parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      if (out.length > 0) return out;
+    }
+  } catch {
+    // fall through to default
+  }
+  return [...DEFAULT_SUBFOLDERS];
+}
+
 const execAsync = promisify(exec);
 
 function resolvePmPath(cliPathOverride?: string): string {

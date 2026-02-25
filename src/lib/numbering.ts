@@ -3,7 +3,7 @@ import path from "path";
 
 /**
  * Parse project folders to extract existing numbers for a domain.
- * Accepts any padding: M-1, M-01, M-001, M-100, etc.
+ * Accepts any padding: W-1, W-01, W-001, W-100, etc.
  */
 export function parseProjectNumbers(
   folderNames: string[],
@@ -59,7 +59,9 @@ export async function getNextFormattedNumber(
       for (const e of entries) {
         if (e.isDirectory()) allNames.push(e.name);
       }
-    } catch {
+    } catch (err) {
+      const code = err && typeof err === "object" && "code" in err ? (err as NodeJS.ErrnoException).code : undefined;
+      if (code !== "ENOENT") throw err;
       // Folder may not exist yet
     }
   }

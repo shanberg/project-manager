@@ -49,6 +49,27 @@ export function createDefaultConfig(
   };
 }
 
+export type PmConfigKey = keyof PmConfig;
+
+export function getConfigValue(config: PmConfig, key: PmConfigKey): unknown {
+  return config[key];
+}
+
+export function setConfigValue(
+  config: PmConfig,
+  key: PmConfigKey,
+  value: string | Record<string, string> | string[]
+): void {
+  const c = config as unknown as Record<string, unknown>;
+  if (key === "paraPath" || key === "activePath" || key === "archivePath") {
+    c[key] = value as string;
+  } else if (key === "domains" || key === "subfolders") {
+    c[key] = value;
+  } else {
+    throw new Error(`Unknown config key: ${key}`);
+  }
+}
+
 /** Resolve active and archive paths. Env vars PM_ACTIVE_PATH and PM_ARCHIVE_PATH override config. */
 export function resolvePaths(config: PmConfig): {
   activePath: string;

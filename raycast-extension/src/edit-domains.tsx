@@ -75,9 +75,9 @@ export default function Command() {
       <Form.TextArea
         id="domainsJson"
         title="Domains (JSON)"
-        placeholder='{"M": "Marketing", "DE": "Design Engineering"}'
+        placeholder='{"W": "Work", "P": "Personal", "L": "Learning", "O": "Other"}'
         defaultValue={initialJson}
-        info="Code → label. Codes are used in project names (e.g. M-001). At least one domain required."
+        info="Code → label. Codes are used in project names (e.g. W-001). At least one domain required."
       />
     </Form>
   );

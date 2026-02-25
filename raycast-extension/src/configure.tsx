@@ -6,19 +6,22 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { getConfigDomains } from "./lib/pm";
+import { getConfigDomains, getConfigSubfolders } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import EditDomains from "./edit-domains";
+import EditProjectStructure from "./edit-project-structure";
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
+  const { data: subfolders = [] } = useCachedPromise(getConfigSubfolders, [prefs]);
   const domainSummary =
     Object.keys(domains).length > 0
       ? Object.entries(domains)
           .map(([code, label]) => `${code} → ${label}`)
           .join("  ·  ")
       : "—";
+  const structureSummary = subfolders.length > 0 ? subfolders.join("  ·  ") : "—";
 
   return (
     <Detail
@@ -31,7 +34,11 @@ Where your projects live. Both can point to different locations (e.g. different 
 
 # Domains
 
-Domain codes and labels used when creating projects (e.g. \`M\` → Marketing). **Edit Domains** to change.`}
+Domain codes and labels used when creating projects (e.g. \`M\` → Marketing). **Edit Domains** to change.
+
+# Project structure
+
+Folder names created inside each new project. **Edit Project Structure** to change.`}
       metadata={
         <Detail.Metadata>
           <Detail.Metadata.Label title="Active" text={prefs.activePath} />
@@ -39,11 +46,14 @@ Domain codes and labels used when creating projects (e.g. \`M\` → Marketing). 
           <Detail.Metadata.Label title="Archive" text={prefs.archivePath} />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Domains" text={domainSummary} />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label title="Project structure" text={structureSummary} />
         </Detail.Metadata>
       }
       actions={
         <ActionPanel>
           <Action.Push title="Edit Domains" target={<EditDomains />} />
+          <Action.Push title="Edit Project Structure" target={<EditProjectStructure />} />
           <Action
             title="Open Preferences"
             onAction={openExtensionPreferences}

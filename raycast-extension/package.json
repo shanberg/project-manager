@@ -2,7 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "project-manager",
   "title": "Project Manager",
-  "description": "Create and manage PARA-style projects. Configure paths, create projects, list, and archive.",
+  "description": "Create and manage projects. Configure paths, create projects, list, and archive.",
   "icon": "icon.png",
   "author": "shanberg",
   "categories": [
@@ -28,6 +28,18 @@
       "mode": "view",
       "keywords": [
         "domains",
+        "config",
+        "pm"
+      ]
+    },
+    {
+      "name": "edit-project-structure",
+      "title": "Edit Project Structure",
+      "description": "Edit folder names created inside each new project",
+      "mode": "view",
+      "keywords": [
+        "subfolders",
+        "structure",
         "config",
         "pm"
       ]

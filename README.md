@@ -1,22 +1,19 @@
 # pm - Project Manager
 
-CLI for PARA-style project creation with domain-based numbering. **Raycast is the main frontend** – configure paths and run all commands from the extension.
+CLI for project creation with domain-based numbering. **Raycast is the main frontend** – configure paths and run all commands from the extension.
+
+**Assumptions:** You use Obsidian and Raycast, follow the PARA model for file management, and have mid-size projects that benefit from some structure but aren’t epics (e.g. no full project-management tooling).
 
 ## Install
 
-**On another computer (Homebrew only)**
+**On another computer (Homebrew)**
 
-1. **One-time: auth for private repo and GitHub Packages**  
-   The formula downloads source from this (private) repo and fetches `@shanberg/project-schema` from GitHub Packages. Use **one** [classic PAT](https://github.com/settings/tokens) with **repo** and **read:packages**, and put it in **both** places (one token, two config locations):
-   - **Homebrew (private repo tarball):** `export HOMEBREW_GITHUB_API_TOKEN=YOUR_PAT` (or add to `~/.zshrc`).
-   - **npm (private deps):** add to `~/.npmrc`: `@shanberg:registry=https://npm.pkg.github.com/` and `//npm.pkg.github.com/:_authToken=YOUR_PAT`
+```bash
+brew tap shanberg/s
+brew install shanberg/s/project-manager
+```
 
-2. **Tap and install:**
-   ```bash
-   brew tap shanberg/s
-   brew install shanberg/s/project-manager
-   ```
-   Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Leave **pm CLI Path** empty so the extension uses `pm` from PATH.
+Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Leave **pm CLI Path** empty so the extension uses `pm` from PATH.
 
 **Local dev (this repo)**
 
@@ -60,19 +57,17 @@ pm notes path <project>
 
 **Examples:**
 ```bash
-pm new M "Slides Redesign"
-# Creates: active/M-001 Slides Redesign/ (or M-1, M-01 depending on existing convention)
+pm new W "Website Refresh"
+# Creates: active/W-1 Website Refresh/ (or W-01, W-001 depending on existing convention)
 
 pm list              # List active projects
 pm list --archive    # List archived projects
 pm list --all        # List both
 
-pm archive "M-1 Slides Redesign"   # By full name
-pm archive M-1                     # By prefix (unambiguous)
-pm unarchive M-1                   # Move from archive back to active
+pm archive "W-1 Website Refresh"   # By full name
+pm archive W-1                     # By prefix (unambiguous)
+pm unarchive W-1                   # Move from archive back to active
 ```
-
-**Domains:** M (Marketing), DE (Design Engineering), P (Product Design), I (Internal)
 
 ## Config
 
@@ -87,29 +82,17 @@ Override: `PM_CONFIG_HOME=/custom/path pm ...`
 
 ## Publishing (maintainers)
 
-The CLI is published to GitHub Packages as `@shanberg/project-manager`. Prerequisite: publish `@shanberg/project-schema` to the same registry first.
+The CLI is published to GitHub Packages as `@shanberg/project-manager`. Publish `@shanberg/project-schema` to the same registry first.
 
-**Manual publish (private) — recommended (no `npm login`, no legacy auth):**
+Create a GitHub Release (tag). The workflow in `.github/workflows/publish.yml` runs on release and publishes using `GITHUB_TOKEN` (package stays private).
 
-GitHub Packages does not support web-based or OAuth login for npm; auth is token-only. The current approach is to put your token in config and run `npm publish`:
-
-1. **Create a classic PAT** (GitHub Packages npm does not support fine-grained tokens yet). GitHub → Settings → Developer settings → [Personal access tokens](https://github.com/settings/tokens) → **Tokens (classic)** → Generate new token. Enable **write:packages** (and **read:packages** if you install from Packages elsewhere).
-2. **Add the token to `~/.npmrc`** (create the file if it doesn’t exist):
-   ```
-   @shanberg:registry=https://npm.pkg.github.com/
-   //npm.pkg.github.com/:_authToken=YOUR_TOKEN
-   ```
-   No `npm login` or legacy auth needed.
-3. **Publish:** From this repo root, run `npm publish`. The package is published privately (`publishConfig.access` is `restricted`).
-
-**Automated:** Create a GitHub Release (tag). The workflow in `.github/workflows/publish.yml` runs on release and publishes using `GITHUB_TOKEN` (package stays private). If you need a PAT for cross-repo or limits, add a `NODE_AUTH_TOKEN` repo secret.
 
 ## Numbering
 
 Numbers are unique across both `active` and `archive`. Padding adapts to your convention:
 
-- Start with `M-1` → next is `M-2`, then `M-10`, `M-100`
-- Start with `M-01` → next is `M-02`, then `M-100` when you hit 100
+- Start with `W-1` → next is `W-2`, then `W-10`, `W-100`
+- Start with `W-01` → next is `W-02`, then `W-100` when you hit 100
 
 ## Project Structure
 

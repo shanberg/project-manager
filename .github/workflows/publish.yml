@@ -1,5 +1,5 @@
 # Optional: publish CLI to GitHub Packages when a release is created.
-# Requires NODE_AUTH_TOKEN (or NPM_TOKEN) repo secret with write:packages.
+# Uses GITHUB_TOKEN (contents read, packages write). For cross-repo or limits, set NODE_AUTH_TOKEN repo secret.
 name: Publish to GitHub Packages
 
 on:

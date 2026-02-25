@@ -8,10 +8,10 @@ export interface PmConfig {
 }
 
 export const DEFAULT_DOMAINS: Record<string, string> = {
-  M: "Marketing",
-  DE: "Design Engineering",
-  P: "Product Design",
-  I: "Internal",
+  W: "Work",
+  P: "Personal",
+  L: "Learning",
+  O: "Other",
 };
 
 export const DEFAULT_SUBFOLDERS = [

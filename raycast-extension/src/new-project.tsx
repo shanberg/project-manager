@@ -80,7 +80,7 @@ export default function Command() {
           <Form.Dropdown.Item key={d.value} value={d.value} title={d.title} />
         ))}
       </Form.Dropdown>
-      <Form.TextField id="title" title="Project Title" placeholder="e.g. Slides Redesign" />
+      <Form.TextField id="title" title="Project Title" placeholder="e.g. Website Refresh" />
     </Form>
   );
 }

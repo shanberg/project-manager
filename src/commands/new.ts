@@ -13,7 +13,7 @@ export async function newProject(domain?: string, title?: string): Promise<void>
 
   if (!domainCode || !projectTitle) {
     console.error("Usage: pm new <domain> <title>");
-    console.error("Example: pm new M 'Slides Redesign'");
+    console.error("Example: pm new W 'Website Refresh'");
     console.error("Domains:", Object.keys(config.domains).join(", "));
     process.exit(1);
   }

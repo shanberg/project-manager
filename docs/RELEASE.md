@@ -1,6 +1,5 @@
 # Release (project-manager)
 
-**When to release:** Run `release` when you want a new version that others can install (e.g. `brew upgrade`). That includes app/CLI changes and release-process changes (scripts, docs, CI)—if you only changed tooling, use `release -- patch` so the formula and checksum get updated and the next install has those changes. If you truly don't need a new installable version (nobody will `brew upgrade` yet), you can just commit and push.
 
 One command: bump version, push, tag, update Homebrew formula, push tap.
 
@@ -19,9 +18,6 @@ The script reads the current version from `package.json`, bumps it (or uses the 
 
 **Optional:** To only update the formula (e.g. after releasing another way): `npm run update-homebrew-formula -- v0.1.3`
 
-## 3. One-time per machine (new installs)
+## Install (users)
 
-Users need **one** PAT with **repo** and **read:packages**, in **both** places:
-
-- **GitHub auth** (one of): run **`gh auth login`** (if you use GitHub CLI — then `brew install` will use that token), or export **`HOMEBREW_GITHUB_API_TOKEN`** or **`GITHUB_TOKEN`** in your shell (e.g. in `~/.zshrc`). Needed for the formula's private tarball and for npm below.
-- `~/.npmrc`: `@shanberg:registry=https://npm.pkg.github.com/` and `//npm.pkg.github.com/:_authToken=YOUR_PAT` — for `@shanberg/project-schema` during build. (Same PAT as above is fine.)
+Users install via the Homebrew tap: `brew tap shanberg/s` then `brew install shanberg/s/project-manager`. The formula fetches the tarball from this repo’s GitHub releases.

@@ -1,4 +1,5 @@
-# On release, download the tarball, compute sha256, and update the Homebrew formula in homebrew-s.
+# On release, download the release-asset tarball, compute sha256, and update the Homebrew formula in homebrew-s.
+# Formula uses releases/download/... URL (deterministic asset); must match, not source tarball.
 # Requires repo secret: TAP_PUSH_TOKEN (PAT with repo scope for shanberg/homebrew-s).
 name: Update Homebrew formula
 
@@ -18,15 +19,13 @@ jobs:
           echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download tarball and compute SHA256
+      - name: Download release asset and compute SHA256
         id: tarball
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ steps.tag.outputs.tag }}"
-          curl -sL -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/tarball/${tag}" \
-            -o tarball.tar.gz
+          version="${{ steps.tag.outputs.version }}"
+          # Same URL as formula (release asset); no auth needed for public repo
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/${tag}/project-manager-${version}.tar.gz" -o tarball.tar.gz
           sha256=$(shasum -a 256 tarball.tar.gz | awk '{print $1}')
           echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
 
@@ -43,7 +42,8 @@ jobs:
           cd tap
 
           formula="Formula/project-manager.rb"
-          sed -i "s|refs/tags/v[0-9.]*\\.tar\\.gz|refs/tags/${tag}.tar.gz|" "$formula"
+          # URL pattern: releases/download/vX.Y.Z/project-manager-X.Y.Z.tar.gz
+          sed -i "s|releases/download/v[0-9.]*/project-manager-[0-9.]*\\.tar\\.gz|releases/download/${tag}/project-manager-${version}.tar.gz|" "$formula"
           sed -i "s/sha256 \"[a-f0-9]*\"/sha256 \"${sha256}\"/" "$formula"
           sed -i "s/version \"[0-9.]*\"/version \"${version}\"/" "$formula"
 

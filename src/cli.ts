@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { createRequire } from "module";
+import path from "path";
+import { fileURLToPath } from "url";
 import { Command } from "commander";
 import { initConfig, getConfig, setConfig } from "./commands/config.js";
 import { newProject } from "./commands/new.js";
@@ -13,17 +16,21 @@ import {
   notesPath,
 } from "./commands/notes.js";
 
+const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = require(path.join(__dirname, "..", "package.json")) as { version: string };
+
 const program = new Command();
 
 program
   .name("pm")
-  .description("Project Manager - PARA-style project creation")
-  .version("0.1.0");
+  .description("Project Manager - project creation with domain-based numbering")
+  .version(pkg.version);
 
 program
   .command("new")
   .description("Create a new project")
-  .argument("[domain]", "Domain code (M, DE, P, I)")
+  .argument("[domain]", "Domain code")
   .argument("[title]", "Project title")
   .action(async (domain, title) => {
     await newProject(domain, title);
@@ -42,7 +49,7 @@ program
 program
   .command("archive")
   .description("Move a project from active to archive")
-  .argument("<name>", "Project name or prefix (e.g. M-1 or 'M-1 Slides Redesign')")
+  .argument("<name>", "Project name or prefix (e.g. W-1 or 'W-1 Website Refresh')")
   .action(async (name) => {
     await archiveProject(name);
   });
@@ -61,7 +68,7 @@ const configCmd = program
 
 configCmd
   .command("init")
-  .description("Initialize config and create PARA structure")
+  .description("Initialize config")
   .action(initConfig);
 
 configCmd

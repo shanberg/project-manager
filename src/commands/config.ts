@@ -6,6 +6,9 @@ import {
   saveConfig,
   getConfigPath,
   createDefaultConfig,
+  getConfigValue,
+  setConfigValue,
+  type PmConfigKey,
 } from "../lib/config.js";
 
 function ask(question: string): Promise<string> {
@@ -59,7 +62,7 @@ export async function getConfig(key?: string): Promise<void> {
   }
 
   if (key) {
-    const value = (config as unknown as Record<string, unknown>)[key];
+    const value = getConfigValue(config, key as PmConfigKey);
     if (value === undefined) {
       console.error("Unknown key:", key);
       process.exit(1);
@@ -77,12 +80,12 @@ export async function setConfig(key: string, valueStr: string): Promise<void> {
     process.exit(1);
   }
 
-  const cfg = config as unknown as Record<string, unknown>;
-  if (key === "paraPath" || key === "activePath" || key === "archivePath") {
-    cfg[key] = valueStr;
-  } else if (key === "domains" || key === "subfolders") {
+  const configKey = key as PmConfigKey;
+  if (configKey === "paraPath" || configKey === "activePath" || configKey === "archivePath") {
+    setConfigValue(config, configKey, valueStr);
+  } else if (configKey === "domains" || configKey === "subfolders") {
     try {
-      cfg[key] = JSON.parse(valueStr);
+      setConfigValue(config, configKey, JSON.parse(valueStr) as Record<string, string> | string[]);
     } catch {
       console.error("Value must be valid JSON for", key);
       process.exit(1);
