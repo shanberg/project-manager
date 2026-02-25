@@ -1,5 +1,5 @@
 # On release, download the release-asset tarball, compute sha256, and update the Homebrew formula in homebrew-s.
-# Formula uses releases/download/... URL (deterministic asset); must match, not source tarball.
+# Formula uses releases/download/... URL (bundled tarball asset).
 # Requires repo secret: TAP_PUSH_TOKEN (PAT with repo scope for shanberg/homebrew-s).
 name: Update Homebrew formula
 

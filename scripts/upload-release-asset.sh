@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time: upload a release asset for an existing tag (e.g. after switching to deterministic tarballs).
+# One-time: upload a release asset for an existing tag (builds bundled tarball and uploads).
 # Usage: ./scripts/upload-release-asset.sh [tag]
 #   tag   e.g. v0.1.6 (default: latest tag)
 set -e
@@ -9,9 +9,9 @@ VERSION="${TAG#v}"
 TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
 [[ -n "$TOKEN" ]] || { echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN." >&2; exit 1; }
 
-TARBALL="project-manager-${VERSION}.tar.gz"
-echo "Building $TARBALL from $TAG..."
-git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" -o "$TARBALL"
+echo "Building bundled tarball for $TAG..."
+TARBALL=$(./scripts/build-release-tarball.sh "$VERSION" | tail -1)
+[[ -f "$TARBALL" ]] || { echo "Build failed." >&2; exit 1; }
 
 echo "Get or create release $TAG..."
 RELEASE=$(curl -sL -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" \
@@ -29,9 +29,9 @@ console.log(u);
 ")
 [[ -n "$UPLOAD_URL" ]] || { echo "No upload_url in release response. Check token scope (repo)." >&2; rm -f "$TARBALL"; exit 1; }
 
-echo "Uploading $TARBALL..."
+TARBALL_NAME="project-manager-${VERSION}.tar.gz"
+echo "Uploading $TARBALL_NAME..."
 curl -sL -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/gzip" \
-  --data-binary "@$TARBALL" "${UPLOAD_URL}?name=${TARBALL}"
+  --data-binary "@$TARBALL" "${UPLOAD_URL}?name=${TARBALL_NAME}"
 rm -f "$TARBALL"
 echo "Done. Run: ./scripts/update-homebrew-formula.sh $TAG (if formula not yet updated)"
-echo "sha256 from git archive: $(git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" | shasum -a 256 | awk '{print $1}')"

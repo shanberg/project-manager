@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Update homebrew-s Formula/project-manager.rb with a new version's release-asset url, version, and sha256.
-# Uses the release asset (git-archive tarball) so sha256 is deterministic across machines.
+# Uses the release asset (bundled tarball) uploaded at release.
 # Run from project-manager repo. Uses GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN.
 #
 # Usage: ./scripts/update-homebrew-formula.sh [tag]
@@ -31,7 +31,7 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-# Download release asset via API (deterministic tarball uploaded at release)
+# Download release asset via API (bundled tarball uploaded at release)
 ASSET_NAME="project-manager-${VERSION}.tar.gz"
 echo "Fetching release $TAG asset $ASSET_NAME..."
 RELEASE_JSON=$(curl -sL -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" \

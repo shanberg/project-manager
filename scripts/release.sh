@@ -92,11 +92,10 @@ else
   git push origin "$TAG"
 fi
 
-# Build deterministic tarball and upload as release asset (same sha256 everywhere)
-echo "==> Create release asset (deterministic tarball)"
-TARBALL="project-manager-${VERSION}.tar.gz"
+# Build bundled tarball (dist + node_modules + templates) so formula needs no npm install
+echo "==> Create release asset (bundled tarball)"
 REPO="shanberg/project-manager"
-git archive --format=tar.gz --prefix="project-manager-${VERSION}/" "$TAG" -o "$TARBALL"
+TARBALL="$("$ROOT/scripts/build-release-tarball.sh" "$VERSION" | tail -1)"
 
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   echo "Using gh CLI for release (same auth as \`gh auth login\`)."
