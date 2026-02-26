@@ -4,12 +4,15 @@ import { readFile } from "fs/promises";
 import {
   Action,
   ActionPanel,
+  Alert,
+  confirmAlert,
   getPreferenceValues,
   Icon,
   List,
   open,
   showToast,
   Toast,
+  useNavigation,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
@@ -31,7 +34,12 @@ import AddTodoForm from "./add-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
-import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
+import {
+  getObsidianUri,
+  hasSrcDir,
+  buildObsidianOptions,
+  ensureTodaySession,
+} from "./lib/utils";
 
 function truncateSubtitle(s: string, max = 40): string {
   return s ? s.slice(0, max) + (s.length > max ? "…" : "") : "Empty";
@@ -52,6 +60,8 @@ type TodoViewMode = "next" | "all";
 
 export default function ProjectView({ projectName, basePath }: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const { pop } = useNavigation();
+  const isActive = basePath === prefs.activePath;
   const projectPath = path.join(basePath, projectName);
   const [viewMode, setViewMode] = useState<TodoViewMode>("next");
   const [todoFilter, setTodoFilter] = useState<TodoFilter>("all");
@@ -66,7 +76,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
       return { notes, todos, notesPath };
     },
     [projectPath],
-    { keepPreviousData: true }
+    { keepPreviousData: true },
   );
 
   const { notes, todos, notesPath } = data ?? {
@@ -131,7 +141,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 
@@ -150,7 +164,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 
@@ -172,13 +190,27 @@ export default function ProjectView({ projectName, basePath }: Props) {
           value={viewMode}
           onChange={(v) => setViewMode(v as TodoViewMode)}
         >
-          <List.Dropdown.Item value="next" title="Next up" icon={Icon.ArrowRightCircleFilled} />
+          <List.Dropdown.Item
+            value="next"
+            title="Next up"
+            icon={Icon.ArrowRightCircleFilled}
+          />
           <List.Dropdown.Item value="all" title="All tasks" icon={Icon.List} />
         </List.Dropdown>
       }
       actions={
         <ActionPanel>
-          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+          <Action
+            title="Refresh"
+            onAction={revalidate}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+          />
+          <Action
+            title="Configure"
+            onAction={() =>
+              open("raycast://extensions/shanberg/project-manager/configure")
+            }
+          />
           {notes && (
             <Action.Push
               title="Add Task"
@@ -208,12 +240,24 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 title="Create Notes File"
                 onAction={async () => {
                   try {
-                    await runPmWithPrefs(prefs, ["notes", "create", projectName]);
-                    await showToast({ style: Toast.Style.Success, title: "Notes created" });
+                    await runPmWithPrefs(prefs, [
+                      "notes",
+                      "create",
+                      projectName,
+                    ]);
+                    await showToast({
+                      style: Toast.Style.Success,
+                      title: "Notes created",
+                    });
                     await mutate();
                   } catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+                    const msg =
+                      err instanceof Error ? err.message : String(err);
+                    await showToast({
+                      style: Toast.Style.Failure,
+                      title: "Error",
+                      message: msg,
+                    });
                   }
                 }}
               />
@@ -257,13 +301,21 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   onAction={() => handleToggle(nextTodo)}
                   shortcut={{ modifiers: ["cmd"], key: "t" }}
                 />
-                {nextTodoContext && (bySession.get(nextTodoContext) ?? []).some((t) => !t.checked) && (
-                  <Action
-                    title="Mark All in Session Done"
-                    onAction={() => handleMarkAllInSessionDone(nextTodoContext)}
-                  />
-                )}
-                <Action.CopyToClipboard content={nextTodo.text} title="Copy Task" />
+                {nextTodoContext &&
+                  (bySession.get(nextTodoContext) ?? []).some(
+                    (t) => !t.checked,
+                  ) && (
+                    <Action
+                      title="Mark All in Session Done"
+                      onAction={() =>
+                        handleMarkAllInSessionDone(nextTodoContext)
+                      }
+                    />
+                  )}
+                <Action.CopyToClipboard
+                  content={nextTodo.text}
+                  title="Copy Task"
+                />
               </ActionPanel>
             }
           />
@@ -283,7 +335,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
               {getSessionTodos(context).map((todo, i) => (
                 <List.Item
                   key={`${context}-${i}-${todo.rawLine}`}
-                  icon={todo.checked ? Icon.CheckCircle : Icon.ArrowRightCircleFilled}
+                  icon={
+                    todo.checked
+                      ? Icon.CheckCircle
+                      : Icon.ArrowRightCircleFilled
+                  }
                   title={todo.text}
                   accessoryTitle={todo.checked ? "done" : undefined}
                   actions={
@@ -293,13 +349,18 @@ export default function ProjectView({ projectName, basePath }: Props) {
                         onAction={() => handleToggle(todo)}
                         shortcut={{ modifiers: ["cmd"], key: "t" }}
                       />
-                      {(bySession.get(context) ?? []).some((t) => !t.checked) && (
+                      {(bySession.get(context) ?? []).some(
+                        (t) => !t.checked,
+                      ) && (
                         <Action
                           title="Mark All in Session Done"
                           onAction={() => handleMarkAllInSessionDone(context)}
                         />
                       )}
-                      <Action.CopyToClipboard content={todo.text} title="Copy Task" />
+                      <Action.CopyToClipboard
+                        content={todo.text}
+                        title="Copy Task"
+                      />
                     </ActionPanel>
                   }
                 />
@@ -361,8 +422,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
             icon={Icon.Target}
             subtitle={truncateSubtitle(notes.goals.filter(Boolean).join(", "))}
             detail={sectionDetail(
-              notes.goals.filter(Boolean).map((g, i) => `${i + 1}. ${g}`).join("\n"),
-              "No goals yet."
+              notes.goals
+                .filter(Boolean)
+                .map((g, i) => `${i + 1}. ${g}`)
+                .join("\n"),
+              "No goals yet.",
             )}
             actions={
               <ActionPanel>
@@ -405,14 +469,22 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             title="Add Link"
             icon={Icon.Link}
-            subtitle={notes.links.filter((l) => l.label || l.url).length + " links"}
+            subtitle={
+              notes.links.filter((l) => l.label || l.url).length + " links"
+            }
             detail={sectionDetail(
               notes.links
                 .filter((l) => l.label || l.url)
-                .map((l) => (l.label && l.url ? `- [${l.label}](${l.url})` : l.url ? `- ${l.url}` : ""))
+                .map((l) =>
+                  l.label && l.url
+                    ? `- [${l.label}](${l.url})`
+                    : l.url
+                      ? `- ${l.url}`
+                      : "",
+                )
                 .filter(Boolean)
                 .join("\n"),
-              "No links yet."
+              "No links yet.",
             )}
             actions={
               <ActionPanel>
@@ -428,10 +500,15 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             title="Edit Learnings"
             icon={Icon.LightBulb}
-            subtitle={truncateSubtitle(notes.learnings.filter(Boolean).join(", "))}
+            subtitle={truncateSubtitle(
+              notes.learnings.filter(Boolean).join(", "),
+            )}
             detail={sectionDetail(
-              notes.learnings.filter(Boolean).map((l) => `- ${l}`).join("\n"),
-              "No learnings yet."
+              notes.learnings
+                .filter(Boolean)
+                .map((l) => `- ${l}`)
+                .join("\n"),
+              "No learnings yet.",
             )}
             actions={
               <ActionPanel>
@@ -454,7 +531,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Open in Finder"
           icon="folder"
-          detail={sectionDetail(`Open the project folder in Finder.\n\n\`${projectPath}\``, "Project path unavailable")}
+          detail={sectionDetail(
+            `Open the project folder in Finder.\n\n\`${projectPath}\``,
+            "Project path unavailable",
+          )}
           actions={
             <ActionPanel>
               <Action
@@ -471,7 +551,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             title="Open in Cursor"
             icon="terminal"
-            detail={sectionDetail(`Open the project in Cursor.\n\n\`${projectPath}\``, "Project path unavailable")}
+            detail={sectionDetail(
+              `Open the project in Cursor.\n\n\`${projectPath}\``,
+              "Project path unavailable",
+            )}
             actions={
               <ActionPanel>
                 <Action
@@ -490,7 +573,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           icon="document"
           detail={sectionDetail(
             `Open notes in Obsidian.\n\n\`${targetPath}\``,
-            "Notes path unavailable"
+            "Notes path unavailable",
           )}
           actions={
             <ActionPanel>
@@ -508,43 +591,14 @@ export default function ProjectView({ projectName, basePath }: Props) {
             </ActionPanel>
           }
         />
-        <List.Item
-          title="Set as Focused Project"
-          icon={Icon.Star}
-          detail={sectionDetail(
-            "Set this project as the focused project for quick access from the menu bar and View Focused Project.",
-            ""
-          )}
-          actions={
-            <ActionPanel>
-              <Action
-                title="Set as Focused Project"
-                onAction={async () => {
-                  await setFocusedProject(basePath, projectName);
-                  await showToast({ style: Toast.Style.Success, title: "Focused", message: projectName });
-                }}
-              />
-            </ActionPanel>
-          }
-        />
-        <List.Item
-          title="Add Session Note"
-          icon="plus"
-          detail={sectionDetail("Add a new session note to the project notes file.", "")}
-          actions={
-            <ActionPanel>
-              <Action.Push
-                title="Add Session Note"
-                target={<AddSessionNoteForm projectName={projectName} />}
-              />
-            </ActionPanel>
-          }
-        />
         {notes && (
           <List.Item
             title="Add Task"
             icon={Icon.ArrowRightCircleFilled}
-            detail={sectionDetail("Add a task to the current session in the project notes.", "")}
+            detail={sectionDetail(
+              "Add a task to the current session in the project notes.",
+              "",
+            )}
             actions={
               <ActionPanel>
                 <Action.Push
@@ -561,6 +615,148 @@ export default function ProjectView({ projectName, basePath }: Props) {
             }
           />
         )}
+        <List.Item
+          title="Add Session Note"
+          icon="plus"
+          detail={sectionDetail(
+            "Add a new session note to the project notes file.",
+            "",
+          )}
+          actions={
+            <ActionPanel>
+              <Action.Push
+                title="Add Session Note"
+                target={<AddSessionNoteForm projectName={projectName} />}
+              />
+            </ActionPanel>
+          }
+        />
+        <List.Item
+          title="Set as Focused Project"
+          icon={Icon.Star}
+          detail={sectionDetail(
+            "Set this project as the focused project for quick access from the menu bar and View Focused Project.",
+            "",
+          )}
+          actions={
+            <ActionPanel>
+              <Action
+                title="Set as Focused Project"
+                onAction={async () => {
+                  await setFocusedProject(basePath, projectName);
+                  await showToast({
+                    style: Toast.Style.Success,
+                    title: "Focused",
+                    message: projectName,
+                  });
+                }}
+              />
+            </ActionPanel>
+          }
+        />
+        {isActive ? (
+          <List.Item
+            title="Archive Project"
+            icon={Icon.Trash}
+            detail={sectionDetail(
+              "Move this project from active to archive.",
+              "",
+            )}
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Archive Project"
+                  onAction={async () => {
+                    const confirmed = await confirmAlert({
+                      title: "Archive Project",
+                      message: `Move "${projectName}" to archive?`,
+                      primaryAction: {
+                        title: "Archive",
+                        style: Alert.ActionStyle.Destructive,
+                      },
+                    });
+                    if (!confirmed) return;
+                    try {
+                      await runPmWithPrefs(prefs, ["archive", projectName]);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Archived",
+                        message: projectName,
+                      });
+                      pop();
+                    } catch (err) {
+                      const msg =
+                        err instanceof Error ? err.message : String(err);
+                      await showToast({
+                        style: Toast.Style.Failure,
+                        title: "Error",
+                        message: msg,
+                      });
+                    }
+                  }}
+                />
+              </ActionPanel>
+            }
+          />
+        ) : (
+          <List.Item
+            title="Unarchive Project"
+            icon={Icon.ArrowUpCircle}
+            detail={sectionDetail(
+              "Move this project from archive back to active.",
+              "",
+            )}
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Unarchive Project"
+                  onAction={async () => {
+                    const confirmed = await confirmAlert({
+                      title: "Unarchive Project",
+                      message: `Move "${projectName}" back to active?`,
+                      primaryAction: { title: "Unarchive" },
+                    });
+                    if (!confirmed) return;
+                    try {
+                      await runPmWithPrefs(prefs, ["unarchive", projectName]);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Unarchived",
+                        message: projectName,
+                      });
+                      pop();
+                    } catch (err) {
+                      const msg =
+                        err instanceof Error ? err.message : String(err);
+                      await showToast({
+                        style: Toast.Style.Failure,
+                        title: "Error",
+                        message: msg,
+                      });
+                    }
+                  }}
+                />
+              </ActionPanel>
+            }
+          />
+        )}
+        <List.Item
+          title="Configure"
+          icon={Icon.Gear}
+          detail={sectionDetail("Open Project Manager configuration.", "")}
+          actions={
+            <ActionPanel>
+              <Action
+                title="Configure"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/configure",
+                  )
+                }
+              />
+            </ActionPanel>
+          }
+        />
       </List.Section>
     </List>
   );

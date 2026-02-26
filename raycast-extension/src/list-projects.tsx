@@ -4,6 +4,8 @@ import { readFile, stat } from "fs/promises";
 import {
   Action,
   ActionPanel,
+  Alert,
+  confirmAlert,
   getPreferenceValues,
   List,
   open,
@@ -24,7 +26,11 @@ import {
   getRecentProjectKeys,
   projectKey,
 } from "./lib/recent-projects";
-import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
+import {
+  setFocusedProject,
+  getProjectCode,
+  getReadableProjectName,
+} from "./lib/focused-project";
 import type { ProjectNotes } from "@shanberg/project-manager/notes";
 import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
@@ -40,7 +46,10 @@ import {
 } from "./lib/utils";
 
 /** Match domain code at start of project name; use longer codes first so DE matches before D. */
-function getDomainFromCodes(name: string, domainCodes: string[]): string | null {
+function getDomainFromCodes(
+  name: string,
+  domainCodes: string[],
+): string | null {
   const sorted = [...domainCodes].sort((a, b) => b.length - a.length);
   const escaped = sorted.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const re = new RegExp(`^(${escaped.join("|")})-\\d+`);
@@ -50,7 +59,7 @@ function getDomainFromCodes(name: string, domainCodes: string[]): string | null 
 
 function parseSearchToken(
   search: string,
-  domainCodes: string[]
+  domainCodes: string[],
 ): { domain: string | null; query: string } {
   const trimmed = search.trim();
   const upper = trimmed.toUpperCase();
@@ -64,7 +73,7 @@ function parseSearchToken(
 
 async function loadNotesForProject(
   basePath: string,
-  projectName: string
+  projectName: string,
 ): Promise<{ notes: ProjectNotes; notesPath: string } | null> {
   const projectPath = path.join(basePath, projectName);
   const notesPath = await resolveNotesPath(projectPath);
@@ -93,7 +102,7 @@ async function fetchProjectsWithMeta(
   activePath: string,
   archivePath: string,
   configPath: string | undefined,
-  pmCliPath: string | undefined
+  pmCliPath: string | undefined,
 ): Promise<{ active: ProjectWithMeta[]; archive: ProjectWithMeta[] }> {
   const prefs = { activePath, archivePath, configPath, pmCliPath };
   const [domains, { stdout }] = await Promise.all([
@@ -104,7 +113,7 @@ async function fetchProjectsWithMeta(
 
   async function enrich(
     names: string[],
-    basePath: string
+    basePath: string,
   ): Promise<ProjectWithMeta[]> {
     const results = await Promise.all(
       names.map(async (name) => {
@@ -127,12 +136,13 @@ async function fetchProjectsWithMeta(
           done,
           total: todos.length,
         };
-      })
+      }),
     );
     return results;
   }
 
-  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
+  const { active: activeNames, archive: archiveNames } =
+    parseListAllOutput(stdout);
   const [active, archive] = await Promise.all([
     enrich(activeNames, activePath),
     enrich(archiveNames, archivePath),
@@ -145,7 +155,7 @@ function filterAndSort(
   projects: ProjectWithMeta[],
   domainFilter: string | null,
   query: string,
-  recentKeys: string[]
+  recentKeys: string[],
 ): ProjectWithMeta[] {
   let filtered = projects;
   if (domainFilter) {
@@ -182,7 +192,7 @@ export default function Command() {
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjectsWithMeta,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true }
+    { keepPreviousData: true },
   );
 
   useEffect(() => {
@@ -193,15 +203,18 @@ export default function Command() {
   const archive = data?.archive ?? [];
   const pathToShow = scope === "active" ? prefs.activePath : prefs.archivePath;
 
-  const { domain: domainFilter, query } = parseSearchToken(searchText, domainCodes);
+  const { domain: domainFilter, query } = parseSearchToken(
+    searchText,
+    domainCodes,
+  );
 
   const displayActive = useMemo(
     () => filterAndSort(active, domainFilter, query, recentKeys),
-    [active, domainFilter, query, recentKeys]
+    [active, domainFilter, query, recentKeys],
   );
   const displayArchive = useMemo(
     () => filterAndSort(archive, domainFilter, query, recentKeys),
-    [archive, domainFilter, query, recentKeys]
+    [archive, domainFilter, query, recentKeys],
   );
 
   async function onOpenProject(basePath: string, name: string) {
@@ -210,7 +223,9 @@ export default function Command() {
   }
 
   function renderDetail(notes: ProjectNotes | null) {
-    const markdown = notes ? formatNotesForDetail(notes) : formatNotesEmptyState();
+    const markdown = notes
+      ? formatNotesForDetail(notes)
+      : formatNotesEmptyState();
     return <List.Item.Detail markdown={markdown} />;
   }
 
@@ -231,20 +246,106 @@ export default function Command() {
   }) {
     const projectPath = path.join(basePath, name);
     const targetPath = notesPath ?? getNotesPath(projectPath);
+    const isActive = basePath === prefs.activePath;
+
+    async function handleArchive() {
+      const confirmed = await confirmAlert({
+        title: "Archive Project",
+        message: `Move "${name}" to archive?`,
+        primaryAction: {
+          title: "Archive",
+          style: Alert.ActionStyle.Destructive,
+        },
+      });
+      if (!confirmed) return;
+      try {
+        await runPmWithPrefs(prefs, ["archive", name]);
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Archived",
+          message: name,
+        });
+        revalidate();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Error",
+          message: msg,
+        });
+      }
+    }
+
+    async function handleUnarchive() {
+      const confirmed = await confirmAlert({
+        title: "Unarchive Project",
+        message: `Move "${name}" back to active?`,
+        primaryAction: { title: "Unarchive" },
+      });
+      if (!confirmed) return;
+      try {
+        await runPmWithPrefs(prefs, ["unarchive", name]);
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Unarchived",
+          message: name,
+        });
+        revalidate();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Error",
+          message: msg,
+        });
+      }
+    }
 
     return (
       <ActionPanel>
+        <Action
+          title="Open in Finder"
+          onAction={async () => {
+            await onOpenProject(basePath, name);
+            open(projectPath);
+          }}
+        />
+        {hasSrc && (
+          <Action
+            title="Open in Cursor"
+            onAction={async () => {
+              await onOpenProject(basePath, name);
+              open(projectPath, "Cursor");
+            }}
+          />
+        )}
+        <Action
+          title="Open in Obsidian"
+          onAction={async () => {
+            await onOpenProject(basePath, name);
+            const session = await ensureTodaySession(name, notes, prefs);
+            const opts = buildObsidianOptions(prefs, session);
+            open(getObsidianUri(targetPath, opts));
+          }}
+        />
         {!hasNotes ? (
           <Action
             title="Create Notes File"
             onAction={async () => {
               try {
                 await runPmWithPrefs(prefs, ["notes", "create", name]);
-                await showToast({ style: Toast.Style.Success, title: "Notes created" });
+                await showToast({
+                  style: Toast.Style.Success,
+                  title: "Notes created",
+                });
                 revalidate();
               } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+                await showToast({
+                  style: Toast.Style.Failure,
+                  title: "Error",
+                  message: msg,
+                });
               }
             }}
           />
@@ -254,54 +355,30 @@ export default function Command() {
             target={<ProjectView projectName={name} basePath={basePath} />}
           />
         )}
-        {hasSrc ? (
-          <Action
-            title="Open in Cursor"
-            onAction={async () => {
-              await onOpenProject(basePath, name);
-              open(projectPath, "Cursor");
-            }}
-          />
-        ) : (
-          <Action
-            title="Open in Obsidian"
-            onAction={async () => {
-              await onOpenProject(basePath, name);
-              const session = await ensureTodaySession(name, notes, prefs);
-              const opts = buildObsidianOptions(prefs, session);
-              open(getObsidianUri(targetPath, opts));
-            }}
-          />
-        )}
-        {hasSrc && (
-          <Action
-            title="Open in Obsidian"
-            onAction={async () => {
-              await onOpenProject(basePath, name);
-              const session = await ensureTodaySession(name, notes, prefs);
-              const opts = buildObsidianOptions(prefs, session);
-              open(getObsidianUri(targetPath, opts));
-            }}
-          />
-        )}
-        <Action
-          title="Open in Finder"
-          onAction={async () => {
-            await onOpenProject(basePath, name);
-            open(projectPath);
-          }}
+        <Action.Push
+          title="Add Session Note"
+          target={<AddSessionNoteForm projectName={name} />}
         />
         <Action
           title="Set as Focused Project"
           onAction={async () => {
             await setFocusedProject(basePath, name);
-            await showToast({ style: Toast.Style.Success, title: "Focused", message: name });
+            await showToast({
+              style: Toast.Style.Success,
+              title: "Focused",
+              message: name,
+            });
           }}
         />
-        <Action.Push
-          title="Add Session Note"
-          target={
-            <AddSessionNoteForm projectName={name} />
+        {isActive ? (
+          <Action title="Archive Project" onAction={handleArchive} />
+        ) : (
+          <Action title="Unarchive Project" onAction={handleUnarchive} />
+        )}
+        <Action
+          title="Configure"
+          onAction={() =>
+            open("raycast://extensions/shanberg/project-manager/configure")
           }
         />
       </ActionPanel>
@@ -335,39 +412,73 @@ export default function Command() {
       }
       actions={
         <ActionPanel>
-          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+          <Action
+            title="Refresh"
+            onAction={revalidate}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+          />
+          <Action
+            title="Configure"
+            onAction={() =>
+              open("raycast://extensions/shanberg/project-manager/configure")
+            }
+          />
         </ActionPanel>
       }
     >
       {scope === "all" ? (
         <>
           <List.Section title="Active">
-            {displayActive.map(({ name, notes, notesPath, hasSrc, done, total }) => (
-              <List.Item
-                key={`active:${name}`}
-                icon={getProgressIcon(total ? done / total : 1)}
-                title={getReadableProjectName(name)}
-                keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
-                detail={renderDetail(notes)}
-                actions={
-                  <ProjectActions name={name} basePath={prefs.activePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
-                }
-              />
-            ))}
+            {displayActive.map(
+              ({ name, notes, notesPath, hasSrc, done, total }) => (
+                <List.Item
+                  key={`active:${name}`}
+                  icon={getProgressIcon(total ? done / total : 1)}
+                  title={getReadableProjectName(name)}
+                  keywords={[
+                    getDomainFromCodes(name, domainCodes) ?? "",
+                    getProjectCode(name),
+                  ]}
+                  detail={renderDetail(notes)}
+                  actions={
+                    <ProjectActions
+                      name={name}
+                      basePath={prefs.activePath}
+                      hasSrc={hasSrc}
+                      hasNotes={!!notes}
+                      notesPath={notesPath}
+                      notes={notes}
+                    />
+                  }
+                />
+              ),
+            )}
           </List.Section>
           <List.Section title="Archive">
-            {displayArchive.map(({ name, notes, notesPath, hasSrc, done, total }) => (
-              <List.Item
-                key={`archive:${name}`}
-                icon={getProgressIcon(total ? done / total : 1)}
-                title={getReadableProjectName(name)}
-                keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
-                detail={renderDetail(notes)}
-                actions={
-                  <ProjectActions name={name} basePath={prefs.archivePath} hasSrc={hasSrc} hasNotes={!!notes} notesPath={notesPath} notes={notes} />
-                }
-              />
-            ))}
+            {displayArchive.map(
+              ({ name, notes, notesPath, hasSrc, done, total }) => (
+                <List.Item
+                  key={`archive:${name}`}
+                  icon={getProgressIcon(total ? done / total : 1)}
+                  title={getReadableProjectName(name)}
+                  keywords={[
+                    getDomainFromCodes(name, domainCodes) ?? "",
+                    getProjectCode(name),
+                  ]}
+                  detail={renderDetail(notes)}
+                  actions={
+                    <ProjectActions
+                      name={name}
+                      basePath={prefs.archivePath}
+                      hasSrc={hasSrc}
+                      hasNotes={!!notes}
+                      notesPath={notesPath}
+                      notes={notes}
+                    />
+                  }
+                />
+              ),
+            )}
           </List.Section>
         </>
       ) : (
@@ -377,9 +488,12 @@ export default function Command() {
               key={name}
               icon={getProgressIcon(total ? done / total : 1)}
               title={getReadableProjectName(name)}
-              keywords={[getDomainFromCodes(name, domainCodes) ?? "", getProjectCode(name)]}
+              keywords={[
+                getDomainFromCodes(name, domainCodes) ?? "",
+                getProjectCode(name),
+              ]}
               detail={renderDetail(notes)}
-                actions={
+              actions={
                 <ProjectActions
                   name={name}
                   basePath={pathToShow}
@@ -390,7 +504,7 @@ export default function Command() {
                 />
               }
             />
-          )
+          ),
         )
       )}
     </List>

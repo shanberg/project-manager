@@ -1,7 +1,7 @@
 import { List } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import ProjectView from "./project-view";
+import AddSessionNoteForm from "./add-session-note-form";
 
 export default function Command() {
   const { data: focusedKey, isLoading } = useCachedPromise(
@@ -10,20 +10,18 @@ export default function Command() {
   );
 
   const parsed = focusedKey ? parseProjectKey(focusedKey) : null;
-  const projectName = parsed?.name ?? null;
-  const basePath = parsed?.basePath ?? "";
 
   if (isLoading) return <List isLoading />;
-  if (!projectName) {
+  if (!parsed) {
     return (
       <List>
         <List.EmptyView
           title="No focused project"
-          description="Set a project as focused from List Projects or View Project"
+          description="Set a project as focused from List Projects"
         />
       </List>
     );
   }
 
-  return <ProjectView projectName={projectName} basePath={basePath} />;
+  return <AddSessionNoteForm projectName={parsed.name} />;
 }

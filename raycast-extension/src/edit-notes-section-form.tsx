@@ -22,11 +22,18 @@ export default function EditNotesSectionForm({
   async function handleSubmit(values: Record<string, string>) {
     try {
       await updateNotesSection(notesPath, { [field]: values[field] });
-      await showToast({ style: Toast.Style.Success, title: `${label} updated` });
+      await showToast({
+        style: Toast.Style.Success,
+        title: `${label} updated`,
+      });
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 

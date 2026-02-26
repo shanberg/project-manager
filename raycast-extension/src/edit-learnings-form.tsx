@@ -7,7 +7,11 @@ interface Props {
   onSuccess?: () => void;
 }
 
-export default function EditLearningsForm({ notesPath, initialLearnings, onSuccess }: Props) {
+export default function EditLearningsForm({
+  notesPath,
+  initialLearnings,
+  onSuccess,
+}: Props) {
   const value = initialLearnings.filter(Boolean).join("\n") || "";
   async function handleSubmit(values: { learnings: string }) {
     const learnings = values.learnings
@@ -15,12 +19,21 @@ export default function EditLearningsForm({ notesPath, initialLearnings, onSucce
       .map((s) => s.trim())
       .filter(Boolean);
     try {
-      await updateNotesSection(notesPath, { learnings: learnings.length ? learnings : [""] });
-      await showToast({ style: Toast.Style.Success, title: "Learnings updated" });
+      await updateNotesSection(notesPath, {
+        learnings: learnings.length ? learnings : [""],
+      });
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Learnings updated",
+      });
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 

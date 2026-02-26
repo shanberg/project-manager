@@ -4,7 +4,10 @@ import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import AddTodoForm from "./add-todo-form";
 
 export default function Command() {
-  const { data: focusedKey, isLoading } = useCachedPromise(getFocusedProject, []);
+  const { data: focusedKey, isLoading } = useCachedPromise(
+    getFocusedProject,
+    [],
+  );
   const parsed = focusedKey ? parseProjectKey(focusedKey) : null;
 
   if (isLoading) return <List isLoading />;

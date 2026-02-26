@@ -25,17 +25,19 @@ function parseDomainsJson(json: string): Record<string, string> {
     if (!code) throw new Error("Domain code cannot be empty");
     out[code] = v.trim();
   }
-  if (Object.keys(out).length === 0) throw new Error("At least one domain required");
+  if (Object.keys(out).length === 0)
+    throw new Error("At least one domain required");
   return out;
 }
 
 export default function Command() {
   const [saving, setSaving] = useState(false);
   const prefs = getPreferenceValues<PreferenceValues>();
-  const { data: domains, isLoading, revalidate } = useCachedPromise(
-    getConfigDomains,
-    [prefs]
-  );
+  const {
+    data: domains,
+    isLoading,
+    revalidate,
+  } = useCachedPromise(getConfigDomains, [prefs]);
 
   const initialJson = domains ? JSON.stringify(domains, null, 2) : "";
 
@@ -53,7 +55,11 @@ export default function Command() {
       revalidate();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Invalid domains", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Invalid domains",
+        message: msg,
+      });
     } finally {
       setSaving(false);
     }

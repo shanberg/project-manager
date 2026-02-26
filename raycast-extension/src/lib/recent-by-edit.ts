@@ -1,19 +1,30 @@
 import path from "path";
 import { readFile, stat } from "fs/promises";
 import { runPmWithPrefs } from "./pm";
-import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
+import {
+  parseNotes,
+  parseTodos,
+  resolveNotesPath,
+} from "@shanberg/project-manager/notes";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 
-export type RecentProject = { name: string; basePath: string; mtime: number; done: number; total: number };
+export type RecentProject = {
+  name: string;
+  basePath: string;
+  mtime: number;
+  done: number;
+  total: number;
+};
 
 export async function getRecentProjectsByEdit(
   prefs: PreferenceValues,
   limit: number,
-  excludeKey?: string
+  excludeKey?: string,
 ): Promise<RecentProject[]> {
   const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
-  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
+  const { active: activeNames, archive: archiveNames } =
+    parseListAllOutput(stdout);
 
   const all: { name: string; basePath: string }[] = [
     ...activeNames.map((name) => ({ name, basePath: prefs.activePath })),
@@ -41,7 +52,7 @@ export async function getRecentProjectsByEdit(
         }
       }
       return { name, basePath, mtime, done, total };
-    })
+    }),
   );
 
   const exclude = excludeKey ? new Set([excludeKey]) : new Set<string>();

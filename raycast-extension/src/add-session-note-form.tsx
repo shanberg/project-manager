@@ -1,4 +1,11 @@
-import { Form, Action, ActionPanel, getPreferenceValues, showToast, Toast } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  getPreferenceValues,
+  showToast,
+  Toast,
+} from "@raycast/api";
 import { runPmWithPrefs } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 
@@ -20,7 +27,11 @@ export default function AddSessionNoteForm({ projectName }: Props) {
       ]);
 
       if (stderr) {
-        await showToast({ style: Toast.Style.Failure, title: "Error", message: stderr });
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Error",
+          message: stderr,
+        });
       } else {
         await showToast({
           style: Toast.Style.Success,
@@ -30,7 +41,11 @@ export default function AddSessionNoteForm({ projectName }: Props) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 

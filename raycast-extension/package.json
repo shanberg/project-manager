@@ -108,7 +108,7 @@
     },
     {
       "name": "focused-project-status",
-      "title": "Focused task",
+      "title": "Focused Task",
       "description": "Show focused project progress in menu bar",
       "mode": "menu-bar",
       "interval": "1m"
@@ -143,6 +143,18 @@
         "add",
         "prior",
         "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "add-focused-session-note",
+      "title": "Add Session Note",
+      "description": "Add a session note to the focused project",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "session",
+        "note",
         "pm"
       ]
     }
@@ -208,7 +220,7 @@
   "scripts": {
     "build": "npm run build:pm && ray build",
     "build:pm": "cd .. && npm run build",
-    "dev": "ray develop",
+    "dev": "npx ray develop",
     "fix-lint": "ray lint --fix",
     "lint": "ray lint"
   },

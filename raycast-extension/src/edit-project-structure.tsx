@@ -32,10 +32,11 @@ function parseSubfoldersJson(json: string): string[] {
 export default function Command() {
   const [saving, setSaving] = useState(false);
   const prefs = getPreferenceValues<PreferenceValues>();
-  const { data: subfolders, isLoading, revalidate } = useCachedPromise(
-    getConfigSubfolders,
-    [prefs]
-  );
+  const {
+    data: subfolders,
+    isLoading,
+    revalidate,
+  } = useCachedPromise(getConfigSubfolders, [prefs]);
 
   const initialJson = subfolders ? JSON.stringify(subfolders, null, 2) : "";
 
@@ -72,7 +73,10 @@ export default function Command() {
       isLoading={saving}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Save Project Structure" onSubmit={handleSubmit} />
+          <Action.SubmitForm
+            title="Save Project Structure"
+            onSubmit={handleSubmit}
+          />
         </ActionPanel>
       }
     >

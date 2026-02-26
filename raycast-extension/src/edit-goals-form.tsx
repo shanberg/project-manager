@@ -7,9 +7,17 @@ interface Props {
   onSuccess?: () => void;
 }
 
-export default function EditGoalsForm({ notesPath, initialGoals, onSuccess }: Props) {
+export default function EditGoalsForm({
+  notesPath,
+  initialGoals,
+  onSuccess,
+}: Props) {
   const goals = [...initialGoals, "", ""].slice(0, 3);
-  async function handleSubmit(values: { goal1: string; goal2: string; goal3: string }) {
+  async function handleSubmit(values: {
+    goal1: string;
+    goal2: string;
+    goal3: string;
+  }) {
     const newGoals = [values.goal1, values.goal2, values.goal3];
     try {
       await updateNotesSection(notesPath, { goals: newGoals });
@@ -17,7 +25,11 @@ export default function EditGoalsForm({ notesPath, initialGoals, onSuccess }: Pr
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 

@@ -30,6 +30,8 @@ declare namespace Preferences {
   export type Configure = ExtensionPreferences & {}
   /** Preferences accessible in the `edit-domains` command */
   export type EditDomains = ExtensionPreferences & {}
+  /** Preferences accessible in the `edit-project-structure` command */
+  export type EditProjectStructure = ExtensionPreferences & {}
   /** Preferences accessible in the `new-project` command */
   export type NewProject = ExtensionPreferences & {}
   /** Preferences accessible in the `list-projects` command */
@@ -50,6 +52,8 @@ declare namespace Preferences {
   export type AddFocusedTodo = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = ExtensionPreferences & {}
+  /** Preferences accessible in the `add-focused-session-note` command */
+  export type AddFocusedSessionNote = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -57,6 +61,8 @@ declare namespace Arguments {
   export type Configure = {}
   /** Arguments passed to the `edit-domains` command */
   export type EditDomains = {}
+  /** Arguments passed to the `edit-project-structure` command */
+  export type EditProjectStructure = {}
   /** Arguments passed to the `new-project` command */
   export type NewProject = {}
   /** Arguments passed to the `list-projects` command */
@@ -77,5 +83,7 @@ declare namespace Arguments {
   export type AddFocusedTodo = {}
   /** Arguments passed to the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = {}
+  /** Arguments passed to the `add-focused-session-note` command */
+  export type AddFocusedSessionNote = {}
 }
 
