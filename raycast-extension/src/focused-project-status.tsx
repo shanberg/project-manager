@@ -30,6 +30,35 @@ import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { getRecentProjectsByEdit } from "./lib/recent-by-edit";
 import type { PreferenceValues } from "./lib/types";
 
+const TOOLTIP_MAX_LEN = 80;
+
+function truncForTooltip(s: string): string {
+  const t = s.trim();
+  return t.length > TOOLTIP_MAX_LEN ? t.slice(0, TOOLTIP_MAX_LEN).trim() + "…" : t;
+}
+
+function formatStructuredTooltip(notes: {
+  summary: string;
+  problem: string;
+  goals: string[];
+  approach: string;
+}): string {
+  const parts: string[] = [];
+  const summary = truncForTooltip(notes.summary);
+  if (summary) parts.push(`Summary: ${summary}`);
+  const problem = truncForTooltip(notes.problem);
+  if (problem) parts.push(`Problem: ${problem}`);
+  const goalItems = notes.goals
+    .map((g) => truncForTooltip(g))
+    .filter(Boolean)
+    .map((g, i) => `${i + 1}. ${g}`)
+    .join(" ");
+  if (goalItems) parts.push(`Goals: ${goalItems.length > 150 ? goalItems.slice(0, 150).trim() + "…" : goalItems}`);
+  const approach = truncForTooltip(notes.approach);
+  if (approach) parts.push(`Approach: ${approach}`);
+  return parts.join("\n\n");
+}
+
 function flattenLinks(links: LinkEntry[]): { label: string; url: string }[] {
   const result: { label: string; url: string }[] = [];
   for (const l of links) {
@@ -103,11 +132,16 @@ export default function Command() {
 
   const code = data ? getProjectCode(data.name) : "";
   const progress = data?.total ? data.done / data.total : 1;
-  const tooltip = data
+  const baseTooltip = data
     ? data.total
       ? `${data.name}: ${data.done}/${data.total} done`
       : data.name
     : "No focused project";
+  const structured =
+    data?.notes
+      ? formatStructuredTooltip(data.notes)
+      : "";
+  const tooltip = structured ? `${baseTooltip}\n\n${structured}` : baseTooltip;
 
   async function onOpenProject() {
     if (!data) return;
@@ -200,18 +234,29 @@ export default function Command() {
           )}
           {recentProjects && recentProjects.length > 0 && (
             <MenuBarExtra.Section title="Recent">
-              {recentProjects.map((p) => (
-                <MenuBarExtra.Item
-                  key={`${p.basePath}:${p.name}`}
-                  icon={getProgressIcon(p.total ? p.done / p.total : 1)}
-                  title={p.name}
-                  onAction={async () => {
-                    await setFocusedProject(p.basePath, p.name);
-                    await showHUD(`Focused: ${p.name}`);
-                    revalidate();
-                  }}
-                />
-              ))}
+              {recentProjects.map((p) => {
+                const baseTip =
+                  p.total ? `${p.name}: ${p.done}/${p.total} done` : p.name;
+                const structured = p.notes
+                  ? formatStructuredTooltip(p.notes)
+                  : "";
+                const tooltip = structured
+                  ? `${baseTip}\n\n${structured}`
+                  : baseTip;
+                return (
+                  <MenuBarExtra.Item
+                    key={`${p.basePath}:${p.name}`}
+                    icon={getProgressIcon(p.total ? p.done / p.total : 1)}
+                    title={p.name}
+                    tooltip={tooltip}
+                    onAction={async () => {
+                      await setFocusedProject(p.basePath, p.name);
+                      await showHUD(`Focused: ${p.name}`);
+                      revalidate();
+                    }}
+                  />
+                );
+              })}
             </MenuBarExtra.Section>
           )}
           <MenuBarExtra.Section>

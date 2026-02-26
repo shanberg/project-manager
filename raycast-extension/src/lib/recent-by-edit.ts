@@ -15,6 +15,7 @@ export type RecentProject = {
   mtime: number;
   done: number;
   total: number;
+  notes: { summary: string; problem: string; goals: string[]; approach: string } | null;
 };
 
 export async function getRecentProjectsByEdit(
@@ -40,18 +41,25 @@ export async function getRecentProjectsByEdit(
         : (await stat(projectPath).catch(() => ({ mtime: 0 }))).mtime;
       let done = 0;
       let total = 0;
+      let notes = null;
       if (notesPath) {
         try {
           const content = await readFile(notesPath, "utf-8");
-          const notes = parseNotes(content);
-          const todos = parseTodos(notes);
+          const parsed = parseNotes(content);
+          const todos = parseTodos(parsed);
           total = todos.length;
           done = todos.filter((t) => t.checked).length;
+          notes = {
+            summary: parsed.summary,
+            problem: parsed.problem,
+            goals: parsed.goals,
+            approach: parsed.approach,
+          };
         } catch {
           /* ignore */
         }
       }
-      return { name, basePath, mtime, done, total };
+      return { name, basePath, mtime, done, total, notes };
     }),
   );
 
