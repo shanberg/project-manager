@@ -4,6 +4,7 @@ const SESSION_HEADING = /^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Ap
 const LINK_LINE = /^\s*-\s+(.+)$/;
 const NESTED_LINK = /^\s{4}-\s+(.+)$/;
 const URL_PATTERN = /^https?:\/\//;
+const MARKDOWN_LINK = /\[([^\]]*)\]\(([^)]+)\)/;
 
 const CALLOUT_START = /^>\s*\[!/;
 
@@ -64,22 +65,32 @@ function parseLinksBlock(text: string): LinkEntry[] {
       i++;
       continue;
     }
+    const mdMatch = part.match(MARKDOWN_LINK);
+    if (mdMatch) {
+      const [, label, url] = mdMatch;
+      entries.push(url ? { label: label || undefined, url: url.trim() } : { label: label || undefined });
+      i++;
+      continue;
+    }
     const colonIdx = part.indexOf(":");
     const isUrl = URL_PATTERN.test(part);
 
     if (colonIdx > 0 && !isUrl) {
       const label = part.slice(0, colonIdx);
-      const url = part.slice(colonIdx + 1);
+      const url = part.slice(colonIdx + 1).trim();
       entries.push(url ? { label, url } : { label });
     } else if (isUrl) {
-      entries.push({ url: part });
+      entries.push({ url: part.trim() });
     } else {
       const children: LinkEntry[] = [];
       i++;
       while (i < lines.length) {
         const nm = lines[i].match(NESTED_LINK);
         if (!nm) break;
-        children.push({ url: nm[1] });
+        const childPart = nm[1].trim();
+        const childMd = childPart.match(MARKDOWN_LINK);
+        const url = childMd ? childMd[2].trim() : childPart;
+        if (url) children.push({ url });
         i++;
       }
       entries.push({ label: part, children });

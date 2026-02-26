@@ -12,6 +12,8 @@ import {
   MenuBarExtra,
   open,
   showHUD,
+  showToast,
+  Toast,
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon } from "@raycast/utils";
 import type { LinkEntry } from "@shanberg/project-manager/notes";
@@ -215,8 +217,8 @@ export default function Command() {
               />
             )}
           </MenuBarExtra.Section>
-          {data.links.length > 0 && (
-            <MenuBarExtra.Section>
+            {data.notesPath && (
+            <MenuBarExtra.Section title="Links">
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
                   key={`${i}-${link.url}`}
@@ -227,9 +229,29 @@ export default function Command() {
                       : link.label
                   }
                   tooltip={link.url}
-                  onAction={() => open(link.url)}
+                  onAction={async () => {
+                    const url = link.url.trim();
+                    try {
+                      await open(url);
+                    } catch (e) {
+                      await showToast({
+                        style: Toast.Style.Failure,
+                        title: "Could not open link",
+                        message: url,
+                      });
+                    }
+                  }}
                 />
               ))}
+              <MenuBarExtra.Item
+                icon={Icon.Plus}
+                title="Add Link"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/add-focused-link",
+                  )
+                }
+              />
             </MenuBarExtra.Section>
           )}
           {recentProjects && recentProjects.length > 0 && (

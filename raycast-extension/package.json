@@ -157,6 +157,17 @@
         "note",
         "pm"
       ]
+    },
+    {
+      "name": "add-focused-link",
+      "title": "Add Link",
+      "description": "Add a link to the focused project notes",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "link",
+        "pm"
+      ]
     }
   ],
   "preferences": [
