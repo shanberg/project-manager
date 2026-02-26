@@ -1,7 +1,7 @@
 import path from "path";
-import { readFile, stat } from "fs/promises";
+import { stat } from "fs/promises";
 import { runPmWithPrefs } from "./pm";
-import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
+import { getNotes, resolveNotesPath } from "./notes-api";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 
@@ -23,19 +23,21 @@ export async function getRecentProjectsByEdit(
   const withMeta = await Promise.all(
     all.map(async ({ name, basePath }) => {
       const projectPath = path.join(basePath, name);
-      const notesPath = await resolveNotesPath(projectPath);
-      const mtime = notesPath
-        ? (await stat(notesPath).catch(() => ({ mtime: 0 }))).mtime
-        : (await stat(projectPath).catch(() => ({ mtime: 0 }))).mtime;
+      const notesPath = await resolveNotesPath(prefs, name);
+      const statsNotes = notesPath ? await stat(notesPath).catch(() => null) : null;
+      const statsProject = await stat(projectPath).catch(() => null);
+      const mtime = statsNotes
+        ? (statsNotes.mtime instanceof Date ? statsNotes.mtime.getTime() : (statsNotes.mtime as number))
+        : statsProject
+          ? (statsProject.mtime instanceof Date ? statsProject.mtime.getTime() : (statsProject.mtime as number))
+          : 0;
       let done = 0;
       let total = 0;
       if (notesPath) {
         try {
-          const content = await readFile(notesPath, "utf-8");
-          const notes = parseNotes(content);
-          const todos = parseTodos(notes);
-          total = todos.length;
-          done = todos.filter((t) => t.checked).length;
+          const out = await getNotes(prefs, name);
+          total = out.todos.length;
+          done = out.todos.filter((t) => t.checked).length;
         } catch {
           /* ignore */
         }

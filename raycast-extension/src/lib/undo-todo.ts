@@ -1,27 +1,34 @@
 import { LocalStorage } from "@raycast/api";
-import type { Todo } from "@shanberg/project-manager/notes";
+import type { Todo } from "./notes-api";
 
 const KEY = "pm-undo-todo";
 
 export interface UndoState {
   notesPath: string;
+  projectName: string;
   todo: Todo;
 }
 
-export async function saveUndoState(notesPath: string, todo: Todo): Promise<void> {
+export async function saveUndoState(
+  notesPath: string,
+  projectName: string,
+  todo: Todo
+): Promise<void> {
   const undoneTodo: Todo = {
     ...todo,
     checked: true,
     rawLine: todo.rawLine.replace(/\[ \]/, "[x]"),
   };
-  await LocalStorage.setItem(KEY, JSON.stringify({ notesPath, todo: undoneTodo }));
+  await LocalStorage.setItem(KEY, JSON.stringify({ notesPath, projectName, todo: undoneTodo }));
 }
 
 export async function getUndoState(): Promise<UndoState | null> {
   const raw = await LocalStorage.getItem<string>(KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as UndoState;
+    const parsed = JSON.parse(raw) as UndoState & { projectName?: string };
+    if (!parsed.projectName) return null;
+    return parsed as UndoState;
   } catch {
     return null;
   }

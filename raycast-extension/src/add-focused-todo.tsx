@@ -19,11 +19,5 @@ export default function Command() {
     );
   }
 
-  return (
-    <AddTodoForm
-      projectName={parsed.name}
-      basePath={parsed.basePath}
-      onSuccess={() => {}}
-    />
-  );
+  return <AddTodoForm projectName={parsed.name} onSuccess={() => {}} />;
 }

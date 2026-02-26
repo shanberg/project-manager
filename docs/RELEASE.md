@@ -1,7 +1,7 @@
 # Release (project-manager)
 
 
-One command: bump version, push, tag, update Homebrew formula, push tap.
+One command: bump version, push, tag, build Swift binary, create tarball, upload to GitHub release, update Homebrew formula, push tap.
 
 From the **project-manager** repo, with `GITHUB_TOKEN` or `HOMEBREW_GITHUB_API_TOKEN` set:
 
@@ -12,11 +12,13 @@ npm run release -- major    # 0.1.2 → 1.0.0 (breaking changes)
 npm run release -- 0.2.0    # or set an exact version
 ```
 
-The script reads the current version from `package.json`, bumps it (or uses the version you pass), writes it back, then commits and pushes, tags, downloads the tarball and updates the formula with the correct sha256, then commits and pushes the tap. **`package.json` must have a `"version"` field** (e.g. `"0.1.4"`) so the script can bump it; the script will fail with a clear message if it’s missing.
+The script reads the current version from `package.json`, bumps it (or uses the version you pass), writes it back, commits and pushes, creates tag, then runs `scripts/build-release-tarball.sh` to build the Swift CLI (`cd pm-swift && swift build -c release`) and pack `pm` into `project-manager-<version>.tar.gz`, uploads the tarball to the GitHub release, and updates the Homebrew formula (sha256 and version). **`package.json` must have a `"version"` field**
 
 **Tap location:** Default is `../homebrew-s`. Override with `TAP_DIR` if your tap lives elsewhere.
 
-**Optional:** To only update the formula (e.g. after releasing another way): `npm run update-homebrew-formula -- v0.1.3`
+**Optional:** To only update the formula (e.g. after releasing another way): `npm run update-homebrew-formula -- v0.2.0`
+
+**Homebrew formula:** The tarball contains a single directory `project-manager-<version>/` with a `pm` binary. The formula in the tap should install that binary (e.g. `bin.install "pm"`). If the formula still expects the old Node tarball layout, update it once to install the Swift binary.
 
 ## Install (users)
 

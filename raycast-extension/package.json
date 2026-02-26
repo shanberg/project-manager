@@ -197,8 +197,7 @@
   ],
   "dependencies": {
     "@raycast/api": "^1.70.0",
-    "@raycast/utils": "^1.10.0",
-    "@shanberg/project-manager": "file:.."
+    "@raycast/utils": "^1.10.0"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.0",
@@ -206,8 +205,7 @@
     "typescript": "^5.0.0"
   },
   "scripts": {
-    "build": "npm run build:pm && ray build",
-    "build:pm": "cd .. && npm run build",
+    "build": "ray build",
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
     "lint": "ray lint"

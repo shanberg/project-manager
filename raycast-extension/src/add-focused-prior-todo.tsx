@@ -1,12 +1,13 @@
-import path from "path";
-import { readFile } from "fs/promises";
-import { List } from "@raycast/api";
+import { List, getPreferenceValues } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
+import { getNotes } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 import AddPriorTodoForm from "./add-prior-todo-form";
 
 export default function Command() {
+  const prefs = getPreferenceValues<PreferenceValues>();
+
   const { data, isLoading } = useCachedPromise(
     async () => {
       const focusedKey = await getFocusedProject();
@@ -14,16 +15,15 @@ export default function Command() {
       const parsed = parseProjectKey(focusedKey);
       if (!parsed) return null;
       const { basePath, name } = parsed;
-      const projectPath = path.join(basePath, name);
-      const notesPath = await resolveNotesPath(projectPath);
-      if (!notesPath) return null;
-      const content = await readFile(notesPath, "utf-8");
-      const notes = parseNotes(content);
-      const todos = parseTodos(notes);
-      const nextTodo = todos.filter((t) => !t.checked)[0] ?? null;
-      return { notesPath, nextTodo };
+      try {
+        const out = await getNotes(prefs, name);
+        const nextTodo = out.todos.filter((t) => !t.checked)[0] ?? null;
+        return { projectName: name, notes: out.notes, nextTodo };
+      } catch {
+        return null;
+      }
     },
-    [],
+    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
     { execute: true }
   );
 
@@ -51,7 +51,8 @@ export default function Command() {
 
   return (
     <AddPriorTodoForm
-      notesPath={data.notesPath}
+      projectName={data.projectName}
+      notes={data.notes}
       beforeTodo={data.nextTodo}
       onSuccess={() => {}}
     />

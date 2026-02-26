@@ -1,8 +1,8 @@
 import path from "path";
 import os from "os";
 import { existsSync } from "fs";
-import { formatSessionDate } from "@shanberg/project-manager/notes";
-import type { ProjectNotes } from "@shanberg/project-manager/notes";
+import { formatSessionDate } from "./notes-api";
+import type { ProjectNotes } from "./notes-api";
 import { runPmWithPrefs } from "./pm";
 import type { PreferenceValues } from "./types";
 
@@ -94,4 +94,12 @@ export function parseListAllOutput(stdout: string): { active: string[]; archive:
 
 export function hasSrcDir(projectPath: string): boolean {
   return existsSync(path.join(projectPath, "src"));
+}
+
+/** Expected notes file path from project folder path (for display when file does not exist yet). */
+export function getNotesPath(projectPath: string): string {
+  const folderName = path.basename(projectPath);
+  const spaceIdx = folderName.indexOf(" ");
+  const title = spaceIdx >= 0 ? folderName.slice(spaceIdx + 1) : folderName;
+  return path.join(projectPath, "docs", `Notes - ${title}.md`);
 }

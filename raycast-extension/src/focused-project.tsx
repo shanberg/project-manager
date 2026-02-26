@@ -1,5 +1,4 @@
 import path from "path";
-import { readFile } from "fs/promises";
 import { getPreferenceValues } from "@raycast/api";
 import {
   Alert,
@@ -11,13 +10,8 @@ import {
   showHUD,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import {
-  parseNotes,
-  parseTodos,
-  resolveNotesPath,
-  toggleTodoInFile,
-} from "@shanberg/project-manager/notes";
-import type { Todo } from "@shanberg/project-manager/notes";
+import { getNotes, resolveNotesPath, toggleTodoInNotes } from "./lib/notes-api";
+import type { Todo } from "./lib/notes-api";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -47,35 +41,63 @@ export default function Command() {
       const parsed = parseProjectKey(focusedKey);
       if (!parsed) return null;
       const { basePath, name } = parsed;
-      const projectPath = path.join(basePath, name);
-      const notesPath = await resolveNotesPath(projectPath);
+      const notesPath = await resolveNotesPath(prefs, name);
       if (!notesPath) {
         await clearTaskTiming();
-        return { projectPath, name, basePath, notesPath: null, todos: [], notes: null, iconColor: undefined };
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath: null,
+          todos: [],
+          notes: null,
+          iconColor: undefined,
+        };
       }
-      const content = await readFile(notesPath, "utf-8");
-      const notes = parseNotes(content);
-      const todos = parseTodos(notes);
-      const openTodos = todos.filter((t) => !t.checked);
-      const nextTodo = openTodos[0] ?? null;
-      let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
-      if (nextTodo) {
-        const key = taskTimingKey(notesPath, nextTodo.rawLine);
-        const stored = await getTaskTiming();
-        const now = Date.now();
-        if (stored?.taskKey === key) {
-          const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
-          if (elapsedHours >= 2) iconColor = Color.Red;
-          else if (elapsedHours >= 1) iconColor = Color.Yellow;
+      try {
+        const out = await getNotes(prefs, name);
+        const notes = out.notes;
+        const todos = out.todos;
+        const openTodos = todos.filter((t) => !t.checked);
+        const nextTodo = openTodos[0] ?? null;
+        let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
+        if (nextTodo) {
+          const key = taskTimingKey(notesPath, nextTodo.rawLine);
+          const stored = await getTaskTiming();
+          const now = Date.now();
+          if (stored?.taskKey === key) {
+            const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
+            if (elapsedHours >= 2) iconColor = Color.Red;
+            else if (elapsedHours >= 1) iconColor = Color.Yellow;
+          } else {
+            await setTaskTiming(key);
+          }
         } else {
-          await setTaskTiming(key);
+          await clearTaskTiming();
         }
-      } else {
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath,
+          todos,
+          notes,
+          iconColor,
+        };
+      } catch {
         await clearTaskTiming();
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath: null,
+          todos: [],
+          notes: null,
+          iconColor: undefined,
+        };
       }
-      return { projectPath, name, basePath, notesPath, todos, notes, iconColor };
     },
-    [],
+    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
     { execute: true }
   );
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
@@ -109,10 +131,10 @@ export default function Command() {
     : "No focused project";
 
   async function handleMarkDone(todo: Todo) {
-    if (!data?.notesPath) return;
+    if (!data?.notesPath || !data?.notes) return;
     try {
-      await saveUndoState(data.notesPath, todo);
-      await toggleTodoInFile(data.notesPath, todo);
+      await saveUndoState(data.notesPath, data.name, todo);
+      await toggleTodoInNotes(prefs, data.name, data.notes, todo);
       await revalidate();
       await revalidateUndo();
       await showHUD(`Done: ${todo.text.slice(0, 40)}`);
@@ -125,7 +147,8 @@ export default function Command() {
   async function handleUndo() {
     if (!undoState) return;
     try {
-      await toggleTodoInFile(undoState.notesPath, undoState.todo);
+      const out = await getNotes(prefs, undoState.projectName);
+      await toggleTodoInNotes(prefs, undoState.projectName, out.notes, undoState.todo);
       await clearUndoState();
       await revalidate();
       await revalidateUndo();

@@ -92,8 +92,8 @@ else
   git push origin "$TAG"
 fi
 
-# Build bundled tarball (dist + node_modules + templates) so formula needs no npm install
-echo "==> Create release asset (bundled tarball)"
+# Build Swift binary and tarball for Homebrew
+echo "==> Create release asset (Swift tarball)"
 REPO="shanberg/project-manager"
 TARBALL="$("$ROOT/scripts/build-release-tarball.sh" "$VERSION" | tail -1)"
 

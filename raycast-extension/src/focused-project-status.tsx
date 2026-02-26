@@ -1,5 +1,4 @@
 import path from "path";
-import { readFile } from "fs/promises";
 import { getObsidianUri, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
 import {
   Alert,
@@ -11,8 +10,8 @@ import {
   showHUD,
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon } from "@raycast/utils";
-import type { LinkEntry } from "@shanberg/project-manager/notes";
-import { parseNotes, parseTodos, resolveNotesPath } from "@shanberg/project-manager/notes";
+import type { LinkEntry } from "./lib/notes-api";
+import { getNotes, resolveNotesPath } from "./lib/notes-api";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -48,18 +47,48 @@ export default function Command() {
       const parsed = parseProjectKey(focusedKey);
       if (!parsed) return null;
       const { basePath, name } = parsed;
-      const projectPath = path.join(basePath, name);
-      const notesPath = await resolveNotesPath(projectPath);
-      if (!notesPath) return { projectPath, name, basePath, notesPath: null, done: 0, total: 0, links: [], notes: null };
-      const content = await readFile(notesPath, "utf-8");
-      const notes = parseNotes(content);
-      const todos = parseTodos(notes);
-      const total = todos.length;
-      const done = todos.filter((t) => t.checked).length;
-      const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
-      return { projectPath, name, basePath, notesPath, done, total, links, notes };
+      const notesPath = await resolveNotesPath(prefs, name);
+      if (!notesPath)
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath: null,
+          done: 0,
+          total: 0,
+          links: [],
+          notes: null,
+        };
+      try {
+        const out = await getNotes(prefs, name);
+        const notes = out.notes;
+        const total = out.todos.length;
+        const done = out.todos.filter((t) => t.checked).length;
+        const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath,
+          done,
+          total,
+          links,
+          notes,
+        };
+      } catch {
+        return {
+          name,
+          basePath,
+          projectPath: path.join(basePath, name),
+          notesPath: null,
+          done: 0,
+          total: 0,
+          links: [],
+          notes: null,
+        };
+      }
     },
-    [],
+    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
     { execute: true }
   );
 

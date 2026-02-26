@@ -1,29 +1,19 @@
-import path from "path";
-import { Form, Action, ActionPanel, showToast, Toast, useNavigation } from "@raycast/api";
-import { addTodoToTodaySession, resolveNotesPath } from "@shanberg/project-manager/notes";
+import { Form, Action, ActionPanel, showToast, Toast, useNavigation, getPreferenceValues } from "@raycast/api";
+import { addTodoToTodaySession } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 
 interface Props {
   projectName: string;
-  basePath: string;
   onSuccess?: () => void;
 }
 
-export default function AddTodoForm({ projectName, basePath, onSuccess }: Props) {
+export default function AddTodoForm({ projectName, onSuccess }: Props) {
+  const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
   async function addTask(text: string): Promise<boolean> {
-    const projectPath = path.join(basePath, projectName);
-    const notesPath = await resolveNotesPath(projectPath);
-    if (!notesPath) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "No notes file",
-        message: "Create a notes file first",
-      });
-      return false;
-    }
     try {
-      await addTodoToTodaySession(notesPath, text);
+      await addTodoToTodaySession(prefs, projectName, text);
       await showToast({
         style: Toast.Style.Success,
         title: "Task added",
@@ -48,7 +38,7 @@ export default function AddTodoForm({ projectName, basePath, onSuccess }: Props)
     const text = values.text.trim();
     if (!text) return;
     const ok = await addTask(text);
-    if (ok) push(<AddTodoForm projectName={projectName} basePath={basePath} onSuccess={onSuccess} />);
+    if (ok) push(<AddTodoForm projectName={projectName} onSuccess={onSuccess} />);
   }
 
   return (

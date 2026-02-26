@@ -14,7 +14,7 @@ type ExtensionPreferences = {
   "archivePath": string,
   /** Config Path Override - Override pm config location (default: ~/.config/pm). Leave empty to use default. */
   "configPath"?: string,
-  /** pm CLI Path - Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect. */
+  /** pm CLI Path - Full path to pm binary (e.g. ~/dev/project-manager/pm-swift/.build/release/pm). Leave empty to use pm from PATH. */
   "pmCliPath"?: string,
   /** Obsidian Vault (Advanced URI) - Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open. */
   "obsidianVault"?: string,
@@ -30,6 +30,8 @@ declare namespace Preferences {
   export type Configure = ExtensionPreferences & {}
   /** Preferences accessible in the `edit-domains` command */
   export type EditDomains = ExtensionPreferences & {}
+  /** Preferences accessible in the `edit-project-structure` command */
+  export type EditProjectStructure = ExtensionPreferences & {}
   /** Preferences accessible in the `new-project` command */
   export type NewProject = ExtensionPreferences & {}
   /** Preferences accessible in the `list-projects` command */
@@ -57,6 +59,8 @@ declare namespace Arguments {
   export type Configure = {}
   /** Arguments passed to the `edit-domains` command */
   export type EditDomains = {}
+  /** Arguments passed to the `edit-project-structure` command */
+  export type EditProjectStructure = {}
   /** Arguments passed to the `new-project` command */
   export type NewProject = {}
   /** Arguments passed to the `list-projects` command */

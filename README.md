@@ -18,12 +18,18 @@ Then install the Raycast extension from source (clone this repo, `cd raycast-ext
 **Local dev (this repo)**
 
 ```bash
-cd project-manager
-npm link
-cd raycast-extension && npm run dev
+cd project-manager/pm-swift
+swift build -c release   # or swift build for debug
+# Binary: pm-swift/.build/release/pm (or .build/debug/pm)
+# Add that path to Raycast "pm CLI Path", or copy to somewhere on PATH
+# Use the release binary for best CLI responsiveness (debug is slower to start and run).
+
+cd raycast-extension && npm install && npm run dev
 ```
 
-Raycast will load the extension. Set **Active Projects Path** and **Archive Path** in the extension preferences (Raycast Preferences → Extensions → Project Manager).
+**Benchmarking:** `PM_BENCHMARK=1 pm list` prints stage timings to stderr (loadConfig, getProjectFolders, etc.).
+
+Raycast will load the extension. Set **Active Projects Path** and **Archive Path** in the extension preferences (Raycast Preferences → Extensions → Project Manager). Leave **pm CLI Path** empty to use `pm` from PATH (after Homebrew install), or set it to the Swift binary when developing.
 
 ## Setup
 
@@ -75,6 +81,7 @@ pm unarchive W-1                   # Move from archive back to active
 - `pm config get activePath` - Show specific key
 - `pm config set activePath /path/to/active` - Update active path
 - `pm config set archivePath /path/to/archive` - Update archive path
+- `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}`; leave empty for default)
 
 Config location: `~/.config/pm/config.json` (or `$XDG_CONFIG_HOME/pm/`)
 
@@ -82,9 +89,7 @@ Override: `PM_CONFIG_HOME=/custom/path pm ...`
 
 ## Publishing (maintainers)
 
-The CLI is published to GitHub Packages as `@shanberg/project-manager`. Publish `@shanberg/project-schema` to the same registry first.
-
-Create a GitHub Release (tag). The workflow in `.github/workflows/publish.yml` runs on release and publishes using `GITHUB_TOKEN` (package stays private).
+The CLI is a Swift binary. Version lives in `package.json` (used by the release script). Create a GitHub Release (tag); the release script builds the Swift binary, creates a tarball, uploads it to the release, and updates the Homebrew formula. See `docs/RELEASE.md`.
 
 
 ## Numbering

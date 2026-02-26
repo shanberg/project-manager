@@ -1,19 +1,22 @@
-import { Form, Action, ActionPanel, showToast, Toast, useNavigation } from "@raycast/api";
-import { addTodoBeforeInFile } from "@shanberg/project-manager/notes";
-import type { Todo } from "@shanberg/project-manager/notes";
+import { Form, Action, ActionPanel, showToast, Toast, useNavigation, getPreferenceValues } from "@raycast/api";
+import { addTodoBeforeInNotes } from "./lib/notes-api";
+import type { ProjectNotes, Todo } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 
 interface Props {
-  notesPath: string;
+  projectName: string;
+  notes: ProjectNotes;
   beforeTodo: Todo;
   onSuccess?: () => void;
 }
 
-export default function AddPriorTodoForm({ notesPath, beforeTodo, onSuccess }: Props) {
+export default function AddPriorTodoForm({ projectName, notes, beforeTodo, onSuccess }: Props) {
+  const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
   async function addTask(text: string): Promise<boolean> {
     try {
-      await addTodoBeforeInFile(notesPath, beforeTodo, text);
+      await addTodoBeforeInNotes(prefs, projectName, notes, beforeTodo, text);
       await showToast({
         style: Toast.Style.Success,
         title: "Task added",
@@ -38,7 +41,7 @@ export default function AddPriorTodoForm({ notesPath, beforeTodo, onSuccess }: P
     const text = values.text.trim();
     if (!text) return;
     const ok = await addTask(text);
-    if (ok) push(<AddPriorTodoForm notesPath={notesPath} beforeTodo={beforeTodo} onSuccess={onSuccess} />);
+    if (ok) push(<AddPriorTodoForm projectName={projectName} notes={notes} beforeTodo={beforeTodo} onSuccess={onSuccess} />);
   }
 
   return (

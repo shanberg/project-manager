@@ -1,48 +1,10 @@
 {
   "name": "@shanberg/project-manager",
-  "version": "0.1.14",
-  "description": "CLI for project creation with domain-based numbering",
-  "type": "module",
-  "main": "dist/cli.js",
-  "exports": {
-    ".": "./dist/cli.js",
-    "./types": "./dist/types.js",
-    "./notes": "./dist/lib/notes/index.js"
-  },
-  "bin": {
-    "pm": "dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "templates"
-  ],
+  "version": "0.2.0",
+  "description": "CLI for project creation with domain-based numbering (Swift)",
+  "license": "MIT",
   "scripts": {
-    "build": "npx tsc",
-    "dev": "npx tsc --watch",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run build",
     "release": "./scripts/release.sh",
     "update-homebrew-formula": "./scripts/update-homebrew-formula.sh"
-  },
-  "keywords": [
-    "cli",
-    "para",
-    "projects"
-  ],
-  "license": "MIT",
-  "engines": {
-    "node": ">=18"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "restricted"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "typescript": "^5.3.0"
-  },
-  "dependencies": {
-    "@shanberg/project-schema": "^1.0.0",
-    "commander": "^11.1.0"
   }
 }

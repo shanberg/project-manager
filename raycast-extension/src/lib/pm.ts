@@ -1,11 +1,25 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import os from "os";
 import { mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
-import { DEFAULT_DOMAINS, DEFAULT_SUBFOLDERS } from "@shanberg/project-manager/types";
 import type { PreferenceValues } from "./types";
+
+export const DEFAULT_DOMAINS: Record<string, string> = {
+  W: "Work",
+  P: "Personal",
+  L: "Learning",
+  O: "Other",
+};
+
+export const DEFAULT_SUBFOLDERS = [
+  "deliverables",
+  "docs",
+  "resources",
+  "previews",
+  "working files",
+];
 
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */
 export async function getConfigDomains(
@@ -54,10 +68,9 @@ function resolvePmPath(cliPathOverride?: string): string {
   const raw = cliPathOverride?.trim();
   if (raw) return path.normalize(expandPath(raw));
   const candidates = [
-    path.join(os.homedir(), "dev", "project-manager", "dist", "cli.js"),
-    path.join(process.cwd(), "..", "dist", "cli.js"),
-    path.join(process.cwd(), "..", "..", "dist", "cli.js"),
-    path.join(os.homedir(), "Projects", "project-manager", "dist", "cli.js"),
+    path.join(os.homedir(), "dev", "project-manager", "pm-swift", ".build", "release", "pm"),
+    path.join(os.homedir(), "dev", "project-manager", "pm-swift", ".build", "debug", "pm"),
+    path.join(process.cwd(), "..", "pm-swift", ".build", "release", "pm"),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
@@ -132,12 +145,10 @@ export async function runPm(
   function shellArg(a: string): string {
     return `'${a.replace(/'/g, "'\\''")}'`;
   }
-  let innerCmd: string;
-  if (pmPath === "pm") {
-    innerCmd = `pm ${args.map(shellArg).join(" ")}`;
-  } else {
-    innerCmd = `node ${shellArg(pmPath)} ${args.map(shellArg).join(" ")}`;
-  }
+  const innerCmd =
+    pmPath === "pm"
+      ? `pm ${args.map(shellArg).join(" ")}`
+      : `${shellArg(pmPath)} ${args.map(shellArg).join(" ")}`;
   const cmd = `/bin/zsh -l -c ${JSON.stringify(innerCmd)}`;
 
   const { stdout, stderr } = await execAsync(cmd, {
@@ -145,4 +156,37 @@ export async function runPm(
     maxBuffer: 10 * 1024 * 1024,
   });
   return { stdout, stderr };
+}
+
+/** Run pm with stdin. Used for `pm notes write` with JSON body. */
+export function runPmWithStdin(
+  args: string[],
+  env: Record<string, string>,
+  cliPathOverride: string | undefined,
+  stdinContent: string
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const fullEnv = { ...process.env, ...env };
+    const pmPath = resolvePmPath(cliPathOverride);
+    const execArgs = pmPath === "pm" ? ["pm", ...args] : [pmPath, ...args];
+    const child = spawn(execArgs[0], execArgs.slice(1), {
+      env: fullEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout?.on("data", (c) => stdoutChunks.push(c));
+    child.stderr?.on("data", (c) => stderrChunks.push(c));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({
+        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+        code: code ?? null,
+      });
+    });
+    child.stdin?.write(stdinContent, "utf-8", () => {
+      child.stdin?.end();
+    });
+  });
 }

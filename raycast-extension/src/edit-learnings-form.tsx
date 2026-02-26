@@ -1,21 +1,29 @@
-import { Form, Action, ActionPanel, showToast, Toast } from "@raycast/api";
-import { updateNotesSection } from "@shanberg/project-manager/notes";
+import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import { updateNotesSection, writeNotes } from "./lib/notes-api";
+import type { ProjectNotes } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 
 interface Props {
-  notesPath: string;
+  projectName: string;
+  notes: ProjectNotes;
   initialLearnings: string[];
   onSuccess?: () => void;
 }
 
-export default function EditLearningsForm({ notesPath, initialLearnings, onSuccess }: Props) {
+export default function EditLearningsForm({ projectName, notes, initialLearnings, onSuccess }: Props) {
+  const prefs = getPreferenceValues<PreferenceValues>();
   const value = initialLearnings.filter(Boolean).join("\n") || "";
+
   async function handleSubmit(values: { learnings: string }) {
     const learnings = values.learnings
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
     try {
-      await updateNotesSection(notesPath, { learnings: learnings.length ? learnings : [""] });
+      const updated = updateNotesSection(notes, {
+        learnings: learnings.length ? learnings : [""],
+      });
+      await writeNotes(prefs, projectName, updated);
       await showToast({ style: Toast.Style.Success, title: "Learnings updated" });
       onSuccess?.();
     } catch (err) {

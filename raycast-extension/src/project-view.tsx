@@ -1,6 +1,5 @@
 import { useState } from "react";
 import path from "path";
-import { readFile } from "fs/promises";
 import {
   Action,
   ActionPanel,
@@ -13,14 +12,13 @@ import {
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
-  getNotesPath,
-  parseNotes,
-  parseTodos,
+  getNotes,
   resolveNotesPath,
-  toggleAllTodosInFile,
-  toggleTodoInFile,
-} from "@shanberg/project-manager/notes";
-import type { Todo } from "@shanberg/project-manager/notes";
+  toggleAllTodosInNotes,
+  toggleTodoInNotes,
+  type ProjectNotes,
+  type Todo,
+} from "./lib/notes-api";
 import { runPmWithPrefs } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";
@@ -58,14 +56,16 @@ export default function ProjectView({ projectName, basePath }: Props) {
 
   const { data, isLoading, revalidate, mutate } = useCachedPromise(
     async () => {
-      const notesPath = await resolveNotesPath(projectPath);
+      const notesPath = await resolveNotesPath(prefs, projectName);
       if (!notesPath) return { notes: null, todos: [], notesPath: null };
-      const content = await readFile(notesPath, "utf-8");
-      const notes = parseNotes(content);
-      const todos = parseTodos(notes);
-      return { notes, todos, notesPath };
+      try {
+        const out = await getNotes(prefs, projectName);
+        return { notes: out.notes, todos: out.todos, notesPath };
+      } catch {
+        return { notes: null, todos: [], notesPath };
+      }
     },
-    [projectPath],
+    [projectName, prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true }
   );
 
@@ -120,9 +120,9 @@ export default function ProjectView({ projectName, basePath }: Props) {
   }
 
   async function handleToggle(todo: Todo) {
-    if (!notesPath) return;
+    if (!notesPath || !notes) return;
     try {
-      await toggleTodoInFile(notesPath, todo);
+      await toggleTodoInNotes(prefs, projectName, notes, todo);
       await mutate();
       await showToast({
         style: Toast.Style.Success,
@@ -136,12 +136,12 @@ export default function ProjectView({ projectName, basePath }: Props) {
   }
 
   async function handleMarkAllInSessionDone(context: string) {
-    if (!notesPath) return;
+    if (!notesPath || !notes) return;
     const sessionTodos = bySession.get(context) ?? [];
     const unchecked = sessionTodos.filter((t) => !t.checked);
     if (unchecked.length === 0) return;
     try {
-      await toggleAllTodosInFile(notesPath, unchecked);
+      await toggleAllTodosInNotes(prefs, projectName, notes, unchecked);
       await mutate();
       await showToast({
         style: Toast.Style.Success,
@@ -182,13 +182,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           {notes && (
             <Action.Push
               title="Add Task"
-              target={
-                <AddTodoForm
-                  projectName={projectName}
-                  basePath={basePath}
-                  onSuccess={mutate}
-                />
-              }
+              target={<AddTodoForm projectName={projectName} onSuccess={mutate} />}
             />
           )}
         </ActionPanel>
@@ -231,13 +225,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               {notes && (
                 <Action.Push
                   title="Add Task"
-                  target={
-                    <AddTodoForm
-                      projectName={projectName}
-                      basePath={basePath}
-                      onSuccess={mutate}
-                    />
-                  }
+                  target={<AddTodoForm projectName={projectName} onSuccess={mutate} />}
                 />
               )}
             </ActionPanel>
@@ -321,7 +309,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Edit Summary"
                   target={
                     <EditNotesSectionForm
-                      notesPath={notesPath}
+                      projectName={projectName}
+                      notes={notes}
                       initialValue={notes.summary}
                       field="summary"
                       label="Summary"
@@ -344,7 +333,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Edit Problem"
                   target={
                     <EditNotesSectionForm
-                      notesPath={notesPath}
+                      projectName={projectName}
+                      notes={notes}
                       initialValue={notes.problem}
                       field="problem"
                       label="Problem"
@@ -370,7 +360,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Edit Goals"
                   target={
                     <EditGoalsForm
-                      notesPath={notesPath}
+                      projectName={projectName}
+                      notes={notes}
                       initialGoals={notes.goals}
                       onSuccess={mutate}
                     />
@@ -390,7 +381,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Edit Approach"
                   target={
                     <EditNotesSectionForm
-                      notesPath={notesPath}
+                      projectName={projectName}
+                      notes={notes}
                       initialValue={notes.approach}
                       field="approach"
                       label="Approach"
@@ -419,7 +411,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 <Action.Push
                   title="Add Link"
                   target={
-                    <AddLinkForm notesPath={notesPath} onSuccess={mutate} />
+                    <AddLinkForm projectName={projectName} notes={notes} onSuccess={mutate} />
                   }
                 />
               </ActionPanel>
@@ -439,7 +431,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Edit Learnings"
                   target={
                     <EditLearningsForm
-                      notesPath={notesPath}
+                      projectName={projectName}
+                      notes={notes}
                       initialLearnings={notes.learnings}
                       onSuccess={mutate}
                     />
@@ -550,11 +543,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 <Action.Push
                   title="Add Task"
                   target={
-                    <AddTodoForm
-                      projectName={projectName}
-                      basePath={basePath}
-                      onSuccess={mutate}
-                    />
+                    <AddTodoForm projectName={projectName} onSuccess={mutate} />
                   }
                 />
               </ActionPanel>

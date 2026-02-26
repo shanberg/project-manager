@@ -1,17 +1,22 @@
-import { Form, Action, ActionPanel, showToast, Toast } from "@raycast/api";
-import { addLinkToNotes } from "@shanberg/project-manager/notes";
+import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import { addLinkToNotes } from "./lib/notes-api";
+import type { ProjectNotes } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 
 interface Props {
-  notesPath: string;
+  projectName: string;
+  notes: ProjectNotes;
   onSuccess?: () => void;
 }
 
-export default function AddLinkForm({ notesPath, onSuccess }: Props) {
+export default function AddLinkForm({ projectName, notes, onSuccess }: Props) {
+  const prefs = getPreferenceValues<PreferenceValues>();
+
   async function handleSubmit(values: { label: string; url: string }) {
     const url = values.url.trim();
     if (!url) return;
     try {
-      await addLinkToNotes(notesPath, {
+      await addLinkToNotes(prefs, projectName, notes, {
         label: values.label.trim() || undefined,
         url,
       });
@@ -35,16 +40,8 @@ export default function AddLinkForm({ notesPath, onSuccess }: Props) {
         </ActionPanel>
       }
     >
-      <Form.TextField
-        id="label"
-        title="Label"
-        placeholder="e.g. Figma, Docs"
-      />
-      <Form.TextField
-        id="url"
-        title="URL"
-        placeholder="https://..."
-      />
+      <Form.TextField id="label" title="Label" placeholder="e.g. Figma, Docs" />
+      <Form.TextField id="url" title="URL" placeholder="https://..." />
     </Form>
   );
 }

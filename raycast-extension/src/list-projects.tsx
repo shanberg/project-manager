@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import path from "path";
-import { readFile, stat } from "fs/promises";
+import { stat } from "fs/promises";
 import {
   Action,
   ActionPanel,
@@ -12,20 +12,18 @@ import {
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon } from "@raycast/utils";
 import {
-  getNotesPath,
-  parseNotes,
-  parseTodos,
+  getNotes,
   resolveNotesPath,
   formatNotesForDetail,
   formatNotesEmptyState,
-} from "@shanberg/project-manager/notes";
+} from "./lib/notes-api";
+import type { ProjectNotes } from "./lib/notes-api";
 import {
   recordRecentProject,
   getRecentProjectKeys,
   projectKey,
 } from "./lib/recent-projects";
 import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
-import type { ProjectNotes } from "@shanberg/project-manager/notes";
 import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";
@@ -37,6 +35,7 @@ import {
   hasSrcDir,
   buildObsidianOptions,
   ensureTodaySession,
+  getNotesPath,
 } from "./lib/utils";
 
 /** Match domain code at start of project name; use longer codes first so DE matches before D. */
@@ -63,15 +62,14 @@ function parseSearchToken(
 }
 
 async function loadNotesForProject(
-  basePath: string,
+  prefs: { activePath: string; archivePath: string; configPath?: string; pmCliPath?: string },
   projectName: string
 ): Promise<{ notes: ProjectNotes; notesPath: string } | null> {
-  const projectPath = path.join(basePath, projectName);
-  const notesPath = await resolveNotesPath(projectPath);
+  const notesPath = await resolveNotesPath(prefs, projectName);
   if (!notesPath) return null;
   try {
-    const content = await readFile(notesPath, "utf-8");
-    return { notes: parseNotes(content), notesPath };
+    const out = await getNotes(prefs, projectName);
+    return { notes: out.notes, notesPath };
   } catch {
     return null;
   }
@@ -106,21 +104,23 @@ async function fetchProjectsWithMeta(
     names: string[],
     basePath: string
   ): Promise<ProjectWithMeta[]> {
+    const prefs = { activePath, archivePath, configPath, pmCliPath };
     const results = await Promise.all(
       names.map(async (name) => {
         const projectPath = path.join(basePath, name);
         const [loaded, stats] = await Promise.all([
-          loadNotesForProject(basePath, name),
-          stat(projectPath).catch(() => ({ mtime: 0 })),
+          loadNotesForProject(prefs, name),
+          stat(projectPath).catch(() => ({ mtime: 0 as number })),
         ]);
         const notes = loaded?.notes ?? null;
-        const todos = notes ? parseTodos(notes) : [];
-        const done = todos.filter((t) => t.checked).length;
+        const todos = loaded?.todos ?? [];
+        const done = todos.filter((t: { checked: boolean }) => t.checked).length;
+        const mtime = typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
         return {
           name,
           notes,
           notesPath: loaded?.notesPath ?? null,
-          mtime: stats.mtime,
+          mtime,
           hasSrc: hasSrcDir(path.join(basePath, name)),
           basePath,
           domain: getDomainFromCodes(name, domainCodes),

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+pm-swift/.build/
+project-manager-*.tar.gz
 *.log
 .DS_Store
 .env

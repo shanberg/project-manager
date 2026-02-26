@@ -1,18 +1,24 @@
-import { Form, Action, ActionPanel, showToast, Toast } from "@raycast/api";
-import { updateNotesSection } from "@shanberg/project-manager/notes";
+import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import { updateNotesSection, writeNotes } from "./lib/notes-api";
+import type { ProjectNotes } from "./lib/notes-api";
+import type { PreferenceValues } from "./lib/types";
 
 interface Props {
-  notesPath: string;
+  projectName: string;
+  notes: ProjectNotes;
   initialGoals: string[];
   onSuccess?: () => void;
 }
 
-export default function EditGoalsForm({ notesPath, initialGoals, onSuccess }: Props) {
+export default function EditGoalsForm({ projectName, notes, initialGoals, onSuccess }: Props) {
+  const prefs = getPreferenceValues<PreferenceValues>();
   const goals = [...initialGoals, "", ""].slice(0, 3);
+
   async function handleSubmit(values: { goal1: string; goal2: string; goal3: string }) {
     const newGoals = [values.goal1, values.goal2, values.goal3];
     try {
-      await updateNotesSection(notesPath, { goals: newGoals });
+      const updated = updateNotesSection(notes, { goals: newGoals });
+      await writeNotes(prefs, projectName, updated);
       await showToast({ style: Toast.Style.Success, title: "Goals updated" });
       onSuccess?.();
     } catch (err) {
