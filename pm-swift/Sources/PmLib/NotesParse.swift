@@ -1,11 +1,50 @@
 import Foundation
 
-private let sessionHeadingPattern = try! NSRegularExpression(pattern: #"^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})(?:\s+(.*))?$"#)
-private let linkLinePattern = try! NSRegularExpression(pattern: #"^\s*-\s+(.+)$"#)
-private let nestedLinkPattern = try! NSRegularExpression(pattern: #"^\s{4}-\s+(.+)$"#)
-private let calloutStartPattern = try! NSRegularExpression(pattern: #"^>\s*\[!"#)
+private func compileRegex(_ pattern: String, options: NSRegularExpression.Options = []) throws -> NSRegularExpression {
+    do {
+        return try NSRegularExpression(pattern: pattern, options: options)
+    } catch {
+        throw PmError.notesRegexError(pattern: pattern)
+    }
+}
 
-private func extractCallout(lines: [String], pattern: NSRegularExpression) -> String {
+private struct NotesPatterns {
+    let sessionHeading: NSRegularExpression
+    let linkLine: NSRegularExpression
+    let nestedLink: NSRegularExpression
+    let calloutStart: NSRegularExpression
+    let goals: NSRegularExpression
+    let num: NSRegularExpression
+    let url: NSRegularExpression
+    let learning: NSRegularExpression
+    let section: NSRegularExpression
+    let summary: NSRegularExpression
+    let problem: NSRegularExpression
+    let approach: NSRegularExpression
+    let linksSection: NSRegularExpression
+    let learningsSection: NSRegularExpression
+    let sessionsSection: NSRegularExpression
+
+    init() throws {
+        sessionHeading = try compileRegex(#"^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})(?:\s+(.*))?$"#)
+        linkLine = try compileRegex(#"^\s*-\s+(.+)$"#)
+        nestedLink = try compileRegex(#"^\s{4}-\s+(.+)$"#)
+        calloutStart = try compileRegex(#"^>\s*\[!"#)
+        goals = try compileRegex(#"^>\s*\[!info\]\s*Goals"#, options: .caseInsensitive)
+        num = try compileRegex(#"^\d+\.\s*(.*)$"#)
+        url = try compileRegex(#"^https?://"#)
+        learning = try compileRegex(#"^\s*-\s+(.*)$"#)
+        section = try compileRegex(#"^##\s"#)
+        summary = try compileRegex(#"^>\s*\[!summary\]"#, options: .caseInsensitive)
+        problem = try compileRegex(#"^>\s*\[!question\]"#, options: .caseInsensitive)
+        approach = try compileRegex(#"^>\s*\[!info\]\s*Approach"#, options: .caseInsensitive)
+        linksSection = try compileRegex(#"^##\s+Links\s*$"#, options: .caseInsensitive)
+        learningsSection = try compileRegex(#"^##\s+Learnings\s*$"#, options: .caseInsensitive)
+        sessionsSection = try compileRegex(#"^##\s+Sessions\s*$"#, options: .caseInsensitive)
+    }
+}
+
+private func extractCallout(lines: [String], pattern: NSRegularExpression, calloutStart: NSRegularExpression) -> String {
     var content: [String] = []
     var inBlock = false
     for line in lines {
@@ -13,7 +52,7 @@ private func extractCallout(lines: [String], pattern: NSRegularExpression) -> St
             inBlock = true
             continue
         }
-        if inBlock, calloutStartPattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { break }
+        if inBlock, calloutStart.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { break }
         if inBlock, line.hasPrefix(">") {
             // Drop "> " (two chars) so round-trip preserves single space after >
             let rest = line.dropFirst()
@@ -29,20 +68,18 @@ private func extractCallout(lines: [String], pattern: NSRegularExpression) -> St
     return content.joined(separator: "\n")
 }
 
-private func extractGoals(lines: [String]) -> [String] {
-    let goalsRe = try! NSRegularExpression(pattern: #"^>\s*\[!info\]\s*Goals"#, options: .caseInsensitive)
+private func extractGoals(lines: [String], p: NotesPatterns) -> [String] {
     var goals: [String] = []
     var inBlock = false
     for line in lines {
-        if goalsRe.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+        if p.goals.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
             inBlock = true
             continue
         }
-        if inBlock, calloutStartPattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { break }
+        if inBlock, p.calloutStart.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { break }
         if inBlock, line.hasPrefix(">") {
             let rest = line.dropFirst().trimmingCharacters(in: .whitespaces)
-            let numRe = try! NSRegularExpression(pattern: #"^\d+\.\s*(.*)$"#)
-            if let m = numRe.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)),
+            if let m = p.num.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)),
                let r = Range(m.range(at: 1), in: rest) {
                 goals.append(String(rest[r]))
             }
@@ -53,13 +90,12 @@ private func extractGoals(lines: [String]) -> [String] {
     return goals.isEmpty ? ["", "", ""] : goals
 }
 
-private func parseLinksBlock(text: String) -> [LinkEntry] {
+private func parseLinksBlock(text: String, p: NotesPatterns) -> [LinkEntry] {
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     var entries: [LinkEntry] = []
     var i = 0
-    let urlPattern = try! NSRegularExpression(pattern: #"^https?://"#)
     while i < lines.count {
-        guard let m = linkLinePattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
+        guard let m = p.linkLine.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
               let r = Range(m.range(at: 1), in: lines[i]) else {
             i += 1
             continue
@@ -71,7 +107,7 @@ private func parseLinksBlock(text: String) -> [LinkEntry] {
             continue
         }
         let colonIdx = part.firstIndex(of: ":")
-        let isUrl = urlPattern.firstMatch(in: part, range: NSRange(part.startIndex..., in: part)) != nil
+        let isUrl = p.url.firstMatch(in: part, range: NSRange(part.startIndex..., in: part)) != nil
         if let ci = colonIdx, ci > part.startIndex, !isUrl {
             let label = String(part[..<ci])
             let url = String(part[part.index(after: ci)...]).trimmingCharacters(in: .whitespaces)
@@ -82,7 +118,7 @@ private func parseLinksBlock(text: String) -> [LinkEntry] {
             var children: [LinkEntry] = []
             i += 1
             while i < lines.count,
-                  let nm = nestedLinkPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
+                  let nm = p.nestedLink.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
                   let nr = Range(nm.range(at: 1), in: lines[i]) {
                 children.append(LinkEntry(url: String(lines[i][nr])))
                 i += 1
@@ -95,24 +131,22 @@ private func parseLinksBlock(text: String) -> [LinkEntry] {
     return entries.isEmpty ? [LinkEntry()] : entries
 }
 
-private func parseLearningsBlock(text: String) -> [String] {
-    let learningRe = try! NSRegularExpression(pattern: #"^\s*-\s+(.*)$"#)
+private func parseLearningsBlock(text: String, p: NotesPatterns) -> [String] {
     let items = text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line -> String? in
         let lineStr = String(line)
-        guard let m = learningRe.firstMatch(in: lineStr, range: NSRange(lineStr.startIndex..., in: lineStr)),
+        guard let m = p.learning.firstMatch(in: lineStr, range: NSRange(lineStr.startIndex..., in: lineStr)),
               let r = Range(m.range(at: 1), in: lineStr) else { return nil }
         return String(lineStr[r])
     }
     return items.isEmpty ? [""] : items
 }
 
-private func parseSessionsBlock(text: String) -> [Session] {
+private func parseSessionsBlock(text: String, p: NotesPatterns) -> [Session] {
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     var sessions: [Session] = []
     var i = 0
-    let sectionRe = try! NSRegularExpression(pattern: #"^##\s"#)
     while i < lines.count {
-        guard let m = sessionHeadingPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
+        guard let m = p.sessionHeading.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])),
               let r1 = Range(m.range(at: 1), in: lines[i]),
               let r2 = Range(m.range(at: 2), in: lines[i]),
               let r3 = Range(m.range(at: 3), in: lines[i]),
@@ -130,8 +164,8 @@ private func parseSessionsBlock(text: String) -> [Session] {
         i += 1
         var bodyLines: [String] = []
         while i < lines.count,
-              sessionHeadingPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil,
-              sectionRe.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil {
+              p.sessionHeading.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil,
+              p.section.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil {
             bodyLines.append(lines[i])
             i += 1
         }
@@ -143,26 +177,19 @@ private func parseSessionsBlock(text: String) -> [Session] {
     return sessions
 }
 
-public func parseNotes(markdown: String) -> ProjectNotes {
+public func parseNotes(markdown: String) throws -> ProjectNotes {
+    let patterns = try NotesPatterns()
     let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     let title = lines.first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) } ?? ""
 
-    let summaryRe = try! NSRegularExpression(pattern: #"^>\s*\[!summary\]"#, options: .caseInsensitive)
-    let problemRe = try! NSRegularExpression(pattern: #"^>\s*\[!question\]"#, options: .caseInsensitive)
-    let approachRe = try! NSRegularExpression(pattern: #"^>\s*\[!info\]\s*Approach"#, options: .caseInsensitive)
+    let summary = extractCallout(lines: lines, pattern: patterns.summary, calloutStart: patterns.calloutStart)
+    let problem = extractCallout(lines: lines, pattern: patterns.problem, calloutStart: patterns.calloutStart)
+    let goals = extractGoals(lines: lines, p: patterns)
+    let approach = extractCallout(lines: lines, pattern: patterns.approach, calloutStart: patterns.calloutStart)
 
-    let summary = extractCallout(lines: lines, pattern: summaryRe)
-    let problem = extractCallout(lines: lines, pattern: problemRe)
-    let goals = extractGoals(lines: lines)
-    let approach = extractCallout(lines: lines, pattern: approachRe)
-
-    let linksSectionRe = try! NSRegularExpression(pattern: #"^##\s+Links\s*$"#, options: .caseInsensitive)
-    let learningsSectionRe = try! NSRegularExpression(pattern: #"^##\s+Learnings\s*$"#, options: .caseInsensitive)
-    let sessionsSectionRe = try! NSRegularExpression(pattern: #"^##\s+Sessions\s*$"#, options: .caseInsensitive)
-
-    let linksStart = lines.firstIndex { linksSectionRe.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
-    let learningsStart = lines.firstIndex { learningsSectionRe.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
-    let sessionsStart = lines.firstIndex { sessionsSectionRe.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let linksStart = lines.firstIndex { patterns.linksSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let learningsStart = lines.firstIndex { patterns.learningsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let sessionsStart = lines.firstIndex { patterns.sessionsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
 
     let linksText: String
     if linksStart >= 0, learningsStart > linksStart {
@@ -190,8 +217,8 @@ public func parseNotes(markdown: String) -> ProjectNotes {
         problem: problem,
         goals: goals,
         approach: approach,
-        links: parseLinksBlock(text: linksText),
-        learnings: parseLearningsBlock(text: learningsText),
-        sessions: parseSessionsBlock(text: sessionsText)
+        links: parseLinksBlock(text: linksText, p: patterns),
+        learnings: parseLearningsBlock(text: learningsText, p: patterns),
+        sessions: parseSessionsBlock(text: sessionsText, p: patterns)
     )
 }

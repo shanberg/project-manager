@@ -157,12 +157,22 @@ public func getConfigValue(config: PmConfig, key: String) -> Any? {
 
 public func setConfigValue(config: inout PmConfig, key: String, value: Any) throws {
     switch key {
-    case "activePath": config.activePath = value as! String
-    case "archivePath": config.archivePath = value as! String
-    case "paraPath": config.paraPath = value as? String
-    case "domains": config.domains = value as! [String: String]
-    case "subfolders": config.subfolders = value as! [String]
-    case "notesTemplatePath": config.notesTemplatePath = (value as? String).flatMap { $0.isEmpty ? nil : $0 }
+    case "activePath":
+        guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
+        config.activePath = v
+    case "archivePath":
+        guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
+        config.archivePath = v
+    case "paraPath":
+        config.paraPath = value as? String
+    case "domains":
+        guard let v = value as? [String: String] else { throw PmError.invalidConfigValue(key: key, expectedType: "object (key-value pairs)") }
+        config.domains = v
+    case "subfolders":
+        guard let v = value as? [String] else { throw PmError.invalidConfigValue(key: key, expectedType: "array of strings") }
+        config.subfolders = v
+    case "notesTemplatePath":
+        config.notesTemplatePath = (value as? String).flatMap { $0.isEmpty ? nil : $0 }
     default: throw PmError.unknownConfigKey(key)
     }
 }
@@ -173,11 +183,13 @@ public enum PmError: Error, CustomStringConvertible {
     case activePathNotFound(String)
     case archivePathNotFound(String)
     case unknownConfigKey(String)
+    case invalidConfigValue(key: String, expectedType: String)
     case projectNotFound(String)
     case ambiguousProject(String)
     case notesNotFound(String)
     case notesAlreadyExists(String)
     case notesTemplateNotFound(String)
+    case notesRegexError(pattern: String)
 
     public var description: String {
         switch self {
@@ -186,11 +198,13 @@ public enum PmError: Error, CustomStringConvertible {
         case .activePathNotFound(let path): return "Active path does not exist or is not a directory: \(path)"
         case .archivePathNotFound(let path): return "Archive path does not exist or is not a directory: \(path)"
         case .unknownConfigKey(let k): return "Unknown key: \(k)"
+        case .invalidConfigValue(let k, let expected): return "Invalid value for \(k): expected \(expected)"
         case .projectNotFound(let q): return "No project found matching: \(q)"
         case .ambiguousProject(let q): return "Ambiguous match. Multiple projects start with: \(q)"
         case .notesNotFound(let path): return "Notes file not found. Expected: \(path)"
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"
         case .notesTemplateNotFound(let path): return "Notes template file not found: \(path)"
+        case .notesRegexError(let pattern): return "Invalid notes regex pattern: \(pattern)"
         }
     }
 }

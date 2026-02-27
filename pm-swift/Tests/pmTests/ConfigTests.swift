@@ -75,4 +75,26 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(paths.activePath, "/tmp/active")
         XCTAssertEqual(paths.archivePath, "/tmp/archive")
     }
+
+    /// setConfigValue throws invalidConfigValue when value has wrong type (no crash from as!).
+    func testSetConfigValueInvalidTypeThrows() {
+        var config = PmConfig(
+            activePath: "/a",
+            archivePath: "/b",
+            domains: defaultDomains,
+            subfolders: defaultSubfolders
+        )
+        XCTAssertThrowsError(try setConfigValue(config: &config, key: "activePath", value: 123)) { err in
+            guard case PmError.invalidConfigValue("activePath", "String") = err else {
+                XCTFail("Expected invalidConfigValue for activePath, got \(err)")
+                return
+            }
+        }
+        XCTAssertThrowsError(try setConfigValue(config: &config, key: "domains", value: "not an object")) { err in
+            guard case PmError.invalidConfigValue(let k, let exp) = err, k == "domains", exp.contains("object") else {
+                XCTFail("Expected invalidConfigValue for domains, got \(err)")
+                return
+            }
+        }
+    }
 }

@@ -1,8 +1,12 @@
 import Foundation
 
-private let todoLinePattern = try! NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
-
-public func parseTodos(notes: ProjectNotes) -> [Todo] {
+public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
+    let todoLinePattern: NSRegularExpression
+    do {
+        todoLinePattern = try NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+    } catch {
+        throw PmError.notesRegexError(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+    }
     var todos: [Todo] = []
     for session in notes.sessions {
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"

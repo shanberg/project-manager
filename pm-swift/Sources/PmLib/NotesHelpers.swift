@@ -42,7 +42,7 @@ public func resolveNotesPath(projectPath: String) -> String? {
 
 public func readNotesFile(notesPath: String) throws -> ProjectNotes {
     let content = try String(contentsOfFile: notesPath, encoding: .utf8)
-    return parseNotes(markdown: content)
+    return try parseNotes(markdown: content)
 }
 
 public func writeNotesFile(notesPath: String, notes: ProjectNotes) throws {

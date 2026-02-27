@@ -43,8 +43,8 @@ final class NotesRoundTripTests: XCTestCase {
 """
 
     /// Parse extracts expected content; then round-trip preserves it.
-    func testRoundTrip() {
-        let parsed = parseNotes(markdown: Self.fixtureMarkdown)
+    func testRoundTrip() throws {
+        let parsed = try parseNotes(markdown: Self.fixtureMarkdown)
         // Assert parse actually extracted the fixture content (not just idempotence of empty)
         XCTAssertEqual(parsed.title, "My Project")
         XCTAssertEqual(parsed.summary.trimmingCharacters(in: .whitespacesAndNewlines), "One line summary.")
@@ -60,16 +60,16 @@ final class NotesRoundTripTests: XCTestCase {
         XCTAssertTrue(parsed.sessions[1].body.contains("[x] Done item"))
 
         let serialized = serializeNotes(parsed)
-        let reparsed = parseNotes(markdown: serialized)
+        let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Round-trip parse → serialize → parse should equal original")
     }
 
-    func testEmptyTemplateRoundTrip() {
+    func testEmptyTemplateRoundTrip() throws {
         let template = notesTemplate.replacingOccurrences(of: "{{title}}", with: "Test")
-        let parsed = parseNotes(markdown: template)
+        let parsed = try parseNotes(markdown: template)
         XCTAssertEqual(parsed.title, "Test")
         let serialized = serializeNotes(parsed)
-        let reparsed = parseNotes(markdown: serialized)
+        let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Empty template parse → serialize → parse should equal original")
     }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import PmLib
 
 func stderr(_ msg: String) {
@@ -304,7 +303,7 @@ func runNotesShow(args: [String]) {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
         let notes = try readNotesFile(notesPath: notesPath)
-        let todos = parseTodos(notes: notes)
+        let todos = try parseTodos(notes: notes)
         let output = NotesShowOutput(notes: notes, todos: todos)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -331,87 +330,6 @@ func runNotesWrite(args: [String]) {
         }
         let notes = try JSONDecoder().decode(ProjectNotes.self, from: stdinData)
         try writeNotesFile(notesPath: notesPath, notes: notes)
-    } catch { fail(error) }
-}
-
-func runNotesShowWindow(args: [String]) {
-    guard let project = args.first else {
-        stderr("Usage: pm notes show-window <project>")
-        exit(1)
-    }
-    do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        let rawContent = try String(contentsOfFile: notesPath, encoding: .utf8)
-        let windowTitle = (projectPath as NSString).lastPathComponent
-
-        let app = NSApplication.shared
-        app.setActivationPolicy(.regular)
-        app.activate(ignoringOtherApps: true)
-
-        class NotesWindowDelegate: NSObject, NSApplicationDelegate {
-            let content: String
-            let title: String
-            var window: NSWindow?
-
-            init(content: String, title: String) {
-                self.content = content
-                self.title = title
-            }
-
-            func applicationDidFinishLaunching(_ notification: Notification) {
-                let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-                let width: CGFloat = 700
-                let height: CGFloat = 500
-                let x = visibleFrame.midX - width / 2
-                let y = visibleFrame.midY - height / 2
-                let window = NSWindow(
-                    contentRect: NSRect(x: x, y: y, width: width, height: height),
-                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                    backing: .buffered,
-                    defer: false,
-                    screen: nil
-                )
-                window.title = title
-                window.isReleasedWhenClosed = false
-
-                let scrollView = NSScrollView(frame: window.contentView!.bounds)
-                scrollView.autoresizingMask = [.width, .height]
-                scrollView.hasVerticalScroller = true
-                scrollView.hasHorizontalScroller = false
-                scrollView.autohidesScrollers = true
-                scrollView.borderType = .noBorder
-                scrollView.drawsBackground = true
-                scrollView.backgroundColor = .textBackgroundColor
-
-                let textView = NSTextView(frame: scrollView.bounds)
-                textView.isEditable = false
-                textView.isSelectable = true
-                textView.drawsBackground = true
-                textView.backgroundColor = .textBackgroundColor
-                textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-                textView.string = content
-                textView.autoresizingMask = [.width]
-                textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
-                textView.textContainer?.widthTracksTextView = true
-
-                scrollView.documentView = textView
-                window.contentView = scrollView
-
-                self.window = window
-                window.makeKeyAndOrderFront(nil)
-            }
-
-            func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-                true
-            }
-        }
-
-        let delegate = NotesWindowDelegate(content: rawContent, title: windowTitle)
-        app.delegate = delegate
-        app.run()
     } catch { fail(error) }
 }
 
@@ -487,7 +405,7 @@ case "config":
     }
 case "notes":
     guard let sub = rest.first else {
-        stderr("Usage: pm notes <path|create|show|show-window|write|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
         exit(1)
     }
     switch sub {
@@ -497,8 +415,6 @@ case "notes":
         runNotesCreate(args: Array(rest.dropFirst()))
     case "show":
         runNotesShow(args: Array(rest.dropFirst()))
-    case "show-window":
-        runNotesShowWindow(args: Array(rest.dropFirst()))
     case "write":
         runNotesWrite(args: Array(rest.dropFirst()))
     case "current-day":
@@ -521,7 +437,7 @@ case "notes":
         }
         runNotesSessionAdd(args: addArgs, dateStr: dateStr)
     default:
-        stderr("Usage: pm notes <path|create|show|show-window|write|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
         exit(1)
     }
 default:
