@@ -2,7 +2,7 @@ import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import os from "os";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import type { PreferenceValues } from "./types";
 
@@ -113,6 +113,11 @@ export async function runPmWithPrefs(
   return runPm(args, buildEnv(prefs), prefs.pmCliPath);
 }
 
+/** Normalize path for config (expand ~ so CLI and Raycast compare the same). */
+function normalizedPath(p: string): string {
+  return path.normalize(expandPath(p));
+}
+
 export async function ensureConfig(
   activePath: string,
   archivePath: string,
@@ -120,17 +125,35 @@ export async function ensureConfig(
 ): Promise<void> {
   const configDir = getConfigDir(configPathOverride);
   const configPath = path.join(configDir, "config.json");
-
-  if (existsSync(configPath)) return;
-
-  const config = {
-    activePath,
-    archivePath,
-    domains: DEFAULT_DOMAINS,
-    subfolders: DEFAULT_SUBFOLDERS,
-  };
   await mkdir(configDir, { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+  const active = normalizedPath(activePath);
+  const archive = normalizedPath(archivePath);
+
+  if (existsSync(configPath)) {
+    try {
+      const raw = await readFile(configPath, "utf-8");
+      const config = JSON.parse(raw) as Record<string, unknown>;
+      const currentActive = config.activePath && typeof config.activePath === "string" ? normalizedPath(config.activePath) : "";
+      const currentArchive = config.archivePath && typeof config.archivePath === "string" ? normalizedPath(config.archivePath) : "";
+      if (currentActive === active && currentArchive === archive) return;
+      config.activePath = active;
+      config.archivePath = archive;
+      await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+    } catch {
+      // If read/parse fails, overwrite with a valid config below
+    }
+  }
+
+  if (!existsSync(configPath)) {
+    const config = {
+      activePath: active,
+      archivePath: archive,
+      domains: DEFAULT_DOMAINS,
+      subfolders: DEFAULT_SUBFOLDERS,
+    };
+    await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+  }
 }
 
 export async function runPm(

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import PmLib
 
 func stderr(_ msg: String) {
@@ -17,6 +18,21 @@ func fail(_ err: Error) -> Never {
         stderr(err.localizedDescription)
     }
     exit(1)
+}
+
+/// True if the path exists but listing its contents fails with a permission error (e.g. macOS Full Disk Access).
+private func isPermissionDenied(path: String) -> Bool {
+    let url = URL(fileURLWithPath: path)
+    do {
+        _ = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        return false
+    } catch {
+        let ns = error as NSError
+        // NSPOSIXErrorDomain, code 1 = EPERM (Operation not permitted)
+        if ns.domain == NSPOSIXErrorDomain && ns.code == 1 { return true }
+        if ns.domain == NSCocoaErrorDomain && ns.code == 257 { return true } // NSFileReadNoPermission
+        return false
+    }
 }
 
 func runList(scope: String) {
@@ -60,6 +76,19 @@ func runList(scope: String) {
                 print(scope == "all" ? " \(name)" : name)
             }
             if scope == "all" && active.isEmpty { print("  (none)") }
+            if active.isEmpty && (scope == "active" || scope == "all") {
+                var isDir: ObjCBool = false
+                if !FileManager.default.fileExists(atPath: paths.activePath, isDirectory: &isDir) || !isDir.boolValue {
+                    stderr("Active path does not exist or is not a directory: \(paths.activePath)")
+                } else if isPermissionDenied(path: paths.activePath) {
+                    stderr("Permission denied: cannot read \(paths.activePath)")
+                    stderr("Grant Full Disk Access to Terminal (or Cursor) in System Settings → Privacy & Security → Full Disk Access.")
+                } else {
+                    stderr("(no active projects in: \(paths.activePath))")
+                    stderr("(project folders must match: <domain>-<number> <title>, e.g. W-1 My Project)")
+                    stderr("(if Raycast shows projects, run List Projects there once to sync paths to this config)")
+                }
+            }
         }
         if scope == "archive" || scope == "all" {
             if scope == "all" { print("\nArchive:") }
@@ -68,6 +97,17 @@ func runList(scope: String) {
             }
             if scope == "archive" && archive.isEmpty { print("(none)") }
             if scope == "all" && archive.isEmpty { print("  (none)") }
+            if archive.isEmpty && (scope == "archive" || scope == "all") {
+                var isDir: ObjCBool = false
+                if !FileManager.default.fileExists(atPath: paths.archivePath, isDirectory: &isDir) || !isDir.boolValue {
+                    stderr("Archive path does not exist or is not a directory: \(paths.archivePath)")
+                } else if isPermissionDenied(path: paths.archivePath) {
+                    stderr("Permission denied: cannot read \(paths.archivePath)")
+                    stderr("Grant Full Disk Access to Terminal (or Cursor) in System Settings → Privacy & Security → Full Disk Access.")
+                } else {
+                    stderr("(no archived projects in: \(paths.archivePath))")
+                }
+            }
         }
     } catch { fail(error) }
 }
@@ -294,6 +334,87 @@ func runNotesWrite(args: [String]) {
     } catch { fail(error) }
 }
 
+func runNotesShowWindow(args: [String]) {
+    guard let project = args.first else {
+        stderr("Usage: pm notes show-window <project>")
+        exit(1)
+    }
+    do {
+        let projectPath = try resolveProjectPath(nameOrPrefix: project)
+        guard let notesPath = resolveNotesPath(projectPath: projectPath) else {
+            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
+        }
+        let rawContent = try String(contentsOfFile: notesPath, encoding: .utf8)
+        let windowTitle = (projectPath as NSString).lastPathComponent
+
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        app.activate(ignoringOtherApps: true)
+
+        class NotesWindowDelegate: NSObject, NSApplicationDelegate {
+            let content: String
+            let title: String
+            var window: NSWindow?
+
+            init(content: String, title: String) {
+                self.content = content
+                self.title = title
+            }
+
+            func applicationDidFinishLaunching(_ notification: Notification) {
+                let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+                let width: CGFloat = 700
+                let height: CGFloat = 500
+                let x = visibleFrame.midX - width / 2
+                let y = visibleFrame.midY - height / 2
+                let window = NSWindow(
+                    contentRect: NSRect(x: x, y: y, width: width, height: height),
+                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                    backing: .buffered,
+                    defer: false,
+                    screen: nil
+                )
+                window.title = title
+                window.isReleasedWhenClosed = false
+
+                let scrollView = NSScrollView(frame: window.contentView!.bounds)
+                scrollView.autoresizingMask = [.width, .height]
+                scrollView.hasVerticalScroller = true
+                scrollView.hasHorizontalScroller = false
+                scrollView.autohidesScrollers = true
+                scrollView.borderType = .noBorder
+                scrollView.drawsBackground = true
+                scrollView.backgroundColor = .textBackgroundColor
+
+                let textView = NSTextView(frame: scrollView.bounds)
+                textView.isEditable = false
+                textView.isSelectable = true
+                textView.drawsBackground = true
+                textView.backgroundColor = .textBackgroundColor
+                textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+                textView.string = content
+                textView.autoresizingMask = [.width]
+                textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
+                textView.textContainer?.widthTracksTextView = true
+
+                scrollView.documentView = textView
+                window.contentView = scrollView
+
+                self.window = window
+                window.makeKeyAndOrderFront(nil)
+            }
+
+            func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+                true
+            }
+        }
+
+        let delegate = NotesWindowDelegate(content: rawContent, title: windowTitle)
+        app.delegate = delegate
+        app.run()
+    } catch { fail(error) }
+}
+
 func runNotesSessionAdd(args: [String], dateStr: String?) {
     guard let project = args.first else {
         stderr("Usage: pm notes session add <project> [label]")
@@ -366,7 +487,7 @@ case "config":
     }
 case "notes":
     guard let sub = rest.first else {
-        stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|show-window|write|current-day|session> ...")
         exit(1)
     }
     switch sub {
@@ -376,6 +497,8 @@ case "notes":
         runNotesCreate(args: Array(rest.dropFirst()))
     case "show":
         runNotesShow(args: Array(rest.dropFirst()))
+    case "show-window":
+        runNotesShowWindow(args: Array(rest.dropFirst()))
     case "write":
         runNotesWrite(args: Array(rest.dropFirst()))
     case "current-day":
@@ -398,7 +521,7 @@ case "notes":
         }
         runNotesSessionAdd(args: addArgs, dateStr: dateStr)
     default:
-        stderr("Usage: pm notes <path|create|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|show-window|write|current-day|session> ...")
         exit(1)
     }
 default:

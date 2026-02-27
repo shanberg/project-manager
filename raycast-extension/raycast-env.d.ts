@@ -14,7 +14,7 @@ type ExtensionPreferences = {
   "archivePath": string,
   /** Config Path Override - Override pm config location (default: ~/.config/pm). Leave empty to use default. */
   "configPath"?: string,
-  /** pm CLI Path - Full path to pm binary (e.g. ~/dev/project-manager/pm-swift/.build/release/pm). Leave empty to use pm from PATH. */
+  /** pm CLI Path - Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect. */
   "pmCliPath"?: string,
   /** Obsidian Vault (Advanced URI) - Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open. */
   "obsidianVault"?: string,
