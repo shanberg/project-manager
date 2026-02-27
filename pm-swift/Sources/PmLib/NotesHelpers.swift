@@ -1,19 +1,23 @@
 import Foundation
 
 /// Parse a YYYY-MM-DD string for session date (e.g. from --date). Throws PmError.invalidSessionDate if invalid.
+/// Date-only strings are interpreted as noon UTC so the calendar day is stable when formatted in any timezone.
 public func parseSessionDateArgument(_ string: String) throws -> Date {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withFullDate]
     guard let date = formatter.date(from: string) else {
         throw PmError.invalidSessionDate(value: string)
     }
-    return date
+    // Noon UTC so the calendar day is stable when formatted in any timezone (matches Raycast session date).
+    return date.addingTimeInterval(12 * 3600)
 }
 
 /// Session date string for notes headings and session matching. Must match Raycast’s formatSessionDate (en-US short) so that addTodoToTodaySession works.
+/// Uses UTC so the same calendar day is formatted identically everywhere (deterministic tests and stable session headings).
 public func formatSessionDate(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
+    formatter.timeZone = TimeZone(identifier: "UTC")
     formatter.dateFormat = "EEE, MMM d, yyyy"
     return formatter.string(from: date)
 }
@@ -29,18 +33,31 @@ public func addSession(notes: ProjectNotes, label: String, date: Date? = nil) ->
     return out
 }
 
+/// Project title derived from folder name (part after first space in "D-1 Title"). Falls back to full folder name if no space.
+public func projectTitle(fromFolderName folderName: String) -> String {
+    let spaceIdx = folderName.firstIndex(of: " ")
+    return spaceIdx.map { String(folderName[folderName.index(after: $0)...]) } ?? folderName
+}
+
 public func getNotesPath(projectPath: String) -> String {
     let folderName = (projectPath as NSString).lastPathComponent
-    let spaceIdx = folderName.firstIndex(of: " ")
-    let title = spaceIdx.map { String(folderName[folderName.index(after: $0)...]) } ?? folderName
+    let title = projectTitle(fromFolderName: folderName)
     return (projectPath as NSString).appendingPathComponent("docs/Notes - \(title).md")
 }
 
-public func resolveNotesPath(projectPath: String) -> String? {
+/// Resolve the path to the project's notes file (canonical or single/first matching Notes - *.md in docs/).
+/// Returns nil if no notes file exists; throws on I/O errors (e.g. permission denied listing docs/).
+public func resolveNotesPath(projectPath: String) throws -> String? {
     let canonical = getNotesPath(projectPath: projectPath)
     if FileManager.default.fileExists(atPath: canonical) { return canonical }
     let docsPath = (projectPath as NSString).appendingPathComponent("docs")
-    guard let entries = try? FileManager.default.contentsOfDirectory(atPath: docsPath) else { return nil }
+    let entries: [String]
+    do {
+        entries = try FileManager.default.contentsOfDirectory(atPath: docsPath)
+    } catch {
+        if isFileNotFoundError(error) { return nil }
+        throw PmError.cannotListDirectory(path: docsPath, message: (error as NSError).localizedDescription)
+    }
     let notesFiles = entries.filter { $0.hasPrefix("Notes - ") && $0.hasSuffix(".md") }
     if notesFiles.count == 1 { return (docsPath as NSString).appendingPathComponent(notesFiles[0]) }
     if notesFiles.count > 1 {
@@ -107,10 +124,11 @@ public let notesTemplate = """
 ## Sessions
 """
 
+/// Create a notes file from the configured template. Requires a valid config and existing active/archive paths
+/// (uses `loadConfigAndPaths()` to resolve the template path). Throws if the notes file already exists.
 public func createNotesFromTemplate(projectPath: String) throws -> String {
     let folderName = (projectPath as NSString).lastPathComponent
-    let spaceIdx = folderName.firstIndex(of: " ")
-    let title = spaceIdx.map { String(folderName[folderName.index(after: $0)...]) } ?? folderName
+    let title = projectTitle(fromFolderName: folderName)
     let notesPath = getNotesPath(projectPath: projectPath)
     if FileManager.default.fileExists(atPath: notesPath) {
         throw PmError.notesAlreadyExists(notesPath)

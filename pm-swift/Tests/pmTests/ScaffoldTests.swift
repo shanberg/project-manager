@@ -22,7 +22,7 @@ final class ScaffoldTests: XCTestCase {
         let projectPath = try createProject(config: config, paths: paths, domainCode: "W", title: "Test Project")
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: projectPath))
-        XCTAssertTrue(projectPath.hasSuffix("W-1 Test Project") || projectPath.contains("W-1 Test Project"))
+        XCTAssertEqual((projectPath as NSString).lastPathComponent, "W-1 Test Project", "Project folder name must be W-1 Test Project")
         for sub in defaultSubfolders {
             let subPath = (projectPath as NSString).appendingPathComponent(sub)
             var isDir: ObjCBool = false

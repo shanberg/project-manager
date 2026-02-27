@@ -2,15 +2,15 @@ import XCTest
 @testable import PmLib
 
 final class NumberingTests: XCTestCase {
-    func testParseProjectNumbersEmptyFolderList() {
-        let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: [], domainCode: "W")
+    func testParseProjectNumbersEmptyFolderList() throws {
+        let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: [], domainCode: "W")
         XCTAssertEqual(numbers, [])
         XCTAssertEqual(observedMinDigits, 0)
     }
 
-    func testParseProjectNumbers() {
+    func testParseProjectNumbers() throws {
         let names = ["W-1 Foo", "W-2 Bar", "W-10 Baz", "P-01 Personal"]
-        let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: names, domainCode: "W")
+        let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: names, domainCode: "W")
         XCTAssertEqual(numbers.sorted(), [1, 2, 10])
         XCTAssertEqual(observedMinDigits, 2)
     }
@@ -26,15 +26,10 @@ final class NumberingTests: XCTestCase {
         let (two, twoFmt) = nextNumberAndPadding(existingNumbers: [1], observedMinDigits: 2)
         XCTAssertEqual(two, 2)
         XCTAssertEqual(twoFmt, "02")
-    }
-
-    func testMatchProject() {
-        let folders = ["W-1 Alpha", "W-2 Beta", "W-10 Gamma"]
-        XCTAssertEqual(matchProject(folders: folders, query: "W-1 Alpha"), "W-1 Alpha")
-        XCTAssertEqual(matchProject(folders: folders, query: "W-2"), "W-2 Beta")
-        XCTAssertNil(matchProject(folders: folders, query: "W-1")) // ambiguous (W-1 Alpha and W-10 Gamma)
-        XCTAssertNil(matchProject(folders: folders, query: "X-1"))
-        XCTAssertNil(matchProject(folders: folders, query: ""))
+        // At 100 with 2-digit convention: no leading zero (README: "W-01 … then W-100 when you hit 100").
+        let (hundred, hundredFmt) = nextNumberAndPadding(existingNumbers: [1, 2, 99], observedMinDigits: 2)
+        XCTAssertEqual(hundred, 100)
+        XCTAssertEqual(hundredFmt, "100")
     }
 
     /// getNextFormattedNumber throws when a path cannot be listed (e.g. does not exist).
@@ -46,6 +41,17 @@ final class NumberingTests: XCTestCase {
                 return
             }
             XCTAssertEqual(path, notExist)
+        }
+    }
+
+    /// parseProjectNumbers throws invalidProjectPattern when the pattern is invalid (e.g. unclosed bracket).
+    func testParseProjectNumbersThrowsWhenPatternInvalid() {
+        XCTAssertThrowsError(try parseProjectNumbersWithPattern(folderNames: [], pattern: "[")) { err in
+            guard case PmError.invalidProjectPattern(let pattern) = err else {
+                XCTFail("Expected invalidProjectPattern, got \(err)")
+                return
+            }
+            XCTAssertEqual(pattern, "[")
         }
     }
 }

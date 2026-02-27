@@ -64,10 +64,16 @@ final class NotesRoundTripTests: XCTestCase {
         XCTAssertEqual(parsed, reparsed, "Round-trip parse → serialize → parse should equal original")
     }
 
+    /// Empty template parses to expected shape (sections present, empty content); round-trip preserves it.
     func testEmptyTemplateRoundTrip() throws {
         let template = notesTemplate.replacingOccurrences(of: "{{title}}", with: "Test")
         let parsed = try parseNotes(markdown: template)
         XCTAssertEqual(parsed.title, "Test")
+        // Assert empty template produces expected structure (not just title).
+        XCTAssertEqual(parsed.goals.count, 3, "Goals section should parse to 3 slots")
+        XCTAssertTrue(parsed.links.count >= 1, "Links section should parse")
+        XCTAssertTrue(parsed.learnings.count >= 1, "Learnings section should parse")
+        XCTAssertEqual(parsed.sessions.count, 0, "Empty template has no sessions")
         let serialized = serializeNotes(parsed)
         let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Empty template parse → serialize → parse should equal original")

@@ -1,11 +1,27 @@
 import Foundation
 
-public func parseProjectNumbers(folderNames: [String], domainCode: String) -> (numbers: [Int], observedMinDigits: Int) {
+/// Build the project-folder regex pattern for a domain code. Internal for testing invalid-pattern error.
+internal func buildProjectNumberPattern(domainCode: String) -> String {
+    let escaped = NSRegularExpression.escapedPattern(for: domainCode)
+    return "^\(escaped)-(\\d+)\\s+.+$"
+}
+
+/// Extract project numbers and observed padding from folder names matching domain. Throws if the pattern for domainCode is invalid.
+public func parseProjectNumbers(folderNames: [String], domainCode: String) throws -> (numbers: [Int], observedMinDigits: Int) {
+    let pattern = buildProjectNumberPattern(domainCode: domainCode)
+    return try parseProjectNumbersWithPattern(folderNames: folderNames, pattern: pattern)
+}
+
+/// Internal overload for testing: pass a raw pattern to trigger invalidProjectPattern when pattern is invalid.
+internal func parseProjectNumbersWithPattern(folderNames: [String], pattern: String) throws -> (numbers: [Int], observedMinDigits: Int) {
     var numbers: [Int] = []
     var observedMinDigits = 0
-    let escaped = NSRegularExpression.escapedPattern(for: domainCode)
-    let pattern = "^\(escaped)-(\\d+)\\s+.+$"
-    guard let re = try? NSRegularExpression(pattern: pattern) else { return ([], 0) }
+    let re: NSRegularExpression
+    do {
+        re = try NSRegularExpression(pattern: pattern)
+    } catch {
+        throw PmError.invalidProjectPattern(pattern: pattern)
+    }
     for name in folderNames {
         guard let match = re.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
               let numRange = Range(match.range(at: 1), in: name) else { continue }
@@ -44,7 +60,7 @@ public func getNextFormattedNumber(activePath: String, archivePath: String, doma
             }
         }
     }
-    let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: allNames, domainCode: domainCode)
+    let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: allNames, domainCode: domainCode)
     let (_, formatted) = nextNumberAndPadding(existingNumbers: numbers, observedMinDigits: observedMinDigits)
     return formatted
 }

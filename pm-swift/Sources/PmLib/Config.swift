@@ -49,6 +49,13 @@ public func getConfigPath() -> String {
     (getConfigDir() as NSString).appendingPathComponent("config.json")
 }
 
+/// True if the error indicates "file or directory does not exist" (CocoaError.fileReadNoSuchFile).
+/// Use this instead of checking NSError.code == 260 so the intent is documented and consistent.
+internal func isFileNotFoundError(_ error: Error) -> Bool {
+    let ns = error as NSError
+    return ns.domain == NSCocoaErrorDomain && ns.code == CocoaError.Code.fileReadNoSuchFile.rawValue
+}
+
 /// Load config from disk. Returns nil only if the config file does not exist; throws on read or decode errors.
 /// Single read (no separate fileExists) and memory-mapped I/O when safe for small config files.
 public func loadConfig() throws -> PmConfig? {
@@ -58,9 +65,7 @@ public func loadConfig() throws -> PmConfig? {
     do {
         data = try Data(contentsOf: url, options: .mappedIfSafe)
     } catch {
-        let ns = error as NSError
-        // 260 = CocoaError.fileReadNoSuchFile
-        if ns.domain == NSCocoaErrorDomain && ns.code == 260 { return nil }
+        if isFileNotFoundError(error) { return nil }
         throw error
     }
     return try JSONDecoder().decode(PmConfig.self, from: data)
@@ -143,43 +148,94 @@ public enum PmConfigKey: String, CaseIterable {
     case activePath, archivePath, paraPath, domains, subfolders, notesTemplatePath
 }
 
+/// Typed result of reading a config key. Use this instead of Any? so "unknown key" and "optional key with nil" are explicit.
+public enum PmConfigValue {
+    case unknownKey
+    case string(String?)
+    case stringArray([String])
+    case stringDictionary([String: String])
+}
+
 /// Supported keys and value types (for `getConfigValue` / `setConfigValue`):
-/// - activePath, archivePath, paraPath, notesTemplatePath: String (paths support ~)
+/// - activePath, archivePath, paraPath, notesTemplatePath: String? (paths support ~; paraPath/notesTemplatePath may be nil)
 /// - domains: [String: String]
 /// - subfolders: [String]
-public func getConfigValue(config: PmConfig, key: String) -> Any? {
+/// Returns a typed value; use .unknownKey when the key is not in the config.
+public func getConfigValue(config: PmConfig, key: PmConfigKey) -> PmConfigValue {
     switch key {
-    case "activePath": return config.activePath
-    case "archivePath": return config.archivePath
-    case "paraPath": return config.paraPath as Any?
-    case "domains": return config.domains
-    case "subfolders": return config.subfolders
-    case "notesTemplatePath": return config.notesTemplatePath as Any?
-    default: return nil
+    case .activePath: return .string(config.activePath)
+    case .archivePath: return .string(config.archivePath)
+    case .paraPath: return .string(config.paraPath)
+    case .notesTemplatePath: return .string(config.notesTemplatePath)
+    case .domains: return .stringDictionary(config.domains)
+    case .subfolders: return .stringArray(config.subfolders)
     }
 }
 
-/// Set a config key. Value must match the key's type (see getConfigValue doc). Throws on unknown key or type mismatch.
-public func setConfigValue(config: inout PmConfig, key: String, value: Any) throws {
-    switch key {
-    case "activePath":
-        guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
+/// String-based overload for CLI. Returns .unknownKey when key is not a valid PmConfigKey.
+public func getConfigValue(config: PmConfig, key: String) -> PmConfigValue {
+    guard let k = PmConfigKey(rawValue: key) else { return .unknownKey }
+    return getConfigValue(config: config, key: k)
+}
+
+/// Set a config key with a typed value. Throws on type mismatch (e.g. .stringArray for .domains).
+public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmConfigValue) throws {
+    switch (key, value) {
+    case (.activePath, .string(let v)):
+        guard let v = v else { throw PmError.invalidConfigValue(key: key.rawValue, expectedType: "String") }
         config.activePath = v
-    case "archivePath":
-        guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
+    case (.archivePath, .string(let v)):
+        guard let v = v else { throw PmError.invalidConfigValue(key: key.rawValue, expectedType: "String") }
         config.archivePath = v
-    case "paraPath":
-        config.paraPath = value as? String
-    case "domains":
-        guard let v = value as? [String: String] else { throw PmError.invalidConfigValue(key: key, expectedType: "object (key-value pairs)") }
+    case (.paraPath, .string(let v)):
+        config.paraPath = v.flatMap { $0.isEmpty ? nil : $0 }
+    case (.notesTemplatePath, .string(let v)):
+        config.notesTemplatePath = v.flatMap { $0.isEmpty ? nil : $0 }
+    case (.domains, .stringDictionary(let v)):
         config.domains = v
-    case "subfolders":
-        guard let v = value as? [String] else { throw PmError.invalidConfigValue(key: key, expectedType: "array of strings") }
+    case (.subfolders, .stringArray(let v)):
         config.subfolders = v
-    case "notesTemplatePath":
-        config.notesTemplatePath = (value as? String).flatMap { $0.isEmpty ? nil : $0 }
-    default: throw PmError.unknownConfigKey(key)
+    default:
+        throw PmError.invalidConfigValue(key: key.rawValue, expectedType: typeName(for: key))
     }
+}
+
+private func typeName(for key: PmConfigKey) -> String {
+    switch key {
+    case .activePath, .archivePath, .paraPath, .notesTemplatePath: return "String"
+    case .domains: return "object (key-value pairs)"
+    case .subfolders: return "array of strings"
+    }
+}
+
+/// Extension so callers can read optional string from PmConfigValue for paraPath/notesTemplatePath.
+public extension PmConfigValue {
+    var stringValue: String? {
+        if case .string(let s) = self { return s }
+        return nil
+    }
+}
+
+/// Set a config key from CLI input (string key and untyped value). Throws on unknown key or type mismatch.
+public func setConfigValue(config: inout PmConfig, key: String, value: Any) throws {
+    guard let k = PmConfigKey(rawValue: key) else { throw PmError.unknownConfigKey(key) }
+    let typed: PmConfigValue
+    switch k {
+    case .activePath, .archivePath:
+        guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
+        typed = .string(v)
+    case .paraPath:
+        typed = .string(value as? String)
+    case .notesTemplatePath:
+        typed = .string(value as? String)
+    case .domains:
+        guard let v = value as? [String: String] else { throw PmError.invalidConfigValue(key: key, expectedType: "object (key-value pairs)") }
+        typed = .stringDictionary(v)
+    case .subfolders:
+        guard let v = value as? [String] else { throw PmError.invalidConfigValue(key: key, expectedType: "array of strings") }
+        typed = .stringArray(v)
+    }
+    try setConfigValue(config: &config, key: k, value: typed)
 }
 
 public enum PmError: Error, CustomStringConvertible {
@@ -191,6 +247,8 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidConfigValue(key: String, expectedType: String)
     case projectNotFound(String)
     case ambiguousProject(String)
+    /// Project name or prefix argument was empty or only whitespace.
+    case emptyProjectQuery
     case notesNotFound(String)
     case notesAlreadyExists(String)
     case notesTemplateNotFound(String)
@@ -214,6 +272,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidConfigValue(let k, let expected): return "Invalid value for \(k): expected \(expected)"
         case .projectNotFound(let q): return "No project found matching: \(q)"
         case .ambiguousProject(let q): return "Ambiguous match. Multiple projects start with: \(q)"
+        case .emptyProjectQuery: return "Project name or prefix cannot be empty."
         case .notesNotFound(let path): return "Notes file not found. Expected: \(path)"
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"
         case .notesTemplateNotFound(let path): return "Notes template file not found: \(path)"

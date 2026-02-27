@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test: run key pm (Swift) commands with existing config. No Node.
-# Usage: ./scripts/integration-diff-pm.sh
+# Usage: ./scripts/smoke-test-pm.sh
 # Requires: pm-swift/.build/release/pm exists
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

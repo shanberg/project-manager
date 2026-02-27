@@ -10,6 +10,7 @@ private func serializeCallout(type: String, label: String, content: String) -> S
     return "> [!\(type)] \(label)\n\(block)"
 }
 
+/// Two spaces after the number (e.g. "> 1.  ") for round-trip consistency with parse (num regex).
 private func serializeGoals(_ goals: [String]) -> String {
     var items = goals
     if items.count < 3 {

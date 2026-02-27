@@ -33,12 +33,26 @@ public func getProjectFolders(basePath: String, domainCodes: [String]) throws ->
         .sorted()
 }
 
-public func matchProject(folders: [String], query: String) -> String? {
+/// Result of matching a project query against folder names. Single source of truth for resolve logic.
+public enum ProjectMatch {
+    case matched(String)
+    case ambiguous
+    case notFound
+}
+
+/// Classify how a query matches project folders. Use this instead of duplicating prefix logic.
+public func matchProjectResult(folders: [String], query: String) -> ProjectMatch {
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    if q.isEmpty { return nil }
-    if let exact = folders.first(where: { $0 == q }) { return exact }
+    if q.isEmpty { return .notFound }
+    if let exact = folders.first(where: { $0 == q }) { return .matched(exact) }
     let prefixMatches = folders.filter { $0.hasPrefix(q) }
-    if prefixMatches.count == 1 { return prefixMatches[0] }
-    if prefixMatches.count > 1 { return nil }
+    if prefixMatches.count == 1 { return .matched(prefixMatches[0]) }
+    if prefixMatches.count > 1 { return .ambiguous }
+    return .notFound
+}
+
+/// Returns the single matching folder name, or nil if not found or ambiguous. Convenience for callers that only need the match.
+public func matchProject(folders: [String], query: String) -> String? {
+    if case .matched(let name) = matchProjectResult(folders: folders, query: query) { return name }
     return nil
 }

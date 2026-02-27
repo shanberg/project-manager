@@ -58,9 +58,9 @@ pm new <domain> <title>
 pm list [-a|--archive] [--all]
 pm archive <name>
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
-pm notes create <project>
+pm notes create <project>   # Requires valid config (active/archive paths) for template path
 pm notes current-day
-pm notes path <project>
+pm notes path <project>   # Exits 0 only if the notes file exists; 1 otherwise (for scripting)
 ```
 
 **Examples:**
@@ -85,13 +85,18 @@ pm unarchive W-1                   # Move from archive back to active
 - `pm config set archivePath /path/to/archive` - Update archive path
 - `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}` in the file). Set to empty for built-in template: `pm config set notesTemplatePath ""`
 
+Path values are stored as entered (e.g. `~/projects/active` stays as `~/projects/active`); tilde is expanded when resolving paths. This keeps config portable across machines.
+
+Values with spaces: quote as one argument or pass as separate words:  
+`pm config set activePath "/path/with spaces"` or `pm config set activePath /path/with spaces`
+
 Config location: `~/.config/pm/config.json` (or `$XDG_CONFIG_HOME/pm/`)
 
 Override: `PM_CONFIG_HOME=/custom/path pm ...`
 
 ## Publishing (maintainers)
 
-The CLI is a Swift binary. Version lives in `package.json` (used by the release script). Create a GitHub Release (tag); the release script builds the Swift binary, creates a tarball, uploads it to the release, and updates the Homebrew formula. See `docs/RELEASE.md`.
+The CLI is a Swift binary. Version is in `package.json` (used by the release script) and in `pm-swift/Sources/pm/Version.swift` (used by `pm --version`); keep them in sync when cutting a release. Create a GitHub Release (tag); the release script builds the Swift binary, creates a tarball, uploads it to the release, and updates the Homebrew formula. See `docs/RELEASE.md`.
 
 
 ## Numbering

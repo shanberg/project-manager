@@ -19,7 +19,7 @@ let package = Package(
         ),
         .testTarget(
             name: "pmTests",
-            dependencies: ["PmLib"],
+            dependencies: ["PmLib", "pm"],
             path: "Tests/pmTests"
         ),
     ]

@@ -44,6 +44,21 @@ private struct NotesPatterns {
     }
 }
 
+/// Lazy, thread-safe cache so regexes are compiled once per process.
+private enum NotesPatternsCache {
+    private static var cached: NotesPatterns?
+    private static let lock = NSLock()
+
+    static func get() throws -> NotesPatterns {
+        lock.lock()
+        defer { lock.unlock() }
+        if let c = cached { return c }
+        let p = try NotesPatterns()
+        cached = p
+        return p
+    }
+}
+
 private func extractCallout(lines: [String], pattern: NSRegularExpression, calloutStart: NSRegularExpression) -> String {
     var content: [String] = []
     var inBlock = false
@@ -131,12 +146,13 @@ private func parseLinksBlock(text: String, p: NotesPatterns) -> [LinkEntry] {
     return entries.isEmpty ? [LinkEntry()] : entries
 }
 
+/// Parse learnings list; empty bullets ("- " or "-  ") are normalized to "" so round-trip matches default ProjectNotes.
 private func parseLearningsBlock(text: String, p: NotesPatterns) -> [String] {
     let items = text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line -> String? in
         let lineStr = String(line)
         guard let m = p.learning.firstMatch(in: lineStr, range: NSRange(lineStr.startIndex..., in: lineStr)),
               let r = Range(m.range(at: 1), in: lineStr) else { return nil }
-        return String(lineStr[r])
+        return String(lineStr[r]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
     return items.isEmpty ? [""] : items
 }
@@ -178,7 +194,7 @@ private func parseSessionsBlock(text: String, p: NotesPatterns) -> [Session] {
 }
 
 public func parseNotes(markdown: String) throws -> ProjectNotes {
-    let patterns = try NotesPatterns()
+    let patterns = try NotesPatternsCache.get()
     let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     let title = lines.first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) } ?? ""
 
