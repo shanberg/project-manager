@@ -6,6 +6,8 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 ## Install
 
+Requires **macOS 13 or later**.
+
 **On another computer (Homebrew)**
 
 ```bash
@@ -81,7 +83,7 @@ pm unarchive W-1                   # Move from archive back to active
 - `pm config get activePath` - Show specific key
 - `pm config set activePath /path/to/active` - Update active path
 - `pm config set archivePath /path/to/archive` - Update archive path
-- `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}`; leave empty for default)
+- `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}` in the file). Set to empty for built-in template: `pm config set notesTemplatePath ""`
 
 Config location: `~/.config/pm/config.json` (or `$XDG_CONFIG_HOME/pm/`)
 

@@ -1,6 +1,12 @@
 import Foundation
 
+/// Characters that would make the project folder name multiple path components or unsafe.
+private let invalidTitleCharacters: CharacterSet = CharacterSet(charactersIn: "/\\\0")
+
 public func createProject(config: PmConfig, paths: ResolvedPaths, domainCode: String, title: String) throws -> String {
+    if title.unicodeScalars.contains(where: { invalidTitleCharacters.contains($0) }) {
+        throw PmError.invalidProjectTitle(title: title)
+    }
     let formatted = try getNextFormattedNumber(activePath: paths.activePath, archivePath: paths.archivePath, domainCode: domainCode)
     let folderName = "\(domainCode)-\(formatted) \(title)"
     let projectPath = (paths.activePath as NSString).appendingPathComponent(folderName)

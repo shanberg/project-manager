@@ -201,6 +201,8 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidProjectPattern(pattern: String)
     /// Session date argument could not be parsed (e.g. --date value).
     case invalidSessionDate(value: String)
+    /// Project title must not contain path separators (e.g. / or \).
+    case invalidProjectTitle(title: String)
 
     public var description: String {
         switch self {
@@ -219,6 +221,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .cannotListDirectory(let path, let message): return "Cannot list directory: \(path). \(message)"
         case .invalidProjectPattern(let pattern): return "Invalid project pattern (check domains in config): \(pattern)"
         case .invalidSessionDate(let value): return "Invalid date for session: \(value). Use YYYY-MM-DD."
+        case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
         }
     }
 }

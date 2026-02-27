@@ -33,4 +33,55 @@ final class ScaffoldTests: XCTestCase {
         let notesContent = try String(contentsOfFile: notesPath, encoding: .utf8)
         XCTAssertTrue(notesContent.contains("# Test Project"), "Notes should contain title")
     }
+
+    /// createProject throws invalidProjectTitle when title contains path separators.
+    func testCreateProjectThrowsWhenTitleContainsSlash() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let activePath = tmp.appendingPathComponent("active").path
+        let archivePath = tmp.appendingPathComponent("archive").path
+        try FileManager.default.createDirectory(atPath: activePath, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: archivePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let config = PmConfig(
+            activePath: activePath,
+            archivePath: archivePath,
+            domains: defaultDomains,
+            subfolders: defaultSubfolders
+        )
+        let paths = ResolvedPaths(activePath: activePath, archivePath: archivePath)
+
+        XCTAssertThrowsError(try createProject(config: config, paths: paths, domainCode: "W", title: "Foo/Bar")) { err in
+            guard case PmError.invalidProjectTitle(let t) = err else {
+                XCTFail("Expected invalidProjectTitle, got \(err)")
+                return
+            }
+            XCTAssertEqual(t, "Foo/Bar")
+        }
+    }
+
+    func testCreateProjectThrowsWhenTitleContainsBackslash() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let activePath = tmp.appendingPathComponent("active").path
+        let archivePath = tmp.appendingPathComponent("archive").path
+        try FileManager.default.createDirectory(atPath: activePath, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: archivePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let config = PmConfig(
+            activePath: activePath,
+            archivePath: archivePath,
+            domains: defaultDomains,
+            subfolders: defaultSubfolders
+        )
+        let paths = ResolvedPaths(activePath: activePath, archivePath: archivePath)
+
+        XCTAssertThrowsError(try createProject(config: config, paths: paths, domainCode: "W", title: "Foo\\Bar")) { err in
+            guard case PmError.invalidProjectTitle(let t) = err else {
+                XCTFail("Expected invalidProjectTitle, got \(err)")
+                return
+            }
+            XCTAssertEqual(t, "Foo\\Bar")
+        }
+    }
 }

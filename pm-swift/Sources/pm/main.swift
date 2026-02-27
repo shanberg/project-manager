@@ -130,7 +130,7 @@ func runNew(args: [String]) {
     do {
         let (config, paths) = try loadConfigAndPaths()
         if domainCode.isEmpty || title.isEmpty {
-            stderr("Usage: pm new <domain> <title>")
+            stderr("Domain and title are required.")
             stderr("Domains: \(config.domains.keys.sorted().joined(separator: ", "))")
             exit(1)
         }
@@ -232,7 +232,12 @@ func runConfigGet(key: String?) {
             if let dict = value as? [String: String] { obj = dict }
             else if let arr = value as? [String] { obj = arr }
             else if let s = value as? String { obj = s }
-            else { obj = value }
+            else if value is NSNull || (value as? String) == nil && "\(type(of: value))".contains("Optional") {
+                obj = NSNull()
+            }
+            else {
+                fail(PmError.invalidConfigValue(key: k, expectedType: "supported type (string, object, or array)"))
+            }
             let data = try JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
             guard let str = String(data: data, encoding: .utf8) else { exit(1) }
             print(str)
@@ -255,7 +260,12 @@ func runConfigSet(key: String, valueStr: String) {
             try setConfigValue(config: &config, key: key, value: valueStr.isEmpty ? "" : (valueStr as NSString).expandingTildeInPath)
         } else if key == "domains" || key == "subfolders" {
             guard let data = valueStr.data(using: .utf8) else { exit(1) }
-            let value = try JSONSerialization.jsonObject(with: data)
+            let value: Any
+            do {
+                value = try JSONSerialization.jsonObject(with: data)
+            } catch {
+                fail(PmError.invalidConfigValue(key: key, expectedType: "valid JSON"))
+            }
             try setConfigValue(config: &config, key: key, value: value)
         } else {
             fail(PmError.unknownConfigKey(key))
@@ -326,10 +336,16 @@ func runNotesWrite(args: [String]) {
         }
         let stdinData = FileHandle.standardInput.readDataToEndOfFile()
         guard String(data: stdinData, encoding: .utf8) != nil else {
-            stderr("Invalid UTF-8 on stdin")
+            stderr("Invalid UTF-8 on stdin.")
             exit(1)
         }
-        let notes = try JSONDecoder().decode(ProjectNotes.self, from: stdinData)
+        let notes: ProjectNotes
+        do {
+            notes = try JSONDecoder().decode(ProjectNotes.self, from: stdinData)
+        } catch {
+            stderr("Invalid JSON on stdin: \(error.localizedDescription)")
+            exit(1)
+        }
         try writeNotesFile(notesPath: notesPath, notes: notes)
     } catch { fail(error) }
 }
@@ -359,31 +375,9 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
     } catch { fail(error) }
 }
 
-// MARK: - main
-
-let argv = CommandLine.arguments
-guard argv.count >= 2 else {
-    stderr("Usage: pm <command> [options] [args]")
-    exit(1)
-}
-
-let cmd = argv[1]
-let rest = Array(argv.dropFirst(2))
-
-switch cmd {
-case "new":
-    runNew(args: rest)
-case "list":
-    var scope = "active"
-    if rest.contains("--all") || rest.contains("-a") { scope = "all" }
-    else if rest.contains("--archive") { scope = "archive" }
-    runList(scope: scope)
-case "archive":
-    runArchive(args: rest)
-case "unarchive":
-    runUnarchive(args: rest)
-case "config":
-    guard let sub = rest.first else {
+/// Dispatch config subcommands (init, get, set).
+private func runConfig(args: [String]) {
+    guard let sub = args.first else {
         stderr("Usage: pm config <init|get|set> ...")
         exit(1)
     }
@@ -391,39 +385,42 @@ case "config":
     case "init":
         runConfigInit()
     case "get":
-        runConfigGet(key: rest.count > 1 ? rest[1] : nil)
+        runConfigGet(key: args.count > 1 ? args[1] : nil)
     case "set":
-        guard rest.count >= 3 else {
+        guard args.count >= 3 else {
             stderr("Usage: pm config set <key> <value>")
             exit(1)
         }
-        runConfigSet(key: rest[1], valueStr: rest[2])
+        runConfigSet(key: args[1], valueStr: args[2])
     default:
         stderr("Usage: pm config <init|get|set> ...")
         exit(1)
     }
-case "notes":
-    guard let sub = rest.first else {
+}
+
+/// Dispatch notes subcommands (path, create, show, write, current-day, session).
+private func runNotes(args: [String]) {
+    guard let sub = args.first else {
         stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
         exit(1)
     }
     switch sub {
     case "path":
-        runNotesPath(args: Array(rest.dropFirst()))
+        runNotesPath(args: Array(args.dropFirst()))
     case "create":
-        runNotesCreate(args: Array(rest.dropFirst()))
+        runNotesCreate(args: Array(args.dropFirst()))
     case "show":
-        runNotesShow(args: Array(rest.dropFirst()))
+        runNotesShow(args: Array(args.dropFirst()))
     case "write":
-        runNotesWrite(args: Array(rest.dropFirst()))
+        runNotesWrite(args: Array(args.dropFirst()))
     case "current-day":
         runNotesCurrentDay()
     case "session":
-        guard rest.count >= 3, rest[1] == "add" else {
+        guard args.count >= 3, args[1] == "add" else {
             stderr("Usage: pm notes session add <project> [label] [-d|--date YYYY-MM-DD]")
             exit(1)
         }
-        var addArgs = Array(rest.dropFirst(2))
+        var addArgs = Array(args.dropFirst(2))
         var dateStr: String?
         if let idx = addArgs.firstIndex(of: "-d"), idx + 1 < addArgs.count {
             dateStr = addArgs[idx + 1]
@@ -439,7 +436,38 @@ case "notes":
         stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
         exit(1)
     }
-default:
-    stderr("Unknown command: \(cmd)")
+}
+
+// MARK: - dispatch
+
+private func dispatch(cmd: String, args: [String]) {
+    switch cmd {
+    case "new":
+        runNew(args: args)
+    case "list":
+        var scope = "active"
+        if args.contains("--all") || args.contains("-a") { scope = "all" }
+        else if args.contains("--archive") { scope = "archive" }
+        runList(scope: scope)
+    case "archive":
+        runArchive(args: args)
+    case "unarchive":
+        runUnarchive(args: args)
+    case "config":
+        runConfig(args: args)
+    case "notes":
+        runNotes(args: args)
+    default:
+        stderr("Unknown command: \(cmd)")
+        exit(1)
+    }
+}
+
+// MARK: - main
+
+let argv = CommandLine.arguments
+guard argv.count >= 2 else {
+    stderr("Usage: pm <command> [options] [args]")
     exit(1)
 }
+dispatch(cmd: argv[1], args: Array(argv.dropFirst(2)))

@@ -10,6 +10,7 @@ public func parseSessionDateArgument(_ string: String) throws -> Date {
     return date
 }
 
+/// Session date string for notes headings and session matching. Must match Raycast’s formatSessionDate (en-US short) so that addTodoToTodaySession works.
 public func formatSessionDate(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
