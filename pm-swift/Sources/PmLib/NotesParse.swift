@@ -177,23 +177,6 @@ private func parseSessionsBlock(text: String, p: NotesPatterns) -> [Session] {
     return sessions
 }
 
-/// Extract content of a section: from the line after the matching header to (exclusive of) the next `## ` line or EOF. Order-independent.
-private func extractSectionContent(lines: [String], headerPattern: NSRegularExpression, nextSectionPattern: NSRegularExpression) -> String {
-    guard let headerIdx = lines.firstIndex(where: { headerPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }) else {
-        return ""
-    }
-    let contentStart = headerIdx + 1
-    guard contentStart < lines.count else { return "" }
-    var contentEnd = lines.count
-    for i in contentStart..<lines.count {
-        if nextSectionPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) != nil {
-            contentEnd = i
-            break
-        }
-    }
-    return lines[contentStart..<contentEnd].joined(separator: "\n")
-}
-
 public func parseNotes(markdown: String) throws -> ProjectNotes {
     let patterns = try NotesPatterns()
     let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -204,10 +187,29 @@ public func parseNotes(markdown: String) throws -> ProjectNotes {
     let goals = extractGoals(lines: lines, p: patterns)
     let approach = extractCallout(lines: lines, pattern: patterns.approach, calloutStart: patterns.calloutStart)
 
-    // Section content: from line after ## SectionName to (exclusive) next ## or EOF. Order-independent.
-    let linksText = extractSectionContent(lines: lines, headerPattern: patterns.linksSection, nextSectionPattern: patterns.section)
-    let learningsText = extractSectionContent(lines: lines, headerPattern: patterns.learningsSection, nextSectionPattern: patterns.section)
-    let sessionsText = extractSectionContent(lines: lines, headerPattern: patterns.sessionsSection, nextSectionPattern: patterns.section)
+    let linksStart = lines.firstIndex { patterns.linksSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let learningsStart = lines.firstIndex { patterns.learningsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let sessionsStart = lines.firstIndex { patterns.sessionsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+
+    let linksText: String
+    if linksStart >= 0, learningsStart > linksStart {
+        linksText = lines[(linksStart + 1)..<learningsStart].joined(separator: "\n")
+    } else {
+        linksText = ""
+    }
+    let learningsText: String
+    if learningsStart >= 0, sessionsStart > learningsStart {
+        let end = sessionsStart >= 0 ? sessionsStart : lines.count
+        learningsText = lines[(learningsStart + 1)..<end].joined(separator: "\n")
+    } else {
+        learningsText = ""
+    }
+    let sessionsText: String
+    if sessionsStart >= 0 {
+        sessionsText = lines[(sessionsStart + 1)...].joined(separator: "\n")
+    } else {
+        sessionsText = ""
+    }
 
     return ProjectNotes(
         title: title,

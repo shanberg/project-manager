@@ -2,15 +2,15 @@ import XCTest
 @testable import PmLib
 
 final class NumberingTests: XCTestCase {
-    func testParseProjectNumbersEmptyFolderList() throws {
-        let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: [], domainCode: "W")
+    func testParseProjectNumbersEmptyFolderList() {
+        let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: [], domainCode: "W")
         XCTAssertEqual(numbers, [])
         XCTAssertEqual(observedMinDigits, 0)
     }
 
-    func testParseProjectNumbers() throws {
+    func testParseProjectNumbers() {
         let names = ["W-1 Foo", "W-2 Bar", "W-10 Baz", "P-01 Personal"]
-        let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: names, domainCode: "W")
+        let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: names, domainCode: "W")
         XCTAssertEqual(numbers.sorted(), [1, 2, 10])
         XCTAssertEqual(observedMinDigits, 2)
     }

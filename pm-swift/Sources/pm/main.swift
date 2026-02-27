@@ -60,11 +60,11 @@ func runList(scope: String) {
         let domainCodes = Array(config.domains.keys)
 
         let t1 = now()
-        let active = try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
+        let active = getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
         if bench { stderr(String(format: "getProjectFolders(active): %.2f ms (%d projects)", (now() - t1) * 1000, active.count)) }
 
         let t2 = now()
-        let archive = try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
+        let archive = getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
         if bench { stderr(String(format: "getProjectFolders(archive): %.2f ms (%d projects)", (now() - t2) * 1000, archive.count)) }
 
         if bench { stderr(String(format: "total (in runList): %.2f ms", (now() - tStart) * 1000)) }
@@ -144,7 +144,7 @@ func runArchive(args: [String]) {
     do {
         let (config, paths) = try loadConfigAndPaths()
         let domainCodes = Array(config.domains.keys)
-        let folders = try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
+        let folders = getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
         guard let matched = matchProject(folders: folders, query: name) else {
             let trimmed = name.trimmingCharacters(in: .whitespaces)
             let prefixMatches = folders.filter { $0.hasPrefix(trimmed) }
@@ -172,7 +172,7 @@ func runUnarchive(args: [String]) {
     do {
         let (config, paths) = try loadConfigAndPaths()
         let domainCodes = Array(config.domains.keys)
-        let folders = try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
+        let folders = getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
         guard let matched = matchProject(folders: folders, query: name) else {
             let trimmed = name.trimmingCharacters(in: .whitespaces)
             let prefixMatches = folders.filter { $0.hasPrefix(trimmed) }
@@ -226,20 +226,20 @@ func runConfigGet(key: String?) {
     do {
         guard let config = try loadConfig() else { fail(PmError.configNotFound) }
         if let k = key {
-            guard let data = try getConfigValueAsJSON(config: config, key: k) else { fail(PmError.unknownConfigKey(k)) }
-            guard let str = String(data: data, encoding: .utf8) else {
-                stderr("Internal error: config value could not be encoded as UTF-8")
-                exit(1)
-            }
+            guard let value = getConfigValue(config: config, key: k) else { fail(PmError.unknownConfigKey(k)) }
+            let obj: Any
+            if let dict = value as? [String: String] { obj = dict }
+            else if let arr = value as? [String] { obj = arr }
+            else if let s = value as? String { obj = s }
+            else { obj = value }
+            let data = try JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
+            guard let str = String(data: data, encoding: .utf8) else { exit(1) }
             print(str)
         } else {
             let enc = JSONEncoder()
             enc.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try enc.encode(config)
-            guard let str = String(data: data, encoding: .utf8) else {
-                stderr("Internal error: config could not be encoded as UTF-8")
-                exit(1)
-            }
+            guard let str = String(data: data, encoding: .utf8) else { exit(1) }
             print(str)
         }
     } catch { fail(error) }
@@ -253,10 +253,7 @@ func runConfigSet(key: String, valueStr: String) {
         } else if key == "notesTemplatePath" {
             try setConfigValue(config: &config, key: key, value: valueStr.isEmpty ? "" : (valueStr as NSString).expandingTildeInPath)
         } else if key == "domains" || key == "subfolders" {
-            guard let data = valueStr.data(using: .utf8) else {
-                stderr("Invalid UTF-8 in value")
-                exit(1)
-            }
+            guard let data = valueStr.data(using: .utf8) else { exit(1) }
             let value = try JSONSerialization.jsonObject(with: data)
             try setConfigValue(config: &config, key: key, value: value)
         } else {
@@ -311,10 +308,7 @@ func runNotesShow(args: [String]) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(output)
-        guard let str = String(data: data, encoding: .utf8) else {
-            stderr("Internal error: notes output could not be encoded as UTF-8")
-            exit(1)
-        }
+        guard let str = String(data: data, encoding: .utf8) else { exit(1) }
         print(str)
     } catch { fail(error) }
 }

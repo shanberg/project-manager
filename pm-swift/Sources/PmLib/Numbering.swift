@@ -1,16 +1,11 @@
 import Foundation
 
-public func parseProjectNumbers(folderNames: [String], domainCode: String) throws -> (numbers: [Int], observedMinDigits: Int) {
+public func parseProjectNumbers(folderNames: [String], domainCode: String) -> (numbers: [Int], observedMinDigits: Int) {
     var numbers: [Int] = []
     var observedMinDigits = 0
     let escaped = NSRegularExpression.escapedPattern(for: domainCode)
     let pattern = "^\(escaped)-(\\d+)\\s+.+$"
-    let re: NSRegularExpression
-    do {
-        re = try NSRegularExpression(pattern: pattern)
-    } catch {
-        throw PmError.invalidRegex(pattern: pattern)
-    }
+    guard let re = try? NSRegularExpression(pattern: pattern) else { return ([], 0) }
     for name in folderNames {
         guard let match = re.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
               let numRange = Range(match.range(at: 1), in: name) else { continue }
@@ -43,7 +38,7 @@ public func getNextFormattedNumber(activePath: String, archivePath: String, doma
             }
         }
     }
-    let (numbers, observedMinDigits) = try parseProjectNumbers(folderNames: allNames, domainCode: domainCode)
+    let (numbers, observedMinDigits) = parseProjectNumbers(folderNames: allNames, domainCode: domainCode)
     let (_, formatted) = nextNumberAndPadding(existingNumbers: numbers, observedMinDigits: observedMinDigits)
     return formatted
 }
