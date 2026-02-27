@@ -187,26 +187,30 @@ public func parseNotes(markdown: String) throws -> ProjectNotes {
     let goals = extractGoals(lines: lines, p: patterns)
     let approach = extractCallout(lines: lines, pattern: patterns.approach, calloutStart: patterns.calloutStart)
 
-    let linksStart = lines.firstIndex { patterns.linksSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
-    let learningsStart = lines.firstIndex { patterns.learningsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
-    let sessionsStart = lines.firstIndex { patterns.sessionsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil } ?? -1
+    let linksStart = lines.firstIndex { patterns.linksSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+    let learningsStart = lines.firstIndex { patterns.learningsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+    let sessionsStart = lines.firstIndex { patterns.sessionsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
 
     let linksText: String
-    if linksStart >= 0, learningsStart > linksStart {
-        linksText = lines[(linksStart + 1)..<learningsStart].joined(separator: "\n")
+    if let ls = linksStart, let lns = learningsStart, lns > ls {
+        linksText = lines[(ls + 1)..<lns].joined(separator: "\n")
     } else {
         linksText = ""
     }
     let learningsText: String
-    if learningsStart >= 0, sessionsStart > learningsStart {
-        let end = sessionsStart >= 0 ? sessionsStart : lines.count
-        learningsText = lines[(learningsStart + 1)..<end].joined(separator: "\n")
+    if let lns = learningsStart {
+        let end = sessionsStart ?? lines.count
+        if end > lns {
+            learningsText = lines[(lns + 1)..<end].joined(separator: "\n")
+        } else {
+            learningsText = ""
+        }
     } else {
         learningsText = ""
     }
     let sessionsText: String
-    if sessionsStart >= 0 {
-        sessionsText = lines[(sessionsStart + 1)...].joined(separator: "\n")
+    if let ss = sessionsStart {
+        sessionsText = lines[(ss + 1)...].joined(separator: "\n")
     } else {
         sessionsText = ""
     }

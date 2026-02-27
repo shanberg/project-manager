@@ -31,7 +31,13 @@ public func getNextFormattedNumber(activePath: String, archivePath: String, doma
     let fm = FileManager.default
     for basePath in [activePath, archivePath] {
         let url = URL(fileURLWithPath: basePath)
-        guard let entries = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { continue }
+        let entries: [URL]
+        do {
+            entries = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        } catch {
+            let message = (error as NSError).localizedDescription
+            throw PmError.cannotListDirectory(path: basePath, message: message)
+        }
         for e in entries {
             if (try? e.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                 allNames.append(e.lastPathComponent)

@@ -42,7 +42,7 @@ private func serializeLearnings(_ items: [String]) -> String {
 private func serializeSessions(_ sessions: [Session]) -> String {
     if sessions.isEmpty { return "" }
     return sessions.map { s in
-        let heading = "### \(s.date) \(s.label)"
+        let heading = s.label.isEmpty ? "### \(s.date)" : "### \(s.date) \(s.label)"
         return s.body.isEmpty ? heading : "\(heading)\n\n\(s.body)"
     }.joined(separator: "\n\n")
 }

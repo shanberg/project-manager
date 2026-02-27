@@ -36,4 +36,16 @@ final class NumberingTests: XCTestCase {
         XCTAssertNil(matchProject(folders: folders, query: "X-1"))
         XCTAssertNil(matchProject(folders: folders, query: ""))
     }
+
+    /// getNextFormattedNumber throws when a path cannot be listed (e.g. does not exist).
+    func testGetNextFormattedNumberThrowsWhenPathCannotBeListed() {
+        let notExist = "/nonexistent/path"
+        XCTAssertThrowsError(try getNextFormattedNumber(activePath: notExist, archivePath: notExist, domainCode: "W")) { err in
+            guard case PmError.cannotListDirectory(let path, _) = err else {
+                XCTFail("Expected cannotListDirectory, got \(err)")
+                return
+            }
+            XCTAssertEqual(path, notExist)
+        }
+    }
 }

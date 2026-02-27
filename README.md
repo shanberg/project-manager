@@ -55,7 +55,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 pm new <domain> <title>
 pm list [-a|--archive] [--all]
 pm archive <name>
-pm notes session add <project> [label] [--date YYYY-MM-DD]
+pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes create <project>
 pm notes current-day
 pm notes path <project>

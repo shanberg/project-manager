@@ -1,5 +1,15 @@
 import Foundation
 
+/// Parse a YYYY-MM-DD string for session date (e.g. from --date). Throws PmError.invalidSessionDate if invalid.
+public func parseSessionDateArgument(_ string: String) throws -> Date {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withFullDate]
+    guard let date = formatter.date(from: string) else {
+        throw PmError.invalidSessionDate(value: string)
+    }
+    return date
+}
+
 public func formatSessionDate(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")

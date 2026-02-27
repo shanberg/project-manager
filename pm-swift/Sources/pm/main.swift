@@ -19,6 +19,20 @@ func fail(_ err: Error) -> Never {
     exit(1)
 }
 
+/// Print hints when a list section is empty (path missing, permission denied, or no projects).
+private func printEmptyListHints(path: String, pathLabel: String, noProjectsMessage: String, extraStderrLines: [String] = []) {
+    var isDir: ObjCBool = false
+    if !FileManager.default.fileExists(atPath: path, isDirectory: &isDir) || !isDir.boolValue {
+        stderr("\(pathLabel) does not exist or is not a directory: \(path)")
+    } else if isPermissionDenied(path: path) {
+        stderr("Permission denied: cannot read \(path)")
+        stderr("Grant Full Disk Access to Terminal (or Cursor) in System Settings → Privacy & Security → Full Disk Access.")
+    } else {
+        stderr(noProjectsMessage)
+        for line in extraStderrLines { stderr(line) }
+    }
+}
+
 /// True if the path exists but listing its contents fails with a permission error (e.g. macOS Full Disk Access).
 private func isPermissionDenied(path: String) -> Bool {
     let url = URL(fileURLWithPath: path)
@@ -60,11 +74,11 @@ func runList(scope: String) {
         let domainCodes = Array(config.domains.keys)
 
         let t1 = now()
-        let active = getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
+        let active = try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
         if bench { stderr(String(format: "getProjectFolders(active): %.2f ms (%d projects)", (now() - t1) * 1000, active.count)) }
 
         let t2 = now()
-        let archive = getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
+        let archive = try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
         if bench { stderr(String(format: "getProjectFolders(archive): %.2f ms (%d projects)", (now() - t2) * 1000, archive.count)) }
 
         if bench { stderr(String(format: "total (in runList): %.2f ms", (now() - tStart) * 1000)) }
@@ -76,17 +90,15 @@ func runList(scope: String) {
             }
             if scope == "all" && active.isEmpty { print("  (none)") }
             if active.isEmpty && (scope == "active" || scope == "all") {
-                var isDir: ObjCBool = false
-                if !FileManager.default.fileExists(atPath: paths.activePath, isDirectory: &isDir) || !isDir.boolValue {
-                    stderr("Active path does not exist or is not a directory: \(paths.activePath)")
-                } else if isPermissionDenied(path: paths.activePath) {
-                    stderr("Permission denied: cannot read \(paths.activePath)")
-                    stderr("Grant Full Disk Access to Terminal (or Cursor) in System Settings → Privacy & Security → Full Disk Access.")
-                } else {
-                    stderr("(no active projects in: \(paths.activePath))")
-                    stderr("(project folders must match: <domain>-<number> <title>, e.g. W-1 My Project)")
-                    stderr("(if Raycast shows projects, run List Projects there once to sync paths to this config)")
-                }
+                printEmptyListHints(
+                    path: paths.activePath,
+                    pathLabel: "Active path",
+                    noProjectsMessage: "(no active projects in: \(paths.activePath))",
+                    extraStderrLines: [
+                        "(project folders must match: <domain>-<number> <title>, e.g. W-1 My Project)",
+                        "(if Raycast shows projects, run List Projects there once to sync paths to this config)"
+                    ]
+                )
             }
         }
         if scope == "archive" || scope == "all" {
@@ -97,15 +109,11 @@ func runList(scope: String) {
             if scope == "archive" && archive.isEmpty { print("(none)") }
             if scope == "all" && archive.isEmpty { print("  (none)") }
             if archive.isEmpty && (scope == "archive" || scope == "all") {
-                var isDir: ObjCBool = false
-                if !FileManager.default.fileExists(atPath: paths.archivePath, isDirectory: &isDir) || !isDir.boolValue {
-                    stderr("Archive path does not exist or is not a directory: \(paths.archivePath)")
-                } else if isPermissionDenied(path: paths.archivePath) {
-                    stderr("Permission denied: cannot read \(paths.archivePath)")
-                    stderr("Grant Full Disk Access to Terminal (or Cursor) in System Settings → Privacy & Security → Full Disk Access.")
-                } else {
-                    stderr("(no archived projects in: \(paths.archivePath))")
-                }
+                printEmptyListHints(
+                    path: paths.archivePath,
+                    pathLabel: "Archive path",
+                    noProjectsMessage: "(no archived projects in: \(paths.archivePath))"
+                )
             }
         }
     } catch { fail(error) }
@@ -136,32 +144,45 @@ func runNew(args: [String]) {
     } catch { fail(error) }
 }
 
+/// Emit match-failure messages and exit. Used by archive/unarchive.
+private func emitMatchErrorAndExit(folders: [String], query: String, notFoundMessage: String, listLabel: String) -> Never {
+    let trimmed = query.trimmingCharacters(in: .whitespaces)
+    let prefixMatches = folders.filter { $0.hasPrefix(trimmed) }
+    if prefixMatches.count > 1 {
+        stderr("Ambiguous match. Multiple projects start with: \(query)")
+        prefixMatches.forEach { stderr(" - \($0)") }
+    } else {
+        stderr(notFoundMessage)
+        if !folders.isEmpty { stderr("\(listLabel): \(folders.joined(separator: ", "))") }
+    }
+    exit(1)
+}
+
+/// Move a project between active and archive. fromActive: true = archive (active→archive), false = unarchive.
+private func runMoveProject(fromActive: Bool, name: String) {
+    do {
+        let (config, paths) = try loadConfigAndPaths()
+        let domainCodes = Array(config.domains.keys)
+        let (sourcePath, destPath, notFoundMsg, listLabel, doneVerb) = fromActive
+            ? (paths.activePath, paths.archivePath, "No project found matching: \(name)", "Active projects", "Archived")
+            : (paths.archivePath, paths.activePath, "No archived project found matching: \(name)", "Archived projects", "Unarchived")
+        let folders = try getProjectFolders(basePath: sourcePath, domainCodes: domainCodes)
+        guard let matched = matchProject(folders: folders, query: name) else {
+            emitMatchErrorAndExit(folders: folders, query: name, notFoundMessage: notFoundMsg, listLabel: listLabel)
+        }
+        let src = (sourcePath as NSString).appendingPathComponent(matched)
+        let dest = (destPath as NSString).appendingPathComponent(matched)
+        try FileManager.default.moveItem(atPath: src, toPath: dest)
+        print("\(doneVerb): \(matched)")
+    } catch { fail(error) }
+}
+
 func runArchive(args: [String]) {
     guard let name = args.first, !name.isEmpty else {
         stderr("Usage: pm archive <name>")
         exit(1)
     }
-    do {
-        let (config, paths) = try loadConfigAndPaths()
-        let domainCodes = Array(config.domains.keys)
-        let folders = getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
-        guard let matched = matchProject(folders: folders, query: name) else {
-            let trimmed = name.trimmingCharacters(in: .whitespaces)
-            let prefixMatches = folders.filter { $0.hasPrefix(trimmed) }
-            if prefixMatches.count > 1 {
-                stderr("Ambiguous match. Multiple projects start with: \(name)")
-                prefixMatches.forEach { stderr(" - \($0)") }
-            } else {
-                stderr("No project found matching: \(name)")
-                if !folders.isEmpty { stderr("Active projects: \(folders.joined(separator: ", "))") }
-            }
-            exit(1)
-        }
-        let src = (paths.activePath as NSString).appendingPathComponent(matched)
-        let dest = (paths.archivePath as NSString).appendingPathComponent(matched)
-        try FileManager.default.moveItem(atPath: src, toPath: dest)
-        print("Archived: \(matched)")
-    } catch { fail(error) }
+    runMoveProject(fromActive: true, name: name)
 }
 
 func runUnarchive(args: [String]) {
@@ -169,27 +190,7 @@ func runUnarchive(args: [String]) {
         stderr("Usage: pm unarchive <name>")
         exit(1)
     }
-    do {
-        let (config, paths) = try loadConfigAndPaths()
-        let domainCodes = Array(config.domains.keys)
-        let folders = getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
-        guard let matched = matchProject(folders: folders, query: name) else {
-            let trimmed = name.trimmingCharacters(in: .whitespaces)
-            let prefixMatches = folders.filter { $0.hasPrefix(trimmed) }
-            if prefixMatches.count > 1 {
-                stderr("Ambiguous match. Multiple projects start with: \(name)")
-                prefixMatches.forEach { stderr(" - \($0)") }
-            } else {
-                stderr("No archived project found matching: \(name)")
-                if !folders.isEmpty { stderr("Archived projects: \(folders.joined(separator: ", "))") }
-            }
-            exit(1)
-        }
-        let src = (paths.archivePath as NSString).appendingPathComponent(matched)
-        let dest = (paths.activePath as NSString).appendingPathComponent(matched)
-        try FileManager.default.moveItem(atPath: src, toPath: dest)
-        print("Unarchived: \(matched)")
-    } catch { fail(error) }
+    runMoveProject(fromActive: false, name: name)
 }
 
 func runConfigInit() {
@@ -347,9 +348,7 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
         var notes = try readNotesFile(notesPath: notesPath)
         let date: Date?
         if let d = dateStr {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withFullDate]
-            date = formatter.date(from: d) ?? Date()
+            date = try parseSessionDateArgument(d)
         } else {
             date = nil
         }
@@ -421,7 +420,7 @@ case "notes":
         runNotesCurrentDay()
     case "session":
         guard rest.count >= 3, rest[1] == "add" else {
-            stderr("Usage: pm notes session add <project> [label] [-d date]")
+            stderr("Usage: pm notes session add <project> [label] [-d|--date YYYY-MM-DD]")
             exit(1)
         }
         var addArgs = Array(rest.dropFirst(2))

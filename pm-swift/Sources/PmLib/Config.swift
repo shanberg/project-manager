@@ -143,6 +143,10 @@ public enum PmConfigKey: String, CaseIterable {
     case activePath, archivePath, paraPath, domains, subfolders, notesTemplatePath
 }
 
+/// Supported keys and value types (for `getConfigValue` / `setConfigValue`):
+/// - activePath, archivePath, paraPath, notesTemplatePath: String (paths support ~)
+/// - domains: [String: String]
+/// - subfolders: [String]
 public func getConfigValue(config: PmConfig, key: String) -> Any? {
     switch key {
     case "activePath": return config.activePath
@@ -155,6 +159,7 @@ public func getConfigValue(config: PmConfig, key: String) -> Any? {
     }
 }
 
+/// Set a config key. Value must match the key's type (see getConfigValue doc). Throws on unknown key or type mismatch.
 public func setConfigValue(config: inout PmConfig, key: String, value: Any) throws {
     switch key {
     case "activePath":
@@ -190,6 +195,12 @@ public enum PmError: Error, CustomStringConvertible {
     case notesAlreadyExists(String)
     case notesTemplateNotFound(String)
     case notesRegexError(pattern: String)
+    /// Directory exists but listing contents failed (e.g. permission denied).
+    case cannotListDirectory(path: String, message: String)
+    /// Project folder pattern could not be built from domain codes (e.g. invalid regex).
+    case invalidProjectPattern(pattern: String)
+    /// Session date argument could not be parsed (e.g. --date value).
+    case invalidSessionDate(value: String)
 
     public var description: String {
         switch self {
@@ -205,6 +216,9 @@ public enum PmError: Error, CustomStringConvertible {
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"
         case .notesTemplateNotFound(let path): return "Notes template file not found: \(path)"
         case .notesRegexError(let pattern): return "Invalid notes regex pattern: \(pattern)"
+        case .cannotListDirectory(let path, let message): return "Cannot list directory: \(path). \(message)"
+        case .invalidProjectPattern(let pattern): return "Invalid project pattern (check domains in config): \(pattern)"
+        case .invalidSessionDate(let value): return "Invalid date for session: \(value). Use YYYY-MM-DD."
         }
     }
 }
