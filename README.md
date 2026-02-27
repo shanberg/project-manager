@@ -4,6 +4,8 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 **Assumptions:** You use Obsidian and Raycast, follow the PARA model for file management, and have mid-size projects that benefit from some structure but aren’t epics (e.g. no full project-management tooling).
 
+**Requirements:** CLI requires macOS 13 or later (Swift package `platforms: [.macOS(.v13)]`).
+
 ## Install
 
 **On another computer (Homebrew)**

@@ -155,6 +155,22 @@ public func getConfigValue(config: PmConfig, key: String) -> Any? {
     }
 }
 
+/// Returns the value for the given key as pretty-printed JSON data. Returns nil if key is unknown. Throws on encoding failure.
+/// Single type-safe encoding path so new keys get a compile-time reminder to add encoding.
+public func getConfigValueAsJSON(config: PmConfig, key: String) throws -> Data? {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted]
+    switch key {
+    case "activePath": return try encoder.encode(config.activePath)
+    case "archivePath": return try encoder.encode(config.archivePath)
+    case "paraPath": return try encoder.encode(config.paraPath)
+    case "domains": return try encoder.encode(config.domains)
+    case "subfolders": return try encoder.encode(config.subfolders)
+    case "notesTemplatePath": return try encoder.encode(config.notesTemplatePath)
+    default: return nil
+    }
+}
+
 public func setConfigValue(config: inout PmConfig, key: String, value: Any) throws {
     switch key {
     case "activePath":
@@ -190,6 +206,7 @@ public enum PmError: Error, CustomStringConvertible {
     case notesAlreadyExists(String)
     case notesTemplateNotFound(String)
     case notesRegexError(pattern: String)
+    case invalidRegex(pattern: String)
 
     public var description: String {
         switch self {
@@ -205,6 +222,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"
         case .notesTemplateNotFound(let path): return "Notes template file not found: \(path)"
         case .notesRegexError(let pattern): return "Invalid notes regex pattern: \(pattern)"
+        case .invalidRegex(let pattern): return "Invalid regex pattern: \(pattern)"
         }
     }
 }

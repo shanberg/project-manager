@@ -72,4 +72,59 @@ final class NotesRoundTripTests: XCTestCase {
         let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Empty template parse → serialize → parse should equal original")
     }
+
+    /// Reordered sections (Sessions, Links, Learnings) still parse correctly; parser is order-independent.
+    func testReorderedSectionsParseCorrectly() throws {
+        let markdownReordered = """
+# Reordered Project
+
+> [!summary] Summary
+> Summary here.
+
+> [!question] Problem
+> Problem here.
+
+> [!info] Goals
+> 1.  G1
+> 2.  G2
+> 3.  G3
+
+> [!info] Approach
+> Approach here.
+
+## Sessions
+
+### Mon, Jan 1, 2024
+
+- [ ] Only session todo
+
+## Links
+
+- Link One: https://one.com
+- https://bare.com
+
+## Learnings
+
+- Learning A
+- Learning B
+"""
+        let parsed = try parseNotes(markdown: markdownReordered)
+        XCTAssertEqual(parsed.title, "Reordered Project")
+        XCTAssertEqual(parsed.sessions.count, 1)
+        XCTAssertEqual(parsed.sessions[0].date, "Mon, Jan 1, 2024")
+        XCTAssertTrue(parsed.sessions[0].body.contains("[ ] Only session todo"))
+        XCTAssertEqual(parsed.links.count, 2)
+        XCTAssertEqual(parsed.links[0].label, "Link One")
+        XCTAssertEqual(parsed.links[0].url, "https://one.com")
+        XCTAssertEqual(parsed.links[1].url, "https://bare.com")
+        XCTAssertEqual(parsed.learnings.filter { !$0.isEmpty }, ["Learning A", "Learning B"])
+
+        // Round-trip reordered doc: serialize then reparse preserves content (output is canonical order).
+        let serialized = serializeNotes(parsed)
+        let reparsed = try parseNotes(markdown: serialized)
+        XCTAssertEqual(parsed.title, reparsed.title)
+        XCTAssertEqual(parsed.sessions.count, reparsed.sessions.count)
+        XCTAssertEqual(parsed.links.count, reparsed.links.count)
+        XCTAssertEqual(parsed.learnings.filter { !$0.isEmpty }, reparsed.learnings.filter { !$0.isEmpty })
+    }
 }

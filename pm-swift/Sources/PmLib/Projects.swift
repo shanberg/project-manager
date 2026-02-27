@@ -1,15 +1,19 @@
 import Foundation
 
-func buildProjectPattern(domainCodes: [String]) -> NSRegularExpression? {
+func buildProjectPattern(domainCodes: [String]) throws -> NSRegularExpression {
     let sorted = domainCodes.sorted { $0.count > $1.count }
     let escaped = sorted.map { NSRegularExpression.escapedPattern(for: $0) }
     let pattern = "^(\(escaped.joined(separator: "|")))-\\d+\\s+.+$"
-    return try? NSRegularExpression(pattern: pattern)
+    do {
+        return try NSRegularExpression(pattern: pattern)
+    } catch {
+        throw PmError.invalidRegex(pattern: pattern)
+    }
 }
 
-public func getProjectFolders(basePath: String, domainCodes: [String]) -> [String] {
+public func getProjectFolders(basePath: String, domainCodes: [String]) throws -> [String] {
     let codes = domainCodes.isEmpty ? Array(defaultDomains.keys) : domainCodes
-    guard let pattern = buildProjectPattern(domainCodes: codes) else { return [] }
+    let pattern = try buildProjectPattern(domainCodes: codes)
     let url = URL(fileURLWithPath: basePath)
     guard let entries = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else {
         return []

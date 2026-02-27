@@ -25,6 +25,20 @@ run_ok() {
   fi
 }
 
+# Run pm with stdin from file (e.g. for notes write).
+run_ok_stdin() {
+  local name="$1"
+  local stdin_file="$2"
+  shift 2
+  if $PM "$@" < "$stdin_file" >/dev/null 2>&1; then
+    echo "OK   $name"
+  else
+    echo "FAIL $name"
+    $PM "$@" < "$stdin_file" 2>&1 || true
+    exit 1
+  fi
+}
+
 echo "Smoke testing Swift pm (config: $PM_CONFIG_HOME)"
 run_ok "list --all" list --all
 run_ok "config get" config get
@@ -32,5 +46,10 @@ run_ok "notes current-day" notes current-day
 first_project=$($PM list --all 2>/dev/null | awk '/^ [A-Za-z]+-[0-9]/ { sub(/^ /,""); print; exit }')
 if [[ -n "$first_project" ]]; then
   run_ok "notes path <first>" notes path "$first_project"
+  run_ok "notes show <first>" notes show "$first_project"
+  show_tmp=$(mktemp)
+  trap 'rm -f "$show_tmp"' EXIT
+  $PM notes show "$first_project" > "$show_tmp" || exit 1
+  run_ok_stdin "notes write <first> (round-trip)" "$show_tmp" notes write "$first_project"
 fi
 echo "Done."
