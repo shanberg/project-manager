@@ -4,8 +4,10 @@ import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import ProjectView from "./project-view";
 
 export default function Command() {
-
-  const { data: focusedKey, isLoading } = useCachedPromise(getFocusedProject, []);
+  const { data: focusedKey, isLoading } = useCachedPromise(
+    getFocusedProject,
+    [],
+  );
 
   const parsed = focusedKey ? parseProjectKey(focusedKey) : null;
   const projectName = parsed?.name ?? null;

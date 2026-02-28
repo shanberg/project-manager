@@ -18,7 +18,10 @@ export async function getTaskTiming(): Promise<StoredState | null> {
 }
 
 export async function setTaskTiming(taskKey: string): Promise<void> {
-  await LocalStorage.setItem(KEY, JSON.stringify({ taskKey, seenAt: Date.now() }));
+  await LocalStorage.setItem(
+    KEY,
+    JSON.stringify({ taskKey, seenAt: Date.now() }),
+  );
 }
 
 export async function clearTaskTiming(): Promise<void> {

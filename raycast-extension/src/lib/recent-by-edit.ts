@@ -5,15 +5,23 @@ import { getNotes, resolveNotesPath } from "./notes-api";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 
-export type RecentProject = { name: string; basePath: string; mtime: number; done: number; total: number };
+export type RecentProject = {
+  name: string;
+  basePath: string;
+  mtime: number;
+  done: number;
+  total: number;
+  notes: { summary: string; problem: string; goals: string[]; approach: string } | null;
+};
 
 export async function getRecentProjectsByEdit(
   prefs: PreferenceValues,
   limit: number,
-  excludeKey?: string
+  excludeKey?: string,
 ): Promise<RecentProject[]> {
   const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
-  const { active: activeNames, archive: archiveNames } = parseListAllOutput(stdout);
+  const { active: activeNames, archive: archiveNames } =
+    parseListAllOutput(stdout);
 
   const all: { name: string; basePath: string }[] = [
     ...activeNames.map((name) => ({ name, basePath: prefs.activePath })),
@@ -33,17 +41,26 @@ export async function getRecentProjectsByEdit(
           : 0;
       let done = 0;
       let total = 0;
+      let notes = null;
       if (notesPath) {
         try {
           const out = await getNotes(prefs, name);
           total = out.todos.length;
           done = out.todos.filter((t) => t.checked).length;
+          notes = out.notes
+            ? {
+                summary: out.notes.summary,
+                problem: out.notes.problem,
+                goals: out.notes.goals,
+                approach: out.notes.approach,
+              }
+            : null;
         } catch {
           /* ignore */
         }
       }
-      return { name, basePath, mtime, done, total };
-    })
+      return { name, basePath, mtime, done, total, notes };
+    }),
   );
 
   const exclude = excludeKey ? new Set([excludeKey]) : new Set<string>();

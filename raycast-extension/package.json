@@ -108,7 +108,7 @@
     },
     {
       "name": "focused-project-status",
-      "title": "Focused task",
+      "title": "Focused Task",
       "description": "Show focused project progress in menu bar",
       "mode": "menu-bar",
       "interval": "1m"
@@ -143,6 +143,29 @@
         "add",
         "prior",
         "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "add-focused-session-note",
+      "title": "Add Session Note",
+      "description": "Add a session note to the focused project",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "session",
+        "note",
+        "pm"
+      ]
+    },
+    {
+      "name": "add-focused-link",
+      "title": "Add Link",
+      "description": "Add a link to the focused project notes",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "link",
         "pm"
       ]
     }

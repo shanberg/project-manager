@@ -18,12 +18,14 @@ export interface ObsidianUriOptions {
 
 export function getObsidianUri(
   notesPath: string,
-  options?: ObsidianUriOptions
+  options?: ObsidianUriOptions,
 ): string {
   const absolute = path.resolve(notesPath);
   const vault = options?.vault?.trim();
   const vaultRootRaw = options?.vaultRoot?.trim();
-  const vaultRoot = vaultRootRaw ? path.resolve(expandPath(vaultRootRaw)) : null;
+  const vaultRoot = vaultRootRaw
+    ? path.resolve(expandPath(vaultRootRaw))
+    : null;
   const heading = options?.heading?.trim();
 
   if (vault && vaultRoot) {
@@ -47,21 +49,24 @@ export function getSessionHeading(date: string, label?: string): string {
 
 export function buildObsidianOptions(
   prefs: { obsidianVault?: string; obsidianVaultRoot?: string },
-  session?: { date: string; label: string } | null
+  session?: { date: string; label: string } | null,
 ): ObsidianUriOptions | undefined {
-  if (!prefs.obsidianVault?.trim() || !prefs.obsidianVaultRoot?.trim()) return undefined;
+  if (!prefs.obsidianVault?.trim() || !prefs.obsidianVaultRoot?.trim())
+    return undefined;
   const opts: ObsidianUriOptions = {
     vault: prefs.obsidianVault.trim(),
     vaultRoot: prefs.obsidianVaultRoot.trim(),
   };
-  opts.heading = session ? getSessionHeading(session.date, session.label) : "Sessions";
+  opts.heading = session
+    ? getSessionHeading(session.date, session.label)
+    : "Sessions";
   return opts;
 }
 
 export async function ensureTodaySession(
   projectName: string,
   notes: ProjectNotes | null,
-  prefs: PreferenceValues
+  prefs: PreferenceValues,
 ): Promise<{ date: string; label: string }> {
   const today = formatSessionDate(new Date());
   const existing = notes?.sessions.find((s) => s.date === today);
@@ -70,7 +75,10 @@ export async function ensureTodaySession(
   return { date: today, label: "" };
 }
 
-export function parseListAllOutput(stdout: string): { active: string[]; archive: string[] } {
+export function parseListAllOutput(stdout: string): {
+  active: string[];
+  archive: string[];
+} {
   const lines = stdout.split("\n");
   const activeList: string[] = [];
   const archiveList: string[] = [];

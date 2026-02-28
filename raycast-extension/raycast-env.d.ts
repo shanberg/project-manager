@@ -52,6 +52,10 @@ declare namespace Preferences {
   export type AddFocusedTodo = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = ExtensionPreferences & {}
+  /** Preferences accessible in the `add-focused-session-note` command */
+  export type AddFocusedSessionNote = ExtensionPreferences & {}
+  /** Preferences accessible in the `add-focused-link` command */
+  export type AddFocusedLink = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -81,5 +85,9 @@ declare namespace Arguments {
   export type AddFocusedTodo = {}
   /** Arguments passed to the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = {}
+  /** Arguments passed to the `add-focused-session-note` command */
+  export type AddFocusedSessionNote = {}
+  /** Arguments passed to the `add-focused-link` command */
+  export type AddFocusedLink = {}
 }
 

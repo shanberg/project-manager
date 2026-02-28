@@ -14,14 +14,17 @@ import EditProjectStructure from "./edit-project-structure";
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
-  const { data: subfolders = [] } = useCachedPromise(getConfigSubfolders, [prefs]);
+  const { data: subfolders = [] } = useCachedPromise(getConfigSubfolders, [
+    prefs,
+  ]);
   const domainSummary =
     Object.keys(domains).length > 0
       ? Object.entries(domains)
           .map(([code, label]) => `${code} → ${label}`)
           .join("  ·  ")
       : "—";
-  const structureSummary = subfolders.length > 0 ? subfolders.join("  ·  ") : "—";
+  const structureSummary =
+    subfolders.length > 0 ? subfolders.join("  ·  ") : "—";
 
   return (
     <Detail
@@ -47,13 +50,19 @@ Folder names created inside each new project. **Edit Project Structure** to chan
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Domains" text={domainSummary} />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label title="Project structure" text={structureSummary} />
+          <Detail.Metadata.Label
+            title="Project structure"
+            text={structureSummary}
+          />
         </Detail.Metadata>
       }
       actions={
         <ActionPanel>
           <Action.Push title="Edit Domains" target={<EditDomains />} />
-          <Action.Push title="Edit Project Structure" target={<EditProjectStructure />} />
+          <Action.Push
+            title="Edit Project Structure"
+            target={<EditProjectStructure />}
+          />
           <Action
             title="Open Preferences"
             onAction={openExtensionPreferences}

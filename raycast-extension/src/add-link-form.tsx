@@ -23,12 +23,18 @@ export default function AddLinkForm({ projectName, notes, onSuccess }: Props) {
       await showToast({
         style: Toast.Style.Success,
         title: "Link added",
-        message: values.label.trim() || url.slice(0, 40) + (url.length > 40 ? "…" : ""),
+        message:
+          values.label.trim() ||
+          url.slice(0, 40) + (url.length > 40 ? "…" : ""),
       });
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 

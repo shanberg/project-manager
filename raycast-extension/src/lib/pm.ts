@@ -23,12 +23,19 @@ export const DEFAULT_SUBFOLDERS = [
 
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */
 export async function getConfigDomains(
-  prefs: Pick<PreferenceValues, "activePath" | "archivePath" | "configPath" | "pmCliPath">
+  prefs: Pick<
+    PreferenceValues,
+    "activePath" | "archivePath" | "configPath" | "pmCliPath"
+  >,
 ): Promise<Record<string, string>> {
   await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
   const env = buildEnv(prefs as PreferenceValues);
   try {
-    const { stdout } = await runPm(["config", "get", "domains"], env, prefs.pmCliPath);
+    const { stdout } = await runPm(
+      ["config", "get", "domains"],
+      env,
+      prefs.pmCliPath,
+    );
     const parsed = JSON.parse(stdout.trim()) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const out: Record<string, string> = {};
@@ -45,15 +52,24 @@ export async function getConfigDomains(
 
 /** Load subfolders (project structure) from pm config. Uses DEFAULT_SUBFOLDERS if config missing or invalid. */
 export async function getConfigSubfolders(
-  prefs: Pick<PreferenceValues, "activePath" | "archivePath" | "configPath" | "pmCliPath">
+  prefs: Pick<
+    PreferenceValues,
+    "activePath" | "archivePath" | "configPath" | "pmCliPath"
+  >,
 ): Promise<string[]> {
   await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
   const env = buildEnv(prefs as PreferenceValues);
   try {
-    const { stdout } = await runPm(["config", "get", "subfolders"], env, prefs.pmCliPath);
+    const { stdout } = await runPm(
+      ["config", "get", "subfolders"],
+      env,
+      prefs.pmCliPath,
+    );
     const parsed = JSON.parse(stdout.trim()) as unknown;
     if (Array.isArray(parsed)) {
-      const out = parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      const out = parsed.filter(
+        (v): v is string => typeof v === "string" && v.trim().length > 0,
+      );
       if (out.length > 0) return out;
     }
   } catch {
@@ -90,7 +106,9 @@ function getConfigDir(configPathOverride?: string): string {
   return path.join(os.homedir(), ".config", "pm");
 }
 
-export function getConfigEnv(configPathOverride?: string): Record<string, string> {
+export function getConfigEnv(
+  configPathOverride?: string,
+): Record<string, string> {
   const raw = configPathOverride?.trim();
   if (!raw) return {};
   return { PM_CONFIG_HOME: getConfigDir(configPathOverride) };
@@ -107,7 +125,7 @@ export function buildEnv(prefs: PreferenceValues): Record<string, string> {
 /** Ensure config exists, then run pm with prefs. Reduces boilerplate in commands. */
 export async function runPmWithPrefs(
   prefs: PreferenceValues,
-  args: string[]
+  args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
   return runPm(args, buildEnv(prefs), prefs.pmCliPath);
@@ -121,7 +139,7 @@ function normalizedPath(p: string): string {
 export async function ensureConfig(
   activePath: string,
   archivePath: string,
-  configPathOverride?: string
+  configPathOverride?: string,
 ): Promise<void> {
   const configDir = getConfigDir(configPathOverride);
   const configPath = path.join(configDir, "config.json");
@@ -159,7 +177,7 @@ export async function ensureConfig(
 export async function runPm(
   args: string[],
   env: Record<string, string> = {},
-  cliPathOverride?: string
+  cliPathOverride?: string,
 ): Promise<{ stdout: string; stderr: string }> {
   const fullEnv = { ...process.env, ...env };
   const pmPath = resolvePmPath(cliPathOverride);

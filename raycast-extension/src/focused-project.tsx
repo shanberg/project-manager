@@ -1,14 +1,6 @@
 import path from "path";
 import { getPreferenceValues } from "@raycast/api";
-import {
-  Alert,
-  Color,
-  Icon,
-  MenuBarExtra,
-  open,
-  confirmAlert,
-  showHUD,
-} from "@raycast/api";
+import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getNotes, resolveNotesPath, toggleTodoInNotes } from "./lib/notes-api";
 import type { Todo } from "./lib/notes-api";
@@ -18,18 +10,18 @@ import {
   clearFocusedProject,
 } from "./lib/focused-project";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
-import {
-  saveUndoState,
-  getUndoState,
-  clearUndoState,
-} from "./lib/undo-todo";
+import { saveUndoState, getUndoState, clearUndoState } from "./lib/undo-todo";
 import {
   getTaskTiming,
   setTaskTiming,
   clearTaskTiming,
   taskKey as taskTimingKey,
 } from "./lib/task-timing";
-import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
+import {
+  getObsidianUri,
+  buildObsidianOptions,
+  ensureTodaySession,
+} from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 
 export default function Command() {
@@ -103,11 +95,12 @@ export default function Command() {
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
     getUndoState,
     [],
-    { execute: true }
+    { execute: true },
   );
 
   const openTodos = data?.todos.filter((t) => !t.checked) ?? [];
-  const nextTodo = openTodos[0] ?? null;
+  const focusedTodo = openTodos.find((t) => t.focused) ?? null;
+  const nextTodo = focusedTodo ?? openTodos[0] ?? null;
   const contextOrder: string[] = [];
   const byContext = new Map<string, Todo[]>();
   for (const t of openTodos) {
@@ -138,6 +131,18 @@ export default function Command() {
       await revalidate();
       await revalidateUndo();
       await showHUD(`Done: ${todo.text.slice(0, 40)}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showHUD(`Error: ${msg}`);
+    }
+  }
+
+  async function handleFocusTask(todo: Todo & { focused?: boolean }) {
+    if (!data?.notesPath || todo.focused) return;
+    try {
+      await setFocusedTaskInFile(data.notesPath, todo);
+      await revalidate();
+      await showHUD(`Focus: ${todo.text.slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showHUD(`Error: ${msg}`);
@@ -179,7 +184,7 @@ export default function Command() {
     >
       {data && (
         <>
-          <MenuBarExtra.Section title={data.name}>
+          <MenuBarExtra.Section>
             {undoState && (
               <MenuBarExtra.Item
                 icon={Icon.Undo}
@@ -188,114 +193,108 @@ export default function Command() {
               />
             )}
             {nextTodo ? (
-              <>
-                <MenuBarExtra.Item
-                  icon={Icon.CheckCircle}
-                  title="Mark Done"
-                  onAction={() => handleMarkDone(nextTodo)}
-                />
-                <MenuBarExtra.Item
-                  icon={Icon.Document}
-                  title="Open in Obsidian"
-                  onAction={async () => {
-                    await onOpenProject();
-                    const session = await ensureTodaySession(data.name, data.notes ?? null, prefs);
-                    const opts = buildObsidianOptions(prefs, session);
-                    open(getObsidianUri(data.notesPath!, opts));
-                  }}
-                />
-              </>
+              <MenuBarExtra.Item
+                icon={Icon.CheckCircle}
+                title="Mark Done"
+                onAction={() => handleMarkDone(nextTodo)}
+              />
             ) : (
               <>
                 <MenuBarExtra.Item icon={Icon.CheckCircle} title="All done" />
                 <MenuBarExtra.Item icon={Icon.Circle} title="No tasks" />
-                {data.notesPath && (
-                  <MenuBarExtra.Item
-                    icon={Icon.Document}
-                    title="Open in Obsidian"
-                    onAction={async () => {
-                      await onOpenProject();
-                      const session = await ensureTodaySession(data.name, data.notes ?? null, prefs);
-                      const opts = buildObsidianOptions(prefs, session);
-                      open(getObsidianUri(data.notesPath!, opts));
-                    }}
-                  />
-                )}
-              </>
-            )}
-            <MenuBarExtra.Item
-              icon={Icon.Eye}
-              title="View Project"
-              onAction={() => open("raycast://extensions/shanberg/project-manager/view-focused-project")}
-            />
-            <MenuBarExtra.Item
-              icon={Icon.Plus}
-              title="New Project"
-              onAction={() => open("raycast://extensions/shanberg/project-manager/new-project")}
-            />
-            {data.notesPath && (
-              <>
-                <MenuBarExtra.Item
-                  icon={Icon.Plus}
-                  title="Add task"
-                  onAction={() => open("raycast://extensions/shanberg/project-manager/add-focused-todo")}
-                />
-                {nextTodo && (
-                  <MenuBarExtra.Item
-                    icon={Icon.ArrowUp}
-                    title="Add prior task"
-                    onAction={() => open("raycast://extensions/shanberg/project-manager/add-focused-prior-todo")}
-                  />
-                )}
               </>
             )}
           </MenuBarExtra.Section>
-          {contextOrder.map((context) => (
-            <MenuBarExtra.Section key={context} title={context}>
-              {(byContext.get(context) ?? []).map((todo, i) => (
-                <MenuBarExtra.Item
-                  key={`${i}-${todo.rawLine}`}
-                  icon={todo === nextTodo ? Icon.ArrowRightCircleFilled : Icon.Circle}
-                  title={todo.text}
-                  onAction={() => handleMarkDone(todo)}
-                />
-              ))}
-            </MenuBarExtra.Section>
-          ))}
-          <MenuBarExtra.Section>
-            <MenuBarExtra.Item
-              icon={Icon.Folder}
-              title="Open in Finder"
-              onAction={async () => {
-                await onOpenProject();
-                open(data.projectPath);
-              }}
-            />
-            {hasSrcDir(data.projectPath) && (
+          {data.notesPath && (
+            <MenuBarExtra.Section>
               <MenuBarExtra.Item
-                icon={Icon.Terminal}
-                title="Open in Cursor"
+                icon={Icon.Plus}
+                title="Add Task"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/add-focused-todo",
+                  )
+                }
+              />
+              {nextTodo && (
+                <MenuBarExtra.Item
+                  icon={Icon.ArrowUp}
+                  title="Add Prior Task"
+                  onAction={() =>
+                    open(
+                      "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
+                    )
+                  }
+                />
+              )}
+              <MenuBarExtra.Item
+                icon={Icon.Plus}
+                title="Add Session Note"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/add-focused-session-note",
+                  )
+                }
+              />
+              <MenuBarExtra.Item
+                icon={Icon.Link}
+                title="Add Link"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/add-focused-link",
+                  )
+                }
+              />
+              <MenuBarExtra.Item
+                icon={Icon.Document}
+                title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();
-                  open(data.projectPath, "Cursor");
+                  const session = await ensureTodaySession(
+                    data.name,
+                    data.notes ?? null,
+                    prefs,
+                  );
+                  const opts = buildObsidianOptions(prefs, session);
+                  open(getObsidianUri(data.notesPath!, opts));
                 }}
               />
-            )}
-            <MenuBarExtra.Item
-              icon={Icon.Star}
-              title="Clear Focused Project"
-              onAction={async () => {
-                const confirmed = await confirmAlert({
-                  title: "Clear Focused Project",
-                  message: "Remove focus from the current project?",
-                  primaryAction: { title: "Clear" },
-                });
-                if (!confirmed) return;
-                await clearFocusedProject();
-                await showHUD("Cleared");
-              }}
-            />
-          </MenuBarExtra.Section>
+            </MenuBarExtra.Section>
+          )}
+          {contextOrder.map((context) => (
+            <MenuBarExtra.Section key={context} title={context}>
+              {(byContext.get(context) ?? []).map((todo, i) => {
+                const isFocused = todo === nextTodo;
+                const completeTitle =
+                  todo.text.length > 35
+                    ? `Complete ${todo.text.slice(0, 32)}…`
+                    : `Complete ${todo.text}`;
+                return (
+                  <MenuBarExtra.Item
+                    key={`${i}-${todo.rawLine}`}
+                    icon={
+                      isFocused
+                        ? Icon.ArrowRightCircleFilled
+                        : Icon.Circle
+                    }
+                    title={todo.text}
+                    onAction={() =>
+                      isFocused ? handleMarkDone(todo) : handleFocusTask(todo)
+                    }
+                    alternate={
+                      !isFocused ? (
+                        <MenuBarExtra.Item
+                          icon={Icon.CheckCircle}
+                          title={completeTitle}
+                          onAction={() => handleMarkDone(todo)}
+                        />
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
+            </MenuBarExtra.Section>
+          ))}
         </>
       )}
     </MenuBarExtra>

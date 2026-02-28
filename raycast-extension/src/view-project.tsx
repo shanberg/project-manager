@@ -3,6 +3,7 @@ import {
   ActionPanel,
   getPreferenceValues,
   List,
+  open,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { runPmWithPrefs } from "./lib/pm";
@@ -14,7 +15,7 @@ async function fetchProjects(
   activePath: string,
   archivePath: string,
   configPath: string | undefined,
-  pmCliPath: string | undefined
+  pmCliPath: string | undefined,
 ) {
   const prefs = { activePath, archivePath, configPath, pmCliPath };
   const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
@@ -28,13 +29,18 @@ export default function Command(props: { launchContext?: LaunchContext }) {
   const direct = props.launchContext;
 
   if (direct?.projectName && direct?.basePath) {
-    return <ProjectView projectName={direct.projectName} basePath={direct.basePath} />;
+    return (
+      <ProjectView
+        projectName={direct.projectName}
+        basePath={direct.basePath}
+      />
+    );
   }
 
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjects,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true }
+    { keepPreviousData: true },
   );
 
   const active = data?.active ?? [];
@@ -47,7 +53,17 @@ export default function Command(props: { launchContext?: LaunchContext }) {
       searchBarPlaceholder="Search projects…"
       actions={
         <ActionPanel>
-          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+          <Action
+            title="Refresh"
+            onAction={revalidate}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+          />
+          <Action
+            title="Configure"
+            onAction={() =>
+              open("raycast://extensions/shanberg/project-manager/configure")
+            }
+          />
         </ActionPanel>
       }
     >
@@ -60,7 +76,12 @@ export default function Command(props: { launchContext?: LaunchContext }) {
               <ActionPanel>
                 <Action.Push
                   title="View Project"
-                  target={<ProjectView projectName={name} basePath={prefs.activePath} />}
+                  target={
+                    <ProjectView
+                      projectName={name}
+                      basePath={prefs.activePath}
+                    />
+                  }
                 />
               </ActionPanel>
             }
@@ -76,7 +97,12 @@ export default function Command(props: { launchContext?: LaunchContext }) {
               <ActionPanel>
                 <Action.Push
                   title="View Project"
-                  target={<ProjectView projectName={name} basePath={prefs.archivePath} />}
+                  target={
+                    <ProjectView
+                      projectName={name}
+                      basePath={prefs.archivePath}
+                    />
+                  }
                 />
               </ActionPanel>
             }

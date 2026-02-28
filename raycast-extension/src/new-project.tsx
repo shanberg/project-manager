@@ -20,7 +20,7 @@ export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data: domains = {}, isLoading: domainsLoading } = useCachedPromise(
     getConfigDomains,
-    [prefs]
+    [prefs],
   );
   const domainOptions = Object.entries(domains).map(([value, label]) => ({
     value,
@@ -38,7 +38,11 @@ export default function Command() {
       ]);
 
       if (stderr) {
-        await showToast({ style: Toast.Style.Failure, title: "Error", message: stderr });
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Error",
+          message: stderr,
+        });
       } else {
         const createdMsg = stdout.trim();
         await showToast({
@@ -60,7 +64,11 @@ export default function Command() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     } finally {
       setLoading(false);
     }
@@ -80,7 +88,11 @@ export default function Command() {
           <Form.Dropdown.Item key={d.value} value={d.value} title={d.title} />
         ))}
       </Form.Dropdown>
-      <Form.TextField id="title" title="Project Title" placeholder="e.g. Website Refresh" />
+      <Form.TextField
+        id="title"
+        title="Project Title"
+        placeholder="e.g. Website Refresh"
+      />
     </Form>
   );
 }

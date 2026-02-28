@@ -1,13 +1,14 @@
 import { List } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import AddTodoForm from "./add-todo-form";
+import AddSessionNoteForm from "./add-session-note-form";
 
 export default function Command() {
   const { data: focusedKey, isLoading } = useCachedPromise(
     getFocusedProject,
     [],
   );
+
   const parsed = focusedKey ? parseProjectKey(focusedKey) : null;
 
   if (isLoading) return <List isLoading />;
@@ -22,5 +23,5 @@ export default function Command() {
     );
   }
 
-  return <AddTodoForm projectName={parsed.name} onSuccess={() => {}} />;
+  return <AddSessionNoteForm projectName={parsed.name} />;
 }

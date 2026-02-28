@@ -23,7 +23,11 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
       return false;
     }
   }
@@ -46,7 +50,10 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Add & Done" onSubmit={handleAddAndDone} />
-          <Action.SubmitForm title="Add & Add Another" onSubmit={handleAddAndAnother} />
+          <Action.SubmitForm
+            title="Add & Add Another"
+            onSubmit={handleAddAndAnother}
+          />
         </ActionPanel>
       }
     >

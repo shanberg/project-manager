@@ -17,7 +17,7 @@ async function fetchArchivedProjects(
   activePath: string,
   archivePath: string,
   configPath: string | undefined,
-  pmCliPath: string | undefined
+  pmCliPath: string | undefined,
 ): Promise<string[]> {
   const prefs = { activePath, archivePath, configPath, pmCliPath };
   const { stdout } = await runPmWithPrefs(prefs, ["list", "--archive"]);
@@ -30,10 +30,15 @@ async function fetchArchivedProjects(
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
 
-  const { data: projects = [], isLoading, revalidate, mutate } = useCachedPromise(
+  const {
+    data: projects = [],
+    isLoading,
+    revalidate,
+    mutate,
+  } = useCachedPromise(
     fetchArchivedProjects,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true }
+    { keepPreviousData: true },
   );
 
   async function unarchiveProject(name: string) {
@@ -44,14 +49,11 @@ export default function Command() {
     });
     if (!confirmed) return;
     try {
-      await mutate(
-        runPmWithPrefs(prefs, ["unarchive", name]),
-        {
-          optimisticUpdate(data) {
-            return data.filter((p) => p !== name);
-          },
-        }
-      );
+      await mutate(runPmWithPrefs(prefs, ["unarchive", name]), {
+        optimisticUpdate(data) {
+          return data.filter((p) => p !== name);
+        },
+      });
       await showToast({
         style: Toast.Style.Success,
         title: "Unarchived",
@@ -59,7 +61,11 @@ export default function Command() {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 
@@ -68,7 +74,11 @@ export default function Command() {
       isLoading={isLoading}
       actions={
         <ActionPanel>
-          <Action title="Refresh" onAction={revalidate} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+          <Action
+            title="Refresh"
+            onAction={revalidate}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+          />
         </ActionPanel>
       }
     >
