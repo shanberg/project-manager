@@ -7,6 +7,7 @@ import {
   parseNotes,
   parseTodos,
   resolveNotesPath,
+  setFocusedTaskInFile,
   toggleTodoInFile,
 } from "@shanberg/project-manager/notes";
 import type { Todo } from "@shanberg/project-manager/notes";
@@ -89,7 +90,8 @@ export default function Command() {
   );
 
   const openTodos = data?.todos.filter((t) => !t.checked) ?? [];
-  const nextTodo = openTodos[0] ?? null;
+  const focusedTodo = openTodos.find((t) => t.focused) ?? null;
+  const nextTodo = focusedTodo ?? openTodos[0] ?? null;
   const contextOrder: string[] = [];
   const byContext = new Map<string, Todo[]>();
   for (const t of openTodos) {
@@ -120,6 +122,18 @@ export default function Command() {
       await revalidate();
       await revalidateUndo();
       await showHUD(`Done: ${todo.text.slice(0, 40)}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showHUD(`Error: ${msg}`);
+    }
+  }
+
+  async function handleFocusTask(todo: Todo & { focused?: boolean }) {
+    if (!data?.notesPath || todo.focused) return;
+    try {
+      await setFocusedTaskInFile(data.notesPath, todo);
+      await revalidate();
+      await showHUD(`Focus: ${todo.text.slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showHUD(`Error: ${msg}`);
@@ -232,18 +246,36 @@ export default function Command() {
           </MenuBarExtra.Section>
           {contextOrder.map((context) => (
             <MenuBarExtra.Section key={context} title={context}>
-              {(byContext.get(context) ?? []).map((todo, i) => (
-                <MenuBarExtra.Item
-                  key={`${i}-${todo.rawLine}`}
-                  icon={
-                    todo === nextTodo
-                      ? Icon.ArrowRightCircleFilled
-                      : Icon.Circle
-                  }
-                  title={todo.text}
-                  onAction={() => handleMarkDone(todo)}
-                />
-              ))}
+              {(byContext.get(context) ?? []).map((todo, i) => {
+                const isFocused = todo === nextTodo;
+                const completeTitle =
+                  todo.text.length > 35
+                    ? `Complete ${todo.text.slice(0, 32)}…`
+                    : `Complete ${todo.text}`;
+                return (
+                  <MenuBarExtra.Item
+                    key={`${i}-${todo.rawLine}`}
+                    icon={
+                      isFocused
+                        ? Icon.ArrowRightCircleFilled
+                        : Icon.Circle
+                    }
+                    title={todo.text}
+                    onAction={() =>
+                      isFocused ? handleMarkDone(todo) : handleFocusTask(todo)
+                    }
+                    alternate={
+                      !isFocused ? (
+                        <MenuBarExtra.Item
+                          icon={Icon.CheckCircle}
+                          title={completeTitle}
+                          onAction={() => handleMarkDone(todo)}
+                        />
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
             </MenuBarExtra.Section>
           ))}
         </>

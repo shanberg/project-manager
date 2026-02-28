@@ -89,15 +89,35 @@ export async function createNotesFromTemplate(projectPath: string): Promise<stri
   return notesPath;
 }
 
+const FOCUS_ANCHOR = /\s+@\s*$/;
+
 export async function toggleTodoInFile(notesPath: string, todo: Todo): Promise<void> {
   const content = await readFile(notesPath, "utf-8");
-  const newLine = todo.checked
+  let newLine = todo.checked
     ? todo.rawLine.replace(/\[[xX]\]/, "[ ]")
     : todo.rawLine.replace(/\[ \]/, "[x]");
+  if (!todo.checked) newLine = newLine.replace(FOCUS_ANCHOR, "");
   const updated = content.replace(todo.rawLine, newLine);
   if (updated === content) {
     throw new Error("Todo line not found in file");
   }
+  await writeFile(notesPath, updated, "utf-8");
+}
+
+export async function setFocusedTaskInFile(
+  notesPath: string,
+  targetTodo: Todo,
+): Promise<void> {
+  const content = await readFile(notesPath, "utf-8");
+  const withoutAnchor = content.replace(/\s+@\s*$/gm, "");
+  const targetStripped = targetTodo.rawLine.replace(FOCUS_ANCHOR, "");
+  const targetWithAnchor = targetStripped + " @";
+  const idx = withoutAnchor.indexOf(targetStripped);
+  if (idx < 0) {
+    throw new Error("Todo line not found in file");
+  }
+  const updated =
+    withoutAnchor.slice(0, idx) + targetWithAnchor + withoutAnchor.slice(idx + targetStripped.length);
   await writeFile(notesPath, updated, "utf-8");
 }
 

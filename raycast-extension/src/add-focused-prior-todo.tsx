@@ -24,7 +24,9 @@ export default function Command() {
       const content = await readFile(notesPath, "utf-8");
       const notes = parseNotes(content);
       const todos = parseTodos(notes);
-      const nextTodo = todos.filter((t) => !t.checked)[0] ?? null;
+      const openTodos = todos.filter((t) => !t.checked);
+      const focusedTodo = openTodos.find((t) => t.focused) ?? null;
+      const nextTodo = focusedTodo ?? openTodos[0] ?? null;
       return { notesPath, nextTodo };
     },
     [],
