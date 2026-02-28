@@ -30,6 +30,21 @@ final class NotesHelpersTests: XCTestCase {
         }
     }
 
+    /// getNotesTemplateContent throws notesTemplateNotFound when template path is set but file does not exist.
+    func testGetNotesTemplateContentThrowsWhenFileMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let missingPath = tmp.appendingPathComponent("nonexistent-template.md").path
+        XCTAssertThrowsError(try getNotesTemplateContent(templatePath: missingPath, title: "Test")) { err in
+            guard case PmError.notesTemplateNotFound(let path) = err else {
+                XCTFail("Expected notesTemplateNotFound, got \(err)")
+                return
+            }
+            XCTAssertEqual(path, missingPath)
+        }
+    }
+
     /// When docs/ does not exist, resolveNotesPath returns nil (no throw; treated as "no notes").
     func testResolveNotesPathReturnsNilWhenDocsMissing() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -84,4 +84,32 @@ final class ScaffoldTests: XCTestCase {
             XCTAssertEqual(t, "Foo\\Bar")
         }
     }
+
+    /// createProject throws notesTemplateNotFound when notesTemplatePath is set but the template file does not exist.
+    func testCreateProjectThrowsWhenTemplatePathMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let activePath = tmp.appendingPathComponent("active").path
+        let archivePath = tmp.appendingPathComponent("archive").path
+        let missingTemplate = tmp.appendingPathComponent("missing-template.md").path
+        try FileManager.default.createDirectory(atPath: activePath, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: archivePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        var config = PmConfig(
+            activePath: activePath,
+            archivePath: archivePath,
+            domains: defaultDomains,
+            subfolders: defaultSubfolders
+        )
+        config.notesTemplatePath = missingTemplate
+        let paths = ResolvedPaths(activePath: activePath, archivePath: archivePath)
+
+        XCTAssertThrowsError(try createProject(config: config, paths: paths, domainCode: "W", title: "Test")) { err in
+            guard case PmError.notesTemplateNotFound(let path) = err else {
+                XCTFail("Expected notesTemplateNotFound, got \(err)")
+                return
+            }
+            XCTAssertEqual(path, missingTemplate)
+        }
+    }
 }

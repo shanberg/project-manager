@@ -29,7 +29,7 @@ import AddTodoForm from "./add-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
-import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession } from "./lib/utils";
+import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession, getNotesPath } from "./lib/utils";
 
 function truncateSubtitle(s: string, max = 40): string {
   return s ? s.slice(0, max) + (s.length > max ? "…" : "") : "Empty";

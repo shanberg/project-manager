@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import PmLib
 
 /// End-to-end tests that run the built `pm` binary with a temp config.
 /// The test target depends on the `pm` executable; `swift test` builds it first. Binary path: packageRoot/.build/debug/pm.
@@ -262,6 +263,35 @@ final class CLITests: XCTestCase {
         let (_, stderr, code) = runPm(["config", "init"], stdin: stdinInput)
         XCTAssertNotEqual(code, 0, "config init with same path should fail")
         XCTAssertTrue(stderr.contains("must be different"), "stderr should explain: \(stderr)")
+    }
+
+    /// notes write accepts ProjectNotes JSON on stdin and overwrites the project notes file; notes show returns the written content.
+    func testNotesWrite() throws {
+        try skipIfNoBinary()
+        let (_, _, codeNew) = runPm(["new", "W", "Notes Write Test"])
+        XCTAssertEqual(codeNew, 0, "pm new should succeed")
+        let notes = ProjectNotes(
+            title: "Notes Write Test",
+            summary: "Summary from notes write",
+            problem: "",
+            goals: ["", "", ""],
+            approach: "",
+            links: [LinkEntry(label: nil, url: nil, children: nil)],
+            learnings: [""],
+            sessions: [
+                Session(date: "Fri, Feb 27, 2025", label: "CLITest", body: "- [ ] Task written via pm notes write")
+            ]
+        )
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(notes)
+        let jsonString = String(data: data, encoding: .utf8)!
+        let (_, _, codeWrite) = runPm(["notes", "write", "W-1"], stdin: jsonString)
+        XCTAssertEqual(codeWrite, 0, "pm notes write should exit 0")
+        let (stdoutShow, _, codeShow) = runPm(["notes", "show", "W-1"])
+        XCTAssertEqual(codeShow, 0, "pm notes show should exit 0 after write")
+        XCTAssertTrue(stdoutShow.contains("Summary from notes write"), "show output should contain written summary")
+        XCTAssertTrue(stdoutShow.contains("Task written via pm notes write"), "show output should contain written todo text")
+        XCTAssertTrue(stdoutShow.contains("CLITest"), "show output should contain session label")
     }
 
     /// notes session add creates a session with optional label and --date; notes show includes the new session.
