@@ -31,7 +31,9 @@ const TOOLTIP_MAX_LEN = 80;
 
 function truncForTooltip(s: string): string {
   const t = s.trim();
-  return t.length > TOOLTIP_MAX_LEN ? t.slice(0, TOOLTIP_MAX_LEN).trim() + "…" : t;
+  return t.length > TOOLTIP_MAX_LEN
+    ? t.slice(0, TOOLTIP_MAX_LEN).trim() + "…"
+    : t;
 }
 
 function formatStructuredTooltip(notes: {
@@ -50,7 +52,10 @@ function formatStructuredTooltip(notes: {
     .filter(Boolean)
     .map((g, i) => `${i + 1}. ${g}`)
     .join(" ");
-  if (goalItems) parts.push(`Goals: ${goalItems.length > 150 ? goalItems.slice(0, 150).trim() + "…" : goalItems}`);
+  if (goalItems)
+    parts.push(
+      `Goals: ${goalItems.length > 150 ? goalItems.slice(0, 150).trim() + "…" : goalItems}`,
+    );
   const approach = truncForTooltip(notes.approach);
   if (approach) parts.push(`Approach: ${approach}`);
   return parts.join("\n\n");
@@ -75,64 +80,89 @@ function flattenLinks(links: LinkEntry[]): { label: string; url: string }[] {
   return result;
 }
 
+async function fetchFocusedProjectStatus(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined,
+) {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const focusedKey = await getFocusedProject();
+  if (!focusedKey) return null;
+  const parsed = parseProjectKey(focusedKey);
+  if (!parsed) return null;
+  const { basePath, name } = parsed;
+  const notesPath = await resolveNotesPath(prefs, name);
+  if (!notesPath)
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath: null as null,
+      done: 0,
+      total: 0,
+      links: [] as { label: string; url: string }[],
+      notes: null as null,
+    };
+  try {
+    const out = await getNotes(prefs, name);
+    const notes = out.notes;
+    const total = out.todos.length;
+    const done = out.todos.filter((t) => t.checked).length;
+    const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath,
+      done,
+      total,
+      links,
+      notes,
+    };
+  } catch {
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath: null,
+      done: 0,
+      total: 0,
+      links: [],
+      notes: null,
+    };
+  }
+}
+
+async function fetchRecentProjects(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined,
+  focusedKey: string | null,
+) {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  return getRecentProjectsByEdit(prefs, 10, focusedKey ?? undefined);
+}
+
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data, isLoading, revalidate } = useCachedPromise(
-    async () => {
-      const focusedKey = await getFocusedProject();
-      if (!focusedKey) return null;
-      const parsed = parseProjectKey(focusedKey);
-      if (!parsed) return null;
-      const { basePath, name } = parsed;
-      const notesPath = await resolveNotesPath(prefs, name);
-      if (!notesPath)
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath: null,
-          done: 0,
-          total: 0,
-          links: [],
-          notes: null,
-        };
-      try {
-        const out = await getNotes(prefs, name);
-        const notes = out.notes;
-        const total = out.todos.length;
-        const done = out.todos.filter((t) => t.checked).length;
-        const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath,
-          done,
-          total,
-          links,
-          notes,
-        };
-      } catch {
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath: null,
-          done: 0,
-          total: 0,
-          links: [],
-          notes: null,
-        };
-      }
-    },
+    fetchFocusedProjectStatus,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { execute: true }
+    { execute: true },
   );
 
   const focusedKey = data ? projectKey(data.basePath, data.name) : null;
   const { data: recentProjects } = useCachedPromise(
-    () => getRecentProjectsByEdit(prefs, 10, focusedKey ?? undefined),
-    [prefs.activePath, prefs.archivePath, focusedKey],
+    fetchRecentProjects,
+    [
+      prefs.activePath,
+      prefs.archivePath,
+      prefs.configPath,
+      prefs.pmCliPath,
+      focusedKey,
+    ],
     { execute: true },
   );
 
@@ -145,10 +175,7 @@ export default function Command() {
       ? `${data.name}: ${data.done}/${data.total} done`
       : data.name
     : "No focused project";
-  const structured =
-    data?.notes
-      ? formatStructuredTooltip(data.notes)
-      : "";
+  const structured = data?.notes ? formatStructuredTooltip(data.notes) : "";
   const tooltip = structured ? `${baseTooltip}\n\n${structured}` : baseTooltip;
 
   async function onOpenProject() {
@@ -223,7 +250,7 @@ export default function Command() {
               />
             )}
           </MenuBarExtra.Section>
-            {data.notesPath && (
+          {data.notesPath && (
             <MenuBarExtra.Section title="Links">
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
@@ -263,8 +290,9 @@ export default function Command() {
           {recentProjects && recentProjects.length > 0 && (
             <MenuBarExtra.Section title="Recent">
               {recentProjects.map((p) => {
-                const baseTip =
-                  p.total ? `${p.name}: ${p.done}/${p.total} done` : p.name;
+                const baseTip = p.total
+                  ? `${p.name}: ${p.done}/${p.total} done`
+                  : p.name;
                 const structured = p.notes
                   ? formatStructuredTooltip(p.notes)
                   : "";

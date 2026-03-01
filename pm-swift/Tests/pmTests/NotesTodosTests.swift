@@ -95,4 +95,102 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(todos.count, 1)
         XCTAssertEqual(todos[0].text, "Only todo")
     }
+
+    /// Depth from indent: 0 spaces = depth 0, 2 spaces = depth 1, 4 = depth 2.
+    func testParseTodosDepthFromIndent() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Root\n  - [ ] Child\n    - [ ] Grandchild"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.count, 3)
+        XCTAssertEqual(todos[0].depth, 0)
+        XCTAssertEqual(todos[0].text, "Root")
+        XCTAssertEqual(todos[1].depth, 1)
+        XCTAssertEqual(todos[1].text, "Child")
+        XCTAssertEqual(todos[2].depth, 2)
+        XCTAssertEqual(todos[2].text, "Grandchild")
+    }
+
+    /// sessionIndex and lineIndex identify position.
+    func testParseTodosSessionAndLineIndex() throws {
+        let s1 = Session(date: "Mon, Jan 1, 2025", label: "", body: "- [ ] A\n- [ ] B")
+        let s2 = Session(date: "Tue, Jan 2, 2025", label: "", body: "- [ ] C")
+        let notes = ProjectNotes(title: "T", sessions: [s1, s2])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.count, 3)
+        XCTAssertEqual(todos[0].sessionIndex, 0)
+        XCTAssertEqual(todos[0].lineIndex, 0)
+        XCTAssertEqual(todos[1].sessionIndex, 0)
+        XCTAssertEqual(todos[1].lineIndex, 1)
+        XCTAssertEqual(todos[2].sessionIndex, 1)
+        XCTAssertEqual(todos[2].lineIndex, 0)
+    }
+
+    /// Task line ending with " @" is focused; text is stripped of suffix.
+    func testParseTodosFocusMarker() throws {
+        let session = Session(date: "Wed, Feb 25, 2025", label: "", body: "- [ ] First\n- [ ] Second @\n- [ ] Third")
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.count, 3)
+        XCTAssertFalse(todos[0].isFocused)
+        XCTAssertEqual(todos[0].text, "First")
+        XCTAssertTrue(todos[1].isFocused)
+        XCTAssertEqual(todos[1].text, "Second")
+        XCTAssertTrue(todos[1].rawLine.hasSuffix(" @"))
+        XCTAssertFalse(todos[2].isFocused)
+        XCTAssertEqual(todos[2].text, "Third")
+    }
+
+    /// Multiple "@" in file: only first (by session/line order) gets isFocused when parsing unnormalized notes.
+    func testParseTodosMultipleFocusMarkersFirstWins() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [ ] B @\n- [ ] C @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.filter { $0.isFocused }.count, 1)
+        XCTAssertTrue(todos[0].isFocused)
+        XCTAssertFalse(todos[1].isFocused)
+        XCTAssertFalse(todos[2].isFocused)
+    }
+
+    /// normalizeFocusMarker keeps first " @" and strips the rest from session bodies.
+    func testNormalizeFocusMarkerKeepsFirstStripsRest() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [ ] B @\n- [ ] C @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let normalized = normalizeFocusMarker(notes: notes)
+        let bodyLines = normalized.sessions[0].body.split(separator: "\n").map(String.init)
+        XCTAssertEqual(bodyLines.count, 3)
+        XCTAssertTrue(bodyLines[0].hasSuffix(" @"))
+        XCTAssertFalse(bodyLines[1].hasSuffix(" @"))
+        XCTAssertFalse(bodyLines[2].hasSuffix(" @"))
+        XCTAssertEqual(bodyLines[1], "- [ ] B")
+        XCTAssertEqual(bodyLines[2], "- [ ] C")
+    }
+
+    /// Round-trip with focus marker: parse -> normalize -> serialize -> parse preserves single @ and isFocused.
+    func testRoundTripWithFocusMarker() throws {
+        let session = Session(date: "Wed, Feb 25, 2025", label: "", body: "- [ ] One\n- [ ] Two @\n- [ ] Three")
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let normalized = normalizeFocusMarker(notes: notes)
+        let serialized = serializeNotes(normalized)
+        let reparsed = try parseNotes(markdown: serialized)
+        let todos = try parseTodos(notes: reparsed)
+        XCTAssertEqual(todos.count, 3)
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "Two")
+        XCTAssertTrue(reparsed.sessions[0].body.contains(" @"))
+        let atCount = reparsed.sessions[0].body.split(separator: "\n").filter { $0.hasSuffix(" @") }.count
+        XCTAssertEqual(atCount, 1)
+    }
 }

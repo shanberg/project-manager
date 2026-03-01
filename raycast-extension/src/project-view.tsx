@@ -19,7 +19,7 @@ import {
   resolveNotesPath,
   toggleAllTodosInNotes,
   toggleTodoInNotes,
-  type ProjectNotes,
+  type LinkEntry,
   type Todo,
 } from "./lib/notes-api";
 import { runPmWithPrefs } from "./lib/pm";
@@ -32,7 +32,13 @@ import AddTodoForm from "./add-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
-import { getObsidianUri, hasSrcDir, buildObsidianOptions, ensureTodaySession, getNotesPath } from "./lib/utils";
+import {
+  getObsidianUri,
+  hasSrcDir,
+  buildObsidianOptions,
+  ensureTodaySession,
+  getNotesPath,
+} from "./lib/utils";
 
 function truncateSubtitle(s: string, max = 40): string {
   return s ? s.slice(0, max) + (s.length > max ? "…" : "") : "Empty";
@@ -41,6 +47,24 @@ function truncateSubtitle(s: string, max = 40): string {
 function sectionDetail(content: string, emptyLabel: string) {
   const markdown = content.trim() ? content : `_${emptyLabel}_`;
   return <List.Item.Detail markdown={markdown} />;
+}
+
+async function fetchProjectNotes(
+  projName: string,
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined,
+) {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const notesPath = await resolveNotesPath(prefs, projName);
+  if (!notesPath) return { notes: null, todos: [] as Todo[], notesPath: null };
+  try {
+    const out = await getNotes(prefs, projName);
+    return { notes: out.notes, todos: out.todos, notesPath };
+  } catch {
+    return { notes: null, todos: [] as Todo[], notesPath };
+  }
 }
 
 interface Props {
@@ -57,21 +81,18 @@ export default function ProjectView({ projectName, basePath }: Props) {
   const isActive = basePath === prefs.activePath;
   const projectPath = path.join(basePath, projectName);
   const [viewMode, setViewMode] = useState<TodoViewMode>("next");
-  const [todoFilter, setTodoFilter] = useState<TodoFilter>("all");
+  const [todoFilter] = useState<TodoFilter>("all");
 
   const { data, isLoading, revalidate, mutate } = useCachedPromise(
-    async () => {
-      const notesPath = await resolveNotesPath(prefs, projectName);
-      if (!notesPath) return { notes: null, todos: [], notesPath: null };
-      try {
-        const out = await getNotes(prefs, projectName);
-        return { notes: out.notes, todos: out.todos, notesPath };
-      } catch {
-        return { notes: null, todos: [], notesPath };
-      }
-    },
-    [projectName, prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true }
+    fetchProjectNotes,
+    [
+      projectName,
+      prefs.activePath,
+      prefs.archivePath,
+      prefs.configPath,
+      prefs.pmCliPath,
+    ],
+    { keepPreviousData: true },
   );
 
   const { notes, todos, notesPath } = data ?? {
@@ -209,7 +230,9 @@ export default function ProjectView({ projectName, basePath }: Props) {
           {notes && (
             <Action.Push
               title="Add Task"
-              target={<AddTodoForm projectName={projectName} onSuccess={mutate} />}
+              target={
+                <AddTodoForm projectName={projectName} onSuccess={mutate} />
+              }
             />
           )}
         </ActionPanel>
@@ -264,7 +287,9 @@ export default function ProjectView({ projectName, basePath }: Props) {
               {notes && (
                 <Action.Push
                   title="Add Task"
-                  target={<AddTodoForm projectName={projectName} onSuccess={mutate} />}
+                  target={
+                    <AddTodoForm projectName={projectName} onSuccess={mutate} />
+                  }
                 />
               )}
             </ActionPanel>
@@ -404,12 +429,12 @@ export default function ProjectView({ projectName, basePath }: Props) {
           />
           <List.Item
             title="Edit Goals"
-            icon={Icon.Target}
+            icon={Icon.Flag}
             subtitle={truncateSubtitle(notes.goals.filter(Boolean).join(", "))}
             detail={sectionDetail(
               notes.goals
                 .filter(Boolean)
-                .map((g, i) => `${i + 1}. ${g}`)
+                .map((g: string, i: number) => `${i + 1}. ${g}`)
                 .join("\n"),
               "No goals yet.",
             )}
@@ -457,12 +482,13 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Add Link"
             icon={Icon.Link}
             subtitle={
-              notes.links.filter((l) => l.label || l.url).length + " links"
+              notes.links.filter((l: LinkEntry) => l.label || l.url).length +
+              " links"
             }
             detail={sectionDetail(
               notes.links
-                .filter((l) => l.label || l.url)
-                .map((l) =>
+                .filter((l: LinkEntry) => l.label || l.url)
+                .map((l: LinkEntry) =>
                   l.label && l.url
                     ? `- [${l.label}](${l.url})`
                     : l.url
@@ -478,7 +504,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 <Action.Push
                   title="Add Link"
                   target={
-                    <AddLinkForm projectName={projectName} notes={notes} onSuccess={mutate} />
+                    <AddLinkForm
+                      projectName={projectName}
+                      notes={notes}
+                      onSuccess={mutate}
+                    />
                   }
                 />
               </ActionPanel>
@@ -493,7 +523,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             detail={sectionDetail(
               notes.learnings
                 .filter(Boolean)
-                .map((l) => `- ${l}`)
+                .map((l: string) => `- ${l}`)
                 .join("\n"),
               "No learnings yet.",
             )}

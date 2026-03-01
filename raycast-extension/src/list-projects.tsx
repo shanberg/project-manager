@@ -19,13 +19,17 @@ import {
   formatNotesForDetail,
   formatNotesEmptyState,
 } from "./lib/notes-api";
-import type { ProjectNotes } from "./lib/notes-api";
+import type { ProjectNotes, Todo } from "./lib/notes-api";
 import {
   recordRecentProject,
   getRecentProjectKeys,
   projectKey,
 } from "./lib/recent-projects";
-import { setFocusedProject, getProjectCode, getReadableProjectName } from "./lib/focused-project";
+import {
+  setFocusedProject,
+  getProjectCode,
+  getReadableProjectName,
+} from "./lib/focused-project";
 import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";
@@ -67,14 +71,19 @@ function parseSearchToken(
 }
 
 async function loadNotesForProject(
-  prefs: { activePath: string; archivePath: string; configPath?: string; pmCliPath?: string },
-  projectName: string
-): Promise<{ notes: ProjectNotes; notesPath: string } | null> {
+  prefs: {
+    activePath: string;
+    archivePath: string;
+    configPath?: string;
+    pmCliPath?: string;
+  },
+  projectName: string,
+): Promise<{ notes: ProjectNotes; notesPath: string; todos: Todo[] } | null> {
   const notesPath = await resolveNotesPath(prefs, projectName);
   if (!notesPath) return null;
   try {
     const out = await getNotes(prefs, projectName);
-    return { notes: out.notes, notesPath };
+    return { notes: out.notes, notesPath, todos: out.todos };
   } catch {
     return null;
   }
@@ -119,8 +128,11 @@ async function fetchProjectsWithMeta(
         ]);
         const notes = loaded?.notes ?? null;
         const todos = loaded?.todos ?? [];
-        const done = todos.filter((t: { checked: boolean }) => t.checked).length;
-        const mtime = typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
+        const done = todos.filter(
+          (t: { checked: boolean }) => t.checked,
+        ).length;
+        const mtime =
+          typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
         return {
           name,
           notes,

@@ -1,4 +1,11 @@
-import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { updateNotesSection, writeNotes } from "./lib/notes-api";
 import type { ProjectNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
@@ -10,11 +17,20 @@ interface Props {
   onSuccess?: () => void;
 }
 
-export default function EditGoalsForm({ projectName, notes, initialGoals, onSuccess }: Props) {
+export default function EditGoalsForm({
+  projectName,
+  notes,
+  initialGoals,
+  onSuccess,
+}: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const goals = [...initialGoals, "", ""].slice(0, 3);
 
-  async function handleSubmit(values: { goal1: string; goal2: string; goal3: string }) {
+  async function handleSubmit(values: {
+    goal1: string;
+    goal2: string;
+    goal3: string;
+  }) {
     const newGoals = [values.goal1, values.goal2, values.goal3];
     try {
       const updated = updateNotesSection(notes, { goals: newGoals });

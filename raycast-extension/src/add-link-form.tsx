@@ -1,4 +1,11 @@
-import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { addLinkToNotes } from "./lib/notes-api";
 import type { ProjectNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";

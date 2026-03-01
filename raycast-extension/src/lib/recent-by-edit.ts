@@ -11,7 +11,12 @@ export type RecentProject = {
   mtime: number;
   done: number;
   total: number;
-  notes: { summary: string; problem: string; goals: string[]; approach: string } | null;
+  notes: {
+    summary: string;
+    problem: string;
+    goals: string[];
+    approach: string;
+  } | null;
 };
 
 export async function getRecentProjectsByEdit(
@@ -32,12 +37,18 @@ export async function getRecentProjectsByEdit(
     all.map(async ({ name, basePath }) => {
       const projectPath = path.join(basePath, name);
       const notesPath = await resolveNotesPath(prefs, name);
-      const statsNotes = notesPath ? await stat(notesPath).catch(() => null) : null;
+      const statsNotes = notesPath
+        ? await stat(notesPath).catch(() => null)
+        : null;
       const statsProject = await stat(projectPath).catch(() => null);
       const mtime = statsNotes
-        ? (statsNotes.mtime instanceof Date ? statsNotes.mtime.getTime() : (statsNotes.mtime as number))
+        ? statsNotes.mtime instanceof Date
+          ? statsNotes.mtime.getTime()
+          : (statsNotes.mtime as number)
         : statsProject
-          ? (statsProject.mtime instanceof Date ? statsProject.mtime.getTime() : (statsProject.mtime as number))
+          ? statsProject.mtime instanceof Date
+            ? statsProject.mtime.getTime()
+            : (statsProject.mtime as number)
           : 0;
       let done = 0;
       let total = 0;

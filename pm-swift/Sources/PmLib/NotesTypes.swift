@@ -51,12 +51,24 @@ public struct Todo: Codable, Equatable {
     public var checked: Bool
     public var rawLine: String
     public var context: String
+    /// Indent depth: 0 = root, 1 = one level in (2 spaces), etc. Derived from leading spaces before "- ".
+    public var depth: Int
+    /// Index of the session in notes.sessions.
+    public var sessionIndex: Int
+    /// Index of the task line within that session's body (by line order).
+    public var lineIndex: Int
+    /// True if this task line ends with " @" (the single focused item in the notes file).
+    public var isFocused: Bool
 
-    public init(text: String, checked: Bool, rawLine: String, context: String) {
+    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false) {
         self.text = text
         self.checked = checked
         self.rawLine = rawLine
         self.context = context
+        self.depth = depth
+        self.sessionIndex = sessionIndex
+        self.lineIndex = lineIndex
+        self.isFocused = isFocused
     }
 }
 
@@ -64,9 +76,12 @@ public struct Todo: Codable, Equatable {
 public struct NotesShowOutput: Codable {
     public var notes: ProjectNotes
     public var todos: [Todo]
+    /// Key of the focused todo, if any: "sessionIndex:lineIndex" for stable identity.
+    public var focusedKey: String?
 
-    public init(notes: ProjectNotes, todos: [Todo]) {
+    public init(notes: ProjectNotes, todos: [Todo], focusedKey: String? = nil) {
         self.notes = notes
         self.todos = todos
+        self.focusedKey = focusedKey
     }
 }

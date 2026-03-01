@@ -1,4 +1,11 @@
-import { Form, Action, ActionPanel, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { updateNotesSection, writeNotes } from "./lib/notes-api";
 import type { ProjectNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
@@ -10,7 +17,12 @@ interface Props {
   onSuccess?: () => void;
 }
 
-export default function EditLearningsForm({ projectName, notes, initialLearnings, onSuccess }: Props) {
+export default function EditLearningsForm({
+  projectName,
+  notes,
+  initialLearnings,
+  onSuccess,
+}: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const value = initialLearnings.filter(Boolean).join("\n") || "";
 
@@ -24,7 +36,10 @@ export default function EditLearningsForm({ projectName, notes, initialLearnings
         learnings: learnings.length ? learnings : [""],
       });
       await writeNotes(prefs, projectName, updated);
-      await showToast({ style: Toast.Style.Success, title: "Learnings updated" });
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Learnings updated",
+      });
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

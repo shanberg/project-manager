@@ -51,7 +51,7 @@ export default function Command() {
     try {
       await mutate(runPmWithPrefs(prefs, ["unarchive", name]), {
         optimisticUpdate(data) {
-          return data.filter((p) => p !== name);
+          return data !== undefined ? data.filter((p) => p !== name) : [];
         },
       });
       await showToast({

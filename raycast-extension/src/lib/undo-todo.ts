@@ -12,14 +12,17 @@ export interface UndoState {
 export async function saveUndoState(
   notesPath: string,
   projectName: string,
-  todo: Todo
+  todo: Todo,
 ): Promise<void> {
   const undoneTodo: Todo = {
     ...todo,
     checked: true,
     rawLine: todo.rawLine.replace(/\[ \]/, "[x]"),
   };
-  await LocalStorage.setItem(KEY, JSON.stringify({ notesPath, projectName, todo: undoneTodo }));
+  await LocalStorage.setItem(
+    KEY,
+    JSON.stringify({ notesPath, projectName, todo: undoneTodo }),
+  );
 }
 
 export async function getUndoState(): Promise<UndoState | null> {

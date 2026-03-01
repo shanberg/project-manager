@@ -1,4 +1,12 @@
-import { Form, Action, ActionPanel, showToast, Toast, useNavigation, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  showToast,
+  Toast,
+  useNavigation,
+  getPreferenceValues,
+} from "@raycast/api";
 import { addTodoBeforeInNotes } from "./lib/notes-api";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
@@ -10,7 +18,12 @@ interface Props {
   onSuccess?: () => void;
 }
 
-export default function AddPriorTodoForm({ projectName, notes, beforeTodo, onSuccess }: Props) {
+export default function AddPriorTodoForm({
+  projectName,
+  notes,
+  beforeTodo,
+  onSuccess,
+}: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
@@ -45,7 +58,15 @@ export default function AddPriorTodoForm({ projectName, notes, beforeTodo, onSuc
     const text = values.text.trim();
     if (!text) return;
     const ok = await addTask(text);
-    if (ok) push(<AddPriorTodoForm projectName={projectName} notes={notes} beforeTodo={beforeTodo} onSuccess={onSuccess} />);
+    if (ok)
+      push(
+        <AddPriorTodoForm
+          projectName={projectName}
+          notes={notes}
+          beforeTodo={beforeTodo}
+          onSuccess={onSuccess}
+        />,
+      );
   }
 
   return (

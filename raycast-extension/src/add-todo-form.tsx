@@ -1,4 +1,12 @@
-import { Form, Action, ActionPanel, showToast, Toast, useNavigation, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  showToast,
+  Toast,
+  useNavigation,
+  getPreferenceValues,
+} from "@raycast/api";
 import { addTodoToTodaySession } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -42,7 +50,8 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
     const text = values.text.trim();
     if (!text) return;
     const ok = await addTask(text);
-    if (ok) push(<AddTodoForm projectName={projectName} onSuccess={onSuccess} />);
+    if (ok)
+      push(<AddTodoForm projectName={projectName} onSuccess={onSuccess} />);
   }
 
   return (

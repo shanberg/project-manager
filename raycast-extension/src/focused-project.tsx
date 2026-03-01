@@ -2,13 +2,14 @@ import path from "path";
 import { getPreferenceValues } from "@raycast/api";
 import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { getNotes, resolveNotesPath, toggleTodoInNotes } from "./lib/notes-api";
-import type { Todo } from "./lib/notes-api";
 import {
-  getFocusedProject,
-  parseProjectKey,
-  clearFocusedProject,
-} from "./lib/focused-project";
+  getNotes,
+  resolveNotesPath,
+  setFocusToTodoInNotes,
+  toggleTodoInNotes,
+} from "./lib/notes-api";
+import type { Todo } from "./lib/notes-api";
+import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { saveUndoState, getUndoState, clearUndoState } from "./lib/undo-todo";
 import {
@@ -24,82 +25,96 @@ import {
 } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 
+async function fetchFocusedProjectData(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined,
+) {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const focusedKey = await getFocusedProject();
+  if (!focusedKey) return null;
+  const parsed = parseProjectKey(focusedKey);
+  if (!parsed) return null;
+  const { basePath, name } = parsed;
+  const notesPath = await resolveNotesPath(prefs, name);
+  if (!notesPath) {
+    await clearTaskTiming();
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath: null as null,
+      todos: [] as Todo[],
+      notes: null as null,
+      iconColor: undefined,
+    };
+  }
+  try {
+    const out = await getNotes(prefs, name);
+    const notes = out.notes;
+    const todos = out.todos;
+    const openTodos = todos.filter((t) => !t.checked);
+    const nextTodo = openTodos[0] ?? null;
+    let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
+    if (nextTodo) {
+      const key = taskTimingKey(notesPath, nextTodo.rawLine);
+      const stored = await getTaskTiming();
+      const now = Date.now();
+      if (stored?.taskKey === key) {
+        const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
+        if (elapsedHours >= 2) iconColor = Color.Red;
+        else if (elapsedHours >= 1) iconColor = Color.Yellow;
+      } else {
+        await setTaskTiming(key);
+      }
+    } else {
+      await clearTaskTiming();
+    }
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath,
+      todos,
+      notes,
+      iconColor,
+    };
+  } catch {
+    await clearTaskTiming();
+    return {
+      name,
+      basePath,
+      projectPath: path.join(basePath, name),
+      notesPath: null,
+      todos: [],
+      notes: null,
+      iconColor: undefined,
+    };
+  }
+}
+
+type FocusedProjectData = Awaited<ReturnType<typeof fetchFocusedProjectData>>;
+
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data, isLoading, revalidate } = useCachedPromise(
-    async () => {
-      const focusedKey = await getFocusedProject();
-      if (!focusedKey) return null;
-      const parsed = parseProjectKey(focusedKey);
-      if (!parsed) return null;
-      const { basePath, name } = parsed;
-      const notesPath = await resolveNotesPath(prefs, name);
-      if (!notesPath) {
-        await clearTaskTiming();
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath: null,
-          todos: [],
-          notes: null,
-          iconColor: undefined,
-        };
-      }
-      try {
-        const out = await getNotes(prefs, name);
-        const notes = out.notes;
-        const todos = out.todos;
-        const openTodos = todos.filter((t) => !t.checked);
-        const nextTodo = openTodos[0] ?? null;
-        let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
-        if (nextTodo) {
-          const key = taskTimingKey(notesPath, nextTodo.rawLine);
-          const stored = await getTaskTiming();
-          const now = Date.now();
-          if (stored?.taskKey === key) {
-            const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
-            if (elapsedHours >= 2) iconColor = Color.Red;
-            else if (elapsedHours >= 1) iconColor = Color.Yellow;
-          } else {
-            await setTaskTiming(key);
-          }
-        } else {
-          await clearTaskTiming();
-        }
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath,
-          todos,
-          notes,
-          iconColor,
-        };
-      } catch {
-        await clearTaskTiming();
-        return {
-          name,
-          basePath,
-          projectPath: path.join(basePath, name),
-          notesPath: null,
-          todos: [],
-          notes: null,
-          iconColor: undefined,
-        };
-      }
-    },
+    fetchFocusedProjectData,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { execute: true }
-  );
+    { execute: true },
+  ) as {
+    data: FocusedProjectData | undefined;
+    isLoading: boolean;
+    revalidate: () => void;
+  };
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
     getUndoState,
     [],
     { execute: true },
   );
 
-  const openTodos = data?.todos.filter((t) => !t.checked) ?? [];
-  const focusedTodo = openTodos.find((t) => t.focused) ?? null;
+  const openTodos = (data?.todos ?? []).filter((t) => !t.checked);
+  const focusedTodo = openTodos.find((t) => t.isFocused) ?? null;
   const nextTodo = focusedTodo ?? openTodos[0] ?? null;
   const contextOrder: string[] = [];
   const byContext = new Map<string, Todo[]>();
@@ -137,10 +152,10 @@ export default function Command() {
     }
   }
 
-  async function handleFocusTask(todo: Todo & { focused?: boolean }) {
-    if (!data?.notesPath || todo.focused) return;
+  async function handleFocusTask(todo: Todo) {
+    if (!data?.notesPath || !data?.notes || todo.isFocused) return;
     try {
-      await setFocusedTaskInFile(data.notesPath, todo);
+      await setFocusToTodoInNotes(prefs, data.name, data.notes, todo);
       await revalidate();
       await showHUD(`Focus: ${todo.text.slice(0, 40)}`);
     } catch (err) {
@@ -153,7 +168,12 @@ export default function Command() {
     if (!undoState) return;
     try {
       const out = await getNotes(prefs, undoState.projectName);
-      await toggleTodoInNotes(prefs, undoState.projectName, out.notes, undoState.todo);
+      await toggleTodoInNotes(
+        prefs,
+        undoState.projectName,
+        out.notes,
+        undoState.todo,
+      );
       await clearUndoState();
       await revalidate();
       await revalidateUndo();
@@ -173,8 +193,11 @@ export default function Command() {
     <MenuBarExtra
       icon={
         nextTodo
-          ? data.iconColor
-            ? { source: Icon.ArrowRightCircleFilled, tintColor: data.iconColor }
+          ? data?.iconColor
+            ? {
+                source: Icon.ArrowRightCircleFilled,
+                tintColor: data?.iconColor,
+              }
             : Icon.ArrowRightCircleFilled
           : Icon.Ellipsis
       }
@@ -272,11 +295,7 @@ export default function Command() {
                 return (
                   <MenuBarExtra.Item
                     key={`${i}-${todo.rawLine}`}
-                    icon={
-                      isFocused
-                        ? Icon.ArrowRightCircleFilled
-                        : Icon.Circle
-                    }
+                    icon={isFocused ? Icon.ArrowRightCircleFilled : Icon.Circle}
                     title={todo.text}
                     onAction={() =>
                       isFocused ? handleMarkDone(todo) : handleFocusTask(todo)

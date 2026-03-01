@@ -84,8 +84,24 @@ function resolvePmPath(cliPathOverride?: string): string {
   const raw = cliPathOverride?.trim();
   if (raw) return path.normalize(expandPath(raw));
   const candidates = [
-    path.join(os.homedir(), "dev", "project-manager", "pm-swift", ".build", "release", "pm"),
-    path.join(os.homedir(), "dev", "project-manager", "pm-swift", ".build", "debug", "pm"),
+    path.join(
+      os.homedir(),
+      "dev",
+      "project-manager",
+      "pm-swift",
+      ".build",
+      "release",
+      "pm",
+    ),
+    path.join(
+      os.homedir(),
+      "dev",
+      "project-manager",
+      "pm-swift",
+      ".build",
+      "debug",
+      "pm",
+    ),
     path.join(process.cwd(), "..", "pm-swift", ".build", "release", "pm"),
   ];
   for (const p of candidates) {
@@ -152,8 +168,14 @@ export async function ensureConfig(
     try {
       const raw = await readFile(configPath, "utf-8");
       const config = JSON.parse(raw) as Record<string, unknown>;
-      const currentActive = config.activePath && typeof config.activePath === "string" ? normalizedPath(config.activePath) : "";
-      const currentArchive = config.archivePath && typeof config.archivePath === "string" ? normalizedPath(config.archivePath) : "";
+      const currentActive =
+        config.activePath && typeof config.activePath === "string"
+          ? normalizedPath(config.activePath)
+          : "";
+      const currentArchive =
+        config.archivePath && typeof config.archivePath === "string"
+          ? normalizedPath(config.archivePath)
+          : "";
       if (currentActive === active && currentArchive === archive) return;
       config.activePath = active;
       config.archivePath = archive;
@@ -204,7 +226,7 @@ export function runPmWithStdin(
   args: string[],
   env: Record<string, string>,
   cliPathOverride: string | undefined,
-  stdinContent: string
+  stdinContent: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
     const fullEnv = { ...process.env, ...env };

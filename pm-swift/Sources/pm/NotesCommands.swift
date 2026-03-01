@@ -41,9 +41,11 @@ func runNotesShow(args: [String]) {
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
-        let notes = try readNotesFile(notesPath: notesPath)
+        var notes = try readNotesFile(notesPath: notesPath)
+        notes = normalizeFocusMarker(notes: notes)
         let todos = try parseTodos(notes: notes)
-        let output = NotesShowOutput(notes: notes, todos: todos)
+        let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
+        let output = NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(output)

@@ -88,7 +88,8 @@ public func getNotesTemplateContent(templatePath: String?, title: String) throws
         let content = try String(contentsOfFile: expanded, encoding: .utf8)
         return content.replacingOccurrences(of: "{{title}}", with: title)
     }
-    return notesTemplate.replacingOccurrences(of: "{{title}}", with: title)
+    let content = notesTemplate.replacingOccurrences(of: "{{title}}", with: title)
+    return content.hasPrefix("\n") ? String(content.dropFirst()) : content
 }
 
 /// Embedded default notes template (same as templates/notes.md with {{title}} placeholder).

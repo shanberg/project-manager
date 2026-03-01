@@ -5,26 +5,34 @@ import { getNotes, resolveNotesPath } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
 
+async function fetchFocusedProjectNotes(
+  activePath: string,
+  archivePath: string,
+  configPath: string | undefined,
+  pmCliPath: string | undefined,
+) {
+  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const focusedKey = await getFocusedProject();
+  if (!focusedKey) return null;
+  const parsed = parseProjectKey(focusedKey);
+  if (!parsed) return null;
+  const notesPath = await resolveNotesPath(prefs, parsed.name);
+  if (!notesPath) return null;
+  try {
+    const out = await getNotes(prefs, parsed.name);
+    return { projectName: parsed.name, notes: out.notes };
+  } catch {
+    return null;
+  }
+}
+
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
 
   const { data, isLoading } = useCachedPromise(
-    async () => {
-      const focusedKey = await getFocusedProject();
-      if (!focusedKey) return null;
-      const parsed = parseProjectKey(focusedKey);
-      if (!parsed) return null;
-      const notesPath = await resolveNotesPath(prefs, parsed.name);
-      if (!notesPath) return null;
-      try {
-        const out = await getNotes(prefs, parsed.name);
-        return { projectName: parsed.name, notes: out.notes };
-      } catch {
-        return null;
-      }
-    },
+    fetchFocusedProjectNotes,
     [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
-    { execute: true }
+    { execute: true },
   );
 
   if (isLoading) return <List isLoading />;
