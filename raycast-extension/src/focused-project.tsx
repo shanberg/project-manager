@@ -208,18 +208,20 @@ export default function Command() {
       {data && (
         <>
           <MenuBarExtra.Section>
-            {undoState && (
-              <MenuBarExtra.Item
-                icon={Icon.Undo}
-                title="Undo"
-                onAction={handleUndo}
-              />
-            )}
             {nextTodo ? (
               <MenuBarExtra.Item
                 icon={Icon.CheckCircle}
                 title="Mark Done"
                 onAction={() => handleMarkDone(nextTodo)}
+                alternate={
+                  undoState ? (
+                    <MenuBarExtra.Item
+                      icon={Icon.Undo}
+                      title="Undo"
+                      onAction={handleUndo}
+                    />
+                  ) : undefined
+                }
               />
             ) : (
               <>
@@ -227,29 +229,33 @@ export default function Command() {
                 <MenuBarExtra.Item icon={Icon.Circle} title="No tasks" />
               </>
             )}
-          </MenuBarExtra.Section>
-          {data.notesPath && (
-            <MenuBarExtra.Section>
-              <MenuBarExtra.Item
-                icon={Icon.Plus}
-                title="Add Task"
-                onAction={() =>
-                  open(
-                    "raycast://extensions/shanberg/project-manager/add-focused-todo",
-                  )
-                }
-              />
-              {nextTodo && (
+            {data.notesPath && (
+              <>
                 <MenuBarExtra.Item
-                  icon={Icon.ArrowUp}
-                  title="Add Prior Task"
+                  icon={Icon.Plus}
+                  title="Add Task"
                   onAction={() =>
                     open(
-                      "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
+                      "raycast://extensions/shanberg/project-manager/add-focused-todo",
                     )
                   }
                 />
-              )}
+                {nextTodo && (
+                  <MenuBarExtra.Item
+                    icon={Icon.ArrowUp}
+                    title="Add Prior Task"
+                    onAction={() =>
+                      open(
+                        "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
+                      )
+                    }
+                  />
+                )}
+              </>
+            )}
+          </MenuBarExtra.Section>
+          {data.notesPath && (
+            <MenuBarExtra.Section>
               <MenuBarExtra.Item
                 icon={Icon.Plus}
                 title="Add Session Note"

@@ -251,7 +251,7 @@ export default function Command() {
             )}
           </MenuBarExtra.Section>
           {data.notesPath && (
-            <MenuBarExtra.Section title="Links">
+            <MenuBarExtra.Section>
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
                   key={`${i}-${link.url}`}
