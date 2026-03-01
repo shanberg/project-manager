@@ -197,7 +197,7 @@ export default function Command() {
             title={`Project · ${data.done}/${data.total} done`}
           >
             <MenuBarExtra.Item
-              icon={Icon.Eye}
+              icon={Icon.AppWindow}
               title="View Project"
               onAction={() =>
                 open(

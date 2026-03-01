@@ -330,6 +330,15 @@ export default function Command() {
                 }
               />
               <MenuBarExtra.Item
+                icon={Icon.AppWindow}
+                title="View Project"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/view-focused-project",
+                  )
+                }
+              />
+              <MenuBarExtra.Item
                 icon={Icon.Document}
                 title="Open in Obsidian"
                 onAction={async () => {
