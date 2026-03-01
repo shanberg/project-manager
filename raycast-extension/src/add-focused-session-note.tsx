@@ -16,7 +16,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          title="No focused project"
+          title="No Focused Project"
           description="Set a project as focused from List Projects"
         />
       </List>

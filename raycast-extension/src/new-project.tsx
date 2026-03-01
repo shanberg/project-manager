@@ -47,7 +47,7 @@ export default function Command() {
         const createdMsg = stdout.trim();
         await showToast({
           style: Toast.Style.Success,
-          title: "Project created",
+          title: "Project Created",
           message: createdMsg,
         });
         const match = createdMsg.match(/^Created:\s*(.+)$/);

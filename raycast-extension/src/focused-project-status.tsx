@@ -4,6 +4,8 @@ import {
   hasSrcDir,
   buildObsidianOptions,
   ensureTodaySession,
+  FINDER_APP_PATH,
+  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 import {
   Color,
@@ -175,7 +177,7 @@ export default function Command() {
     ? data.total
       ? `${data.name}: ${data.done}/${data.total} done`
       : data.name
-    : "No focused project";
+    : "No Focused Project";
   const structured = data?.notes ? formatStructuredTooltip(data.notes) : "";
   const tooltip = structured ? `${baseTooltip}\n\n${structured}` : baseTooltip;
 
@@ -197,7 +199,6 @@ export default function Command() {
             title={`Project · ${data.done}/${data.total} done`}
           >
             <MenuBarExtra.Item
-              icon={Icon.AppWindow}
               title="View Project"
               onAction={() =>
                 open(
@@ -207,7 +208,6 @@ export default function Command() {
             />
             {data.notesPath ? (
               <MenuBarExtra.Item
-                icon={Icon.Document}
                 title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();
@@ -221,7 +221,6 @@ export default function Command() {
                 }}
                 alternate={
                   <MenuBarExtra.Item
-                    icon={Icon.Folder}
                     title="Open in Finder"
                     onAction={async () => {
                       await onOpenProject();
@@ -232,7 +231,6 @@ export default function Command() {
               />
             ) : (
               <MenuBarExtra.Item
-                icon={Icon.Folder}
                 title="Open in Finder"
                 onAction={async () => {
                   await onOpenProject();
@@ -270,7 +268,7 @@ export default function Command() {
                     } catch (e) {
                       await showToast({
                         style: Toast.Style.Failure,
-                        title: "Could not open link",
+                        title: "Could Not Open Link",
                         message: url,
                       });
                     }
@@ -278,7 +276,6 @@ export default function Command() {
                 />
               ))}
               <MenuBarExtra.Item
-                icon={Icon.Plus}
                 title="Add Link"
                 onAction={() =>
                   open(
@@ -321,7 +318,6 @@ export default function Command() {
           )}
           <MenuBarExtra.Section>
             <MenuBarExtra.Item
-              icon={Icon.Plus}
               title="New Project"
               onAction={() =>
                 open(
@@ -330,7 +326,6 @@ export default function Command() {
               }
             />
             <MenuBarExtra.Item
-              icon={Icon.List}
               title="List Projects"
               onAction={() =>
                 open(
@@ -339,7 +334,6 @@ export default function Command() {
               }
             />
             <MenuBarExtra.Item
-              icon={Icon.Gear}
               title="Configure"
               onAction={() =>
                 open("raycast://extensions/shanberg/project-manager/configure")

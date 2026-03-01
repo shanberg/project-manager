@@ -38,6 +38,8 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
   getNotesPath,
+  FINDER_APP_PATH,
+  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 
 function truncateSubtitle(s: string, max = 40): string {
@@ -153,7 +155,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
       await mutate();
       await showToast({
         style: Toast.Style.Success,
-        title: todo.checked ? "Unchecked" : "Done",
+        title: todo.checked ? "Incomplete" : "Complete",
         message: todo.text.slice(0, 50) + (todo.text.length > 50 ? "…" : ""),
       });
     } catch (err) {
@@ -176,7 +178,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
       await mutate();
       await showToast({
         style: Toast.Style.Success,
-        title: "Marked done",
+        title: "Completed",
         message: `${unchecked.length} task${unchecked.length === 1 ? "" : "s"} in session`,
       });
     } catch (err) {
@@ -212,7 +214,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             title="Next up"
             icon={Icon.ArrowRightCircleFilled}
           />
-          <List.Dropdown.Item value="all" title="All tasks" icon={Icon.List} />
+          <List.Dropdown.Item value="all" title="All Tasks" icon={Icon.List} />
         </List.Dropdown>
       }
       actions={
@@ -231,6 +233,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           {notes && (
             <Action.Push
               title="Narrow Focus"
+              icon={Icon.Plus}
               target={
                 <AddTodoForm projectName={projectName} onSuccess={mutate} />
               }
@@ -241,7 +244,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     >
       {todos.length === 0 ? (
         <List.EmptyView
-          title={notes ? "No tasks" : "No notes file"}
+          title={notes ? "No Tasks" : "No Notes File"}
           description={
             notes
               ? "Add - [ ] task items in your session notes"
@@ -251,6 +254,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             <ActionPanel>
               <Action
                 title="Create Notes File"
+                icon={Icon.Document}
                 onAction={async () => {
                   try {
                     await runPmWithPrefs(prefs, [
@@ -260,7 +264,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     ]);
                     await showToast({
                       style: Toast.Style.Success,
-                      title: "Notes created",
+                      title: "Notes Created",
                     });
                     await mutate();
                   } catch (err) {
@@ -276,6 +280,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               />
               <Action
                 title="Open in Finder"
+                icon={{ fileIcon: FINDER_APP_PATH }}
                 onAction={async () => {
                   await onOpenProject();
                   open(projectPath);
@@ -283,11 +288,13 @@ export default function ProjectView({ projectName, basePath }: Props) {
               />
               <Action.Push
                 title="Add Session Note"
+                icon={Icon.ShortParagraph}
                 target={<AddSessionNoteForm projectName={projectName} />}
               />
               {notes && (
                 <Action.Push
                   title="Narrow Focus"
+                  icon={Icon.Plus}
                   target={
                     <AddTodoForm projectName={projectName} onSuccess={mutate} />
                   }
@@ -297,7 +304,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           }
         />
       ) : viewMode === "next" && nextTodo ? (
-        <List.Section title="Next up">
+        <List.Section title="Next Up">
           <List.Item
             key={`${nextTodoContext}-${nextTodo.rawLine}`}
             icon={Icon.ArrowRightCircleFilled}
@@ -306,7 +313,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
             actions={
               <ActionPanel>
                 <Action
-                  title="Mark Done"
+                  title="Complete"
+                  icon={Icon.CheckCircle}
                   onAction={() => handleToggle(nextTodo)}
                   shortcut={{ modifiers: ["cmd"], key: "t" }}
                 />
@@ -315,7 +323,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     (t) => !t.checked,
                   ) && (
                     <Action
-                      title="Mark All in Session Done"
+                      title="Complete All in Session"
+                      icon={Icon.CheckCircle}
                       onAction={() =>
                         handleMarkAllInSessionDone(nextTodoContext)
                       }
@@ -324,16 +333,17 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 <Action.CopyToClipboard
                   content={nextTodo.text}
                   title="Copy Task"
+                  icon={Icon.Clipboard}
                 />
               </ActionPanel>
             }
           />
         </List.Section>
       ) : viewMode === "next" && uncheckedTodos.length === 0 ? (
-        <List.Section title="Next up">
+        <List.Section title="Next Up">
           <List.Item
             icon={Icon.CheckCircle}
-            title="All done"
+            title="All Done"
             subtitle={`${todos.filter((t) => t.checked).length} completed`}
           />
         </List.Section>
@@ -354,7 +364,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   actions={
                     <ActionPanel>
                       <Action
-                        title={todo.checked ? "Mark Undone" : "Mark Done"}
+                        title={todo.checked ? "Incomplete" : "Complete"}
+                        icon={todo.checked ? Icon.Circle : Icon.CheckCircle}
                         onAction={() => handleToggle(todo)}
                         shortcut={{ modifiers: ["cmd"], key: "t" }}
                       />
@@ -362,13 +373,15 @@ export default function ProjectView({ projectName, basePath }: Props) {
                         (t) => !t.checked,
                       ) && (
                         <Action
-                          title="Mark All in Session Done"
+                          title="Complete All in Session"
+                          icon={Icon.CheckCircle}
                           onAction={() => handleMarkAllInSessionDone(context)}
                         />
                       )}
                       <Action.CopyToClipboard
                         content={todo.text}
                         title="Copy Task"
+                        icon={Icon.Clipboard}
                       />
                     </ActionPanel>
                   }
@@ -549,7 +562,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
       <List.Section title="Actions">
         <List.Item
           title="Open in Finder"
-          icon="folder"
+          icon={{ fileIcon: FINDER_APP_PATH }}
           detail={sectionDetail(
             `Open the project folder in Finder.\n\n\`${projectPath}\``,
             "Project path unavailable",
@@ -558,6 +571,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             <ActionPanel>
               <Action
                 title="Open in Finder"
+                icon={{ fileIcon: FINDER_APP_PATH }}
                 onAction={async () => {
                   await onOpenProject();
                   open(projectPath);
@@ -569,7 +583,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         {hasSrc && (
           <List.Item
             title="Open in Cursor"
-            icon="terminal"
+            icon={Icon.Terminal}
             detail={sectionDetail(
               `Open the project in Cursor.\n\n\`${projectPath}\``,
               "Project path unavailable",
@@ -578,6 +592,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               <ActionPanel>
                 <Action
                   title="Open in Cursor"
+                  icon={Icon.Terminal}
                   onAction={async () => {
                     await onOpenProject();
                     open(projectPath, "Cursor");
@@ -589,7 +604,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         )}
         <List.Item
           title="Open in Obsidian"
-          icon="document"
+          icon={{ fileIcon: OBSIDIAN_APP_PATH }}
           detail={sectionDetail(
             `Open notes in Obsidian.\n\n\`${targetPath}\``,
             "Notes path unavailable",
@@ -598,6 +613,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             <ActionPanel>
               <Action
                 title="Open in Obsidian"
+                icon={{ fileIcon: OBSIDIAN_APP_PATH }}
                 onAction={async () => {
                   await onOpenProject();
                   const session = notes
@@ -613,7 +629,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         {notes && (
           <List.Item
             title="Narrow Focus"
-            icon={Icon.ArrowRightCircleFilled}
+            icon={Icon.Plus}
             detail={sectionDetail(
               "Add a task to the current session in the project notes.",
               "",
@@ -622,6 +638,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               <ActionPanel>
                 <Action.Push
                   title="Narrow Focus"
+                  icon={Icon.Plus}
                   target={
                     <AddTodoForm projectName={projectName} onSuccess={mutate} />
                   }
@@ -632,7 +649,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         )}
         <List.Item
           title="Add Session Note"
-          icon="plus"
+          icon={Icon.ShortParagraph}
           detail={sectionDetail(
             "Add a new session note to the project notes file.",
             "",
@@ -641,6 +658,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             <ActionPanel>
               <Action.Push
                 title="Add Session Note"
+                icon={Icon.ShortParagraph}
                 target={<AddSessionNoteForm projectName={projectName} />}
               />
             </ActionPanel>
@@ -648,7 +666,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         />
         <List.Item
           title="Set as Focused Project"
-          icon={Icon.Star}
+          icon={Icon.ArrowRightCircleFilled}
           detail={sectionDetail(
             "Set this project as the focused project for quick access from the menu bar and View Focused Project.",
             "",
@@ -657,6 +675,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             <ActionPanel>
               <Action
                 title="Set as Focused Project"
+                icon={Icon.ArrowRightCircleFilled}
                 onAction={async () => {
                   await setFocusedProject(basePath, projectName);
                   await showToast({

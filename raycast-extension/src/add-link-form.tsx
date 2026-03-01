@@ -29,7 +29,7 @@ export default function AddLinkForm({ projectName, notes, onSuccess }: Props) {
       });
       await showToast({
         style: Toast.Style.Success,
-        title: "Link added",
+        title: "Link Added",
         message:
           values.label.trim() ||
           url.slice(0, 40) + (url.length > 40 ? "…" : ""),

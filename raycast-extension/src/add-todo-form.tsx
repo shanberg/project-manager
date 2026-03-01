@@ -24,7 +24,7 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
       await addTodoToTodaySession(prefs, projectName, text);
       await showToast({
         style: Toast.Style.Success,
-        title: "Task added",
+        title: "Task Added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();

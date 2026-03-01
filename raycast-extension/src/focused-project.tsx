@@ -24,6 +24,8 @@ import {
   getObsidianUri,
   buildObsidianOptions,
   ensureTodaySession,
+  FINDER_APP_PATH,
+  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 
@@ -145,12 +147,12 @@ export default function Command() {
 
   const title = nextTodo
     ? nextTodo.text.slice(0, 40) + (nextTodo.text.length > 40 ? "…" : "")
-    : "No tasks";
+    : "No Tasks";
   const tooltip = data
     ? nextTodo
       ? `${data.name}: ${breadcrumbForNowTask(data.todos, nextTodo)}`
       : data.name
-    : "No focused project";
+    : "No Focused Project";
 
   async function handleMarkDone(todo: Todo) {
     if (!data?.notesPath || !data?.notes) return;
@@ -249,14 +251,14 @@ export default function Command() {
               />
             ) : (
               <>
-                <MenuBarExtra.Item icon={Icon.CheckCircle} title="All done" />
-                <MenuBarExtra.Item icon={Icon.Circle} title="No tasks" />
+                <MenuBarExtra.Item icon={Icon.CheckCircle} title="All Done" />
+                <MenuBarExtra.Item icon={Icon.Circle} title="No Tasks" />
               </>
             )}
             {data.notesPath && (
               <MenuBarExtra.Item
                 icon={Icon.Plus}
-                title="Narrow focus"
+                title="Narrow Focus"
                 onAction={() =>
                   open(
                     "raycast://extensions/shanberg/project-manager/add-focused-todo",
@@ -268,7 +270,7 @@ export default function Command() {
               <>
                 <MenuBarExtra.Item
                   icon={Icon.ArrowDown}
-                  title="Add after"
+                  title="Add After"
                   onAction={() =>
                     open(
                       "raycast://extensions/shanberg/project-manager/add-focused-after-todo",
@@ -277,7 +279,7 @@ export default function Command() {
                   alternate={
                     <MenuBarExtra.Item
                       icon={Icon.ArrowUp}
-                      title="Add before"
+                      title="Add Before"
                       onAction={() =>
                         open(
                           "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
@@ -287,7 +289,7 @@ export default function Command() {
                   }
                 />
                 <MenuBarExtra.Item
-                  icon={Icon.Pencil}
+                  icon={Icon.TextCursor}
                   title="Edit"
                   onAction={() =>
                     open(
@@ -312,7 +314,6 @@ export default function Command() {
           {data.notesPath && (
             <MenuBarExtra.Section>
               <MenuBarExtra.Item
-                icon={Icon.Plus}
                 title="Add Session Note"
                 onAction={() =>
                   open(
@@ -321,7 +322,6 @@ export default function Command() {
                 }
               />
               <MenuBarExtra.Item
-                icon={Icon.Link}
                 title="Add Link"
                 onAction={() =>
                   open(
@@ -330,7 +330,6 @@ export default function Command() {
                 }
               />
               <MenuBarExtra.Item
-                icon={Icon.AppWindow}
                 title="View Project"
                 onAction={() =>
                   open(
@@ -339,7 +338,6 @@ export default function Command() {
                 }
               />
               <MenuBarExtra.Item
-                icon={Icon.Document}
                 title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();
@@ -353,7 +351,6 @@ export default function Command() {
                 }}
                 alternate={
                   <MenuBarExtra.Item
-                    icon={Icon.Folder}
                     title="Open in Finder"
                     onAction={() => open(data.projectPath)}
                   />

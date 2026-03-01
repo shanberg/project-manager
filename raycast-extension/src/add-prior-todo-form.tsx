@@ -32,7 +32,7 @@ export default function AddPriorTodoForm({
       await addTodoBeforeInNotes(prefs, projectName, notes, beforeTodo, text);
       await showToast({
         style: Toast.Style.Success,
-        title: "Task added",
+        title: "Task Added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();

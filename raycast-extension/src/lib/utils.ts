@@ -6,6 +6,10 @@ import type { ProjectNotes } from "./notes-api";
 import { runPmWithPrefs } from "./pm";
 import type { PreferenceValues } from "./types";
 
+/** Paths to apps for use with Raycast FileIcon (real app icons). */
+export const FINDER_APP_PATH = "/System/Library/CoreServices/Finder.app";
+export const OBSIDIAN_APP_PATH = "/Applications/Obsidian.app";
+
 function expandPath(p: string): string {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
 }

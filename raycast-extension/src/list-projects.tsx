@@ -8,6 +8,7 @@ import {
   Color,
   confirmAlert,
   getPreferenceValues,
+  Icon,
   List,
   open,
   showToast,
@@ -43,6 +44,8 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
   getNotesPath,
+  FINDER_APP_PATH,
+  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 
 /** Match domain code at start of project name; use longer codes first so DE matches before D. */
@@ -314,6 +317,7 @@ export default function Command() {
       <ActionPanel>
         <Action
           title="Open in Finder"
+          icon={{ fileIcon: FINDER_APP_PATH }}
           onAction={async () => {
             await onOpenProject(basePath, name);
             open(projectPath);
@@ -322,6 +326,7 @@ export default function Command() {
         {hasSrc && (
           <Action
             title="Open in Cursor"
+            icon={Icon.Terminal}
             onAction={async () => {
               await onOpenProject(basePath, name);
               open(projectPath, "Cursor");
@@ -330,6 +335,7 @@ export default function Command() {
         )}
         <Action
           title="Open in Obsidian"
+          icon={{ fileIcon: OBSIDIAN_APP_PATH }}
           onAction={async () => {
             await onOpenProject(basePath, name);
             const session = await ensureTodaySession(name, notes, prefs);
@@ -340,12 +346,13 @@ export default function Command() {
         {!hasNotes ? (
           <Action
             title="Create Notes File"
+            icon={Icon.Document}
             onAction={async () => {
               try {
                 await runPmWithPrefs(prefs, ["notes", "create", name]);
                 await showToast({
                   style: Toast.Style.Success,
-                  title: "Notes created",
+                  title: "Notes Created",
                 });
                 revalidate();
               } catch (err) {
@@ -361,15 +368,18 @@ export default function Command() {
         ) : (
           <Action.Push
             title="View Project"
+            icon={Icon.ArrowRightCircleFilled}
             target={<ProjectView projectName={name} basePath={basePath} />}
           />
         )}
         <Action.Push
           title="Add Session Note"
+          icon={Icon.ShortParagraph}
           target={<AddSessionNoteForm projectName={name} />}
         />
         <Action
           title="Set as Focused Project"
+          icon={Icon.ArrowRightCircleFilled}
           onAction={async () => {
             await setFocusedProject(basePath, name);
             await showToast({
@@ -380,12 +390,21 @@ export default function Command() {
           }}
         />
         {isActive ? (
-          <Action title="Archive Project" onAction={handleArchive} />
+          <Action
+            title="Archive Project"
+            icon={Icon.Trash}
+            onAction={handleArchive}
+          />
         ) : (
-          <Action title="Unarchive Project" onAction={handleUnarchive} />
+          <Action
+            title="Unarchive Project"
+            icon={Icon.ArrowUpCircle}
+            onAction={handleUnarchive}
+          />
         )}
         <Action
           title="Configure"
+          icon={Icon.Gear}
           onAction={() =>
             open("raycast://extensions/shanberg/project-manager/configure")
           }
@@ -421,6 +440,15 @@ export default function Command() {
       }
       actions={
         <ActionPanel>
+          <Action
+            title="View Focused Project"
+            icon={Icon.ArrowRightCircleFilled}
+            onAction={() =>
+              open(
+                "raycast://extensions/shanberg/project-manager/view-focused-project",
+              )
+            }
+          />
           <Action
             title="Refresh"
             onAction={revalidate}

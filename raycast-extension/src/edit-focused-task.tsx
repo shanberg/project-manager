@@ -49,7 +49,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          title="No focused project"
+          title="No Focused Project"
           description="Set a project as focused from List Projects"
         />
       </List>
@@ -59,7 +59,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          title="No active task"
+          title="No Active Task"
           description="Edit requires an active task. Use Narrow Focus first."
         />
       </List>
@@ -73,7 +73,7 @@ export default function Command() {
     if (!text) {
       await showToast({
         style: Toast.Style.Failure,
-        title: "Task text cannot be empty",
+        title: "Task Text Cannot Be Empty",
       });
       return;
     }
@@ -87,7 +87,7 @@ export default function Command() {
       );
       await showToast({
         style: Toast.Style.Success,
-        title: "Task updated",
+        title: "Task Updated",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
     } catch (err) {

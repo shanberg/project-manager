@@ -35,7 +35,7 @@ export default function AddSessionNoteForm({ projectName }: Props) {
       } else {
         await showToast({
           style: Toast.Style.Success,
-          title: "Session added",
+          title: "Session Added",
           message: stdout.trim(),
         });
       }

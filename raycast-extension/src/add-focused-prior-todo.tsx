@@ -42,7 +42,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          title="No focused project"
+          title="No Focused Project"
           description="Set a project as focused from List Projects"
         />
       </List>
@@ -52,7 +52,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          title="No active task"
+          title="No Active Task"
           description="Add Before requires an active task. Use Narrow Focus first."
         />
       </List>

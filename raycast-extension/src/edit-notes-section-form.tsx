@@ -44,7 +44,7 @@ export default function EditNotesSectionForm({
       await writeNotes(prefs, projectName, updated);
       await showToast({
         style: Toast.Style.Success,
-        title: `${label} updated`,
+        title: `${label} Updated`,
       });
       onSuccess?.();
     } catch (err) {

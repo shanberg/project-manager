@@ -35,7 +35,7 @@ export default function EditGoalsForm({
     try {
       const updated = updateNotesSection(notes, { goals: newGoals });
       await writeNotes(prefs, projectName, updated);
-      await showToast({ style: Toast.Style.Success, title: "Goals updated" });
+      await showToast({ style: Toast.Style.Success, title: "Goals Updated" });
       onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

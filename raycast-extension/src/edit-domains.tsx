@@ -49,7 +49,7 @@ export default function Command() {
       await runPmWithPrefs(prefs, ["config", "set", "domains", jsonStr]);
       await showToast({
         style: Toast.Style.Success,
-        title: "Domains updated",
+        title: "Domains Updated",
         message: Object.keys(next).join(", "),
       });
       revalidate();
@@ -57,7 +57,7 @@ export default function Command() {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({
         style: Toast.Style.Failure,
-        title: "Invalid domains",
+        title: "Invalid Domains",
         message: msg,
       });
     } finally {

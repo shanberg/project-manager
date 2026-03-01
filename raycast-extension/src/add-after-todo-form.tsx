@@ -32,7 +32,7 @@ export default function AddAfterTodoForm({
       await addTodoAfterInNotes(prefs, projectName, notes, afterTodo, text);
       await showToast({
         style: Toast.Style.Success,
-        title: "Task added",
+        title: "Task Added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();

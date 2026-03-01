@@ -48,7 +48,7 @@ export default function Command() {
       await runPmWithPrefs(prefs, ["config", "set", "subfolders", jsonStr]);
       await showToast({
         style: Toast.Style.Success,
-        title: "Project structure updated",
+        title: "Project Structure Updated",
         message: next.join(", "),
       });
       revalidate();
@@ -56,7 +56,7 @@ export default function Command() {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({
         style: Toast.Style.Failure,
-        title: "Invalid project structure",
+        title: "Invalid Project Structure",
         message: msg,
       });
     } finally {

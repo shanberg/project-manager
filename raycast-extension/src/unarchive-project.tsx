@@ -12,6 +12,7 @@ import path from "path";
 import { useCachedPromise } from "@raycast/utils";
 import { runPmWithPrefs } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
+import { FINDER_APP_PATH } from "./lib/utils";
 
 async function fetchArchivedProjects(
   activePath: string,
@@ -94,6 +95,7 @@ export default function Command() {
               />
               <Action
                 title="Open in Finder"
+                icon={{ fileIcon: FINDER_APP_PATH }}
                 onAction={() => open(path.join(prefs.archivePath, name))}
               />
             </ActionPanel>

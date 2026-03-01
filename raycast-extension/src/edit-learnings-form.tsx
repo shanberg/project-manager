@@ -38,7 +38,7 @@ export default function EditLearningsForm({
       await writeNotes(prefs, projectName, updated);
       await showToast({
         style: Toast.Style.Success,
-        title: "Learnings updated",
+        title: "Learnings Updated",
       });
       onSuccess?.();
     } catch (err) {
