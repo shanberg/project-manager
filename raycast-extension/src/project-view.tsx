@@ -117,7 +117,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
   }
 
   const uncheckedTodos = todos.filter((t) => !t.checked);
-  const nextTodo = uncheckedTodos[0] ?? null;
+  const nextTodo =
+    uncheckedTodos.find((t) => t.isFocused) ?? uncheckedTodos[0] ?? null;
   const nextTodoContext = nextTodo ? nextTodo.context : null;
 
   const filteredSessionOrder = sessionOrder.filter((context) => {
@@ -229,7 +230,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           />
           {notes && (
             <Action.Push
-              title="Add Task"
+              title="Narrow Focus"
               target={
                 <AddTodoForm projectName={projectName} onSuccess={mutate} />
               }
@@ -286,7 +287,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               />
               {notes && (
                 <Action.Push
-                  title="Add Task"
+                  title="Narrow Focus"
                   target={
                     <AddTodoForm projectName={projectName} onSuccess={mutate} />
                   }
@@ -611,7 +612,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         />
         {notes && (
           <List.Item
-            title="Add Task"
+            title="Narrow Focus"
             icon={Icon.ArrowRightCircleFilled}
             detail={sectionDetail(
               "Add a task to the current session in the project notes.",
@@ -620,7 +621,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
             actions={
               <ActionPanel>
                 <Action.Push
-                  title="Add Task"
+                  title="Narrow Focus"
                   target={
                     <AddTodoForm projectName={projectName} onSuccess={mutate} />
                   }

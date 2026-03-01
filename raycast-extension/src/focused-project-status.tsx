@@ -6,6 +6,7 @@ import {
   ensureTodaySession,
 } from "./lib/utils";
 import {
+  Color,
   getPreferenceValues,
   Icon,
   MenuBarExtra,
@@ -185,7 +186,7 @@ export default function Command() {
 
   return (
     <MenuBarExtra
-      icon={getProgressIcon(progress)}
+      icon={getProgressIcon(progress, Color.PrimaryText, { backgroundOpacity: 0.25, background: Color.PrimaryText })}
       title={code}
       tooltip={tooltip}
       isLoading={isLoading}
@@ -302,7 +303,10 @@ export default function Command() {
                 return (
                   <MenuBarExtra.Item
                     key={`${p.basePath}:${p.name}`}
-                    icon={getProgressIcon(p.total ? p.done / p.total : 1)}
+                    icon={getProgressIcon(p.total ? p.done / p.total : 1, Color.PrimaryText, {
+                      backgroundOpacity: 0.25,
+                      background: Color.PrimaryText,
+                    })}
                     title={p.name}
                     tooltip={tooltip}
                     onAction={async () => {

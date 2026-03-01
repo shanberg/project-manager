@@ -7,6 +7,8 @@ import {
   resolveNotesPath,
   setFocusToTodoInNotes,
   toggleTodoInNotes,
+  completeAndAdvanceInNotes,
+  undoCompleteInNotes,
 } from "./lib/notes-api";
 import type { Todo } from "./lib/notes-api";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
@@ -24,6 +26,18 @@ import {
   ensureTodaySession,
 } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
+
+function breadcrumbForNowTask(todos: Todo[], nowTask: Todo): string {
+  const sameContext = todos.filter((t) => t.context === nowTask.context);
+  const path: Todo[] = [];
+  for (const t of sameContext) {
+    if (t.depth === path.length) {
+      path.push(t);
+      if (t === nowTask) break;
+    }
+  }
+  return [nowTask.context, ...path.map((t) => t.text)].join(" » ");
+}
 
 async function fetchFocusedProjectData(
   activePath: string,
@@ -55,7 +69,7 @@ async function fetchFocusedProjectData(
     const notes = out.notes;
     const todos = out.todos;
     const openTodos = todos.filter((t) => !t.checked);
-    const nextTodo = openTodos[0] ?? null;
+    const nextTodo = openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
     let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
     if (nextTodo) {
       const key = taskTimingKey(notesPath, nextTodo.rawLine);
@@ -134,7 +148,7 @@ export default function Command() {
     : "No tasks";
   const tooltip = data
     ? nextTodo
-      ? `${data.name}: ${nextTodo.text}`
+      ? `${data.name}: ${breadcrumbForNowTask(data.todos, nextTodo)}`
       : data.name
     : "No focused project";
 
@@ -142,7 +156,17 @@ export default function Command() {
     if (!data?.notesPath || !data?.notes) return;
     try {
       await saveUndoState(data.notesPath, data.name, todo);
-      await toggleTodoInNotes(prefs, data.name, data.notes, todo);
+      if (todo === nextTodo) {
+        await completeAndAdvanceInNotes(
+          prefs,
+          data.name,
+          data.notes,
+          data.todos,
+          todo,
+        );
+      } else {
+        await toggleTodoInNotes(prefs, data.name, data.notes, todo);
+      }
       await revalidate();
       await revalidateUndo();
       await showHUD(`Done: ${todo.text.slice(0, 40)}`);
@@ -168,7 +192,7 @@ export default function Command() {
     if (!undoState) return;
     try {
       const out = await getNotes(prefs, undoState.projectName);
-      await toggleTodoInNotes(
+      await undoCompleteInNotes(
         prefs,
         undoState.projectName,
         out.notes,
@@ -211,7 +235,7 @@ export default function Command() {
             {nextTodo ? (
               <MenuBarExtra.Item
                 icon={Icon.CheckCircle}
-                title="Mark Done"
+                title="Complete"
                 onAction={() => handleMarkDone(nextTodo)}
                 alternate={
                   undoState ? (
@@ -230,27 +254,58 @@ export default function Command() {
               </>
             )}
             {data.notesPath && (
+              <MenuBarExtra.Item
+                icon={Icon.Plus}
+                title="Narrow focus"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/add-focused-todo",
+                  )
+                }
+              />
+            )}
+            {nextTodo && (
               <>
                 <MenuBarExtra.Item
-                  icon={Icon.Plus}
-                  title="Add Task"
+                  icon={Icon.ArrowDown}
+                  title="Add after"
                   onAction={() =>
                     open(
-                      "raycast://extensions/shanberg/project-manager/add-focused-todo",
+                      "raycast://extensions/shanberg/project-manager/add-focused-after-todo",
                     )
                   }
+                  alternate={
+                    <MenuBarExtra.Item
+                      icon={Icon.ArrowUp}
+                      title="Add before"
+                      onAction={() =>
+                        open(
+                          "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
+                        )
+                      }
+                    />
+                  }
                 />
-                {nextTodo && (
-                  <MenuBarExtra.Item
-                    icon={Icon.ArrowUp}
-                    title="Add Prior Task"
-                    onAction={() =>
-                      open(
-                        "raycast://extensions/shanberg/project-manager/add-focused-prior-todo",
-                      )
-                    }
-                  />
-                )}
+                <MenuBarExtra.Item
+                  icon={Icon.Pencil}
+                  title="Edit"
+                  onAction={() =>
+                    open(
+                      "raycast://extensions/shanberg/project-manager/edit-focused-task",
+                    )
+                  }
+                  alternate={
+                    <MenuBarExtra.Item
+                      icon={Icon.Layers}
+                      title="Wrap"
+                      onAction={() =>
+                        open(
+                          "raycast://extensions/shanberg/project-manager/wrap-focused-task",
+                        )
+                      }
+                    />
+                  }
+                />
               </>
             )}
           </MenuBarExtra.Section>
@@ -287,6 +342,13 @@ export default function Command() {
                   const opts = buildObsidianOptions(prefs, session);
                   open(getObsidianUri(data.notesPath!, opts));
                 }}
+                alternate={
+                  <MenuBarExtra.Item
+                    icon={Icon.Folder}
+                    title="Open in Finder"
+                    onAction={() => open(data.projectPath)}
+                  />
+                }
               />
             </MenuBarExtra.Section>
           )}

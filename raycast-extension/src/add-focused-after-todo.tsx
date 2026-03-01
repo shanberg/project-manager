@@ -3,7 +3,7 @@ import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { getNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
-import AddPriorTodoForm from "./add-prior-todo-form";
+import AddAfterTodoForm from "./add-after-todo-form";
 
 async function fetchFocusedProjectWithNextTodo(
   activePath: string,
@@ -53,17 +53,17 @@ export default function Command() {
       <List>
         <List.EmptyView
           title="No active task"
-          description="Add Before requires an active task. Use Narrow Focus first."
+          description="Add After requires an active task. Use Narrow Focus first."
         />
       </List>
     );
   }
 
   return (
-    <AddPriorTodoForm
+    <AddAfterTodoForm
       projectName={data.projectName}
       notes={data.notes}
-      beforeTodo={data.nextTodo}
+      afterTodo={data.nextTodo}
       onSuccess={() => {}}
     />
   );

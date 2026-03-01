@@ -125,23 +125,58 @@
     },
     {
       "name": "add-focused-todo",
-      "title": "Add Task",
-      "description": "Add a task to the focused project",
+      "title": "Narrow Focus",
+      "description": "Add a child to the current item",
       "mode": "view",
       "keywords": [
+        "narrow",
+        "focus",
         "add",
-        "task",
         "pm"
       ]
     },
     {
       "name": "add-focused-prior-todo",
-      "title": "Add Prior Task",
+      "title": "Add Before",
       "description": "Add a task before the active task",
       "mode": "view",
       "keywords": [
         "add",
-        "prior",
+        "before",
+        "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "add-focused-after-todo",
+      "title": "Add After",
+      "description": "Add a task after the active task",
+      "mode": "view",
+      "keywords": [
+        "add",
+        "after",
+        "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "edit-focused-task",
+      "title": "Edit Task",
+      "description": "Edit the active task text",
+      "mode": "view",
+      "keywords": [
+        "edit",
+        "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "wrap-focused-task",
+      "title": "Wrap Task",
+      "description": "Wrap the active task in a new parent",
+      "mode": "view",
+      "keywords": [
+        "wrap",
         "task",
         "pm"
       ]

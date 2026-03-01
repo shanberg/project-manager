@@ -251,24 +251,103 @@ export async function addTodoBeforeInNotes(
   await writeNotes(prefs, projectName, updated);
 }
 
-const FOCUS_MARKER = " @";
+/** Add a todo line after the given todo in notes. */
+export async function addTodoAfterInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  afterTodo: Todo,
+  text: string,
+): Promise<void> {
+  const prefix = afterTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+  const newLine = `${prefix}[ ] ${text}`;
+  const updated =
+    typeof afterTodo.sessionIndex === "number" &&
+    typeof afterTodo.lineIndex === "number"
+      ? replaceTodoAtPositionInNotes(
+          notes,
+          afterTodo.sessionIndex,
+          afterTodo.lineIndex,
+          `${afterTodo.rawLine}\n${newLine}`,
+        )
+      : replaceTodoRawLineInNotes(
+          notes,
+          afterTodo.rawLine,
+          `${afterTodo.rawLine}\n${newLine}`,
+        );
+  await writeNotes(prefs, projectName, updated);
+}
 
-/** Move the single " @" focus marker to the given todo's line. Strips @ from all other task lines across all sessions. */
-export async function setFocusToTodoInNotes(
+/** Edit a todo's text in place; preserves indent, checkbox state, and focus marker. */
+export async function editTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   todo: Todo,
+  newText: string,
 ): Promise<void> {
-  const targetSessionIndex = todo.sessionIndex ?? 0;
-  const targetLineIndex = todo.lineIndex ?? 0;
+  const trimmed = newText.trim();
+  if (trimmed.length === 0) return;
+  const prefix = todo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+  const checkMatch = todo.rawLine.match(/\[([ xX])\]/);
+  const checkbox = checkMatch ? checkMatch[1] : " ";
+  let newLine = `${prefix}[${checkbox}] ${trimmed}`;
+  if (todo.isFocused) {
+    newLine += FOCUS_MARKER;
+  }
+  const sessionIndex = todo.sessionIndex ?? 0;
+  const lineIndex = todo.lineIndex ?? 0;
+  const updated = replaceTodoAtPositionInNotes(
+    notes,
+    sessionIndex,
+    lineIndex,
+    newLine,
+  );
+  await writeNotes(prefs, projectName, updated);
+}
+
+/** Wrap the given todo in a new parent task (insert parent above, indent current by 2 spaces); focus stays on the wrapped task. */
+export async function wrapTodoInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  todo: Todo,
+  newParentText: string,
+): Promise<void> {
+  const trimmed = newParentText.trim();
+  if (trimmed.length === 0) return;
+  const prefix = todo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+  const parentLine = `${prefix}[ ] ${trimmed}`;
+  const childLine = "  " + todo.rawLine;
+  const sessionIndex = todo.sessionIndex ?? 0;
+  const lineIndex = todo.lineIndex ?? 0;
+  const updated = replaceTodoAtPositionInNotes(
+    notes,
+    sessionIndex,
+    lineIndex,
+    `${parentLine}\n${childLine}`,
+  );
+  await writeNotes(prefs, projectName, updated);
+}
+
+const FOCUS_MARKER = " @";
+
+/** Pure: return notes with " @" only on the given todo's line (or nowhere if todo is null). */
+function applyFocusToTodoInNotes(
+  notes: ProjectNotes,
+  todo: Todo | null,
+): ProjectNotes {
+  const targetSessionIndex = todo?.sessionIndex ?? -1;
+  const targetLineIndex = todo?.lineIndex ?? -1;
   const sessions = notes.sessions.map((session, si) => {
     const lines = session.body.split("\n");
     let taskCount = 0;
     const newLines = lines.map((line) => {
       if (!TODO_LINE_REGEX.test(line)) return line;
       const isTarget =
-        si === targetSessionIndex && taskCount === targetLineIndex;
+        todo != null &&
+        si === targetSessionIndex &&
+        taskCount === targetLineIndex;
       taskCount++;
       const stripped = line.endsWith(FOCUS_MARKER)
         ? line.slice(0, -FOCUS_MARKER.length).trimEnd()
@@ -277,7 +356,65 @@ export async function setFocusToTodoInNotes(
     });
     return { ...session, body: newLines.join("\n") };
   });
-  await writeNotes(prefs, projectName, { ...notes, sessions });
+  return { ...notes, sessions };
+}
+
+/** Move the single " @" focus marker to the given todo's line. Strips @ from all other task lines across all sessions. */
+export async function setFocusToTodoInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  todo: Todo,
+): Promise<void> {
+  const updated = applyFocusToTodoInNotes(notes, todo);
+  await writeNotes(prefs, projectName, updated);
+}
+
+/** Complete the now task (toggle to [x], strip @ from it) and move focus to the next open task in list order. One write. */
+export async function completeAndAdvanceInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  todos: Todo[],
+  nowTodo: Todo,
+): Promise<void> {
+  const openTodos = todos.filter((t) => !t.checked);
+  const idx = openTodos.indexOf(nowTodo);
+  const nextOpen = idx >= 0 && idx + 1 < openTodos.length ? openTodos[idx + 1] : null;
+
+  let newCheckedLine = nowTodo.rawLine.replace(/\[ \]/, "[x]");
+  if (newCheckedLine.endsWith(FOCUS_MARKER)) {
+    newCheckedLine = newCheckedLine.slice(0, -FOCUS_MARKER.length).trimEnd();
+  }
+
+  const sessionIndex = nowTodo.sessionIndex ?? 0;
+  const lineIndex = nowTodo.lineIndex ?? 0;
+  let updated = replaceTodoAtPositionInNotes(
+    notes,
+    sessionIndex,
+    lineIndex,
+    newCheckedLine,
+  );
+  updated = applyFocusToTodoInNotes(updated, nextOpen);
+  await writeNotes(prefs, projectName, updated);
+}
+
+/** Undo: toggle the task back to unchecked and move focus (@) back to it. One write. */
+export async function undoCompleteInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  todo: Todo,
+): Promise<void> {
+  let newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
+  if (newLine.endsWith(FOCUS_MARKER)) {
+    newLine = newLine.slice(0, -FOCUS_MARKER.length).trimEnd();
+  }
+  const sessionIndex = todo.sessionIndex ?? 0;
+  const lineIndex = todo.lineIndex ?? 0;
+  let updated = replaceTodoAtPositionInNotes(notes, sessionIndex, lineIndex, newLine);
+  updated = applyFocusToTodoInNotes(updated, { ...todo, rawLine: newLine, checked: false });
+  await writeNotes(prefs, projectName, updated);
 }
 
 /** Update sections (summary, problem, goals, approach, links, learnings). */

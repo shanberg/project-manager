@@ -52,6 +52,12 @@ declare namespace Preferences {
   export type AddFocusedTodo = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = ExtensionPreferences & {}
+  /** Preferences accessible in the `add-focused-after-todo` command */
+  export type AddFocusedAfterTodo = ExtensionPreferences & {}
+  /** Preferences accessible in the `edit-focused-task` command */
+  export type EditFocusedTask = ExtensionPreferences & {}
+  /** Preferences accessible in the `wrap-focused-task` command */
+  export type WrapFocusedTask = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-session-note` command */
   export type AddFocusedSessionNote = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-link` command */
@@ -85,6 +91,12 @@ declare namespace Arguments {
   export type AddFocusedTodo = {}
   /** Arguments passed to the `add-focused-prior-todo` command */
   export type AddFocusedPriorTodo = {}
+  /** Arguments passed to the `add-focused-after-todo` command */
+  export type AddFocusedAfterTodo = {}
+  /** Arguments passed to the `edit-focused-task` command */
+  export type EditFocusedTask = {}
+  /** Arguments passed to the `wrap-focused-task` command */
+  export type WrapFocusedTask = {}
   /** Arguments passed to the `add-focused-session-note` command */
   export type AddFocusedSessionNote = {}
   /** Arguments passed to the `add-focused-link` command */

@@ -1,9 +1,16 @@
-import { List, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  List,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { getNotes } from "./lib/notes-api";
+import { getNotes, wrapTodoInNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
-import AddPriorTodoForm from "./add-prior-todo-form";
 
 async function fetchFocusedProjectWithNextTodo(
   activePath: string,
@@ -53,18 +60,60 @@ export default function Command() {
       <List>
         <List.EmptyView
           title="No active task"
-          description="Add Before requires an active task. Use Narrow Focus first."
+          description="Wrap requires an active task. Use Narrow Focus first."
         />
       </List>
     );
   }
 
+  const nowTask = data.nextTodo;
+
+  async function handleSubmit(values: { parentName: string }) {
+    const parentName = values.parentName.trim();
+    if (!parentName) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Parent name cannot be empty",
+      });
+      return;
+    }
+    try {
+      await wrapTodoInNotes(
+        prefs,
+        data!.projectName,
+        data!.notes,
+        nowTask,
+        parentName,
+      );
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Task wrapped",
+        message: `"${nowTask.text}" under "${parentName}"`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
+    }
+  }
+
   return (
-    <AddPriorTodoForm
-      projectName={data.projectName}
-      notes={data.notes}
-      beforeTodo={data.nextTodo}
-      onSuccess={() => {}}
-    />
+    <Form
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm title="Wrap" onSubmit={handleSubmit} />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField
+        id="parentName"
+        title="New parent name"
+        placeholder="e.g. Phase 1"
+        autoFocus
+      />
+    </Form>
   );
 }

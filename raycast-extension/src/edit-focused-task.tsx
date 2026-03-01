@@ -1,9 +1,16 @@
-import { List, getPreferenceValues } from "@raycast/api";
+import {
+  Form,
+  Action,
+  ActionPanel,
+  List,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { getNotes } from "./lib/notes-api";
+import { getNotes, editTodoInNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
-import AddPriorTodoForm from "./add-prior-todo-form";
 
 async function fetchFocusedProjectWithNextTodo(
   activePath: string,
@@ -22,7 +29,7 @@ async function fetchFocusedProjectWithNextTodo(
     const openTodos = out.todos.filter((t) => !t.checked);
     const nextTodo =
       openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
-    return { projectName: name, notes: out.notes, nextTodo };
+    return { projectName: name, notes: out.notes, todos: out.todos, nextTodo };
   } catch {
     return null;
   }
@@ -53,18 +60,61 @@ export default function Command() {
       <List>
         <List.EmptyView
           title="No active task"
-          description="Add Before requires an active task. Use Narrow Focus first."
+          description="Edit requires an active task. Use Narrow Focus first."
         />
       </List>
     );
   }
 
+  const nowTask = data.nextTodo;
+
+  async function handleSubmit(values: { text: string }) {
+    const text = values.text.trim();
+    if (!text) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Task text cannot be empty",
+      });
+      return;
+    }
+    try {
+      await editTodoInNotes(
+        prefs,
+        data!.projectName,
+        data!.notes,
+        nowTask,
+        text,
+      );
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Task updated",
+        message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
+    }
+  }
+
   return (
-    <AddPriorTodoForm
-      projectName={data.projectName}
-      notes={data.notes}
-      beforeTodo={data.nextTodo}
-      onSuccess={() => {}}
-    />
+    <Form
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm title="Update" onSubmit={handleSubmit} />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField
+        id="text"
+        title="Task"
+        placeholder="e.g. Review PR, Call client"
+        defaultValue={nowTask.text}
+        autoFocus
+      />
+    </Form>
   );
 }
