@@ -238,6 +238,18 @@
       "title": "Obsidian Vault Root (Advanced URI)",
       "description": "Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath.",
       "placeholder": "~/Obsidian/Projects"
+    },
+    {
+      "name": "menubarProjectDisplay",
+      "type": "dropdown",
+      "required": true,
+      "title": "Menubar Project Display",
+      "description": "Show project name or code in the focused project menubar item.",
+      "data": [
+        { "value": "code", "title": "Project Code (e.g. W-001)" },
+        { "value": "name", "title": "Project Name" }
+      ],
+      "default": "code"
     }
   ],
   "dependencies": {

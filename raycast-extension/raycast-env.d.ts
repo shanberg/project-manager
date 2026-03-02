@@ -15,7 +15,9 @@ type ExtensionPreferences = {
   /** Obsidian Vault (Advanced URI) - Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open. */
   "obsidianVault"?: string,
   /** Obsidian Vault Root (Advanced URI) - Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath. */
-  "obsidianVaultRoot"?: string
+  "obsidianVaultRoot"?: string,
+  /** Menubar Project Display - Show project name or code in the focused project menubar item. */
+  "menubarProjectDisplay": "code" | "name"
 }
 
 /** Preferences accessible in all the extension's commands */

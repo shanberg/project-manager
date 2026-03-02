@@ -159,7 +159,12 @@ export default function Command() {
     { execute: true },
   );
 
-  const code = data ? getProjectCode(data.name) : "—";
+  const menubarLabel =
+    data && prefs.menubarProjectDisplay === "name"
+      ? data.name
+      : data
+        ? getProjectCode(data.name)
+        : "—";
   const progress = data?.total ? data.done / data.total : 1;
   const baseTooltip = data
     ? data.total
@@ -177,7 +182,7 @@ export default function Command() {
   return (
     <MenuBarExtra
       icon={getProgressIcon(progress, Color.PrimaryText, { backgroundOpacity: 0.25, background: Color.PrimaryText })}
-      title={code}
+      title={menubarLabel}
       tooltip={tooltip}
       isLoading={isLoading}
     >

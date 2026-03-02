@@ -3,4 +3,5 @@ export interface PreferenceValues {
   pmCliPath?: string;
   obsidianVault?: string;
   obsidianVaultRoot?: string;
+  menubarProjectDisplay?: "code" | "name";
 }
