@@ -193,4 +193,24 @@ final class NotesTodosTests: XCTestCase {
         let atCount = reparsed.sessions[0].body.split(separator: "\n").filter { $0.hasSuffix(" @") }.count
         XCTAssertEqual(atCount, 1)
     }
+
+    /// completeTodoWithDescendants completes parent and all children.
+    func testCompleteTodoWithDescendants() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Root\n  - [ ] Child\n    - [ ] Grandchild\n- [ ] Sibling"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: false)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[0].checked)
+        XCTAssertEqual(todos[0].text, "Root")
+        XCTAssertTrue(todos[1].checked)
+        XCTAssertEqual(todos[1].text, "Child")
+        XCTAssertTrue(todos[2].checked)
+        XCTAssertEqual(todos[2].text, "Grandchild")
+        XCTAssertFalse(todos[3].checked)
+        XCTAssertEqual(todos[3].text, "Sibling")
+    }
 }

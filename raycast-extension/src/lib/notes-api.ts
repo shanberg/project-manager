@@ -114,6 +114,21 @@ export async function writeNotes(
   if (code !== 0) throw new Error(stderr || "pm notes write failed");
 }
 
+/** Complete a todo and its descendants via pm notes todo complete. */
+async function completeTodoViaCli(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  projectName: string,
+  todo: Todo,
+  advanceFocus: boolean,
+): Promise<void> {
+  const si = todo.sessionIndex ?? 0;
+  const li = todo.lineIndex ?? 0;
+  const args = ["notes", "todo", "complete", projectName, String(si), String(li)];
+  if (advanceFocus) args.push("--advance");
+  const { stderr, code } = await runPmWithPrefs(prefs, args);
+  if (code !== 0) throw new Error(stderr || "pm notes todo complete failed");
+}
+
 /** Get notes file path via pm notes path. */
 export async function resolveNotesPath(
   prefs: PreferenceValues,
@@ -132,26 +147,28 @@ export async function resolveNotesPath(
   }
 }
 
-/** Toggle one todo in notes (flip [ ] <-> [x]) and write back. Uses position when available to avoid duplicate rawLine ambiguity. */
+/** Toggle one todo in notes (flip [ ] <-> [x]) and write back. Completing cascades to children via CLI. */
 export async function toggleTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const newLine = todo.checked
-    ? todo.rawLine.replace(/\[[xX]\]/, "[ ]")
-    : todo.rawLine.replace(/\[ \]/, "[x]");
-  const updated =
-    typeof todo.sessionIndex === "number" && typeof todo.lineIndex === "number"
-      ? replaceTodoAtPositionInNotes(
-        notes,
-        todo.sessionIndex,
-        todo.lineIndex,
-        newLine,
-      )
-      : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
-  await writeNotes(prefs, projectName, updated);
+  if (todo.checked) {
+    const newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
+    const updated =
+      typeof todo.sessionIndex === "number" && typeof todo.lineIndex === "number"
+        ? replaceTodoAtPositionInNotes(
+          notes,
+          todo.sessionIndex,
+          todo.lineIndex,
+          newLine,
+        )
+        : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
+    await writeNotes(prefs, projectName, updated);
+  } else {
+    await completeTodoViaCli(prefs, projectName, todo, false);
+  }
 }
 
 /** Toggle multiple todos (all to [x]) and write back. */
@@ -212,7 +229,7 @@ function replaceTodoAtPositionInNotes(
   return { ...notes, sessions };
 }
 
-/** Add a todo to today's session. Creates today's session if missing. */
+/** Add a todo to today's session. Creates today's session if missing. Sets focus to the new task. */
 export async function addTodoToTodaySession(
   prefs: PreferenceValues,
   projectName: string,
@@ -236,7 +253,14 @@ export async function addTodoToTodaySession(
   const updatedSessions = sessions.map((s, i) =>
     i === idx ? { ...s, body: newBody } : s,
   );
-  await writeNotes(prefs, projectName, { ...notes, sessions: updatedSessions });
+  let updated = { ...notes, sessions: updatedSessions };
+  const taskMatches = newBody.match(new RegExp(TODO_LINE_REGEX.source, "g"));
+  const newTaskLineIndex = taskMatches ? taskMatches.length - 1 : 0;
+  updated = applyFocusToTodoInNotes(updated, {
+    sessionIndex: idx,
+    lineIndex: newTaskLineIndex,
+  } as Todo);
+  await writeNotes(prefs, projectName, updated);
 }
 
 /** Add a todo line before the given todo in notes. */
@@ -293,7 +317,26 @@ export async function addTodoAfterInNotes(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). */
+function findTodoPositionInNotes(
+  notes: ProjectNotes,
+  rawLine: string,
+): { sessionIndex: number; lineIndex: number } | null {
+  for (let si = 0; si < notes.sessions.length; si++) {
+    const lines = notes.sessions[si].body.split("\n");
+    let taskCount = 0;
+    for (const line of lines) {
+      if (TODO_LINE_REGEX.test(line)) {
+        if (line === rawLine || line.trimEnd() === rawLine.trimEnd()) {
+          return { sessionIndex: si, lineIndex: taskCount };
+        }
+        taskCount++;
+      }
+    }
+  }
+  return null;
+}
+
+/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). Sets focus to the new child. */
 export async function addTodoAsChildInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -306,7 +349,7 @@ export async function addTodoAsChildInNotes(
   const parentPrefix = parentTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
   const childPrefix = "  " + parentPrefix;
   const newLine = `${childPrefix}[ ] ${trimmed}`;
-  const updated =
+  let updated =
     typeof parentTodo.sessionIndex === "number" &&
     typeof parentTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
@@ -320,6 +363,20 @@ export async function addTodoAsChildInNotes(
           parentTodo.rawLine,
           `${parentTodo.rawLine}\n${newLine}`,
         );
+  const newChildPos =
+    typeof parentTodo.sessionIndex === "number" &&
+      typeof parentTodo.lineIndex === "number"
+      ? {
+        sessionIndex: parentTodo.sessionIndex,
+        lineIndex: parentTodo.lineIndex + 1,
+      }
+      : findTodoPositionInNotes(updated, newLine);
+  if (newChildPos) {
+    updated = applyFocusToTodoInNotes(updated, {
+      sessionIndex: newChildPos.sessionIndex,
+      lineIndex: newChildPos.lineIndex,
+    } as Todo);
+  }
   await writeNotes(prefs, projectName, updated);
 }
 
@@ -415,33 +472,15 @@ export async function setFocusToTodoInNotes(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Complete the now task (toggle to [x], strip @ from it) and move focus to the next open task in list order. One write. */
+/** Complete the now task and its descendants, move focus to next open task. Uses CLI. */
 export async function completeAndAdvanceInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
-  todos: Todo[],
+  _notes: ProjectNotes,
+  _todos: Todo[],
   nowTodo: Todo,
 ): Promise<void> {
-  const openTodos = todos.filter((t) => !t.checked);
-  const idx = openTodos.indexOf(nowTodo);
-  const nextOpen = idx >= 0 && idx + 1 < openTodos.length ? openTodos[idx + 1] : null;
-
-  let newCheckedLine = nowTodo.rawLine.replace(/\[ \]/, "[x]");
-  if (newCheckedLine.endsWith(FOCUS_MARKER)) {
-    newCheckedLine = newCheckedLine.slice(0, -FOCUS_MARKER.length).trimEnd();
-  }
-
-  const sessionIndex = nowTodo.sessionIndex ?? 0;
-  const lineIndex = nowTodo.lineIndex ?? 0;
-  let updated = replaceTodoAtPositionInNotes(
-    notes,
-    sessionIndex,
-    lineIndex,
-    newCheckedLine,
-  );
-  updated = applyFocusToTodoInNotes(updated, nextOpen);
-  await writeNotes(prefs, projectName, updated);
+  await completeTodoViaCli(prefs, projectName, nowTodo, true);
 }
 
 /** Undo: toggle the task back to unchecked and move focus (@) back to it. One write. */

@@ -203,6 +203,42 @@
         "link",
         "pm"
       ]
+    },
+    {
+      "name": "complete-focused-task",
+      "title": "Complete Task",
+      "description": "Complete the focused task and advance to next",
+      "mode": "no-view",
+      "keywords": [
+        "complete",
+        "done",
+        "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "undo-focused-complete",
+      "title": "Undo Complete",
+      "description": "Undo the last completed task",
+      "mode": "no-view",
+      "keywords": [
+        "undo",
+        "complete",
+        "task",
+        "pm"
+      ]
+    },
+    {
+      "name": "dive-in-focused-task",
+      "title": "Dive In",
+      "description": "Set focus to the first leaf in the active branch, or first leaf in tree if no focus",
+      "mode": "no-view",
+      "keywords": [
+        "dive",
+        "leaf",
+        "focus",
+        "pm"
+      ]
     }
   ],
   "preferences": [

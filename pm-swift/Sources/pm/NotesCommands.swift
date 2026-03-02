@@ -104,9 +104,31 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
     } catch { fail(error) }
 }
 
+func runNotesTodoComplete(args: [String]) {
+    let filtered = args.filter { $0 != "--advance" }
+    guard filtered.count >= 3,
+          let sessionIndex = Int(filtered[1]),
+          let lineIndex = Int(filtered[2]) else {
+        stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--advance]")
+        exit(1)
+    }
+    let project = filtered[0]
+    let advanceFocus = args.contains("--advance")
+    do {
+        let projectPath = try resolveProjectPath(nameOrPrefix: project)
+        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
+            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
+        }
+        var notes = try readNotesFile(notesPath: notesPath)
+        notes = normalizeFocusMarker(notes: notes)
+        notes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
+        try writeNotesFile(notesPath: notesPath, notes: notes)
+    } catch { fail(error) }
+}
+
 func runNotes(args: [String]) {
     guard let sub = args.first else {
-        stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|write|current-day|session|todo> ...")
         exit(1)
     }
     switch sub {
@@ -120,6 +142,12 @@ func runNotes(args: [String]) {
         runNotesWrite(args: Array(args.dropFirst()))
     case "current-day":
         runNotesCurrentDay()
+    case "todo":
+        guard args.count >= 3, args[1] == "complete" else {
+            stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--advance]")
+            exit(1)
+        }
+        runNotesTodoComplete(args: Array(args.dropFirst(2)))
     case "session":
         guard args.count >= 3, args[1] == "add" else {
             stderr("Usage: pm notes session add <project> [label] [-d|--date YYYY-MM-DD]")
@@ -138,7 +166,7 @@ func runNotes(args: [String]) {
         }
         runNotesSessionAdd(args: addArgs, dateStr: dateStr)
     default:
-        stderr("Usage: pm notes <path|create|show|write|current-day|session> ...")
+        stderr("Usage: pm notes <path|create|show|write|current-day|session|todo> ...")
         exit(1)
     }
 }

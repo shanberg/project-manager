@@ -60,6 +60,12 @@ declare namespace Preferences {
   export type AddFocusedSessionNote = ExtensionPreferences & {}
   /** Preferences accessible in the `add-focused-link` command */
   export type AddFocusedLink = ExtensionPreferences & {}
+  /** Preferences accessible in the `complete-focused-task` command */
+  export type CompleteFocusedTask = ExtensionPreferences & {}
+  /** Preferences accessible in the `undo-focused-complete` command */
+  export type UndoFocusedComplete = ExtensionPreferences & {}
+  /** Preferences accessible in the `dive-in-focused-task` command */
+  export type DiveInFocusedTask = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -99,5 +105,11 @@ declare namespace Arguments {
   export type AddFocusedSessionNote = {}
   /** Arguments passed to the `add-focused-link` command */
   export type AddFocusedLink = {}
+  /** Arguments passed to the `complete-focused-task` command */
+  export type CompleteFocusedTask = {}
+  /** Arguments passed to the `undo-focused-complete` command */
+  export type UndoFocusedComplete = {}
+  /** Arguments passed to the `dive-in-focused-task` command */
+  export type DiveInFocusedTask = {}
 }
 

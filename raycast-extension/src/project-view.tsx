@@ -25,6 +25,7 @@ import {
 import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";
+import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
 import AddSessionNoteForm from "./add-session-note-form";
@@ -91,6 +92,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
     { keepPreviousData: true },
   );
 
+  async function onNotesSuccess() {
+    await mutate();
+    await refreshMenubar();
+  }
+
   const { notes, todos, notesPath } = data ?? {
     notes: null,
     todos: [],
@@ -147,6 +153,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     try {
       await toggleTodoInNotes(prefs, projectName, notes, todo);
       await mutate();
+      await refreshMenubar();
       await showToast({
         style: Toast.Style.Success,
         title: todo.checked ? "Incomplete" : "Complete",
@@ -170,6 +177,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     try {
       await toggleAllTodosInNotes(prefs, projectName, notes, unchecked);
       await mutate();
+      await refreshMenubar();
       await showToast({
         style: Toast.Style.Success,
         title: "Completed",
@@ -234,7 +242,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     projectName={projectName}
                     notes={notes}
                     parentTodo={nextTodo}
-                    onSuccess={mutate}
+                    onSuccess={onNotesSuccess}
                   />
                 }
               />
@@ -243,7 +251,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 title="Add Task"
                 icon={Icon.Plus}
                 target={
-                  <AddTodoForm projectName={projectName} onSuccess={mutate} />
+                  <AddTodoForm projectName={projectName} onSuccess={onNotesSuccess} />
                 }
               />
             ))}
@@ -274,7 +282,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       style: Toast.Style.Success,
                       title: "Notes Created",
                     });
-                    await mutate();
+                    await onNotesSuccess();
                   } catch (err) {
                     const msg =
                       err instanceof Error ? err.message : String(err);
@@ -304,7 +312,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Add Task"
                   icon={Icon.Plus}
                   target={
-                    <AddTodoForm projectName={projectName} onSuccess={mutate} />
+                    <AddTodoForm projectName={projectName} onSuccess={onNotesSuccess} />
                   }
                 />
               )}
@@ -418,7 +426,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       field="summary"
                       label="Summary"
                       submitTitle="Save Summary"
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -442,7 +450,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       field="problem"
                       label="Problem"
                       submitTitle="Save Problem"
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -469,7 +477,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       projectName={projectName}
                       notes={notes}
                       initialGoals={notes.goals}
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -493,7 +501,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       field="approach"
                       label="Approach"
                       submitTitle="Save Approach"
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -529,7 +537,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     <AddLinkForm
                       projectName={projectName}
                       notes={notes}
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -558,7 +566,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       projectName={projectName}
                       notes={notes}
                       initialLearnings={notes.learnings}
-                      onSuccess={mutate}
+                      onSuccess={onNotesSuccess}
                     />
                   }
                 />
@@ -655,7 +663,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                         projectName={projectName}
                         notes={notes}
                         parentTodo={nextTodo}
-                        onSuccess={mutate}
+                        onSuccess={onNotesSuccess}
                       />
                     }
                   />
@@ -666,7 +674,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     target={
                       <AddTodoForm
                         projectName={projectName}
-                        onSuccess={mutate}
+                        onSuccess={onNotesSuccess}
                       />
                     }
                   />
@@ -706,6 +714,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 icon={Icon.ArrowRightCircleFilled}
                 onAction={async () => {
                   await setFocusedProject(basePath, projectName);
+                  await refreshMenubar();
                   await showToast({
                     style: Toast.Style.Success,
                     title: "Focused",

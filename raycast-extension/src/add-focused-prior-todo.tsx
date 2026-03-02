@@ -1,6 +1,7 @@
 import { List, getPreferenceValues } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
+import { refreshMenubar } from "./lib/menubar-refresh";
 import { getNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 import AddPriorTodoForm from "./add-prior-todo-form";
@@ -62,7 +63,7 @@ export default function Command() {
       projectName={data.projectName}
       notes={data.notes}
       beforeTodo={data.nextTodo}
-      onSuccess={() => {}}
+      onSuccess={() => refreshMenubar()}
     />
   );
 }

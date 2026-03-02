@@ -10,6 +10,7 @@ import {
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { getNotes, wrapTodoInNotes } from "./lib/notes-api";
+import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
 async function fetchFocusedProjectWithNextTodo(
@@ -88,6 +89,7 @@ export default function Command() {
         title: "Task Wrapped",
         message: `"${nowTask.text}" under "${parentName}"`,
       });
+      await refreshMenubar();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({

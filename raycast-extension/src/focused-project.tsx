@@ -358,15 +358,16 @@ export default function Command() {
             <MenuBarExtra.Section key={context} title={context}>
               {(byContext.get(context) ?? []).map((todo, i) => {
                 const isFocused = todo === nextTodo;
-                const completeTitle =
-                  todo.text.length > 35
-                    ? `Complete ${todo.text.slice(0, 32)}…`
-                    : `Complete ${todo.text}`;
+                const indent = "  ".repeat(todo.depth ?? 0);
+                const displayTitle = indent + todo.text;
+                const alternateTitle =
+                  indent +
+                  (todo.text.length > 35 ? todo.text.slice(0, 32) + "…" : todo.text);
                 return (
                   <MenuBarExtra.Item
                     key={`${i}-${todo.rawLine}`}
                     icon={isFocused ? Icon.ArrowRightCircleFilled : Icon.Circle}
-                    title={todo.text}
+                    title={displayTitle}
                     onAction={() =>
                       isFocused ? handleMarkDone(todo) : handleFocusTask(todo)
                     }
@@ -374,7 +375,7 @@ export default function Command() {
                       !isFocused ? (
                         <MenuBarExtra.Item
                           icon={Icon.CheckCircle}
-                          title={completeTitle}
+                          title={alternateTitle}
                           onAction={() => handleMarkDone(todo)}
                         />
                       ) : undefined

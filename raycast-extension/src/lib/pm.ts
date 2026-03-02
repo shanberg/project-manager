@@ -148,7 +148,7 @@ export async function runPm(
   args: string[],
   env: Record<string, string> = {},
   cliPathOverride?: string,
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const fullEnv = { ...process.env, ...env };
   const pmPath = resolvePmPath(cliPathOverride);
   return new Promise((resolve, reject) => {
@@ -161,10 +161,11 @@ export async function runPm(
     child.stdout?.on("data", (c) => stdoutChunks.push(c));
     child.stderr?.on("data", (c) => stderrChunks.push(c));
     child.on("error", reject);
-    child.on("close", () => {
+    child.on("close", (code) => {
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+        code: code ?? null,
       });
     });
   });
