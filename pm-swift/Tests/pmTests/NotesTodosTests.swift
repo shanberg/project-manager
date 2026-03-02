@@ -213,4 +213,117 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertFalse(todos[3].checked)
         XCTAssertEqual(todos[3].text, "Sibling")
     }
+
+    /// Advance focus uses now-style: previous sibling's last leaf, else next sibling's first leaf, else parent.
+    func testCompleteAdvanceFocusNowStyle() throws {
+        // Three root siblings: A (leaf), B with child B1, C (leaf). Focus B, complete B → focus should go to A (prev sibling's last leaf).
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A\n- [ ] B @\n  - [ ] B1\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 1, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[1].checked, "B completed")
+        XCTAssertTrue(todos[2].checked, "B1 completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "A", "focus moves to previous sibling's last leaf (A)")
+    }
+
+    /// Complete first root → focus moves to next sibling's first leaf (B has child B1, so first leaf is B1).
+    func testCompleteAdvanceFocusNextSiblingFirstLeaf() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [ ] B\n  - [ ] B1\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[0].checked, "A completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "B1", "focus moves to next sibling B's first leaf (B1)")
+    }
+
+    /// Complete only child → focus moves to parent.
+    func testCompleteAdvanceFocusToParent() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A\n  - [ ] A1 @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 1, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[1].checked, "A1 completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "A", "focus moves to parent A")
+    }
+
+    /// Previous sibling has children → focus moves to that sibling's last leaf.
+    func testCompleteAdvanceFocusPrevSiblingLastLeaf() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A\n  - [ ] A1\n  - [ ] A2\n- [ ] B @\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 3, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[3].checked, "B completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "A2", "focus moves to previous sibling A's last leaf (A2)")
+    }
+
+    /// Two roots: complete second → focus moves to first (previous sibling's last leaf).
+    func testCompleteAdvanceFocusTwoRootsCompleteSecond() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A\n- [ ] B @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 1, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[1].checked, "B completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "A", "focus moves to previous sibling A")
+    }
+
+    /// Single root, complete with advance → no structural candidate; focus cleared (all done).
+    func testCompleteAdvanceFocusSingleRootClearsFocus() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Only @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[0].checked, "Only completed")
+        let focusedCount = todos.filter { $0.isFocused }.count
+        XCTAssertEqual(focusedCount, 0, "no focus when no open tasks left")
+    }
+
+    /// Three roots A, B, C — complete A → focus to B (next sibling; B is leaf so first leaf is B).
+    func testCompleteAdvanceFocusNextSiblingIsLeaf() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [ ] B\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[0].checked, "A completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "B", "focus moves to next sibling B (leaf)")
+    }
 }
