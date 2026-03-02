@@ -6,12 +6,10 @@ import type { PreferenceValues } from "./lib/types";
 import AddChildTodoForm from "./add-child-todo-form";
 
 async function fetchFocusedProjectWithFocusedTask(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
@@ -33,7 +31,7 @@ export default function Command() {
 
   const { data, isLoading } = useCachedPromise(
     fetchFocusedProjectWithFocusedTask,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { execute: true },
   );
 

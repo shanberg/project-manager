@@ -13,12 +13,10 @@ import { getNotes, editTodoInNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
 async function fetchFocusedProjectWithNextTodo(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
@@ -40,7 +38,7 @@ export default function Command() {
 
   const { data, isLoading } = useCachedPromise(
     fetchFocusedProjectWithNextTodo,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { execute: true },
   );
 

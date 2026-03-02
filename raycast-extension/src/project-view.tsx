@@ -22,7 +22,7 @@ import {
   type LinkEntry,
   type Todo,
 } from "./lib/notes-api";
-import { runPmWithPrefs } from "./lib/pm";
+import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";
 import type { PreferenceValues } from "./lib/types";
@@ -54,12 +54,10 @@ function sectionDetail(content: string, emptyLabel: string) {
 
 async function fetchProjectNotes(
   projName: string,
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const notesPath = await resolveNotesPath(prefs, projName);
   if (!notesPath) return { notes: null, todos: [] as Todo[], notesPath: null };
   try {
@@ -81,20 +79,15 @@ type TodoViewMode = "next" | "all";
 export default function ProjectView({ projectName, basePath }: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { pop } = useNavigation();
-  const isActive = basePath === prefs.activePath;
+  const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
+  const isActive = basePath === (paths?.activePath ?? "");
   const projectPath = path.join(basePath, projectName);
   const [viewMode, setViewMode] = useState<TodoViewMode>("next");
   const [todoFilter] = useState<TodoFilter>("all");
 
   const { data, isLoading, revalidate, mutate } = useCachedPromise(
     fetchProjectNotes,
-    [
-      projectName,
-      prefs.activePath,
-      prefs.archivePath,
-      prefs.configPath,
-      prefs.pmCliPath,
-    ],
+    [projectName, prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true },
   );
 

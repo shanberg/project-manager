@@ -1,6 +1,6 @@
 import path from "path";
 import { stat } from "fs/promises";
-import { runPmWithPrefs } from "./pm";
+import { runPmWithPrefs, getPmPaths } from "./pm";
 import { getNotes, resolveNotesPath } from "./notes-api";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
@@ -20,17 +20,20 @@ export type RecentProject = {
 };
 
 export async function getRecentProjectsByEdit(
-  prefs: PreferenceValues,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   limit: number,
   excludeKey?: string,
 ): Promise<RecentProject[]> {
-  const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
+  const [paths, { stdout }] = await Promise.all([
+    getPmPaths(prefs),
+    runPmWithPrefs(prefs, ["list", "--all"]),
+  ]);
   const { active: activeNames, archive: archiveNames } =
     parseListAllOutput(stdout);
 
   const all: { name: string; basePath: string }[] = [
-    ...activeNames.map((name) => ({ name, basePath: prefs.activePath })),
-    ...archiveNames.map((name) => ({ name, basePath: prefs.archivePath })),
+    ...activeNames.map((name) => ({ name, basePath: paths.activePath })),
+    ...archiveNames.map((name) => ({ name, basePath: paths.archivePath })),
   ];
 
   const withMeta = await Promise.all(

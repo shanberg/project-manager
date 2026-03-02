@@ -6,12 +6,10 @@ import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
 
 async function fetchFocusedProjectNotes(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
@@ -31,7 +29,7 @@ export default function Command() {
 
   const { data, isLoading } = useCachedPromise(
     fetchFocusedProjectNotes,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { execute: true },
   );
 

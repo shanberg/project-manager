@@ -41,35 +41,42 @@ func runConfigGet(key: String?) {
     do {
         guard let config = try loadConfig() else { fail(PmError.configNotFound) }
         if let k = key {
-            let value = getConfigValue(config: config, key: k)
-            switch value {
-            case .unknownKey:
+            switch k {
+            case "activePath":
+                print(config.activePath)
+            case "archivePath":
+                print(config.archivePath)
+            case "paraPath":
+                print(config.paraPath ?? "null")
+            case "notesTemplatePath":
+                print(config.notesTemplatePath ?? "null")
+            case "domains":
+                let data = try JSONSerialization.data(withJSONObject: config.domains as NSDictionary, options: .prettyPrinted)
+                guard let str = String(data: data, encoding: .utf8) else {
+                    stderr("Failed to encode config value '\(k)' as UTF-8.")
+                    exit(1)
+                }
+                print(str)
+            case "subfolders":
+                let data = try JSONSerialization.data(withJSONObject: config.subfolders as NSArray, options: .prettyPrinted)
+                guard let str = String(data: data, encoding: .utf8) else {
+                    stderr("Failed to encode config value '\(k)' as UTF-8.")
+                    exit(1)
+                }
+                print(str)
+            default:
                 fail(PmError.unknownConfigKey(k))
-            case .string(let s):
-                if let s = s {
-                    print(s)
-                } else {
-                    print("null")
-                }
-            case .stringArray(let arr):
-                let data = try JSONSerialization.data(withJSONObject: arr, options: .prettyPrinted)
-                guard let str = String(data: data, encoding: .utf8) else {
-                    stderr("Failed to encode config value '\(k)' as UTF-8.")
-                    exit(1)
-                }
-                print(str)
-            case .stringDictionary(let dict):
-                let data = try JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted)
-                guard let str = String(data: data, encoding: .utf8) else {
-                    stderr("Failed to encode config value '\(k)' as UTF-8.")
-                    exit(1)
-                }
-                print(str)
             }
         } else {
-            let enc = JSONEncoder()
-            enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try enc.encode(config)
+            var obj: [String: Any] = [
+                "activePath": config.activePath,
+                "archivePath": config.archivePath,
+                "domains": config.domains,
+                "subfolders": config.subfolders,
+            ]
+            obj["paraPath"] = config.paraPath ?? NSNull()
+            obj["notesTemplatePath"] = config.notesTemplatePath ?? NSNull()
+            let data = try JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
             guard let str = String(data: data, encoding: .utf8) else {
                 stderr("Failed to encode config JSON as UTF-8.")
                 exit(1)

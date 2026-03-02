@@ -6,13 +6,14 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { getConfigDomains, getConfigSubfolders } from "./lib/pm";
+import { getConfigDomains, getConfigSubfolders, getPmPaths } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import EditDomains from "./edit-domains";
 import EditProjectStructure from "./edit-project-structure";
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
   const { data: subfolders = [] } = useCachedPromise(getConfigSubfolders, [
     prefs,
@@ -33,7 +34,7 @@ export default function Command() {
 
 Where your projects live. Both can point to different locations (e.g. different drives or cloud folders).
 
-**Edit in preferences** to change paths.
+Paths come from pm config (\`pm config init\`). The extension does not override them.
 
 # Domains
 
@@ -44,9 +45,9 @@ Domain codes and labels used when creating projects (e.g. \`M\` → Marketing). 
 Folder names created inside each new project. **Edit Project Structure** to change.`}
       metadata={
         <Detail.Metadata>
-          <Detail.Metadata.Label title="Active" text={prefs.activePath} />
+          <Detail.Metadata.Label title="Active" text={paths?.activePath ?? "—"} />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label title="Archive" text={prefs.archivePath} />
+          <Detail.Metadata.Label title="Archive" text={paths?.archivePath ?? "—"} />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Domains" text={domainSummary} />
           <Detail.Metadata.Separator />

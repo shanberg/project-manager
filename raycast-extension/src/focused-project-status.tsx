@@ -84,12 +84,10 @@ function flattenLinks(links: LinkEntry[]): { label: string; url: string }[] {
 }
 
 async function fetchFocusedProjectStatus(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
@@ -138,13 +136,11 @@ async function fetchFocusedProjectStatus(
 }
 
 async function fetchRecentProjects(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
   focusedKey: string | null,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   return getRecentProjectsByEdit(prefs, 10, focusedKey ?? undefined);
 }
 
@@ -152,26 +148,18 @@ export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocusedProjectStatus,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { execute: true },
   );
 
   const focusedKey = data ? projectKey(data.basePath, data.name) : null;
   const { data: recentProjects } = useCachedPromise(
     fetchRecentProjects,
-    [
-      prefs.activePath,
-      prefs.archivePath,
-      prefs.configPath,
-      prefs.pmCliPath,
-      focusedKey,
-    ],
+    [prefs.configPath, prefs.pmCliPath, focusedKey],
     { execute: true },
   );
 
-  if (!data && !isLoading) return null;
-
-  const code = data ? getProjectCode(data.name) : "";
+  const code = data ? getProjectCode(data.name) : "—";
   const progress = data?.total ? data.done / data.total : 1;
   const baseTooltip = data
     ? data.total
@@ -193,7 +181,7 @@ export default function Command() {
       tooltip={tooltip}
       isLoading={isLoading}
     >
-      {data && (
+      {data ? (
         <>
           <MenuBarExtra.Section
             title={`Project · ${data.done}/${data.total} done`}
@@ -341,6 +329,31 @@ export default function Command() {
             />
           </MenuBarExtra.Section>
         </>
+      ) : (
+        <MenuBarExtra.Section>
+          <MenuBarExtra.Item
+            title="List Projects"
+            onAction={() =>
+              open(
+                "raycast://extensions/shanberg/project-manager/list-projects",
+              )
+            }
+          />
+          <MenuBarExtra.Item
+            title="New Project"
+            onAction={() =>
+              open(
+                "raycast://extensions/shanberg/project-manager/new-project",
+              )
+            }
+          />
+          <MenuBarExtra.Item
+            title="Configure"
+            onAction={() =>
+              open("raycast://extensions/shanberg/project-manager/configure")
+            }
+          />
+        </MenuBarExtra.Section>
       )}
     </MenuBarExtra>
   );

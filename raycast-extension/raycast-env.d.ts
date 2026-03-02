@@ -8,14 +8,10 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** Active Projects Path - Folder where active projects live */
-  "activePath": string,
-  /** Archive Path - Folder where archived projects live */
-  "archivePath": string,
   /** Config Path Override - Override pm config location (default: ~/.config/pm). Leave empty to use default. */
   "configPath"?: string,
-  /** pm CLI Path - Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect. */
-  "pmCliPath"?: string,
+  /** pm CLI Path - Full path to pm CLI. Default: Homebrew (Apple Silicon). Intel: use /usr/local/bin/pm. */
+  "pmCliPath": string,
   /** Obsidian Vault (Advanced URI) - Vault name for cursor positioning. Requires Obsidian Advanced URI plugin. Leave empty to use path-only open. */
   "obsidianVault"?: string,
   /** Obsidian Vault Root (Advanced URI) - Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath. */

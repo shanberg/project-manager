@@ -207,20 +207,6 @@
   ],
   "preferences": [
     {
-      "name": "activePath",
-      "type": "directory",
-      "required": true,
-      "title": "Active Projects Path",
-      "description": "Folder where active projects live"
-    },
-    {
-      "name": "archivePath",
-      "type": "directory",
-      "required": true,
-      "title": "Archive Path",
-      "description": "Folder where archived projects live"
-    },
-    {
       "name": "configPath",
       "type": "textfield",
       "required": false,
@@ -233,8 +219,9 @@
       "type": "textfield",
       "required": false,
       "title": "pm CLI Path",
-      "description": "Full path to pm CLI (e.g. ~/dev/project-manager/dist/cli.js). Leave empty to auto-detect.",
-      "placeholder": "~/dev/project-manager/dist/cli.js"
+      "description": "Full path to pm CLI. Default: Homebrew (Apple Silicon). Intel: use /usr/local/bin/pm.",
+      "placeholder": "/opt/homebrew/bin/pm",
+      "default": "/opt/homebrew/bin/pm"
     },
     {
       "name": "obsidianVault",

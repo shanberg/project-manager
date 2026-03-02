@@ -11,7 +11,7 @@ import {
   Toast,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
+import { runPmWithPrefs, getConfigDomains, getPmPaths } from "./lib/pm";
 import { setFocusedProject } from "./lib/focused-project";
 import type { PreferenceValues } from "./lib/types";
 
@@ -54,11 +54,12 @@ export default function Command() {
         if (match) {
           const projectPath = match[1].trim();
           const projectName = path.basename(projectPath);
-          await setFocusedProject(prefs.activePath, projectName);
+          const { activePath } = await getPmPaths(prefs);
+          await setFocusedProject(activePath, projectName);
           await launchCommand({
             name: "view-project",
             type: LaunchType.UserInitiated,
-            context: { projectName, basePath: prefs.activePath },
+            context: { projectName, basePath: activePath },
           });
         }
       }

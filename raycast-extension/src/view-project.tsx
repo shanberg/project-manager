@@ -6,20 +6,21 @@ import {
   open,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { runPmWithPrefs } from "./lib/pm";
+import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { parseListAllOutput } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 import ProjectView from "./project-view";
 
 async function fetchProjects(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
-  const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
-  return parseListAllOutput(stdout);
+  const prefs = { configPath, pmCliPath };
+  const [paths, { stdout }] = await Promise.all([
+    getPmPaths(prefs),
+    runPmWithPrefs(prefs, ["list", "--all"]),
+  ]);
+  return { ...parseListAllOutput(stdout), ...paths };
 }
 
 type LaunchContext = { projectName: string; basePath: string };
@@ -39,12 +40,14 @@ export default function Command(props: { launchContext?: LaunchContext }) {
 
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjects,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true },
   );
 
   const active = data?.active ?? [];
   const archive = data?.archive ?? [];
+  const activePath = data?.activePath ?? "";
+  const archivePath = data?.archivePath ?? "";
 
   return (
     <List
@@ -79,7 +82,7 @@ export default function Command(props: { launchContext?: LaunchContext }) {
                   target={
                     <ProjectView
                       projectName={name}
-                      basePath={prefs.activePath}
+                      basePath={activePath}
                     />
                   }
                 />
@@ -100,7 +103,7 @@ export default function Command(props: { launchContext?: LaunchContext }) {
                   target={
                     <ProjectView
                       projectName={name}
-                      basePath={prefs.archivePath}
+                      basePath={archivePath}
                     />
                   }
                 />

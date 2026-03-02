@@ -3,7 +3,7 @@
  * Types match Swift PmLib JSON output.
  */
 
-import { buildEnv, ensureConfig, runPmWithPrefs, runPmWithStdin } from "./pm";
+import { buildEnv, runPmWithPrefs, runPmWithStdin } from "./pm";
 import type { PreferenceValues } from "./types";
 
 export interface LinkEntry {
@@ -101,11 +101,10 @@ export async function getNotes(
 
 /** Write notes back via pm notes write (stdin JSON). */
 export async function writeNotes(
-  prefs: PreferenceValues,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   projectName: string,
   notes: ProjectNotes,
 ): Promise<void> {
-  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
   const { stderr, code } = await runPmWithStdin(
     ["notes", "write", projectName],
     buildEnv(prefs),

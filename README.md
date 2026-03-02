@@ -15,7 +15,7 @@ brew tap shanberg/s
 brew install shanberg/s/project-manager
 ```
 
-Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Leave **pm CLI Path** empty so the extension uses `pm` from PATH.
+Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Paths come from pm config; the extension does not override them.
 
 **Local dev (this repo)**
 
@@ -31,13 +31,11 @@ cd raycast-extension && npm install && npm run dev
 
 **Benchmarking:** `PM_BENCHMARK=1 pm list` prints stage timings to stderr (loadConfig, getProjectFolders, etc.).
 
-Raycast will load the extension. Set **Active Projects Path** and **Archive Path** in the extension preferences (Raycast Preferences → Extensions → Project Manager). Leave **pm CLI Path** empty to use `pm` from PATH (after Homebrew install), or set it to the Swift binary when developing.
+Raycast will load the extension. Paths come from pm config (`pm config init`). The extension reads them from pm and does not override. Set **pm CLI Path** in preferences if needed (default: Homebrew `/opt/homebrew/bin/pm`).
 
 ## Setup
 
-**Via Raycast:** Open Extension Preferences and set the two paths. The extension creates the config on first use.
-
-**Via CLI:** `pm config init` – you'll be prompted for active and archive paths.
+**Via CLI:** `pm config init` – you'll be prompted for active and archive paths. The Raycast extension reads them from pm config and does not override.
 
 These can be anywhere (e.g. different drives, cloud sync folders).
 
@@ -45,7 +43,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 
 **Raycast (recommended):**
 
-- **Configure Project Manager** – Open preferences to set paths
+- **Configure Project Manager** – View paths (from pm config), domains, structure
 - **New Project** – Create a project (domain + title)
 - **List Projects** – Browse active/archive, open in Finder, add session notes
 - **Archive Project** – Move a project to archive

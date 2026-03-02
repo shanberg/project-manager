@@ -32,7 +32,7 @@ import {
   getProjectCode,
   getReadableProjectName,
 } from "./lib/focused-project";
-import { runPmWithPrefs, getConfigDomains } from "./lib/pm";
+import { runPmWithPrefs, getConfigDomains, getPmPaths } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";
 import ProjectView from "./project-view";
@@ -75,12 +75,7 @@ function parseSearchToken(
 }
 
 async function loadNotesForProject(
-  prefs: {
-    activePath: string;
-    archivePath: string;
-    configPath?: string;
-    pmCliPath?: string;
-  },
+  prefs: { configPath?: string; pmCliPath?: string },
   projectName: string,
 ): Promise<{ notes: ProjectNotes; notesPath: string; todos: Todo[] } | null> {
   const notesPath = await resolveNotesPath(prefs, projectName);
@@ -106,23 +101,27 @@ type ProjectWithMeta = {
 };
 
 async function fetchProjectsWithMeta(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
-): Promise<{ active: ProjectWithMeta[]; archive: ProjectWithMeta[] }> {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
-  const [domains, { stdout }] = await Promise.all([
+): Promise<{
+  active: ProjectWithMeta[];
+  archive: ProjectWithMeta[];
+  activePath: string;
+  archivePath: string;
+}> {
+  const prefs = { configPath, pmCliPath };
+  const [paths, domains, { stdout }] = await Promise.all([
+    getPmPaths(prefs),
     getConfigDomains(prefs),
     runPmWithPrefs(prefs, ["list", "--all"]),
   ]);
+  const { activePath, archivePath } = paths;
   const domainCodes = Object.keys(domains);
 
   async function enrich(
     names: string[],
     basePath: string,
   ): Promise<ProjectWithMeta[]> {
-    const prefs = { activePath, archivePath, configPath, pmCliPath };
     const results = await Promise.all(
       names.map(async (name) => {
         const projectPath = path.join(basePath, name);
@@ -160,7 +159,7 @@ async function fetchProjectsWithMeta(
     enrich(archiveNames, archivePath),
   ]);
 
-  return { active, archive };
+  return { active, archive, activePath, archivePath };
 }
 
 function filterAndSort(
@@ -203,7 +202,7 @@ export default function Command() {
 
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchProjectsWithMeta,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true },
   );
 
@@ -213,7 +212,6 @@ export default function Command() {
 
   const active = data?.active ?? [];
   const archive = data?.archive ?? [];
-  const pathToShow = scope === "active" ? prefs.activePath : prefs.archivePath;
 
   const { domain: domainFilter, query } = parseSearchToken(
     searchText,
@@ -248,6 +246,7 @@ export default function Command() {
     hasNotes,
     notesPath,
     notes,
+    activePath,
   }: {
     name: string;
     basePath: string;
@@ -255,10 +254,11 @@ export default function Command() {
     hasNotes: boolean;
     notesPath: string | null;
     notes: ProjectNotes | null;
+    activePath: string;
   }) {
     const projectPath = path.join(basePath, name);
     const targetPath = notesPath ?? getNotesPath(projectPath);
-    const isActive = basePath === prefs.activePath;
+    const isActive = basePath === activePath;
 
     async function handleArchive() {
       const confirmed = await confirmAlert({
@@ -467,7 +467,7 @@ export default function Command() {
         <>
           <List.Section title="Active">
             {displayActive.map(
-              ({ name, notes, notesPath, hasSrc, done, total }) => (
+              ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
                 <List.Item
                   key={`active:${name}`}
                   icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
@@ -480,11 +480,12 @@ export default function Command() {
                   actions={
                     <ProjectActions
                       name={name}
-                      basePath={prefs.activePath}
+                      basePath={basePath}
                       hasSrc={hasSrc}
                       hasNotes={!!notes}
                       notesPath={notesPath}
                       notes={notes}
+                      activePath={data?.activePath ?? ""}
                     />
                   }
                 />
@@ -493,7 +494,7 @@ export default function Command() {
           </List.Section>
           <List.Section title="Archive">
             {displayArchive.map(
-              ({ name, notes, notesPath, hasSrc, done, total }) => (
+              ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
                 <List.Item
                   key={`archive:${name}`}
                   icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
@@ -506,11 +507,12 @@ export default function Command() {
                   actions={
                     <ProjectActions
                       name={name}
-                      basePath={prefs.archivePath}
+                      basePath={basePath}
                       hasSrc={hasSrc}
                       hasNotes={!!notes}
                       notesPath={notesPath}
                       notes={notes}
+                      activePath={data?.activePath ?? ""}
                     />
                   }
                 />
@@ -520,7 +522,7 @@ export default function Command() {
         </>
       ) : (
         (scope === "active" ? displayActive : displayArchive).map(
-          ({ name, notes, notesPath, hasSrc, done, total }) => (
+          ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
             <List.Item
               key={name}
               icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
@@ -533,11 +535,12 @@ export default function Command() {
               actions={
                 <ProjectActions
                   name={name}
-                  basePath={pathToShow}
+                  basePath={basePath}
                   hasSrc={hasSrc}
                   hasNotes={!!notes}
                   notesPath={notesPath}
                   notes={notes}
+                  activePath={data?.activePath ?? ""}
                 />
               }
             />

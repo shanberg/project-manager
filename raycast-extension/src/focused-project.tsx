@@ -42,12 +42,10 @@ function breadcrumbForNowTask(todos: Todo[], nowTask: Todo): string {
 }
 
 async function fetchFocusedProjectData(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ) {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
@@ -116,7 +114,7 @@ export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocusedProjectData,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { execute: true },
   ) as {
     data: FocusedProjectData | undefined;
@@ -142,8 +140,6 @@ export default function Command() {
     list.push(t);
     byContext.set(t.context, list);
   }
-
-  if (!data && !isLoading) return null;
 
   const title = nextTodo
     ? nextTodo.text.slice(0, 40) + (nextTodo.text.length > 40 ? "…" : "")
@@ -231,7 +227,7 @@ export default function Command() {
       tooltip={tooltip}
       isLoading={isLoading}
     >
-      {data && (
+      {data ? (
         <>
           <MenuBarExtra.Section>
             {nextTodo ? (
@@ -389,6 +385,31 @@ export default function Command() {
             </MenuBarExtra.Section>
           ))}
         </>
+      ) : (
+        <MenuBarExtra.Section>
+          <MenuBarExtra.Item
+            title="List Projects"
+            onAction={() =>
+              open(
+                "raycast://extensions/shanberg/project-manager/list-projects",
+              )
+            }
+          />
+          <MenuBarExtra.Item
+            title="New Project"
+            onAction={() =>
+              open(
+                "raycast://extensions/shanberg/project-manager/new-project",
+              )
+            }
+          />
+          <MenuBarExtra.Item
+            title="Configure"
+            onAction={() =>
+              open("raycast://extensions/shanberg/project-manager/configure")
+            }
+          />
+        </MenuBarExtra.Section>
       )}
     </MenuBarExtra>
   );

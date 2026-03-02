@@ -1,8 +1,6 @@
-import { exec, spawn } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import path from "path";
 import os from "os";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import type { PreferenceValues } from "./types";
 
@@ -21,15 +19,39 @@ export const DEFAULT_SUBFOLDERS = [
   "working files",
 ];
 
+export interface PmPaths {
+  activePath: string;
+  archivePath: string;
+}
+
+/** Get activePath and archivePath from pm config. Single source of truth. */
+export async function getPmPaths(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+): Promise<PmPaths> {
+  const env = getConfigEnv(prefs.configPath);
+  const { stdout } = await runPm(["config", "get"], env, prefs.pmCliPath);
+  const config = JSON.parse(stdout.trim()) as {
+    activePath?: string;
+    archivePath?: string;
+  };
+  const activePath = config.activePath ?? "";
+  const archivePath = config.archivePath ?? "";
+  if (!activePath || !archivePath) {
+    throw new Error(
+      "pm config missing paths. Run: pm config init",
+    );
+  }
+  return {
+    activePath: path.normalize(expandPath(activePath)),
+    archivePath: path.normalize(expandPath(archivePath)),
+  };
+}
+
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */
 export async function getConfigDomains(
-  prefs: Pick<
-    PreferenceValues,
-    "activePath" | "archivePath" | "configPath" | "pmCliPath"
-  >,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
 ): Promise<Record<string, string>> {
-  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
-  const env = buildEnv(prefs as PreferenceValues);
+  const env = getConfigEnv(prefs.configPath);
   try {
     const { stdout } = await runPm(
       ["config", "get", "domains"],
@@ -52,13 +74,9 @@ export async function getConfigDomains(
 
 /** Load subfolders (project structure) from pm config. Uses DEFAULT_SUBFOLDERS if config missing or invalid. */
 export async function getConfigSubfolders(
-  prefs: Pick<
-    PreferenceValues,
-    "activePath" | "archivePath" | "configPath" | "pmCliPath"
-  >,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
 ): Promise<string[]> {
-  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
-  const env = buildEnv(prefs as PreferenceValues);
+  const env = getConfigEnv(prefs.configPath);
   try {
     const { stdout } = await runPm(
       ["config", "get", "subfolders"],
@@ -78,36 +96,20 @@ export async function getConfigSubfolders(
   return [...DEFAULT_SUBFOLDERS];
 }
 
-const execAsync = promisify(exec);
+const HOMEBREW_PM_PATHS = [
+  "/opt/homebrew/bin/pm",
+  "/usr/local/bin/pm",
+];
 
 function resolvePmPath(cliPathOverride?: string): string {
   const raw = cliPathOverride?.trim();
   if (raw) return path.normalize(expandPath(raw));
-  const candidates = [
-    path.join(
-      os.homedir(),
-      "dev",
-      "project-manager",
-      "pm-swift",
-      ".build",
-      "release",
-      "pm",
-    ),
-    path.join(
-      os.homedir(),
-      "dev",
-      "project-manager",
-      "pm-swift",
-      ".build",
-      "debug",
-      "pm",
-    ),
-    path.join(process.cwd(), "..", "pm-swift", ".build", "release", "pm"),
-  ];
-  for (const p of candidates) {
+  for (const p of HOMEBREW_PM_PATHS) {
     if (existsSync(p)) return p;
   }
-  return "pm";
+  throw new Error(
+    "pm not found. Install via Homebrew: brew install pm. Or set pmCliPath in preferences.",
+  );
 }
 
 function expandPath(p: string): string {
@@ -130,70 +132,16 @@ export function getConfigEnv(
   return { PM_CONFIG_HOME: getConfigDir(configPathOverride) };
 }
 
-export function buildEnv(prefs: PreferenceValues): Record<string, string> {
-  return {
-    PM_ACTIVE_PATH: prefs.activePath,
-    PM_ARCHIVE_PATH: prefs.archivePath,
-    ...getConfigEnv(prefs.configPath),
-  };
+export function buildEnv(prefs: Pick<PreferenceValues, "configPath">): Record<string, string> {
+  return getConfigEnv(prefs.configPath);
 }
 
-/** Ensure config exists, then run pm with prefs. Reduces boilerplate in commands. */
+/** Run pm with extension prefs. Uses pm config only; no path overrides. */
 export async function runPmWithPrefs(
-  prefs: PreferenceValues,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
-  await ensureConfig(prefs.activePath, prefs.archivePath, prefs.configPath);
   return runPm(args, buildEnv(prefs), prefs.pmCliPath);
-}
-
-/** Normalize path for config (expand ~ so CLI and Raycast compare the same). */
-function normalizedPath(p: string): string {
-  return path.normalize(expandPath(p));
-}
-
-export async function ensureConfig(
-  activePath: string,
-  archivePath: string,
-  configPathOverride?: string,
-): Promise<void> {
-  const configDir = getConfigDir(configPathOverride);
-  const configPath = path.join(configDir, "config.json");
-  await mkdir(configDir, { recursive: true });
-
-  const active = normalizedPath(activePath);
-  const archive = normalizedPath(archivePath);
-
-  if (existsSync(configPath)) {
-    try {
-      const raw = await readFile(configPath, "utf-8");
-      const config = JSON.parse(raw) as Record<string, unknown>;
-      const currentActive =
-        config.activePath && typeof config.activePath === "string"
-          ? normalizedPath(config.activePath)
-          : "";
-      const currentArchive =
-        config.archivePath && typeof config.archivePath === "string"
-          ? normalizedPath(config.archivePath)
-          : "";
-      if (currentActive === active && currentArchive === archive) return;
-      config.activePath = active;
-      config.archivePath = archive;
-      await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
-    } catch {
-      // If read/parse fails, overwrite with a valid config below
-    }
-  }
-
-  if (!existsSync(configPath)) {
-    const config = {
-      activePath: active,
-      archivePath: archive,
-      domains: DEFAULT_DOMAINS,
-      subfolders: DEFAULT_SUBFOLDERS,
-    };
-    await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
-  }
 }
 
 export async function runPm(
@@ -203,22 +151,23 @@ export async function runPm(
 ): Promise<{ stdout: string; stderr: string }> {
   const fullEnv = { ...process.env, ...env };
   const pmPath = resolvePmPath(cliPathOverride);
-
-  /** Escape for zsh -c: wrap in single quotes, escape single quotes as '\'' */
-  function shellArg(a: string): string {
-    return `'${a.replace(/'/g, "'\\''")}'`;
-  }
-  const innerCmd =
-    pmPath === "pm"
-      ? `pm ${args.map(shellArg).join(" ")}`
-      : `${shellArg(pmPath)} ${args.map(shellArg).join(" ")}`;
-  const cmd = `/bin/zsh -l -c ${JSON.stringify(innerCmd)}`;
-
-  const { stdout, stderr } = await execAsync(cmd, {
-    env: fullEnv,
-    maxBuffer: 10 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const child = spawn(pmPath, args, {
+      env: fullEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout?.on("data", (c) => stdoutChunks.push(c));
+    child.stderr?.on("data", (c) => stderrChunks.push(c));
+    child.on("error", reject);
+    child.on("close", () => {
+      resolve({
+        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+      });
+    });
   });
-  return { stdout, stderr };
 }
 
 const PM_STDIN_TIMEOUT_MS = 30_000;
@@ -230,11 +179,10 @@ export function runPmWithStdin(
   cliPathOverride: string | undefined,
   stdinContent: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const fullEnv = { ...process.env, ...env };
+  const pmPath = resolvePmPath(cliPathOverride);
   return new Promise((resolve, reject) => {
-    const fullEnv = { ...process.env, ...env };
-    const pmPath = resolvePmPath(cliPathOverride);
-    const execArgs = pmPath === "pm" ? ["pm", ...args] : [pmPath, ...args];
-    const child = spawn(execArgs[0], execArgs.slice(1), {
+    const child = spawn(pmPath, args, {
       env: fullEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });

@@ -13,12 +13,10 @@ import { runPmWithPrefs } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 
 async function fetchActiveProjects(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ): Promise<string[]> {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
+  const prefs = { configPath, pmCliPath };
   const { stdout } = await runPmWithPrefs(prefs, ["list"]);
   return stdout
     .split("\n")
@@ -36,7 +34,7 @@ export default function Command() {
     mutate,
   } = useCachedPromise(
     fetchActiveProjects,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true },
   );
 
@@ -48,7 +46,10 @@ export default function Command() {
     });
     if (!confirmed) return;
     try {
-      await mutate(runPmWithPrefs(prefs, ["archive", name]), {
+      await mutate(async () => {
+        await runPmWithPrefs(prefs, ["archive", name]);
+        return (projects ?? []).filter((p) => p !== name);
+      }, {
         optimisticUpdate(data) {
           return data !== undefined ? data.filter((p) => p !== name) : [];
         },

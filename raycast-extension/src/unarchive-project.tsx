@@ -10,35 +10,37 @@ import {
 } from "@raycast/api";
 import path from "path";
 import { useCachedPromise } from "@raycast/utils";
-import { runPmWithPrefs } from "./lib/pm";
+import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import { FINDER_APP_PATH } from "./lib/utils";
 
 async function fetchArchivedProjects(
-  activePath: string,
-  archivePath: string,
   configPath: string | undefined,
   pmCliPath: string | undefined,
-): Promise<string[]> {
-  const prefs = { activePath, archivePath, configPath, pmCliPath };
-  const { stdout } = await runPmWithPrefs(prefs, ["list", "--archive"]);
-  return stdout
+): Promise<{ projects: string[]; archivePath: string }> {
+  const prefs = { configPath, pmCliPath };
+  const [paths, { stdout }] = await Promise.all([
+    getPmPaths(prefs),
+    runPmWithPrefs(prefs, ["list", "--archive"]),
+  ]);
+  const projects = stdout
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
+  return { projects, archivePath: paths.archivePath };
 }
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
 
   const {
-    data: projects = [],
+    data = { projects: [], archivePath: "" },
     isLoading,
     revalidate,
     mutate,
   } = useCachedPromise(
     fetchArchivedProjects,
-    [prefs.activePath, prefs.archivePath, prefs.configPath, prefs.pmCliPath],
+    [prefs.configPath, prefs.pmCliPath],
     { keepPreviousData: true },
   );
 
@@ -50,9 +52,19 @@ export default function Command() {
     });
     if (!confirmed) return;
     try {
-      await mutate(runPmWithPrefs(prefs, ["unarchive", name]), {
-        optimisticUpdate(data) {
-          return data !== undefined ? data.filter((p) => p !== name) : [];
+      await mutate(async () => {
+        await runPmWithPrefs(prefs, ["unarchive", name]);
+        return {
+          projects: data.projects.filter((p) => p !== name),
+          archivePath: data.archivePath,
+        };
+      }, {
+        optimisticUpdate(d) {
+          if (!d) return { projects: [], archivePath: "" };
+          return {
+            ...d,
+            projects: d.projects.filter((p) => p !== name),
+          };
         },
       });
       await showToast({
@@ -83,7 +95,7 @@ export default function Command() {
         </ActionPanel>
       }
     >
-      {projects.map((name) => (
+      {data.projects.map((name) => (
         <List.Item
           key={name}
           title={name}
@@ -96,7 +108,7 @@ export default function Command() {
               <Action
                 title="Open in Finder"
                 icon={{ fileIcon: FINDER_APP_PATH }}
-                onAction={() => open(path.join(prefs.archivePath, name))}
+                onAction={() => open(path.join(data.archivePath, name))}
               />
             </ActionPanel>
           }
