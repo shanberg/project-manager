@@ -80,6 +80,22 @@ export async function getNotes(
   ]);
   const parsed = JSON.parse(stdout.trim()) as NotesShowOutput;
   if (!parsed?.notes) throw new Error(stderr || "Invalid notes response");
+
+  // If no task is focused but there are open tasks, focus the first one (best-effort).
+  const openTodos = (parsed.todos ?? []).filter((t) => !t.checked);
+  if (
+    (parsed.focusedKey == null || parsed.focusedKey === "") &&
+    openTodos.length > 0
+  ) {
+    try {
+      await setFocusToTodoInNotes(prefs, projectName, parsed.notes, openTodos[0]);
+      return getNotes(prefs, projectName);
+    } catch {
+      // Write failed (e.g. permissions, pm unavailable); return current data so fetch doesn't fail.
+      return parsed;
+    }
+  }
+
   return parsed;
 }
 
@@ -130,11 +146,11 @@ export async function toggleTodoInNotes(
   const updated =
     typeof todo.sessionIndex === "number" && typeof todo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-          notes,
-          todo.sessionIndex,
-          todo.lineIndex,
-          newLine,
-        )
+        notes,
+        todo.sessionIndex,
+        todo.lineIndex,
+        newLine,
+      )
       : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
   await writeNotes(prefs, projectName, updated);
 }
@@ -236,18 +252,18 @@ export async function addTodoBeforeInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof beforeTodo.sessionIndex === "number" &&
-    typeof beforeTodo.lineIndex === "number"
+      typeof beforeTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-          notes,
-          beforeTodo.sessionIndex,
-          beforeTodo.lineIndex,
-          `${newLine}\n${beforeTodo.rawLine}`,
-        )
+        notes,
+        beforeTodo.sessionIndex,
+        beforeTodo.lineIndex,
+        `${newLine}\n${beforeTodo.rawLine}`,
+      )
       : replaceTodoRawLineInNotes(
-          notes,
-          beforeTodo.rawLine,
-          `${newLine}\n${beforeTodo.rawLine}`,
-        );
+        notes,
+        beforeTodo.rawLine,
+        `${newLine}\n${beforeTodo.rawLine}`,
+      );
   await writeNotes(prefs, projectName, updated);
 }
 
@@ -263,17 +279,47 @@ export async function addTodoAfterInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof afterTodo.sessionIndex === "number" &&
-    typeof afterTodo.lineIndex === "number"
+      typeof afterTodo.lineIndex === "number"
+      ? replaceTodoAtPositionInNotes(
+        notes,
+        afterTodo.sessionIndex,
+        afterTodo.lineIndex,
+        `${afterTodo.rawLine}\n${newLine}`,
+      )
+      : replaceTodoRawLineInNotes(
+        notes,
+        afterTodo.rawLine,
+        `${afterTodo.rawLine}\n${newLine}`,
+      );
+  await writeNotes(prefs, projectName, updated);
+}
+
+/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). */
+export async function addTodoAsChildInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  parentTodo: Todo,
+  text: string,
+): Promise<void> {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return;
+  const parentPrefix = parentTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+  const childPrefix = "  " + parentPrefix;
+  const newLine = `${childPrefix}[ ] ${trimmed}`;
+  const updated =
+    typeof parentTodo.sessionIndex === "number" &&
+    typeof parentTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
           notes,
-          afterTodo.sessionIndex,
-          afterTodo.lineIndex,
-          `${afterTodo.rawLine}\n${newLine}`,
+          parentTodo.sessionIndex,
+          parentTodo.lineIndex,
+          `${parentTodo.rawLine}\n${newLine}`,
         )
       : replaceTodoRawLineInNotes(
           notes,
-          afterTodo.rawLine,
-          `${afterTodo.rawLine}\n${newLine}`,
+          parentTodo.rawLine,
+          `${parentTodo.rawLine}\n${newLine}`,
         );
   await writeNotes(prefs, projectName, updated);
 }

@@ -221,6 +221,8 @@ export async function runPm(
   return { stdout, stderr };
 }
 
+const PM_STDIN_TIMEOUT_MS = 30_000;
+
 /** Run pm with stdin. Used for `pm notes write` with JSON body. */
 export function runPmWithStdin(
   args: string[],
@@ -240,15 +242,48 @@ export function runPmWithStdin(
     const stderrChunks: Buffer[] = [];
     child.stdout?.on("data", (c) => stdoutChunks.push(c));
     child.stderr?.on("data", (c) => stderrChunks.push(c));
-    child.on("error", reject);
+
+    let settled = false;
+    function finish(
+      result:
+        | { stdout: string; stderr: string; code: number | null }
+        | { error: Error },
+    ) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      child.stdin?.destroy();
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      if ("error" in result) reject(result.error);
+      else resolve(result);
+    }
+
+    const timeoutId = setTimeout(() => {
+      finish({
+        error: new Error(
+          `pm notes write timed out after ${PM_STDIN_TIMEOUT_MS / 1000}s`,
+        ),
+      });
+    }, PM_STDIN_TIMEOUT_MS);
+
+    child.on("error", (err) => finish({ error: err }));
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
         code: code ?? null,
       });
     });
-    child.stdin?.write(stdinContent, "utf-8", () => {
+    child.stdin?.write(stdinContent, "utf-8", (err) => {
+      if (err) {
+        finish({ error: err });
+        return;
+      }
       child.stdin?.end();
     });
   });

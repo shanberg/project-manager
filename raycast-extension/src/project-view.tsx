@@ -29,6 +29,7 @@ import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
 import AddSessionNoteForm from "./add-session-note-form";
 import AddTodoForm from "./add-todo-form";
+import AddChildTodoForm from "./add-child-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
@@ -230,15 +231,29 @@ export default function ProjectView({ projectName, basePath }: Props) {
               open("raycast://extensions/shanberg/project-manager/configure")
             }
           />
-          {notes && (
-            <Action.Push
-              title="Narrow Focus"
-              icon={Icon.Plus}
-              target={
-                <AddTodoForm projectName={projectName} onSuccess={mutate} />
-              }
-            />
-          )}
+          {notes &&
+            (nextTodo ? (
+              <Action.Push
+                title="Narrow Focus"
+                icon={Icon.Plus}
+                target={
+                  <AddChildTodoForm
+                    projectName={projectName}
+                    notes={notes}
+                    parentTodo={nextTodo}
+                    onSuccess={mutate}
+                  />
+                }
+              />
+            ) : (
+              <Action.Push
+                title="Add Task"
+                icon={Icon.Plus}
+                target={
+                  <AddTodoForm projectName={projectName} onSuccess={mutate} />
+                }
+              />
+            ))}
         </ActionPanel>
       }
     >
@@ -293,7 +308,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               />
               {notes && (
                 <Action.Push
-                  title="Narrow Focus"
+                  title="Add Task"
                   icon={Icon.Plus}
                   target={
                     <AddTodoForm projectName={projectName} onSuccess={mutate} />
@@ -628,21 +643,41 @@ export default function ProjectView({ projectName, basePath }: Props) {
         />
         {notes && (
           <List.Item
-            title="Narrow Focus"
+            title={nextTodo ? "Narrow Focus" : "Add Task"}
             icon={Icon.Plus}
             detail={sectionDetail(
-              "Add a task to the current session in the project notes.",
+              nextTodo
+                ? "Add a child to the current task."
+                : "Add a task to the current session in the project notes.",
               "",
             )}
             actions={
               <ActionPanel>
-                <Action.Push
-                  title="Narrow Focus"
-                  icon={Icon.Plus}
-                  target={
-                    <AddTodoForm projectName={projectName} onSuccess={mutate} />
-                  }
-                />
+                {nextTodo ? (
+                  <Action.Push
+                    title="Narrow Focus"
+                    icon={Icon.Plus}
+                    target={
+                      <AddChildTodoForm
+                        projectName={projectName}
+                        notes={notes}
+                        parentTodo={nextTodo}
+                        onSuccess={mutate}
+                      />
+                    }
+                  />
+                ) : (
+                  <Action.Push
+                    title="Add Task"
+                    icon={Icon.Plus}
+                    target={
+                      <AddTodoForm
+                        projectName={projectName}
+                        onSuccess={mutate}
+                      />
+                    }
+                  />
+                )}
               </ActionPanel>
             }
           />
