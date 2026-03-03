@@ -16,6 +16,8 @@ type ExtensionPreferences = {
   "obsidianVault"?: string,
   /** Obsidian Vault Root (Advanced URI) - Absolute path to vault root (e.g. ~/Obsidian/Projects). Must contain activePath and archivePath. */
   "obsidianVaultRoot"?: string,
+  /** Use Obsidian CLI for notes - When enabled, the pm CLI will read/write notes via the Obsidian CLI (Obsidian 1.12+ with CLI enabled). Uses the vault name and path above. If the CLI is unavailable, pm falls back to direct file I/O. */
+  "useObsidianCLI": boolean,
   /** Menubar Project Display - Show project name or code in the focused project menubar item. */
   "menubarProjectDisplay": "code" | "name"
 }

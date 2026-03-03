@@ -8,14 +8,23 @@ public struct PmConfig: Codable, Equatable {
     public var subfolders: [String]
     /// Optional path to a custom notes template file (supports ~). If set, the file must exist.
     public var notesTemplatePath: String?
+    /// When true and obsidianVault/obsidianVaultPath are set, notes read/write may use the Obsidian CLI. Nil (missing in JSON) is treated as false.
+    public var useObsidianCLI: Bool?
+    /// Vault name for the Obsidian CLI (e.g. "MyVault"). Required when useObsidianCLI is true.
+    public var obsidianVault: String?
+    /// Absolute path to vault root (supports ~). Used to compute relative path for CLI. Required when useObsidianCLI is true.
+    public var obsidianVaultPath: String?
 
-    public init(paraPath: String? = nil, activePath: String, archivePath: String, domains: [String: String], subfolders: [String], notesTemplatePath: String? = nil) {
+    public init(paraPath: String? = nil, activePath: String, archivePath: String, domains: [String: String], subfolders: [String], notesTemplatePath: String? = nil, useObsidianCLI: Bool? = nil, obsidianVault: String? = nil, obsidianVaultPath: String? = nil) {
         self.paraPath = paraPath
         self.activePath = activePath
         self.archivePath = archivePath
         self.domains = domains
         self.subfolders = subfolders
         self.notesTemplatePath = notesTemplatePath
+        self.useObsidianCLI = useObsidianCLI
+        self.obsidianVault = obsidianVault
+        self.obsidianVaultPath = obsidianVaultPath
     }
 }
 
@@ -146,6 +155,7 @@ public func loadConfigAndPaths(skipPathValidation: Bool = false) throws -> (PmCo
 
 public enum PmConfigKey: String, CaseIterable {
     case activePath, archivePath, paraPath, domains, subfolders, notesTemplatePath
+    case useObsidianCLI, obsidianVault, obsidianVaultPath
 }
 
 /// Typed result of reading a config key. Use this instead of Any? so "unknown key" and "optional key with nil" are explicit.
@@ -154,10 +164,12 @@ public enum PmConfigValue {
     case string(String?)
     case stringArray([String])
     case stringDictionary([String: String])
+    case bool(Bool)
 }
 
 /// Supported keys and value types (for `getConfigValue` / `setConfigValue`):
-/// - activePath, archivePath, paraPath, notesTemplatePath: String? (paths support ~; paraPath/notesTemplatePath may be nil)
+/// - activePath, archivePath, paraPath, notesTemplatePath, obsidianVault, obsidianVaultPath: String? (paths support ~; optional keys may be nil)
+/// - useObsidianCLI: Bool
 /// - domains: [String: String]
 /// - subfolders: [String]
 /// Returns a typed value; use .unknownKey when the key is not in the config.
@@ -167,6 +179,9 @@ public func getConfigValue(config: PmConfig, key: PmConfigKey) -> PmConfigValue 
     case .archivePath: return .string(config.archivePath)
     case .paraPath: return .string(config.paraPath)
     case .notesTemplatePath: return .string(config.notesTemplatePath)
+    case .useObsidianCLI: return .bool(config.useObsidianCLI ?? false)
+    case .obsidianVault: return .string(config.obsidianVault)
+    case .obsidianVaultPath: return .string(config.obsidianVaultPath)
     case .domains: return .stringDictionary(config.domains)
     case .subfolders: return .stringArray(config.subfolders)
     }
@@ -191,6 +206,12 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
         config.paraPath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.notesTemplatePath, .string(let v)):
         config.notesTemplatePath = v.flatMap { $0.isEmpty ? nil : $0 }
+    case (.useObsidianCLI, .bool(let v)):
+        config.useObsidianCLI = v
+    case (.obsidianVault, .string(let v)):
+        config.obsidianVault = v.flatMap { $0.isEmpty ? nil : $0 }
+    case (.obsidianVaultPath, .string(let v)):
+        config.obsidianVaultPath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.domains, .stringDictionary(let v)):
         config.domains = v
     case (.subfolders, .stringArray(let v)):
@@ -202,7 +223,8 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
 
 private func typeName(for key: PmConfigKey) -> String {
     switch key {
-    case .activePath, .archivePath, .paraPath, .notesTemplatePath: return "String"
+    case .activePath, .archivePath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
+    case .useObsidianCLI: return "Boolean"
     case .domains: return "object (key-value pairs)"
     case .subfolders: return "array of strings"
     }
@@ -224,10 +246,19 @@ public func setConfigValue(config: inout PmConfig, key: String, value: Any) thro
     case .activePath, .archivePath:
         guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
         typed = .string(v)
-    case .paraPath:
+    case .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath:
         typed = .string(value as? String)
-    case .notesTemplatePath:
-        typed = .string(value as? String)
+    case .useObsidianCLI:
+        if let v = value as? Bool {
+            typed = .bool(v)
+        } else if let s = value as? String {
+            let lower = s.lowercased()
+            if lower == "true" || lower == "1" { typed = .bool(true) }
+            else if lower == "false" || lower == "0" { typed = .bool(false) }
+            else { throw PmError.invalidConfigValue(key: key, expectedType: "Boolean") }
+        } else {
+            throw PmError.invalidConfigValue(key: key, expectedType: "Boolean")
+        }
     case .domains:
         guard let v = value as? [String: String] else { throw PmError.invalidConfigValue(key: key, expectedType: "object (key-value pairs)") }
         typed = .stringDictionary(v)
@@ -261,6 +292,10 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidSessionDate(value: String)
     /// Project title must not contain path separators (e.g. / or \).
     case invalidProjectTitle(title: String)
+    /// Obsidian CLI read failed (path, message from CLI or process).
+    case obsidianCLIReadFailed(path: String, message: String)
+    /// Obsidian CLI write/create failed (path, message from CLI or process).
+    case obsidianCLIWriteFailed(path: String, message: String)
 
     public var description: String {
         switch self {
@@ -281,6 +316,8 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidProjectPattern(let pattern): return "Invalid project pattern (check domains in config): \(pattern)"
         case .invalidSessionDate(let value): return "Invalid date for session: \(value). Use YYYY-MM-DD."
         case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
+        case .obsidianCLIReadFailed(let path, let message): return "Obsidian CLI read failed for \(path): \(message)"
+        case .obsidianCLIWriteFailed(let path, let message): return "Obsidian CLI write failed for \(path): \(message)"
         }
     }
 }

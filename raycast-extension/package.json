@@ -276,6 +276,14 @@
       "placeholder": "~/Obsidian/Projects"
     },
     {
+      "name": "useObsidianCLI",
+      "type": "checkbox",
+      "required": false,
+      "title": "Use Obsidian CLI for notes",
+      "description": "When enabled, the pm CLI will read/write notes via the Obsidian CLI (Obsidian 1.12+ with CLI enabled). Uses the vault name and path above. If the CLI is unavailable, pm falls back to direct file I/O.",
+      "default": false
+    },
+    {
       "name": "menubarProjectDisplay",
       "type": "dropdown",
       "required": true,
@@ -295,13 +303,16 @@
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.0",
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.0"
   },
   "scripts": {
     "build": "ray build",
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
-    "lint": "ray lint"
+    "lint": "ray lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "platforms": [
     "macOS"

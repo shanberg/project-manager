@@ -7,7 +7,7 @@ import {
   useNavigation,
   getPreferenceValues,
 } from "@raycast/api";
-import { addTodoAfterInNotes } from "./lib/notes-api";
+import { addTodoAfterInNotes, getNotes } from "./lib/notes-api";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -27,16 +27,17 @@ export default function AddAfterTodoForm({
   const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
-  async function addTask(text: string): Promise<boolean> {
+  async function addTask(text: string): Promise<{ notes: ProjectNotes; insertedTodo: Todo } | null> {
     try {
-      await addTodoAfterInNotes(prefs, projectName, notes, afterTodo, text);
+      const data = await getNotes(prefs, projectName);
+      const result = await addTodoAfterInNotes(prefs, projectName, data.notes, afterTodo, text);
       await showToast({
         style: Toast.Style.Success,
         title: "Task Added",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       onSuccess?.();
-      return true;
+      return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({
@@ -44,7 +45,7 @@ export default function AddAfterTodoForm({
         title: "Error",
         message: msg,
       });
-      return false;
+      return null;
     }
   }
 
@@ -57,13 +58,13 @@ export default function AddAfterTodoForm({
   async function handleAddAndAnother(values: { text: string }) {
     const text = values.text.trim();
     if (!text) return;
-    const ok = await addTask(text);
-    if (ok)
+    const result = await addTask(text);
+    if (result)
       push(
         <AddAfterTodoForm
           projectName={projectName}
-          notes={notes}
-          afterTodo={afterTodo}
+          notes={result.notes}
+          afterTodo={result.insertedTodo}
           onSuccess={onSuccess}
         />,
       );

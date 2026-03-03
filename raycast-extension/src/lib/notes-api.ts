@@ -3,7 +3,7 @@
  * Types match Swift PmLib JSON output.
  */
 
-import { buildEnv, runPmWithPrefs, runPmWithStdin } from "./pm";
+import { buildEnv, runPmWithPrefs, runPmWithStdin, syncObsidianPrefsToPmConfig } from "./pm";
 import type { PreferenceValues } from "./types";
 
 export interface LinkEntry {
@@ -106,10 +106,11 @@ export async function getNotes(
 
 /** Write notes back via pm notes write (stdin JSON). */
 export async function writeNotes(
-  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
 ): Promise<void> {
+  await syncObsidianPrefsToPmConfig(prefs);
   const { stderr, code } = await runPmWithStdin(
     ["notes", "write", projectName],
     buildEnv(prefs),
@@ -202,6 +203,11 @@ export async function toggleAllTodosInNotes(
 
 const TODO_LINE_REGEX = /^\s*-\s+\[([ xX])\]\s+(.*)$/;
 
+/** List-item prefix (indent + "- ") from a raw task line. Used so new tasks match the anchor's hierarchy level. */
+function getListPrefix(rawLine: string): string {
+  return rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+}
+
 function replaceTodoRawLineInNotes(
   notes: ProjectNotes,
   oldLine: string,
@@ -276,15 +282,15 @@ export async function addTodoToTodaySession(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Add a todo line before the given todo in notes. */
+/** Add a todo line before the given todo in notes. Tasks are inserted in sequence (1, then 2, then …) before the anchor. New tasks use the same hierarchy level (indent) as the anchor. Returns updated notes and the anchor at its new position (for chaining "Add Another"). */
 export async function addTodoBeforeInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   beforeTodo: Todo,
   text: string,
-): Promise<void> {
-  const prefix = beforeTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo }> {
+  const prefix = getListPrefix(beforeTodo.rawLine);
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof beforeTodo.sessionIndex === "number" &&
@@ -301,17 +307,28 @@ export async function addTodoBeforeInNotes(
           `${newLine}\n${beforeTodo.rawLine}`,
         );
   await writeNotes(prefs, projectName, updated);
+  const nextBeforeTodo: Todo =
+    typeof beforeTodo.sessionIndex === "number" &&
+    typeof beforeTodo.lineIndex === "number"
+      ? { ...beforeTodo, lineIndex: beforeTodo.lineIndex + 1 }
+      : (() => {
+          const pos = findTodoPositionInNotes(updated, beforeTodo.rawLine);
+          return pos
+            ? { ...beforeTodo, sessionIndex: pos.sessionIndex, lineIndex: pos.lineIndex }
+            : beforeTodo;
+        })();
+  return { notes: updated, nextBeforeTodo };
 }
 
-/** Add a todo line after the given todo in notes. */
+/** Add a todo line after the given todo in notes. Tasks are inserted in sequence (each after the previous). New tasks use the same hierarchy level (indent) as the anchor. Returns updated notes and the inserted todo (for chaining "Add Another"). */
 export async function addTodoAfterInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   afterTodo: Todo,
   text: string,
-): Promise<void> {
-  const prefix = afterTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
+): Promise<{ notes: ProjectNotes; insertedTodo: Todo }> {
+  const prefix = getListPrefix(afterTodo.rawLine);
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof afterTodo.sessionIndex === "number" &&
@@ -328,6 +345,31 @@ export async function addTodoAfterInNotes(
           `${afterTodo.rawLine}\n${newLine}`,
         );
   await writeNotes(prefs, projectName, updated);
+  const insertedTodo: Todo =
+    typeof afterTodo.sessionIndex === "number" &&
+    typeof afterTodo.lineIndex === "number"
+      ? {
+          rawLine: newLine,
+          sessionIndex: afterTodo.sessionIndex,
+          lineIndex: afterTodo.lineIndex + 1,
+          text,
+          checked: false,
+          context: "",
+        }
+      : (() => {
+          const pos = findTodoPositionInNotes(updated, newLine);
+          return pos
+            ? {
+                rawLine: newLine,
+                sessionIndex: pos.sessionIndex,
+                lineIndex: pos.lineIndex,
+                text,
+                checked: false,
+                context: "",
+              }
+            : { rawLine: newLine, text, checked: false, context: "" };
+        })();
+  return { notes: updated, insertedTodo };
 }
 
 function findTodoPositionInNotes(

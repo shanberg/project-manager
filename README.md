@@ -83,6 +83,8 @@ pm unarchive W-1                   # Move from archive back to active
 - `pm config set archivePath /path/to/archive` - Update archive path
 - `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}` in the file). Set to empty for built-in template: `pm config set notesTemplatePath ""`
 
+**Optional – Obsidian CLI:** If you use Obsidian (1.12+) with the built-in CLI enabled, you can route notes read/write through it so edits are indexed by Obsidian. No hard dependency: if the CLI is off or unavailable, pm uses direct file I/O. Set `useObsidianCLI` to `true`, then set `obsidianVault` (vault name) and `obsidianVaultPath` (absolute path to vault root, e.g. `~/Documents/ObsidianVault`). Example: `pm config set useObsidianCLI true`, `pm config set obsidianVault "MyVault"`, `pm config set obsidianVaultPath ~/Documents/MyVault`.
+
 Path values are stored as entered (e.g. `~/projects/active` stays as `~/projects/active`); tilde is expanded when resolving paths. This keeps config portable across machines.
 
 Values with spaces: quote as one argument or pass as separate words:  

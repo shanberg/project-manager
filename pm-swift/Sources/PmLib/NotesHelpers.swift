@@ -68,14 +68,18 @@ public func resolveNotesPath(projectPath: String) throws -> String? {
     return nil
 }
 
-public func readNotesFile(notesPath: String) throws -> ProjectNotes {
-    let content = try String(contentsOfFile: notesPath, encoding: .utf8)
+/// Read and parse the notes file. When `notesIO` is nil, uses direct file I/O.
+public func readNotesFile(notesPath: String, notesIO: NotesIO? = nil) throws -> ProjectNotes {
+    let io = notesIO ?? DirectNotesIO()
+    let content = try io.readContent(path: notesPath)
     return try parseNotes(markdown: content)
 }
 
-public func writeNotesFile(notesPath: String, notes: ProjectNotes) throws {
+/// Serialize and write the notes file. When `notesIO` is nil, uses direct file I/O.
+public func writeNotesFile(notesPath: String, notes: ProjectNotes, notesIO: NotesIO? = nil) throws {
+    let io = notesIO ?? DirectNotesIO()
     let content = serializeNotes(notes)
-    try content.write(toFile: notesPath, atomically: true, encoding: .utf8)
+    try io.writeContent(path: notesPath, content: content)
 }
 
 /// Resolve notes template content: if template path is set, file must exist and is used (with {{title}} replaced); otherwise use embedded default.
@@ -127,6 +131,7 @@ public let notesTemplate = """
 
 /// Create a notes file from the configured template. Requires a valid config and existing active/archive paths
 /// (uses `loadConfigAndPaths()` to resolve the template path). Throws if the notes file already exists.
+/// Uses NotesIO so the file is created via Obsidian CLI when configured.
 public func createNotesFromTemplate(projectPath: String) throws -> String {
     let folderName = (projectPath as NSString).lastPathComponent
     let title = projectTitle(fromFolderName: folderName)
@@ -138,6 +143,7 @@ public func createNotesFromTemplate(projectPath: String) throws -> String {
     let content = try getNotesTemplateContent(templatePath: config.notesTemplatePath, title: title)
     let docsPath = (projectPath as NSString).appendingPathComponent("docs")
     try FileManager.default.createDirectory(atPath: docsPath, withIntermediateDirectories: true)
-    try content.write(toFile: notesPath, atomically: true, encoding: .utf8)
+    let io = makeNotesIO(notesPath: notesPath, config: config)
+    try io.writeContent(path: notesPath, content: content)
     return notesPath
 }

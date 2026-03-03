@@ -41,7 +41,9 @@ func runNotesShow(args: [String]) {
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
-        var notes = try readNotesFile(notesPath: notesPath)
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
         notes = normalizeFocusMarker(notes: notes)
         let todos = try parseTodos(notes: notes)
         let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
@@ -67,6 +69,8 @@ func runNotesWrite(args: [String]) {
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
         let stdinData = FileHandle.standardInput.readDataToEndOfFile()
         let notes: ProjectNotes
         do {
@@ -75,7 +79,7 @@ func runNotesWrite(args: [String]) {
             stderr("Invalid JSON on stdin: \(error.localizedDescription)")
             exit(1)
         }
-        try writeNotesFile(notesPath: notesPath, notes: notes)
+        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
     } catch { fail(error) }
 }
 
@@ -90,7 +94,9 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
-        var notes = try readNotesFile(notesPath: notesPath)
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
         let date: Date?
         if let d = dateStr {
             date = try parseSessionDateArgument(d)
@@ -98,7 +104,7 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
             date = nil
         }
         notes = addSession(notes: notes, label: label, date: date)
-        try writeNotesFile(notesPath: notesPath, notes: notes)
+        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
         let sessionDate = formatSessionDate(date ?? Date())
         print("Added session: \(sessionDate) \(label)")
     } catch { fail(error) }
@@ -119,10 +125,12 @@ func runNotesTodoComplete(args: [String]) {
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
             fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
         }
-        var notes = try readNotesFile(notesPath: notesPath)
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
         notes = normalizeFocusMarker(notes: notes)
         notes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
-        try writeNotesFile(notesPath: notesPath, notes: notes)
+        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
     } catch { fail(error) }
 }
 

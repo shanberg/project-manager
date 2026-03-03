@@ -133,11 +133,44 @@ export function buildEnv(
   return getConfigEnv(prefs.configPath);
 }
 
-/** Run pm with extension prefs. Uses pm config only; no path overrides. */
+type PrefsForNotes = Pick<
+  PreferenceValues,
+  "configPath" | "pmCliPath" | "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot"
+>;
+
+/** Sync Obsidian CLI preferences from extension to pm config so pm uses them for notes read/write.
+ * When useObsidianCLI is true, throws on failure so notes commands don't silently use direct I/O.
+ * When useObsidianCLI is false, best-effort (swallows errors). */
+export async function syncObsidianPrefsToPmConfig(
+  prefs: PrefsForNotes,
+): Promise<void> {
+  const env = buildEnv(prefs);
+  const pmPath = prefs.pmCliPath;
+  const requireSync = !!prefs.useObsidianCLI;
+  try {
+    await runPm(
+      ["config", "set", "useObsidianCLI", prefs.useObsidianCLI ? "true" : "false"],
+      env,
+      pmPath,
+    );
+    const vault = prefs.obsidianVault?.trim() ?? "";
+    const vaultPath = prefs.obsidianVaultRoot?.trim() ?? "";
+    await runPm(["config", "set", "obsidianVault", vault], env, pmPath);
+    await runPm(["config", "set", "obsidianVaultPath", vaultPath], env, pmPath);
+  } catch (err) {
+    if (requireSync) throw err;
+    // useObsidianCLI off: pm config may not exist yet; let the actual notes command fail or use defaults
+  }
+}
+
+/** Run pm with extension prefs. Uses pm config only; no path overrides. When running a notes command, syncs Obsidian CLI prefs to pm config first. */
 export async function runPmWithPrefs(
-  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath"> & Partial<Pick<PreferenceValues, "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot">>,
   args: string[],
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  if (args[0] === "notes" && ("useObsidianCLI" in prefs || "obsidianVault" in prefs || "obsidianVaultRoot" in prefs)) {
+    await syncObsidianPrefsToPmConfig(prefs as PrefsForNotes);
+  }
   return runPm(args, buildEnv(prefs), prefs.pmCliPath);
 }
 

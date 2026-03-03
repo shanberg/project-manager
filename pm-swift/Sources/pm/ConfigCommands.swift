@@ -50,6 +50,12 @@ func runConfigGet(key: String?) {
                 print(config.paraPath ?? "null")
             case "notesTemplatePath":
                 print(config.notesTemplatePath ?? "null")
+            case "useObsidianCLI":
+                print(config.useObsidianCLI ?? false)
+            case "obsidianVault":
+                print(config.obsidianVault ?? "null")
+            case "obsidianVaultPath":
+                print(config.obsidianVaultPath ?? "null")
             case "domains":
                 let data = try JSONSerialization.data(withJSONObject: config.domains as NSDictionary, options: .prettyPrinted)
                 guard let str = String(data: data, encoding: .utf8) else {
@@ -76,6 +82,9 @@ func runConfigGet(key: String?) {
             ]
             obj["paraPath"] = config.paraPath ?? NSNull()
             obj["notesTemplatePath"] = config.notesTemplatePath ?? NSNull()
+            obj["useObsidianCLI"] = config.useObsidianCLI ?? false
+            obj["obsidianVault"] = config.obsidianVault ?? NSNull()
+            obj["obsidianVaultPath"] = config.obsidianVaultPath ?? NSNull()
             let data = try JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
             guard let str = String(data: data, encoding: .utf8) else {
                 stderr("Failed to encode config JSON as UTF-8.")
@@ -91,8 +100,10 @@ func runConfigSet(key: String, valueStr: String) {
         guard var config = try loadConfig() else { fail(PmError.configNotFound) }
         if key == "activePath" || key == "archivePath" || key == "paraPath" {
             try setConfigValue(config: &config, key: key, value: valueStr)
-        } else if key == "notesTemplatePath" {
+        } else if key == "notesTemplatePath" || key == "obsidianVault" || key == "obsidianVaultPath" {
             try setConfigValue(config: &config, key: key, value: valueStr.isEmpty ? "" : valueStr)
+        } else if key == "useObsidianCLI" {
+            try setConfigValue(config: &config, key: key, value: valueStr)
         } else if key == "domains" || key == "subfolders" {
             guard let data = valueStr.data(using: .utf8) else {
                 stderr("Invalid UTF-8 in value.")

@@ -63,6 +63,18 @@ if (readBack.version !== version) {
 }
 " "$PACKAGE_JSON" "$VERSION"
 
+# Keep Swift CLI version in sync (pm --version)
+VERSION_SWIFT="$ROOT/pm-swift/Sources/pm/Version.swift"
+if [[ -f "$VERSION_SWIFT" ]]; then
+  if sed -i.bak "s/let pmVersion = \".*\"/let pmVersion = \"$VERSION\"/" "$VERSION_SWIFT" 2>/dev/null; then
+    rm -f "${VERSION_SWIFT}.bak"
+  else
+    # macOS sed
+    sed -i '' "s/let pmVersion = \".*\"/let pmVersion = \"$VERSION\"/" "$VERSION_SWIFT"
+  fi
+  echo "==> Set Version.swift to $VERSION"
+fi
+
 # Verify again right before commit (editor may have overwritten after our write)
 ON_DISK=$(node -p "require(process.argv[1]).version" "$PACKAGE_JSON" 2>/dev/null || true)
 if [[ "$ON_DISK" != "$VERSION" ]]; then
@@ -72,6 +84,7 @@ fi
 
 echo "==> Commit and push"
 git add package.json
+[[ -f "$ROOT/pm-swift/Sources/pm/Version.swift" ]] && git add pm-swift/Sources/pm/Version.swift
 if ! git diff --staged --quiet; then
   git commit -m "Release $TAG"
   git push
