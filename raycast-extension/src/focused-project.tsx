@@ -25,6 +25,7 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
 } from "./lib/utils";
+import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
 function breadcrumbForNowTask(todos: Todo[], nowTask: Todo): string {
@@ -175,8 +176,10 @@ export default function Command() {
   async function handleFocusTask(todo: Todo) {
     if (!data?.notesPath || !data?.notes || todo.isFocused) return;
     try {
-      await setFocusToTodoInNotes(prefs, data.name, data.notes, todo);
+      const fresh = await getNotes(prefs, data.name);
+      await setFocusToTodoInNotes(prefs, data.name, fresh.notes, todo);
       await revalidate();
+      await refreshMenubar();
       await showHUD(`Focus: ${todo.text.slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -365,7 +368,7 @@ export default function Command() {
                     : todo.text);
                 return (
                   <MenuBarExtra.Item
-                    key={`${i}-${todo.rawLine}`}
+                    key={`${todo.sessionIndex ?? 0}-${todo.lineIndex ?? 0}-${todo.text}`}
                     icon={isFocused ? Icon.ArrowRightCircleFilled : Icon.Circle}
                     title={displayTitle}
                     onAction={() =>

@@ -230,7 +230,7 @@ function replaceTodoAtPositionInNotes(
 ): ProjectNotes {
   const session = notes.sessions[sessionIndex];
   if (!session) return notes;
-  const lines = session.body.split("\n");
+  const lines = session.body.split(/\r?\n/);
   let taskCount = 0;
   const newLines = lines.map((line) => {
     if (!TODO_LINE_REGEX.test(line)) return line;
@@ -372,16 +372,21 @@ export async function addTodoAfterInNotes(
   return { notes: updated, insertedTodo };
 }
 
+function normalizeLineForMatch(line: string): string {
+  return line.replace(/\r/g, "").trimEnd();
+}
+
 function findTodoPositionInNotes(
   notes: ProjectNotes,
   rawLine: string,
 ): { sessionIndex: number; lineIndex: number } | null {
+  const rawNorm = normalizeLineForMatch(rawLine);
   for (let si = 0; si < notes.sessions.length; si++) {
-    const lines = notes.sessions[si].body.split("\n");
+    const lines = notes.sessions[si].body.split(/\r?\n/);
     let taskCount = 0;
     for (const line of lines) {
       if (TODO_LINE_REGEX.test(line)) {
-        if (line === rawLine || line.trimEnd() === rawLine.trimEnd()) {
+        if (line === rawLine || normalizeLineForMatch(line) === rawNorm) {
           return { sessionIndex: si, lineIndex: taskCount };
         }
         taskCount++;
@@ -489,26 +494,36 @@ export async function wrapTodoInNotes(
 
 const FOCUS_MARKER = " @";
 
-/** Pure: return notes with " @" only on the given todo's line (or nowhere if todo is null). */
+/** Pure: return notes with " @" only on the given todo's line. Matches by content (rawLine) not position. */
 function applyFocusToTodoInNotes(
   notes: ProjectNotes,
   todo: Todo | null,
 ): ProjectNotes {
-  const targetSessionIndex = todo?.sessionIndex ?? -1;
-  const targetLineIndex = todo?.lineIndex ?? -1;
-  const sessions = notes.sessions.map((session, si) => {
-    const lines = session.body.split("\n");
-    let taskCount = 0;
+  if (!todo) {
+    const sessions = notes.sessions.map((session) => {
+      const lines = session.body.split(/\r?\n/);
+      const newLines = lines.map((line) =>
+        TODO_LINE_REGEX.test(line) && line.endsWith(FOCUS_MARKER)
+          ? line.slice(0, -FOCUS_MARKER.length)
+          : line,
+      );
+      return { ...session, body: newLines.join("\n") };
+    });
+    return { ...notes, sessions };
+  }
+  const targetNorm = normalizeLineForMatch(
+    todo.rawLine.endsWith(FOCUS_MARKER)
+      ? todo.rawLine.slice(0, -FOCUS_MARKER.length)
+      : todo.rawLine,
+  );
+  const sessions = notes.sessions.map((session) => {
+    const lines = session.body.split(/\r?\n/);
     const newLines = lines.map((line) => {
       if (!TODO_LINE_REGEX.test(line)) return line;
-      const isTarget =
-        todo != null &&
-        si === targetSessionIndex &&
-        taskCount === targetLineIndex;
-      taskCount++;
       const stripped = line.endsWith(FOCUS_MARKER)
-        ? line.slice(0, -FOCUS_MARKER.length).trimEnd()
+        ? line.slice(0, -FOCUS_MARKER.length)
         : line;
+      const isTarget = normalizeLineForMatch(stripped) === targetNorm;
       return isTarget ? stripped + FOCUS_MARKER : stripped;
     });
     return { ...session, body: newLines.join("\n") };
@@ -516,7 +531,7 @@ function applyFocusToTodoInNotes(
   return { ...notes, sessions };
 }
 
-/** Move the single " @" focus marker to the given todo's line. Strips @ from all other task lines across all sessions. */
+/** Move the single " @" focus marker to the given todo's line. Strips @ from all other task lines across all sessions. Matches by content (rawLine) not position. */
 export async function setFocusToTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
