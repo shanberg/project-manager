@@ -5,6 +5,7 @@ import { refreshMenubar } from "./lib/menubar-refresh";
 import { getNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 import AddChildTodoForm from "./add-child-todo-form";
+import AddTodoForm from "./add-todo-form";
 
 async function fetchFocusedProjectWithFocusedTask(
   configPath: string | undefined,
@@ -49,12 +50,10 @@ export default function Command() {
   }
   if (!data.focusedTodo) {
     return (
-      <List>
-        <List.EmptyView
-          title="No Active Task"
-          description="Narrow Focus adds a child to the current task. Add or select a task in the project first."
-        />
-      </List>
+      <AddTodoForm
+        projectName={data.projectName}
+        onSuccess={() => refreshMenubar()}
+      />
     );
   }
 

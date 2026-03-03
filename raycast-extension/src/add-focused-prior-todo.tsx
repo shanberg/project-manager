@@ -5,6 +5,7 @@ import { refreshMenubar } from "./lib/menubar-refresh";
 import { getNotes } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 import AddPriorTodoForm from "./add-prior-todo-form";
+import AddTodoForm from "./add-todo-form";
 
 async function fetchFocusedProjectWithNextTodo(
   configPath: string | undefined,
@@ -48,12 +49,10 @@ export default function Command() {
   }
   if (!data.nextTodo) {
     return (
-      <List>
-        <List.EmptyView
-          title="No Active Task"
-          description="Add Before requires an active task. Use Narrow Focus first."
-        />
-      </List>
+      <AddTodoForm
+        projectName={data.projectName}
+        onSuccess={() => refreshMenubar()}
+      />
     );
   }
 

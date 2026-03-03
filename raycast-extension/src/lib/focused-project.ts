@@ -1,13 +1,27 @@
-import { LocalStorage } from "@raycast/api";
+import { LocalStorage, getPreferenceValues } from "@raycast/api";
+import { mkdir, writeFile, unlink } from "fs/promises";
+import path from "path";
 import { projectKey, type ProjectKey } from "./recent-projects";
+import { getConfigDir } from "./pm";
+import type { PreferenceValues } from "./types";
 
 const KEY = "pm-focused-project";
+const FOCUSED_FILE = "focused.json";
+
+function getFocusedFilePath(): string {
+  const prefs = getPreferenceValues<PreferenceValues>();
+  return path.join(getConfigDir(prefs.configPath), FOCUSED_FILE);
+}
 
 export async function setFocusedProject(
   basePath: string,
   name: string,
 ): Promise<void> {
-  await LocalStorage.setItem(KEY, projectKey(basePath, name));
+  const key = projectKey(basePath, name);
+  await LocalStorage.setItem(KEY, key);
+  const filePath = getFocusedFilePath();
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify({ projectKey: key }) + "\n", "utf-8");
 }
 
 export async function getFocusedProject(): Promise<ProjectKey | null> {
@@ -17,6 +31,12 @@ export async function getFocusedProject(): Promise<ProjectKey | null> {
 
 export async function clearFocusedProject(): Promise<void> {
   await LocalStorage.removeItem(KEY);
+  const filePath = getFocusedFilePath();
+  try {
+    await unlink(filePath);
+  } catch {
+    /* file may not exist */
+  }
 }
 
 export function parseProjectKey(

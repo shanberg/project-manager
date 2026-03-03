@@ -111,7 +111,7 @@ function expandPath(p: string): string {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
 }
 
-function getConfigDir(configPathOverride?: string): string {
+export function getConfigDir(configPathOverride?: string): string {
   const raw = configPathOverride?.trim();
   if (raw) return path.normalize(expandPath(raw));
   const xdg = process.env.XDG_CONFIG_HOME;

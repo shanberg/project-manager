@@ -317,6 +317,19 @@ export default function Command() {
     return (
       <ActionPanel>
         <Action
+          title="Set as Focused Project"
+          icon={Icon.ArrowRightCircleFilled}
+          onAction={async () => {
+            await setFocusedProject(basePath, name);
+            await refreshMenubar();
+            await showToast({
+              style: Toast.Style.Success,
+              title: "Focused",
+              message: name,
+            });
+          }}
+        />
+        <Action
           title="Open in Finder"
           icon={{ fileIcon: FINDER_APP_PATH }}
           onAction={async () => {
@@ -377,19 +390,6 @@ export default function Command() {
           title="Add Session Note"
           icon={Icon.ShortParagraph}
           target={<AddSessionNoteForm projectName={name} />}
-        />
-        <Action
-          title="Set as Focused Project"
-          icon={Icon.ArrowRightCircleFilled}
-          onAction={async () => {
-            await setFocusedProject(basePath, name);
-            await refreshMenubar();
-            await showToast({
-              style: Toast.Style.Success,
-              title: "Focused",
-              message: name,
-            });
-          }}
         />
         {isActive ? (
           <Action

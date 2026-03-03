@@ -239,6 +239,30 @@
         "focus",
         "pm"
       ]
+    },
+    {
+      "name": "open-focused-in-finder",
+      "title": "Open Focused in Finder",
+      "description": "Open the focused project folder in Finder",
+      "mode": "no-view",
+      "keywords": [
+        "finder",
+        "open",
+        "folder",
+        "pm"
+      ]
+    },
+    {
+      "name": "open-focused-in-obsidian",
+      "title": "Open Focused in Obsidian",
+      "description": "Open the focused project notes in Obsidian",
+      "mode": "no-view",
+      "keywords": [
+        "obsidian",
+        "open",
+        "notes",
+        "pm"
+      ]
     }
   ],
   "preferences": [
