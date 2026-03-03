@@ -1,7 +1,11 @@
 import { getPreferenceValues, showHUD } from "@raycast/api";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { refreshMenubar } from "./lib/menubar-refresh";
-import { getNotes, resolveNotesPath, setFocusToTodoInNotes } from "./lib/notes-api";
+import {
+  getNotes,
+  resolveNotesPath,
+  setFocusToTodoInNotes,
+} from "./lib/notes-api";
 import type { Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -58,7 +62,11 @@ export default async function Command() {
       await showHUD("All Done");
       return;
     }
-    if (focusedTodo && target === focusedTodo && isLeaf(openTodos, openTodos.indexOf(focusedTodo))) {
+    if (
+      focusedTodo &&
+      target === focusedTodo &&
+      isLeaf(openTodos, openTodos.indexOf(focusedTodo))
+    ) {
       await showHUD("Already at leaf");
       return;
     }

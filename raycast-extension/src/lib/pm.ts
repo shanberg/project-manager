@@ -37,9 +37,7 @@ export async function getPmPaths(
   const activePath = config.activePath ?? "";
   const archivePath = config.archivePath ?? "";
   if (!activePath || !archivePath) {
-    throw new Error(
-      "pm config missing paths. Run: pm config init",
-    );
+    throw new Error("pm config missing paths. Run: pm config init");
   }
   return {
     activePath: path.normalize(expandPath(activePath)),
@@ -96,10 +94,7 @@ export async function getConfigSubfolders(
   return [...DEFAULT_SUBFOLDERS];
 }
 
-const HOMEBREW_PM_PATHS = [
-  "/opt/homebrew/bin/pm",
-  "/usr/local/bin/pm",
-];
+const HOMEBREW_PM_PATHS = ["/opt/homebrew/bin/pm", "/usr/local/bin/pm"];
 
 function resolvePmPath(cliPathOverride?: string): string {
   const raw = cliPathOverride?.trim();
@@ -132,7 +127,9 @@ export function getConfigEnv(
   return { PM_CONFIG_HOME: getConfigDir(configPathOverride) };
 }
 
-export function buildEnv(prefs: Pick<PreferenceValues, "configPath">): Record<string, string> {
+export function buildEnv(
+  prefs: Pick<PreferenceValues, "configPath">,
+): Record<string, string> {
   return getConfigEnv(prefs.configPath);
 }
 

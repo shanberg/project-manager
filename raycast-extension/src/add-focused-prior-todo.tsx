@@ -19,8 +19,7 @@ async function fetchFocusedProjectWithNextTodo(
   try {
     const out = await getNotes(prefs, name);
     const openTodos = out.todos.filter((t) => !t.checked);
-    const nextTodo =
-      openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
+    const nextTodo = openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
     return { projectName: name, notes: out.notes, nextTodo };
   } catch {
     return null;

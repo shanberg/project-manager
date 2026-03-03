@@ -45,9 +45,15 @@ Domain codes and labels used when creating projects (e.g. \`M\` → Marketing). 
 Folder names created inside each new project. **Edit Project Structure** to change.`}
       metadata={
         <Detail.Metadata>
-          <Detail.Metadata.Label title="Active" text={paths?.activePath ?? "—"} />
+          <Detail.Metadata.Label
+            title="Active"
+            text={paths?.activePath ?? "—"}
+          />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label title="Archive" text={paths?.archivePath ?? "—"} />
+          <Detail.Metadata.Label
+            title="Archive"
+            text={paths?.archivePath ?? "—"}
+          />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Domains" text={domainSummary} />
           <Detail.Metadata.Separator />

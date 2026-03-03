@@ -24,8 +24,6 @@ import {
   getObsidianUri,
   buildObsidianOptions,
   ensureTodaySession,
-  FINDER_APP_PATH,
-  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 
@@ -362,7 +360,9 @@ export default function Command() {
                 const displayTitle = indent + todo.text;
                 const alternateTitle =
                   indent +
-                  (todo.text.length > 35 ? todo.text.slice(0, 32) + "…" : todo.text);
+                  (todo.text.length > 35
+                    ? todo.text.slice(0, 32) + "…"
+                    : todo.text);
                 return (
                   <MenuBarExtra.Item
                     key={`${i}-${todo.rawLine}`}
@@ -399,9 +399,7 @@ export default function Command() {
           <MenuBarExtra.Item
             title="New Project"
             onAction={() =>
-              open(
-                "raycast://extensions/shanberg/project-manager/new-project",
-              )
+              open("raycast://extensions/shanberg/project-manager/new-project")
             }
           />
           <MenuBarExtra.Item

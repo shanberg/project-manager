@@ -52,21 +52,24 @@ export default function Command() {
     });
     if (!confirmed) return;
     try {
-      await mutate(async () => {
-        await runPmWithPrefs(prefs, ["unarchive", name]);
-        return {
-          projects: data.projects.filter((p) => p !== name),
-          archivePath: data.archivePath,
-        };
-      }, {
-        optimisticUpdate(d) {
-          if (!d) return { projects: [], archivePath: "" };
+      await mutate(
+        async () => {
+          await runPmWithPrefs(prefs, ["unarchive", name]);
           return {
-            ...d,
-            projects: d.projects.filter((p) => p !== name),
+            projects: data.projects.filter((p) => p !== name),
+            archivePath: data.archivePath,
           };
         },
-      });
+        {
+          optimisticUpdate(d) {
+            if (!d) return { projects: [], archivePath: "" };
+            return {
+              ...d,
+              projects: d.projects.filter((p) => p !== name),
+            };
+          },
+        },
+      );
       await showToast({
         style: Toast.Style.Success,
         title: "Unarchived",

@@ -29,8 +29,7 @@ export default async function Command() {
   try {
     const out = await getNotes(prefs, parsed.name);
     const openTodos = out.todos.filter((t) => !t.checked);
-    const nextTodo =
-      openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
+    const nextTodo = openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
     if (!nextTodo) {
       await showHUD("All Done");
       return;

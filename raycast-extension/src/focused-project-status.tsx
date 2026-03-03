@@ -4,8 +4,6 @@ import {
   hasSrcDir,
   buildObsidianOptions,
   ensureTodaySession,
-  FINDER_APP_PATH,
-  OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 import {
   Color,
@@ -181,7 +179,10 @@ export default function Command() {
 
   return (
     <MenuBarExtra
-      icon={getProgressIcon(progress, Color.PrimaryText, { backgroundOpacity: 0.25, background: Color.PrimaryText })}
+      icon={getProgressIcon(progress, Color.PrimaryText, {
+        backgroundOpacity: 0.25,
+        background: Color.PrimaryText,
+      })}
       title={menubarLabel}
       tooltip={tooltip}
       isLoading={isLoading}
@@ -258,11 +259,11 @@ export default function Command() {
                     const url = link.url.trim();
                     try {
                       await open(url);
-                    } catch (e) {
+                    } catch (err) {
                       await showToast({
                         style: Toast.Style.Failure,
                         title: "Could Not Open Link",
-                        message: url,
+                        message: err instanceof Error ? err.message : String(err),
                       });
                     }
                   }}
@@ -293,10 +294,14 @@ export default function Command() {
                 return (
                   <MenuBarExtra.Item
                     key={`${p.basePath}:${p.name}`}
-                    icon={getProgressIcon(p.total ? p.done / p.total : 1, Color.PrimaryText, {
-                      backgroundOpacity: 0.25,
-                      background: Color.PrimaryText,
-                    })}
+                    icon={getProgressIcon(
+                      p.total ? p.done / p.total : 1,
+                      Color.PrimaryText,
+                      {
+                        backgroundOpacity: 0.25,
+                        background: Color.PrimaryText,
+                      },
+                    )}
                     title={p.name}
                     tooltip={tooltip}
                     onAction={async () => {
@@ -347,9 +352,7 @@ export default function Command() {
           <MenuBarExtra.Item
             title="New Project"
             onAction={() =>
-              open(
-                "raycast://extensions/shanberg/project-manager/new-project",
-              )
+              open("raycast://extensions/shanberg/project-manager/new-project")
             }
           />
           <MenuBarExtra.Item

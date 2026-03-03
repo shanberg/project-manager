@@ -80,10 +80,7 @@ export default function Command(props: { launchContext?: LaunchContext }) {
                 <Action.Push
                   title="View Project"
                   target={
-                    <ProjectView
-                      projectName={name}
-                      basePath={activePath}
-                    />
+                    <ProjectView projectName={name} basePath={activePath} />
                   }
                 />
               </ActionPanel>
@@ -101,10 +98,7 @@ export default function Command(props: { launchContext?: LaunchContext }) {
                 <Action.Push
                   title="View Project"
                   target={
-                    <ProjectView
-                      projectName={name}
-                      basePath={archivePath}
-                    />
+                    <ProjectView projectName={name} basePath={archivePath} />
                   }
                 />
               </ActionPanel>

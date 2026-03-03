@@ -251,7 +251,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 title="Add Task"
                 icon={Icon.Plus}
                 target={
-                  <AddTodoForm projectName={projectName} onSuccess={onNotesSuccess} />
+                  <AddTodoForm
+                    projectName={projectName}
+                    onSuccess={onNotesSuccess}
+                  />
                 }
               />
             ))}
@@ -312,7 +315,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Add Task"
                   icon={Icon.Plus}
                   target={
-                    <AddTodoForm projectName={projectName} onSuccess={onNotesSuccess} />
+                    <AddTodoForm
+                      projectName={projectName}
+                      onSuccess={onNotesSuccess}
+                    />
                   }
                 />
               )}

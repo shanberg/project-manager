@@ -472,7 +472,10 @@ export default function Command() {
               ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
                 <List.Item
                   key={`active:${name}`}
-                  icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
+                  icon={getProgressIcon(
+                    total ? done / total : 1,
+                    Color.PrimaryText,
+                  )}
                   title={getReadableProjectName(name)}
                   keywords={[
                     getDomainFromCodes(name, domainCodes) ?? "",
@@ -499,7 +502,10 @@ export default function Command() {
               ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
                 <List.Item
                   key={`archive:${name}`}
-                  icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
+                  icon={getProgressIcon(
+                    total ? done / total : 1,
+                    Color.PrimaryText,
+                  )}
                   title={getReadableProjectName(name)}
                   keywords={[
                     getDomainFromCodes(name, domainCodes) ?? "",
@@ -527,7 +533,10 @@ export default function Command() {
           ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
             <List.Item
               key={name}
-              icon={getProgressIcon(total ? done / total : 1, Color.PrimaryText)}
+              icon={getProgressIcon(
+                total ? done / total : 1,
+                Color.PrimaryText,
+              )}
               title={getReadableProjectName(name)}
               keywords={[
                 getDomainFromCodes(name, domainCodes) ?? "",

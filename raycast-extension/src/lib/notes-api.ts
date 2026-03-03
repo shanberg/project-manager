@@ -88,7 +88,12 @@ export async function getNotes(
     openTodos.length > 0
   ) {
     try {
-      await setFocusToTodoInNotes(prefs, projectName, parsed.notes, openTodos[0]);
+      await setFocusToTodoInNotes(
+        prefs,
+        projectName,
+        parsed.notes,
+        openTodos[0],
+      );
       return getNotes(prefs, projectName);
     } catch {
       // Write failed (e.g. permissions, pm unavailable); return current data so fetch doesn't fail.
@@ -123,7 +128,14 @@ async function completeTodoViaCli(
 ): Promise<void> {
   const si = todo.sessionIndex ?? 0;
   const li = todo.lineIndex ?? 0;
-  const args = ["notes", "todo", "complete", projectName, String(si), String(li)];
+  const args = [
+    "notes",
+    "todo",
+    "complete",
+    projectName,
+    String(si),
+    String(li),
+  ];
   if (advanceFocus) args.push("--advance");
   const { stderr, code } = await runPmWithPrefs(prefs, args);
   if (code !== 0) throw new Error(stderr || "pm notes todo complete failed");
@@ -157,13 +169,14 @@ export async function toggleTodoInNotes(
   if (todo.checked) {
     const newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
     const updated =
-      typeof todo.sessionIndex === "number" && typeof todo.lineIndex === "number"
+      typeof todo.sessionIndex === "number" &&
+      typeof todo.lineIndex === "number"
         ? replaceTodoAtPositionInNotes(
-          notes,
-          todo.sessionIndex,
-          todo.lineIndex,
-          newLine,
-        )
+            notes,
+            todo.sessionIndex,
+            todo.lineIndex,
+            newLine,
+          )
         : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
     await writeNotes(prefs, projectName, updated);
   } else {
@@ -275,18 +288,18 @@ export async function addTodoBeforeInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof beforeTodo.sessionIndex === "number" &&
-      typeof beforeTodo.lineIndex === "number"
+    typeof beforeTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-        notes,
-        beforeTodo.sessionIndex,
-        beforeTodo.lineIndex,
-        `${newLine}\n${beforeTodo.rawLine}`,
-      )
+          notes,
+          beforeTodo.sessionIndex,
+          beforeTodo.lineIndex,
+          `${newLine}\n${beforeTodo.rawLine}`,
+        )
       : replaceTodoRawLineInNotes(
-        notes,
-        beforeTodo.rawLine,
-        `${newLine}\n${beforeTodo.rawLine}`,
-      );
+          notes,
+          beforeTodo.rawLine,
+          `${newLine}\n${beforeTodo.rawLine}`,
+        );
   await writeNotes(prefs, projectName, updated);
 }
 
@@ -302,18 +315,18 @@ export async function addTodoAfterInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof afterTodo.sessionIndex === "number" &&
-      typeof afterTodo.lineIndex === "number"
+    typeof afterTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-        notes,
-        afterTodo.sessionIndex,
-        afterTodo.lineIndex,
-        `${afterTodo.rawLine}\n${newLine}`,
-      )
+          notes,
+          afterTodo.sessionIndex,
+          afterTodo.lineIndex,
+          `${afterTodo.rawLine}\n${newLine}`,
+        )
       : replaceTodoRawLineInNotes(
-        notes,
-        afterTodo.rawLine,
-        `${afterTodo.rawLine}\n${newLine}`,
-      );
+          notes,
+          afterTodo.rawLine,
+          `${afterTodo.rawLine}\n${newLine}`,
+        );
   await writeNotes(prefs, projectName, updated);
 }
 
@@ -365,11 +378,11 @@ export async function addTodoAsChildInNotes(
         );
   const newChildPos =
     typeof parentTodo.sessionIndex === "number" &&
-      typeof parentTodo.lineIndex === "number"
+    typeof parentTodo.lineIndex === "number"
       ? {
-        sessionIndex: parentTodo.sessionIndex,
-        lineIndex: parentTodo.lineIndex + 1,
-      }
+          sessionIndex: parentTodo.sessionIndex,
+          lineIndex: parentTodo.lineIndex + 1,
+        }
       : findTodoPositionInNotes(updated, newLine);
   if (newChildPos) {
     updated = applyFocusToTodoInNotes(updated, {
@@ -496,8 +509,17 @@ export async function undoCompleteInNotes(
   }
   const sessionIndex = todo.sessionIndex ?? 0;
   const lineIndex = todo.lineIndex ?? 0;
-  let updated = replaceTodoAtPositionInNotes(notes, sessionIndex, lineIndex, newLine);
-  updated = applyFocusToTodoInNotes(updated, { ...todo, rawLine: newLine, checked: false });
+  let updated = replaceTodoAtPositionInNotes(
+    notes,
+    sessionIndex,
+    lineIndex,
+    newLine,
+  );
+  updated = applyFocusToTodoInNotes(updated, {
+    ...todo,
+    rawLine: newLine,
+    checked: false,
+  });
   await writeNotes(prefs, projectName, updated);
 }
 
