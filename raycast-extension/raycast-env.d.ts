@@ -68,6 +68,10 @@ declare namespace Preferences {
   export type UndoFocusedComplete = ExtensionPreferences & {}
   /** Preferences accessible in the `dive-in-focused-task` command */
   export type DiveInFocusedTask = ExtensionPreferences & {}
+  /** Preferences accessible in the `open-focused-in-finder` command */
+  export type OpenFocusedInFinder = ExtensionPreferences & {}
+  /** Preferences accessible in the `open-focused-in-obsidian` command */
+  export type OpenFocusedInObsidian = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -113,5 +117,9 @@ declare namespace Arguments {
   export type UndoFocusedComplete = {}
   /** Arguments passed to the `dive-in-focused-task` command */
   export type DiveInFocusedTask = {}
+  /** Arguments passed to the `open-focused-in-finder` command */
+  export type OpenFocusedInFinder = {}
+  /** Arguments passed to the `open-focused-in-obsidian` command */
+  export type OpenFocusedInObsidian = {}
 }
 

@@ -112,7 +112,7 @@ TARBALL="$("$ROOT/scripts/build-release-tarball.sh" "$VERSION" | tail -1)"
 
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   echo "Using gh CLI for release (same auth as \`gh auth login\`)."
-  if ! gh release create "$TAG" "$TARBALL" --repo "$REPO" --title "$TAG" 2>/dev/null; then
+  if ! gh release create "$TAG" "$TARBALL" --repo "$REPO" --title "$TAG" --notes "Release $TAG" 2>/dev/null; then
     # Release may already exist (e.g. we re-ran); upload asset
     gh release upload "$TAG" "$TARBALL" --repo "$REPO" --clobber
   fi

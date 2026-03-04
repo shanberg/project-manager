@@ -6,7 +6,7 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 ## Install
 
-Requires **macOS 13 or later**.
+Requires **macOS 13 or later** (Apple Silicon arm64 only).
 
 **On another computer (Homebrew)**
 
