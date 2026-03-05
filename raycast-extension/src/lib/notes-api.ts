@@ -29,6 +29,8 @@ export interface ProjectNotes {
   sessions: Session[];
 }
 
+export type FocusTarget = { rawLine: string };
+
 export interface Todo {
   text: string;
   checked: boolean;
@@ -273,12 +275,8 @@ export async function addTodoToTodaySession(
     i === idx ? { ...s, body: newBody } : s,
   );
   let updated = { ...notes, sessions: updatedSessions };
-  const taskMatches = newBody.match(new RegExp(TODO_LINE_REGEX.source, "g"));
-  const newTaskLineIndex = taskMatches ? taskMatches.length - 1 : 0;
-  updated = applyFocusToTodoInNotes(updated, {
-    sessionIndex: idx,
-    lineIndex: newTaskLineIndex,
-  } as Todo);
+  const newLine = `- [ ] ${text}`;
+  updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
   await writeNotes(prefs, projectName, updated);
 }
 
@@ -432,10 +430,7 @@ export async function addTodoAsChildInNotes(
         }
       : findTodoPositionInNotes(updated, newLine);
   if (newChildPos) {
-    updated = applyFocusToTodoInNotes(updated, {
-      sessionIndex: newChildPos.sessionIndex,
-      lineIndex: newChildPos.lineIndex,
-    } as Todo);
+    updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
   }
   await writeNotes(prefs, projectName, updated);
 }
@@ -497,7 +492,7 @@ const FOCUS_MARKER = " @";
 /** Pure: return notes with " @" only on the given todo's line. Matches by content (rawLine) not position. */
 function applyFocusToTodoInNotes(
   notes: ProjectNotes,
-  todo: Todo | null,
+  todo: FocusTarget | null,
 ): ProjectNotes {
   if (!todo) {
     const sessions = notes.sessions.map((session) => {
@@ -572,11 +567,7 @@ export async function undoCompleteInNotes(
     lineIndex,
     newLine,
   );
-  updated = applyFocusToTodoInNotes(updated, {
-    ...todo,
-    rawLine: newLine,
-    checked: false,
-  });
+  updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
   await writeNotes(prefs, projectName, updated);
 }
 

@@ -1,12 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   addTodoAfterInNotes,
   addTodoBeforeInNotes,
+  addTodoAsChildInNotes,
   type ProjectNotes,
   type Session,
   type Todo,
 } from "../notes-api";
 import type { PreferenceValues } from "../types";
+import { runPmWithStdin } from "../pm";
 
 vi.mock("../pm", () => ({
   buildEnv: vi.fn(() => ({})),
@@ -14,6 +16,10 @@ vi.mock("../pm", () => ({
   runPmWithStdin: vi.fn().mockResolvedValue({ code: 0, stderr: "" }),
   syncObsidianPrefsToPmConfig: vi.fn().mockResolvedValue(undefined),
 }));
+
+beforeEach(() => {
+  vi.mocked(runPmWithStdin).mockResolvedValue({ code: 0, stderr: "" });
+});
 
 const prefs: PreferenceValues = { configPath: "/tmp/config", pmCliPath: "pm" };
 
@@ -297,5 +303,66 @@ describe("addTodoBeforeInNotes", () => {
     expect(third.notes.sessions[0].body).toBe(
       "- [ ] 1\n- [ ] 2\n- [ ] 3\n- [ ] Anchor",
     );
+  });
+});
+
+describe("addTodoAsChildInNotes", () => {
+  beforeEach(() => {
+    vi.mocked(runPmWithStdin).mockClear();
+  });
+
+  it("inserts child under parent and sets focus marker on new child", async () => {
+    const body = "- [ ] Parent";
+    const notes = makeNotes(body);
+    const parentTodo: Todo = {
+      rawLine: "- [ ] Parent",
+      text: "Parent",
+      checked: false,
+      context: "",
+      sessionIndex: 0,
+      lineIndex: 0,
+    };
+
+    await addTodoAsChildInNotes(
+      prefs,
+      "p",
+      notes,
+      parentTodo,
+      "Child task",
+    );
+
+    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
+    expect(written.sessions[0].body).toBe(
+      "- [ ] Parent\n  - [ ] Child task @",
+    );
+  });
+
+  it("strips focus from parent when adding child", async () => {
+    const body = "- [ ] Parent @\n  - [ ] Sibling";
+    const notes = makeNotes(body);
+    const parentTodo: Todo = {
+      rawLine: "- [ ] Parent @",
+      text: "Parent",
+      checked: false,
+      context: "",
+      sessionIndex: 0,
+      lineIndex: 0,
+    };
+
+    await addTodoAsChildInNotes(
+      prefs,
+      "p",
+      notes,
+      parentTodo,
+      "New child",
+    );
+
+    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
+    expect(written.sessions[0].body).toContain("- [ ] Parent\n");
+    expect(written.sessions[0].body).toContain("  - [ ] New child @");
   });
 });
