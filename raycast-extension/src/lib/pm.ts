@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import path from "path";
 import os from "os";
 import { existsSync } from "fs";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import type { PreferenceValues } from "./types";
 
 export const DEFAULT_DOMAINS: Record<string, string> = {
@@ -43,6 +44,80 @@ export async function getPmPaths(
     activePath: path.normalize(expandPath(activePath)),
     archivePath: path.normalize(expandPath(archivePath)),
   };
+}
+
+/** Check if pm config exists and has both paths. Returns null when config is missing or incomplete (for first-run detection).
+ * If the pm CLI is unavailable, tries reading config.json directly so the configured view still shows after first-run. */
+export async function getPmPathsIfPresent(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+): Promise<PmPaths | null> {
+  async function fromConfigJson(): Promise<PmPaths | null> {
+    const configPath = path.join(getConfigDir(prefs.configPath), "config.json");
+    try {
+      const data = await readFile(configPath, "utf-8");
+      const config = JSON.parse(data) as { activePath?: string; archivePath?: string };
+      const activePath = (config.activePath ?? "").trim();
+      const archivePath = (config.archivePath ?? "").trim();
+      if (!activePath || !archivePath) return null;
+      return {
+        activePath: path.normalize(expandPath(activePath)),
+        archivePath: path.normalize(expandPath(archivePath)),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const env = getConfigEnv(prefs.configPath);
+    const { stdout, code } = await runPm(
+      ["config", "get"],
+      env,
+      prefs.pmCliPath,
+    );
+    if (code !== 0) return fromConfigJson();
+    const config = JSON.parse(stdout.trim()) as {
+      activePath?: string;
+      archivePath?: string;
+    };
+    const activePath = (config.activePath ?? "").trim();
+    const archivePath = (config.archivePath ?? "").trim();
+    if (!activePath || !archivePath) return null;
+    return {
+      activePath: path.normalize(expandPath(activePath)),
+      archivePath: path.normalize(expandPath(archivePath)),
+    };
+  } catch {
+    return fromConfigJson();
+  }
+}
+
+export interface WriteInitialConfigOptions {
+  activePath: string;
+  archivePath: string;
+  useObsidianCLI: boolean;
+}
+
+/** Create initial pm config (for first-run). Writes config.json; does not create the active/archive directories. */
+export async function writeInitialConfig(
+  prefs: Pick<PreferenceValues, "configPath">,
+  options: WriteInitialConfigOptions,
+): Promise<void> {
+  const dir = getConfigDir(prefs.configPath);
+  await mkdir(dir, { recursive: true });
+  const config = {
+    activePath: options.activePath.trim(),
+    archivePath: options.archivePath.trim(),
+    domains: DEFAULT_DOMAINS,
+    subfolders: DEFAULT_SUBFOLDERS,
+    useObsidianCLI: options.useObsidianCLI,
+  };
+  const configPath = path.join(dir, "config.json");
+  await writeFile(
+    configPath,
+    JSON.stringify(config, null, 2),
+    "utf-8",
+  );
 }
 
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */

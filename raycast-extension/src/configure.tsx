@@ -6,18 +6,43 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { getConfigDomains, getConfigSubfolders, getPmPaths } from "./lib/pm";
+import {
+  getConfigDomains,
+  getConfigSubfolders,
+  getPmPathsIfPresent,
+} from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import EditDomains from "./edit-domains";
 import EditProjectStructure from "./edit-project-structure";
+import FirstRunSetup from "./first-run-setup";
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
-  const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
+  const { data: pathsOrNull, revalidate } = useCachedPromise(
+    getPmPathsIfPresent,
+    [prefs],
+  );
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
   const { data: subfolders = [] } = useCachedPromise(getConfigSubfolders, [
     prefs,
   ]);
+
+  if (pathsOrNull === undefined) {
+    return <Detail navigationTitle="Configure Project Manager" markdown="Loading…" />;
+  }
+
+  if (pathsOrNull === null) {
+    return (
+      <FirstRunSetup
+        prefs={prefs}
+        onComplete={() => {
+          revalidate();
+        }}
+      />
+    );
+  }
+
+  const paths = pathsOrNull;
   const domainSummary =
     Object.keys(domains).length > 0
       ? Object.entries(domains)
@@ -34,7 +59,7 @@ export default function Command() {
 
 Where your projects live. Both can point to different locations (e.g. different drives or cloud folders).
 
-Paths come from pm config (\`pm config init\`). The extension does not override them.
+Paths are stored in pm config. Use **Configure Project Manager** on first run to set them, or \`pm config set activePath|archivePath\` in the terminal.
 
 # Domains
 
@@ -47,12 +72,12 @@ Folder names created inside each new project. **Edit Project Structure** to chan
         <Detail.Metadata>
           <Detail.Metadata.Label
             title="Active"
-            text={paths?.activePath ?? "—"}
+            text={paths.activePath}
           />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label
             title="Archive"
-            text={paths?.archivePath ?? "—"}
+            text={paths.archivePath}
           />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Domains" text={domainSummary} />

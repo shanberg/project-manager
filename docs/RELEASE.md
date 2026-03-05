@@ -12,7 +12,7 @@ npm run release -- major    # 0.1.2 → 1.0.0 (breaking changes)
 npm run release -- 0.2.0    # or set an exact version
 ```
 
-The script reads the current version from `package.json`, bumps it (or uses the version you pass), writes it back, commits and pushes, creates tag, then runs `scripts/build-release-tarball.sh` to build the Swift CLI (`cd pm-swift && swift build -c release`) and pack `pm` into `project-manager-<version>.tar.gz`, uploads the tarball to the GitHub release, and updates the Homebrew formula (sha256 and version). **`package.json` must have a `"version"` field**
+The script reads the current version from `package.json`, bumps it (or uses the version you pass), writes it back, commits and pushes, creates tag, then runs `scripts/build-release-tarball.sh` to build the Swift CLI for **arm64 only** (`swift build -c release --triple arm64-apple-macosx`) and pack `pm` into `project-manager-<version>.tar.gz`, uploads the tarball to the GitHub release, and updates the Homebrew formula (sha256 and version). **Run the release from an Apple Silicon Mac.** **`package.json` must have a `"version"` field**
 
 **Tap location:** Default is `../homebrew-s`. Override with `TAP_DIR` if your tap lives elsewhere.
 
