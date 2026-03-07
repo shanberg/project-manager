@@ -25,7 +25,10 @@ import {
   setFocusedProject,
 } from "./lib/focused-project";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
-import { getRecentProjectsByEdit } from "./lib/recent-by-edit";
+import {
+  getRecentProjectsByEdit,
+  type FocusedProjectData,
+} from "./lib/recent-by-edit";
 import type { PreferenceValues } from "./lib/types";
 
 const TOOLTIP_MAX_LEN = 80;
@@ -133,13 +136,33 @@ async function fetchFocusedProjectStatus(
   }
 }
 
+function toFocusedProjectData(
+  data: NonNullable<Awaited<ReturnType<typeof fetchFocusedProjectStatus>>>,
+): FocusedProjectData {
+  return {
+    name: data.name,
+    basePath: data.basePath,
+    done: data.done,
+    total: data.total,
+    notes: data.notes,
+  };
+}
+
 async function fetchRecentProjects(
   configPath: string | undefined,
   pmCliPath: string | undefined,
   focusedKey: string | null,
+  focusedData: Awaited<ReturnType<typeof fetchFocusedProjectStatus>>,
 ) {
   const prefs = { configPath, pmCliPath };
-  return getRecentProjectsByEdit(prefs, 10, focusedKey ?? undefined);
+  const focusedProjectData =
+    focusedData != null ? toFocusedProjectData(focusedData) : undefined;
+  return getRecentProjectsByEdit(
+    prefs,
+    10,
+    focusedKey ?? undefined,
+    focusedProjectData,
+  );
 }
 
 export default function Command() {
@@ -153,7 +176,7 @@ export default function Command() {
   const focusedKey = data ? projectKey(data.basePath, data.name) : null;
   const { data: recentProjects } = useCachedPromise(
     fetchRecentProjects,
-    [prefs.configPath, prefs.pmCliPath, focusedKey],
+    [prefs.configPath, prefs.pmCliPath, focusedKey, data],
     { execute: true },
   );
 

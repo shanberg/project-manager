@@ -19,10 +19,24 @@ export type RecentProject = {
   } | null;
 };
 
+/** Pre-fetched data for the focused project so we can skip calling getNotes for it. */
+export type FocusedProjectData = {
+  name: string;
+  basePath: string;
+  done: number;
+  total: number;
+  notes: RecentProject["notes"];
+};
+
+function toMs(m: Date | number): number {
+  return m instanceof Date ? m.getTime() : m;
+}
+
 export async function getRecentProjectsByEdit(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   limit: number,
   excludeKey?: string,
+  focusedProjectData?: FocusedProjectData | null,
 ): Promise<RecentProject[]> {
   const [paths, { stdout }] = await Promise.all([
     getPmPaths(prefs),
@@ -36,7 +50,7 @@ export async function getRecentProjectsByEdit(
     ...archiveNames.map((name) => ({ name, basePath: paths.archivePath })),
   ];
 
-  const withMeta = await Promise.all(
+  const withMtime = await Promise.all(
     all.map(async ({ name, basePath }) => {
       const projectPath = path.join(basePath, name);
       const notesPath = await resolveNotesPath(prefs, name);
@@ -45,20 +59,39 @@ export async function getRecentProjectsByEdit(
         : null;
       const statsProject = await stat(projectPath).catch(() => null);
       const mtime = statsNotes
-        ? statsNotes.mtime instanceof Date
-          ? statsNotes.mtime.getTime()
-          : (statsNotes.mtime as number)
+        ? toMs(statsNotes.mtime)
         : statsProject
-          ? statsProject.mtime instanceof Date
-            ? statsProject.mtime.getTime()
-            : (statsProject.mtime as number)
+          ? toMs(statsProject.mtime)
           : 0;
+      return { name, basePath, mtime };
+    }),
+  );
+
+  const key = (p: { basePath: string; name: string }) => `${p.basePath}:${p.name}`;
+  const sorted = [...withMtime].sort((a, b) => b.mtime - a.mtime);
+  const excludeFocused = !!excludeKey;
+  const takeCount = excludeFocused ? limit + 1 : limit;
+  const topByMtime = sorted.slice(0, takeCount);
+
+  const withData = await Promise.all(
+    topByMtime.map(async (p): Promise<RecentProject> => {
+      if (excludeKey && key(p) === excludeKey && focusedProjectData) {
+        return {
+          name: focusedProjectData.name,
+          basePath: focusedProjectData.basePath,
+          mtime: p.mtime,
+          done: focusedProjectData.done,
+          total: focusedProjectData.total,
+          notes: focusedProjectData.notes,
+        };
+      }
+      const notesPath = await resolveNotesPath(prefs, p.name);
       let done = 0;
       let total = 0;
-      let notes = null;
+      let notes: RecentProject["notes"] = null;
       if (notesPath) {
         try {
-          const out = await getNotes(prefs, name);
+          const out = await getNotes(prefs, p.name);
           total = out.todos.length;
           done = out.todos.filter((t) => t.checked).length;
           notes = out.notes
@@ -73,15 +106,19 @@ export async function getRecentProjectsByEdit(
           /* ignore */
         }
       }
-      return { name, basePath, mtime, done, total, notes };
+      return {
+        name: p.name,
+        basePath: p.basePath,
+        mtime: p.mtime,
+        done,
+        total,
+        notes,
+      };
     }),
   );
 
-  const exclude = excludeKey ? new Set([excludeKey]) : new Set<string>();
-  const key = (p: RecentProject) => `${p.basePath}:${p.name}`;
-
-  return withMeta
-    .filter((p) => !exclude.has(key(p)))
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, limit);
+  const withoutFocused = excludeKey
+    ? withData.filter((p) => key(p) !== excludeKey)
+    : withData;
+  return withoutFocused.slice(0, limit);
 }
