@@ -208,7 +208,13 @@ export default function Command() {
   );
 
   useEffect(() => {
-    getRecentProjectKeys().then(setRecentKeys);
+    let cancelled = false;
+    getRecentProjectKeys().then((keys) => {
+      if (!cancelled) setRecentKeys(keys);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const active = data?.active ?? [];

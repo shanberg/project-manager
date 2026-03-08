@@ -25,6 +25,101 @@ export interface PmPaths {
   archivePath: string;
 }
 
+/** Full pm config shape (matches pm CLI config.json). */
+export interface PmConfig {
+  activePath: string;
+  archivePath: string;
+  paraPath?: string | null;
+  domains: Record<string, string>;
+  subfolders: string[];
+  notesTemplatePath?: string | null;
+  useObsidianCLI?: boolean | null;
+  obsidianVault?: string | null;
+  obsidianVaultPath?: string | null;
+}
+
+/** Get full pm config. Uses `pm config get` when CLI available; otherwise reads config.json. */
+export async function getPmConfig(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+): Promise<PmConfig | null> {
+  const configPath = path.join(getConfigDir(prefs.configPath), "config.json");
+  async function fromFile(): Promise<PmConfig | null> {
+    try {
+      const data = await readFile(configPath, "utf-8");
+      const raw = JSON.parse(data) as Record<string, unknown>;
+      if (typeof raw?.activePath !== "string" || typeof raw?.archivePath !== "string")
+        return null;
+      return {
+        activePath: raw.activePath as string,
+        archivePath: raw.archivePath as string,
+        paraPath: raw.paraPath as string | null | undefined,
+        domains:
+          raw.domains && typeof raw.domains === "object" && !Array.isArray(raw.domains)
+            ? (raw.domains as Record<string, string>)
+            : { ...DEFAULT_DOMAINS },
+        subfolders: Array.isArray(raw.subfolders)
+          ? (raw.subfolders as string[]).filter((s) => typeof s === "string")
+          : [...DEFAULT_SUBFOLDERS],
+        notesTemplatePath: raw.notesTemplatePath as string | null | undefined,
+        useObsidianCLI: raw.useObsidianCLI as boolean | null | undefined,
+        obsidianVault: raw.obsidianVault as string | null | undefined,
+        obsidianVaultPath: raw.obsidianVaultPath as string | null | undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const env = getConfigEnv(prefs.configPath);
+    const { stdout, code } = await runPm(["config", "get"], env, prefs.pmCliPath);
+    if (code !== 0) return fromFile();
+    const raw = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    if (typeof raw?.activePath !== "string" || typeof raw?.archivePath !== "string")
+      return fromFile();
+    return {
+      activePath: raw.activePath as string,
+      archivePath: raw.archivePath as string,
+      paraPath: raw.paraPath as string | null | undefined,
+      domains:
+        raw.domains && typeof raw.domains === "object" && !Array.isArray(raw.domains)
+          ? (raw.domains as Record<string, string>)
+          : { ...DEFAULT_DOMAINS },
+      subfolders: Array.isArray(raw.subfolders)
+        ? (raw.subfolders as string[]).filter((s) => typeof s === "string")
+        : [...DEFAULT_SUBFOLDERS],
+      notesTemplatePath: raw.notesTemplatePath as string | null | undefined,
+      useObsidianCLI: raw.useObsidianCLI as boolean | null | undefined,
+      obsidianVault: raw.obsidianVault as string | null | undefined,
+      obsidianVaultPath: raw.obsidianVaultPath as string | null | undefined,
+    };
+  } catch {
+    return fromFile();
+  }
+}
+
+/** Set a single pm config key. Value is string (or JSON string for domains/subfolders). Throws on failure. */
+export async function setPmConfigKey(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  key: keyof PmConfig,
+  value: string | boolean | Record<string, string> | string[],
+): Promise<void> {
+  const env = getConfigEnv(prefs.configPath);
+  const valueStr =
+    typeof value === "string"
+      ? value
+      : typeof value === "boolean"
+        ? value ? "true" : "false"
+        : JSON.stringify(value);
+  const { stderr, code } = await runPm(
+    ["config", "set", key, valueStr],
+    env,
+    prefs.pmCliPath,
+  );
+  if (code !== 0) {
+    throw new Error(stderr.trim() || `pm config set ${key} failed (exit ${code})`);
+  }
+}
+
 /** Get activePath and archivePath from pm config. Single source of truth. */
 export async function getPmPaths(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
@@ -96,6 +191,14 @@ export interface WriteInitialConfigOptions {
   activePath: string;
   archivePath: string;
   useObsidianCLI: boolean;
+  /** Optional. When set, pm uses paraPath/active and paraPath/archive. */
+  paraPath?: string;
+  /** Optional path to notes template file (supports ~). */
+  notesTemplatePath?: string;
+  /** Vault name for Obsidian CLI. Used when useObsidianCLI is true. */
+  obsidianVault?: string;
+  /** Absolute path to vault root (supports ~). Used when useObsidianCLI is true. */
+  obsidianVaultPath?: string;
 }
 
 /** Create initial pm config (for first-run). Writes config.json; does not create the active/archive directories. */
@@ -105,13 +208,21 @@ export async function writeInitialConfig(
 ): Promise<void> {
   const dir = getConfigDir(prefs.configPath);
   await mkdir(dir, { recursive: true });
-  const config = {
+  const para = options.paraPath?.trim();
+  const notesTpl = options.notesTemplatePath?.trim();
+  const vault = options.obsidianVault?.trim();
+  const vaultPath = options.obsidianVaultPath?.trim();
+  const config: Record<string, unknown> = {
     activePath: options.activePath.trim(),
     archivePath: options.archivePath.trim(),
     domains: DEFAULT_DOMAINS,
     subfolders: DEFAULT_SUBFOLDERS,
     useObsidianCLI: options.useObsidianCLI,
   };
+  if (para) config.paraPath = para;
+  if (notesTpl) config.notesTemplatePath = notesTpl;
+  if (options.useObsidianCLI && vault) config.obsidianVault = vault;
+  if (options.useObsidianCLI && vaultPath) config.obsidianVaultPath = vaultPath;
   const configPath = path.join(dir, "config.json");
   await writeFile(
     configPath,
@@ -182,7 +293,7 @@ function resolvePmPath(cliPathOverride?: string): string {
   );
 }
 
-function expandPath(p: string): string {
+export function expandPath(p: string): string {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
 }
 
@@ -265,7 +376,10 @@ export async function runPm(
     const stderrChunks: Buffer[] = [];
     child.stdout?.on("data", (c) => stdoutChunks.push(c));
     child.stderr?.on("data", (c) => stderrChunks.push(c));
-    child.on("error", reject);
+    child.on("error", (err) => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      reject(err);
+    });
     child.on("close", (code) => {
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
