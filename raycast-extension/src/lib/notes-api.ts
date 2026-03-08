@@ -70,6 +70,31 @@ export async function fetchNotes(
   }
 }
 
+/** First open (unchecked) leaf in document order. A leaf has no children (next task in same session has depth <= this, or last in session). */
+function firstOpenLeaf(todos: Todo[]): Todo | undefined {
+  const bySession = new Map<number, Todo[]>();
+  for (const t of todos) {
+    const si = t.sessionIndex ?? 0;
+    if (!bySession.has(si)) bySession.set(si, []);
+    bySession.get(si)!.push(t);
+  }
+  const sessionIndices = [...bySession.keys()].sort((a, b) => a - b);
+  for (const si of sessionIndices) {
+    const sessionTodos = bySession
+      .get(si)!
+      .sort((a, b) => (a.lineIndex ?? 0) - (b.lineIndex ?? 0));
+    for (let i = 0; i < sessionTodos.length; i++) {
+      const t = sessionTodos[i];
+      if (t.checked) continue;
+      const next = sessionTodos[i + 1];
+      const depth = t.depth ?? 0;
+      const isLeaf = next === undefined || (next.depth ?? 0) <= depth;
+      if (isLeaf) return t;
+    }
+  }
+  return undefined;
+}
+
 /** Call pm notes show and return parsed output. Throws on error. */
 export async function getNotes(
   prefs: PreferenceValues,
@@ -83,19 +108,14 @@ export async function getNotes(
   const parsed = JSON.parse(stdout.trim()) as NotesShowOutput;
   if (!parsed?.notes) throw new Error(stderr || "Invalid notes response");
 
-  // If no task is focused but there are open tasks, focus the first one (best-effort).
-  const openTodos = (parsed.todos ?? []).filter((t) => !t.checked);
+  // If no task is focused but there are open tasks, focus the first open leaf (best-effort).
+  const firstLeaf = firstOpenLeaf(parsed.todos ?? []);
   if (
     (parsed.focusedKey == null || parsed.focusedKey === "") &&
-    openTodos.length > 0
+    firstLeaf !== undefined
   ) {
     try {
-      await setFocusToTodoInNotes(
-        prefs,
-        projectName,
-        parsed.notes,
-        openTodos[0],
-      );
+      await setFocusToTodoInNotes(prefs, projectName, parsed.notes, firstLeaf);
       return getNotes(prefs, projectName);
     } catch {
       // Write failed (e.g. permissions, pm unavailable); return current data so fetch doesn't fail.
@@ -139,7 +159,7 @@ async function completeTodoViaCli(
     String(si),
     String(li),
   ];
-  if (advanceFocus) args.push("--advance");
+  if (!advanceFocus) args.push("--no-advance");
   const { stderr, code } = await runPmWithPrefs(prefs, args);
   if (code !== 0) throw new Error(stderr || "pm notes todo complete failed");
 }
@@ -173,13 +193,13 @@ export async function toggleTodoInNotes(
     const newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
     const updated =
       typeof todo.sessionIndex === "number" &&
-      typeof todo.lineIndex === "number"
+        typeof todo.lineIndex === "number"
         ? replaceTodoAtPositionInNotes(
-            notes,
-            todo.sessionIndex,
-            todo.lineIndex,
-            newLine,
-          )
+          notes,
+          todo.sessionIndex,
+          todo.lineIndex,
+          newLine,
+        )
         : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
     await writeNotes(prefs, projectName, updated);
   } else {
@@ -292,29 +312,29 @@ export async function addTodoBeforeInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof beforeTodo.sessionIndex === "number" &&
-    typeof beforeTodo.lineIndex === "number"
+      typeof beforeTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-          notes,
-          beforeTodo.sessionIndex,
-          beforeTodo.lineIndex,
-          `${newLine}\n${beforeTodo.rawLine}`,
-        )
+        notes,
+        beforeTodo.sessionIndex,
+        beforeTodo.lineIndex,
+        `${newLine}\n${beforeTodo.rawLine}`,
+      )
       : replaceTodoRawLineInNotes(
-          notes,
-          beforeTodo.rawLine,
-          `${newLine}\n${beforeTodo.rawLine}`,
-        );
+        notes,
+        beforeTodo.rawLine,
+        `${newLine}\n${beforeTodo.rawLine}`,
+      );
   await writeNotes(prefs, projectName, updated);
   const nextBeforeTodo: Todo =
     typeof beforeTodo.sessionIndex === "number" &&
-    typeof beforeTodo.lineIndex === "number"
+      typeof beforeTodo.lineIndex === "number"
       ? { ...beforeTodo, lineIndex: beforeTodo.lineIndex + 1 }
       : (() => {
-          const pos = findTodoPositionInNotes(updated, beforeTodo.rawLine);
-          return pos
-            ? { ...beforeTodo, sessionIndex: pos.sessionIndex, lineIndex: pos.lineIndex }
-            : beforeTodo;
-        })();
+        const pos = findTodoPositionInNotes(updated, beforeTodo.rawLine);
+        return pos
+          ? { ...beforeTodo, sessionIndex: pos.sessionIndex, lineIndex: pos.lineIndex }
+          : beforeTodo;
+      })();
   return { notes: updated, nextBeforeTodo };
 }
 
@@ -330,43 +350,43 @@ export async function addTodoAfterInNotes(
   const newLine = `${prefix}[ ] ${text}`;
   const updated =
     typeof afterTodo.sessionIndex === "number" &&
-    typeof afterTodo.lineIndex === "number"
+      typeof afterTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-          notes,
-          afterTodo.sessionIndex,
-          afterTodo.lineIndex,
-          `${afterTodo.rawLine}\n${newLine}`,
-        )
+        notes,
+        afterTodo.sessionIndex,
+        afterTodo.lineIndex,
+        `${afterTodo.rawLine}\n${newLine}`,
+      )
       : replaceTodoRawLineInNotes(
-          notes,
-          afterTodo.rawLine,
-          `${afterTodo.rawLine}\n${newLine}`,
-        );
+        notes,
+        afterTodo.rawLine,
+        `${afterTodo.rawLine}\n${newLine}`,
+      );
   await writeNotes(prefs, projectName, updated);
   const insertedTodo: Todo =
     typeof afterTodo.sessionIndex === "number" &&
-    typeof afterTodo.lineIndex === "number"
+      typeof afterTodo.lineIndex === "number"
       ? {
-          rawLine: newLine,
-          sessionIndex: afterTodo.sessionIndex,
-          lineIndex: afterTodo.lineIndex + 1,
-          text,
-          checked: false,
-          context: "",
-        }
+        rawLine: newLine,
+        sessionIndex: afterTodo.sessionIndex,
+        lineIndex: afterTodo.lineIndex + 1,
+        text,
+        checked: false,
+        context: "",
+      }
       : (() => {
-          const pos = findTodoPositionInNotes(updated, newLine);
-          return pos
-            ? {
-                rawLine: newLine,
-                sessionIndex: pos.sessionIndex,
-                lineIndex: pos.lineIndex,
-                text,
-                checked: false,
-                context: "",
-              }
-            : { rawLine: newLine, text, checked: false, context: "" };
-        })();
+        const pos = findTodoPositionInNotes(updated, newLine);
+        return pos
+          ? {
+            rawLine: newLine,
+            sessionIndex: pos.sessionIndex,
+            lineIndex: pos.lineIndex,
+            text,
+            checked: false,
+            context: "",
+          }
+          : { rawLine: newLine, text, checked: false, context: "" };
+      })();
   return { notes: updated, insertedTodo };
 }
 
@@ -409,25 +429,25 @@ export async function addTodoAsChildInNotes(
   const newLine = `${childPrefix}[ ] ${trimmed}`;
   let updated =
     typeof parentTodo.sessionIndex === "number" &&
-    typeof parentTodo.lineIndex === "number"
+      typeof parentTodo.lineIndex === "number"
       ? replaceTodoAtPositionInNotes(
-          notes,
-          parentTodo.sessionIndex,
-          parentTodo.lineIndex,
-          `${parentTodo.rawLine}\n${newLine}`,
-        )
+        notes,
+        parentTodo.sessionIndex,
+        parentTodo.lineIndex,
+        `${parentTodo.rawLine}\n${newLine}`,
+      )
       : replaceTodoRawLineInNotes(
-          notes,
-          parentTodo.rawLine,
-          `${parentTodo.rawLine}\n${newLine}`,
-        );
+        notes,
+        parentTodo.rawLine,
+        `${parentTodo.rawLine}\n${newLine}`,
+      );
   const newChildPos =
     typeof parentTodo.sessionIndex === "number" &&
-    typeof parentTodo.lineIndex === "number"
+      typeof parentTodo.lineIndex === "number"
       ? {
-          sessionIndex: parentTodo.sessionIndex,
-          lineIndex: parentTodo.lineIndex + 1,
-        }
+        sessionIndex: parentTodo.sessionIndex,
+        lineIndex: parentTodo.lineIndex + 1,
+      }
       : findTodoPositionInNotes(updated, newLine);
   if (newChildPos) {
     updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
@@ -537,7 +557,7 @@ export async function setFocusToTodoInNotes(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Complete the now task and its descendants, move focus to next open task. Uses CLI. */
+/** Complete the now task and its descendants, move focus to next open task. Uses CLI. See docs/task-focus-flow.md for how next focus is chosen. */
 export async function completeAndAdvanceInNotes(
   prefs: PreferenceValues,
   projectName: string,

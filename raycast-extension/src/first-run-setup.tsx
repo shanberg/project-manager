@@ -1,19 +1,16 @@
 import path from "path";
-import os from "os";
+import fs from "fs";
 import { useState } from "react";
 import { Action, ActionPanel, Form, showToast, Toast } from "@raycast/api";
 import { writeInitialConfig } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 
-const PATH_DESCRIPTION =
-  "Location to store project markdown files. Can be any level of hierarchy within this folder.";
-
-function expandPath(p: string): string {
-  const trimmed = p.trim();
-  if (!trimmed) return "";
-  return trimmed.startsWith("~")
-    ? path.join(os.homedir(), trimmed.slice(1))
-    : trimmed;
+function isDir(p: string): boolean {
+  try {
+    return fs.existsSync(p) && fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 type Props = {
@@ -27,24 +24,34 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
 
   async function handleSubmit(values: {
     useObsidian: string;
-    activePath: string;
-    archivePath: string;
+    activePath: string[];
+    archivePath: string[];
+    paraPath: string[];
+    notesTemplatePath: string[];
+    obsidianVault: string;
+    obsidianVaultPath: string[];
   }) {
-    const activePath = values.activePath.trim();
-    const archivePath = values.archivePath.trim();
+    const activePath = values.activePath?.[0]?.trim() ?? "";
+    const archivePath = values.archivePath?.[0]?.trim() ?? "";
+    const useObsidian = values.useObsidian === "yes";
 
     if (!activePath) {
-      setActiveError("Enter a path for active projects.");
+      setActiveError("Select a folder for active projects.");
       return;
     }
     if (!archivePath) {
-      setArchiveError("Enter a path for archive projects.");
+      setArchiveError("Select a folder for archive projects.");
       return;
     }
-
-    const activeExpanded = path.normalize(expandPath(activePath));
-    const archiveExpanded = path.normalize(expandPath(archivePath));
-    if (activeExpanded && archiveExpanded && activeExpanded === archiveExpanded) {
+    if (!isDir(activePath)) {
+      setActiveError("Selected path is not a directory.");
+      return;
+    }
+    if (!isDir(archivePath)) {
+      setArchiveError("Selected path is not a directory.");
+      return;
+    }
+    if (path.normalize(activePath) === path.normalize(archivePath)) {
       setActiveError("Active and archive paths must be different.");
       setArchiveError("Active and archive paths must be different.");
       return;
@@ -53,11 +60,19 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
     setActiveError(undefined);
     setArchiveError(undefined);
 
+    const paraPath = values.paraPath?.[0]?.trim();
+    const notesTemplatePath = values.notesTemplatePath?.[0]?.trim();
+    const obsidianVaultPath = values.obsidianVaultPath?.[0]?.trim();
+
     try {
       await writeInitialConfig(prefs, {
         activePath,
         archivePath,
-        useObsidianCLI: values.useObsidian === "yes",
+        useObsidianCLI: useObsidian,
+        paraPath: paraPath || undefined,
+        notesTemplatePath: notesTemplatePath || undefined,
+        obsidianVault: useObsidian ? values.obsidianVault.trim() || undefined : undefined,
+        obsidianVaultPath: useObsidian ? obsidianVaultPath || undefined : undefined,
       });
       await showToast({
         style: Toast.Style.Success,
@@ -98,19 +113,53 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
         <Form.Dropdown.Item value="yes" title="Yes, use with Obsidian" />
         <Form.Dropdown.Item value="no" title="No, use without Obsidian" />
       </Form.Dropdown>
-      <Form.TextField
+      <Form.FilePicker
         id="activePath"
         title="Active projects folder"
-        placeholder="e.g. ~/projects/active or /path/to/active"
+        allowMultipleSelection={false}
+        canChooseDirectories
+        canChooseFiles={false}
         error={activeError}
-        info={PATH_DESCRIPTION}
+        info="Where active projects are stored. Required."
       />
-      <Form.TextField
+      <Form.FilePicker
         id="archivePath"
         title="Archive projects folder"
-        placeholder="e.g. ~/projects/archive or /path/to/archive"
+        allowMultipleSelection={false}
+        canChooseDirectories
+        canChooseFiles={false}
         error={archiveError}
-        info={PATH_DESCRIPTION}
+        info="Where archived projects are stored. Required."
+      />
+      <Form.FilePicker
+        id="paraPath"
+        title="Para path (optional)"
+        allowMultipleSelection={false}
+        canChooseDirectories
+        canChooseFiles={false}
+        info="If set, pm uses paraPath/active and paraPath/archive. Leave empty to use the paths above directly."
+      />
+      <Form.FilePicker
+        id="notesTemplatePath"
+        title="Notes template file (optional)"
+        allowMultipleSelection={false}
+        canChooseDirectories={false}
+        canChooseFiles
+        info="Custom notes template for new project notes. Leave empty for default."
+      />
+      <Form.Separator />
+      <Form.TextField
+        id="obsidianVault"
+        title="Obsidian vault name (optional)"
+        placeholder="My Vault"
+        info="When using with Obsidian, set vault name and vault root below or later in extension preferences."
+      />
+      <Form.FilePicker
+        id="obsidianVaultPath"
+        title="Obsidian vault root (optional)"
+        allowMultipleSelection={false}
+        canChooseDirectories
+        canChooseFiles={false}
       />
     </Form>
   );

@@ -108,16 +108,8 @@ private let todoLinePattern: NSRegularExpression? = {
     try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
 }()
 
-// MARK: - Now-style focus advance (previous sibling's last leaf, else next sibling's first leaf, else parent)
-
-/// Last line index of the subtree rooted at idx (inclusive). Subtree = idx plus following lines with greater depth.
-private func lastLeafOf(sessionTodos: [Todo], idx: Int) -> Int {
-    var i = idx
-    while i + 1 < sessionTodos.count, sessionTodos[i + 1].depth > sessionTodos[idx].depth {
-        i += 1
-    }
-    return i
-}
+// MARK: - Now-style focus advance (parent's first leaf, else next sibling's first leaf, else parent)
+// Full flow: docs/task-focus-flow.md
 
 /// First leaf in the subtree rooted at idx (deepest first descendant, or self if leaf).
 private func firstLeafOf(sessionTodos: [Todo], idx: Int) -> Int {
@@ -125,6 +117,20 @@ private func firstLeafOf(sessionTodos: [Todo], idx: Int) -> Int {
         return idx
     }
     return firstLeafOf(sessionTodos: sessionTodos, idx: idx + 1)
+}
+
+/// First leaf in the parent's subtree (document order), excluding any index in indicesToComplete. Returns nil if parent has no such leaf.
+private func firstLeafOfParentExcluding(sessionTodos: [Todo], parentIdx: Int, indicesToComplete: Set<Int>) -> Int? {
+    let parentDepth = sessionTodos[parentIdx].depth
+    var i = parentIdx + 1
+    while i < sessionTodos.count, sessionTodos[i].depth > parentDepth {
+        let isLeaf = (i + 1 >= sessionTodos.count) || (sessionTodos[i + 1].depth <= sessionTodos[i].depth)
+        if isLeaf, !indicesToComplete.contains(i) {
+            return i
+        }
+        i += 1
+    }
+    return nil
 }
 
 /// Index of the parent task (last task before idx with strictly lesser depth), or nil if root-level.
@@ -161,7 +167,23 @@ private func siblingIndicesAndPosition(sessionTodos: [Todo], idx: Int) -> (indic
     return (siblingIndices, pos)
 }
 
-/// Choose next focus using now pattern: previous sibling's last leaf, else next sibling's first leaf, else parent. Prefer unchecked.
+/// First open (unchecked) leaf in document order that is not in the completed set. Used when no structural candidate exists.
+private func firstOpenLeafNotInSet(todos: [Todo], completedSessionIndex: Int, indicesToComplete: Set<Int>) -> Todo? {
+    let sessionIndices = Set(todos.map(\.sessionIndex)).sorted()
+    for sessionIdx in sessionIndices {
+        let sessionTodos = todos.filter { $0.sessionIndex == sessionIdx }.sorted { $0.lineIndex < $1.lineIndex }
+        for i in 0..<sessionTodos.count {
+            let t = sessionTodos[i]
+            guard !t.checked else { continue }
+            if sessionIdx == completedSessionIndex, indicesToComplete.contains(t.lineIndex) { continue }
+            let isLeaf = (i + 1 >= sessionTodos.count) || (sessionTodos[i + 1].depth <= t.depth)
+            if isLeaf { return t }
+        }
+    }
+    return nil
+}
+
+/// Choose next focus using now pattern: parent's first leaf, else next sibling's first leaf, else parent. Prefer unchecked.
 private func selectNewCurrentAfterRemoval(
     sessionTodos: [Todo],
     completedLineIndex: Int,
@@ -171,9 +193,9 @@ private func selectNewCurrentAfterRemoval(
         return nil
     }
     var candidates: [Int] = []
-    if position > 0 {
-        let prevSiblingIdx = siblingIndices[position - 1]
-        candidates.append(lastLeafOf(sessionTodos: sessionTodos, idx: prevSiblingIdx))
+    if let parentIdx = parentOf(sessionTodos: sessionTodos, idx: completedLineIndex),
+       let parentFirstLeaf = firstLeafOfParentExcluding(sessionTodos: sessionTodos, parentIdx: parentIdx, indicesToComplete: indicesToComplete) {
+        candidates.append(parentFirstLeaf)
     }
     if position + 1 < siblingIndices.count {
         let nextSiblingIdx = siblingIndices[position + 1]
@@ -192,7 +214,7 @@ private func selectNewCurrentAfterRemoval(
     return nil
 }
 
-/// Complete the todo at (sessionIndex, lineIndex) and all its descendants. Optionally move focus to next open todo (now-style: prev sibling last leaf, else next sibling first leaf, else parent).
+/// Complete the todo at (sessionIndex, lineIndex) and all its descendants. Optionally move focus to next open todo (now-style: parent's first leaf, else next sibling first leaf, else parent).
 public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) throws -> ProjectNotes {
     let todos = try parseTodos(notes: notes)
     guard sessionIndex < notes.sessions.count else { return notes }
@@ -251,10 +273,7 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
         if let nowStyle = selectNewCurrentAfterRemoval(sessionTodos: sessionTodos, completedLineIndex: lineIndex, indicesToComplete: indicesToComplete) {
             nextTodo = nowStyle
         } else {
-            let openTodos = todos.filter { !$0.checked }
-            nextTodo = openTodos.first { t in
-                t.sessionIndex != sessionIndex || !indicesToComplete.contains(t.lineIndex)
-            }
+            nextTodo = firstOpenLeafNotInSet(todos: todos, completedSessionIndex: sessionIndex, indicesToComplete: indicesToComplete)
         }
         updatedNotes = applyFocusToTodoInNotes(notes: updatedNotes, todo: nextTodo)
     }

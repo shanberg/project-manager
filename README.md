@@ -75,6 +75,8 @@ pm archive W-1                     # By prefix (unambiguous)
 pm unarchive W-1                   # Move from archive back to active
 ```
 
+**Task focus:** Each project has a single focused (“now”) task, shown in the menubar and used by Complete Focused Task, Dive In, etc. How focus moves when you complete a task (parent's first leaf → next sibling’s first leaf → parent, with fallbacks) is documented in [docs/task-focus-flow.md](docs/task-focus-flow.md).
+
 ## Config
 
 - `pm config get` - Show full config

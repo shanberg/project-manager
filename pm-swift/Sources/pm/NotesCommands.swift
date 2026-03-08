@@ -111,15 +111,15 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
 }
 
 func runNotesTodoComplete(args: [String]) {
-    let filtered = args.filter { $0 != "--advance" }
+    let filtered = args.filter { $0 != "--no-advance" }
     guard filtered.count >= 3,
           let sessionIndex = Int(filtered[1]),
           let lineIndex = Int(filtered[2]) else {
-        stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--advance]")
+        stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--no-advance]")
         exit(1)
     }
     let project = filtered[0]
-    let advanceFocus = args.contains("--advance")
+    let advanceFocus = !args.contains("--no-advance")
     do {
         let projectPath = try resolveProjectPath(nameOrPrefix: project)
         guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
@@ -152,7 +152,7 @@ func runNotes(args: [String]) {
         runNotesCurrentDay()
     case "todo":
         guard args.count >= 3, args[1] == "complete" else {
-            stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--advance]")
+            stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--no-advance]")
             exit(1)
         }
         runNotesTodoComplete(args: Array(args.dropFirst(2)))
