@@ -323,11 +323,12 @@ export async function updateDueDateInNotes(
   await writeNotes(prefs, projectName, { ...notes, sessions });
 }
 
-/** Add a todo to today's session. Creates today's session if missing. Sets focus to the new task. */
+/** Add a todo to today's session. Creates today's session if missing. Sets focus to the new task. Optional dueDate is stored as next-line metadata. */
 export async function addTodoToTodaySession(
   prefs: PreferenceValues,
   projectName: string,
   text: string,
+  dueDate?: string | null,
 ): Promise<void> {
   const data = await getNotes(prefs, projectName);
   const notes = data.notes;
@@ -341,9 +342,10 @@ export async function addTodoToTodaySession(
   }
   const idx = todayIdx >= 0 ? todayIdx : 0;
   const session = sessions[idx];
+  const dueSuffix = dueDate ? `\n  due: ${dueDate}` : "";
   const newBody = session.body
-    ? `${session.body}\n- [ ] ${text}`
-    : `- [ ] ${text}`;
+    ? `${session.body}\n- [ ] ${text}${dueSuffix}`
+    : `- [ ] ${text}${dueSuffix}`;
   const updatedSessions = sessions.map((s, i) =>
     i === idx ? { ...s, body: newBody } : s,
   );
@@ -353,16 +355,19 @@ export async function addTodoToTodaySession(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Add a todo line before the given todo in notes. Tasks are inserted in sequence (1, then 2, then …) before the anchor. New tasks use the same hierarchy level (indent) as the anchor. Returns updated notes and the anchor at its new position (for chaining "Add Another"). */
+/** Add a todo line before the given todo in notes. Tasks are inserted in sequence (1, then 2, then …) before the anchor. New tasks use the same hierarchy level (indent) as the anchor. Optional dueDate is stored as next-line metadata. Returns updated notes and the anchor at its new position (for chaining "Add Another"). */
 export async function addTodoBeforeInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   beforeTodo: Todo,
   text: string,
+  dueDate?: string | null,
 ): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo }> {
   const prefix = getListPrefix(beforeTodo.rawLine);
   const newLine = `${prefix}[ ] ${text}`;
+  const dueSuffix = dueDate ? `\n  due: ${dueDate}` : "";
+  const inserted = `${newLine}${dueSuffix}\n${beforeTodo.rawLine}`;
   const updated =
     typeof beforeTodo.sessionIndex === "number" &&
       typeof beforeTodo.lineIndex === "number"
@@ -370,13 +375,9 @@ export async function addTodoBeforeInNotes(
         notes,
         beforeTodo.sessionIndex,
         beforeTodo.lineIndex,
-        `${newLine}\n${beforeTodo.rawLine}`,
+        inserted,
       )
-      : replaceTodoRawLineInNotes(
-        notes,
-        beforeTodo.rawLine,
-        `${newLine}\n${beforeTodo.rawLine}`,
-      );
+      : replaceTodoRawLineInNotes(notes, beforeTodo.rawLine, inserted);
   await writeNotes(prefs, projectName, updated);
   const nextBeforeTodo: Todo =
     typeof beforeTodo.sessionIndex === "number" &&
@@ -391,16 +392,19 @@ export async function addTodoBeforeInNotes(
   return { notes: updated, nextBeforeTodo };
 }
 
-/** Add a todo line after the given todo in notes. Tasks are inserted in sequence (each after the previous). New tasks use the same hierarchy level (indent) as the anchor. Returns updated notes and the inserted todo (for chaining "Add Another"). */
+/** Add a todo line after the given todo in notes. Tasks are inserted in sequence (each after the previous). New tasks use the same hierarchy level (indent) as the anchor. Optional dueDate is stored as next-line metadata. Returns updated notes and the inserted todo (for chaining "Add Another"). */
 export async function addTodoAfterInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   afterTodo: Todo,
   text: string,
+  dueDate?: string | null,
 ): Promise<{ notes: ProjectNotes; insertedTodo: Todo }> {
   const prefix = getListPrefix(afterTodo.rawLine);
   const newLine = `${prefix}[ ] ${text}`;
+  const dueSuffix = dueDate ? `\n  due: ${dueDate}` : "";
+  const inserted = `${afterTodo.rawLine}\n${newLine}${dueSuffix}`;
   const updated =
     typeof afterTodo.sessionIndex === "number" &&
       typeof afterTodo.lineIndex === "number"
@@ -408,13 +412,9 @@ export async function addTodoAfterInNotes(
         notes,
         afterTodo.sessionIndex,
         afterTodo.lineIndex,
-        `${afterTodo.rawLine}\n${newLine}`,
+        inserted,
       )
-      : replaceTodoRawLineInNotes(
-        notes,
-        afterTodo.rawLine,
-        `${afterTodo.rawLine}\n${newLine}`,
-      );
+      : replaceTodoRawLineInNotes(notes, afterTodo.rawLine, inserted);
   await writeNotes(prefs, projectName, updated);
   const insertedTodo: Todo =
     typeof afterTodo.sessionIndex === "number" &&
@@ -467,19 +467,22 @@ function findTodoPositionInNotes(
   return null;
 }
 
-/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). Sets focus to the new child. */
+/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). Sets focus to the new child. Optional dueDate is stored as next-line metadata. */
 export async function addTodoAsChildInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   parentTodo: Todo,
   text: string,
+  dueDate?: string | null,
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0) return;
   const parentPrefix = parentTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
   const childPrefix = "  " + parentPrefix;
   const newLine = `${childPrefix}[ ] ${trimmed}`;
+  const dueSuffix = dueDate ? `\n  due: ${dueDate}` : "";
+  const inserted = `${parentTodo.rawLine}\n${newLine}${dueSuffix}`;
   let updated =
     typeof parentTodo.sessionIndex === "number" &&
       typeof parentTodo.lineIndex === "number"
@@ -487,13 +490,9 @@ export async function addTodoAsChildInNotes(
         notes,
         parentTodo.sessionIndex,
         parentTodo.lineIndex,
-        `${parentTodo.rawLine}\n${newLine}`,
+        inserted,
       )
-      : replaceTodoRawLineInNotes(
-        notes,
-        parentTodo.rawLine,
-        `${parentTodo.rawLine}\n${newLine}`,
-      );
+      : replaceTodoRawLineInNotes(notes, parentTodo.rawLine, inserted);
   const newChildPos =
     typeof parentTodo.sessionIndex === "number" &&
       typeof parentTodo.lineIndex === "number"
@@ -508,16 +507,16 @@ export async function addTodoAsChildInNotes(
   await writeNotes(prefs, projectName, updated);
 }
 
-/** Edit a todo's text in place; preserves indent, checkbox state, and focus marker. */
+/** Edit a todo's text in place; preserves indent, checkbox state, and focus marker. Returns updated notes for chaining (e.g. with updateDueDateInNotes). */
 export async function editTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
   todo: Todo,
   newText: string,
-): Promise<void> {
+): Promise<ProjectNotes> {
   const trimmed = newText.trim();
-  if (trimmed.length === 0) return;
+  if (trimmed.length === 0) return notes;
   const prefix = todo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
   const checkMatch = todo.rawLine.match(/\[([ xX])\]/);
   const checkbox = checkMatch ? checkMatch[1] : " ";
@@ -534,6 +533,7 @@ export async function editTodoInNotes(
     newLine,
   );
   await writeNotes(prefs, projectName, updated);
+  return updated;
 }
 
 /** Wrap the given todo in a new parent task (insert parent above, indent current by 2 spaces); focus stays on the wrapped task. */

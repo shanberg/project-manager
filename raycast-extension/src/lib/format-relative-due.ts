@@ -1,3 +1,14 @@
+/** Format a Date for storage (YYYY-MM-DD or YYYY-MM-DD HH:mm). */
+export function formatDueForStorage(d: Date): string {
+  const dateStr = d.toISOString().slice(0, 10);
+  const hours = d.getHours();
+  const mins = d.getMinutes();
+  if (hours === 12 && mins === 0) return dateStr;
+  const h = String(hours).padStart(2, "0");
+  const m = String(mins).padStart(2, "0");
+  return `${dateStr} ${h}:${m}`;
+}
+
 export function parseDueDate(s: string): Date | null {
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) {

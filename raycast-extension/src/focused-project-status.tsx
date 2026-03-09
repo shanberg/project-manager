@@ -15,7 +15,7 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { useCachedPromise, getProgressIcon } from "@raycast/utils";
+import { useCachedPromise, getProgressIcon, getFavicon } from "@raycast/utils";
 import type { LinkEntry } from "./lib/notes-api";
 import { getNotes, resolveNotesPath } from "./lib/notes-api";
 import {
@@ -271,7 +271,7 @@ export default function Command() {
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
                   key={`${i}-${link.url}`}
-                  icon={Icon.Link}
+                  icon={getFavicon(link.url)}
                   title={
                     link.label.length > 50
                       ? link.label.slice(0, 47) + "…"

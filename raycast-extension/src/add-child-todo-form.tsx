@@ -8,6 +8,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import { addTodoAsChildInNotes } from "./lib/notes-api";
+import { formatDueForStorage } from "./lib/format-relative-due";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -27,9 +28,21 @@ export default function AddChildTodoForm({
   const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
-  async function addTask(text: string): Promise<boolean> {
+  async function addTask(
+    text: string,
+    dueDate?: Date | null,
+  ): Promise<boolean> {
     try {
-      await addTodoAsChildInNotes(prefs, projectName, notes, parentTodo, text);
+      const dueStr =
+        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      await addTodoAsChildInNotes(
+        prefs,
+        projectName,
+        notes,
+        parentTodo,
+        text,
+        dueStr,
+      );
       await showToast({
         style: Toast.Style.Success,
         title: "Child Task Added",
@@ -48,16 +61,16 @@ export default function AddChildTodoForm({
     }
   }
 
-  async function handleAddAndDone(values: { text: string }) {
+  async function handleAddAndDone(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    await addTask(text);
+    await addTask(text, values.dueDate);
   }
 
-  async function handleAddAndAnother(values: { text: string }) {
+  async function handleAddAndAnother(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    const ok = await addTask(text);
+    const ok = await addTask(text, values.dueDate);
     if (ok)
       push(
         <AddChildTodoForm
@@ -86,6 +99,11 @@ export default function AddChildTodoForm({
         title="Child Task"
         placeholder="e.g. Subtask under current task"
         autoFocus
+      />
+      <Form.DatePicker
+        id="dueDate"
+        title="Due"
+        type={Form.DatePicker.Type.DateTime}
       />
     </Form>
   );

@@ -219,9 +219,9 @@ export default function Command() {
         nextTodo
           ? data?.iconColor
             ? {
-                source: Icon.ArrowRightCircleFilled,
-                tintColor: data?.iconColor,
-              }
+              source: Icon.ArrowRightCircleFilled,
+              tintColor: data?.iconColor,
+            }
             : Icon.ArrowRightCircleFilled
           : Icon.Ellipsis
       }

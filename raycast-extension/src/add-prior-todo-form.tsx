@@ -8,6 +8,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import { addTodoBeforeInNotes, getNotes } from "./lib/notes-api";
+import { formatDueForStorage } from "./lib/format-relative-due";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -27,10 +28,22 @@ export default function AddPriorTodoForm({
   const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
-  async function addTask(text: string): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo } | null> {
+  async function addTask(
+    text: string,
+    dueDate?: Date | null,
+  ): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo } | null> {
     try {
       const data = await getNotes(prefs, projectName);
-      const result = await addTodoBeforeInNotes(prefs, projectName, data.notes, beforeTodo, text);
+      const dueStr =
+        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      const result = await addTodoBeforeInNotes(
+        prefs,
+        projectName,
+        data.notes,
+        beforeTodo,
+        text,
+        dueStr,
+      );
       await showToast({
         style: Toast.Style.Success,
         title: "Task Added",
@@ -49,16 +62,16 @@ export default function AddPriorTodoForm({
     }
   }
 
-  async function handleAddAndDone(values: { text: string }) {
+  async function handleAddAndDone(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    await addTask(text);
+    await addTask(text, values.dueDate);
   }
 
-  async function handleAddAndAnother(values: { text: string }) {
+  async function handleAddAndAnother(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    const result = await addTask(text);
+    const result = await addTask(text, values.dueDate);
     if (result)
       push(
         <AddPriorTodoForm
@@ -87,6 +100,11 @@ export default function AddPriorTodoForm({
         title="Task"
         placeholder="e.g. Review PR, Call client"
         autoFocus
+      />
+      <Form.DatePicker
+        id="dueDate"
+        title="Due"
+        type={Form.DatePicker.Type.DateTime}
       />
     </Form>
   );

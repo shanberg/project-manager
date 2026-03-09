@@ -314,8 +314,14 @@
       "title": "Menubar Project Display",
       "description": "Show project name or code in the focused project menubar item.",
       "data": [
-        { "value": "code", "title": "Project Code (e.g. W-001)" },
-        { "value": "name", "title": "Project Name" }
+        {
+          "value": "code",
+          "title": "Project Code (e.g. W-001)"
+        },
+        {
+          "value": "name",
+          "title": "Project Name"
+        }
       ],
       "default": "code"
     }

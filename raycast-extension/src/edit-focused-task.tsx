@@ -12,7 +12,7 @@ import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { getNotes, editTodoInNotes, updateDueDateInNotes } from "./lib/notes-api";
 import { refreshMenubar } from "./lib/menubar-refresh";
-import SetDueDateForm from "./set-due-date-form";
+import { parseDueDate, formatDueForStorage } from "./lib/format-relative-due";
 import type { PreferenceValues } from "./lib/types";
 
 async function fetchFocusedProjectWithNextTodo(
@@ -85,7 +85,7 @@ export default function Command() {
     }
   }
 
-  async function handleSubmit(values: { text: string }) {
+  async function handleSubmit(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) {
       await showToast({
@@ -95,13 +95,22 @@ export default function Command() {
       return;
     }
     try {
-      await editTodoInNotes(
+      const updatedNotes = await editTodoInNotes(
         prefs,
         data!.projectName,
         data!.notes,
         nowTask,
         text,
       );
+      if (values.dueDate != null) {
+        await updateDueDateInNotes(
+          prefs,
+          data!.projectName,
+          updatedNotes,
+          nowTask,
+          formatDueForStorage(values.dueDate),
+        );
+      }
       await showToast({
         style: Toast.Style.Success,
         title: "Task Updated",
@@ -123,18 +132,6 @@ export default function Command() {
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Update" onSubmit={handleSubmit} />
-          <Action.Push
-            title="Set Due Date"
-            icon={Icon.Calendar}
-            target={
-              <SetDueDateForm
-                projectName={data!.projectName}
-                notes={data!.notes}
-                todo={nowTask}
-                onSuccess={refreshMenubar}
-              />
-            }
-          />
           {nowTask.dueDate && (
             <Action
               title="Remove Due Date"
@@ -151,6 +148,12 @@ export default function Command() {
         placeholder="e.g. Review PR, Call client"
         defaultValue={nowTask.text}
         autoFocus
+      />
+      <Form.DatePicker
+        id="dueDate"
+        title="Due"
+        type={Form.DatePicker.Type.DateTime}
+        defaultValue={nowTask.dueDate ? parseDueDate(nowTask.dueDate) ?? undefined : undefined}
       />
     </Form>
   );

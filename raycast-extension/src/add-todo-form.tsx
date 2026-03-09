@@ -8,6 +8,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import { addTodoToTodaySession } from "./lib/notes-api";
+import { formatDueForStorage } from "./lib/format-relative-due";
 import type { PreferenceValues } from "./lib/types";
 
 interface Props {
@@ -19,9 +20,14 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { push } = useNavigation();
 
-  async function addTask(text: string): Promise<boolean> {
+  async function addTask(
+    text: string,
+    dueDate?: Date | null,
+  ): Promise<boolean> {
     try {
-      await addTodoToTodaySession(prefs, projectName, text);
+      const dueStr =
+        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      await addTodoToTodaySession(prefs, projectName, text, dueStr);
       await showToast({
         style: Toast.Style.Success,
         title: "Task Added",
@@ -40,16 +46,16 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
     }
   }
 
-  async function handleAddAndDone(values: { text: string }) {
+  async function handleAddAndDone(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    await addTask(text);
+    await addTask(text, values.dueDate);
   }
 
-  async function handleAddAndAnother(values: { text: string }) {
+  async function handleAddAndAnother(values: { text: string; dueDate?: Date }) {
     const text = values.text.trim();
     if (!text) return;
-    const ok = await addTask(text);
+    const ok = await addTask(text, values.dueDate);
     if (ok)
       push(<AddTodoForm projectName={projectName} onSuccess={onSuccess} />);
   }
@@ -71,6 +77,11 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
         title="Task"
         placeholder="e.g. Review PR, Call client"
         autoFocus
+      />
+      <Form.DatePicker
+        id="dueDate"
+        title="Due"
+        type={Form.DatePicker.Type.DateTime}
       />
     </Form>
   );

@@ -7,7 +7,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import { updateDueDateInNotes } from "./lib/notes-api";
-import { parseDueDate } from "./lib/format-relative-due";
+import { parseDueDate, formatDueForStorage } from "./lib/format-relative-due";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import type { PreferenceValues } from "./lib/types";
 
@@ -16,16 +16,6 @@ interface Props {
   notes: ProjectNotes;
   todo: Todo;
   onSuccess?: () => void;
-}
-
-function formatDueForStorage(d: Date): string {
-  const dateStr = d.toISOString().slice(0, 10);
-  const hours = d.getHours();
-  const mins = d.getMinutes();
-  if (hours === 12 && mins === 0) return dateStr;
-  const h = String(hours).padStart(2, "0");
-  const m = String(mins).padStart(2, "0");
-  return `${dateStr} ${h}:${m}`;
 }
 
 export default function SetDueDateForm({
