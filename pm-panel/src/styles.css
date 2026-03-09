@@ -1,0 +1,312 @@
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #1a1a1a;
+  color-scheme: light dark;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+}
+
+.panel {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  max-height: 100vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 52px);
+  padding-right: env(safe-area-inset-right, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  background: transparent;
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+
+.panel-drag-region {
+  padding: 12px 16px 4px;
+  cursor: default;
+  pointer-events: none;
+}
+
+.panel-body {
+  padding: 8px 16px 16px;
+}
+
+.panel-body .project-picker,
+.panel-body input,
+.panel-body a,
+.panel-body .todo-label,
+.panel-body .tasks-filter {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  pointer-events: none;
+}
+
+.project-picker-wrap {
+  margin: 0 0 10px 0;
+}
+
+.project-picker {
+  width: 100%;
+  max-width: 100%;
+  font: inherit;
+  padding: 4px 6px;
+  cursor: pointer;
+  appearance: auto;
+  background-color: field;
+  color: fieldtext;
+  border: 1px solid #ccc;
+}
+
+.project-picker:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.project-picker:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.project-picker:focus-visible {
+  outline: 1px solid CanvasText;
+  outline-offset: 1px;
+}
+
+.error {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: #c00;
+  pointer-events: none;
+}
+
+.content {
+  margin-top: 8px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 10px;
+}
+
+.block {
+  margin-bottom: 10px;
+}
+
+.block:empty {
+  display: none;
+}
+
+.section-title {
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+  pointer-events: none;
+}
+
+.section-body {
+  margin: 0;
+  font-size: 12px;
+  color: #333;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.section-body a {
+  color: LinkText;
+  text-decoration: none;
+}
+
+.section-body a:hover {
+  text-decoration: underline;
+}
+
+.tasks-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.tasks-section-header .section-title {
+  margin: 0;
+}
+
+.tasks-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tasks-filter input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.todo-session-header {
+  margin: 8px 0 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+  pointer-events: none;
+}
+
+.todo-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.55;
+  color: #666;
+}
+
+.todo-row.todo-row-focused {
+  opacity: 1;
+  color: inherit;
+  font-weight: 500;
+}
+
+/* Checkboxes: flat fill instead of accent */
+.todo-checkbox,
+.tasks-filter input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #999;
+  border-radius: 3px;
+  background: transparent;
+  background-size: 10px 10px;
+  background-position: center;
+}
+
+.todo-checkbox:checked,
+.tasks-filter input[type="checkbox"]:checked {
+  background-color: #555;
+  border-color: #555;
+  background-image: url("/check-white.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 10px;
+}
+
+.todo-label {
+  cursor: pointer;
+  user-select: text;
+  word-break: break-word;
+}
+
+.todo-label:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e6e6e6;
+  }
+
+  .panel {
+    background: transparent;
+  }
+
+  .panel-title {
+    color: #999;
+  }
+
+  .error {
+    color: #f66;
+  }
+
+  .project-picker {
+    background-color: field;
+    color: fieldtext;
+    border-color: #555;
+  }
+
+  .todo-checkbox,
+  .tasks-filter input[type="checkbox"] {
+    border-color: #888;
+  }
+
+  .todo-checkbox:checked,
+  .tasks-filter input[type="checkbox"]:checked {
+    background-color: #888;
+    border-color: #888;
+    background-image: url("/check-dark.svg");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 10px 10px;
+  }
+
+  .content {
+    border-top-color: #333;
+  }
+
+  .section-title {
+    color: #aaa;
+  }
+
+  .section-body {
+    color: #ccc;
+  }
+
+  .section-body a {
+    color: LinkText;
+  }
+
+  .todo-row {
+    color: #888;
+  }
+
+  .todo-row.todo-row-focused {
+    color: #e6e6e6;
+  }
+
+  .todo-session-header {
+    color: #aaa;
+  }
+
+  .tasks-filter {
+    color: #aaa;
+  }
+}

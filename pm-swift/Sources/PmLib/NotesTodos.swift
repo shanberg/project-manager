@@ -280,6 +280,88 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
     return updatedNotes
 }
 
+/// Move the single " @" focus marker to the task at (sessionIndex, lineIndex). Strips @ from all other task lines.
+public func applyFocusToTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int) -> ProjectNotes {
+    guard let pattern = todoLinePattern else { return notes }
+    var outSessions: [Session] = []
+    for (si, session) in notes.sessions.enumerated() {
+        let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var taskCount = 0
+        var outLines: [String] = []
+        for line in lines {
+            guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                  let r1 = Range(m.range(at: 1), in: line),
+                  let r2 = Range(m.range(at: 2), in: line),
+                  let r3 = Range(m.range(at: 3), in: line) else {
+                outLines.append(line)
+                continue
+            }
+            let isTarget = si == sessionIndex && taskCount == lineIndex
+            var content = String(line[r3])
+            if content.hasSuffix(focusMarkerSuffix) {
+                content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+            }
+            let prefix = String(line[r1])
+            let check = String(line[r2])
+            outLines.append("\(prefix)[\(check)] \(content)\(isTarget ? focusMarkerSuffix : "")")
+            taskCount += 1
+        }
+        outSessions.append(Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n")))
+    }
+    return ProjectNotes(
+        title: notes.title,
+        summary: notes.summary,
+        problem: notes.problem,
+        goals: notes.goals,
+        approach: notes.approach,
+        links: notes.links,
+        learnings: notes.learnings,
+        sessions: outSessions
+    )
+}
+
+/// Uncheck the task at (sessionIndex, lineIndex) and move focus to it. One logical write.
+public func undoTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int) throws -> ProjectNotes {
+    guard sessionIndex < notes.sessions.count else { return notes }
+    guard let pattern = todoLinePattern else { return notes }
+    let session = notes.sessions[sessionIndex]
+    let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var taskCount = 0
+    var outLines: [String] = []
+    for line in lines {
+        guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let r1 = Range(m.range(at: 1), in: line),
+              let r2 = Range(m.range(at: 2), in: line),
+              let r3 = Range(m.range(at: 3), in: line) else {
+            outLines.append(line)
+            continue
+        }
+        let prefix = String(line[r1])
+        var check = String(line[r2])
+        var content = String(line[r3])
+        if content.hasSuffix(focusMarkerSuffix) {
+            content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        if taskCount == lineIndex {
+            check = " "
+        }
+        outLines.append("\(prefix)[\(check)] \(content)")
+        taskCount += 1
+    }
+    var updatedNotes = ProjectNotes(
+        title: notes.title,
+        summary: notes.summary,
+        problem: notes.problem,
+        goals: notes.goals,
+        approach: notes.approach,
+        links: notes.links,
+        learnings: notes.learnings,
+        sessions: notes.sessions
+    )
+    updatedNotes.sessions[sessionIndex] = Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n"))
+    return applyFocusToTodoAt(notes: updatedNotes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+}
+
 private func applyFocusToTodoInNotes(notes: ProjectNotes, todo: Todo?) -> ProjectNotes {
     guard let pattern = todoLinePattern else { return notes }
     let targetSessionIndex = todo?.sessionIndex ?? -1

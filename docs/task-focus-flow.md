@@ -42,7 +42,7 @@ Implementation: `pm-swift/Sources/PmLib/NotesTodos.swift` → `selectNewCurrentA
 
 - **Dive In:** Moves focus to the first leaf under the current focused task, or to the first leaf in the tree if nothing is focused.
 - **Clicking a task** in the Focused Project menubar or View Focused Project: focus moves to that task.
-- **Set focus in notes:** `setFocusToTodoInNotes` (and the CLI path it uses) moves the ` @` to the chosen task’s line and strips it from all others.
+- **Set focus in notes:** Implemented by the CLI as `pm notes todo focus <project> <sessionIndex> <lineIndex>`. Both the panel and the Raycast extension call this; it moves the ` @` to the chosen task’s line and strips it from all others.
 
 ## When a new task gets focus
 
@@ -55,7 +55,7 @@ Implementation: `pm-swift/Sources/PmLib/NotesTodos.swift` → `selectNewCurrentA
 
 ## Undo
 
-- **Undo complete:** The task is toggled back to unchecked and the focus marker ` @` is moved back onto that task’s line (one write).
+- **Undo complete:** The task is toggled back to unchecked and the focus marker ` @` is moved back onto that task’s line (one write). Implemented by the CLI as `pm notes todo undo <project> <sessionIndex> <lineIndex>`; both the panel and the Raycast extension use this command.
 
 ## Summary diagram (advance on complete)
 
