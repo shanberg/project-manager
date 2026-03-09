@@ -1,6 +1,9 @@
-/** Format a Date for storage (YYYY-MM-DD or YYYY-MM-DD HH:mm). */
+/** Format a Date for storage (YYYY-MM-DD or YYYY-MM-DD HH:mm). Uses local date/time. */
 export function formatDueForStorage(d: Date): string {
-  const dateStr = d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const dateStr = `${y}-${mo}-${day}`;
   const hours = d.getHours();
   const mins = d.getMinutes();
   if (hours === 12 && mins === 0) return dateStr;
