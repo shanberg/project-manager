@@ -115,10 +115,7 @@ public struct ObsidianNotesIO: NotesIO {
     private func writeViaCLI(relativePath: String, absolutePath: String, content: String) throws {
         // Obsidian CLI: create with path= and content=; overwrite so existing files are updated.
         // Docs say use \n for newlines in content= value, so escape backslashes then newlines.
-        let normalized = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let contentEscaped = normalized
+        let contentEscaped = content
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\n", with: "\\n")
         let result = runProcess(executable: "/usr/bin/env", arguments: ["obsidian", "create", "vault=\(vaultName)", "path=\(relativePath)", "content=\(contentEscaped)", "overwrite"])
