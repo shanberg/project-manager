@@ -19,7 +19,7 @@ body {
   max-height: 100vh;
   overflow-y: auto;
   box-sizing: border-box;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 52px);
+  padding-top: calc(env(safe-area-inset-top, 0px) + 24px);
   padding-right: env(safe-area-inset-right, 0);
   padding-bottom: env(safe-area-inset-bottom, 0);
   padding-left: env(safe-area-inset-left, 0);
