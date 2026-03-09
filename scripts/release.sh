@@ -29,17 +29,22 @@ fi
 
 # Resolve VERSION: if arg is patch/minor/major, bump current; else use arg as version
 if [[ "$ARG" == patch || "$ARG" == minor || "$ARG" == major ]]; then
-  VERSION=$(node -e "
+  VERSION=$(BUMP="$ARG" node -e "
     const bump = process.env.BUMP;
     const v = require('./package.json').version;
     const [major, minor, patch] = v.split('.').map(Number);
     if (bump === 'major') console.log((major + 1) + '.0.0');
     else if (bump === 'minor') console.log(major + '.' + (minor + 1) + '.0');
     else console.log(major + '.' + minor + '.' + (patch + 1));
-  " BUMP="$ARG")
+  ")
   echo "==> Bump $ARG: $CURRENT → $VERSION"
 else
   VERSION="$ARG"
+  if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Version must be semver (e.g. 0.1.2). Got: $VERSION" >&2
+    echo "Use patch, minor, or major to bump from current version." >&2
+    exit 1
+  fi
 fi
 
 TAG="v${VERSION}"
