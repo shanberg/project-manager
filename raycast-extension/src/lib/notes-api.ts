@@ -156,16 +156,16 @@ function firstOpenLeaf(todos: Todo[]): Todo | undefined {
 export async function getNotes(
   prefs: PreferenceValues,
   projectName: string,
+  signal?: AbortSignal,
 ): Promise<NotesShowOutput> {
-  const { stdout, stderr } = await runPmWithPrefs(prefs, [
-    "notes",
-    "show",
-    projectName,
-  ]);
+  const { stdout, stderr } = await runPmWithPrefs(
+    prefs,
+    ["notes", "show", projectName],
+    signal,
+  );
   const parsed = JSON.parse(stdout.trim()) as NotesShowOutput;
   if (!parsed?.notes) throw new Error(stderr || "Invalid notes response");
 
-  // If no task is focused but there are open tasks, focus the first open leaf (best-effort).
   const firstLeaf = firstOpenLeaf(parsed.todos ?? []);
   if (
     (parsed.focusedKey == null || parsed.focusedKey === "") &&
@@ -173,9 +173,8 @@ export async function getNotes(
   ) {
     try {
       await setFocusToTodoInNotes(prefs, projectName, parsed.notes, firstLeaf);
-      return getNotes(prefs, projectName);
+      return getNotes(prefs, projectName, signal);
     } catch {
-      // Write failed (e.g. permissions, pm unavailable); return current data so fetch doesn't fail.
       return parsed;
     }
   }
@@ -225,13 +224,14 @@ async function completeTodoViaCli(
 export async function resolveNotesPath(
   prefs: PreferenceValues,
   projectName: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
-    const { stdout } = await runPmWithPrefs(prefs, [
-      "notes",
-      "path",
-      projectName,
-    ]);
+    const { stdout } = await runPmWithPrefs(
+      prefs,
+      ["notes", "path", projectName],
+      signal,
+    );
     const p = stdout.trim();
     return p || null;
   } catch {

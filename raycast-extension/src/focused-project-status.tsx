@@ -1,3 +1,4 @@
+import React, { useRef, useMemo } from "react";
 import path from "path";
 import {
   getObsidianUri,
@@ -33,6 +34,14 @@ import {
 import type { PreferenceValues } from "./lib/types";
 
 const TOOLTIP_MAX_LEN = 80;
+
+function toAbsoluteUrl(url: string): string {
+  const t = url.trim();
+  if (!t) return t;
+  if (t.startsWith("//")) return "https:" + t;
+  if (t.startsWith("http://") || t.startsWith("https://")) return t;
+  return "https://" + t;
+}
 
 function truncForTooltip(s: string): string {
   const t = s.trim();
@@ -85,17 +94,21 @@ function flattenLinks(links: LinkEntry[]): { label: string; url: string }[] {
   return result;
 }
 
-async function fetchFocusedProjectStatus(
-  configPath: string | undefined,
-  pmCliPath: string | undefined,
+function fetchFocusedProjectStatus(
+  abortRef: React.RefObject<AbortController | null | undefined>,
 ) {
-  const prefs = { configPath, pmCliPath };
+  return async (
+    configPath: string | undefined,
+    pmCliPath: string | undefined,
+  ) => {
+    const prefs = { configPath, pmCliPath };
+    const signal = abortRef?.current?.signal;
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
   if (!parsed) return null;
   const { basePath, name } = parsed;
-  const notesPath = await resolveNotesPath(prefs, name);
+  const notesPath = await resolveNotesPath(prefs, name, signal);
   if (!notesPath)
     return {
       name,
@@ -109,7 +122,7 @@ async function fetchFocusedProjectStatus(
       notes: null as null,
     };
   try {
-    const out = await getNotes(prefs, name);
+    const out = await getNotes(prefs, name, signal);
     const notes = out.notes;
     const todos = out.todos ?? [];
     const total = todos.length;
@@ -139,10 +152,11 @@ async function fetchFocusedProjectStatus(
       notes: null,
     };
   }
+  };
 }
 
 function toFocusedProjectData(
-  data: NonNullable<Awaited<ReturnType<typeof fetchFocusedProjectStatus>>>,
+  data: NonNullable<Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>>>,
 ): FocusedProjectData {
   return {
     name: data.name,
@@ -154,36 +168,52 @@ function toFocusedProjectData(
   };
 }
 
-async function fetchRecentProjects(
-  configPath: string | undefined,
-  pmCliPath: string | undefined,
-  focusedKey: string | null,
-  focusedData: Awaited<ReturnType<typeof fetchFocusedProjectStatus>>,
+function fetchRecentProjects(
+  abortRef: React.RefObject<AbortController | null | undefined>,
 ) {
-  const prefs = { configPath, pmCliPath };
-  const focusedProjectData =
-    focusedData != null ? toFocusedProjectData(focusedData) : undefined;
-  return getRecentProjectsByEdit(
-    prefs,
-    10,
-    focusedKey ?? undefined,
-    focusedProjectData,
-  );
+  return async (
+    configPath: string | undefined,
+    pmCliPath: string | undefined,
+    focusedKey: string | null,
+    focusedData: Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>>,
+  ) => {
+    const prefs = { configPath, pmCliPath };
+    const signal = abortRef?.current?.signal;
+    const focusedProjectData =
+      focusedData != null ? toFocusedProjectData(focusedData) : undefined;
+    return getRecentProjectsByEdit(
+      prefs,
+      10,
+      focusedKey ?? undefined,
+      focusedProjectData,
+      signal,
+    );
+  };
 }
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const abortableFocused = useRef<AbortController>();
+  const abortableRecent = useRef<AbortController>();
+  const fetchFocused = useMemo(
+    () => fetchFocusedProjectStatus(abortableFocused),
+    [],
+  );
+  const fetchRecent = useMemo(
+    () => fetchRecentProjects(abortableRecent),
+    [],
+  );
   const { data, isLoading, revalidate } = useCachedPromise(
-    fetchFocusedProjectStatus,
+    fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
-    { execute: true },
+    { execute: true, abortable: abortableFocused },
   );
 
   const focusedKey = data ? projectKey(data.basePath, data.name) : null;
   const { data: recentProjects } = useCachedPromise(
-    fetchRecentProjects,
+    fetchRecent,
     [prefs.configPath, prefs.pmCliPath, focusedKey, data],
-    { execute: true },
+    { execute: true, abortable: abortableRecent },
   );
 
   const menubarLabel =
@@ -292,7 +322,7 @@ export default function Command() {
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
                   key={`${i}-${link.url}`}
-                  icon={getFavicon(link.url)}
+                  icon={getFavicon(toAbsoluteUrl(link.url))}
                   title={
                     link.label.length > 50
                       ? link.label.slice(0, 47) + "…"

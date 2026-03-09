@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import path from "path";
 import { stat } from "fs/promises";
 import {
@@ -48,6 +48,7 @@ import {
   FINDER_APP_PATH,
   OBSIDIAN_APP_PATH,
 } from "./lib/utils";
+import { mapWithConcurrency, PM_CONCURRENCY } from "./lib/concurrency";
 
 /** Match domain code at start of project name; use longer codes first so DE matches before D. */
 function getDomainFromCodes(
@@ -78,11 +79,12 @@ function parseSearchToken(
 async function loadNotesForProject(
   prefs: { configPath?: string; pmCliPath?: string },
   projectName: string,
+  signal?: AbortSignal,
 ): Promise<{ notes: ProjectNotes; notesPath: string; todos: Todo[] } | null> {
-  const notesPath = await resolveNotesPath(prefs, projectName);
+  const notesPath = await resolveNotesPath(prefs, projectName, signal);
   if (!notesPath) return null;
   try {
-    const out = await getNotes(prefs, projectName);
+    const out = await getNotes(prefs, projectName, signal);
     return { notes: out.notes, notesPath, todos: out.todos };
   } catch {
     return null;
@@ -101,20 +103,19 @@ type ProjectWithMeta = {
   total: number;
 };
 
-async function fetchProjectsWithMeta(
-  configPath: string | undefined,
-  pmCliPath: string | undefined,
-): Promise<{
-  active: ProjectWithMeta[];
-  archive: ProjectWithMeta[];
-  activePath: string;
-  archivePath: string;
-}> {
+function fetchProjectsWithMeta(
+  abortRef: React.RefObject<AbortController | null | undefined>,
+) {
+  return async (
+    configPath: string | undefined,
+    pmCliPath: string | undefined,
+  ) => {
   const prefs = { configPath, pmCliPath };
+  const signal = abortRef?.current?.signal;
   const [paths, domains, { stdout }] = await Promise.all([
-    getPmPaths(prefs),
+    getPmPaths(prefs, signal),
     getConfigDomains(prefs),
-    runPmWithPrefs(prefs, ["list", "--all"]),
+    runPmWithPrefs(prefs, ["list", "--all"], signal),
   ]);
   const { activePath, archivePath } = paths;
   const domainCodes = Object.keys(domains);
@@ -123,34 +124,31 @@ async function fetchProjectsWithMeta(
     names: string[],
     basePath: string,
   ): Promise<ProjectWithMeta[]> {
-    const results = await Promise.all(
-      names.map(async (name) => {
-        const projectPath = path.join(basePath, name);
-        const [loaded, stats] = await Promise.all([
-          loadNotesForProject(prefs, name),
-          stat(projectPath).catch(() => ({ mtime: 0 as number })),
-        ]);
-        const notes = loaded?.notes ?? null;
-        const todos = loaded?.todos ?? [];
-        const done = todos.filter(
-          (t: { checked: boolean }) => t.checked,
-        ).length;
-        const mtime =
-          typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
-        return {
-          name,
-          notes,
-          notesPath: loaded?.notesPath ?? null,
-          mtime,
-          hasSrc: hasSrcDir(path.join(basePath, name)),
-          basePath,
-          domain: getDomainFromCodes(name, domainCodes),
-          done,
-          total: todos.length,
-        };
-      }),
-    );
-    return results;
+    return mapWithConcurrency(names, PM_CONCURRENCY, async (name) => {
+      const projectPath = path.join(basePath, name);
+      const [loaded, stats] = await Promise.all([
+        loadNotesForProject(prefs, name, signal),
+        stat(projectPath).catch(() => ({ mtime: 0 as number })),
+      ]);
+      const notes = loaded?.notes ?? null;
+      const todos = loaded?.todos ?? [];
+      const done = todos.filter(
+        (t: { checked: boolean }) => t.checked,
+      ).length;
+      const mtime =
+        typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
+      return {
+        name,
+        notes,
+        notesPath: loaded?.notesPath ?? null,
+        mtime,
+        hasSrc: hasSrcDir(path.join(basePath, name)),
+        basePath,
+        domain: getDomainFromCodes(name, domainCodes),
+        done,
+        total: todos.length,
+      };
+    });
   }
 
   const { active: activeNames, archive: archiveNames } =
@@ -161,6 +159,7 @@ async function fetchProjectsWithMeta(
   ]);
 
   return { active, archive, activePath, archivePath };
+  };
 }
 
 function filterAndSort(
@@ -197,14 +196,19 @@ export default function Command() {
   const [searchText, setSearchText] = useState("");
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
   const prefs = getPreferenceValues<PreferenceValues>();
+  const abortable = useRef<AbortController>();
+  const fetchProjects = useMemo(
+    () => fetchProjectsWithMeta(abortable),
+    [],
+  );
 
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
   const domainCodes = Object.keys(domains);
 
   const { data, isLoading, revalidate } = useCachedPromise(
-    fetchProjectsWithMeta,
+    fetchProjects,
     [prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true },
+    { keepPreviousData: true, abortable },
   );
 
   useEffect(() => {

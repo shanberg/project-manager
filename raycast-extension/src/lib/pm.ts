@@ -123,9 +123,15 @@ export async function setPmConfigKey(
 /** Get activePath and archivePath from pm config. Single source of truth. */
 export async function getPmPaths(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  signal?: AbortSignal,
 ): Promise<PmPaths> {
   const env = getConfigEnv(prefs.configPath);
-  const { stdout } = await runPm(["config", "get"], env, prefs.pmCliPath);
+  const { stdout } = await runPm(
+    ["config", "get"],
+    env,
+    prefs.pmCliPath,
+    signal,
+  );
   const config = JSON.parse(stdout.trim()) as {
     activePath?: string;
     archivePath?: string;
@@ -353,18 +359,25 @@ export async function syncObsidianPrefsToPmConfig(
 export async function runPmWithPrefs(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath"> & Partial<Pick<PreferenceValues, "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot">>,
   args: string[],
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   if (args[0] === "notes" && ("useObsidianCLI" in prefs || "obsidianVault" in prefs || "obsidianVaultRoot" in prefs)) {
     await syncObsidianPrefsToPmConfig(prefs as PrefsForNotes);
   }
-  return runPm(args, buildEnv(prefs), prefs.pmCliPath);
+  return runPm(args, buildEnv(prefs), prefs.pmCliPath, signal);
 }
+
+const PM_RUN_TIMEOUT_MS = 30_000;
 
 export async function runPm(
   args: string[],
   env: Record<string, string> = {},
   cliPathOverride?: string,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   const fullEnv = { ...process.env, ...env };
   const pmPath = resolvePmPath(cliPathOverride);
   return new Promise((resolve, reject) => {
@@ -376,11 +389,44 @@ export async function runPm(
     const stderrChunks: Buffer[] = [];
     child.stdout?.on("data", (c) => stdoutChunks.push(c));
     child.stderr?.on("data", (c) => stderrChunks.push(c));
-    child.on("error", (err) => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      reject(err);
-    });
+
+    let settled = false;
+    function finish(
+      result:
+        | { stdout: string; stderr: string; code: number | null }
+        | { error: Error },
+    ) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      if ("error" in result) reject(result.error);
+      else resolve(result);
+    }
+
+    const onAbort = () =>
+      finish({ error: new DOMException("Aborted", "AbortError") });
+    signal?.addEventListener("abort", onAbort);
+
+    const timeoutId = setTimeout(
+      () =>
+        finish({
+          error: new Error(
+            `pm timed out after ${PM_RUN_TIMEOUT_MS / 1000}s`,
+          ),
+        }),
+      PM_RUN_TIMEOUT_MS,
+    );
+
+    child.on("error", (err) => finish({ error: err }));
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),

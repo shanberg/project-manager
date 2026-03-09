@@ -1,3 +1,4 @@
+import React, { useRef, useMemo } from "react";
 import path from "path";
 import { getPreferenceValues } from "@raycast/api";
 import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
@@ -42,17 +43,21 @@ function breadcrumbForNowTask(todos: Todo[], nowTask: Todo): string {
   return [nowTask.context, ...path.map((t) => t.text)].join(" » ");
 }
 
-async function fetchFocusedProjectData(
-  configPath: string | undefined,
-  pmCliPath: string | undefined,
+function fetchFocusedProjectData(
+  abortRef: React.RefObject<AbortController | null | undefined>,
 ) {
-  const prefs = { configPath, pmCliPath };
+  return async (
+    configPath: string | undefined,
+    pmCliPath: string | undefined,
+  ) => {
+    const prefs = { configPath, pmCliPath };
+    const signal = abortRef?.current?.signal;
   const focusedKey = await getFocusedProject();
   if (!focusedKey) return null;
   const parsed = parseProjectKey(focusedKey);
   if (!parsed) return null;
   const { basePath, name } = parsed;
-  const notesPath = await resolveNotesPath(prefs, name);
+  const notesPath = await resolveNotesPath(prefs, name, signal);
   if (!notesPath) {
     await clearTaskTiming();
     return {
@@ -66,7 +71,7 @@ async function fetchFocusedProjectData(
     };
   }
   try {
-    const out = await getNotes(prefs, name);
+    const out = await getNotes(prefs, name, signal);
     const notes = out.notes;
     const todos = out.todos;
     const openTodos = todos.filter((t) => !t.checked);
@@ -107,16 +112,22 @@ async function fetchFocusedProjectData(
       iconColor: undefined,
     };
   }
+  };
 }
 
-type FocusedProjectData = Awaited<ReturnType<typeof fetchFocusedProjectData>>;
+type FocusedProjectData = Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectData>>>;
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const abortable = useRef<AbortController>();
+  const fetchFocused = useMemo(
+    () => fetchFocusedProjectData(abortable),
+    [],
+  );
   const { data, isLoading, revalidate } = useCachedPromise(
-    fetchFocusedProjectData,
+    fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
-    { execute: true },
+    { execute: true, abortable },
   ) as {
     data: FocusedProjectData | undefined;
     isLoading: boolean;

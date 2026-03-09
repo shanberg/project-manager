@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import path from "path";
 import {
   Action,
@@ -35,6 +35,7 @@ import AddChildTodoForm from "./add-child-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
+import SetDueDateForm from "./set-due-date-form";
 import {
   getObsidianUri,
   hasSrcDir,
@@ -54,20 +55,25 @@ function sectionDetail(content: string, emptyLabel: string) {
   return <List.Item.Detail markdown={markdown} />;
 }
 
-async function fetchProjectNotes(
-  projName: string,
-  configPath: string | undefined,
-  pmCliPath: string | undefined,
+function fetchProjectNotes(
+  abortRef: React.RefObject<AbortController | null | undefined>,
 ) {
-  const prefs = { configPath, pmCliPath };
-  const notesPath = await resolveNotesPath(prefs, projName);
-  if (!notesPath) return { notes: null, todos: [] as Todo[], notesPath: null };
-  try {
-    const out = await getNotes(prefs, projName);
-    return { notes: out.notes, todos: out.todos, notesPath };
-  } catch {
-    return { notes: null, todos: [] as Todo[], notesPath };
-  }
+  return async (
+    projName: string,
+    configPath: string | undefined,
+    pmCliPath: string | undefined,
+  ) => {
+    const prefs = { configPath, pmCliPath };
+    const signal = abortRef?.current?.signal;
+    const notesPath = await resolveNotesPath(prefs, projName, signal);
+    if (!notesPath) return { notes: null, todos: [] as Todo[], notesPath: null };
+    try {
+      const out = await getNotes(prefs, projName, signal);
+      return { notes: out.notes, todos: out.todos, notesPath };
+    } catch {
+      return { notes: null, todos: [] as Todo[], notesPath };
+    }
+  };
 }
 
 interface Props {
@@ -81,6 +87,8 @@ type TodoViewMode = "next" | "all";
 export default function ProjectView({ projectName, basePath }: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { pop } = useNavigation();
+  const abortable = useRef<AbortController>();
+  const fetchNotes = useMemo(() => fetchProjectNotes(abortable), []);
   const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
   const isActive = basePath === (paths?.activePath ?? "");
   const projectPath = path.join(basePath, projectName);
@@ -88,9 +96,9 @@ export default function ProjectView({ projectName, basePath }: Props) {
   const [todoFilter] = useState<TodoFilter>("all");
 
   const { data, isLoading, revalidate, mutate } = useCachedPromise(
-    fetchProjectNotes,
+    fetchNotes,
     [projectName, prefs.configPath, prefs.pmCliPath],
-    { keepPreviousData: true },
+    { keepPreviousData: true, abortable },
   );
 
   async function onNotesSuccess() {
@@ -358,6 +366,20 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   title="Copy Task"
                   icon={Icon.Clipboard}
                 />
+                {notes && (
+                  <Action.Push
+                    title="Set Due Date"
+                    icon={Icon.Calendar}
+                    target={
+                      <SetDueDateForm
+                        projectName={projectName}
+                        notes={notes}
+                        todo={nextTodo}
+                        onSuccess={onNotesSuccess}
+                      />
+                    }
+                  />
+                )}
               </ActionPanel>
             }
           />
@@ -412,6 +434,20 @@ export default function ProjectView({ projectName, basePath }: Props) {
                         title="Copy Task"
                         icon={Icon.Clipboard}
                       />
+                      {notes && (
+                        <Action.Push
+                          title="Set Due Date"
+                          icon={Icon.Calendar}
+                          target={
+                            <SetDueDateForm
+                              projectName={projectName}
+                              notes={notes}
+                              todo={todo}
+                              onSuccess={onNotesSuccess}
+                            />
+                          }
+                        />
+                      )}
                     </ActionPanel>
                   }
                 />
