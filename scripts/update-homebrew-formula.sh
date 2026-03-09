@@ -27,7 +27,12 @@ fi
 
 TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN}}"
 if [[ -z "$TOKEN" ]]; then
-  echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN." >&2
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    TOKEN=$(gh auth token)
+  fi
+fi
+if [[ -z "$TOKEN" ]]; then
+  echo "Set GITHUB_TOKEN or HOMEBREW_GITHUB_API_TOKEN, or run \`gh auth login\`." >&2
   exit 1
 fi
 
