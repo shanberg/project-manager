@@ -1,6 +1,6 @@
 {
   "name": "@shanberg/project-manager",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "CLI for project creation with domain-based numbering (Swift)",
   "license": "MIT",
   "scripts": {
