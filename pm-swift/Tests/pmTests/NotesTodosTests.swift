@@ -414,4 +414,37 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertNotNil(focused)
         XCTAssertEqual(focused?.text, "B", "focus moves to next sibling B (leaf)")
     }
+
+    /// applyFocusToTodoAt: focus on second task → only second has @.
+    func testApplyFocusToTodoAt() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [ ] B\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = applyFocusToTodoAt(notes: notes, sessionIndex: 0, lineIndex: 1)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertEqual(todos.count, 3)
+        XCTAssertFalse(todos[0].isFocused, "A no longer focused")
+        XCTAssertTrue(todos[1].isFocused, "B is focused")
+        XCTAssertFalse(todos[2].isFocused, "C not focused")
+    }
+
+    /// undoTodoAt: completed task at (0,1) → unchecked and has @.
+    func testUndoTodoAt() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [x] B\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try undoTodoAt(notes: notes, sessionIndex: 0, lineIndex: 1)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertEqual(todos.count, 3)
+        XCTAssertFalse(todos[0].isFocused, "A no longer focused")
+        XCTAssertTrue(todos[1].isFocused, "B is focused after undo")
+        XCTAssertFalse(todos[1].checked, "B unchecked")
+        XCTAssertFalse(todos[2].isFocused, "C not focused")
+    }
 }

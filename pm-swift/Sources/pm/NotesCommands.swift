@@ -134,6 +134,50 @@ func runNotesTodoComplete(args: [String]) {
     } catch { fail(error) }
 }
 
+func runNotesTodoFocus(args: [String]) {
+    guard args.count >= 3,
+          let sessionIndex = Int(args[1]),
+          let lineIndex = Int(args[2]) else {
+        stderr("Usage: pm notes todo focus <project> <sessionIndex> <lineIndex>")
+        exit(1)
+    }
+    let project = args[0]
+    do {
+        let projectPath = try resolveProjectPath(nameOrPrefix: project)
+        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
+            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
+        }
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
+        notes = normalizeFocusMarker(notes: notes)
+        notes = applyFocusToTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+    } catch { fail(error) }
+}
+
+func runNotesTodoUndo(args: [String]) {
+    guard args.count >= 3,
+          let sessionIndex = Int(args[1]),
+          let lineIndex = Int(args[2]) else {
+        stderr("Usage: pm notes todo undo <project> <sessionIndex> <lineIndex>")
+        exit(1)
+    }
+    let project = args[0]
+    do {
+        let projectPath = try resolveProjectPath(nameOrPrefix: project)
+        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
+            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
+        }
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
+        notes = normalizeFocusMarker(notes: notes)
+        notes = try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+    } catch { fail(error) }
+}
+
 func runNotes(args: [String]) {
     guard let sub = args.first else {
         stderr("Usage: pm notes <path|create|show|write|current-day|session|todo> ...")
@@ -151,11 +195,23 @@ func runNotes(args: [String]) {
     case "current-day":
         runNotesCurrentDay()
     case "todo":
-        guard args.count >= 3, args[1] == "complete" else {
-            stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--no-advance]")
+        guard args.count >= 3 else {
+            stderr("Usage: pm notes todo <complete|focus|undo> <project> <sessionIndex> <lineIndex> [--no-advance for complete]")
             exit(1)
         }
-        runNotesTodoComplete(args: Array(args.dropFirst(2)))
+        let sub = args[1]
+        let todoArgs = Array(args.dropFirst(2))
+        switch sub {
+        case "complete":
+            runNotesTodoComplete(args: todoArgs)
+        case "focus":
+            runNotesTodoFocus(args: todoArgs)
+        case "undo":
+            runNotesTodoUndo(args: todoArgs)
+        default:
+            stderr("Usage: pm notes todo <complete|focus|undo> <project> <sessionIndex> <lineIndex> [--no-advance for complete]")
+            exit(1)
+        }
     case "session":
         guard args.count >= 3, args[1] == "add" else {
             stderr("Usage: pm notes session add <project> [label] [-d|--date YYYY-MM-DD]")

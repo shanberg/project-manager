@@ -184,26 +184,15 @@ export async function resolveNotesPath(
   }
 }
 
-/** Toggle one todo in notes (flip [ ] <-> [x]) and write back. Completing cascades to children via CLI. */
+/** Toggle one todo in notes (flip [ ] <-> [x]). Check uses CLI complete; uncheck uses CLI undo. */
 export async function toggleTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
   if (todo.checked) {
-    const newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
-    const updated =
-      typeof todo.sessionIndex === "number" &&
-        typeof todo.lineIndex === "number"
-        ? replaceTodoAtPositionInNotes(
-          notes,
-          todo.sessionIndex,
-          todo.lineIndex,
-          newLine,
-        )
-        : replaceTodoRawLineInNotes(notes, todo.rawLine, newLine);
-    await writeNotes(prefs, projectName, updated);
+    await undoCompleteInNotes(prefs, projectName, _notes, todo);
   } else {
     await completeTodoViaCli(prefs, projectName, todo, false);
   }
@@ -610,15 +599,24 @@ function applyFocusToTodoInNotes(
   return { ...notes, sessions };
 }
 
-/** Move the single " @" focus marker to the given todo's line. Strips @ from all other task lines across all sessions. Matches by content (rawLine) not position. */
+/** Move the single " @" focus marker to the given todo's line. Uses CLI. */
 export async function setFocusToTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const updated = applyFocusToTodoInNotes(notes, todo);
-  await writeNotes(prefs, projectName, updated);
+  const si = todo.sessionIndex ?? 0;
+  const li = todo.lineIndex ?? 0;
+  const { stderr, code } = await runPmWithPrefs(prefs, [
+    "notes",
+    "todo",
+    "focus",
+    projectName,
+    String(si),
+    String(li),
+  ]);
+  if (code !== 0) throw new Error(stderr || "pm notes todo focus failed");
 }
 
 /** Complete the now task and its descendants, move focus to next open task. Uses CLI. See docs/task-focus-flow.md for how next focus is chosen. */
@@ -632,27 +630,24 @@ export async function completeAndAdvanceInNotes(
   await completeTodoViaCli(prefs, projectName, nowTodo, true);
 }
 
-/** Undo: toggle the task back to unchecked and move focus (@) back to it. One write. */
+/** Undo: toggle the task back to unchecked and move focus (@) back to it. Uses CLI. */
 export async function undoCompleteInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  let newLine = todo.rawLine.replace(/\[[xX]\]/, "[ ]");
-  if (newLine.endsWith(FOCUS_MARKER)) {
-    newLine = newLine.slice(0, -FOCUS_MARKER.length).trimEnd();
-  }
-  const sessionIndex = todo.sessionIndex ?? 0;
-  const lineIndex = todo.lineIndex ?? 0;
-  let updated = replaceTodoAtPositionInNotes(
-    notes,
-    sessionIndex,
-    lineIndex,
-    newLine,
-  );
-  updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
-  await writeNotes(prefs, projectName, updated);
+  const si = todo.sessionIndex ?? 0;
+  const li = todo.lineIndex ?? 0;
+  const { stderr, code } = await runPmWithPrefs(prefs, [
+    "notes",
+    "todo",
+    "undo",
+    projectName,
+    String(si),
+    String(li),
+  ]);
+  if (code !== 0) throw new Error(stderr || "pm notes todo undo failed");
 }
 
 /** Update sections (summary, problem, goals, approach, links, learnings). */

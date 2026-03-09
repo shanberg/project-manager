@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PM Panel</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="panel" data-tauri-drag-region>
+      <header class="panel-drag-region">
+        <h1 class="panel-title">Current project</h1>
+      </header>
+      <div class="panel-body">
+      <div class="project-picker-wrap">
+        <select id="project-picker" class="project-picker" aria-label="Change focused project" title="Change focused project">
+          <option value="">—</option>
+        </select>
+      </div>
+      <p id="error" class="error" aria-live="polite"></p>
+      <div id="content" class="content" hidden>
+        <div id="summary-block" class="block"></div>
+        <div id="problem-block" class="block"></div>
+        <div id="goals-block" class="block"></div>
+        <div id="approach-block" class="block"></div>
+        <div id="links-block" class="block"></div>
+        <div id="learnings-block" class="block"></div>
+        <div id="todos-block" class="block"></div>
+      </div>
+      </div>
+    </main>
+  </body>
+</html>

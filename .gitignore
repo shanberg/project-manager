@@ -6,3 +6,6 @@ project-manager-*.tar.gz
 .DS_Store
 .env
 .env.*
+# Visual test suite generated artifacts
+tests/visual/results.json
+tests/visual/report.html
