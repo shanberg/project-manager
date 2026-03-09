@@ -7,6 +7,7 @@ import {
   showToast,
   Toast,
   getPreferenceValues,
+  useNavigation,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
@@ -37,8 +38,9 @@ async function fetchFocusedProjectWithNextTodo(
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
+  const { pop } = useNavigation();
 
-  const { data, isLoading } = useCachedPromise(
+  const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocusedProjectWithNextTodo,
     [prefs.configPath, prefs.pmCliPath],
     { execute: true },
@@ -78,7 +80,9 @@ export default function Command() {
         null,
       );
       await showToast({ style: Toast.Style.Success, title: "Due Date Removed" });
+      await revalidate();
       await refreshMenubar();
+      pop();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
@@ -116,7 +120,9 @@ export default function Command() {
         title: "Task Updated",
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
+      await revalidate();
       await refreshMenubar();
+      pop();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showToast({

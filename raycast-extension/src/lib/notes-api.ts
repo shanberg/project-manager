@@ -46,6 +46,8 @@ export interface Todo {
   isFocused?: boolean;
   /** Parsed from next-line metadata `due:\s*<date>`. */
   dueDate?: string | null;
+  /** Effective due for display: own dueDate if set, else earliest due among ancestors (nearest deadline). From notes show. */
+  effectiveDueDate?: string | null;
 }
 
 export interface NotesShowOutput {
@@ -53,6 +55,59 @@ export interface NotesShowOutput {
   todos: Todo[];
   /** Key of the focused todo if any: "sessionIndex:lineIndex". */
   focusedKey?: string | null;
+}
+
+/** Sort key for due date comparison (earliest first). Uses YYYY-MM-DD prefix when present. */
+function dueDateSortKey(s: string): string {
+  const prefix = s.slice(0, 10);
+  if (prefix.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(prefix)) return prefix;
+  return s;
+}
+
+/**
+ * Effective due for a todo: earliest due among own and all ancestors (nearest deadline).
+ * Use when CLI does not provide effectiveDueDate (e.g. older pm) or to double-check.
+ */
+export function getEffectiveDue(todos: Todo[], todo: Todo): string | null {
+  const sessionIndex = todo.sessionIndex ?? 0;
+  const sessionTodos = todos
+    .filter((t) => (t.sessionIndex ?? 0) === sessionIndex)
+    .sort((a, b) => (a.lineIndex ?? 0) - (b.lineIndex ?? 0));
+  const idx = sessionTodos.findIndex(
+    (t) => t.lineIndex === todo.lineIndex && t.sessionIndex === todo.sessionIndex,
+  );
+  const candidates: string[] = [];
+  if (todo.dueDate) candidates.push(todo.dueDate);
+  if (idx >= 0) {
+    let currentDepth = todo.depth ?? 0;
+    let i = idx - 1;
+    while (i >= 0) {
+      const d = sessionTodos[i].depth ?? 0;
+      if (d < currentDepth) {
+        const due = sessionTodos[i].dueDate;
+        if (due) candidates.push(due);
+        currentDepth = d;
+      }
+      i--;
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates.reduce((a, b) => (dueDateSortKey(a) < dueDateSortKey(b) ? a : b));
+}
+
+/**
+ * Earliest effective due among all open (unchecked) todos in the list.
+ * Use for project-level "next due" in the project menubar.
+ */
+export function getNextDueForProject(todos: Todo[]): string | null {
+  const openTodos = todos.filter((t) => !t.checked);
+  const effectiveDues: string[] = [];
+  for (const t of openTodos) {
+    const due = getEffectiveDue(todos, t);
+    if (due) effectiveDues.push(due);
+  }
+  if (effectiveDues.length === 0) return null;
+  return effectiveDues.reduce((a, b) => (dueDateSortKey(a) < dueDateSortKey(b) ? a : b));
 }
 
 export async function fetchNotes(

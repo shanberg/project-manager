@@ -386,8 +386,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                   accessoryTitle={
                     todo.checked
                       ? "done"
-                      : todo.dueDate
-                        ? formatRelativeDue(todo.dueDate)
+                      : (todo.effectiveDueDate ?? todo.dueDate)
+                        ? formatRelativeDue(todo.effectiveDueDate ?? todo.dueDate ?? "")
                         : undefined
                   }
                   actions={

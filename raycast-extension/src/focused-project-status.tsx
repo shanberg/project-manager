@@ -16,8 +16,9 @@ import {
   Toast,
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon, getFavicon } from "@raycast/utils";
-import type { LinkEntry } from "./lib/notes-api";
-import { getNotes, resolveNotesPath } from "./lib/notes-api";
+import type { LinkEntry, Todo } from "./lib/notes-api";
+import { getNotes, getNextDueForProject, resolveNotesPath } from "./lib/notes-api";
+import { formatDueForMenubar, formatRelativeDue } from "./lib/format-relative-due";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -103,14 +104,16 @@ async function fetchFocusedProjectStatus(
       notesPath: null as null,
       done: 0,
       total: 0,
+      todos: [] as Todo[],
       links: [] as { label: string; url: string }[],
       notes: null as null,
     };
   try {
     const out = await getNotes(prefs, name);
     const notes = out.notes;
-    const total = out.todos.length;
-    const done = out.todos.filter((t) => t.checked).length;
+    const todos = out.todos ?? [];
+    const total = todos.length;
+    const done = todos.filter((t) => t.checked).length;
     const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
     return {
       name,
@@ -119,6 +122,7 @@ async function fetchFocusedProjectStatus(
       notesPath,
       done,
       total,
+      todos,
       links,
       notes,
     };
@@ -130,6 +134,7 @@ async function fetchFocusedProjectStatus(
       notesPath: null,
       done: 0,
       total: 0,
+      todos: [] as Todo[],
       links: [],
       notes: null,
     };
@@ -186,14 +191,25 @@ export default function Command() {
       : data
         ? getProjectCode(data.name)
         : "—";
+  const nextDue = data?.todos ? getNextDueForProject(data.todos) : null;
+  const nextDueShort = nextDue ? formatDueForMenubar(nextDue) : "";
+  const titleWithDue =
+    nextDueShort && data
+      ? `${menubarLabel} · ${nextDueShort}`
+      : menubarLabel;
   const progress = data?.total ? data.done / data.total : 1;
   const baseTooltip = data
     ? data.total
       ? `${data.name}: ${data.done}/${data.total} done`
       : data.name
     : "No Focused Project";
+  const nextDueTooltip =
+    nextDue && data
+      ? `\nNext due: ${formatRelativeDue(nextDue)}`
+      : "";
+  const tooltipBase = nextDueTooltip ? `${baseTooltip}${nextDueTooltip}` : baseTooltip;
   const structured = data?.notes ? formatStructuredTooltip(data.notes) : "";
-  const tooltip = structured ? `${baseTooltip}\n\n${structured}` : baseTooltip;
+  const tooltip = structured ? `${tooltipBase}\n\n${structured}` : tooltipBase;
 
   async function onOpenProject() {
     if (!data) return;
@@ -206,14 +222,18 @@ export default function Command() {
         backgroundOpacity: 0.25,
         background: Color.PrimaryText,
       })}
-      title={menubarLabel}
+      title={titleWithDue}
       tooltip={tooltip}
       isLoading={isLoading}
     >
       {data ? (
         <>
           <MenuBarExtra.Section
-            title={`Project · ${data.done}/${data.total} done`}
+            title={
+              nextDue
+                ? `Project · ${data.done}/${data.total} done · next ${formatRelativeDue(nextDue)}`
+                : `Project · ${data.done}/${data.total} done`
+            }
           >
             <MenuBarExtra.Item
               title="View Project"

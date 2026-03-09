@@ -61,8 +61,10 @@ public struct Todo: Codable, Equatable {
     public var isFocused: Bool
     /// Parsed from next-line metadata `due:\s*<date>`. Stored as-is for display; raw metadata line preserved on write.
     public var dueDate: String?
+    /// Effective due date for display: own dueDate if set, else earliest due among ancestors (nearest deadline). Not stored in notes; computed when producing notes show output.
+    public var effectiveDueDate: String?
 
-    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil) {
+    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil) {
         self.text = text
         self.checked = checked
         self.rawLine = rawLine
@@ -72,6 +74,7 @@ public struct Todo: Codable, Equatable {
         self.lineIndex = lineIndex
         self.isFocused = isFocused
         self.dueDate = dueDate
+        self.effectiveDueDate = effectiveDueDate
     }
 }
 

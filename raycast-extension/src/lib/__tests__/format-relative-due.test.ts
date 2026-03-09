@@ -28,9 +28,8 @@ describe("formatRelativeDue", () => {
   });
 
   it("formats future date relatively", () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const str = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
-    expect(formatRelativeDue(str)).toBe("tomorrow");
+    const in48Hours = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    const str = `${in48Hours.getFullYear()}-${String(in48Hours.getMonth() + 1).padStart(2, "0")}-${String(in48Hours.getDate()).padStart(2, "0")}`;
+    expect(formatRelativeDue(str)).toBe("in 2 days");
   });
 });

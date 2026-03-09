@@ -120,6 +120,64 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     return todos
 }
 
+/// Compare due date strings by calendar order (earliest first). Uses first 10 chars (YYYY-MM-DD) when present so "2025-03-15" and "2025-03-15 14:30" compare equal.
+private func dueDateSortKey(_ s: String) -> String {
+    let prefix = String(s.prefix(10))
+    if prefix.count == 10, prefix.filter({ $0 == "-" }).count == 2 {
+        return prefix
+    }
+    return s
+}
+
+/// Earliest due date among ancestors (parent, grandparent, …). "Nearest" = soonest deadline. Returns nil if no ancestor has a due.
+private func earliestAncestorDue(sessionTodos: [Todo], idx: Int) -> String? {
+    var candidates: [String] = []
+    var i = idx
+    while let p = parentOf(sessionTodos: sessionTodos, idx: i) {
+        if let d = sessionTodos[p].dueDate { candidates.append(d) }
+        i = p
+    }
+    return candidates.min(by: { dueDateSortKey($0) < dueDateSortKey($1) })
+}
+
+/// Returns todos with effectiveDueDate set: earliest due among own and all ancestors (nearest deadline). Use when producing notes show output.
+public func todosWithEffectiveDueDates(_ todos: [Todo]) -> [Todo] {
+    let bySession = Dictionary(grouping: todos) { $0.sessionIndex }
+    return todos.map { todo in
+        let sessionTodos = (bySession[todo.sessionIndex] ?? []).sorted { $0.lineIndex < $1.lineIndex }
+        guard let idx = sessionTodos.firstIndex(where: { $0.lineIndex == todo.lineIndex }) else {
+            return Todo(
+                text: todo.text,
+                checked: todo.checked,
+                rawLine: todo.rawLine,
+                context: todo.context,
+                depth: todo.depth,
+                sessionIndex: todo.sessionIndex,
+                lineIndex: todo.lineIndex,
+                isFocused: todo.isFocused,
+                dueDate: todo.dueDate,
+                effectiveDueDate: todo.dueDate
+            )
+        }
+        var candidates: [String] = []
+        if let own = todo.dueDate { candidates.append(own) }
+        if let ancestor = earliestAncestorDue(sessionTodos: sessionTodos, idx: idx) { candidates.append(ancestor) }
+        let effective = candidates.min(by: { dueDateSortKey($0) < dueDateSortKey($1) })
+        return Todo(
+            text: todo.text,
+            checked: todo.checked,
+            rawLine: todo.rawLine,
+            context: todo.context,
+            depth: todo.depth,
+            sessionIndex: todo.sessionIndex,
+            lineIndex: todo.lineIndex,
+            isFocused: todo.isFocused,
+            dueDate: todo.dueDate,
+            effectiveDueDate: effective
+        )
+    }
+}
+
 private let todoLinePattern: NSRegularExpression? = {
     try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
 }()

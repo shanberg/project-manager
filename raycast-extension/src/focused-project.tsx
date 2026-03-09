@@ -4,6 +4,7 @@ import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
   getNotes,
+  getEffectiveDue,
   resolveNotesPath,
   setFocusToTodoInNotes,
   toggleTodoInNotes,
@@ -25,7 +26,7 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
 } from "./lib/utils";
-import { formatRelativeDue } from "./lib/format-relative-due";
+import { formatRelativeDue, formatDueForMenubar } from "./lib/format-relative-due";
 import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
@@ -141,8 +142,16 @@ export default function Command() {
     byContext.set(t.context, list);
   }
 
+  const effectiveDue =
+    nextTodo != null
+      ? (nextTodo.effectiveDueDate ??
+        (data?.todos ? getEffectiveDue(data.todos, nextTodo) : null) ??
+        nextTodo.dueDate) ??
+      null
+      : null;
+  const dueMenubar = effectiveDue ? formatDueForMenubar(effectiveDue) : "";
   const title = nextTodo
-    ? nextTodo.text.slice(0, 40) + (nextTodo.text.length > 40 ? "…" : "")
+    ? nextTodo.text.slice(0, 40) + (nextTodo.text.length > 40 ? "…" : "") + (dueMenubar ? ` • ${dueMenubar}` : "")
     : "No Tasks";
   const tooltip = data
     ? nextTodo
@@ -361,8 +370,8 @@ export default function Command() {
               {(byContext.get(context) ?? []).map((todo, i) => {
                 const isFocused = todo === nextTodo;
                 const indent = "  ".repeat(todo.depth ?? 0);
-                const dueSuffix = todo.dueDate
-                  ? ` (${formatRelativeDue(todo.dueDate)})`
+                const dueSuffix = (todo.effectiveDueDate ?? todo.dueDate)
+                  ? ` (${formatRelativeDue(todo.effectiveDueDate ?? todo.dueDate ?? "")})`
                   : "";
                 const displayTitle = indent + todo.text + dueSuffix;
                 const alternateTitle =

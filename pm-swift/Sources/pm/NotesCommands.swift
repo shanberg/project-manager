@@ -46,8 +46,9 @@ func runNotesShow(args: [String]) {
         var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
         notes = normalizeFocusMarker(notes: notes)
         let todos = try parseTodos(notes: notes)
-        let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
-        let output = NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey)
+        let todosWithEffective = todosWithEffectiveDueDates(todos)
+        let focusedKey = todosWithEffective.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
+        let output = NotesShowOutput(notes: notes, todos: todosWithEffective, focusedKey: focusedKey)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(output)

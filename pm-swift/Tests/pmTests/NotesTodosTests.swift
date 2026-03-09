@@ -125,6 +125,71 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertNil(todos[1].dueDate)
     }
 
+    /// effectiveDueDate: task with own due keeps it; child without due gets earliest ancestor due (nearest deadline).
+    func testTodosWithEffectiveDueDates() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Root
+                  due: 2026-06-15
+                - [ ] Child no due
+                - [ ] Parent
+                  due: 2025-12-01
+                  - [ ] Grandchild no due
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        let withEffective = todosWithEffectiveDueDates(todos)
+        XCTAssertEqual(withEffective[0].dueDate, "2026-06-15")
+        XCTAssertEqual(withEffective[0].effectiveDueDate, "2026-06-15")
+        XCTAssertNil(withEffective[1].dueDate)
+        XCTAssertNil(withEffective[1].effectiveDueDate)
+        XCTAssertEqual(withEffective[2].dueDate, "2025-12-01")
+        XCTAssertEqual(withEffective[2].effectiveDueDate, "2025-12-01")
+        XCTAssertNil(withEffective[3].dueDate)
+        XCTAssertEqual(withEffective[3].effectiveDueDate, "2025-12-01")
+    }
+
+    /// effectiveDueDate when task has own due but ancestor has earlier due: uses earliest (parent wins).
+    func testTodosWithEffectiveDueDatesEarliestAmongOwnAndAncestors() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Parent
+                  due: 2025-06-01
+                  - [ ] Child
+                    due: 2026-12-31
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        let withEffective = todosWithEffectiveDueDates(todos)
+        XCTAssertEqual(withEffective[1].dueDate, "2026-12-31")
+        XCTAssertEqual(withEffective[1].effectiveDueDate, "2025-06-01")
+    }
+
+    /// effectiveDueDate with multiple ancestors: uses nearest (earliest) due.
+    func testTodosWithEffectiveDueDatesEarliestAncestorWins() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Grandparent
+                  due: 2026-12-31
+                  - [ ] Parent
+                    due: 2025-06-01
+                    - [ ] Child no due
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        let withEffective = todosWithEffectiveDueDates(todos)
+        XCTAssertEqual(withEffective[2].effectiveDueDate, "2025-06-01")
+    }
+
     /// completeTodoWithDescendants preserves metadata line when completing task.
     func testCompleteTodoPreservesDueMetadata() throws {
         let session = Session(
