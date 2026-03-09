@@ -83,6 +83,62 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(todos[1].context, "Tue, Jan 2, 2025 · Day 2")
     }
 
+    /// Next-line metadata `due:\s*<date>` is parsed; formats YYYY-MM-DD and D-M-YYYY accepted.
+    func testParseTodosDueMetadata() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Task A\n  due: 2027-01-01\n- [ ] Task B"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.count, 2)
+        XCTAssertEqual(todos[0].text, "Task A")
+        XCTAssertEqual(todos[0].dueDate, "2027-01-01")
+        XCTAssertNil(todos[1].dueDate)
+    }
+
+    /// Due metadata with varied spacing: 2 spaces, 4 spaces, no space after colon.
+    func testParseTodosDueMetadataSpacing() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A\n  due: 2025-03-09\n- [ ] B\n    due:2026-12-31\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].dueDate, "2025-03-09")
+        XCTAssertEqual(todos[1].dueDate, "2026-12-31")
+        XCTAssertNil(todos[2].dueDate)
+    }
+
+    /// Due metadata with optional time: YYYY-MM-DD HH:mm.
+    func testParseTodosDueMetadataWithTime() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Call client\n  due: 2025-03-15 14:30\n- [ ] Other"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].dueDate, "2025-03-15 14:30")
+        XCTAssertNil(todos[1].dueDate)
+    }
+
+    /// completeTodoWithDescendants preserves metadata line when completing task.
+    func testCompleteTodoPreservesDueMetadata() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Do X\n  due: 2027-01-01\n- [ ] Other"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: false)
+        XCTAssertTrue(updated.sessions[0].body.contains("due: 2027-01-01"))
+        let todos = try parseTodos(notes: updated)
+        XCTAssertEqual(todos[0].dueDate, "2027-01-01")
+    }
+
     /// Non-todo lines in body are ignored.
     func testParseTodosSkipsNonTodoLines() throws {
         let session = Session(

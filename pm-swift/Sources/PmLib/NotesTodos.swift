@@ -55,6 +55,20 @@ public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
     )
 }
 
+private let dueMetadataPattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"^\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*$"#)
+}()
+
+private func parseDueFromNextLine(_ lines: [String], afterIndex idx: Int) -> String? {
+    guard idx + 1 < lines.count else { return nil }
+    let nextLine = lines[idx + 1]
+    guard nextLine.first == " " || nextLine.first == "\t" else { return nil }
+    guard let pattern = dueMetadataPattern,
+          let m = pattern.firstMatch(in: nextLine, range: NSRange(nextLine.startIndex..., in: nextLine)),
+          let r1 = Range(m.range(at: 1), in: nextLine) else { return nil }
+    return String(nextLine[r1])
+}
+
 public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     let todoLinePattern: NSRegularExpression
     do {
@@ -68,7 +82,7 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var lineIndex = 0
-        for line in lines {
+        for (idx, line) in lines.enumerated() {
             guard let m = todoLinePattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                   let r2 = Range(m.range(at: 2), in: line),
                   let r3 = Range(m.range(at: 3), in: line) else { continue }
@@ -88,6 +102,7 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
             } else {
                 isFocused = false
             }
+            let dueDate = parseDueFromNextLine(lines, afterIndex: idx)
             todos.append(Todo(
                 text: text,
                 checked: checked,
@@ -96,7 +111,8 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                 depth: depth,
                 sessionIndex: sessionIndex,
                 lineIndex: lineIndex,
-                isFocused: isFocused
+                isFocused: isFocused,
+                dueDate: dueDate
             ))
             lineIndex += 1
         }

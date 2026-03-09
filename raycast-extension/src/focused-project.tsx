@@ -25,6 +25,7 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
 } from "./lib/utils";
+import { formatRelativeDue } from "./lib/format-relative-due";
 import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
@@ -360,12 +361,15 @@ export default function Command() {
               {(byContext.get(context) ?? []).map((todo, i) => {
                 const isFocused = todo === nextTodo;
                 const indent = "  ".repeat(todo.depth ?? 0);
-                const displayTitle = indent + todo.text;
+                const dueSuffix = todo.dueDate
+                  ? ` (${formatRelativeDue(todo.dueDate)})`
+                  : "";
+                const displayTitle = indent + todo.text + dueSuffix;
                 const alternateTitle =
                   indent +
-                  (todo.text.length > 35
-                    ? todo.text.slice(0, 32) + "…"
-                    : todo.text);
+                  (todo.text.length + dueSuffix.length > 35
+                    ? todo.text.slice(0, 32) + "…" + dueSuffix
+                    : todo.text + dueSuffix);
                 return (
                   <MenuBarExtra.Item
                     key={`${todo.sessionIndex ?? 0}-${todo.lineIndex ?? 0}-${todo.text}`}

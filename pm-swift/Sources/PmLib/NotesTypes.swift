@@ -59,8 +59,10 @@ public struct Todo: Codable, Equatable {
     public var lineIndex: Int
     /// True if this task line ends with " @" (the single focused item in the notes file).
     public var isFocused: Bool
+    /// Parsed from next-line metadata `due:\s*<date>`. Stored as-is for display; raw metadata line preserved on write.
+    public var dueDate: String?
 
-    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false) {
+    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil) {
         self.text = text
         self.checked = checked
         self.rawLine = rawLine
@@ -69,6 +71,7 @@ public struct Todo: Codable, Equatable {
         self.sessionIndex = sessionIndex
         self.lineIndex = lineIndex
         self.isFocused = isFocused
+        self.dueDate = dueDate
     }
 }
 

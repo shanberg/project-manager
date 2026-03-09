@@ -44,6 +44,8 @@ export interface Todo {
   lineIndex?: number;
   /** True if this task is the single focused item (line ends with " @"). */
   isFocused?: boolean;
+  /** Parsed from next-line metadata `due:\s*<date>`. */
+  dueDate?: string | null;
 }
 
 export interface NotesShowOutput {
@@ -224,6 +226,7 @@ export async function toggleAllTodosInNotes(
 }
 
 const TODO_LINE_REGEX = /^\s*-\s+\[([ xX])\]\s+(.*)$/;
+const DUE_METADATA_REGEX = /^\s+due:\s*.+$/;
 
 /** List-item prefix (indent + "- ") from a raw task line. Used so new tasks match the anchor's hierarchy level. */
 function getListPrefix(rawLine: string): string {
@@ -268,6 +271,67 @@ function replaceTodoAtPositionInNotes(
     i === sessionIndex ? { ...s, body: newBody } : s,
   );
   return { ...notes, sessions };
+}
+
+/** Set or remove due date on a task. Preserves original indent when updating metadata. */
+export async function updateDueDateInNotes(
+  prefs: PreferenceValues,
+  projectName: string,
+  notes: ProjectNotes,
+  todo: Todo,
+  dueDate: string | null,
+): Promise<void> {
+  const si = todo.sessionIndex ?? 0;
+  const session = notes.sessions[si];
+  if (!session) return;
+  const lines = session.body.split(/\r?\n/);
+  let taskCount = 0;
+  let taskLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (TODO_LINE_REGEX.test(lines[i])) {
+      if (taskCount === (todo.lineIndex ?? 0)) {
+        taskLineIdx = i;
+        break;
+      }
+      taskCount++;
+    }
+  }
+  if (taskLineIdx < 0) return;
+  const nextLine = lines[taskLineIdx + 1];
+  const hasMetadata = nextLine !== undefined && DUE_METADATA_REGEX.test(nextLine);
+  const indent = hasMetadata ? (nextLine.match(/^(\s+)/)?.[1] ?? "  ") : "  ";
+
+  let newLines: string[];
+  if (dueDate) {
+    const metaLine = `${indent}due: ${dueDate}`;
+    if (hasMetadata) {
+      newLines = [
+        ...lines.slice(0, taskLineIdx + 1),
+        metaLine,
+        ...lines.slice(taskLineIdx + 2),
+      ];
+    } else {
+      newLines = [
+        ...lines.slice(0, taskLineIdx + 1),
+        metaLine,
+        ...lines.slice(taskLineIdx + 1),
+      ];
+    }
+  } else {
+    if (hasMetadata) {
+      newLines = [
+        ...lines.slice(0, taskLineIdx + 1),
+        ...lines.slice(taskLineIdx + 2),
+      ];
+    } else {
+      return;
+    }
+  }
+  const newBody = newLines.join("\n");
+  const sessions = notes.sessions.map((s, i) =>
+    i === si ? { ...s, body: newBody } : s,
+  );
+  await writeNotes(prefs, projectName, { ...notes, sessions });
 }
 
 /** Add a todo to today's session. Creates today's session if missing. Sets focus to the new task. */

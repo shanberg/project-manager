@@ -19,9 +19,11 @@ import {
   resolveNotesPath,
   toggleAllTodosInNotes,
   toggleTodoInNotes,
+  updateDueDateInNotes,
   type LinkEntry,
   type Todo,
 } from "./lib/notes-api";
+import { formatRelativeDue } from "./lib/format-relative-due";
 import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";
@@ -34,6 +36,7 @@ import AddChildTodoForm from "./add-child-todo-form";
 import EditNotesSectionForm from "./edit-notes-section-form";
 import EditGoalsForm from "./edit-goals-form";
 import EditLearningsForm from "./edit-learnings-form";
+import SetDueDateForm from "./set-due-date-form";
 import {
   getObsidianUri,
   hasSrcDir,
@@ -382,7 +385,13 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       : Icon.ArrowRightCircleFilled
                   }
                   title={todo.text}
-                  accessoryTitle={todo.checked ? "done" : undefined}
+                  accessoryTitle={
+                    todo.checked
+                      ? "done"
+                      : todo.dueDate
+                        ? formatRelativeDue(todo.dueDate)
+                        : undefined
+                  }
                   actions={
                     <ActionPanel>
                       <Action
@@ -398,6 +407,44 @@ export default function ProjectView({ projectName, basePath }: Props) {
                           title="Complete All in Session"
                           icon={Icon.CheckCircle}
                           onAction={() => handleMarkAllInSessionDone(context)}
+                        />
+                      )}
+                      <Action.Push
+                        title="Set Due Date"
+                        icon={Icon.Calendar}
+                        target={
+                          <SetDueDateForm
+                            projectName={projectName}
+                            notes={notes}
+                            todo={todo}
+                            onSuccess={onNotesSuccess}
+                          />
+                        }
+                      />
+                      {todo.dueDate && (
+                        <Action
+                          title="Remove Due Date"
+                          icon={Icon.XMarkCircle}
+                          onAction={async () => {
+                            try {
+                              await updateDueDateInNotes(
+                                prefs,
+                                projectName,
+                                notes,
+                                todo,
+                                null,
+                              );
+                              await onNotesSuccess();
+                            } catch (err) {
+                              const msg =
+                                err instanceof Error ? err.message : String(err);
+                              await showToast({
+                                style: Toast.Style.Failure,
+                                title: "Error",
+                                message: msg,
+                              });
+                            }
+                          }}
                         />
                       )}
                       <Action.CopyToClipboard

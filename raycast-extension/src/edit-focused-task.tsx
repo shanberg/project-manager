@@ -2,6 +2,7 @@ import {
   Form,
   Action,
   ActionPanel,
+  Icon,
   List,
   showToast,
   Toast,
@@ -9,8 +10,9 @@ import {
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { getNotes, editTodoInNotes } from "./lib/notes-api";
+import { getNotes, editTodoInNotes, updateDueDateInNotes } from "./lib/notes-api";
 import { refreshMenubar } from "./lib/menubar-refresh";
+import SetDueDateForm from "./set-due-date-form";
 import type { PreferenceValues } from "./lib/types";
 
 async function fetchFocusedProjectWithNextTodo(
@@ -66,6 +68,23 @@ export default function Command() {
 
   const nowTask = data.nextTodo;
 
+  async function handleRemoveDue() {
+    try {
+      await updateDueDateInNotes(
+        prefs,
+        data!.projectName,
+        data!.notes,
+        nowTask,
+        null,
+      );
+      await showToast({ style: Toast.Style.Success, title: "Due Date Removed" });
+      await refreshMenubar();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+    }
+  }
+
   async function handleSubmit(values: { text: string }) {
     const text = values.text.trim();
     if (!text) {
@@ -104,6 +123,25 @@ export default function Command() {
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Update" onSubmit={handleSubmit} />
+          <Action.Push
+            title="Set Due Date"
+            icon={Icon.Calendar}
+            target={
+              <SetDueDateForm
+                projectName={data!.projectName}
+                notes={data!.notes}
+                todo={nowTask}
+                onSuccess={refreshMenubar}
+              />
+            }
+          />
+          {nowTask.dueDate && (
+            <Action
+              title="Remove Due Date"
+              icon={Icon.XMarkCircle}
+              onAction={handleRemoveDue}
+            />
+          )}
         </ActionPanel>
       }
     >
