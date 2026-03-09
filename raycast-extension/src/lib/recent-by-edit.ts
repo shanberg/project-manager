@@ -1,7 +1,7 @@
 import path from "path";
 import { stat } from "fs/promises";
 import { runPmWithPrefs, getPmPaths } from "./pm";
-import { getNotes, resolveNotesPath } from "./notes-api";
+import { getNotes, getNextDueForProject, resolveNotesPath } from "./notes-api";
 import { parseListAllOutput } from "./utils";
 import type { PreferenceValues } from "./types";
 
@@ -11,6 +11,8 @@ export type RecentProject = {
   mtime: number;
   done: number;
   total: number;
+  /** Soonest effective due among open tasks, or null. */
+  nextDue: string | null;
   notes: {
     summary: string;
     problem: string;
@@ -25,6 +27,7 @@ export type FocusedProjectData = {
   basePath: string;
   done: number;
   total: number;
+  nextDue: string | null;
   notes: RecentProject["notes"];
 };
 
@@ -82,25 +85,29 @@ export async function getRecentProjectsByEdit(
           mtime: p.mtime,
           done: focusedProjectData.done,
           total: focusedProjectData.total,
+          nextDue: focusedProjectData.nextDue,
           notes: focusedProjectData.notes,
         };
       }
       const notesPath = await resolveNotesPath(prefs, p.name);
       let done = 0;
       let total = 0;
+      let nextDue: string | null = null;
       let notes: RecentProject["notes"] = null;
       if (notesPath) {
         try {
           const out = await getNotes(prefs, p.name);
-          total = out.todos.length;
-          done = out.todos.filter((t) => t.checked).length;
+          const todos = out.todos ?? [];
+          total = todos.length;
+          done = todos.filter((t) => t.checked).length;
+          nextDue = getNextDueForProject(todos);
           notes = out.notes
             ? {
-                summary: out.notes.summary,
-                problem: out.notes.problem,
-                goals: out.notes.goals,
-                approach: out.notes.approach,
-              }
+              summary: out.notes.summary,
+              problem: out.notes.problem,
+              goals: out.notes.goals,
+              approach: out.notes.approach,
+            }
             : null;
         } catch {
           /* ignore */
@@ -112,6 +119,7 @@ export async function getRecentProjectsByEdit(
         mtime: p.mtime,
         done,
         total,
+        nextDue,
         notes,
       };
     }),

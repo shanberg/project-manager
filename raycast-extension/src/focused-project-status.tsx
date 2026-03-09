@@ -149,6 +149,7 @@ function toFocusedProjectData(
     basePath: data.basePath,
     done: data.done,
     total: data.total,
+    nextDue: data.todos ? getNextDueForProject(data.todos) : null,
     notes: data.notes,
   };
 }
@@ -328,12 +329,19 @@ export default function Command() {
                 const baseTip = p.total
                   ? `${p.name}: ${p.done}/${p.total} done`
                   : p.name;
+                const nextDueTip =
+                  p.nextDue ? `\nNext due: ${formatRelativeDue(p.nextDue)}` : "";
+                const tooltipBase = nextDueTip ? `${baseTip}${nextDueTip}` : baseTip;
                 const structured = p.notes
                   ? formatStructuredTooltip(p.notes)
                   : "";
                 const tooltip = structured
-                  ? `${baseTip}\n\n${structured}`
-                  : baseTip;
+                  ? `${tooltipBase}\n\n${structured}`
+                  : tooltipBase;
+                const titleWithDue =
+                  p.nextDue
+                    ? `${p.name} · ${formatDueForMenubar(p.nextDue)}`
+                    : p.name;
                 return (
                   <MenuBarExtra.Item
                     key={`${p.basePath}:${p.name}`}
@@ -345,7 +353,7 @@ export default function Command() {
                         background: Color.PrimaryText,
                       },
                     )}
-                    title={p.name}
+                    title={titleWithDue}
                     tooltip={tooltip}
                     onAction={async () => {
                       await setFocusedProject(p.basePath, p.name);

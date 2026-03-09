@@ -135,6 +135,7 @@ describe("getRecentProjectsByEdit", () => {
       basePath: "/active",
       done: 1,
       total: 3,
+      nextDue: null,
       notes: {
         summary: "Focused",
         problem: "",
@@ -156,7 +157,7 @@ describe("getRecentProjectsByEdit", () => {
     expect(getNotesCalls.length).toBe(10);
   });
 
-  it("returns correct shape (name, basePath, mtime, done, total, notes) for each item", async () => {
+  it("returns correct shape (name, basePath, mtime, done, total, nextDue, notes) for each item", async () => {
     const result = await getRecentProjectsByEdit(prefs, 10);
 
     for (const p of result) {
@@ -167,6 +168,7 @@ describe("getRecentProjectsByEdit", () => {
         done: expect.any(Number),
         total: expect.any(Number),
       });
+      expect("nextDue" in p).toBe(true);
       expect("notes" in p).toBe(true);
       if (p.notes) {
         expect(p.notes).toMatchObject({
