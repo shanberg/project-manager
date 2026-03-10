@@ -47,6 +47,10 @@ pub struct Todo {
     pub context: String,
     pub session_index: usize,
     pub line_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_due_date: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -67,6 +71,7 @@ pub struct FocusedProject {
 
 const MAX_RECENT: usize = 10;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
+const UNDO_STATE_FILE: &str = "undo-state.json";
 
 /// Run pm with args. Uses PM_CONFIG_HOME so CLI uses same config as panel. Returns stdout or stderr on failure.
 fn run_pm(args: &[&str]) -> Result<String, String> {
@@ -131,6 +136,10 @@ struct TodoJson {
     session_index: Option<usize>,
     #[serde(rename = "lineIndex")]
     line_index: Option<usize>,
+    #[serde(rename = "dueDate")]
+    due_date: Option<String>,
+    #[serde(rename = "effectiveDueDate")]
+    effective_due_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -173,7 +182,7 @@ fn read_recent_project_keys() -> Vec<String> {
 }
 
 /// Record a project as recently used (prepend, dedupe, keep at most MAX_RECENT). Same logic as Raycast menubar.
-fn record_recent_project(project_key: &str) {
+pub fn record_recent_project(project_key: &str) {
     let path = match recent_projects_path() {
         Ok(p) => p,
         Err(_) => return,
@@ -288,6 +297,8 @@ pub fn get_focused_project() -> Result<FocusedProject, String> {
             context: t.context.unwrap_or_default(),
             session_index: t.session_index.unwrap_or(0),
             line_index: t.line_index.unwrap_or(0),
+            due_date: t.due_date.filter(|s| !s.is_empty()),
+            effective_due_date: t.effective_due_date.filter(|s| !s.is_empty()),
         })
         .collect();
     let title = notes
@@ -408,4 +419,217 @@ fn escape_json_string(s: &str) -> String {
         }
     }
     out
+}
+
+// --- Tray / menubar helpers ---
+
+/// Project code for menubar display: "M-123" style prefix or full name.
+pub fn get_project_code(name: &str) -> String {
+    if let Some(m) = regex::Regex::new(r"^((?:M|DE|P|I)-\d+)")
+        .ok()
+        .and_then(|re| re.find(name))
+    {
+        return m.as_str().to_string();
+    }
+    name.to_string()
+}
+
+/// Notes file path for the project, if it exists. Uses `pm notes path`.
+pub fn get_notes_path(project_name: &str) -> Option<PathBuf> {
+    let s = run_pm(&["notes", "path", project_name]).ok()?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+/// Earliest effective due among open (unchecked) todos. For project-level "next due" in menubar.
+pub fn get_next_due_for_project(todos: &[Todo]) -> Option<String> {
+    let open_todos: Vec<&Todo> = todos.iter().filter(|t| !t.checked).collect();
+    let mut earliest: Option<&str> = None;
+    for t in open_todos {
+        let due = t.effective_due_date.as_deref().or(t.due_date.as_deref())?;
+        if let Some(e) = earliest {
+            if due_date_sort_key(due) < due_date_sort_key(e) {
+                earliest = Some(due);
+            }
+        } else {
+            earliest = Some(due);
+        }
+    }
+    earliest.map(String::from)
+}
+
+fn due_date_sort_key(s: &str) -> String {
+    let prefix = s.get(0..10).unwrap_or("");
+    if prefix.len() == 10 && s.chars().take(10).all(|c| c.is_ascii_digit() || c == '-') {
+        return prefix.to_string();
+    }
+    "9999-12-31".to_string()
+}
+
+/// Short due format for menubar: "in 15m", "tomorrow", "2d", etc.
+pub fn format_due_menubar(due: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let parse_ymd = |s: &str| -> Option<(i32, u32, u32)> {
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() >= 3 {
+            let y: i32 = parts[0].parse().ok()?;
+            let m: u32 = parts[1].parse().ok()?;
+            let d: u32 = parts[2].parse().ok()?;
+            Some((y, m, d))
+        } else {
+            None
+        }
+    };
+    let date_sec = if let Some(ymd) = due.get(0..10) {
+        if let Some((y, m, d)) = parse_ymd(ymd) {
+            let hour = due
+                .get(11..13)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(12);
+            let min = due
+                .get(14..16)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            let dt = chrono_parse(y, m, d, hour, min);
+            dt.map(|t| t.and_utc().timestamp()).unwrap_or(0)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    if date_sec == 0 {
+        return due.get(0..8).unwrap_or(due).to_string();
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let diff_sec = date_sec - now;
+    let diff_min = diff_sec / 60;
+    let diff_hours = diff_min / 60;
+    let diff_days = diff_hours / 24;
+
+    if diff_min > -60 && diff_min < 60 {
+        if diff_min >= 0 {
+            return if diff_min == 0 {
+                "now".to_string()
+            } else {
+                format!("in {}m", diff_min)
+            };
+        }
+        return format!("{}m ago", -diff_min);
+    }
+    if diff_hours > -24 && diff_hours < 24 {
+        let h = diff_hours.abs();
+        let m = (diff_min.abs() % 60) as i64;
+        if diff_hours >= 0 {
+            return if m != 0 {
+                format!("in {}h {}m", h, m)
+            } else {
+                format!("in {}h", h)
+            };
+        }
+        return if m != 0 {
+            format!("{}h {}m ago", h, m)
+        } else {
+            format!("{}h ago", h)
+        };
+    }
+    if diff_days == 1 {
+        return "tomorrow".to_string();
+    }
+    if diff_days == -1 {
+        return "yesterday".to_string();
+    }
+    if diff_days > 0 && diff_days < 7 {
+        return format!("in {}d", diff_days);
+    }
+    if diff_days < 0 && diff_days > -7 {
+        return format!("{}d ago", -diff_days);
+    }
+    if diff_days >= 7 && diff_days < 30 {
+        return format!("in {}w", (diff_days as f64 / 7.0).round());
+    }
+    if diff_days <= -7 && diff_days > -30 {
+        return format!("{}w ago", (-diff_days as f64 / 7.0).round());
+    }
+    if let Some(ymd) = due.get(0..10) {
+        if let Some((_, m, d)) = parse_ymd(ymd) {
+            return format!("{}/{}", m, d);
+        }
+    }
+    due.get(0..10).unwrap_or(due).to_string()
+}
+
+fn chrono_parse(y: i32, m: u32, d: u32, hour: u32, min: u32) -> Option<chrono::NaiveDateTime> {
+    let date = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
+    let time = chrono::NaiveTime::from_hms_opt(hour, min, 0)?;
+    Some(chrono::NaiveDateTime::new(date, time))
+}
+
+/// Whether the project directory has a `src` subdirectory (for "Open in Cursor").
+pub fn has_src_dir(project_path: &std::path::Path) -> bool {
+    std::fs::metadata(project_path.join("src")).is_ok()
+}
+
+// --- Undo state (for "Undo" after Complete in tray) ---
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct UndoState {
+    project_name: String,
+    session_index: usize,
+    line_index: usize,
+    text: String,
+}
+
+fn undo_state_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join(UNDO_STATE_FILE))
+}
+
+/// Save state before completing a task so we can offer Undo.
+pub fn save_undo_state(project_name: &str, session_index: usize, line_index: usize, text: &str) {
+    let path = match undo_state_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let state = UndoState {
+        project_name: project_name.to_string(),
+        session_index,
+        line_index,
+        text: text.to_string(),
+    };
+    if let Ok(contents) = serde_json::to_string(&state) {
+        let _ = std::fs::write(path, contents);
+    }
+}
+
+/// Load undo state if any.
+pub fn get_undo_state() -> Option<(String, usize, usize)> {
+    let path = undo_state_path().ok()?;
+    let raw = std::fs::read_to_string(path).ok()?;
+    let state: UndoState = serde_json::from_str(&raw).ok()?;
+    Some((state.project_name, state.session_index, state.line_index))
+}
+
+/// Clear undo state after undo or when no longer relevant.
+pub fn clear_undo_state() {
+    let _ = undo_state_path().map(|p| std::fs::remove_file(p));
+}
+
+/// Run undo for the given project (uses saved project from undo state, not current focused).
+pub fn run_undo(project_name: &str, session_index: usize, line_index: usize) -> Result<(), String> {
+    run_pm(&[
+        "notes",
+        "todo",
+        "undo",
+        project_name,
+        &session_index.to_string(),
+        &line_index.to_string(),
+    ])?;
+    Ok(())
 }

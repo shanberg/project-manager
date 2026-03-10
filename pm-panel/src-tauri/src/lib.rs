@@ -1,4 +1,5 @@
 mod pm_notes;
+mod tray;
 
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,9 +70,13 @@ fn run_project_watcher(handle: tauri::AppHandle) {
                         }
                     }
                     let _ = handle.emit(PROJECT_DATA_CHANGED_EVENT, ());
+                    let h = handle.clone();
+                    let _ = handle.run_on_main_thread(move || tray::refresh_trays(&h));
                 }
                 Err(_) => {
                     let _ = handle.emit(PROJECT_DATA_CHANGED_EVENT, ());
+                    let h = handle.clone();
+                    let _ = handle.run_on_main_thread(move || tray::refresh_trays(&h));
                 }
             }
             if refresh_paths {
@@ -201,6 +206,9 @@ pub fn run() {
         ])
         .setup(|app| {
             run_project_watcher(app.handle().clone());
+            if let Err(e) = tray::setup_trays(app.handle()) {
+                eprintln!("Tray setup failed: {}", e);
+            }
             let is_shade = std::env::var("PM_PANEL_VIEW").as_deref() == Ok("shade");
 
             if is_shade {
