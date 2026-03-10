@@ -12,6 +12,7 @@
     <main class="panel" data-tauri-drag-region>
       <header class="panel-drag-region">
         <h1 class="panel-title">Current project</h1>
+        <button type="button" id="shade-fullscreen-btn" class="shade-fullscreen-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen">⛶</button>
       </header>
       <div class="panel-body">
       <div class="project-picker-wrap">
@@ -20,14 +21,25 @@
         </select>
       </div>
       <p id="error" class="error" aria-live="polite"></p>
-      <div id="content" class="content" hidden>
-        <div id="summary-block" class="block"></div>
-        <div id="problem-block" class="block"></div>
-        <div id="goals-block" class="block"></div>
-        <div id="approach-block" class="block"></div>
-        <div id="links-block" class="block"></div>
-        <div id="learnings-block" class="block"></div>
-        <div id="todos-block" class="block"></div>
+      <div id="content" class="panel-columns" hidden>
+        <div class="column column-content">
+          <h2 class="column-heading">Content</h2>
+          <div id="summary-block" class="block"></div>
+          <div id="problem-block" class="block"></div>
+          <div id="goals-block" class="block"></div>
+          <div id="approach-block" class="block"></div>
+          <div id="links-block" class="block"></div>
+          <div id="learnings-block" class="block"></div>
+        </div>
+        <div class="column column-sessions">
+          <h2 class="column-heading">Sessions</h2>
+          <div id="sessions-list" class="sessions-list"></div>
+        </div>
+        <div class="column column-tasks">
+          <div id="todos-column">
+            <div id="todos-block" class="block"></div>
+          </div>
+        </div>
       </div>
       </div>
     </main>

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 interface LinkEntry {
   label?: string | null;
@@ -129,6 +130,18 @@ function renderContent(data: FocusedProject): void {
     ? data.todos.filter((t) => !t.checked)
     : data.todos;
   blocks.todos = renderTasksSection(filteredTodos, data.sessions, showIncompleteOnly);
+
+  const sessionsListEl = contentEl.querySelector("#sessions-list") as HTMLElement;
+  if (sessionsListEl) {
+    sessionsListEl.innerHTML = data.sessions
+      .map(
+        (s, i) =>
+          `<div class="session-item" data-session-index="${i}" aria-label="Session ${i + 1}">${escapeHtml(
+            s.label ? `${s.date} · ${s.label}` : s.date,
+          )}</div>`,
+      )
+      .join("");
+  }
 
   (contentEl.querySelector("#summary-block") as HTMLElement).innerHTML =
     blocks.summary ?? "";
@@ -321,7 +334,35 @@ function bindProjectPicker(): void {
   });
 }
 
+function setShadeExpandedState(expanded: boolean): void {
+  if (expanded) {
+    document.body.dataset.fullscreen = "true";
+  } else {
+    delete document.body.dataset.fullscreen;
+  }
+}
+
+function initShadeFullscreen(): void {
+  const btn = document.getElementById("shade-fullscreen-btn");
+  if (!btn) return;
+  setShadeExpandedState(false);
+  btn.addEventListener("click", async () => {
+    const expanded = document.body.dataset.fullscreen === "true";
+    try {
+      await invoke("shade_set_expanded", { expanded: !expanded });
+      setShadeExpandedState(!expanded);
+    } catch (err) {
+      console.error("Toggle shade expanded failed:", err);
+    }
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  const win = getCurrentWebviewWindow();
+  if (win.label === "shade") {
+    document.body.dataset.view = "shade";
+    initShadeFullscreen();
+  }
   bindProjectPicker();
   loadProject();
   listen("pm:project-data-changed", () => {
