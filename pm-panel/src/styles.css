@@ -12,6 +12,11 @@ body {
   background: transparent;
 }
 
+/* Shade fullscreen: document fills viewport so panel can fill and center content */
+[data-view="shade"][data-fullscreen="true"] {
+  min-height: 100vh;
+}
+
 .panel {
   margin: 0;
   padding: 0;
@@ -42,10 +47,22 @@ body {
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12), 0 -1px 3px rgba(0, 0, 0, 0.08);
 }
 
-/* Shade fullscreen: no shadow, no rounded corners, no handle */
+/* Shade fullscreen: fill viewport so background covers window; no shadow, no handle */
 [data-view="shade"][data-fullscreen="true"] .panel {
   border-radius: 0;
   box-shadow: none;
+  min-height: 100vh;
+  padding-top: clamp(2rem, 5vh, 4rem);
+  padding-bottom: clamp(2rem, 5vh, 4rem);
+  padding-left: clamp(1rem, 3vw, 2rem);
+  padding-right: clamp(1rem, 3vw, 2rem);
+}
+
+[data-view="shade"][data-fullscreen="true"] .panel-body {
+  max-width: 15in;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
 }
 
 [data-view="shade"][data-fullscreen="true"] .panel::before {
