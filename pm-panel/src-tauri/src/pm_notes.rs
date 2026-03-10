@@ -198,7 +198,6 @@ impl Default for LinkEntry {
     }
 }
 
-
 /// Paths to watch for focus/notes changes: (config_dir containing focused.json, optional notes file path).
 pub fn get_watch_paths() -> Result<(PathBuf, Option<PathBuf>), String> {
     let dir = config_dir()?;
@@ -266,8 +265,8 @@ pub fn get_focused_project() -> Result<FocusedProject, String> {
         .ok_or("No projectKey in focused.json")?;
     let project_name = project_name_from_key(&project_key).ok_or("Invalid projectKey format")?;
     let stdout = run_pm(&["notes", "show", &project_name])?;
-    let out: NotesShowOutput = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Invalid notes show output: {}", e))?;
+    let out: NotesShowOutput =
+        serde_json::from_str(&stdout).map_err(|e| format!("Invalid notes show output: {}", e))?;
     let notes = out.notes.ok_or("notes show missing notes")?;
     let todos_json = out.todos.unwrap_or_default();
     let sessions: Vec<Session> = notes
@@ -359,14 +358,10 @@ pub fn list_projects() -> Result<ListProjectsResult, String> {
             project_key: format!("{}:{}", active_path.trim(), name),
             name,
         })
-        .chain(
-            archive_names
-                .into_iter()
-                .map(|name| ListableProject {
-                    project_key: format!("{}:{}", archive_path.trim(), name),
-                    name,
-                }),
-        )
+        .chain(archive_names.into_iter().map(|name| ListableProject {
+            project_key: format!("{}:{}", archive_path.trim(), name),
+            name,
+        }))
         .collect();
     let recent_ordered: Vec<String> = read_recent_project_keys()
         .into_iter()
@@ -391,7 +386,10 @@ pub fn set_focused_project(project_key: &str) -> Result<(), String> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create config dir: {}", e))?;
     let focused_path = dir.join("focused.json");
-    let contents = format!("{{\"projectKey\":\"{}\"}}\n", escape_json_string(project_key));
+    let contents = format!(
+        "{{\"projectKey\":\"{}\"}}\n",
+        escape_json_string(project_key)
+    );
     fs::write(&focused_path, contents).map_err(|e| format!("Cannot write focused.json: {}", e))?;
     record_recent_project(project_key);
     Ok(())

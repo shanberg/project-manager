@@ -27,6 +27,20 @@
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
+      },
+      {
+        "title": "PM Panel",
+        "label": "shade",
+        "width": 800,
+        "height": 420,
+        "visible": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

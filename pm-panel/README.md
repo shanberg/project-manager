@@ -30,6 +30,20 @@ If your projects live in a protected folder (e.g. `~/Documents/PARA/Projects`), 
 
 The list may not show the binary by name (it can appear as a generic icon); the toggle still applies. After a rebuild, the same path is reused so the permission still applies.
 
+## Global shortcut
+
+**Cmd+Shift+P** (macOS) / **Ctrl+Shift+P** (Windows/Linux) toggles the panel from anywhere: show and focus when hidden, hide when visible.
+
+## Shade variant (bottom-of-screen panel)
+
+To run the panel as a full-width shade that anchors to the bottom of the primary monitor (rounded top corners, handle bar), set the environment variable before launching:
+
+```bash
+PM_PANEL_VIEW=shade npm run tauri dev
+```
+
+Or for a built app: `PM_PANEL_VIEW=shade open "PM Panel.app"` (or set the env in your launcher). The same binary supports both the default floating panel and the shade; which window is shown is determined by `PM_PANEL_VIEW`.
+
 ## Development
 
 ```bash
