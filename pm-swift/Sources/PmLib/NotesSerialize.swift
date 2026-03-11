@@ -49,6 +49,9 @@ private func serializeSessions(_ sessions: [Session]) -> String {
 }
 
 public func serializeNotes(_ notes: ProjectNotes) -> String {
+    // #region agent log
+    debugLog(location: "NotesSerialize.swift:serializeNotes", message: "Serializing notes to markdown", data: ["title": notes.title], hypothesisId: "D")
+    // #endregion
     var parts: [String] = []
     parts.append("# \(notes.title)\n")
     parts.append(serializeCallout(type: "summary", label: "Summary", content: notes.summary))

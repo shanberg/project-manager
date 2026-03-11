@@ -128,10 +128,16 @@ func runNotesTodoComplete(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
+        let rawContent = try io.readContent(path: notesPath)
+        var notes = try parseNotes(markdown: rawContent)
         notes = normalizeFocusMarker(notes: notes)
-        notes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let todos = try parseTodos(notes: notes)
+        if let newContent = applySurgicalTodoComplete(content: rawContent, notes: notes, todos: todos, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus) {
+            try io.writeContent(path: notesPath, content: newContent)
+        } else {
+            notes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
+            try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        }
     } catch { fail(error) }
 }
 
@@ -150,10 +156,16 @@ func runNotesTodoFocus(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
+        let rawContent = try io.readContent(path: notesPath)
+        var notes = try parseNotes(markdown: rawContent)
         notes = normalizeFocusMarker(notes: notes)
-        notes = applyFocusToTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let todos = try parseTodos(notes: notes)
+        if let newContent = applySurgicalFocus(content: rawContent, notes: notes, todos: todos, sessionIndex: sessionIndex, lineIndex: lineIndex) {
+            try io.writeContent(path: notesPath, content: newContent)
+        } else {
+            notes = applyFocusToTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+            try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        }
     } catch { fail(error) }
 }
 
@@ -172,10 +184,16 @@ func runNotesTodoUndo(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
+        let rawContent = try io.readContent(path: notesPath)
+        var notes = try parseNotes(markdown: rawContent)
         notes = normalizeFocusMarker(notes: notes)
-        notes = try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let todos = try parseTodos(notes: notes)
+        if let newContent = applySurgicalTodoUndo(content: rawContent, notes: notes, todos: todos, sessionIndex: sessionIndex, lineIndex: lineIndex) {
+            try io.writeContent(path: notesPath, content: newContent)
+        } else {
+            notes = try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+            try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        }
     } catch { fail(error) }
 }
 

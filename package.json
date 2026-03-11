@@ -5,6 +5,8 @@
   "license": "MIT",
   "scripts": {
     "release": "./scripts/release.sh",
-    "update-homebrew-formula": "./scripts/update-homebrew-formula.sh"
+    "update-homebrew-formula": "./scripts/update-homebrew-formula.sh",
+    "pm:build": "cd pm-swift && swift build",
+    "pm:watch": "./scripts/pm-build-watch.sh"
   }
 }

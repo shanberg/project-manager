@@ -1,16 +1,20 @@
 //! Menubar tray icons matching the Raycast extension: task-focused (focused-project) and status-focused (focused-project-status).
+//! Raycast uses "alternate" menu items (Option-key reveals alternate action on the same row); Tauri has no
+//! native alternate API, so we group main+alternate pairs as submenus: one row that expands to show both actions.
 
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::pm_notes::{
-    self, clear_undo_state, format_due_menubar, get_next_due_for_project, get_notes_path,
-    get_project_code, get_undo_state, has_src_dir, record_recent_project, save_undo_state,
-    FocusedProject, LinkEntry, ListProjectsResult, Todo,
+    self, clear_task_timing, clear_undo_state, format_due_menubar, get_next_due_for_project,
+    get_notes_path, get_project_code, get_task_icon_color, get_undo_state, has_src_dir,
+    record_recent_project, save_undo_state, TaskIconColor, FocusedProject, LinkEntry,
+    ListProjectsResult, Todo,
 };
+use crate::tray_icons;
 
 /// State for menu action handlers: updated each time we refresh the tray menus.
 pub struct TrayState {
@@ -110,7 +114,59 @@ fn show_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
+        crate::reposition_panel_for_display_change(app);
     }
+}
+
+/// Task tray icon and whether it's a template (macOS tint). Full parity: ellipsis when no tasks, arrow-circle with optional yellow/red.
+fn task_icon_for_state(data: Option<&FocusedProject>) -> (tauri::image::Image<'static>, bool) {
+    match data {
+        None => (tray_icons::task_icon_ellipsis_template(), true),
+        Some(d) => {
+            let open: Vec<&Todo> = d.todos.iter().filter(|t| !t.checked).collect();
+            let next = open.iter().find(|t| t.is_focused).or(open.first());
+            match next {
+                None => {
+                    clear_task_timing();
+                    (tray_icons::task_icon_ellipsis_template(), true)
+                }
+                Some(t) => {
+                    let notes_path = match get_notes_path(&d.project_name) {
+                        Some(p) => p,
+                        None => return (tray_icons::task_icon_arrow_circle_template(), true),
+                    };
+                    match get_task_icon_color(&notes_path, t.session_index, t.line_index) {
+                        Some(TaskIconColor::Yellow) => (
+                            tray_icons::task_icon_arrow_circle_colored(255, 204, 0),
+                            false,
+                        ),
+                        Some(TaskIconColor::Red) => (
+                            tray_icons::task_icon_arrow_circle_colored(255, 59, 48),
+                            false,
+                        ),
+                        None => (tray_icons::task_icon_arrow_circle_template(), true),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Status tray icon: progress ring (0 = empty, 1 = full). Template for system tint.
+fn status_icon_for_data(data: Option<&FocusedProject>) -> tauri::image::Image<'static> {
+    let progress = match data {
+        None => 1.0,
+        Some(d) => {
+            let total = d.todos.len();
+            if total == 0 {
+                1.0
+            } else {
+                let done = d.todos.iter().filter(|t| t.checked).count();
+                done as f64 / total as f64
+            }
+        }
+    };
+    tray_icons::status_icon_progress_template(progress)
 }
 
 fn build_task_menu(app: &AppHandle, data: Option<&FocusedProject>) -> Result<tauri::menu::Menu<tauri::Wry>, tauri::Error> {
@@ -126,37 +182,50 @@ fn build_task_menu(app: &AppHandle, data: Option<&FocusedProject>) -> Result<tau
             .map(|base| std::path::PathBuf::from(base).join(&d.project_name))
             .unwrap_or_else(|| std::path::PathBuf::from(&d.project_key.replace(':', "/")));
 
+        // Raycast uses "alternate" (Option-key) for main+alt on one row; Tauri has no alternate API,
+        // so we group main+alternate as submenus: one row that expands to show both actions.
         if let Some(_t) = next_todo {
-            let complete = MenuItemBuilder::with_id("task_complete", "Complete").build(app)?;
-            b = b.item(&complete);
             if get_undo_state().is_some() {
-                let undo = MenuItemBuilder::with_id("task_undo", "Undo").build(app)?;
-                b = b.item(&undo);
+                let complete_sub = SubmenuBuilder::new(app, "Complete")
+                    .submenu_icon(tray_icons::menu_icon_check_circle())
+                    .icon("task_complete", "Complete", tray_icons::menu_icon_check_circle())
+                    .icon("task_undo", "Undo", tray_icons::menu_icon_undo())
+                    .build()?;
+                b = b.item(&complete_sub);
+            } else {
+                b = b.icon("task_complete", "Complete", tray_icons::menu_icon_check_circle());
             }
         } else {
-            let _all_done = MenuItemBuilder::with_id("task_noop", "All Done").build(app)?;
-            let _no_tasks = MenuItemBuilder::with_id("task_noop2", "No Tasks").build(app)?;
-            b = b.item(&_all_done).item(&_no_tasks);
+            b = b.icon("task_noop", "All Done", tray_icons::menu_icon_check_circle());
+            b = b.icon("task_noop2", "No Tasks", tray_icons::menu_icon_circle());
         }
         if notes_path.is_some() {
-            let narrow = MenuItemBuilder::with_id("task_narrow_focus", "Narrow Focus").build(app)?;
-            b = b.item(&narrow);
+            b = b.icon("task_narrow_focus", "Narrow Focus", tray_icons::menu_icon_plus());
         }
         if next_todo.is_some() {
-            let add_after = MenuItemBuilder::with_id("task_add_after", "Add After").build(app)?;
-            let add_before = MenuItemBuilder::with_id("task_add_before", "Add Before").build(app)?;
-            let edit = MenuItemBuilder::with_id("task_edit", "Edit").build(app)?;
-            let wrap = MenuItemBuilder::with_id("task_wrap", "Wrap").build(app)?;
-            b = b.item(&add_after).item(&add_before).item(&edit).item(&wrap);
+            let add_sub = SubmenuBuilder::new(app, "Add After")
+                .submenu_icon(tray_icons::menu_icon_arrow_down())
+                .icon("task_add_after", "Add After", tray_icons::menu_icon_arrow_down())
+                .icon("task_add_before", "Add Before", tray_icons::menu_icon_arrow_up())
+                .build()?;
+            let edit_sub = SubmenuBuilder::new(app, "Edit")
+                .submenu_icon(tray_icons::menu_icon_text_cursor())
+                .icon("task_edit", "Edit", tray_icons::menu_icon_text_cursor())
+                .icon("task_wrap", "Wrap", tray_icons::menu_icon_layers())
+                .build()?;
+            b = b.item(&add_sub).item(&edit_sub);
         }
         b = b.separator();
         if notes_path.is_some() {
-            let session = MenuItemBuilder::with_id("task_add_session_note", "Add Session Note").build(app)?;
-            let link = MenuItemBuilder::with_id("task_add_link", "Add Link").build(app)?;
-            let view = MenuItemBuilder::with_id("task_view_project", "View Project").build(app)?;
-            let obsidian = MenuItemBuilder::with_id("task_open_obsidian", "Open in Obsidian").build(app)?;
-            let finder = MenuItemBuilder::with_id("task_open_finder", "Open in Finder").build(app)?;
-            b = b.item(&session).item(&link).item(&view).item(&obsidian).item(&finder);
+            b = b.icon("task_add_session_note", "Add Session Note", tray_icons::menu_icon_paragraph());
+            b = b.icon("task_add_link", "Add Link", tray_icons::menu_icon_link());
+            b = b.icon("task_view_project", "View Project", tray_icons::menu_icon_arrow_right_circle());
+            let open_sub = SubmenuBuilder::new(app, "Open in Obsidian")
+                .submenu_icon(tray_icons::menu_icon_paragraph())
+                .icon("task_open_obsidian", "Open in Obsidian", tray_icons::menu_icon_paragraph())
+                .icon("task_open_finder", "Open in Finder", tray_icons::menu_icon_folder())
+                .build()?;
+            b = b.item(&open_sub);
         }
         b = b.separator();
 
@@ -183,8 +252,12 @@ fn build_task_menu(app: &AppHandle, data: Option<&FocusedProject>) -> Result<tau
                 let raw = format!("{}{}{}", indent, t.text, due_suffix);
                 let text = truncate_menu_text(&raw, 50);
                 let id_focus = format!("task_todo_f_{}_{}", si, li);
-                let item = MenuItemBuilder::with_id(id_focus.clone(), text.as_str()).build(app)?;
-                b = b.item(&item);
+                let todo_icon = if t.is_focused {
+                    tray_icons::menu_icon_arrow_right_circle()
+                } else {
+                    tray_icons::menu_icon_circle()
+                };
+                b = b.icon(id_focus.as_str(), text.as_str(), todo_icon);
             }
         }
         b = b.separator();
@@ -216,8 +289,7 @@ fn build_status_menu(
     if let Some(d) = data {
         let _done = d.todos.iter().filter(|t| t.checked).count();
         let _total = d.todos.len();
-        let view = MenuItemBuilder::with_id("status_view_project", "View Project").build(app)?;
-        b = b.item(&view);
+        b = b.icon("status_view_project", "View Project", tray_icons::menu_icon_arrow_right_circle());
         let notes_path = get_notes_path(&d.project_name);
         let project_path = d
             .project_key
@@ -226,16 +298,17 @@ fn build_status_menu(
             .map(|base| std::path::PathBuf::from(base).join(&d.project_name))
             .unwrap_or_else(|| std::path::PathBuf::from(&d.project_key.replace(':', "/")));
         if notes_path.is_some() {
-            let obsidian = MenuItemBuilder::with_id("status_open_obsidian", "Open in Obsidian").build(app)?;
-            let finder = MenuItemBuilder::with_id("status_open_finder", "Open in Finder").build(app)?;
-            b = b.item(&obsidian).item(&finder);
+            let open_sub = SubmenuBuilder::new(app, "Open in Obsidian")
+                .submenu_icon(tray_icons::menu_icon_paragraph())
+                .icon("status_open_obsidian", "Open in Obsidian", tray_icons::menu_icon_paragraph())
+                .icon("status_open_finder", "Open in Finder", tray_icons::menu_icon_folder())
+                .build()?;
+            b = b.item(&open_sub);
         } else {
-            let finder = MenuItemBuilder::with_id("status_open_finder", "Open in Finder").build(app)?;
-            b = b.item(&finder);
+            b = b.icon("status_open_finder", "Open in Finder", tray_icons::menu_icon_folder());
         }
         if has_src_dir(&project_path) {
-            let cursor = MenuItemBuilder::with_id("status_open_cursor", "Open in Cursor").build(app)?;
-            b = b.item(&cursor);
+            b = b.icon("status_open_cursor", "Open in Cursor", tray_icons::menu_icon_terminal());
         }
         b = b.separator();
 
@@ -243,20 +316,18 @@ fn build_status_menu(
         for (i, (label, _url)) in links.iter().enumerate() {
             let text = truncate_menu_text(label, 50);
             let id = format!("status_link_{}", i);
-            let item = MenuItemBuilder::with_id(id, text.as_str()).build(app)?;
-            b = b.item(&item);
+            b = b.icon(id.as_str(), text.as_str(), tray_icons::menu_icon_link());
         }
         if !links.is_empty() || notes_path.is_some() {
-            let add_link = MenuItemBuilder::with_id("status_add_link", "Add Link").build(app)?;
-            b = b.item(&add_link);
+            b = b.icon("status_add_link", "Add Link", tray_icons::menu_icon_link());
         }
         if !list.recent.is_empty() {
             b = b.separator();
             for (i, p) in list.recent.iter().enumerate() {
                 let title = truncate_menu_text(&p.name, 50);
                 let id = format!("status_recent_{}", i);
-                let item = MenuItemBuilder::with_id(id, title.as_str()).build(app)?;
-                b = b.item(&item);
+                let progress = 0.0_f64;
+                b = b.icon(id.as_str(), title.as_str(), tray_icons::menu_icon_progress(progress));
             }
         }
         b = b.separator();
@@ -491,12 +562,13 @@ pub fn setup_trays(app: &AppHandle) -> Result<(), String> {
         .map(|d| d.project_name.clone())
         .unwrap_or_else(|| "No Focused Project".to_string());
 
-    let icon = app.default_window_icon().cloned();
-
+    let (task_icon, task_icon_template) = task_icon_for_state(data.as_ref());
     let task_tray = TrayIconBuilder::with_id(TRAY_TASK_ID)
         .menu(&task_menu)
         .title(&task_title)
         .tooltip(&task_tooltip)
+        .icon(task_icon)
+        .icon_as_template(task_icon_template)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
@@ -504,11 +576,6 @@ pub fn setup_trays(app: &AppHandle) -> Result<(), String> {
                 handle_task_menu_event(app, id, state.inner());
             }
         });
-    let task_tray = if let Some(ref icon) = icon {
-        task_tray.icon(icon.clone()).icon_as_template(true)
-    } else {
-        task_tray
-    };
     let _task_tray = task_tray.build(app).map_err(|e| e.to_string())?;
 
     let status_menu = build_status_menu(app, data.as_ref(), &list).map_err(|e| e.to_string())?;
@@ -535,10 +602,13 @@ pub fn setup_trays(app: &AppHandle) -> Result<(), String> {
         })
         .unwrap_or_else(|| "No Focused Project".to_string());
 
+    let status_icon = status_icon_for_data(data.as_ref());
     let status_tray = TrayIconBuilder::with_id(TRAY_STATUS_ID)
         .menu(&status_menu)
         .title(&status_title)
         .tooltip(&status_tooltip)
+        .icon(status_icon)
+        .icon_as_template(true)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
@@ -546,11 +616,6 @@ pub fn setup_trays(app: &AppHandle) -> Result<(), String> {
                 handle_status_menu_event(app, id, state.inner());
             }
         });
-    let status_tray = if let Some(ref icon) = icon {
-        status_tray.icon(icon.clone()).icon_as_template(true)
-    } else {
-        status_tray
-    };
     let _status_tray = status_tray.build(app).map_err(|e| e.to_string())?;
 
     Ok(())
@@ -593,6 +658,9 @@ pub fn refresh_trays(app: &AppHandle) {
                 .as_ref()
                 .map(|d| d.project_name.clone())
                 .unwrap_or_else(|| "No Focused Project".to_string());
+            let (task_icon, task_template) = task_icon_for_state(data.as_ref());
+            let _ = tray.set_icon(Some(task_icon));
+            let _ = tray.set_icon_as_template(task_template);
             let _ = tray.set_title(Some(task_title));
             let _ = tray.set_tooltip(Some(task_tooltip));
         }
@@ -620,6 +688,9 @@ pub fn refresh_trays(app: &AppHandle) {
                     format!("{}: {}/{} done", d.project_name, done, total)
                 })
                 .unwrap_or_else(|| "No Focused Project".to_string());
+            let status_icon = status_icon_for_data(data.as_ref());
+            let _ = tray.set_icon(Some(status_icon));
+            let _ = tray.set_icon_as_template(true);
             let _ = tray.set_title(Some(status_title));
             let _ = tray.set_tooltip(Some(status_tooltip));
         }

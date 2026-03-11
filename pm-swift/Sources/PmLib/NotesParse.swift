@@ -59,9 +59,12 @@ private enum NotesPatternsCache {
     }
 }
 
-private func extractCallout(lines: [String], pattern: NSRegularExpression, calloutStart: NSRegularExpression) -> String {
+// #region agent log
+/// Preserves blank lines inside callouts (append "" when inBlock and line is blank) so round-trip keeps formatting.
+private func extractCallout(lines: [String], pattern: NSRegularExpression, calloutStart: NSRegularExpression, calloutLabel: String? = nil) -> String {
     var content: [String] = []
     var inBlock = false
+    var blankLinesPreserved = 0
     for line in lines {
         if pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
             inBlock = true
@@ -78,10 +81,19 @@ private func extractCallout(lines: [String], pattern: NSRegularExpression, callo
             }
             continue
         }
-        if inBlock, !line.hasPrefix(">"), !line.trimmingCharacters(in: .whitespaces).isEmpty { break }
+        if inBlock, !line.hasPrefix(">") {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                content.append("")
+                blankLinesPreserved += 1
+            } else { break }
+        }
+    }
+    if let label = calloutLabel, blankLinesPreserved > 0 {
+        debugLog(location: "NotesParse.swift:extractCallout", message: "Blank lines preserved in callout", data: ["callout": label, "count": blankLinesPreserved], hypothesisId: "A")
     }
     return content.joined(separator: "\n")
 }
+// #endregion
 
 private func extractGoals(lines: [String], p: NotesPatterns) -> [String] {
     var goals: [String] = []
@@ -107,6 +119,10 @@ private func extractGoals(lines: [String], p: NotesPatterns) -> [String] {
 
 private func parseLinksBlock(text: String, p: NotesPatterns) -> [LinkEntry] {
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let emptyLineCount = lines.filter { $0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+    if emptyLineCount > 0 {
+        debugLog(location: "NotesParse.swift:parseLinksBlock", message: "Empty/blank lines in Links block", data: ["emptyLineCount": emptyLineCount, "totalLines": lines.count], hypothesisId: "C")
+    }
     var entries: [LinkEntry] = []
     var i = 0
     while i < lines.count {
@@ -148,7 +164,12 @@ private func parseLinksBlock(text: String, p: NotesPatterns) -> [LinkEntry] {
 
 /// Parse learnings list; empty bullets ("- " or "-  ") are normalized to "" so round-trip matches default ProjectNotes.
 private func parseLearningsBlock(text: String, p: NotesPatterns) -> [String] {
-    let items = text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line -> String? in
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let emptyLineCount = lines.filter { $0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+    if emptyLineCount > 0 {
+        debugLog(location: "NotesParse.swift:parseLearningsBlock", message: "Empty/blank lines in Learnings block", data: ["emptyLineCount": emptyLineCount, "totalLines": lines.count], hypothesisId: "C")
+    }
+    let items = lines.compactMap { line -> String? in
         let lineStr = String(line)
         guard let m = p.learning.firstMatch(in: lineStr, range: NSRange(lineStr.startIndex..., in: lineStr)),
               let r = Range(m.range(at: 1), in: lineStr) else { return nil }
@@ -186,8 +207,9 @@ private func parseSessionsBlock(text: String, p: NotesPatterns) -> [Session] {
             i += 1
         }
         var bodyStr = bodyLines.joined(separator: "\n")
-        while bodyStr.hasPrefix("\n") { bodyStr = String(bodyStr.dropFirst()) }
-        while bodyStr.hasSuffix("\n") { bodyStr = String(bodyStr.dropLast()) }
+        // Trim at most one leading and one trailing newline so multiple blank lines at start/end are preserved.
+        if bodyStr.hasPrefix("\n") { bodyStr = String(bodyStr.dropFirst()) }
+        if bodyStr.hasSuffix("\n") { bodyStr = String(bodyStr.dropLast()) }
         sessions.append(Session(date: date, label: label, body: bodyStr))
     }
     return sessions
@@ -198,10 +220,10 @@ public func parseNotes(markdown: String) throws -> ProjectNotes {
     let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     let title = lines.first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) } ?? ""
 
-    let summary = extractCallout(lines: lines, pattern: patterns.summary, calloutStart: patterns.calloutStart)
-    let problem = extractCallout(lines: lines, pattern: patterns.problem, calloutStart: patterns.calloutStart)
+    let summary = extractCallout(lines: lines, pattern: patterns.summary, calloutStart: patterns.calloutStart, calloutLabel: "summary")
+    let problem = extractCallout(lines: lines, pattern: patterns.problem, calloutStart: patterns.calloutStart, calloutLabel: "problem")
     let goals = extractGoals(lines: lines, p: patterns)
-    let approach = extractCallout(lines: lines, pattern: patterns.approach, calloutStart: patterns.calloutStart)
+    let approach = extractCallout(lines: lines, pattern: patterns.approach, calloutStart: patterns.calloutStart, calloutLabel: "approach")
 
     let linksStart = lines.firstIndex { patterns.linksSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
     let learningsStart = lines.firstIndex { patterns.learningsSection.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }

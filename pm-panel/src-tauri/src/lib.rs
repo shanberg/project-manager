@@ -1,5 +1,6 @@
 mod pm_notes;
 mod tray;
+mod tray_icons;
 
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +23,8 @@ impl Default for PanelVisible {
 
 const PROJECT_DATA_CHANGED_EVENT: &str = "pm:project-data-changed";
 const DEBOUNCE_MS: u64 = 300;
+/// Interval for checking display setup and repositioning the panel when monitors change.
+const DISPLAY_CHECK_INTERVAL_SECS: u64 = 5;
 
 fn run_project_watcher(handle: tauri::AppHandle) {
     std::thread::spawn(move || loop {
@@ -150,6 +153,67 @@ fn shade_set_expanded(app: tauri::AppHandle, expanded: bool) -> Result<(), Strin
     Ok(())
 }
 
+/// Repositions the visible panel so it stays on-screen when the display setup changes
+/// (e.g. monitor unplugged, clamshell closed). Shade is always placed at bottom of primary;
+/// main window is moved to primary if it would otherwise be off-screen.
+pub(crate) fn reposition_panel_for_display_change(app: &tauri::AppHandle) {
+    let visible = app.state::<PanelVisible>().0.load(Ordering::SeqCst);
+    if !visible {
+        return;
+    }
+    let is_shade = std::env::var("PM_PANEL_VIEW").as_deref() == Ok("shade");
+
+    if is_shade {
+        let Some(shade) = app.get_webview_window("shade") else { return };
+        let Ok(Some(monitor)) = app.primary_monitor() else { return };
+        let mon_size = monitor.size();
+        let pos = monitor.position();
+        let width = mon_size.width;
+        let height = shade
+            .inner_size()
+            .map(|s| s.height.clamp(200, mon_size.height))
+            .unwrap_or(420_u32.min(mon_size.height));
+        let y = pos.y + (mon_size.height as i32) - (height as i32);
+        let _ = shade.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: pos.x,
+            y,
+        }));
+        let _ = shade.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width,
+            height,
+        }));
+        return;
+    }
+
+    let Some(window) = app.get_webview_window("main") else { return };
+    let Ok(win_pos) = window.outer_position() else { return };
+    let x = win_pos.x as f64;
+    let y = win_pos.y as f64;
+    if app.monitor_from_point(x, y).ok().and_then(|m| m).is_some() {
+        return;
+    }
+    let Ok(Some(monitor)) = app.primary_monitor() else { return };
+    let pos = monitor.position();
+    let padding = 32;
+    let new_x = pos.x + padding;
+    let new_y = pos.y + padding;
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: new_x,
+        y: new_y,
+    }));
+}
+
+fn run_display_check_loop(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let interval = Duration::from_secs(DISPLAY_CHECK_INTERVAL_SECS);
+        loop {
+            std::thread::sleep(interval);
+            let h = handle.clone();
+            let _ = handle.run_on_main_thread(move || reposition_panel_for_display_change(&h));
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -184,6 +248,7 @@ pub fn run() {
                                         let _ = win.show();
                                         let _ = win.set_focus();
                                         app_handle.state::<PanelVisible>().0.store(true, Ordering::SeqCst);
+                                        reposition_panel_for_display_change(&app_handle);
                                     }
                                 }
                             });
@@ -206,6 +271,7 @@ pub fn run() {
         ])
         .setup(|app| {
             run_project_watcher(app.handle().clone());
+            run_display_check_loop(app.handle().clone());
             if let Err(e) = tray::setup_trays(app.handle()) {
                 eprintln!("Tray setup failed: {}", e);
             }
@@ -259,6 +325,7 @@ pub fn run() {
                     use window_vibrancy::apply_blur;
                     let _ = apply_blur(&window, Some((18, 18, 18, 125)));
                 }
+                reposition_panel_for_display_change(app.handle());
             }
 
             Ok(())

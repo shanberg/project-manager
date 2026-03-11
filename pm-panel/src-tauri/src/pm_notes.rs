@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Deserialize)]
@@ -72,6 +72,7 @@ pub struct FocusedProject {
 const MAX_RECENT: usize = 10;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
 const UNDO_STATE_FILE: &str = "undo-state.json";
+const TASK_TIMING_FILE: &str = "task-timing.json";
 
 /// Run pm with args. Uses PM_CONFIG_HOME so CLI uses same config as panel. Returns stdout or stderr on failure.
 fn run_pm(args: &[&str]) -> Result<String, String> {
@@ -632,4 +633,89 @@ pub fn run_undo(project_name: &str, session_index: usize, line_index: usize) -> 
         &line_index.to_string(),
     ])?;
     Ok(())
+}
+
+// --- Task timing (1h yellow, 2h red tray icon) ---
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TaskTimingState {
+    task_key: String,
+    seen_at: u64,
+}
+
+fn task_timing_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join(TASK_TIMING_FILE))
+}
+
+fn get_task_timing() -> Option<TaskTimingState> {
+    let path = task_timing_path().ok()?;
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn set_task_timing(task_key: &str) {
+    if let Ok(path) = task_timing_path() {
+        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        let state = TaskTimingState {
+            task_key: task_key.to_string(),
+            seen_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+        };
+        if let Ok(contents) = serde_json::to_string(&state) {
+            let _ = fs::write(path, contents);
+        }
+    }
+}
+
+/// Clear stored task timing (call when there is no focused task).
+pub fn clear_task_timing() {
+    let _ = task_timing_path().map(fs::remove_file);
+}
+
+/// Stable key for the focused task (matches Raycast task-timing key concept).
+pub fn task_timing_key(notes_path: &Path, session_index: usize, line_index: usize) -> String {
+    format!(
+        "{}::{}:{}",
+        notes_path.display(),
+        session_index,
+        line_index
+    )
+}
+
+/// Icon color for task tray when focused task has been sitting 1h+ (yellow) or 2h+ (red).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskIconColor {
+    Yellow,
+    Red,
+}
+
+/// Returns Yellow/Red if the current focused task (notes_path, si, li) has been focused >= 1h or >= 2h.
+/// Side effect: if key doesn't match stored (or no stored), updates timing to now.
+pub fn get_task_icon_color(
+    notes_path: &Path,
+    session_index: usize,
+    line_index: usize,
+) -> Option<TaskIconColor> {
+    let key = task_timing_key(notes_path, session_index, line_index);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let stored = get_task_timing();
+    if let Some(ref s) = stored {
+        if s.task_key == key {
+            let elapsed_hours = (now_ms.saturating_sub(s.seen_at)) as f64 / 3_600_000.0;
+            if elapsed_hours >= 2.0 {
+                return Some(TaskIconColor::Red);
+            }
+            if elapsed_hours >= 1.0 {
+                return Some(TaskIconColor::Yellow);
+            }
+            return None;
+        }
+    }
+    set_task_timing(&key);
+    None
 }

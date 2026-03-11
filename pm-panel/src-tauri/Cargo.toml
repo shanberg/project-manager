@@ -30,7 +30,13 @@ notify-debouncer-mini = "0.4"
 window-vibrancy = "0.7"
 chrono = "0.4"
 urlencoding = "2"
+image = "0.25"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
+
+# Patch muda so menu item icons (from RGBA) are marked as template on macOS,
+# allowing the system to tint them for light/dark mode.
+[patch.crates-io]
+muda = { path = "muda-patch" }
 

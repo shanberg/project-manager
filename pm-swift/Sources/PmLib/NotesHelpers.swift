@@ -82,6 +82,141 @@ public func writeNotesFile(notesPath: String, notes: ProjectNotes, notesIO: Note
     try io.writeContent(path: notesPath, content: content)
 }
 
+// MARK: - Surgical edit (preserve file formatting)
+
+private let surgicalSessionSectionPattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"^##\s+Sessions\s*$"#, options: .caseInsensitive)
+}()
+
+private let surgicalSessionHeadingPattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),"#)
+}()
+
+private let surgicalTaskLinePattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"^\s*-\s+\[([ xX])\]\s+(.*)$"#)
+}()
+
+/// Returns the 0-based line number of the task at (sessionIndex, lineIndex) in the raw markdown, or nil if not found.
+public func findTaskLineNumber(content: String, sessionIndex: Int, lineIndex: Int) -> Int? {
+    guard let sectionPattern = surgicalSessionSectionPattern,
+          let headingPattern = surgicalSessionHeadingPattern,
+          let taskPattern = surgicalTaskLinePattern else { return nil }
+    let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    guard let sectionLine = lines.firstIndex(where: { sectionPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }) else { return nil }
+    var lineIdx = sectionLine + 1
+    var currentSession = -1
+    while lineIdx < lines.count {
+        let line = lines[lineIdx]
+        if headingPattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+            currentSession += 1
+            if currentSession == sessionIndex {
+                var taskCount = 0
+                var i = lineIdx + 1
+                while i < lines.count, headingPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil,
+                      surgicalSessionSectionPattern?.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) == nil {
+                    if taskPattern.firstMatch(in: lines[i], range: NSRange(lines[i].startIndex..., in: lines[i])) != nil {
+                        if taskCount == lineIndex { return i }
+                        taskCount += 1
+                    }
+                    i += 1
+                }
+                return nil
+            }
+        }
+        lineIdx += 1
+    }
+    return nil
+}
+
+/// Replaces the given lines (0-based indices) with new content; other lines are unchanged. Preserves line count and trailing newline.
+public func replaceLinesInContent(content: String, replacements: [Int: String]) -> String {
+    guard !replacements.isEmpty else { return content }
+    var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    for (idx, newLine) in replacements {
+        if idx >= 0, idx < lines.count {
+            lines[idx] = newLine
+        }
+    }
+    return lines.joined(separator: "\n")
+}
+
+/// Returns (sessionIndex, lineIndex) of the task line that contains the focus marker " @", or nil.
+public func focusedTaskIndicesInNotes(notes: ProjectNotes) -> (sessionIndex: Int, lineIndex: Int)? {
+    let taskPattern = try? NSRegularExpression(pattern: #"^\s*-\s+\[([ xX])\]\s+(.*)$"#)
+    guard let pattern = taskPattern else { return nil }
+    for (sessionIndex, session) in notes.sessions.enumerated() {
+        let bodyLines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var lineIndex = 0
+        for line in bodyLines {
+            if pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+                if line.hasSuffix(" @") { return (sessionIndex, lineIndex) }
+                lineIndex += 1
+            }
+        }
+    }
+    return nil
+}
+
+private let focusMarkerSuffix = " @"
+
+/// Surgical todo complete: replace only the task line(s) in raw content so the rest of the file is unchanged. Returns nil if line numbers cannot be determined (fall back to full parse/serialize).
+public func applySurgicalTodoComplete(content: String, notes: ProjectNotes, todos: [Todo], sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) -> String? {
+    guard let completedLineNum = findTaskLineNumber(content: content, sessionIndex: sessionIndex, lineIndex: lineIndex),
+          let completedTodo = todos.first(where: { $0.sessionIndex == sessionIndex && $0.lineIndex == lineIndex }) else { return nil }
+    var newCompletedLine = completedTodo.rawLine.replacingOccurrences(of: "[ ]", with: "[x]")
+    if newCompletedLine.hasSuffix(focusMarkerSuffix) {
+        newCompletedLine = String(newCompletedLine.dropLast(focusMarkerSuffix.count))
+    }
+    var replacements: [Int: String] = [completedLineNum: newCompletedLine]
+    if advanceFocus {
+        let updatedNotes: ProjectNotes
+        do {
+            updatedNotes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: true)
+        } catch { return nil }
+        guard let (nextSi, nextLi) = focusedTaskIndicesInNotes(notes: updatedNotes),
+              let nextLineNum = findTaskLineNumber(content: content, sessionIndex: nextSi, lineIndex: nextLi),
+              let nextTodo = todos.first(where: { $0.sessionIndex == nextSi && $0.lineIndex == nextLi }) else {
+            return replaceLinesInContent(content: content, replacements: replacements)
+        }
+        let nextLine = nextTodo.rawLine.hasSuffix(focusMarkerSuffix) ? nextTodo.rawLine : nextTodo.rawLine + focusMarkerSuffix
+        replacements[nextLineNum] = nextLine
+    }
+    return replaceLinesInContent(content: content, replacements: replacements)
+}
+
+/// Surgical todo undo: uncheck the task and move focus to it; remove focus from previous. Returns nil to fall back to full path.
+public func applySurgicalTodoUndo(content: String, notes: ProjectNotes, todos: [Todo], sessionIndex: Int, lineIndex: Int) -> String? {
+    guard let lineNum = findTaskLineNumber(content: content, sessionIndex: sessionIndex, lineIndex: lineIndex),
+          let todo = todos.first(where: { $0.sessionIndex == sessionIndex && $0.lineIndex == lineIndex }) else { return nil }
+    var replacements: [Int: String] = [:]
+    if let (curSi, curLi) = focusedTaskIndicesInNotes(notes: notes), (curSi, curLi) != (sessionIndex, lineIndex),
+       let curLineNum = findTaskLineNumber(content: content, sessionIndex: curSi, lineIndex: curLi),
+       let curTodo = todos.first(where: { $0.sessionIndex == curSi && $0.lineIndex == curLi }) {
+        let withoutFocus = curTodo.rawLine.hasSuffix(focusMarkerSuffix) ? String(curTodo.rawLine.dropLast(focusMarkerSuffix.count)) : curTodo.rawLine
+        replacements[curLineNum] = withoutFocus
+    }
+    let unchecked = todo.rawLine.replacingOccurrences(of: "[x]", with: "[ ]")
+    let withFocus = unchecked.hasSuffix(focusMarkerSuffix) ? unchecked : unchecked + focusMarkerSuffix
+    replacements[lineNum] = withFocus
+    return replaceLinesInContent(content: content, replacements: replacements)
+}
+
+/// Surgical focus: replace the current focus line (remove " @") and the target line (add " @"). Returns nil to fall back to full path.
+public func applySurgicalFocus(content: String, notes: ProjectNotes, todos: [Todo], sessionIndex: Int, lineIndex: Int) -> String? {
+    let currentFocus = focusedTaskIndicesInNotes(notes: notes)
+    guard let targetLineNum = findTaskLineNumber(content: content, sessionIndex: sessionIndex, lineIndex: lineIndex),
+          let targetTodo = todos.first(where: { $0.sessionIndex == sessionIndex && $0.lineIndex == lineIndex }) else { return nil }
+    var replacements: [Int: String] = [:]
+    if let (curSi, curLi) = currentFocus, let curLineNum = findTaskLineNumber(content: content, sessionIndex: curSi, lineIndex: curLi),
+       let curTodo = todos.first(where: { $0.sessionIndex == curSi && $0.lineIndex == curLi }) {
+        let withoutFocus = curTodo.rawLine.hasSuffix(focusMarkerSuffix) ? String(curTodo.rawLine.dropLast(focusMarkerSuffix.count)) : curTodo.rawLine
+        replacements[curLineNum] = withoutFocus
+    }
+    let targetNew = targetTodo.rawLine.hasSuffix(focusMarkerSuffix) ? targetTodo.rawLine : targetTodo.rawLine + focusMarkerSuffix
+    replacements[targetLineNum] = targetNew
+    return replaceLinesInContent(content: content, replacements: replacements)
+}
+
 /// Resolve notes template content: if template path is set, file must exist and is used (with {{title}} replaced); otherwise use embedded default.
 public func getNotesTemplateContent(templatePath: String?, title: String) throws -> String {
     if let path = templatePath, !path.isEmpty {
