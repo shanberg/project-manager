@@ -25,8 +25,7 @@ export default function AddTodoForm({ projectName, onSuccess }: Props) {
     dueDate?: Date | null,
   ): Promise<boolean> {
     try {
-      const dueStr =
-        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      const dueStr = dueDate != null ? formatDueForStorage(dueDate) : undefined;
       await addTodoToTodaySession(prefs, projectName, text, dueStr);
       await showToast({
         style: Toast.Style.Success,

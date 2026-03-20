@@ -69,12 +69,12 @@ export default function SetDueDateForm({
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm
-            title="Set Due Date"
-            onSubmit={handleSet}
-          />
+          <Action.SubmitForm title="Set Due Date" onSubmit={handleSet} />
           {todo.dueDate ? (
-            <Action.SubmitForm title="Remove Due Date" onSubmit={handleRemove} />
+            <Action.SubmitForm
+              title="Remove Due Date"
+              onSubmit={handleRemove}
+            />
           ) : null}
         </ActionPanel>
       }

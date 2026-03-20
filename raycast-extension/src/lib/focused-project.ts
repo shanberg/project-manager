@@ -19,7 +19,11 @@ export async function setFocusedProject(
   const key = projectKey(basePath, name);
   const filePath = getFocusedFilePath();
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify({ projectKey: key }) + "\n", "utf-8");
+  await writeFile(
+    filePath,
+    JSON.stringify({ projectKey: key }) + "\n",
+    "utf-8",
+  );
 }
 
 export async function getFocusedProject(): Promise<ProjectKey | null> {

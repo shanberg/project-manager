@@ -83,45 +83,58 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(todos[1].context, "Tue, Jan 2, 2025 · Day 2")
     }
 
-    /// Next-line metadata `due:\s*<date>` is parsed; formats YYYY-MM-DD and D-M-YYYY accepted.
-    func testParseTodosDueMetadata() throws {
+    /// Inline due at end of task line is parsed; text excludes the due.
+    func testParseTodosDueInline() throws {
         let session = Session(
             date: "Wed, Feb 25, 2025",
             label: "",
-            body: "- [ ] Task A\n  due: 2027-01-01\n- [ ] Task B"
+            body: "- [ ] Ship design due: 2026-03-11 00:00\n- [ ] Other"
         )
         let notes = ProjectNotes(title: "T", sessions: [session])
         let todos = try parseTodos(notes: notes)
-        XCTAssertEqual(todos.count, 2)
-        XCTAssertEqual(todos[0].text, "Task A")
-        XCTAssertEqual(todos[0].dueDate, "2027-01-01")
+        XCTAssertEqual(todos[0].text, "Ship design")
+        XCTAssertEqual(todos[0].dueDate, "2026-03-11 00:00")
         XCTAssertNil(todos[1].dueDate)
     }
 
-    /// Due metadata with varied spacing: 2 spaces, 4 spaces, no space after colon.
-    func testParseTodosDueMetadataSpacing() throws {
+    /// Inline due supports optional time component.
+    func testParseTodosDueInlineWithTime() throws {
         let session = Session(
             date: "Wed, Feb 25, 2025",
             label: "",
-            body: "- [ ] A\n  due: 2025-03-09\n- [ ] B\n    due:2026-12-31\n- [ ] C"
-        )
-        let notes = ProjectNotes(title: "T", sessions: [session])
-        let todos = try parseTodos(notes: notes)
-        XCTAssertEqual(todos[0].dueDate, "2025-03-09")
-        XCTAssertEqual(todos[1].dueDate, "2026-12-31")
-        XCTAssertNil(todos[2].dueDate)
-    }
-
-    /// Due metadata with optional time: YYYY-MM-DD HH:mm.
-    func testParseTodosDueMetadataWithTime() throws {
-        let session = Session(
-            date: "Wed, Feb 25, 2025",
-            label: "",
-            body: "- [ ] Call client\n  due: 2025-03-15 14:30\n- [ ] Other"
+            body: "- [ ] Call client due: 2025-03-15 14:30\n- [ ] Other"
         )
         let notes = ProjectNotes(title: "T", sessions: [session])
         let todos = try parseTodos(notes: notes)
         XCTAssertEqual(todos[0].dueDate, "2025-03-15 14:30")
+        XCTAssertNil(todos[1].dueDate)
+    }
+
+    /// Inline due supports no-space after colon and extra spacing before due.
+    func testParseTodosDueInlineSpacing() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A    due:2025-03-09\n- [ ] B"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].dueDate, "2025-03-09")
+        XCTAssertNil(todos[1].dueDate)
+    }
+
+    /// Inline due is parsed even when focus marker (@) follows.
+    func testParseTodosDueInlineWithFocusMarker() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Ship design due: 2026-03-11 00:00 @\n- [ ] Other"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].text, "Ship design")
+        XCTAssertEqual(todos[0].dueDate, "2026-03-11 00:00")
+        XCTAssertTrue(todos[0].isFocused)
         XCTAssertNil(todos[1].dueDate)
     }
 
@@ -131,11 +144,9 @@ final class NotesTodosTests: XCTestCase {
             date: "Wed, Feb 25, 2025",
             label: "",
             body: """
-                - [ ] Root
-                  due: 2026-06-15
+                - [ ] Root due: 2026-06-15
                 - [ ] Child no due
-                - [ ] Parent
-                  due: 2025-12-01
+                - [ ] Parent due: 2025-12-01
                   - [ ] Grandchild no due
                 """
         )
@@ -158,10 +169,8 @@ final class NotesTodosTests: XCTestCase {
             date: "Wed, Feb 25, 2025",
             label: "",
             body: """
-                - [ ] Parent
-                  due: 2025-06-01
-                  - [ ] Child
-                    due: 2026-12-31
+                - [ ] Parent due: 2025-06-01
+                  - [ ] Child due: 2026-12-31
                 """
         )
         let notes = ProjectNotes(title: "T", sessions: [session])
@@ -177,10 +186,8 @@ final class NotesTodosTests: XCTestCase {
             date: "Wed, Feb 25, 2025",
             label: "",
             body: """
-                - [ ] Grandparent
-                  due: 2026-12-31
-                  - [ ] Parent
-                    due: 2025-06-01
+                - [ ] Grandparent due: 2026-12-31
+                  - [ ] Parent due: 2025-06-01
                     - [ ] Child no due
                 """
         )
@@ -190,12 +197,12 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(withEffective[2].effectiveDueDate, "2025-06-01")
     }
 
-    /// completeTodoWithDescendants preserves metadata line when completing task.
-    func testCompleteTodoPreservesDueMetadata() throws {
+    /// completeTodoWithDescendants preserves inline due when completing task.
+    func testCompleteTodoPreservesDueInline() throws {
         let session = Session(
             date: "Wed, Feb 25, 2025",
             label: "",
-            body: "- [ ] Do X\n  due: 2027-01-01\n- [ ] Other"
+            body: "- [ ] Do X due: 2027-01-01\n- [ ] Other"
         )
         let notes = ProjectNotes(title: "T", sessions: [session])
         let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: false)

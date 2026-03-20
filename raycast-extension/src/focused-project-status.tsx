@@ -18,8 +18,15 @@ import {
 } from "@raycast/api";
 import { useCachedPromise, getProgressIcon, getFavicon } from "@raycast/utils";
 import type { LinkEntry, Todo } from "./lib/notes-api";
-import { getNotes, getNextDueForProject, resolveNotesPath } from "./lib/notes-api";
-import { formatDueForMenubar, formatRelativeDue } from "./lib/format-relative-due";
+import {
+  getNotes,
+  getNextDueForProject,
+  resolveNotesPath,
+} from "./lib/notes-api";
+import {
+  formatDueForMenubar,
+  formatRelativeDue,
+} from "./lib/format-relative-due";
 import {
   getFocusedProject,
   parseProjectKey,
@@ -103,60 +110,62 @@ function fetchFocusedProjectStatus(
   ) => {
     const prefs = { configPath, pmCliPath };
     const signal = abortRef?.current?.signal;
-  const focusedKey = await getFocusedProject();
-  if (!focusedKey) return null;
-  const parsed = parseProjectKey(focusedKey);
-  if (!parsed) return null;
-  const { basePath, name } = parsed;
-  const notesPath = await resolveNotesPath(prefs, name, signal);
-  if (!notesPath)
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath: null as null,
-      done: 0,
-      total: 0,
-      todos: [] as Todo[],
-      links: [] as { label: string; url: string }[],
-      notes: null as null,
-    };
-  try {
-    const out = await getNotes(prefs, name, signal);
-    const notes = out.notes;
-    const todos = out.todos ?? [];
-    const total = todos.length;
-    const done = todos.filter((t) => t.checked).length;
-    const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath,
-      done,
-      total,
-      todos,
-      links,
-      notes,
-    };
-  } catch {
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath: null,
-      done: 0,
-      total: 0,
-      todos: [] as Todo[],
-      links: [],
-      notes: null,
-    };
-  }
+    const focusedKey = await getFocusedProject();
+    if (!focusedKey) return null;
+    const parsed = parseProjectKey(focusedKey);
+    if (!parsed) return null;
+    const { basePath, name } = parsed;
+    const notesPath = await resolveNotesPath(prefs, name, signal);
+    if (!notesPath)
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath: null as null,
+        done: 0,
+        total: 0,
+        todos: [] as Todo[],
+        links: [] as { label: string; url: string }[],
+        notes: null as null,
+      };
+    try {
+      const out = await getNotes(prefs, name, signal);
+      const notes = out.notes;
+      const todos = out.todos ?? [];
+      const total = todos.length;
+      const done = todos.filter((t) => t.checked).length;
+      const links = flattenLinks(notes.links.filter((l) => l.label || l.url));
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath,
+        done,
+        total,
+        todos,
+        links,
+        notes,
+      };
+    } catch {
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath: null,
+        done: 0,
+        total: 0,
+        todos: [] as Todo[],
+        links: [],
+        notes: null,
+      };
+    }
   };
 }
 
 function toFocusedProjectData(
-  data: NonNullable<Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>>>,
+  data: NonNullable<
+    Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>>
+  >,
 ): FocusedProjectData {
   return {
     name: data.name,
@@ -175,7 +184,9 @@ function fetchRecentProjects(
     configPath: string | undefined,
     pmCliPath: string | undefined,
     focusedKey: string | null,
-    focusedData: Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>>,
+    focusedData: Awaited<
+      ReturnType<ReturnType<typeof fetchFocusedProjectStatus>>
+    >,
   ) => {
     const prefs = { configPath, pmCliPath };
     const signal = abortRef?.current?.signal;
@@ -199,10 +210,7 @@ export default function Command() {
     () => fetchFocusedProjectStatus(abortableFocused),
     [],
   );
-  const fetchRecent = useMemo(
-    () => fetchRecentProjects(abortableRecent),
-    [],
-  );
+  const fetchRecent = useMemo(() => fetchRecentProjects(abortableRecent), []);
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
@@ -225,9 +233,7 @@ export default function Command() {
   const nextDue = data?.todos ? getNextDueForProject(data.todos) : null;
   const nextDueShort = nextDue ? formatDueForMenubar(nextDue) : "";
   const titleWithDue =
-    nextDueShort && data
-      ? `${menubarLabel} · ${nextDueShort}`
-      : menubarLabel;
+    nextDueShort && data ? `${menubarLabel} · ${nextDueShort}` : menubarLabel;
   const progress = data?.total ? data.done / data.total : 1;
   const baseTooltip = data
     ? data.total
@@ -235,10 +241,10 @@ export default function Command() {
       : data.name
     : "No Focused Project";
   const nextDueTooltip =
-    nextDue && data
-      ? `\nNext due: ${formatRelativeDue(nextDue)}`
-      : "";
-  const tooltipBase = nextDueTooltip ? `${baseTooltip}${nextDueTooltip}` : baseTooltip;
+    nextDue && data ? `\nNext due: ${formatRelativeDue(nextDue)}` : "";
+  const tooltipBase = nextDueTooltip
+    ? `${baseTooltip}${nextDueTooltip}`
+    : baseTooltip;
   const structured = data?.notes ? formatStructuredTooltip(data.notes) : "";
   const tooltip = structured ? `${tooltipBase}\n\n${structured}` : tooltipBase;
 
@@ -337,7 +343,8 @@ export default function Command() {
                       await showToast({
                         style: Toast.Style.Failure,
                         title: "Could Not Open Link",
-                        message: err instanceof Error ? err.message : String(err),
+                        message:
+                          err instanceof Error ? err.message : String(err),
                       });
                     }
                   }}
@@ -359,19 +366,21 @@ export default function Command() {
                 const baseTip = p.total
                   ? `${p.name}: ${p.done}/${p.total} done`
                   : p.name;
-                const nextDueTip =
-                  p.nextDue ? `\nNext due: ${formatRelativeDue(p.nextDue)}` : "";
-                const tooltipBase = nextDueTip ? `${baseTip}${nextDueTip}` : baseTip;
+                const nextDueTip = p.nextDue
+                  ? `\nNext due: ${formatRelativeDue(p.nextDue)}`
+                  : "";
+                const tooltipBase = nextDueTip
+                  ? `${baseTip}${nextDueTip}`
+                  : baseTip;
                 const structured = p.notes
                   ? formatStructuredTooltip(p.notes)
                   : "";
                 const tooltip = structured
                   ? `${tooltipBase}\n\n${structured}`
                   : tooltipBase;
-                const titleWithDue =
-                  p.nextDue
-                    ? `${p.name} · ${formatDueForMenubar(p.nextDue)}`
-                    : p.name;
+                const titleWithDue = p.nextDue
+                  ? `${p.name} · ${formatDueForMenubar(p.nextDue)}`
+                  : p.name;
                 return (
                   <MenuBarExtra.Item
                     key={`${p.basePath}:${p.name}`}

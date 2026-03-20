@@ -13,9 +13,11 @@ export function formatDueForStorage(d: Date): string {
 }
 
 export function parseDueDate(s: string): Date | null {
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const raw = s.trim();
+  const cleaned = raw.replace(/^due:\s*/i, "");
+  const iso = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) {
-    const timePart = s.match(/\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    const timePart = cleaned.match(/\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (timePart) {
       const h = timePart[1].padStart(2, "0");
       const m = timePart[2];
@@ -24,14 +26,18 @@ export function parseDueDate(s: string): Date | null {
     }
     return new Date(`${iso[0]}T12:00:00`);
   }
-  const dmy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  const dmy = cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
   if (dmy) {
-    const [_, d, m, y] = dmy;
-    const timePart = s.match(/\s+(\d{1,2}):(\d{2})/);
+    const [, d, m, y] = dmy;
+    const timePart = cleaned.match(/\s+(\d{1,2}):(\d{2})/);
     if (timePart) {
-      return new Date(`${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T${timePart[1].padStart(2, "0")}:${timePart[2]}:00`);
+      return new Date(
+        `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T${timePart[1].padStart(2, "0")}:${timePart[2]}:00`,
+      );
     }
-    return new Date(`${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T12:00:00`);
+    return new Date(
+      `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T12:00:00`,
+    );
   }
   return null;
 }
@@ -40,7 +46,11 @@ export function parseDueDate(s: string): Date | null {
 function formatDatePrecise(d: Date, includeYear?: boolean): string {
   const now = new Date();
   if (includeYear ?? d.getFullYear() !== now.getFullYear()) {
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
   }
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -132,5 +142,7 @@ export function formatDueForMenubar(dueDate: string): string {
   const y = date.getFullYear();
   const month = date.getMonth() + 1;
   const day = date.getDate();
-  return days >= 0 ? `in ${month}/${day}/${y.toString().slice(-2)}` : `${month}/${day}/${y.toString().slice(-2)}`;
+  return days >= 0
+    ? `in ${month}/${day}/${y.toString().slice(-2)}`
+    : `${month}/${day}/${y.toString().slice(-2)}`;
 }

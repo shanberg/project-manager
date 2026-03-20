@@ -21,7 +21,6 @@ interface Props {
 
 export default function AddPriorTodoForm({
   projectName,
-  notes,
   beforeTodo,
   onSuccess,
 }: Props) {
@@ -34,8 +33,7 @@ export default function AddPriorTodoForm({
   ): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo } | null> {
     try {
       const data = await getNotes(prefs, projectName);
-      const dueStr =
-        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      const dueStr = dueDate != null ? formatDueForStorage(dueDate) : undefined;
       const result = await addTodoBeforeInNotes(
         prefs,
         projectName,

@@ -33,8 +33,7 @@ export default function AddChildTodoForm({
     dueDate?: Date | null,
   ): Promise<boolean> {
     try {
-      const dueStr =
-        dueDate != null ? formatDueForStorage(dueDate) : undefined;
+      const dueStr = dueDate != null ? formatDueForStorage(dueDate) : undefined;
       await addTodoAsChildInNotes(
         prefs,
         projectName,

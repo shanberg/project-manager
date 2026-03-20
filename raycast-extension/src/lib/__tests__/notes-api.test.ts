@@ -3,6 +3,7 @@ import {
   addTodoAfterInNotes,
   addTodoBeforeInNotes,
   addTodoAsChildInNotes,
+  updateDueDateInNotes,
   type ProjectNotes,
   type Session,
   type Todo,
@@ -147,10 +148,36 @@ describe("addTodoAfterInNotes", () => {
       afterTodo,
       "After only",
     );
-    expect(result.notes.sessions[0].body).toBe(
-      "- [ ] Only\n- [ ] After only",
-    );
+    expect(result.notes.sessions[0].body).toBe("- [ ] Only\n- [ ] After only");
     expect(result.insertedTodo.rawLine).toBe("- [ ] After only");
+  });
+
+  it("stores due inline when anchor has due", async () => {
+    const body = "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00";
+    const notes = makeNotes(body);
+    const child: Todo = {
+      rawLine: "  - [ ] Child due: 2026-03-11 00:00",
+      text: "Child",
+      checked: false,
+      context: "",
+      sessionIndex: 0,
+      lineIndex: 1,
+      dueDate: "2026-03-11 00:00",
+    };
+
+    const result = await addTodoAfterInNotes(
+      prefs,
+      "p",
+      notes,
+      child,
+      "New sibling",
+      "2026-03-12 00:00",
+    );
+    const resultBody = result.notes.sessions[0].body;
+    expect(resultBody).toBe(
+      "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00\n  - [ ] New sibling due: 2026-03-12 00:00",
+    );
+    expect((resultBody.match(/due:/g) ?? []).length).toBe(2);
   });
 
   it("adds tasks in sequence at same hierarchy level as focused task", async () => {
@@ -306,6 +333,53 @@ describe("addTodoBeforeInNotes", () => {
   });
 });
 
+describe("updateDueDateInNotes", () => {
+  it("updates inline due when setting due", async () => {
+    const body = "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00";
+    const notes = makeNotes(body);
+    const child: Todo = {
+      rawLine: "  - [ ] Child due: 2026-03-11 00:00",
+      text: "Child",
+      checked: false,
+      context: "",
+      sessionIndex: 0,
+      lineIndex: 1,
+      dueDate: "2026-03-11 00:00",
+    };
+
+    await updateDueDateInNotes(prefs, "p", notes, child, "2026-03-15 00:00");
+
+    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
+    expect(written.sessions[0].body).toContain(
+      "  - [ ] Child due: 2026-03-15 00:00",
+    );
+    expect((written.sessions[0].body.match(/due:/g) ?? []).length).toBe(1);
+  });
+
+  it("removes inline due when clearing", async () => {
+    const body = "- [ ] Task due: 2026-03-11 00:00";
+    const notes = makeNotes(body);
+    const todo: Todo = {
+      rawLine: "- [ ] Task due: 2026-03-11 00:00",
+      text: "Task",
+      checked: false,
+      context: "",
+      sessionIndex: 0,
+      lineIndex: 0,
+      dueDate: "2026-03-11 00:00",
+    };
+
+    await updateDueDateInNotes(prefs, "p", notes, todo, null);
+
+    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
+    expect(written.sessions[0].body).toBe("- [ ] Task");
+  });
+});
+
 describe("addTodoAsChildInNotes", () => {
   beforeEach(() => {
     vi.mocked(runPmWithStdin).mockClear();
@@ -323,20 +397,12 @@ describe("addTodoAsChildInNotes", () => {
       lineIndex: 0,
     };
 
-    await addTodoAsChildInNotes(
-      prefs,
-      "p",
-      notes,
-      parentTodo,
-      "Child task",
-    );
+    await addTodoAsChildInNotes(prefs, "p", notes, parentTodo, "Child task");
 
     const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
     expect(lastCall).toBeDefined();
     const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
-    expect(written.sessions[0].body).toBe(
-      "- [ ] Parent\n  - [ ] Child task @",
-    );
+    expect(written.sessions[0].body).toBe("- [ ] Parent\n  - [ ] Child task @");
   });
 
   it("strips focus from parent when adding child", async () => {
@@ -351,13 +417,7 @@ describe("addTodoAsChildInNotes", () => {
       lineIndex: 0,
     };
 
-    await addTodoAsChildInNotes(
-      prefs,
-      "p",
-      notes,
-      parentTodo,
-      "New child",
-    );
+    await addTodoAsChildInNotes(prefs, "p", notes, parentTodo, "New child");
 
     const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
     expect(lastCall).toBeDefined();

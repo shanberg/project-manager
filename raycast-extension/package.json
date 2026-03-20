@@ -230,7 +230,7 @@
     },
     {
       "name": "dive-in-focused-task",
-      "title": "Dive In",
+      "title": "Dive in",
       "description": "Set focus to the first leaf in the active branch, or first leaf in tree if no focus",
       "mode": "no-view",
       "keywords": [
@@ -303,6 +303,7 @@
       "name": "useObsidianCLI",
       "type": "checkbox",
       "required": false,
+      "label": "Use Obsidian CLI for notes",
       "title": "Use Obsidian CLI for notes",
       "description": "When enabled, the pm CLI will read/write notes via the Obsidian CLI (Obsidian 1.12+ with CLI enabled). Uses the vault name and path above. If the CLI is unavailable, pm falls back to direct file I/O.",
       "default": false

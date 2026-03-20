@@ -17,12 +17,12 @@ import { useCachedPromise } from "@raycast/utils";
 import {
   getNotes,
   resolveNotesPath,
+  stripInlineDueFromText,
   toggleAllTodosInNotes,
   toggleTodoInNotes,
   type LinkEntry,
   type Todo,
 } from "./lib/notes-api";
-import { formatRelativeDue } from "./lib/format-relative-due";
 import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { setFocusedProject } from "./lib/focused-project";
@@ -66,7 +66,8 @@ function fetchProjectNotes(
     const prefs = { configPath, pmCliPath };
     const signal = abortRef?.current?.signal;
     const notesPath = await resolveNotesPath(prefs, projName, signal);
-    if (!notesPath) return { notes: null, todos: [] as Todo[], notesPath: null };
+    if (!notesPath)
+      return { notes: null, todos: [] as Todo[], notesPath: null };
     try {
       const out = await getNotes(prefs, projName, signal);
       return { notes: out.notes, todos: out.todos, notesPath };
@@ -163,10 +164,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
       await toggleTodoInNotes(prefs, projectName, notes, todo);
       await mutate();
       await refreshMenubar();
+      const toastText = stripInlineDueFromText(todo.text);
       await showToast({
         style: Toast.Style.Success,
         title: todo.checked ? "Incomplete" : "Complete",
-        message: todo.text.slice(0, 50) + (todo.text.length > 50 ? "…" : ""),
+        message: toastText.slice(0, 50) + (toastText.length > 50 ? "…" : ""),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -339,7 +341,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           <List.Item
             key={`${nextTodoContext}-${nextTodo.rawLine}`}
             icon={Icon.ArrowRightCircleFilled}
-            title={nextTodo.text}
+            title={stripInlineDueFromText(nextTodo.text)}
             subtitle={nextTodoContext ?? undefined}
             actions={
               <ActionPanel>
@@ -362,7 +364,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
                     />
                   )}
                 <Action.CopyToClipboard
-                  content={nextTodo.text}
+                  content={stripInlineDueFromText(nextTodo.text)}
                   title="Copy Task"
                   icon={Icon.Clipboard}
                 />
@@ -404,14 +406,8 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       ? Icon.CheckCircle
                       : Icon.ArrowRightCircleFilled
                   }
-                  title={todo.text}
-                  accessoryTitle={
-                    todo.checked
-                      ? "done"
-                      : (todo.effectiveDueDate ?? todo.dueDate)
-                        ? formatRelativeDue(todo.effectiveDueDate ?? todo.dueDate ?? "")
-                        : undefined
-                  }
+                  title={stripInlineDueFromText(todo.text)}
+                  accessoryTitle={todo.checked ? "done" : undefined}
                   actions={
                     <ActionPanel>
                       <Action
@@ -423,14 +419,14 @@ export default function ProjectView({ projectName, basePath }: Props) {
                       {(bySession.get(context) ?? []).some(
                         (t) => !t.checked,
                       ) && (
-                          <Action
-                            title="Complete All in Session"
-                            icon={Icon.CheckCircle}
-                            onAction={() => handleMarkAllInSessionDone(context)}
-                          />
-                        )}
+                        <Action
+                          title="Complete All in Session"
+                          icon={Icon.CheckCircle}
+                          onAction={() => handleMarkAllInSessionDone(context)}
+                        />
+                      )}
                       <Action.CopyToClipboard
-                        content={todo.text}
+                        content={stripInlineDueFromText(todo.text)}
                         title="Copy Task"
                         icon={Icon.Clipboard}
                       />

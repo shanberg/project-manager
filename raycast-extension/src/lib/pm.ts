@@ -47,14 +47,19 @@ export async function getPmConfig(
     try {
       const data = await readFile(configPath, "utf-8");
       const raw = JSON.parse(data) as Record<string, unknown>;
-      if (typeof raw?.activePath !== "string" || typeof raw?.archivePath !== "string")
+      if (
+        typeof raw?.activePath !== "string" ||
+        typeof raw?.archivePath !== "string"
+      )
         return null;
       return {
         activePath: raw.activePath as string,
         archivePath: raw.archivePath as string,
         paraPath: raw.paraPath as string | null | undefined,
         domains:
-          raw.domains && typeof raw.domains === "object" && !Array.isArray(raw.domains)
+          raw.domains &&
+          typeof raw.domains === "object" &&
+          !Array.isArray(raw.domains)
             ? (raw.domains as Record<string, string>)
             : { ...DEFAULT_DOMAINS },
         subfolders: Array.isArray(raw.subfolders)
@@ -71,17 +76,26 @@ export async function getPmConfig(
   }
   try {
     const env = getConfigEnv(prefs.configPath);
-    const { stdout, code } = await runPm(["config", "get"], env, prefs.pmCliPath);
+    const { stdout, code } = await runPm(
+      ["config", "get"],
+      env,
+      prefs.pmCliPath,
+    );
     if (code !== 0) return fromFile();
     const raw = JSON.parse(stdout.trim()) as Record<string, unknown>;
-    if (typeof raw?.activePath !== "string" || typeof raw?.archivePath !== "string")
+    if (
+      typeof raw?.activePath !== "string" ||
+      typeof raw?.archivePath !== "string"
+    )
       return fromFile();
     return {
       activePath: raw.activePath as string,
       archivePath: raw.archivePath as string,
       paraPath: raw.paraPath as string | null | undefined,
       domains:
-        raw.domains && typeof raw.domains === "object" && !Array.isArray(raw.domains)
+        raw.domains &&
+        typeof raw.domains === "object" &&
+        !Array.isArray(raw.domains)
           ? (raw.domains as Record<string, string>)
           : { ...DEFAULT_DOMAINS },
       subfolders: Array.isArray(raw.subfolders)
@@ -108,7 +122,9 @@ export async function setPmConfigKey(
     typeof value === "string"
       ? value
       : typeof value === "boolean"
-        ? value ? "true" : "false"
+        ? value
+          ? "true"
+          : "false"
         : JSON.stringify(value);
   const { stderr, code } = await runPm(
     ["config", "set", key, valueStr],
@@ -116,7 +132,9 @@ export async function setPmConfigKey(
     prefs.pmCliPath,
   );
   if (code !== 0) {
-    throw new Error(stderr.trim() || `pm config set ${key} failed (exit ${code})`);
+    throw new Error(
+      stderr.trim() || `pm config set ${key} failed (exit ${code})`,
+    );
   }
 }
 
@@ -156,7 +174,10 @@ export async function getPmPathsIfPresent(
     const configPath = path.join(getConfigDir(prefs.configPath), "config.json");
     try {
       const data = await readFile(configPath, "utf-8");
-      const config = JSON.parse(data) as { activePath?: string; archivePath?: string };
+      const config = JSON.parse(data) as {
+        activePath?: string;
+        archivePath?: string;
+      };
       const activePath = (config.activePath ?? "").trim();
       const archivePath = (config.archivePath ?? "").trim();
       if (!activePath || !archivePath) return null;
@@ -230,11 +251,7 @@ export async function writeInitialConfig(
   if (options.useObsidianCLI && vault) config.obsidianVault = vault;
   if (options.useObsidianCLI && vaultPath) config.obsidianVaultPath = vaultPath;
   const configPath = path.join(dir, "config.json");
-  await writeFile(
-    configPath,
-    JSON.stringify(config, null, 2),
-    "utf-8",
-  );
+  await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
 }
 
 /** Load domains from pm config. Uses DEFAULT_DOMAINS if config missing or invalid. */
@@ -327,7 +344,11 @@ export function buildEnv(
 
 type PrefsForNotes = Pick<
   PreferenceValues,
-  "configPath" | "pmCliPath" | "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot"
+  | "configPath"
+  | "pmCliPath"
+  | "useObsidianCLI"
+  | "obsidianVault"
+  | "obsidianVaultRoot"
 >;
 
 /** Sync Obsidian CLI preferences from extension to pm config so pm uses them for notes read/write.
@@ -341,7 +362,12 @@ export async function syncObsidianPrefsToPmConfig(
   const requireSync = !!prefs.useObsidianCLI;
   try {
     await runPm(
-      ["config", "set", "useObsidianCLI", prefs.useObsidianCLI ? "true" : "false"],
+      [
+        "config",
+        "set",
+        "useObsidianCLI",
+        prefs.useObsidianCLI ? "true" : "false",
+      ],
       env,
       pmPath,
     );
@@ -357,11 +383,22 @@ export async function syncObsidianPrefsToPmConfig(
 
 /** Run pm with extension prefs. Uses pm config only; no path overrides. When running a notes command, syncs Obsidian CLI prefs to pm config first. */
 export async function runPmWithPrefs(
-  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath"> & Partial<Pick<PreferenceValues, "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot">>,
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath"> &
+    Partial<
+      Pick<
+        PreferenceValues,
+        "useObsidianCLI" | "obsidianVault" | "obsidianVaultRoot"
+      >
+    >,
   args: string[],
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  if (args[0] === "notes" && ("useObsidianCLI" in prefs || "obsidianVault" in prefs || "obsidianVaultRoot" in prefs)) {
+  if (
+    args[0] === "notes" &&
+    ("useObsidianCLI" in prefs ||
+      "obsidianVault" in prefs ||
+      "obsidianVaultRoot" in prefs)
+  ) {
     await syncObsidianPrefsToPmConfig(prefs as PrefsForNotes);
   }
   return runPm(args, buildEnv(prefs), prefs.pmCliPath, signal);
@@ -414,9 +451,7 @@ export async function runPm(
     const timeoutId = setTimeout(
       () =>
         finish({
-          error: new Error(
-            `pm timed out after ${PM_RUN_TIMEOUT_MS / 1000}s`,
-          ),
+          error: new Error(`pm timed out after ${PM_RUN_TIMEOUT_MS / 1000}s`),
         }),
       PM_RUN_TIMEOUT_MS,
     );

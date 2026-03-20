@@ -55,19 +55,30 @@ public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
     )
 }
 
-private let dueMetadataPattern: NSRegularExpression? = {
-    try? NSRegularExpression(pattern: #"^\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*$"#)
+private let dueInlinePattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?=\s*@|\s*$)"#)
 }()
 
-private func parseDueFromNextLine(_ lines: [String], afterIndex idx: Int) -> String? {
-    guard idx + 1 < lines.count else { return nil }
-    let nextLine = lines[idx + 1]
-    guard nextLine.first == " " || nextLine.first == "\t" else { return nil }
-    guard let pattern = dueMetadataPattern,
-          let m = pattern.firstMatch(in: nextLine, range: NSRange(nextLine.startIndex..., in: nextLine)),
-          let r1 = Range(m.range(at: 1), in: nextLine) else { return nil }
-    return String(nextLine[r1])
+private func parseDueFromLine(_ line: String) -> (due: String?, contentWithoutDue: String) {
+    guard let pattern = dueInlinePattern,
+          let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+          let r0 = Range(m.range(at: 0), in: line),
+          let r1 = Range(m.range(at: 1), in: line) else {
+        return (nil, line)
+    }
+    let due = String(line[r1])
+    var without = String(line[..<r0.lowerBound])
+    let tail = String(line[r0.upperBound...]).trimmingCharacters(in: .whitespaces)
+    if tail == "@" {
+        without = without.trimmingCharacters(in: .whitespaces) + focusMarkerSuffix
+    } else if without.hasSuffix("@") && !without.hasSuffix(focusMarkerSuffix) {
+        without = String(without.dropLast()) + focusMarkerSuffix
+    } else {
+        without = without.trimmingCharacters(in: .whitespaces)
+    }
+    return (due, without)
 }
+
 
 public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     let todoLinePattern: NSRegularExpression
@@ -82,14 +93,17 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var lineIndex = 0
-        for (idx, line) in lines.enumerated() {
+        for line in lines {
             guard let m = todoLinePattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                   let r2 = Range(m.range(at: 2), in: line),
                   let r3 = Range(m.range(at: 3), in: line) else { continue }
             let leadingSpaces = line.prefix(while: { $0 == " " }).count
             let depth = leadingSpaces / 2
             let checked = line[r2].lowercased() == "x"
-            var text = String(line[r3])
+            let content = String(line[r3])
+            let (inlineDue, contentWithoutDue) = parseDueFromLine(content)
+            let dueDate = inlineDue
+            var text = contentWithoutDue
             let isFocused: Bool
             if text.hasSuffix(focusMarkerSuffix) {
                 text = String(text.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
@@ -102,7 +116,6 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
             } else {
                 isFocused = false
             }
-            let dueDate = parseDueFromNextLine(lines, afterIndex: idx)
             todos.append(Todo(
                 text: text,
                 checked: checked,
@@ -306,12 +319,15 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
     let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     var taskCount = 0
     var outLines: [String] = []
-    for line in lines {
+    var i = 0
+    while i < lines.count {
+        let line = lines[i]
         guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
               let r1 = Range(m.range(at: 1), in: line),
               let r2 = Range(m.range(at: 2), in: line),
               let r3 = Range(m.range(at: 3), in: line) else {
             outLines.append(line)
+            i += 1
             continue
         }
         let check = String(line[r2])
@@ -323,12 +339,19 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
             if newContent.hasSuffix(focusMarkerSuffix) {
                 newContent = String(newContent.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
             }
+            let (inlineDue, contentWithoutDue) = parseDueFromLine(newContent)
+            let contentForLine = contentWithoutDue
             let prefix = String(line[r1])
-            outLines.append("\(prefix)[x] \(newContent)")
+            var completed = "\(prefix)[x] \(contentForLine)"
+            if let due = inlineDue {
+                completed += " due: \(due)"
+            }
+            outLines.append(completed)
         } else {
             outLines.append(line)
         }
         taskCount += 1
+        i += 1
     }
     var updatedNotes = ProjectNotes(
         title: notes.title,

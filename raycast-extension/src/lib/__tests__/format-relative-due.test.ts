@@ -20,6 +20,20 @@ describe("parseDueDate", () => {
   it("returns null for invalid input", () => {
     expect(parseDueDate("invalid")).toBeNull();
   });
+
+  it("parses due: prefix on ISO date", () => {
+    const d = parseDueDate("due: 2025-03-15");
+    expect(d?.getFullYear()).toBe(2025);
+    expect(d?.getMonth()).toBe(2);
+    expect(d?.getDate()).toBe(15);
+  });
+
+  it("parses due: prefix on D-M-YYYY", () => {
+    const d = parseDueDate("due: 15-03-2025");
+    expect(d?.getFullYear()).toBe(2025);
+    expect(d?.getMonth()).toBe(2);
+    expect(d?.getDate()).toBe(15);
+  });
 });
 
 describe("formatRelativeDue", () => {

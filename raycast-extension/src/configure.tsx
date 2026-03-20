@@ -6,10 +6,7 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import {
-  getPmConfig,
-  getPmPathsIfPresent,
-} from "./lib/pm";
+import { getPmConfig, getPmPathsIfPresent } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import EditDomains from "./edit-domains";
 import EditNotesTemplate from "./edit-notes-template";
@@ -23,14 +20,14 @@ export default function Command() {
     getPmPathsIfPresent,
     [prefs],
   );
-  const { data: config } = useCachedPromise(
-    getPmConfig,
-    [prefs],
-    { execute: pathsOrNull != null },
-  );
+  const { data: config } = useCachedPromise(getPmConfig, [prefs], {
+    execute: pathsOrNull != null,
+  });
 
   if (pathsOrNull === undefined) {
-    return <Detail navigationTitle="Configure Project Manager" markdown="Loading…" />;
+    return (
+      <Detail navigationTitle="Configure Project Manager" markdown="Loading…" />
+    );
   }
 
   if (pathsOrNull === null) {
@@ -50,8 +47,8 @@ export default function Command() {
   const domainSummary =
     Object.keys(domains).length > 0
       ? Object.entries(domains)
-        .map(([code, label]) => `${code} → ${label}`)
-        .join("  ·  ")
+          .map(([code, label]) => `${code} → ${label}`)
+          .join("  ·  ")
       : "—";
   const structureSummary =
     subfolders.length > 0 ? subfolders.join("  ·  ") : "—";
@@ -85,15 +82,9 @@ Optional path to a custom notes template file. **Edit Notes Template** to set or
 When enabled, pm reads/writes notes via the Obsidian CLI. Configure in **Open Preferences**.`}
       metadata={
         <Detail.Metadata>
-          <Detail.Metadata.Label
-            title="Active"
-            text={paths.activePath}
-          />
+          <Detail.Metadata.Label title="Active" text={paths.activePath} />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label
-            title="Archive"
-            text={paths.archivePath}
-          />
+          <Detail.Metadata.Label title="Archive" text={paths.archivePath} />
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Para path" text={paraPathText} />
           <Detail.Metadata.Separator />
@@ -109,9 +100,18 @@ When enabled, pm reads/writes notes via the Obsidian CLI. Configure in **Open Pr
             text={notesTemplateText}
           />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label title="Use Obsidian CLI" text={useObsidianText} />
-          <Detail.Metadata.Label title="Obsidian vault" text={obsidianVaultText} />
-          <Detail.Metadata.Label title="Obsidian vault path" text={obsidianVaultPathText} />
+          <Detail.Metadata.Label
+            title="Use Obsidian CLI"
+            text={useObsidianText}
+          />
+          <Detail.Metadata.Label
+            title="Obsidian vault"
+            text={obsidianVaultText}
+          />
+          <Detail.Metadata.Label
+            title="Obsidian vault path"
+            text={obsidianVaultPathText}
+          />
         </Detail.Metadata>
       }
       actions={

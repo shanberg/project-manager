@@ -59,7 +59,7 @@ public struct Todo: Codable, Equatable {
     public var lineIndex: Int
     /// True if this task line ends with " @" (the single focused item in the notes file).
     public var isFocused: Bool
-    /// Parsed from next-line metadata `due:\s*<date>`. Stored as-is for display; raw metadata line preserved on write.
+    /// Parsed from inline `due: <date>` at end of task line. Stored as-is for display.
     public var dueDate: String?
     /// Effective due date for display: own dueDate if set, else earliest due among ancestors (nearest deadline). Not stored in notes; computed when producing notes show output.
     public var effectiveDueDate: String?

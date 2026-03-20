@@ -110,55 +110,55 @@ function fetchProjectsWithMeta(
     configPath: string | undefined,
     pmCliPath: string | undefined,
   ) => {
-  const prefs = { configPath, pmCliPath };
-  const signal = abortRef?.current?.signal;
-  const [paths, domains, { stdout }] = await Promise.all([
-    getPmPaths(prefs, signal),
-    getConfigDomains(prefs),
-    runPmWithPrefs(prefs, ["list", "--all"], signal),
-  ]);
-  const { activePath, archivePath } = paths;
-  const domainCodes = Object.keys(domains);
+    const prefs = { configPath, pmCliPath };
+    const signal = abortRef?.current?.signal;
+    const [paths, domains, { stdout }] = await Promise.all([
+      getPmPaths(prefs, signal),
+      getConfigDomains(prefs),
+      runPmWithPrefs(prefs, ["list", "--all"], signal),
+    ]);
+    const { activePath, archivePath } = paths;
+    const domainCodes = Object.keys(domains);
 
-  async function enrich(
-    names: string[],
-    basePath: string,
-  ): Promise<ProjectWithMeta[]> {
-    return mapWithConcurrency(names, PM_CONCURRENCY, async (name) => {
-      const projectPath = path.join(basePath, name);
-      const [loaded, stats] = await Promise.all([
-        loadNotesForProject(prefs, name, signal),
-        stat(projectPath).catch(() => ({ mtime: 0 as number })),
-      ]);
-      const notes = loaded?.notes ?? null;
-      const todos = loaded?.todos ?? [];
-      const done = todos.filter(
-        (t: { checked: boolean }) => t.checked,
-      ).length;
-      const mtime =
-        typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
-      return {
-        name,
-        notes,
-        notesPath: loaded?.notesPath ?? null,
-        mtime,
-        hasSrc: hasSrcDir(path.join(basePath, name)),
-        basePath,
-        domain: getDomainFromCodes(name, domainCodes),
-        done,
-        total: todos.length,
-      };
-    });
-  }
+    async function enrich(
+      names: string[],
+      basePath: string,
+    ): Promise<ProjectWithMeta[]> {
+      return mapWithConcurrency(names, PM_CONCURRENCY, async (name) => {
+        const projectPath = path.join(basePath, name);
+        const [loaded, stats] = await Promise.all([
+          loadNotesForProject(prefs, name, signal),
+          stat(projectPath).catch(() => ({ mtime: 0 as number })),
+        ]);
+        const notes = loaded?.notes ?? null;
+        const todos = loaded?.todos ?? [];
+        const done = todos.filter(
+          (t: { checked: boolean }) => t.checked,
+        ).length;
+        const mtime =
+          typeof stats.mtime === "number" ? stats.mtime : stats.mtime.getTime();
+        return {
+          name,
+          notes,
+          notesPath: loaded?.notesPath ?? null,
+          mtime,
+          hasSrc: hasSrcDir(path.join(basePath, name)),
+          basePath,
+          domain: getDomainFromCodes(name, domainCodes),
+          done,
+          total: todos.length,
+        };
+      });
+    }
 
-  const { active: activeNames, archive: archiveNames } =
-    parseListAllOutput(stdout);
-  const [active, archive] = await Promise.all([
-    enrich(activeNames, activePath),
-    enrich(archiveNames, archivePath),
-  ]);
+    const { active: activeNames, archive: archiveNames } =
+      parseListAllOutput(stdout);
+    const [active, archive] = await Promise.all([
+      enrich(activeNames, activePath),
+      enrich(archiveNames, archivePath),
+    ]);
 
-  return { active, archive, activePath, archivePath };
+    return { active, archive, activePath, archivePath };
   };
 }
 
@@ -197,10 +197,7 @@ export default function Command() {
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
   const prefs = getPreferenceValues<PreferenceValues>();
   const abortable = useRef<AbortController>();
-  const fetchProjects = useMemo(
-    () => fetchProjectsWithMeta(abortable),
-    [],
-  );
+  const fetchProjects = useMemo(() => fetchProjectsWithMeta(abortable), []);
 
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
   const domainCodes = Object.keys(domains);

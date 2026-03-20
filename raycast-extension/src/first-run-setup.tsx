@@ -71,8 +71,12 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
         useObsidianCLI: useObsidian,
         paraPath: paraPath || undefined,
         notesTemplatePath: notesTemplatePath || undefined,
-        obsidianVault: useObsidian ? values.obsidianVault.trim() || undefined : undefined,
-        obsidianVaultPath: useObsidian ? obsidianVaultPath || undefined : undefined,
+        obsidianVault: useObsidian
+          ? values.obsidianVault.trim() || undefined
+          : undefined,
+        obsidianVaultPath: useObsidian
+          ? obsidianVaultPath || undefined
+          : undefined,
       });
       await showToast({
         style: Toast.Style.Success,

@@ -98,12 +98,20 @@ describe("getRecentProjectsByEdit", () => {
 
     expect(result).toHaveLength(10);
     expect(vi.mocked(getNotes).mock.calls.length).toBe(10);
-    const projectNamesCalled = vi.mocked(getNotes).mock.calls.map(
-      (c) => c[1] as string,
-    );
+    const projectNamesCalled = vi
+      .mocked(getNotes)
+      .mock.calls.map((c) => c[1] as string);
     expect(projectNamesCalled).toEqual([
-      "proj-a", "proj-b", "proj-c", "proj-d", "proj-e",
-      "proj-f", "proj-g", "proj-h", "proj-i", "proj-j",
+      "proj-a",
+      "proj-b",
+      "proj-c",
+      "proj-d",
+      "proj-e",
+      "proj-f",
+      "proj-g",
+      "proj-h",
+      "proj-i",
+      "proj-j",
     ]);
   });
 

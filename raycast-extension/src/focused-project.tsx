@@ -5,9 +5,9 @@ import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
   getNotes,
-  getEffectiveDue,
   resolveNotesPath,
   setFocusToTodoInNotes,
+  stripInlineDueFromText,
   toggleTodoInNotes,
   completeAndAdvanceInNotes,
   undoCompleteInNotes,
@@ -27,7 +27,6 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
 } from "./lib/utils";
-import { formatRelativeDue, formatDueForMenubar } from "./lib/format-relative-due";
 import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
@@ -40,7 +39,10 @@ function breadcrumbForNowTask(todos: Todo[], nowTask: Todo): string {
       if (t === nowTask) break;
     }
   }
-  return [nowTask.context, ...path.map((t) => t.text)].join(" » ");
+  return [
+    nowTask.context,
+    ...path.map((t) => stripInlineDueFromText(t.text)),
+  ].join(" » ");
 }
 
 function fetchFocusedProjectData(
@@ -52,87 +54,80 @@ function fetchFocusedProjectData(
   ) => {
     const prefs = { configPath, pmCliPath };
     const signal = abortRef?.current?.signal;
-  const focusedKey = await getFocusedProject();
-  if (!focusedKey) return null;
-  const parsed = parseProjectKey(focusedKey);
-  if (!parsed) return null;
-  const { basePath, name } = parsed;
-  const notesPath = await resolveNotesPath(prefs, name, signal);
-  if (!notesPath) {
-    await clearTaskTiming();
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath: null as null,
-      todos: [] as Todo[],
-      notes: null as null,
-      iconColor: undefined,
-    };
-  }
-  try {
-    const out = await getNotes(prefs, name, signal);
-    const notes = out.notes;
-    const todos = out.todos;
-    const openTodos = todos.filter((t) => !t.checked);
-    const nextTodo = openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
-    let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
-    if (nextTodo) {
-      const key = taskTimingKey(notesPath, nextTodo.rawLine);
-      const stored = await getTaskTiming();
-      const now = Date.now();
-      if (stored?.taskKey === key) {
-        const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
-        if (elapsedHours >= 2) iconColor = Color.Red;
-        else if (elapsedHours >= 1) iconColor = Color.Yellow;
-      } else {
-        await setTaskTiming(key);
-      }
-    } else {
+    const focusedKey = await getFocusedProject();
+    if (!focusedKey) return null;
+    const parsed = parseProjectKey(focusedKey);
+    if (!parsed) return null;
+    const { basePath, name } = parsed;
+    const notesPath = await resolveNotesPath(prefs, name, signal);
+    if (!notesPath) {
       await clearTaskTiming();
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath: null as null,
+        todos: [] as Todo[],
+        notes: null as null,
+        iconColor: undefined,
+      };
     }
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath,
-      todos,
-      notes,
-      iconColor,
-    };
-  } catch {
-    await clearTaskTiming();
-    return {
-      name,
-      basePath,
-      projectPath: path.join(basePath, name),
-      notesPath: null,
-      todos: [],
-      notes: null,
-      iconColor: undefined,
-    };
-  }
+    try {
+      const out = await getNotes(prefs, name, signal);
+      const notes = out.notes;
+      const todos = out.todos;
+      const openTodos = todos.filter((t) => !t.checked);
+      const nextTodo =
+        openTodos.find((t) => t.isFocused) ?? openTodos[0] ?? null;
+      let iconColor: typeof Color.Yellow | typeof Color.Red | undefined;
+      if (nextTodo) {
+        const key = taskTimingKey(notesPath, nextTodo.rawLine);
+        const stored = await getTaskTiming();
+        const now = Date.now();
+        if (stored?.taskKey === key) {
+          const elapsedHours = (now - stored.seenAt) / (1000 * 60 * 60);
+          if (elapsedHours >= 2) iconColor = Color.Red;
+          else if (elapsedHours >= 1) iconColor = Color.Yellow;
+        } else {
+          await setTaskTiming(key);
+        }
+      } else {
+        await clearTaskTiming();
+      }
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath,
+        todos,
+        notes,
+        iconColor,
+      };
+    } catch {
+      await clearTaskTiming();
+      return {
+        name,
+        basePath,
+        projectPath: path.join(basePath, name),
+        notesPath: null,
+        todos: [],
+        notes: null,
+        iconColor: undefined,
+      };
+    }
   };
 }
-
-type FocusedProjectData = Awaited<ReturnType<ReturnType<typeof fetchFocusedProjectData>>>;
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
   const abortable = useRef<AbortController>();
-  const fetchFocused = useMemo(
-    () => fetchFocusedProjectData(abortable),
-    [],
-  );
+  const fetchFocused = useMemo(() => fetchFocusedProjectData(abortable), []);
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
     { execute: true, abortable },
-  ) as {
-    data: FocusedProjectData | undefined;
-    isLoading: boolean;
-    revalidate: () => void;
-  };
+  );
+
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
     getUndoState,
     [],
@@ -153,16 +148,9 @@ export default function Command() {
     byContext.set(t.context, list);
   }
 
-  const effectiveDue =
-    nextTodo != null
-      ? (nextTodo.effectiveDueDate ??
-        (data?.todos ? getEffectiveDue(data.todos, nextTodo) : null) ??
-        nextTodo.dueDate) ??
-      null
-      : null;
-  const dueMenubar = effectiveDue ? formatDueForMenubar(effectiveDue) : "";
+  const nextTodoText = nextTodo ? stripInlineDueFromText(nextTodo.text) : "";
   const title = nextTodo
-    ? nextTodo.text.slice(0, 40) + (nextTodo.text.length > 40 ? "…" : "") + (dueMenubar ? ` • ${dueMenubar}` : "")
+    ? nextTodoText.slice(0, 40) + (nextTodoText.length > 40 ? "…" : "")
     : "No Tasks";
   const tooltip = data
     ? nextTodo
@@ -187,7 +175,7 @@ export default function Command() {
       }
       await revalidate();
       await revalidateUndo();
-      await showHUD(`Done: ${todo.text.slice(0, 40)}`);
+      await showHUD(`Done: ${stripInlineDueFromText(todo.text).slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showHUD(`Error: ${msg}`);
@@ -201,7 +189,7 @@ export default function Command() {
       await setFocusToTodoInNotes(prefs, data.name, fresh.notes, todo);
       await revalidate();
       await refreshMenubar();
-      await showHUD(`Focus: ${todo.text.slice(0, 40)}`);
+      await showHUD(`Focus: ${stripInlineDueFromText(todo.text).slice(0, 40)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await showHUD(`Error: ${msg}`);
@@ -239,9 +227,9 @@ export default function Command() {
         nextTodo
           ? data?.iconColor
             ? {
-              source: Icon.ArrowRightCircleFilled,
-              tintColor: data?.iconColor,
-            }
+                source: Icon.ArrowRightCircleFilled,
+                tintColor: data?.iconColor,
+              }
             : Icon.ArrowRightCircleFilled
           : Icon.Ellipsis
       }
@@ -378,18 +366,15 @@ export default function Command() {
           )}
           {contextOrder.map((context) => (
             <MenuBarExtra.Section key={context} title={context}>
-              {(byContext.get(context) ?? []).map((todo, i) => {
+              {(byContext.get(context) ?? []).map((todo) => {
                 const isFocused = todo === nextTodo;
                 const indent = "  ".repeat(todo.depth ?? 0);
-                const dueSuffix = (todo.effectiveDueDate ?? todo.dueDate)
-                  ? ` (${formatRelativeDue(todo.effectiveDueDate ?? todo.dueDate ?? "")})`
-                  : "";
-                const displayTitle = indent + todo.text + dueSuffix;
-                const alternateTitle =
+                const todoText = stripInlineDueFromText(todo.text);
+                const displayTitle =
                   indent +
-                  (todo.text.length + dueSuffix.length > 35
-                    ? todo.text.slice(0, 32) + "…" + dueSuffix
-                    : todo.text + dueSuffix);
+                  (todoText.length > 35
+                    ? todoText.slice(0, 32) + "…"
+                    : todoText);
                 return (
                   <MenuBarExtra.Item
                     key={`${todo.sessionIndex ?? 0}-${todo.lineIndex ?? 0}-${todo.text}`}
@@ -402,7 +387,7 @@ export default function Command() {
                       !isFocused ? (
                         <MenuBarExtra.Item
                           icon={Icon.CheckCircle}
-                          title={alternateTitle}
+                          title={displayTitle}
                           onAction={() => handleMarkDone(todo)}
                         />
                       ) : undefined

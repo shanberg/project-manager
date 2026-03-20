@@ -81,7 +81,8 @@ export async function getRecentProjectsByEdit(
     },
   );
 
-  const key = (p: { basePath: string; name: string }) => `${p.basePath}:${p.name}`;
+  const key = (p: { basePath: string; name: string }) =>
+    `${p.basePath}:${p.name}`;
   const sorted = [...withMtime].sort((a, b) => b.mtime - a.mtime);
   const excludeFocused = !!excludeKey;
   const takeCount = excludeFocused ? limit + 1 : limit;
@@ -116,11 +117,11 @@ export async function getRecentProjectsByEdit(
           nextDue = getNextDueForProject(todos);
           notes = out.notes
             ? {
-              summary: out.notes.summary,
-              problem: out.notes.problem,
-              goals: out.notes.goals,
-              approach: out.notes.approach,
-            }
+                summary: out.notes.summary,
+                problem: out.notes.problem,
+                goals: out.notes.goals,
+                approach: out.notes.approach,
+              }
             : null;
         } catch {
           /* ignore */

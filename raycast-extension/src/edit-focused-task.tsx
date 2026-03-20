@@ -11,7 +11,11 @@ import {
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { getNotes, editTodoInNotes, updateDueDateInNotes } from "./lib/notes-api";
+import {
+  getNotes,
+  editTodoInNotes,
+  updateDueDateInNotes,
+} from "./lib/notes-api";
 import { refreshMenubar } from "./lib/menubar-refresh";
 import { parseDueDate, formatDueForStorage } from "./lib/format-relative-due";
 import type { PreferenceValues } from "./lib/types";
@@ -79,13 +83,20 @@ export default function Command() {
         nowTask,
         null,
       );
-      await showToast({ style: Toast.Style.Success, title: "Due Date Removed" });
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Due Date Removed",
+      });
       await revalidate();
       await refreshMenubar();
       pop();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await showToast({ style: Toast.Style.Failure, title: "Error", message: msg });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: msg,
+      });
     }
   }
 
@@ -159,7 +170,11 @@ export default function Command() {
         id="dueDate"
         title="Due"
         type={Form.DatePicker.Type.DateTime}
-        defaultValue={nowTask.dueDate ? parseDueDate(nowTask.dueDate) ?? undefined : undefined}
+        defaultValue={
+          nowTask.dueDate
+            ? (parseDueDate(nowTask.dueDate) ?? undefined)
+            : undefined
+        }
       />
     </Form>
   );

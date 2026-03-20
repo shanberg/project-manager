@@ -61,7 +61,9 @@ export default function EditNotesTemplate() {
         allowMultipleSelection={false}
         canChooseDirectories={false}
         canChooseFiles
-        defaultValue={config.notesTemplatePath ? [config.notesTemplatePath] : []}
+        defaultValue={
+          config.notesTemplatePath ? [config.notesTemplatePath] : []
+        }
         info="Optional custom notes template file. When set, new project notes use this file. Leave empty to use pm default."
       />
     </Form>
