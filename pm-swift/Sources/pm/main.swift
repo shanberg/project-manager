@@ -16,6 +16,8 @@ private func dispatch(cmd: String, args: [String]) {
         runArchive(args: args)
     case "unarchive":
         runUnarchive(args: args)
+    case "rename":
+        runRename(args: args)
     case "config":
         runConfig(args: args)
     case "notes":

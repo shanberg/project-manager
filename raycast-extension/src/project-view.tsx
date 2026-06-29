@@ -25,7 +25,7 @@ import {
 } from "./lib/notes-api";
 import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
-import { setFocusedProject } from "./lib/focused-project";
+import { getFocusedProject, setFocusedProject } from "./lib/focused-project";
 import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
@@ -91,6 +91,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
   const abortable = useRef<AbortController>();
   const fetchNotes = useMemo(() => fetchProjectNotes(abortable), []);
   const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
+  const { data: focusedKey } = useCachedPromise(getFocusedProject, [], {
+    execute: true,
+  });
+  const isFocusedProject =
+    focusedKey != null && focusedKey === projectKey(basePath, projectName);
   const isActive = basePath === (paths?.activePath ?? "");
   const projectPath = path.join(basePath, projectName);
   const [viewMode, setViewMode] = useState<TodoViewMode>("next");
@@ -770,6 +775,29 @@ export default function ProjectView({ projectName, basePath }: Props) {
             </ActionPanel>
           }
         />
+        {isFocusedProject && (
+          <List.Item
+            title="Edit Project"
+            icon={Icon.Pencil}
+            detail={sectionDetail(
+              "Rename the project title. Domain and number stay the same.",
+              "",
+            )}
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Edit Project"
+                  icon={Icon.Pencil}
+                  onAction={() =>
+                    open(
+                      "raycast://extensions/shanberg/project-manager/edit-focused-project",
+                    )
+                  }
+                />
+              </ActionPanel>
+            }
+          />
+        )}
         {isActive ? (
           <List.Item
             title="Archive Project"

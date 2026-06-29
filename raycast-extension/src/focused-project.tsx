@@ -344,6 +344,14 @@ export default function Command() {
                 }
               />
               <MenuBarExtra.Item
+                title="Edit Project"
+                onAction={() =>
+                  open(
+                    "raycast://extensions/shanberg/project-manager/edit-focused-project",
+                  )
+                }
+              />
+              <MenuBarExtra.Item
                 title="Open in Obsidian"
                 onAction={async () => {
                   await onOpenProject();

@@ -124,6 +124,17 @@
       ]
     },
     {
+      "name": "edit-focused-project",
+      "title": "Edit Project",
+      "description": "Rename the focused project title (domain and number stay the same)",
+      "mode": "view",
+      "keywords": [
+        "rename",
+        "focused",
+        "pm"
+      ]
+    },
+    {
       "name": "add-focused-todo",
       "title": "Narrow Focus",
       "description": "Add a child to the current item",
