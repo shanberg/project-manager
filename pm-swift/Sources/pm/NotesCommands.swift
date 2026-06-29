@@ -80,7 +80,14 @@ func runNotesWrite(args: [String]) {
             stderr("Invalid JSON on stdin: \(error.localizedDescription)")
             exit(1)
         }
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        // Splice only the sections that changed, preserving all other formatting. Fall back to the
+        // full serializer if the existing file can't be read or a changed section can't be spliced.
+        let rawText = try? io.readContent(path: notesPath)
+        if let rawText = rawText, let updated = try writeNotesPreservingFormat(rawText: rawText, incoming: notes) {
+            try io.writeContent(path: notesPath, content: updated)
+        } else {
+            try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        }
     } catch { fail(error) }
 }
 
@@ -97,15 +104,20 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
         let date: Date?
         if let d = dateStr {
             date = try parseSessionDateArgument(d)
         } else {
             date = nil
         }
-        notes = addSession(notes: notes, label: label, date: date)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let rawText = try io.readContent(path: notesPath)
+        if let updated = sessionAddPreservingFormat(rawText: rawText, label: label, date: date ?? Date()) {
+            try io.writeContent(path: notesPath, content: updated)
+        } else {
+            // No "## Sessions" heading to splice into; fall back to the model round-trip.
+            let notes = addSession(notes: try parseNotes(markdown: rawText), label: label, date: date)
+            try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        }
         let sessionDate = formatSessionDate(date ?? Date())
         print("Added session: \(sessionDate) \(label)")
     } catch { fail(error) }
@@ -128,10 +140,12 @@ func runNotesTodoComplete(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
-        notes = normalizeFocusMarker(notes: notes)
-        notes = try completeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let rawText = try io.readContent(path: notesPath)
+        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
+            let normalized = normalizeFocusMarker(notes: notes)
+            return try completeTodoWithDescendants(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
+        }
+        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
     } catch { fail(error) }
 }
 
@@ -150,10 +164,12 @@ func runNotesTodoFocus(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
-        notes = normalizeFocusMarker(notes: notes)
-        notes = applyFocusToTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let rawText = try io.readContent(path: notesPath)
+        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
+            let normalized = normalizeFocusMarker(notes: notes)
+            return applyFocusToTodoAt(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex)
+        }
+        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
     } catch { fail(error) }
 }
 
@@ -172,10 +188,12 @@ func runNotesTodoUndo(args: [String]) {
         }
         guard let config = try loadConfig() else { throw PmError.configNotFound }
         let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
-        notes = normalizeFocusMarker(notes: notes)
-        notes = try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
+        let rawText = try io.readContent(path: notesPath)
+        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
+            let normalized = normalizeFocusMarker(notes: notes)
+            return try undoTodoAt(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex)
+        }
+        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
     } catch { fail(error) }
 }
 

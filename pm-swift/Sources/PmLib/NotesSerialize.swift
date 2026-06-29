@@ -5,13 +5,19 @@ private func escapeCalloutLine(_ s: String) -> String {
 }
 
 private func serializeCallout(type: String, label: String, content: String) -> String {
-    let lines = content.isEmpty ? [""] : content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    let block = lines.map(escapeCalloutLine).joined(separator: "\n")
+    let block = calloutContentLines(content).joined(separator: "\n")
     return "> [!\(type)] \(label)\n\(block)"
 }
 
+/// Content lines of a callout (the `> ...` body lines, excluding the `> [!type] Label` header).
+/// Empty content yields a single `> ` line. Reused by format-preserving section splicing.
+func calloutContentLines(_ content: String) -> [String] {
+    let lines = content.isEmpty ? [""] : content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    return lines.map(escapeCalloutLine)
+}
+
 /// Two spaces after the number (e.g. "> 1.  ") for round-trip consistency with parse (num regex).
-private func serializeGoals(_ goals: [String]) -> String {
+func serializeGoals(_ goals: [String]) -> String {
     var items = goals
     if items.count < 3 {
         items.append(contentsOf: [String](repeating: "", count: 3 - items.count))
@@ -21,7 +27,7 @@ private func serializeGoals(_ goals: [String]) -> String {
     return items.enumerated().map { "> \($0.offset + 1).  \($0.element)" }.joined(separator: "\n")
 }
 
-private func serializeLinks(_ entries: [LinkEntry]) -> String {
+func serializeLinks(_ entries: [LinkEntry]) -> String {
     if entries.isEmpty { return "- \n" }
     let parts = entries.compactMap { e -> String? in
         if let children = e.children, !children.isEmpty {
@@ -35,7 +41,7 @@ private func serializeLinks(_ entries: [LinkEntry]) -> String {
     return parts.joined(separator: "\n").isEmpty ? "- \n" : parts.joined(separator: "\n") + "\n"
 }
 
-private func serializeLearnings(_ items: [String]) -> String {
+func serializeLearnings(_ items: [String]) -> String {
     let list = items.isEmpty ? [""] : items
     return list.map { "- \($0)" }.joined(separator: "\n")
 }

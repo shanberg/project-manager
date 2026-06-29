@@ -18,6 +18,21 @@ export async function recordRecentProject(key: ProjectKey): Promise<void> {
   await LocalStorage.setItem(KEY, JSON.stringify(trimmed));
 }
 
+export async function replaceRecentProjectKey(
+  oldKey: ProjectKey,
+  newKey: ProjectKey,
+): Promise<void> {
+  if (oldKey === newKey) return;
+  const raw = await LocalStorage.getItem<string>(KEY);
+  const recent: string[] = raw ? JSON.parse(raw) : [];
+  const mapped = recent.map((k) => (k === oldKey ? newKey : k));
+  const deduped: string[] = [];
+  for (const k of mapped) {
+    if (!deduped.includes(k)) deduped.push(k);
+  }
+  await LocalStorage.setItem(KEY, JSON.stringify(deduped.slice(0, MAX_RECENT)));
+}
+
 export async function getRecentProjectKeys(): Promise<ProjectKey[]> {
   const raw = await LocalStorage.getItem<string>(KEY);
   return raw ? JSON.parse(raw) : [];

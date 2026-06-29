@@ -255,6 +255,20 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(stdoutActive3.contains("Archive Test Project"), "list should show project again after unarchive")
     }
 
+    /// rename changes folder title; stdout is the new folder basename.
+    func testPmRenamePrintsNewBasename() throws {
+        try skipIfNoBinary()
+        let (_, _, codeNew) = runPm(["new", "W", "Rename CLI Test"])
+        XCTAssertEqual(codeNew, 0)
+        let (stdout, stderr, code) = runPm(["rename", "W-1", "Renamed Title"])
+        XCTAssertEqual(code, 0, "pm rename should succeed: \(stderr)")
+        let line = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(line, "W-1 Renamed Title")
+        let newPath = (activePath as NSString).appendingPathComponent("W-1 Renamed Title")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (activePath as NSString).appendingPathComponent("W-1 Rename CLI Test")))
+    }
+
     /// config init rejects when active and archive paths are the same.
     func testConfigInitRejectsSamePath() throws {
         try skipIfNoBinary()

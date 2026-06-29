@@ -68,3 +68,10 @@ export function getReadableProjectName(name: string): string {
     .trim();
   return rest || name;
 }
+
+const folderTitleFromBasenameRe = /^(.+)-(\d+)\s+(.+)$/;
+
+export function folderTitleFromBasename(basename: string): string {
+  const m = basename.match(folderTitleFromBasenameRe);
+  return m ? m[3].trim() : basename.trim();
+}

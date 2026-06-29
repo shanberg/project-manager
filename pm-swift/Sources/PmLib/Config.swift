@@ -296,6 +296,12 @@ public enum PmError: Error, CustomStringConvertible {
     case obsidianCLIReadFailed(path: String, message: String)
     /// Obsidian CLI write/create failed (path, message from CLI or process).
     case obsidianCLIWriteFailed(path: String, message: String)
+    /// Project folder name does not match `<domain>-<digits> <title>` for configured domains.
+    case projectFolderMalformed(String)
+    /// Rename target path already exists.
+    case renameTargetExists(String)
+    /// `pm rename` new title was empty or only whitespace.
+    case emptyRenameTitle
 
     public var description: String {
         switch self {
@@ -318,6 +324,9 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
         case .obsidianCLIReadFailed(let path, let message): return "Obsidian CLI read failed for \(path): \(message)"
         case .obsidianCLIWriteFailed(let path, let message): return "Obsidian CLI write failed for \(path): \(message)"
+        case .projectFolderMalformed(let name): return "Project folder name is not valid for configured domains: \(name)"
+        case .renameTargetExists(let path): return "A project folder already exists at: \(path)"
+        case .emptyRenameTitle: return "New project title cannot be empty."
         }
     }
 }
