@@ -19,16 +19,8 @@ interface Todo {
   context: string;
   session_index: number;
   line_index: number;
-}
-
-interface ListableProject {
-  project_key: string;
-  name: string;
-}
-
-interface ListProjectsResult {
-  recent: ListableProject[];
-  other: ListableProject[];
+  due_date?: string | null;
+  effective_due_date?: string | null;
 }
 
 interface FocusedProject {
@@ -72,30 +64,41 @@ function isSafeUrl(url: string): boolean {
   return t.startsWith("http://") || t.startsWith("https://");
 }
 
+/** Strip the scheme and a trailing slash so a bare URL reads as a clean domain/path. */
+function prettyUrl(url: string): string {
+  return url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+}
+
 function linksSection(entries: LinkEntry[]): string {
   if (!entries.some((l) => l.label || l.url)) return "";
-  const lines = entries
+  const items = entries
     .filter((l) => l.label || l.url)
     .map((l) => {
       const label = (l.label ?? "").trim();
       const url = (l.url ?? "").trim();
-      const linkText = label || url || "";
       if (url && isSafeUrl(url)) {
-        const display = escapeHtml(linkText || url);
         const href = escapeAttr(url);
-        const anchor = `<a href="${href}" target="_blank" rel="noopener noreferrer">${display}</a>`;
-        return label && linkText !== url ? `- ${escapeHtml(label)}: ${anchor}` : `- ${anchor}`;
+        const text = label || prettyUrl(url);
+        const sub =
+          label && prettyUrl(url) !== label
+            ? `<span class="link-host">${escapeHtml(prettyUrl(url))}</span>`
+            : "";
+        return `<li class="link-item"><a class="link-anchor" href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>${sub}</li>`;
       }
-      if (label && url) return `- ${escapeHtml(label)}: ${escapeHtml(url)}`;
-      if (url) return `- ${escapeHtml(url)}`;
-      return `- ${escapeHtml(label)}`;
+      const text = label && url ? `${label}: ${url}` : label || url;
+      return `<li class="link-item"><span class="link-plain">${escapeHtml(text)}</span></li>`;
     });
-  const body = lines.join("<br>");
-  return `<h2 class="section-title">Links</h2><div class="section-body">${body}</div>`;
+  return `<h2 class="section-title">Links</h2><ul class="link-list">${items.join("")}</ul>`;
+}
+
+function setTitle(text: string): void {
+  const titleEl = document.getElementById("project-title");
+  if (titleEl) titleEl.textContent = text;
 }
 
 function renderContent(data: FocusedProject): void {
   lastProject = data;
+  setTitle(data.title.trim() || data.project_name.trim() || "Untitled project");
   const contentEl = document.getElementById("content");
   if (!contentEl) return;
 
@@ -144,9 +147,7 @@ function renderContent(data: FocusedProject): void {
     blocks.learnings ?? "";
   const todosBlock = contentEl.querySelector("#todos-block") as HTMLElement;
   todosBlock.innerHTML = blocks.todos ?? "";
-  if (data.todos.length > 0) {
-    bindTodoListeners(todosBlock);
-  }
+  bindTodoListeners(todosBlock);
   bindTasksFilterToggle(todosBlock);
 
   contentEl.hidden = false;
@@ -154,12 +155,62 @@ function renderContent(data: FocusedProject): void {
 
 const TODO_INDENT_EM = 1.25;
 
+/** First 10 chars when they look like YYYY-MM-DD, for a <input type="date"> value. */
+function dueInputValue(due: string | null | undefined): string {
+  if (!due) return "";
+  const m = due.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
+}
+
+function dueChip(t: Todo): string {
+  const own = t.due_date ?? null;
+  const eff = t.effective_due_date ?? null;
+  const seed = dueInputValue(own ?? eff);
+  if (own) {
+    return `<button type="button" class="todo-due-chip has-due" data-due="${escapeAttr(seed)}" title="Edit due date">${escapeHtml(own.slice(0, 10))}</button>`;
+  }
+  if (eff) {
+    return `<button type="button" class="todo-due-chip inherited" data-due="${escapeAttr(seed)}" title="Inherited due — click to set this task's own">${escapeHtml(eff.slice(0, 10))}</button>`;
+  }
+  return `<button type="button" class="todo-due-chip empty" data-due="" title="Set due date" aria-label="Set due date">＋date</button>`;
+}
+
 function renderTaskRow(t: Todo): string {
   const checked = t.checked ? ' checked' : '';
   return (
     `<div class="todo-row${t.is_focused ? " todo-row-focused" : ""}" data-session-index="${t.session_index}" data-line-index="${t.line_index}" style="padding-left: ${t.depth * TODO_INDENT_EM}em">` +
     `<input type="checkbox" class="todo-checkbox"${checked} aria-label="Toggle task">` +
     `<span class="todo-label" role="button" tabindex="0">${escapeHtml(t.text)}</span>` +
+    `<span class="todo-actions">${dueChip(t)}<button type="button" class="todo-add" title="Add task here" aria-label="Add task here">+</button></span>` +
+    `</div>`
+  );
+}
+
+function buildAddEditor(): string {
+  return (
+    `<div class="todo-editor add-editor">` +
+    `<div class="seg" role="group" aria-label="Where to add">` +
+    `<button type="button" class="seg-btn" data-pos="before">Before</button>` +
+    `<button type="button" class="seg-btn active" data-pos="child">Subtask</button>` +
+    `<button type="button" class="seg-btn" data-pos="after">After</button>` +
+    `</div>` +
+    `<input class="editor-text" type="text" placeholder="Task text" aria-label="Task text">` +
+    `<div class="editor-actions">` +
+    `<input class="editor-due" type="date" aria-label="Due date">` +
+    `<button type="button" class="editor-add">Add</button>` +
+    `<button type="button" class="editor-cancel">Cancel</button>` +
+    `</div>` +
+    `</div>`
+  );
+}
+
+function buildDueEditor(current: string): string {
+  return (
+    `<div class="todo-editor due-editor">` +
+    `<input class="editor-due" type="date" value="${escapeAttr(current)}" aria-label="Due date">` +
+    `<button type="button" class="due-set">Set</button>` +
+    `<button type="button" class="due-clear">Clear</button>` +
+    `<button type="button" class="editor-cancel">Cancel</button>` +
     `</div>`
   );
 }
@@ -199,132 +250,211 @@ function bindTasksFilterToggle(container: HTMLElement): void {
   });
 }
 
+function rowPos(el: HTMLElement): { si: number; li: number } | null {
+  const row = el.closest(".todo-row") as HTMLElement | null;
+  if (!row) return null;
+  const si = Number(row.dataset.sessionIndex);
+  const li = Number(row.dataset.lineIndex);
+  if (Number.isNaN(si) || Number.isNaN(li)) return null;
+  return { si, li };
+}
+
+function showError(err: unknown): void {
+  const errEl = document.getElementById("error");
+  if (errEl) errEl.textContent = err instanceof Error ? err.message : String(err);
+}
+
+function closeEditors(container: HTMLElement): void {
+  container.querySelectorAll(".todo-editor").forEach((e) => e.remove());
+}
+
 function bindTodoListeners(container: HTMLElement): void {
+  // Handlers are delegated and read the current DOM, so bind once — renderContent reuses the
+  // same #todos-block element on every reload, and re-adding would stack duplicate handlers.
+  if (container.dataset.bound === "1") return;
+  container.dataset.bound = "1";
+
   container.addEventListener("change", async (e) => {
     const target = e.target as HTMLInputElement;
     if (target.type !== "checkbox" || !target.classList.contains("todo-checkbox")) return;
-    const row = target.closest(".todo-row") as HTMLElement | null;
-    if (!row) return;
-    const si = Number(row.dataset.sessionIndex);
-    const li = Number(row.dataset.lineIndex);
-    if (Number.isNaN(si) || Number.isNaN(li)) return;
+    const pos = rowPos(target);
+    if (!pos) return;
     try {
-      await invoke("toggle_todo", { sessionIndex: si, lineIndex: li, checked: target.checked });
+      await invoke("toggle_todo", { sessionIndex: pos.si, lineIndex: pos.li, checked: target.checked });
       await loadProject();
     } catch (err) {
-      console.error(err);
+      showError(err);
     }
   });
+
+  container.addEventListener("keydown", (e) => {
+    const target = e.target as HTMLElement;
+    if ((e as KeyboardEvent).key === "Enter" && target.classList.contains("editor-text")) {
+      e.preventDefault();
+      (target.closest(".add-editor")?.querySelector(".editor-add") as HTMLElement | null)?.click();
+    }
+  });
+
   container.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    if (!target.classList.contains("todo-label")) return;
-    const row = target.closest(".todo-row") as HTMLElement | null;
-    if (!row) return;
-    const si = Number(row.dataset.sessionIndex);
-    const li = Number(row.dataset.lineIndex);
-    if (Number.isNaN(si) || Number.isNaN(li)) return;
-    e.preventDefault();
-    try {
-      await invoke("set_focus_to", { sessionIndex: si, lineIndex: li });
-      await loadProject();
-    } catch (err) {
-      console.error(err);
+
+    // Move focus by clicking a task's label.
+    if (target.classList.contains("todo-label")) {
+      const pos = rowPos(target);
+      if (!pos) return;
+      e.preventDefault();
+      try {
+        await invoke("set_focus_to", { sessionIndex: pos.si, lineIndex: pos.li });
+        await loadProject();
+      } catch (err) {
+        showError(err);
+      }
+      return;
+    }
+
+    // Open the positional add editor under the row.
+    if (target.classList.contains("todo-add")) {
+      const row = target.closest(".todo-row") as HTMLElement | null;
+      if (!row) return;
+      const wasOpen = (row.nextElementSibling as HTMLElement | null)?.classList.contains("add-editor");
+      closeEditors(container);
+      if (wasOpen) return;
+      row.insertAdjacentHTML("afterend", buildAddEditor());
+      (row.nextElementSibling?.querySelector(".editor-text") as HTMLInputElement | null)?.focus();
+      return;
+    }
+
+    // Open the due-date editor under the row.
+    if (target.classList.contains("todo-due-chip")) {
+      const row = target.closest(".todo-row") as HTMLElement | null;
+      if (!row) return;
+      const wasOpen = (row.nextElementSibling as HTMLElement | null)?.classList.contains("due-editor");
+      closeEditors(container);
+      if (wasOpen) return;
+      row.insertAdjacentHTML("afterend", buildDueEditor(target.dataset.due ?? ""));
+      (row.nextElementSibling?.querySelector(".editor-due") as HTMLInputElement | null)?.focus();
+      return;
+    }
+
+    // Segmented position selector.
+    if (target.classList.contains("seg-btn")) {
+      target.closest(".seg")?.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+      target.classList.add("active");
+      return;
+    }
+
+    if (target.classList.contains("editor-cancel")) {
+      closeEditors(container);
+      return;
+    }
+
+    // Submit a positional add.
+    if (target.classList.contains("editor-add")) {
+      const editor = target.closest(".add-editor") as HTMLElement | null;
+      const row = editor?.previousElementSibling as HTMLElement | null;
+      const pos = row ? rowPos(row) : null;
+      if (!editor || !pos) return;
+      const text = (editor.querySelector(".editor-text") as HTMLInputElement).value.trim();
+      if (!text) return;
+      const due = (editor.querySelector(".editor-due") as HTMLInputElement).value || null;
+      const kind = (editor.querySelector(".seg-btn.active") as HTMLElement | null)?.dataset.pos ?? "child";
+      try {
+        await invoke("add_todo", {
+          text,
+          due,
+          position: { kind, sessionIndex: pos.si, lineIndex: pos.li },
+        });
+        await loadProject();
+      } catch (err) {
+        showError(err);
+      }
+      return;
+    }
+
+    // Set or clear a due date.
+    if (target.classList.contains("due-set") || target.classList.contains("due-clear")) {
+      const editor = target.closest(".due-editor") as HTMLElement | null;
+      const row = editor?.previousElementSibling as HTMLElement | null;
+      const pos = row ? rowPos(row) : null;
+      if (!editor || !pos) return;
+      const due = target.classList.contains("due-clear")
+        ? null
+        : (editor.querySelector(".editor-due") as HTMLInputElement).value || null;
+      try {
+        await invoke("set_due", { sessionIndex: pos.si, lineIndex: pos.li, due });
+        await loadProject();
+      } catch (err) {
+        showError(err);
+      }
+      return;
     }
   });
-}
-
-function populateProjectPicker(data: ListProjectsResult, selectedKey: string): void {
-  const picker = document.getElementById("project-picker") as HTMLSelectElement | null;
-  if (!picker) return;
-  picker.innerHTML = "";
-  const empty = document.createElement("option");
-  empty.value = "";
-  empty.textContent = "—";
-  picker.appendChild(empty);
-  if (data.recent.length > 0) {
-    const group = document.createElement("optgroup");
-    group.label = "Recent";
-    for (const p of data.recent) {
-      const opt = document.createElement("option");
-      opt.value = p.project_key;
-      opt.textContent = p.name;
-      group.appendChild(opt);
-    }
-    picker.appendChild(group);
-  }
-  if (data.other.length > 0) {
-    const group = document.createElement("optgroup");
-    group.label = "All projects";
-    for (const p of data.other) {
-      const opt = document.createElement("option");
-      opt.value = p.project_key;
-      opt.textContent = p.name;
-      group.appendChild(opt);
-    }
-    picker.appendChild(group);
-  }
-  picker.value = selectedKey;
 }
 
 async function loadProject(): Promise<void> {
-  const picker = document.getElementById("project-picker") as HTMLSelectElement | null;
   const errEl = document.getElementById("error");
   const contentEl = document.getElementById("content");
-  if (!picker || !errEl) return;
+  if (!errEl) return;
 
-  errEl.textContent = "";
-  picker.disabled = true;
-  if (contentEl) contentEl.hidden = true;
-
-  let projectList: ListProjectsResult = { recent: [], other: [] };
-  try {
-    projectList = await invoke<ListProjectsResult>("list_projects");
-  } catch {
-    // list_projects can fail if config is missing; picker stays empty
-  }
+  // Only blank the panel on the very first load. On reloads (which fire on every cloud-sync
+  // touch of the notes file) we keep the last render painted and swap it in place once the new
+  // data arrives — no flash to empty while `pm notes show` round-trips over Google Drive.
+  const firstLoad = lastProject === null;
+  if (firstLoad && contentEl) contentEl.hidden = true;
 
   try {
     const result = await invoke<FocusedProject>("get_focused_project");
-    populateProjectPicker(projectList, result.project_key);
-    picker.disabled = false;
+    errEl.textContent = "";
     renderContent(result);
   } catch (e) {
+    // Ride out transient reload failures (a cloud-sync blip mid-read) by keeping the last good
+    // render; only surface the empty state when there's nothing shown yet.
+    if (!firstLoad) return;
     const msg = e instanceof Error ? e.message : String(e);
-    populateProjectPicker(projectList, "");
-    picker.disabled = false;
+    setTitle("No project");
     if (
       msg.includes("No projectKey") ||
       msg.includes("focused.json") ||
       msg.includes("Invalid projectKey")
     ) {
       errEl.textContent =
-        "No focused project. Choose one above or set from Raycast (List Projects / View Project).";
+        "No focused project. Set one from Raycast (List Projects / View Project).";
     } else {
       errEl.textContent = msg;
     }
   }
 }
 
-function bindProjectPicker(): void {
-  const picker = document.getElementById("project-picker") as HTMLSelectElement | null;
-  if (!picker) return;
-  picker.addEventListener("change", async () => {
-    const key = picker.value;
-    if (!key) return;
-    try {
-      await invoke("set_focused_project", { project_key: key });
-      await loadProject();
-    } catch (e) {
-      const errEl = document.getElementById("error");
-      if (errEl) errEl.textContent = e instanceof Error ? e.message : String(e);
-    }
-  });
+/** Resize the window's height to fit the rendered content (width stays fixed). */
+async function fitToContent(): Promise<void> {
+  const panel = document.querySelector(".panel") as HTMLElement | null;
+  if (!panel) return;
+  const desired = Math.ceil(panel.scrollHeight) + 2;
+  const max = Math.floor(window.screen.availHeight * 0.95);
+  const height = Math.min(desired, max);
+  try {
+    await invoke("set_panel_height", { height });
+  } catch (err) {
+    showError(err);
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  bindProjectPicker();
   loadProject();
+  document
+    .getElementById("resize-grip")
+    ?.addEventListener("dblclick", () => void fitToContent());
   listen("pm:project-data-changed", () => {
     loadProject();
+  });
+  // Escape closes an open inline editor first, otherwise dismisses the panel.
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const openEditor = document.querySelector(".todo-editor");
+    if (openEditor) {
+      openEditor.remove();
+      return;
+    }
+    invoke("hide_panel").catch(() => {});
   });
 });

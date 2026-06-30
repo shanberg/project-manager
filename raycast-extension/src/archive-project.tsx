@@ -47,10 +47,10 @@ export default function Command() {
     if (!confirmed) return;
     try {
       await mutate(
-        async () => {
+        (async () => {
           await runPmWithPrefs(prefs, ["archive", name]);
           return (projects ?? []).filter((p) => p !== name);
-        },
+        })(),
         {
           optimisticUpdate(data) {
             return data !== undefined ? data.filter((p) => p !== name) : [];

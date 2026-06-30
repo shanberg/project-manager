@@ -86,7 +86,9 @@ beforeEach(() => {
     return { stdout: "", stderr: "", code: 0 };
   });
   vi.mocked(resolveNotesPath).mockResolvedValue("/notes/project.md");
-  vi.mocked(stat).mockResolvedValue({ mtime: 1000 } as ReturnType<typeof stat>);
+  vi.mocked(stat).mockResolvedValue({
+    mtime: 1000,
+  } as unknown as Awaited<ReturnType<typeof stat>>);
   vi.mocked(getNotes).mockImplementation(async (_, projectName: string) =>
     makeNotesResponse(projectName),
   );
@@ -195,7 +197,7 @@ describe("getRecentProjectsByEdit", () => {
       callIndex += 1;
       return Promise.resolve({
         mtime: 1000 + callIndex,
-      } as ReturnType<typeof stat>);
+      } as unknown as Awaited<ReturnType<typeof stat>>);
     });
 
     const result = await getRecentProjectsByEdit(prefs, 3);

@@ -417,6 +417,55 @@ public func applyFocusToTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex
     )
 }
 
+/// Set or clear the inline `due:` on the task at (sessionIndex, lineIndex). Passing nil clears it.
+/// Preserves the checkbox state and the focus marker; canonical order is "<text> due: <date> @".
+public func setDueOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, due: String?) -> ProjectNotes {
+    guard sessionIndex < notes.sessions.count, let pattern = todoLinePattern else { return notes }
+    let session = notes.sessions[sessionIndex]
+    let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var taskCount = 0
+    var outLines: [String] = []
+    for line in lines {
+        guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let r1 = Range(m.range(at: 1), in: line),
+              let r2 = Range(m.range(at: 2), in: line),
+              let r3 = Range(m.range(at: 3), in: line) else {
+            outLines.append(line)
+            continue
+        }
+        if taskCount != lineIndex {
+            outLines.append(line)
+            taskCount += 1
+            continue
+        }
+        let prefix = String(line[r1])
+        let check = String(line[r2])
+        var content = String(line[r3])
+        // Peel off the focus marker, then any existing due, leaving the bare task text.
+        let hasFocus = content.hasSuffix(focusMarkerSuffix)
+        if hasFocus {
+            content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        let (_, withoutDue) = parseDueFromLine(content)
+        var base = withoutDue
+        if base.hasSuffix(focusMarkerSuffix) {
+            base = String(base.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        var newContent = base
+        if let due = due, !due.isEmpty {
+            newContent += " due: \(due)"
+        }
+        if hasFocus {
+            newContent += focusMarkerSuffix
+        }
+        outLines.append("\(prefix)[\(check)] \(newContent)")
+        taskCount += 1
+    }
+    var updated = notes
+    updated.sessions[sessionIndex] = Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n"))
+    return updated
+}
+
 /// Uncheck the task at (sessionIndex, lineIndex) and move focus to it. One logical write.
 public func undoTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int) throws -> ProjectNotes {
     guard sessionIndex < notes.sessions.count else { return notes }

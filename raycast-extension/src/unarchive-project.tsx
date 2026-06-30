@@ -53,13 +53,13 @@ export default function Command() {
     if (!confirmed) return;
     try {
       await mutate(
-        async () => {
+        (async () => {
           await runPmWithPrefs(prefs, ["unarchive", name]);
           return {
             projects: data.projects.filter((p) => p !== name),
             archivePath: data.archivePath,
           };
-        },
+        })(),
         {
           optimisticUpdate(d) {
             if (!d) return { projects: [], archivePath: "" };

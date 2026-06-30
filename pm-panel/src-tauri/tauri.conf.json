@@ -11,7 +11,6 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "PM Panel",
@@ -21,9 +20,9 @@
         "maxWidth": 380,
         "height": 420,
         "visible": false,
-        "alwaysOnTop": true,
+        "alwaysOnTop": false,
         "resizable": true,
-        "transparent": true,
+        "transparent": false,
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Menubar utility that lives hidden and is summoned on demand. App Nap would suspend the
+	     hidden WebKit process, making the first show after idle take ~1-2s to wake and recomposite.
+	     Disabling it keeps the webview warm so summoning is instant. -->
+	<key>LSAppNapIsDisabled</key>
+	<true/>
+</dict>
+</plist>

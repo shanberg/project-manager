@@ -51,6 +51,7 @@ export default function Command() {
   const oldKey = projectKey(data.basePath, data.name);
 
   async function handleSubmit(values: { title: string }) {
+    if (!data) return;
     const newTitle = values.title.trim();
     if (!newTitle) {
       await showToast({

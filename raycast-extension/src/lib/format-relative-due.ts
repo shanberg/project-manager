@@ -105,6 +105,13 @@ export function formatRelativeDueShort(dueDate: string): string {
   return `${m}/${d}/${y.toString().slice(-2)}`;
 }
 
+/** True when the due date is in the past (overdue). Invalid/unparseable dates are not overdue. */
+export function isDueOverdue(dueDate: string): boolean {
+  const date = parseDueDate(dueDate);
+  if (!date) return false;
+  return date.getTime() < Date.now();
+}
+
 /**
  * Schedule-extension-style relative time for menubar: "in 15m", "in 2h", "tomorrow", "in 2d".
  * Compact units (m/h/d/w) with "in " prefix for future; "X ago" for past.

@@ -74,6 +74,15 @@ declare namespace Preferences {
   export type OpenFocusedInFinder = ExtensionPreferences & {}
   /** Preferences accessible in the `open-focused-in-obsidian` command */
   export type OpenFocusedInObsidian = ExtensionPreferences & {}
+  /** Preferences accessible in the `toggle-panel` command */
+  export type TogglePanel = ExtensionPreferences & {
+  /** Panel Path - Path to the PM Panel executable or .app. Installed: /Applications/PM Panel.app. Dev: pm-panel/src-tauri/target/debug/pm-panel. */
+  "panelPath"?: string
+}
+  /** Preferences accessible in the `toggle-panel-pin` command */
+  export type TogglePanelPin = ExtensionPreferences & {}
+  /** Preferences accessible in the `toggle-panel-float` command */
+  export type TogglePanelFloat = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -125,5 +134,11 @@ declare namespace Arguments {
   export type OpenFocusedInFinder = {}
   /** Arguments passed to the `open-focused-in-obsidian` command */
   export type OpenFocusedInObsidian = {}
+  /** Arguments passed to the `toggle-panel` command */
+  export type TogglePanel = {}
+  /** Arguments passed to the `toggle-panel-pin` command */
+  export type TogglePanelPin = {}
+  /** Arguments passed to the `toggle-panel-float` command */
+  export type TogglePanelFloat = {}
 }
 

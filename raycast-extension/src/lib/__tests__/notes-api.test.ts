@@ -19,7 +19,7 @@ vi.mock("../pm", () => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(runPmWithStdin).mockResolvedValue({ code: 0, stderr: "" });
+  vi.mocked(runPmWithStdin).mockResolvedValue({ stdout: "", code: 0, stderr: "" });
 });
 
 const prefs: PreferenceValues = { configPath: "/tmp/config", pmCliPath: "pm" };

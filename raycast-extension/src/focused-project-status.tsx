@@ -7,7 +7,6 @@ import {
   ensureTodaySession,
 } from "./lib/utils";
 import {
-  Color,
   getPreferenceValues,
   Icon,
   MenuBarExtra,
@@ -16,7 +15,8 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { useCachedPromise, getProgressIcon, getFavicon } from "@raycast/utils";
+import { useCachedPromise, getFavicon } from "@raycast/utils";
+import { progressRingIcon } from "./lib/progress-icon";
 import type { LinkEntry, Todo } from "./lib/notes-api";
 import {
   getNotes,
@@ -26,6 +26,7 @@ import {
 import {
   formatDueForMenubar,
   formatRelativeDue,
+  isDueOverdue,
 } from "./lib/format-relative-due";
 import {
   getFocusedProject,
@@ -204,8 +205,8 @@ function fetchRecentProjects(
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
-  const abortableFocused = useRef<AbortController>();
-  const abortableRecent = useRef<AbortController>();
+  const abortableFocused = useRef<AbortController>(undefined);
+  const abortableRecent = useRef<AbortController>(undefined);
   const fetchFocused = useMemo(
     () => fetchFocusedProjectStatus(abortableFocused),
     [],
@@ -214,14 +215,17 @@ export default function Command() {
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
-    { execute: true, abortable: abortableFocused },
+    { execute: true, abortable: abortableFocused, keepPreviousData: true },
   );
 
   const focusedKey = data ? projectKey(data.basePath, data.name) : null;
+  // keepPreviousData: the deps below change on every focus switch and on each
+  // 1-minute menubar refresh (a new `data` object), so without it the list
+  // blanks out while refetching — very visible over slow Google Drive reads.
   const { data: recentProjects } = useCachedPromise(
     fetchRecent,
-    [prefs.configPath, prefs.pmCliPath, focusedKey, data],
-    { execute: true, abortable: abortableRecent },
+    [prefs.configPath, prefs.pmCliPath, focusedKey, data ?? null],
+    { execute: true, abortable: abortableRecent, keepPreviousData: true },
   );
 
   const menubarLabel =
@@ -230,8 +234,19 @@ export default function Command() {
       : data
         ? getProjectCode(data.name)
         : "—";
+  // Memoize favicon descriptors keyed by URL so revalidation-on-open does not
+  // rebuild them every render (which makes the link icons flash off/on).
+  const links = data?.links ?? [];
+  const linkIcons = useMemo(
+    () => links.map((link) => getFavicon(toAbsoluteUrl(link.url))),
+    [links.map((l) => l.url).join("\n")],
+  );
+
   const nextDue = data?.todos ? getNextDueForProject(data.todos) : null;
-  const nextDueShort = nextDue ? formatDueForMenubar(nextDue) : "";
+  const nextDueOverdue = nextDue ? isDueOverdue(nextDue) : false;
+  const nextDueShort = nextDue
+    ? `${nextDueOverdue ? "⚠ " : ""}${formatDueForMenubar(nextDue)}`
+    : "";
   const titleWithDue =
     nextDueShort && data ? `${menubarLabel} · ${nextDueShort}` : menubarLabel;
   const progress = data?.total ? data.done / data.total : 1;
@@ -255,10 +270,7 @@ export default function Command() {
 
   return (
     <MenuBarExtra
-      icon={getProgressIcon(progress, Color.PrimaryText, {
-        backgroundOpacity: 0.25,
-        background: Color.PrimaryText,
-      })}
+      icon={progressRingIcon(progress)}
       title={titleWithDue}
       tooltip={tooltip}
       isLoading={isLoading}
@@ -268,7 +280,7 @@ export default function Command() {
           <MenuBarExtra.Section
             title={
               nextDue
-                ? `Project · ${data.done}/${data.total} done · next ${formatRelativeDue(nextDue)}`
+                ? `Project · ${data.done}/${data.total} done · ${nextDueOverdue ? "⚠ overdue " : "next "}${formatRelativeDue(nextDue)}`
                 : `Project · ${data.done}/${data.total} done`
             }
           >
@@ -328,7 +340,7 @@ export default function Command() {
               {data.links.map((link, i) => (
                 <MenuBarExtra.Item
                   key={`${i}-${link.url}`}
-                  icon={getFavicon(toAbsoluteUrl(link.url))}
+                  icon={linkIcons[i]}
                   title={
                     link.label.length > 50
                       ? link.label.slice(0, 47) + "…"
@@ -384,14 +396,7 @@ export default function Command() {
                 return (
                   <MenuBarExtra.Item
                     key={`${p.basePath}:${p.name}`}
-                    icon={getProgressIcon(
-                      p.total ? p.done / p.total : 1,
-                      Color.PrimaryText,
-                      {
-                        backgroundOpacity: 0.25,
-                        background: Color.PrimaryText,
-                      },
-                    )}
+                    icon={progressRingIcon(p.total ? p.done / p.total : 1)}
                     title={titleWithDue}
                     tooltip={tooltip}
                     onAction={async () => {

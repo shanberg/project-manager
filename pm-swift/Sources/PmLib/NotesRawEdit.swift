@@ -94,6 +94,139 @@ private func spliceTaskLines(rawText: String, replacements: [String: String]) ->
     return lines.joined(separator: "\n")
 }
 
+// MARK: - Task insertion (format-preserving)
+//
+// `editTodosPreservingFormat` can only rewrite existing task lines 1:1. Adding a task needs a
+// line *insertion*, so these helpers walk the raw markdown the same way parseTodos indexes task
+// lines and splice a new line in at the right spot, leaving every other byte verbatim.
+
+/// Where a new task sits relative to an anchor task.
+public enum TaskInsertPosition {
+    case before
+    case after
+    case child
+}
+
+/// Leading list prefix ("  - ", "- ", etc.) of a raw task line; falls back to "- ".
+private func listPrefix(of line: String) -> String {
+    guard let pattern = rawTaskPattern,
+          let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+          let r1 = Range(m.range(at: 1), in: line) else {
+        return "- "
+    }
+    return String(line[r1])
+}
+
+/// Build a new unchecked task line at the given list prefix, with an optional inline `due:`.
+/// Mirrors the canonical order parseTodos round-trips: "<prefix>[ ] <text> due: <date>".
+private func newTaskLine(prefix: String, text: String, due: String?) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespaces)
+    let dueSuffix = (due?.isEmpty == false) ? " due: \(due!)" : ""
+    return "\(prefix)[ ] \(trimmed)\(dueSuffix)"
+}
+
+/// Insert a new task relative to the task at (anchorSessionIndex, anchorLineIndex), preserving format.
+/// before/after reuse the anchor's indent; child indents two spaces deeper. Returns the new markdown
+/// and the (sessionIndex, lineIndex) of the inserted task, or nil if the anchor can't be located.
+public func insertTaskRelative(
+    rawText: String,
+    anchorSessionIndex: Int,
+    anchorLineIndex: Int,
+    text: String,
+    due: String?,
+    position: TaskInsertPosition
+) -> (rawText: String, sessionIndex: Int, lineIndex: Int)? {
+    var lines = rawText.components(separatedBy: "\n")
+    var inSessions = false
+    var sessionIndex = -1
+    var taskIndex = 0
+
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) {
+            sessionIndex += 1
+            taskIndex = 0
+            continue
+        }
+        if matches(rawSectionPattern, line) {
+            inSessions = false
+            continue
+        }
+        guard sessionIndex >= 0, matches(rawTaskPattern, line) else { continue }
+        if sessionIndex == anchorSessionIndex && taskIndex == anchorLineIndex {
+            let prefix = position == .child ? "  " + listPrefix(of: line) : listPrefix(of: line)
+            let inserted = newTaskLine(prefix: prefix, text: text, due: due)
+            switch position {
+            case .before:
+                lines.insert(inserted, at: n)
+                return (lines.joined(separator: "\n"), sessionIndex, taskIndex)
+            case .after, .child:
+                lines.insert(inserted, at: n + 1)
+                return (lines.joined(separator: "\n"), sessionIndex, taskIndex + 1)
+            }
+        }
+        taskIndex += 1
+    }
+    return nil
+}
+
+/// Append a new task at the end of a session's task list (or right after its heading when the
+/// session has no tasks yet), preserving format. Returns the new markdown and the (sessionIndex,
+/// lineIndex) of the inserted task, or nil if the session can't be located.
+public func appendTaskToSession(
+    rawText: String,
+    sessionIndex targetSession: Int,
+    text: String,
+    due: String?
+) -> (rawText: String, sessionIndex: Int, lineIndex: Int)? {
+    var lines = rawText.components(separatedBy: "\n")
+    var inSessions = false
+    var sessionIndex = -1
+    var taskIndex = 0
+    var headingLine: Int? = nil
+    var lastTaskLine: Int? = nil
+    var prefix = "- "
+
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) {
+            sessionIndex += 1
+            if sessionIndex == targetSession {
+                headingLine = n
+                taskIndex = 0
+                lastTaskLine = nil
+            } else if sessionIndex > targetSession {
+                break
+            }
+            continue
+        }
+        if matches(rawSectionPattern, line) {
+            if sessionIndex >= targetSession { break }
+            inSessions = false
+            continue
+        }
+        guard sessionIndex == targetSession, matches(rawTaskPattern, line) else { continue }
+        lastTaskLine = n
+        prefix = listPrefix(of: line)
+        taskIndex += 1
+    }
+
+    guard let heading = headingLine else { return nil }
+    // Tasks inherit the session's indent level (root); reuse the last task's prefix when present.
+    let inserted = newTaskLine(prefix: lastTaskLine != nil ? prefix : "- ", text: text, due: due)
+    let insertAt = (lastTaskLine ?? heading) + 1
+    lines.insert(inserted, at: insertAt)
+    return (lines.joined(separator: "\n"), targetSession, taskIndex)
+}
+
 // MARK: - Section-level splicing for `notes write`
 //
 // A full-document write (e.g. editing goals/learnings/summary from Raycast) arrives as a complete

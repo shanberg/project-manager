@@ -47,6 +47,10 @@ pub struct Todo {
     pub context: String,
     pub session_index: usize,
     pub line_index: usize,
+    /// Inline `due:` on this task line, if any (verbatim, e.g. "2026-07-15").
+    pub due_date: Option<String>,
+    /// Due used for display: own due, else nearest ancestor due. Computed by `pm notes show`.
+    pub effective_due_date: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -67,11 +71,63 @@ pub struct FocusedProject {
 
 const MAX_RECENT: usize = 10;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
+pub const PANEL_SETTINGS_FILE: &str = "panel-settings.json";
+
+/// Window behavior toggles shared between the panel's tray menu and the Raycast extension via
+/// `panel-settings.json` in the config dir. Both default off (normal menubar-utility behavior).
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+pub struct PanelSettings {
+    /// Keep the panel visible when it loses focus instead of auto-hiding.
+    #[serde(default)]
+    pub pinned: bool,
+    /// Float the panel above all other windows (always-on-top).
+    #[serde(default)]
+    pub floating: bool,
+}
+
+fn panel_settings_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join(PANEL_SETTINGS_FILE))
+}
+
+/// Read panel settings; returns defaults (all off) when the file is missing or unparseable.
+pub fn read_panel_settings() -> PanelSettings {
+    panel_settings_path()
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Persist panel settings to the config dir so the choice survives restarts and is visible to Raycast.
+pub fn write_panel_settings(settings: PanelSettings) -> Result<(), String> {
+    let dir = config_dir()?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create config dir: {}", e))?;
+    let contents = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Cannot serialize panel settings: {}", e))?;
+    fs::write(dir.join(PANEL_SETTINGS_FILE), contents)
+        .map_err(|e| format!("Cannot write {}: {}", PANEL_SETTINGS_FILE, e))
+}
+
+/// Resolve the `pm` binary. A GUI app (especially a launched .app bundle) may not inherit the
+/// shell PATH, so prefer an explicit override and known install locations before bare PATH lookup.
+fn pm_binary() -> String {
+    if let Ok(p) = std::env::var("PM_CLI_PATH") {
+        if !p.trim().is_empty() {
+            return p;
+        }
+    }
+    for candidate in ["/opt/homebrew/bin/pm", "/usr/local/bin/pm"] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    "pm".to_string()
+}
 
 /// Run pm with args. Uses PM_CONFIG_HOME so CLI uses same config as panel. Returns stdout or stderr on failure.
 fn run_pm(args: &[&str]) -> Result<String, String> {
     let dir = config_dir()?;
-    let output = Command::new("pm")
+    let output = Command::new(pm_binary())
         .args(args)
         .env("PM_CONFIG_HOME", dir.as_os_str())
         .output()
@@ -131,6 +187,10 @@ struct TodoJson {
     session_index: Option<usize>,
     #[serde(rename = "lineIndex")]
     line_index: Option<usize>,
+    #[serde(rename = "dueDate")]
+    due_date: Option<String>,
+    #[serde(rename = "effectiveDueDate")]
+    effective_due_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -251,6 +311,78 @@ pub fn set_focus_to(session_index: usize, line_index: usize) -> Result<(), Strin
     Ok(())
 }
 
+/// Where a new task is inserted relative to an anchor task. Omitted for a quick-add to today's session.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPosition {
+    /// "child" | "before" | "after".
+    pub kind: String,
+    pub session_index: usize,
+    pub line_index: usize,
+}
+
+/// Add a task to the focused project via `pm notes todo add`. No position → quick-add to today's
+/// session (and take focus). Optional `due` is stored inline on the task line.
+pub fn add_todo(text: String, due: Option<String>, position: Option<AddPosition>) -> Result<(), String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("Task text is required".to_string());
+    }
+    let project_key = get_current_project_key().ok_or("No focused project")?;
+    let project_name = project_name_from_key(&project_key).ok_or("Invalid projectKey format")?;
+    let mut args: Vec<String> = vec![
+        "notes".into(),
+        "todo".into(),
+        "add".into(),
+        project_name,
+        trimmed.to_string(),
+    ];
+    if let Some(d) = due {
+        if !d.trim().is_empty() {
+            args.push("--due".into());
+            args.push(d);
+        }
+    }
+    if let Some(pos) = position {
+        let flag = match pos.kind.as_str() {
+            "child" => "--child",
+            "before" => "--before",
+            "after" => "--after",
+            other => return Err(format!("Invalid position: {}", other)),
+        };
+        args.push(flag.into());
+        args.push(pos.session_index.to_string());
+        args.push(pos.line_index.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_pm(&arg_refs)?;
+    Ok(())
+}
+
+/// Set or clear the inline due date on the task at (session_index, line_index) via `pm notes todo due`.
+/// A None or empty `due` clears it.
+pub fn set_due(session_index: usize, line_index: usize, due: Option<String>) -> Result<(), String> {
+    let project_key = get_current_project_key().ok_or("No focused project")?;
+    let project_name = project_name_from_key(&project_key).ok_or("Invalid projectKey format")?;
+    let due_arg = match due {
+        Some(d) if !d.trim().is_empty() => d,
+        _ => "--clear".to_string(),
+    };
+    let si = session_index.to_string();
+    let li = line_index.to_string();
+    let args = [
+        "notes",
+        "todo",
+        "due",
+        project_name.as_str(),
+        &si,
+        &li,
+        &due_arg,
+    ];
+    run_pm(&args)?;
+    Ok(())
+}
+
 fn get_current_project_key() -> Option<String> {
     let dir = config_dir().ok()?;
     let raw = fs::read_to_string(dir.join("focused.json")).ok()?;
@@ -289,6 +421,8 @@ pub fn get_focused_project() -> Result<FocusedProject, String> {
             context: t.context.unwrap_or_default(),
             session_index: t.session_index.unwrap_or(0),
             line_index: t.line_index.unwrap_or(0),
+            due_date: t.due_date,
+            effective_due_date: t.effective_due_date,
         })
         .collect();
     let title = notes

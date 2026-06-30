@@ -6,4 +6,6 @@ export interface PreferenceValues {
   /** When true, extension syncs Obsidian prefs to pm config so pm uses Obsidian CLI for notes read/write. */
   useObsidianCLI?: boolean;
   menubarProjectDisplay?: "code" | "name";
+  /** Path to the PM Panel executable (or .app bundle) for the Toggle Panel command. */
+  panelPath?: string;
 }

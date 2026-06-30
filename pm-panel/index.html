@@ -10,26 +10,27 @@
 
   <body>
     <main class="panel" data-tauri-drag-region>
-      <header class="panel-drag-region">
-        <h1 class="panel-title">Current project</h1>
+      <header class="panel-header">
+        <h1 id="project-title" class="project-title">—</h1>
       </header>
       <div class="panel-body">
-      <div class="project-picker-wrap">
-        <select id="project-picker" class="project-picker" aria-label="Change focused project" title="Change focused project">
-          <option value="">—</option>
-        </select>
-      </div>
       <p id="error" class="error" aria-live="polite"></p>
       <div id="content" class="content" hidden>
-        <div id="summary-block" class="block"></div>
-        <div id="problem-block" class="block"></div>
-        <div id="goals-block" class="block"></div>
-        <div id="approach-block" class="block"></div>
-        <div id="links-block" class="block"></div>
-        <div id="learnings-block" class="block"></div>
+        <details id="details" class="project-details">
+          <summary class="details-summary">Project details</summary>
+          <div class="details-inner">
+            <div id="summary-block" class="block"></div>
+            <div id="problem-block" class="block"></div>
+            <div id="goals-block" class="block"></div>
+            <div id="approach-block" class="block"></div>
+            <div id="links-block" class="block"></div>
+            <div id="learnings-block" class="block"></div>
+          </div>
+        </details>
         <div id="todos-block" class="block"></div>
       </div>
       </div>
+      <div id="resize-grip" class="resize-grip" title="Double-click to fit the panel to its content" aria-label="Resize grip — double-click to fit height"></div>
     </main>
   </body>
 </html>

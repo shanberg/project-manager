@@ -5,6 +5,7 @@ import { Color, Icon, MenuBarExtra, open, showHUD } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import {
   getNotes,
+  getNextDueForProject,
   resolveNotesPath,
   setFocusToTodoInNotes,
   stripInlineDueFromText,
@@ -12,6 +13,11 @@ import {
   completeAndAdvanceInNotes,
   undoCompleteInNotes,
 } from "./lib/notes-api";
+import {
+  formatDueForMenubar,
+  formatRelativeDue,
+  isDueOverdue,
+} from "./lib/format-relative-due";
 import type { Todo } from "./lib/notes-api";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
@@ -120,12 +126,12 @@ function fetchFocusedProjectData(
 
 export default function Command() {
   const prefs = getPreferenceValues<PreferenceValues>();
-  const abortable = useRef<AbortController>();
+  const abortable = useRef<AbortController>(undefined);
   const fetchFocused = useMemo(() => fetchFocusedProjectData(abortable), []);
   const { data, isLoading, revalidate } = useCachedPromise(
     fetchFocused,
     [prefs.configPath, prefs.pmCliPath],
-    { execute: true, abortable },
+    { execute: true, abortable, keepPreviousData: true },
   );
 
   const { data: undoState, revalidate: revalidateUndo } = useCachedPromise(
@@ -147,6 +153,12 @@ export default function Command() {
     list.push(t);
     byContext.set(t.context, list);
   }
+
+  const nextDue = data?.todos ? getNextDueForProject(data.todos) : null;
+  const nextDueOverdue = nextDue ? isDueOverdue(nextDue) : false;
+  const tasksSectionTitle = nextDue
+    ? `Tasks · ${nextDueOverdue ? "⚠ overdue " : "next due "}${formatRelativeDue(nextDue)}`
+    : undefined;
 
   const nextTodoText = nextTodo ? stripInlineDueFromText(nextTodo.text) : "";
   const title = nextTodo
@@ -239,7 +251,7 @@ export default function Command() {
     >
       {data ? (
         <>
-          <MenuBarExtra.Section>
+          <MenuBarExtra.Section title={tasksSectionTitle}>
             {nextTodo ? (
               <MenuBarExtra.Item
                 icon={Icon.CheckCircle}
@@ -383,11 +395,23 @@ export default function Command() {
                   (todoText.length > 35
                     ? todoText.slice(0, 32) + "…"
                     : todoText);
+                const due = todo.dueDate;
+                const overdue = due ? isDueOverdue(due) : false;
+                const dueSubtitle = due
+                  ? `${overdue ? "⚠ " : ""}${formatDueForMenubar(due)}`
+                  : undefined;
+                const baseIcon = isFocused
+                  ? Icon.ArrowRightCircleFilled
+                  : Icon.Circle;
+                const icon = overdue
+                  ? { source: baseIcon, tintColor: Color.Red }
+                  : baseIcon;
                 return (
                   <MenuBarExtra.Item
                     key={`${todo.sessionIndex ?? 0}-${todo.lineIndex ?? 0}-${todo.text}`}
-                    icon={isFocused ? Icon.ArrowRightCircleFilled : Icon.Circle}
+                    icon={icon}
                     title={displayTitle}
+                    subtitle={dueSubtitle}
                     onAction={() =>
                       isFocused ? handleMarkDone(todo) : handleFocusTask(todo)
                     }
@@ -396,6 +420,7 @@ export default function Command() {
                         <MenuBarExtra.Item
                           icon={Icon.CheckCircle}
                           title={displayTitle}
+                          subtitle={dueSubtitle}
                           onAction={() => handleMarkDone(todo)}
                         />
                       ) : undefined

@@ -274,6 +274,57 @@
         "notes",
         "pm"
       ]
+    },
+    {
+      "name": "toggle-panel",
+      "title": "Toggle Panel",
+      "description": "Show or hide the floating PM panel",
+      "mode": "no-view",
+      "keywords": [
+        "panel",
+        "hud",
+        "toggle",
+        "show",
+        "hide",
+        "pm"
+      ],
+      "preferences": [
+        {
+          "name": "panelPath",
+          "type": "textfield",
+          "required": false,
+          "title": "Panel Path",
+          "description": "Path to the PM Panel executable or .app. Installed: /Applications/PM Panel.app. Dev: pm-panel/src-tauri/target/debug/pm-panel.",
+          "placeholder": "/Applications/PM Panel.app"
+        }
+      ]
+    },
+    {
+      "name": "toggle-panel-pin",
+      "title": "Toggle Panel Pin",
+      "description": "Keep the PM panel open when it loses focus (or let it auto-hide)",
+      "mode": "no-view",
+      "keywords": [
+        "panel",
+        "pin",
+        "keep",
+        "open",
+        "sticky",
+        "pm"
+      ]
+    },
+    {
+      "name": "toggle-panel-float",
+      "title": "Toggle Panel Float",
+      "description": "Float the PM panel above all other windows (or use normal stacking)",
+      "mode": "no-view",
+      "keywords": [
+        "panel",
+        "float",
+        "always on top",
+        "top",
+        "pm"
+      ]
     }
   ],
   "preferences": [
@@ -339,7 +390,7 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.70.0",
+    "@raycast/api": "^1.104.20",
     "@raycast/utils": "^1.10.0"
   },
   "devDependencies": {

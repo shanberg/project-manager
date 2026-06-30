@@ -5,7 +5,6 @@ import {
   Action,
   ActionPanel,
   Alert,
-  Color,
   confirmAlert,
   getPreferenceValues,
   Icon,
@@ -14,13 +13,19 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { useCachedPromise, getProgressIcon } from "@raycast/utils";
+import { useCachedPromise } from "@raycast/utils";
+import { progressRingIcon } from "./lib/progress-icon";
 import {
   getNotes,
+  getNextDueForProject,
   resolveNotesPath,
   formatNotesForDetail,
   formatNotesEmptyState,
 } from "./lib/notes-api";
+import {
+  formatRelativeDueShort,
+  isDueOverdue,
+} from "./lib/format-relative-due";
 import type { ProjectNotes, Todo } from "./lib/notes-api";
 import {
   recordRecentProject,
@@ -49,6 +54,17 @@ import {
   OBSIDIAN_APP_PATH,
 } from "./lib/utils";
 import { mapWithConcurrency, PM_CONCURRENCY } from "./lib/concurrency";
+
+/**
+ * Row title with the project's next due appended (e.g. "Acme Redesign · in 3d").
+ * Accessories are hidden while the detail pane is shown, so the due lives in the title.
+ */
+function projectRowTitle(name: string, nextDue: string | null): string {
+  const readable = getReadableProjectName(name);
+  if (!nextDue) return readable;
+  const marker = isDueOverdue(nextDue) ? "⚠ " : "";
+  return `${readable} · ${marker}${formatRelativeDueShort(nextDue)}`;
+}
 
 /** Match domain code at start of project name; use longer codes first so DE matches before D. */
 function getDomainFromCodes(
@@ -101,6 +117,7 @@ type ProjectWithMeta = {
   domain: string | null;
   done: number;
   total: number;
+  nextDue: string | null;
 };
 
 function fetchProjectsWithMeta(
@@ -147,6 +164,7 @@ function fetchProjectsWithMeta(
           domain: getDomainFromCodes(name, domainCodes),
           done,
           total: todos.length,
+          nextDue: getNextDueForProject(todos),
         };
       });
     }
@@ -196,7 +214,7 @@ export default function Command() {
   const [searchText, setSearchText] = useState("");
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
   const prefs = getPreferenceValues<PreferenceValues>();
-  const abortable = useRef<AbortController>();
+  const abortable = useRef<AbortController>(undefined);
   const fetchProjects = useMemo(() => fetchProjectsWithMeta(abortable), []);
 
   const { data: domains = {} } = useCachedPromise(getConfigDomains, [prefs]);
@@ -476,14 +494,20 @@ export default function Command() {
         <>
           <List.Section title="Active">
             {displayActive.map(
-              ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
+              ({
+                name,
+                basePath,
+                notes,
+                notesPath,
+                hasSrc,
+                done,
+                total,
+                nextDue,
+              }) => (
                 <List.Item
                   key={`active:${name}`}
-                  icon={getProgressIcon(
-                    total ? done / total : 1,
-                    Color.PrimaryText,
-                  )}
-                  title={getReadableProjectName(name)}
+                  icon={progressRingIcon(total ? done / total : 1)}
+                  title={projectRowTitle(name, nextDue)}
                   keywords={[
                     getDomainFromCodes(name, domainCodes) ?? "",
                     getProjectCode(name),
@@ -506,14 +530,20 @@ export default function Command() {
           </List.Section>
           <List.Section title="Archive">
             {displayArchive.map(
-              ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
+              ({
+                name,
+                basePath,
+                notes,
+                notesPath,
+                hasSrc,
+                done,
+                total,
+                nextDue,
+              }) => (
                 <List.Item
                   key={`archive:${name}`}
-                  icon={getProgressIcon(
-                    total ? done / total : 1,
-                    Color.PrimaryText,
-                  )}
-                  title={getReadableProjectName(name)}
+                  icon={progressRingIcon(total ? done / total : 1)}
+                  title={projectRowTitle(name, nextDue)}
                   keywords={[
                     getDomainFromCodes(name, domainCodes) ?? "",
                     getProjectCode(name),
@@ -537,14 +567,20 @@ export default function Command() {
         </>
       ) : (
         (scope === "active" ? displayActive : displayArchive).map(
-          ({ name, basePath, notes, notesPath, hasSrc, done, total }) => (
+          ({
+            name,
+            basePath,
+            notes,
+            notesPath,
+            hasSrc,
+            done,
+            total,
+            nextDue,
+          }) => (
             <List.Item
               key={name}
-              icon={getProgressIcon(
-                total ? done / total : 1,
-                Color.PrimaryText,
-              )}
-              title={getReadableProjectName(name)}
+              icon={progressRingIcon(total ? done / total : 1)}
+              title={projectRowTitle(name, nextDue)}
               keywords={[
                 getDomainFromCodes(name, domainCodes) ?? "",
                 getProjectCode(name),

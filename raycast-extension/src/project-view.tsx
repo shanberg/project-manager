@@ -88,7 +88,7 @@ type TodoViewMode = "next" | "all";
 export default function ProjectView({ projectName, basePath }: Props) {
   const prefs = getPreferenceValues<PreferenceValues>();
   const { pop } = useNavigation();
-  const abortable = useRef<AbortController>();
+  const abortable = useRef<AbortController>(undefined);
   const fetchNotes = useMemo(() => fetchProjectNotes(abortable), []);
   const { data: paths } = useCachedPromise(getPmPaths, [prefs]);
   const { data: focusedKey } = useCachedPromise(getFocusedProject, [], {
