@@ -308,6 +308,34 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(stdoutShow.contains("CLITest"), "show output should contain session label")
     }
 
+    /// notes todo add (quick add) takes focus; notes show reflects it; notes todo complete clears/advances
+    /// focus. Exercises the shared NotesService load/mutate/write path end-to-end.
+    func testNotesTodoAddShowComplete() throws {
+        try skipIfNoBinary()
+        let (_, _, codeNew) = runPm(["new", "W", "Todo Service Test"])
+        XCTAssertEqual(codeNew, 0, "pm new should succeed")
+        // pm new scaffolds the notes file from the template, so todo mutations can run immediately.
+        let (_, addErr, codeAdd) = runPm(["notes", "todo", "add", "W-1", "First service task"])
+        XCTAssertEqual(codeAdd, 0, "pm notes todo add should exit 0: \(addErr)")
+
+        let (showOut, _, codeShow) = runPm(["notes", "show", "W-1"])
+        XCTAssertEqual(codeShow, 0, "pm notes show should exit 0")
+        XCTAssertTrue(showOut.contains("First service task"), "show should contain the added task")
+        XCTAssertTrue(showOut.contains("\"focusedKey\""), "quick-added task should take focus")
+
+        // Complete it; with no other tasks, focus clears (focusedKey becomes null).
+        let (showData, _, _) = runPm(["notes", "show", "W-1"])
+        struct ShowKey: Decodable { let focusedKey: String? }
+        let key = (try? JSONDecoder().decode(ShowKey.self, from: Data(showData.utf8)))?.focusedKey
+        let parts = (key ?? "0:0").split(separator: ":")
+        let (_, compErr, codeComp) = runPm(["notes", "todo", "complete", "W-1", String(parts[0]), String(parts[1])])
+        XCTAssertEqual(codeComp, 0, "pm notes todo complete should exit 0: \(compErr)")
+
+        let (showOut2, _, _) = runPm(["notes", "show", "W-1"])
+        XCTAssertTrue(showOut2.contains("\"checked\":true") || showOut2.contains("\"checked\" : true"),
+                      "completed task should be checked in show output")
+    }
+
     /// notes session add creates a session with optional label and --date; notes show includes the new session.
     func testNotesSessionAdd() throws {
         try skipIfNoBinary()

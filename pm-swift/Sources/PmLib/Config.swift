@@ -302,6 +302,10 @@ public enum PmError: Error, CustomStringConvertible {
     case renameTargetExists(String)
     /// `pm rename` new title was empty or only whitespace.
     case emptyRenameTitle
+    /// Todo `due:` value was empty, multi-line, or contained reserved tokens (`due:`, `@`).
+    case invalidTodoDue(String)
+    /// Todo text was empty or only whitespace.
+    case emptyTodoText
 
     public var description: String {
         switch self {
@@ -327,6 +331,8 @@ public enum PmError: Error, CustomStringConvertible {
         case .projectFolderMalformed(let name): return "Project folder name is not valid for configured domains: \(name)"
         case .renameTargetExists(let path): return "A project folder already exists at: \(path)"
         case .emptyRenameTitle: return "New project title cannot be empty."
+        case .invalidTodoDue(let value): return "Invalid due value: \(value)"
+        case .emptyTodoText: return "Task text is required."
         }
     }
 }

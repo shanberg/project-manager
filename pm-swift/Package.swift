@@ -6,6 +6,9 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .executable(name: "pm", targets: ["pm"]),
+        // Exposed so native macOS front-ends (the menubar agent app) can link the domain
+        // logic directly instead of shelling out to the `pm` CLI.
+        .library(name: "PmLib", targets: ["PmLib"]),
     ],
     targets: [
         .executableTarget(

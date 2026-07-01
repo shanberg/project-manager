@@ -37,18 +37,7 @@ func runNotesShow(args: [String]) {
         exit(1)
     }
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        var notes = try readNotesFile(notesPath: notesPath, notesIO: io)
-        notes = normalizeFocusMarker(notes: notes)
-        let todos = try parseTodos(notes: notes)
-        let todosWithEffective = todosWithEffectiveDueDates(todos)
-        let focusedKey = todosWithEffective.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
-        let output = NotesShowOutput(notes: notes, todos: todosWithEffective, focusedKey: focusedKey)
+        let output = try notesShow(project: project)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(output)
@@ -134,18 +123,7 @@ func runNotesTodoComplete(args: [String]) {
     let project = filtered[0]
     let advanceFocus = !args.contains("--no-advance")
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        let rawText = try io.readContent(path: notesPath)
-        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
-            let normalized = normalizeFocusMarker(notes: notes)
-            return try completeTodoWithDescendants(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
-        }
-        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
+        try completeTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
     } catch { fail(error) }
 }
 
@@ -158,18 +136,7 @@ func runNotesTodoFocus(args: [String]) {
     }
     let project = args[0]
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        let rawText = try io.readContent(path: notesPath)
-        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
-            let normalized = normalizeFocusMarker(notes: notes)
-            return applyFocusToTodoAt(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        }
-        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
+        try focusTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex)
     } catch { fail(error) }
 }
 
@@ -182,23 +149,8 @@ func runNotesTodoUndo(args: [String]) {
     }
     let project = args[0]
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        let rawText = try io.readContent(path: notesPath)
-        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
-            let normalized = normalizeFocusMarker(notes: notes)
-            return try undoTodoAt(notes: normalized, sessionIndex: sessionIndex, lineIndex: lineIndex)
-        }
-        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
+        try undoTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex)
     } catch { fail(error) }
-}
-
-private func isValidDueValue(_ s: String) -> Bool {
-    !s.isEmpty && !s.contains("\n") && !s.contains("due:") && !s.contains("@")
 }
 
 func runNotesTodoAdd(args: [String]) {
@@ -231,60 +183,10 @@ func runNotesTodoAdd(args: [String]) {
     guard let taskText = text, !taskText.trimmingCharacters(in: .whitespaces).isEmpty else {
         stderr("Task text is required\n\(usage)"); exit(1)
     }
-    if let d = due, !isValidDueValue(d) { stderr("Invalid due value: \(d)"); exit(1) }
+    if let d = due, !isValidTodoDue(d) { stderr("Invalid due value: \(d)"); exit(1) }
+    let servicePosition = position.map { (kind: $0.kind, sessionIndex: $0.si, lineIndex: $0.li) }
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        var rawText = try io.readContent(path: notesPath)
-
-        let inserted: (rawText: String, sessionIndex: Int, lineIndex: Int)?
-        let shouldFocus: Bool
-        if let pos = position {
-            inserted = insertTaskRelative(
-                rawText: rawText,
-                anchorSessionIndex: pos.si,
-                anchorLineIndex: pos.li,
-                text: taskText,
-                due: due,
-                position: pos.kind
-            )
-            shouldFocus = pos.kind == .child
-        } else {
-            // Quick add: append to today's session (creating it if needed) and take focus.
-            let today = formatSessionDate(Date())
-            var notes = try parseNotes(markdown: rawText)
-            var todayIdx = notes.sessions.firstIndex(where: { $0.date == today })
-            if todayIdx == nil {
-                guard let withSession = sessionAddPreservingFormat(rawText: rawText, label: "", date: Date()) else {
-                    stderr("Notes file has no \"## Sessions\" section")
-                    exit(1)
-                }
-                rawText = withSession
-                notes = try parseNotes(markdown: rawText)
-                todayIdx = notes.sessions.firstIndex(where: { $0.date == today })
-            }
-            guard let si = todayIdx else { stderr("Could not resolve today's session"); exit(1) }
-            inserted = appendTaskToSession(rawText: rawText, sessionIndex: si, text: taskText, due: due)
-            shouldFocus = true
-        }
-        guard let result = inserted else {
-            stderr("Could not locate the target task to insert relative to")
-            exit(1)
-        }
-        var finalText = result.rawText
-        if shouldFocus {
-            if let focused = try editTodosPreservingFormat(rawText: result.rawText, mutate: { notes in
-                let normalized = normalizeFocusMarker(notes: notes)
-                return applyFocusToTodoAt(notes: normalized, sessionIndex: result.sessionIndex, lineIndex: result.lineIndex)
-            }) {
-                finalText = focused
-            }
-        }
-        try io.writeContent(path: notesPath, content: finalText)
+        try addTodo(project: project, text: taskText, due: due, position: servicePosition)
     } catch { fail(error) }
 }
 
@@ -296,19 +198,9 @@ func runNotesTodoDue(args: [String]) {
     let project = args[0]
     let dueArg = args[3]
     let due: String? = dueArg == "--clear" ? nil : dueArg
-    if let d = due, !isValidDueValue(d) { stderr("Invalid due value: \(d)"); exit(1) }
+    if let d = due, !isValidTodoDue(d) { stderr("Invalid due value: \(d)"); exit(1) }
     do {
-        let projectPath = try resolveProjectPath(nameOrPrefix: project)
-        guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-            fail(PmError.notesNotFound(getNotesPath(projectPath: projectPath)))
-        }
-        guard let config = try loadConfig() else { throw PmError.configNotFound }
-        let io = makeNotesIO(notesPath: notesPath, config: config)
-        let rawText = try io.readContent(path: notesPath)
-        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
-            setDueOnTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, due: due)
-        }
-        if let updated = updated { try io.writeContent(path: notesPath, content: updated) }
+        try setDueOnTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex, due: due)
     } catch { fail(error) }
 }
 
