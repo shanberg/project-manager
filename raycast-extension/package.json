@@ -318,7 +318,7 @@
   },
   "scripts": {
     "build": "ray build",
-    "dev": "ray develop",
+    "dev": "./scripts/dev.sh",
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "test": "vitest run",

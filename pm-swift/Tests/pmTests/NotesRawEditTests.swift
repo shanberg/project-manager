@@ -190,4 +190,60 @@ final class NotesRawEditTests: XCTestCase {
         notes.sessions.insert(Session(date: "Mon, Mar 10, 2025", label: "", body: ""), at: 0)
         XCTAssertNil(try writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes))
     }
+
+    // MARK: - Edit text
+
+    /// Editing a task's text rewrites only its content, preserving checkbox/due/focus/indent and
+    /// every other line.
+    func testSetTextPreservesCheckboxDueFocusAndOtherLines() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Parent
+          - [x] Child due: 2025-03-01 @
+        """
+        let updated = try XCTUnwrap(editTodosPreservingFormat(rawText: raw) { notes in
+            setTextOnTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: 0, lineIndex: 1, text: "Renamed child")
+        })
+        XCTAssertTrue(updated.contains("  - [x] Renamed child due: 2025-03-01 @"),
+                      "Checkbox, indent, due, and focus preserved; text swapped")
+        XCTAssertTrue(updated.contains("- [ ] Parent"), "Sibling untouched")
+    }
+
+    // MARK: - Wrap
+
+    /// Wrapping a leaf inserts a parent at its indent and pushes the task in one level, keeping focus.
+    func testWrapLeafInsertsParentAndIndents() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] One
+        - [ ] Two @
+        """
+        let updated = try XCTUnwrap(wrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 1, parentText: "Group"))
+        XCTAssertTrue(updated.contains("- [ ] Group\n  - [ ] Two @"), "Parent inserted; task nested and focus kept")
+        XCTAssertTrue(updated.contains("- [ ] One\n- [ ] Group"), "Sibling order preserved before the new parent")
+    }
+
+    /// Wrapping a task carries its whole subtree along (all deeper contiguous lines indent too).
+    func testWrapCarriesSubtree() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Task
+          - [ ] Sub A
+          - [ ] Sub B
+        - [ ] After
+        """
+        let updated = try XCTUnwrap(wrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 0, parentText: "Wrapper"))
+        XCTAssertTrue(updated.contains("- [ ] Wrapper\n  - [ ] Task\n    - [ ] Sub A\n    - [ ] Sub B"),
+                      "Task and its subtree all indented under the new parent")
+        XCTAssertTrue(updated.contains("- [ ] After"), "Following sibling at the original indent is left alone")
+    }
 }

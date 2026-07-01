@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Be active for the first protected-folder access so a TCC prompt (if any) can present.
         NSApp.activate(ignoringOtherApps: true)
         store.reload()
+
+        // Reopen the panel if it was open when the app was last quit.
+        panelController.restoreIfNeeded()
     }
 
     /// Shown at most once per launch if the projects folder can't be read (a Full Disk Access issue).

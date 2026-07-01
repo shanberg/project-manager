@@ -65,6 +65,24 @@ public func editTodos(project: String, _ mutate: @escaping (ProjectNotes) throws
     }
 }
 
+/// Apply a format-preserving edit to the notes' detail fields (summary/problem/goals/approach/
+/// links/learnings/title) and write it back. The transform receives freshly-parsed notes — so
+/// sessions and todos are read from disk, not a possibly-stale caller copy — and the splice
+/// preserves every untouched section (and the whole Sessions region) byte-for-byte, falling back to
+/// a full serialize only if a changed section can't be spliced. A no-op edit writes nothing.
+public func editDetails(project: String, _ mutate: (ProjectNotes) throws -> ProjectNotes) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    let current = try parseNotes(markdown: rawText)
+    let updated = try mutate(current)
+    guard updated != current else { return }
+    if let spliced = try writeNotesPreservingFormat(rawText: rawText, incoming: updated) {
+        try handle.io.writeContent(path: handle.notesPath, content: spliced)
+    } else {
+        try writeNotesFile(notesPath: handle.notesPath, notes: updated, notesIO: handle.io)
+    }
+}
+
 /// Complete a todo (and its descendants). By default advances focus per the now-style rule.
 public func completeTodo(project: String, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool = true) throws {
     try editTodos(project: project) { notes in
@@ -85,6 +103,27 @@ public func undoTodo(project: String, sessionIndex: Int, lineIndex: Int) throws 
     try editTodos(project: project) { notes in
         try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
     }
+}
+
+/// Replace a todo's text in place, preserving its checkbox, due, focus marker, and indent.
+public func setTodoText(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+    guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
+    try editTodos(project: project) { notes in
+        setTextOnTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, text: text)
+    }
+}
+
+/// Wrap a todo in a new parent task (insert a parent above at the task's indent, nest the task and
+/// its subtree under it). Focus stays on the wrapped task. Format-preserving.
+public func wrapTodo(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+    guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = wrapTaskPreservingFormat(
+        rawText: rawText, sessionIndex: sessionIndex, lineIndex: lineIndex, parentText: text) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
 /// Set (or clear, with `due == nil`) the inline `due:` value on a todo line.

@@ -19,6 +19,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     /// Fixed panel width (the content lays out to this; height auto-fits).
     static let width: CGFloat = 420
+    /// Window identifier so the panel's outside-click monitor can scope to this window.
+    static let windowIdentifier = "PMPanel"
     /// Max height as a Tarot-card proportion of the width (~2.75×4.75). Content beyond this scrolls;
     /// below it, the panel fits exactly.
     static let maxHeightRatio: CGFloat = 4.75 / 2.75
@@ -70,13 +72,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.delegate = self
-        panel.setFrameAutosaveName("PMPanel")
+        // Tag the window so PanelView's outside-click monitor can tell our clicks from other windows'.
+        panel.identifier = NSUserInterfaceItemIdentifier(Self.windowIdentifier)
         // Dismissal is via Escape / blur / hotkey / menu, so hide all traffic-light buttons — this
         // also removes the close button that was overlapping the title.
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         applySettings(settings)
+        restorePosition()
     }
 
     // MARK: Show / hide
@@ -88,13 +92,32 @@ final class PanelController: NSObject, NSWindowDelegate {
     func show() {
         pendingHide?.cancel()
         suppressNextFitAnimation = true
+        Self.wasOpen = true
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
     }
 
     func hide() {
         pendingHide?.cancel()
+        Self.wasOpen = false
         panel.orderOut(nil)
+    }
+
+    // MARK: Open-state restore
+
+    /// Whether the panel was open (user intent, not transient visibility) when the app last ran, so it
+    /// can reopen on relaunch. Set by the explicit summon/dismiss paths (`show`/`hide`); the blur
+    /// auto-hide deliberately leaves it set, since an unpinned panel that hid on blur is still "open".
+    /// App-local (`UserDefaults`) rather than in the Raycast-shared settings file.
+    static var wasOpen: Bool {
+        get { UserDefaults.standard.bool(forKey: wasOpenKey) }
+        set { UserDefaults.standard.set(newValue, forKey: wasOpenKey) }
+    }
+    private static let wasOpenKey = "PMPanelWasOpen"
+
+    /// Reopen the panel on launch if it was open when the app was last quit.
+    func restoreIfNeeded() {
+        if Self.wasOpen { show() }
     }
 
     // MARK: Settings
@@ -102,6 +125,67 @@ final class PanelController: NSObject, NSWindowDelegate {
     func applySettings(_ new: PanelSettings) {
         settings = new
         panel.level = new.floating ? .floating : .normal
+    }
+
+    // MARK: Window position persistence
+
+    /// Persisted position, anchored to whichever corner is nearest a screen edge. Storing offsets
+    /// from the near edges (rather than an absolute point) keeps the panel the same distance from
+    /// that edge across resolution/display changes, and the vertical anchor also drives which edge
+    /// the auto-fit grows from — see `verticalAnchorNearTop` / `fit(toContentHeight:)`.
+    private struct SavedPosition: Codable {
+        var fromRight: Bool     // horizontal anchor: nearer the right screen edge?
+        var xOffset: CGFloat    // distance from that edge to the panel's near vertical side
+        var fromTop: Bool       // vertical anchor: nearer the top screen edge?
+        var yOffset: CGFloat    // distance from that edge to the panel's near horizontal side
+    }
+    private static let positionKey = "PMPanelAnchor"
+
+    private var visibleFrame: NSRect? { (panel.screen ?? NSScreen.main)?.visibleFrame }
+
+    /// Whether the panel's top edge is currently the nearer of the two horizontal screen edges. The
+    /// auto-fit keeps this edge fixed so growth happens away from the nearby edge. Defaults to top.
+    private var verticalAnchorNearTop: Bool {
+        guard let vf = visibleFrame else { return true }
+        return (vf.maxY - panel.frame.maxY) <= (panel.frame.minY - vf.minY)
+    }
+
+    private func savePosition() {
+        guard let vf = visibleFrame else { return }
+        let f = panel.frame
+        let fromRight = (vf.maxX - f.maxX) < (f.minX - vf.minX)
+        let fromTop = verticalAnchorNearTop
+        let pos = SavedPosition(
+            fromRight: fromRight,
+            xOffset: fromRight ? vf.maxX - f.maxX : f.minX - vf.minX,
+            fromTop: fromTop,
+            yOffset: fromTop ? vf.maxY - f.maxY : f.minY - vf.minY
+        )
+        if let data = try? JSONEncoder().encode(pos) {
+            UserDefaults.standard.set(data, forKey: Self.positionKey)
+        }
+    }
+
+    /// Restore the panel relative to its nearest-edge corner, or center on first run. A later auto-fit
+    /// keeps the anchored vertical edge fixed, preserving the position.
+    ///
+    /// This runs in `init`, before the hosting controller has laid out the SwiftUI content, so at this
+    /// point `panel.frame.size` is still `.zero`. We must therefore anchor off the panel's known fixed
+    /// width (`Self.width`) rather than the not-yet-measured `frame.width`: a right-anchored panel sets
+    /// its left edge here, and the auto-fit grows width from that left edge, so using a zero width would
+    /// leave the panel one full width too far right. Height needs no such care — the top-anchored case
+    /// cancels height out (top edge = origin.y + height), and the bottom-anchored case ignores it.
+    private func restorePosition() {
+        guard let data = UserDefaults.standard.data(forKey: Self.positionKey),
+              let pos = try? JSONDecoder().decode(SavedPosition.self, from: data),
+              let vf = visibleFrame else {
+            panel.center()
+            return
+        }
+        let height = panel.frame.height
+        let x = pos.fromRight ? vf.maxX - pos.xOffset - Self.width : vf.minX + pos.xOffset
+        let y = pos.fromTop ? vf.maxY - pos.yOffset - height : vf.minY + pos.yOffset
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     /// Auto-fit the panel height to its content (width stays 380), clamped to a sane min and 95% of
@@ -112,8 +196,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         let target = min(max(ceil(height), 120), maxHeight)
         guard abs(panel.frame.height - target) > 1 else { return }
         var frame = panel.frame
-        // Grow/shrink from the top edge so the panel doesn't appear to jump downward.
-        frame.origin.y += frame.height - target
+        // Grow/shrink from whichever horizontal screen edge the panel is anchored to: keep the top
+        // edge fixed when anchored near the top (grows downward), else keep the bottom edge fixed
+        // (grows upward). Either way the panel expands away from the nearby edge, not across it.
+        if verticalAnchorNearTop { frame.origin.y += frame.height - target }
         frame.size = NSSize(width: Self.width, height: target)
 
         // Animate the resize, except for the first fit right after summon and while hidden, which
@@ -153,6 +239,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         pendingHide?.cancel()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        // Fires on user drags (and on the auto-fit reposition, which leaves the top-left unchanged).
+        savePosition()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

@@ -165,11 +165,22 @@ final class PMStore: ObservableObject {
         mutate { try setDueOnTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, due: due) }
     }
 
-    /// "Dive in": move focus to the first leaf under the focused task, else the first open leaf in
-    /// the tree. Mirrors the Raycast Dive In command; computed here from the flat todo list.
-    func diveIn() {
+    /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
+    func editText(_ todo: Todo, text: String) {
+        mutate { try setTodoText(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, text: text) }
+    }
+
+    /// Wrap a task in a new parent task, nesting the task (and its subtree) under it; focus stays put.
+    func wrap(_ todo: Todo, parentText: String) {
+        mutate { try wrapTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, text: parentText) }
+    }
+
+    /// The task focus should advance to: the first open leaf under the focused task, else the next
+    /// open leaf anywhere in document order. Always excludes the currently focused task itself.
+    /// Drives both "Dive in" and the focused-mode "Next" hint so the two can't diverge.
+    var nextTodo: Todo? {
         let list = todos
-        guard !list.isEmpty else { return }
+        guard !list.isEmpty else { return nil }
         func isLeaf(_ i: Int) -> Bool {
             let next = i + 1
             return next >= list.count
@@ -180,12 +191,28 @@ final class PMStore: ObservableObject {
             let fd = list[fi].depth
             var j = fi + 1
             while j < list.count, list[j].sessionIndex == list[fi].sessionIndex, list[j].depth > fd {
-                if !list[j].checked && isLeaf(j) { focus(list[j]); return }
+                if !list[j].checked && isLeaf(j) { return list[j] }
                 j += 1
             }
+            // No open leaf beneath: first open leaf elsewhere, skipping the focused task itself.
+            for i in list.indices where i != fi && !list[i].checked && isLeaf(i) { return list[i] }
+            return nil
         }
-        // Fallback: first open (unchecked) leaf anywhere.
-        for i in list.indices where !list[i].checked && isLeaf(i) { focus(list[i]); return }
+        // Nothing focused: first open (unchecked) leaf anywhere.
+        for i in list.indices where !list[i].checked && isLeaf(i) { return list[i] }
+        return nil
+    }
+
+    /// "Dive in": move focus to the next open leaf. Mirrors the Raycast Dive In command.
+    func diveIn() {
+        if let next = nextTodo { focus(next) }
+    }
+
+    /// Persist an edit to the project's detail fields (summary, problem, goals, approach, learnings).
+    /// The transform runs against freshly-parsed notes on the IO queue, so tasks/sessions are read
+    /// from disk and preserved. Reloads afterward like every other mutation.
+    func saveDetails(_ transform: @escaping (ProjectNotes) -> ProjectNotes) {
+        mutate { try editDetails(project: $0, transform) }
     }
 
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil, position: TaskInsertPosition? = nil) {

@@ -174,6 +174,67 @@ public func insertTaskRelative(
     return nil
 }
 
+/// Leading-space count of a line (the task-indent depth; the notes convention is two-space steps).
+private func leadingSpaces(_ line: String) -> Int {
+    line.prefix { $0 == " " }.count
+}
+
+/// Wrap the task at (sessionIndex, lineIndex) in a new parent task: insert an unchecked parent line
+/// at the task's own indent, then indent the task and its (deeper, contiguous) descendants two spaces
+/// so they nest under it. The wrapped task keeps its checkbox, due, and focus marker verbatim (only
+/// its indent changes), so focus stays on it. Returns the new markdown, or nil if the task can't be
+/// located. Mirrors the Raycast "Wrap" command, extended to carry a task's subtree along.
+public func wrapTaskPreservingFormat(
+    rawText: String,
+    sessionIndex targetSession: Int,
+    lineIndex targetLine: Int,
+    parentText: String
+) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    var inSessions = false
+    var sessionIndex = -1
+    var taskIndex = 0
+
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) {
+            sessionIndex += 1
+            taskIndex = 0
+            continue
+        }
+        if matches(rawSectionPattern, line) {
+            inSessions = false
+            continue
+        }
+        guard sessionIndex >= 0, matches(rawTaskPattern, line) else { continue }
+        if sessionIndex == targetSession && taskIndex == targetLine {
+            let prefix = listPrefix(of: line)
+            let indent = leadingSpaces(line)
+            let parentLine = "\(prefix)[ ] \(parentText.trimmingCharacters(in: .whitespaces))"
+            // Indent the target line, then every immediately following deeper task line (its subtree).
+            var i = n
+            while i < lines.count {
+                if i == n {
+                    lines[i] = "  " + lines[i]
+                } else if matches(rawTaskPattern, lines[i]), leadingSpaces(lines[i]) > indent {
+                    lines[i] = "  " + lines[i]
+                } else {
+                    break
+                }
+                i += 1
+            }
+            lines.insert(parentLine, at: n)
+            return lines.joined(separator: "\n")
+        }
+        taskIndex += 1
+    }
+    return nil
+}
+
 /// Append a new task at the end of a session's task list (or right after its heading when the
 /// session has no tasks yet), preserving format. Returns the new markdown and the (sessionIndex,
 /// lineIndex) of the inserted task, or nil if the session can't be located.
