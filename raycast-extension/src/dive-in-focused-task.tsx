@@ -1,6 +1,5 @@
 import { getPreferenceValues, showHUD } from "@raycast/api";
 import { getFocusedProject, parseProjectKey } from "./lib/focused-project";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import {
   getNotes,
   resolveNotesPath,
@@ -72,7 +71,6 @@ export default async function Command() {
     }
     await setFocusToTodoInNotes(prefs, parsed.name, out.notes, target);
     await showHUD(`Focus: ${target.text.slice(0, 40)}`);
-    await refreshMenubar();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await showHUD(`Error: ${msg}`);

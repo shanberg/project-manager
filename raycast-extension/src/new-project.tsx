@@ -13,7 +13,6 @@ import {
 import { useCachedPromise } from "@raycast/utils";
 import { runPmWithPrefs, getConfigDomains, getPmPaths } from "./lib/pm";
 import { setFocusedProject } from "./lib/focused-project";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 
 export default function Command() {
@@ -57,7 +56,6 @@ export default function Command() {
           const projectName = path.basename(projectPath);
           const { activePath } = await getPmPaths(prefs);
           await setFocusedProject(activePath, projectName);
-          await refreshMenubar();
           await launchCommand({
             name: "view-project",
             type: LaunchType.UserInitiated,

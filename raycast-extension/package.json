@@ -100,20 +100,6 @@
       ]
     },
     {
-      "name": "focused-project",
-      "title": "Focused Project",
-      "description": "Show focused project and next task in menu bar",
-      "mode": "menu-bar",
-      "interval": "1m"
-    },
-    {
-      "name": "focused-project-status",
-      "title": "Focused Task",
-      "description": "Show focused project progress in menu bar",
-      "mode": "menu-bar",
-      "interval": "1m"
-    },
-    {
       "name": "view-focused-project",
       "title": "View Focused Project",
       "description": "Open the focused project view",
@@ -274,57 +260,6 @@
         "notes",
         "pm"
       ]
-    },
-    {
-      "name": "toggle-panel",
-      "title": "Toggle Panel",
-      "description": "Show or hide the floating PM panel",
-      "mode": "no-view",
-      "keywords": [
-        "panel",
-        "hud",
-        "toggle",
-        "show",
-        "hide",
-        "pm"
-      ],
-      "preferences": [
-        {
-          "name": "panelPath",
-          "type": "textfield",
-          "required": false,
-          "title": "Panel Path",
-          "description": "Path to the PM Panel executable or .app. Installed: /Applications/PM Panel.app. Dev: pm-panel/src-tauri/target/debug/pm-panel.",
-          "placeholder": "/Applications/PM Panel.app"
-        }
-      ]
-    },
-    {
-      "name": "toggle-panel-pin",
-      "title": "Toggle Panel Pin",
-      "description": "Keep the PM panel open when it loses focus (or let it auto-hide)",
-      "mode": "no-view",
-      "keywords": [
-        "panel",
-        "pin",
-        "keep",
-        "open",
-        "sticky",
-        "pm"
-      ]
-    },
-    {
-      "name": "toggle-panel-float",
-      "title": "Toggle Panel Float",
-      "description": "Float the PM panel above all other windows (or use normal stacking)",
-      "mode": "no-view",
-      "keywords": [
-        "panel",
-        "float",
-        "always on top",
-        "top",
-        "pm"
-      ]
     }
   ],
   "preferences": [
@@ -369,24 +304,6 @@
       "title": "Use Obsidian CLI for notes",
       "description": "When enabled, the pm CLI will read/write notes via the Obsidian CLI (Obsidian 1.12+ with CLI enabled). Uses the vault name and path above. If the CLI is unavailable, pm falls back to direct file I/O.",
       "default": false
-    },
-    {
-      "name": "menubarProjectDisplay",
-      "type": "dropdown",
-      "required": true,
-      "title": "Menubar Project Display",
-      "description": "Show project name or code in the focused project menubar item.",
-      "data": [
-        {
-          "value": "code",
-          "title": "Project Code (e.g. W-001)"
-        },
-        {
-          "value": "name",
-          "title": "Project Name"
-        }
-      ],
-      "default": "code"
     }
   ],
   "dependencies": {

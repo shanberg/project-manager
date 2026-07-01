@@ -9,3 +9,8 @@ project-manager-*.tar.gz
 # Visual test suite generated artifacts
 tests/visual/results.json
 tests/visual/report.html
+# Xcode (pm-mac native app)
+pm-mac/**/xcuserdata/
+pm-mac/**/*.xcuserstate
+pm-mac/build/
+DerivedData/

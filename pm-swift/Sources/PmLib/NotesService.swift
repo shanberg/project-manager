@@ -39,7 +39,12 @@ public func resolveNotesHandle(project: String) throws -> NotesHandle {
 /// The `pm notes show` payload: parsed notes, todos with effective (inherited) due dates, and the
 /// focused todo's stable key. Focus is normalized so at most one line carries the ` @` marker.
 public func notesShow(project: String) throws -> NotesShowOutput {
-    let handle = try resolveNotesHandle(project: project)
+    try notesShow(handle: try resolveNotesHandle(project: project))
+}
+
+/// `notesShow` for a pre-resolved handle — lets callers resolve once and reuse the notes path
+/// (e.g. to set up a file watch) without a second project-directory scan.
+public func notesShow(handle: NotesHandle) throws -> NotesShowOutput {
     var notes = try readNotesFile(notesPath: handle.notesPath, notesIO: handle.io)
     notes = normalizeFocusMarker(notes: notes)
     let todos = todosWithEffectiveDueDates(try parseTodos(notes: notes))

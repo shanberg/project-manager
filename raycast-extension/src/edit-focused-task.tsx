@@ -16,7 +16,6 @@ import {
   editTodoInNotes,
   updateDueDateInNotes,
 } from "./lib/notes-api";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import { parseDueDate, formatDueForStorage } from "./lib/format-relative-due";
 import type { PreferenceValues } from "./lib/types";
 
@@ -88,7 +87,6 @@ export default function Command() {
         title: "Due Date Removed",
       });
       await revalidate();
-      await refreshMenubar();
       pop();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -132,7 +130,6 @@ export default function Command() {
         message: text.slice(0, 50) + (text.length > 50 ? "…" : ""),
       });
       await revalidate();
-      await refreshMenubar();
       pop();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

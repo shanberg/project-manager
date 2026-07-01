@@ -37,7 +37,6 @@ import {
   getProjectCode,
   getReadableProjectName,
 } from "./lib/focused-project";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import { runPmWithPrefs, getConfigDomains, getPmPaths } from "./lib/pm";
 import type { PreferenceValues } from "./lib/types";
 import AddSessionNoteForm from "./add-session-note-form";
@@ -346,7 +345,6 @@ export default function Command() {
           icon={Icon.ArrowRightCircleFilled}
           onAction={async () => {
             await setFocusedProject(basePath, name);
-            await refreshMenubar();
             await showToast({
               style: Toast.Style.Success,
               title: "Focused",

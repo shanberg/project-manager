@@ -15,7 +15,6 @@ import {
   parseProjectKey,
   setFocusedProject,
 } from "./lib/focused-project";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import { runPmWithPrefs } from "./lib/pm";
 import { projectKey, replaceRecentProjectKey } from "./lib/recent-projects";
 import type { PreferenceValues } from "./lib/types";
@@ -87,7 +86,6 @@ export default function Command() {
       const newKey = projectKey(data.basePath, newBasename);
       await setFocusedProject(data.basePath, newBasename);
       await replaceRecentProjectKey(oldKey, newKey);
-      await refreshMenubar();
       await showToast({
         style: Toast.Style.Success,
         title: "Project renamed",

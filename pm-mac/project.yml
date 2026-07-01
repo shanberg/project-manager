@@ -1,0 +1,71 @@
+name: PM
+options:
+  bundleIdPrefix: com.stuarthanberg
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "13.0"
+
+packages:
+  PmLib:
+    # Local Swift package holding the shared domain logic (config, notes, todos, focus).
+    path: ../pm-swift
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Sign with the local Apple Development identity (not ad-hoc). This gives a stable, identifier-
+    # based designated requirement so macOS TCC grants (Documents / Full Disk Access) persist across
+    # rebuilds — an ad-hoc "-" signature uses a per-build cdhash that TCC can't durably record.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development: Stuart Hanberg (L4L7G83F22)"
+    DEVELOPMENT_TEAM: 9626CTDMM9
+    ENABLE_HARDENED_RUNTIME: false
+    # Don't let Xcode inject get-task-allow=true (the debuggable flag). TCC can refuse to honor a
+    # Full Disk Access grant for a debuggable app, which manifests as the folder access hanging then
+    # being denied even though the app is listed in FDA.
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+
+targets:
+  PM:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: PM
+    dependencies:
+      - package: PmLib
+        product: PmLib
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stuarthanberg.pm
+        PRODUCT_NAME: PM
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+    info:
+      path: PM/Info.plist
+      properties:
+        CFBundleName: PM
+        CFBundleDisplayName: PM
+        # Menubar-only agent: no Dock icon, no main window on launch.
+        LSUIElement: true
+        LSMinimumSystemVersion: "13.0"
+        # Custom URL scheme so Raycast (and other launchers) can drive the app:
+        # pmpanel://toggle | show | hide | pin?on=… | float?on=…
+        CFBundleURLTypes:
+          - CFBundleURLName: com.stuarthanberg.pm
+            CFBundleURLSchemes: [pmpanel]
+        # Speakable aliases so Siri can recognize App Shortcut phrases — the bundle name "PM" is a
+        # homophone of "p.m." and doesn't work as a spoken trigger. Say e.g. "Show Project Manager
+        # panel", "Complete my Project Manager task".
+        INAlternativeAppNames:
+          - INAlternativeAppName: Project Manager
+          - INAlternativeAppName: PM Projects
+    entitlements:
+      path: PM/PM.entitlements
+      properties:
+        # Not sandboxed: needs to read project notes in arbitrary (Full Disk Access) folders,
+        # matching the retired Tauri panel's entitlements.
+        com.apple.security.app-sandbox: false
+        # Explicitly non-debuggable so TCC treats it as a normal app (see CODE_SIGN_INJECT... above).
+        com.apple.security.get-task-allow: false

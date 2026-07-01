@@ -26,7 +26,6 @@ import {
 import { runPmWithPrefs, getPmPaths } from "./lib/pm";
 import { recordRecentProject, projectKey } from "./lib/recent-projects";
 import { getFocusedProject, setFocusedProject } from "./lib/focused-project";
-import { refreshMenubar } from "./lib/menubar-refresh";
 import type { PreferenceValues } from "./lib/types";
 import AddLinkForm from "./add-link-form";
 import AddSessionNoteForm from "./add-session-note-form";
@@ -109,7 +108,6 @@ export default function ProjectView({ projectName, basePath }: Props) {
 
   async function onNotesSuccess() {
     await mutate();
-    await refreshMenubar();
   }
 
   const { notes, todos, notesPath } = data ?? {
@@ -168,7 +166,6 @@ export default function ProjectView({ projectName, basePath }: Props) {
     try {
       await toggleTodoInNotes(prefs, projectName, notes, todo);
       await mutate();
-      await refreshMenubar();
       const toastText = stripInlineDueFromText(todo.text);
       await showToast({
         style: Toast.Style.Success,
@@ -193,7 +190,6 @@ export default function ProjectView({ projectName, basePath }: Props) {
     try {
       await toggleAllTodosInNotes(prefs, projectName, notes, unchecked);
       await mutate();
-      await refreshMenubar();
       await showToast({
         style: Toast.Style.Success,
         title: "Completed",
@@ -764,7 +760,6 @@ export default function ProjectView({ projectName, basePath }: Props) {
                 icon={Icon.ArrowRightCircleFilled}
                 onAction={async () => {
                   await setFocusedProject(basePath, projectName);
-                  await refreshMenubar();
                   await showToast({
                     style: Toast.Style.Success,
                     title: "Focused",
