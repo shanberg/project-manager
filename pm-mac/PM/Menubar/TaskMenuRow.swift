@@ -79,6 +79,77 @@ final class MenuRowView: NSView {
     }
 }
 
+// MARK: - Status-bar button host
+
+/// An `NSHostingView` that declines every mouse hit, so the status-bar button hosting it still
+/// receives clicks and opens its menu. Its content is display-only and never needs input of its own.
+final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    @MainActor required init(rootView: Content) { super.init(rootView: rootView) }
+    @available(*, unavailable) @MainActor required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+/// The menu-bar button's content: the progress ring, the current task (with its relative due), and the
+/// project code. Only the task element carries a transition — keyed by the task's identity so a move
+/// (see `FocusMove`) slides just that piece in the direction of travel, while the ring and project code
+/// stay put. Mirrors the old attributed-title layout ("task  2d · H-005") so the bar reads the same.
+struct MenubarTitleContent: View {
+    /// The current task reduced to what the bar shows; `key`+`text` give the task view its transition
+    /// identity so navigating tasks animates only it.
+    struct Task: Equatable { let key: String; let text: String; let due: String?; let overdue: Bool }
+
+    let ring: NSImage
+    let task: Task?
+    let project: String
+    let move: FocusMove
+    let moveToken: Int
+
+    private var titleFont: Font { Font(NSFont.menuBarFont(ofSize: 0)) }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(nsImage: ring)   // template ring tints to the label color; a stale (colored) ring draws as-is
+            if let task {
+                taskView(task)
+                    .id("\(task.key)|\(task.text)")
+                    .transition(transition)
+                    .clipped()
+                    // Scope the animation to the task alone: only a real, classified move advances the
+                    // token, and the ring / project code are outside this so they never slide with it.
+                    .animation(move == .wipe ? .easeInOut(duration: 0.3) : .snappy(duration: 0.32), value: moveToken)
+                Text("·").foregroundStyle(.tertiary)
+                Text(project).foregroundStyle(.secondary)
+            } else {
+                Text(project).foregroundStyle(.primary)   // all tasks done: project only
+            }
+        }
+        .font(titleFont)
+        .fixedSize()
+        .padding(.horizontal, 2)
+    }
+
+    private func taskView(_ task: Task) -> some View {
+        HStack(spacing: 5) {
+            Text(task.text).foregroundStyle(.primary)
+            if let due = task.due {
+                Text(due).foregroundStyle(task.overdue ? Color(nsColor: .systemRed) : .secondary)
+            }
+        }
+    }
+
+    private var transition: AnyTransition {
+        switch move {
+        case .right: return .cornerPush(horizontal: .trailing, vertical: .bottom)  // dove into a subtask → down-right
+        case .left:  return .cornerPush(horizontal: .leading,  vertical: .top)     // bubbled up to an ancestor → up-left
+        case .down:  return .cornerPush(horizontal: nil,       vertical: .bottom)  // next → up from below
+        case .up:    return .cornerPush(horizontal: nil,       vertical: .top)     // previous → down from above
+        case .wipe:  return .wipe
+        case .none:  return .identity
+        }
+    }
+}
+
 // MARK: - Non-interactive host (header)
 
 /// Wraps a SwiftUI view in an `NSMenuItem.view` with no interaction — used for the header/progress

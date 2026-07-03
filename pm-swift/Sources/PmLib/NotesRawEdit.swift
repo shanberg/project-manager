@@ -235,6 +235,58 @@ public func wrapTaskPreservingFormat(
     return nil
 }
 
+/// Unwrap (dissolve) the parent task at (sessionIndex, lineIndex): delete the parent line and promote
+/// its subtree — the contiguous run of deeper task lines immediately following it — one indent level
+/// (two spaces) shallower, so the former children take the parent's position and depth. Returns the new
+/// markdown, or nil if the task can't be located or has no children (a leaf — nothing to dissolve).
+/// Inverse of `wrapTaskPreservingFormat`; the caller handles moving focus off the removed parent.
+public func unwrapTaskPreservingFormat(
+    rawText: String,
+    sessionIndex targetSession: Int,
+    lineIndex targetLine: Int
+) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    var inSessions = false
+    var sessionIndex = -1
+    var taskIndex = 0
+
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) {
+            sessionIndex += 1
+            taskIndex = 0
+            continue
+        }
+        if matches(rawSectionPattern, line) {
+            inSessions = false
+            continue
+        }
+        guard sessionIndex >= 0, matches(rawTaskPattern, line) else { continue }
+        if sessionIndex == targetSession && taskIndex == targetLine {
+            let indent = leadingSpaces(line)
+            // The subtree is the contiguous run of deeper task lines right after the parent.
+            var end = n + 1
+            while end < lines.count, matches(rawTaskPattern, lines[end]), leadingSpaces(lines[end]) > indent {
+                end += 1
+            }
+            guard end > n + 1 else { return nil }  // leaf task — nothing to dissolve
+            // Promote each descendant two spaces shallower (their relative nesting is preserved),
+            // then drop the parent line so the first child lands at the parent's old position.
+            for i in (n + 1)..<end {
+                lines[i] = String(lines[i].dropFirst(2))
+            }
+            lines.remove(at: n)
+            return lines.joined(separator: "\n")
+        }
+        taskIndex += 1
+    }
+    return nil
+}
+
 /// Append a new task at the end of a session's task list (or right after its heading when the
 /// session has no tasks yet), preserving format. Returns the new markdown and the (sessionIndex,
 /// lineIndex) of the inserted task, or nil if the session can't be located.

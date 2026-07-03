@@ -301,6 +301,49 @@ private func selectNewCurrentAfterRemoval(
     return nil
 }
 
+/// The task that "Dive In" should focus next, given `todos` in document order (as produced by
+/// `parseTodos`: grouped by session, then by line). Mirrors the Raycast "Dive In" command, extended
+/// with a forward "advance" fallback so repeated dives walk down through the task list rather than
+/// stalling once you reach a leaf:
+///
+///   1. A focused task with an open (unchecked) leaf in its subtree → that leaf (first in document
+///      order). This is the "dive deeper" case.
+///   2. A focused task that is already a leaf (or whose subtree is fully checked) → the next open
+///      leaf *after* it in document order. This is the "advance to the next task" case.
+///   3. Nothing focused → the first open leaf anywhere.
+///   4. Otherwise (no open leaf to move to — everything checked, or already at the last open leaf) →
+///      nil, so callers can no-op.
+///
+/// Also drives the panel's "Next" hint, so the hint and the action can never diverge. A "leaf" is a
+/// task whose next task in the same session isn't deeper; a new session always ends the subtree.
+public func nextDiveInLeaf(todos: [Todo]) -> Todo? {
+    guard !todos.isEmpty else { return nil }
+    func isLeaf(_ i: Int) -> Bool {
+        let n = i + 1
+        return n >= todos.count
+            || todos[n].sessionIndex != todos[i].sessionIndex
+            || todos[n].depth <= todos[i].depth
+    }
+    func isOpenLeaf(_ i: Int) -> Bool { !todos[i].checked && isLeaf(i) }
+
+    guard let fi = todos.firstIndex(where: { $0.isFocused }) else {
+        // Nothing focused: the first open leaf anywhere.
+        return todos.indices.first(where: isOpenLeaf).map { todos[$0] }
+    }
+    // 1. Dive in: the first open leaf strictly beneath the focused task (same session, deeper).
+    let fd = todos[fi].depth
+    var j = fi + 1
+    while j < todos.count, todos[j].sessionIndex == todos[fi].sessionIndex, todos[j].depth > fd {
+        if isOpenLeaf(j) { return todos[j] }
+        j += 1
+    }
+    // 2. No open leaf beneath: advance to the next open leaf AFTER the focused task, in document
+    //    order. (Not the *first* open leaf in the document — that would jump backward past the
+    //    focused task, which is what "Dive In" was doing wrong.)
+    if let k = ((fi + 1)..<todos.count).first(where: isOpenLeaf) { return todos[k] }
+    return nil
+}
+
 /// Complete the todo at (sessionIndex, lineIndex) and all its descendants. Optionally move focus to next open todo (now-style: parent's first leaf, else next sibling first leaf, else parent).
 public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) throws -> ProjectNotes {
     let todos = try parseTodos(notes: notes)

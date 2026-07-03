@@ -246,4 +246,57 @@ final class NotesRawEditTests: XCTestCase {
                       "Task and its subtree all indented under the new parent")
         XCTAssertTrue(updated.contains("- [ ] After"), "Following sibling at the original indent is left alone")
     }
+
+    // MARK: - Unwrap
+
+    /// Unwrapping a parent removes it and promotes its children one level shallower, into its place.
+    func testUnwrapPromotesChildrenAndRemovesParent() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] One
+        - [ ] Group
+          - [ ] Two
+          - [ ] Three
+        - [ ] Four
+        """
+        let updated = try XCTUnwrap(unwrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 1))
+        XCTAssertFalse(updated.contains("Group"), "Parent line is removed")
+        XCTAssertTrue(updated.contains("- [ ] One\n- [ ] Two\n- [ ] Three\n- [ ] Four"),
+                      "Children promoted to the parent's indent and position; siblings untouched")
+    }
+
+    /// Unwrapping carries nested subtrees along: grandchildren dedent by one level too, keeping their
+    /// relative nesting under the promoted child.
+    func testUnwrapPreservesNestedSubtree() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Group
+          - [ ] Child
+            - [ ] Grandchild
+        - [ ] After
+        """
+        let updated = try XCTUnwrap(unwrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 0))
+        XCTAssertTrue(updated.contains("- [ ] Child\n  - [ ] Grandchild\n- [ ] After"),
+                      "Child promoted to root, grandchild stays nested one level under it")
+    }
+
+    /// Unwrapping a leaf (no children) is a no-op — returns nil so the caller can skip the write.
+    func testUnwrapLeafReturnsNil() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] One
+        - [ ] Two
+        """
+        XCTAssertNil(unwrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 0),
+                     "A task with no children can't be dissolved")
+    }
 }

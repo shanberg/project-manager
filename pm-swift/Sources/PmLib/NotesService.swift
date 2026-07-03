@@ -126,6 +126,35 @@ public func wrapTodo(project: String, sessionIndex: Int, lineIndex: Int, text: S
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
+/// Unwrap (dissolve) a parent todo: remove it and promote its children (with their subtrees) one
+/// level shallower, into the parent's position. If the dissolved parent held focus, focus moves to
+/// its first child so it isn't lost. Format-preserving. Inverse of `wrapTodo`.
+public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    // Was the dissolved parent the focused task? If so, focus should follow to its first child, which
+    // takes over the parent's (sessionIndex, lineIndex) once the parent line is removed.
+    let wasFocused = try parseTodos(notes: parseNotes(markdown: rawText)).contains {
+        $0.sessionIndex == sessionIndex && $0.lineIndex == lineIndex && $0.isFocused
+    }
+    guard let updated = unwrapTaskPreservingFormat(
+        rawText: rawText, sessionIndex: sessionIndex, lineIndex: lineIndex) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    var finalText = updated
+    if wasFocused {
+        if let focused = try editTodosPreservingFormat(rawText: updated, mutate: { notes in
+            applyFocusToTodoAt(
+                notes: normalizeFocusMarker(notes: notes),
+                sessionIndex: sessionIndex,
+                lineIndex: lineIndex)
+        }) {
+            finalText = focused
+        }
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: finalText)
+}
+
 /// Set (or clear, with `due == nil`) the inline `due:` value on a todo line.
 public func setDueOnTodo(project: String, sessionIndex: Int, lineIndex: Int, due: String?) throws {
     if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }

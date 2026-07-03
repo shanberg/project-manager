@@ -11,12 +11,16 @@
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19EFCE48163B4933B104DA26 /* AppIcons.swift */; };
 		3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F714E00F765F5D12885D0F68 /* PMIntents.swift */; };
+		E17A0001E17A0001E17A0001 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0002E17A0002E17A0002 /* PMEntities.swift */; };
+		E17A0003E17A0003E17A0003 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0004E17A0004E17A0004 /* PMSpotlight.swift */; };
+		E17A0005E17A0005E17A0005 /* PMReminderSchemas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */; };
 		682B885D994EC5F7B065C269 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3644D4885A6C393A632399AA /* main.swift */; };
 		70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */; };
 		86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857714074D07452813367D28 /* HotKey.swift */; };
 		90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46709D20934C0BFAC22FD087 /* PanelView.swift */; };
 		906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3025790996749621C9EBB543 /* PMFiles.swift */; };
 		AEB26A36D3A80E60177994A4 /* PmLib in Frameworks */ = {isa = PBXBuildFile; productRef = 386E7476C0693BFAA29A250D /* PmLib */; };
+		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
 		C1920D4ABB2E832B9F975126 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A8DE07C53FA9ECB9C061BC /* Log.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
 		CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */; };
@@ -45,10 +49,14 @@
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigWatcher.swift; sourceTree = "<group>"; };
 		B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
+		B358A62B026F88C33AA9FF42 /* MenubarRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarRing.swift; sourceTree = "<group>"; };
 		D69731046CF949BED6A9B753 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		E1B28724379E1B0A1A3DA2DC /* RelativeDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeDue.swift; sourceTree = "<group>"; };
 		F492935965C6142489D845E3 /* PM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PM.entitlements; sourceTree = "<group>"; };
 		F714E00F765F5D12885D0F68 /* PMIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMIntents.swift; sourceTree = "<group>"; };
+		E17A0002E17A0002E17A0002 /* PMEntities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMEntities.swift; sourceTree = "<group>"; };
+		E17A0004E17A0004E17A0004 /* PMSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMSpotlight.swift; sourceTree = "<group>"; };
+		E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +100,9 @@
 			isa = PBXGroup;
 			children = (
 				F714E00F765F5D12885D0F68 /* PMIntents.swift */,
+				E17A0002E17A0002E17A0002 /* PMEntities.swift */,
+				E17A0004E17A0004E17A0004 /* PMSpotlight.swift */,
+				E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */,
 			);
 			path = Intents;
 			sourceTree = "<group>";
@@ -101,6 +112,7 @@
 			children = (
 				19EFCE48163B4933B104DA26 /* AppIcons.swift */,
 				84A8DE07C53FA9ECB9C061BC /* Log.swift */,
+				B358A62B026F88C33AA9FF42 /* MenubarRing.swift */,
 				8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */,
 				3025790996749621C9EBB543 /* PMFiles.swift */,
 				03A7709B2DE4D155EAE70CCF /* PMStore.swift */,
@@ -223,9 +235,13 @@
 				21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
+				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,
 				C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */,
 				906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */,
 				3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */,
+				E17A0001E17A0001E17A0001 /* PMEntities.swift in Sources */,
+				E17A0003E17A0003E17A0003 /* PMSpotlight.swift in Sources */,
+				E17A0005E17A0005E17A0005 /* PMReminderSchemas.swift in Sources */,
 				EF13FDBC361FD2123FF4CD3D /* PMStore.swift in Sources */,
 				70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */,
 				CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */,

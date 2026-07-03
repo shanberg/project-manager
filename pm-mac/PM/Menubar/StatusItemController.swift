@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import ServiceManagement
 import PmLib
 
@@ -19,16 +20,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var onSetPinned: (Bool) -> Void = { _ in }
     var onSetFloating: (Bool) -> Void = { _ in }
 
-    /// Recent projects (derived from notes-file mtime, like the Raycast status command) plus their
-    /// cached progress/due, so the submenu can render rings + due without protected-folder reads while
-    /// the menu opens. The whole set is recomputed in the background on store changes (30s TTL).
-    private struct RecentInfo { let done: Int; let total: Int; let nextDue: String?; let summary: String? }
-    private var recentList: [PMFiles.RecentProject] = []
-    private var recentInfo: [String: RecentInfo] = [:]
-    private var recentsWarmedAt: Date = .distantPast
-    private var recentsWarmedForKey: String?
-    private let recentsQueue = DispatchQueue(label: "com.stuarthanberg.pm.recents")
-
     /// Cached favicons for project links, keyed by host. Fetched once per host in the background.
     private var faviconCache: [String: NSImage] = [:]
     private var faviconTried: Set<String> = []
@@ -42,6 +33,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         updateButton()
     }
 
+    /// Hosts the button's content (ring + task + project) as SwiftUI so only the task element animates
+    /// when the focused task moves. Kept across updates (its `rootView` is reassigned) so SwiftUI can
+    /// diff and run the scoped transition rather than rebuilding from scratch.
+    private var titleHost: PassthroughHostingView<AnyView>?
+
     // MARK: Button (icon + title)
 
     /// Custom menu rows are sized to this width, which also sets the menu's minimum width.
@@ -52,38 +48,52 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func updateButton() {
         guard let button = statusItem.button else { return }
+        button.image = nil            // content is drawn by the hosted SwiftUI view below
+        button.toolTip = tooltipText()
+
         let p = store.progress
         let fraction = p.total > 0 ? Double(p.done) / Double(p.total) : 0
-        button.image = MenubarRing.image(fraction: fraction, hasProject: store.projectName != nil, tint: staleTint())
-        button.imagePosition = .imageLeading
-        button.attributedTitle = titleAttributed()
-        button.toolTip = tooltipText()
+        let ring = MenubarRing.image(fraction: fraction, hasProject: store.projectName != nil, tint: staleTint())
+        let content = MenubarTitleContent(
+            ring: ring,
+            task: currentTaskGlyph(),
+            project: store.projectName.map { truncate(projectTitle($0), 24) } ?? "",
+            move: store.focusMove,
+            moveToken: store.focusMoveToken
+        )
+        let root = AnyView(content)
+
+        let host: PassthroughHostingView<AnyView>
+        if let existing = titleHost {
+            host = existing
+            host.rootView = root       // reassign so SwiftUI diffs and runs the scoped task transition
+        } else {
+            host = PassthroughHostingView(rootView: root)   // ignores hits so the button still opens the menu
+            button.addSubview(host)
+            titleHost = host
+        }
+
+        // Size the status item to the content and vertically center it in the bar.
+        host.layoutSubtreeIfNeeded()
+        let fit = host.fittingSize
+        let width = max(1, ceil(fit.width))
+        statusItem.length = width
+        let barHeight = button.bounds.height
+        host.frame = NSRect(x: 0, y: ((barHeight - ceil(fit.height)) / 2).rounded(),
+                            width: width, height: ceil(fit.height))
     }
 
-    /// "next task  2d · H-005" — task first (with its relative due if any), a dimmed dot, then the
-    /// project code. Attributed so the due can tint red when overdue and the code/dot read as
-    /// secondary, packing more signal into the bar than a plain string.
-    private func titleAttributed() -> NSAttributedString {
-        guard let name = store.projectName else { return NSAttributedString(string: "") }
-        let project = truncate(projectTitle(name), 24)
-        let font = NSFont.menuBarFont(ofSize: 0)
-        let smallFont = NSFont.menuBarFont(ofSize: NSFont.systemFontSize - 2)
-        func seg(_ s: String, _ color: NSColor, _ f: NSFont = font) -> NSAttributedString {
-            NSAttributedString(string: s, attributes: [.font: f, .foregroundColor: color])
-        }
-        let result = NSMutableAttributedString()
-        if let next = store.focusedTodo ?? store.openTodos.first {
-            result.append(seg(" " + truncate(next.text, 30), .labelColor))
-            if let due = next.dueDate ?? next.effectiveDueDate {
-                let overdue = RelativeDue.isOverdue(due)
-                result.append(seg("  " + RelativeDue.short(due), overdue ? .systemRed : .secondaryLabelColor))
-            }
-            result.append(seg("  ·  ", .tertiaryLabelColor, smallFont))
-            result.append(seg(project, .secondaryLabelColor))
-        } else {
-            result.append(seg(" " + project, .labelColor))  // all tasks done
-        }
-        return result
+    /// The focused (or first open) task reduced to what the bar shows, or nil when everything's done.
+    /// `key` + `text` give the hosted task view its transition identity so a move animates just it.
+    private func currentTaskGlyph() -> MenubarTitleContent.Task? {
+        guard let next = store.focusedTodo ?? store.openTodos.first else { return nil }
+        let due = next.dueDate ?? next.effectiveDueDate
+        return MenubarTitleContent.Task(
+            key: PMStore.key(for: next),
+            text: truncate(next.text, 30),
+            due: due.map { RelativeDue.short($0) },
+            overdue: due.map(RelativeDue.isOverdue) ?? false
+        )
     }
 
     private func tooltipText() -> String? {
@@ -162,7 +172,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// in was doing exactly that). menuDidClose reapplies the update.
     func storeChanged() {
         if !menuIsOpen { updateButton() }
-        warmRecents()
         warmFavicons()
     }
 
@@ -292,18 +301,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// list for everything else so the menu stays the same height as the project count grows.
     private func switchProjectMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Switch Project", symbol: "arrow.left.arrow.right")
-        let recents = recentList   // mtime-ordered, focused project already excluded, capped
+        let recents = store.recents   // mtime-ordered, focused project already excluded, capped
         for recent in recents {
             let r = actionItem(truncate(recent.name, 40), #selector(switchProject(_:)))
-            let info = recentInfo[recent.projectKey]
-            if let info, info.total > 0 {
-                r.image = MenubarRing.image(fraction: Double(info.done) / Double(info.total), hasProject: true, tint: nil)
+            if recent.total > 0 {
+                r.image = MenubarRing.image(fraction: recent.fraction, hasProject: true, tint: nil)
             } else {
                 r.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
             }
             Self.forceImageVisible(r)
-            if #available(macOS 14.4, *), let due = info?.nextDue { r.subtitle = "next \(RelativeDue.short(due))" }
-            r.toolTip = recentTooltip(name: recent.name, info: info)
+            if #available(macOS 14.4, *) { r.subtitle = recentSubtitle(recent) }
+            r.toolTip = recentTooltip(recent)
             r.representedObject = recent.projectKey
             sub.addItem(r)
         }
@@ -311,15 +319,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         sub.addItem(raycastItem("All Projects…", command: "list-projects", symbol: "magnifyingglass"))
         sub.addItem(raycastItem("New Project…", command: "new-project", symbol: "plus.square"))
         sub.addItem(raycastItem("Configure…", command: "configure", symbol: "gearshape"))
-        warmRecents()   // ensure warming if the cache is cold/stale when the menu is built
         return item
     }
 
-    private func recentTooltip(name: String, info: RecentInfo?) -> String {
-        guard let info else { return name }
-        var parts = [info.total > 0 ? "\(name): \(info.done)/\(info.total) done" : name]
-        if let due = info.nextDue { parts.append("Next due: \(RelativeDue.short(due))") }
-        if let summary = info.summary { parts.append(String(summary.prefix(120))) }
+    /// The recent row's second line: its focused (or next) task, with the "next due" hint appended.
+    /// Nil when the project has neither, so the row stays a single line.
+    private func recentSubtitle(_ recent: PMStore.Recent) -> String? {
+        var parts: [String] = []
+        if let task = recent.focusedText { parts.append(truncate(task, 40)) }
+        if let due = recent.nextDue { parts.append("next \(RelativeDue.short(due))") }
+        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
+    }
+
+    private func recentTooltip(_ recent: PMStore.Recent) -> String {
+        var parts = [recent.total > 0 ? "\(recent.name): \(recent.done)/\(recent.total) done" : recent.name]
+        if let due = recent.nextDue { parts.append("Next due: \(RelativeDue.short(due))") }
+        if let summary = recent.summary { parts.append(String(summary.prefix(120))) }
         return parts.joined(separator: "\n")
     }
 
@@ -424,68 +439,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return s
     }
 
-    // MARK: Async enrichment (recent-project rings + link favicons)
-
-    /// Rebuilds the recent-projects list (ordered by notes-file mtime, like the Raycast status
-    /// command's `getRecentProjectsByEdit`) and their progress/due/summary, in the background. This
-    /// derives recents purely from the filesystem — no shared write is needed, so they populate even
-    /// on a fresh install. Respects a 30s TTL, re-running immediately when the focused project changes.
-    private func warmRecents() {
-        let excludeKey = store.projectKey
-        if recentsWarmedForKey == excludeKey, Date().timeIntervalSince(recentsWarmedAt) < 30 { return }
-        recentsWarmedAt = Date()          // debounce concurrent triggers (menu-open + storeChanged)
-        recentsWarmedForKey = excludeKey
-        recentsQueue.async { [weak self] in
-            guard let list = Self.recentsByEdit(excludeKey: excludeKey, limit: 8) else { return }
-            var info: [String: RecentInfo] = [:]
-            for r in list {
-                guard let out = try? notesShow(project: r.name) else { continue }
-                let summary = out.notes.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                info[r.projectKey] = RecentInfo(done: out.todos.filter { $0.checked }.count,
-                                                total: out.todos.count,
-                                                nextDue: Self.earliestDue(out.todos),
-                                                summary: summary.isEmpty ? nil : summary)
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.recentList = list
-                self.recentInfo = info
-                // Don't rebuild the menu here even if it's open: recents live in the Switch Project
-                // submenu (not visible at the top level), and swapping the top menu's custom view
-                // items mid-track ends tracking and closes the menu. The warmed data appears on the
-                // next open — warming is proactive on store changes, so it's ready by then.
-            }
-        }
-    }
-
-    /// All projects across the active + archive folders, ordered by notes-file mtime (newest first,
-    /// falling back to folder mtime), excluding the focused project, capped at `limit`. Does protected-
-    /// folder IO, so only ever call this off the main thread.
-    private static func recentsByEdit(excludeKey: String?, limit: Int) -> [PMFiles.RecentProject]? {
-        guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
-        let codes = Array(config.domains.keys)
-        var entries: [(project: PMFiles.RecentProject, mtime: Date)] = []
-        for base in [paths.activePath, paths.archivePath] {
-            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
-            for name in folders {
-                let key = "\(base):\(name)"
-                if key == excludeKey { continue }
-                let projectPath = (base as NSString).appendingPathComponent(name)
-                let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil
-                let attrs = try? FileManager.default.attributesOfItem(atPath: notesPath ?? projectPath)
-                let mtime = (attrs?[.modificationDate] as? Date) ?? .distantPast
-                entries.append((PMFiles.RecentProject(projectKey: key, name: name), mtime))
-            }
-        }
-        return entries.sorted { $0.mtime > $1.mtime }.prefix(limit).map(\.project)
-    }
-
-    /// Earliest due (own or inherited) among open todos, for the recent-project "next due" hint.
-    private static func earliestDue(_ todos: [Todo]) -> String? {
-        todos.filter { !$0.checked }
-            .compactMap { $0.dueDate ?? $0.effectiveDueDate }
-            .min { (RelativeDue.parse($0) ?? .distantFuture) < (RelativeDue.parse($1) ?? .distantFuture) }
-    }
+    // MARK: Async enrichment (link favicons)
 
     /// Fetches favicons for the focused project's link hosts once each, from the linked host's own
     /// `/favicon.ico` (no third-party favicon service). Cached for the app's lifetime.
@@ -594,42 +548,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } catch {
             NSLog("PM: failed to toggle login item: \(error)")
         }
-    }
-}
-
-// MARK: - Drawn progress ring (finer-grained than Raycast's 5-step CircleProgress)
-
-private enum MenubarRing {
-    static func image(fraction: Double, hasProject: Bool, tint: NSColor?) -> NSImage {
-        let size = NSSize(width: 15, height: 15)
-        let img = NSImage(size: size, flipped: false) { rect in
-            let lineWidth: CGFloat = 1.6
-            let inset = rect.insetBy(dx: lineWidth, dy: lineWidth)
-            let color = tint ?? .black  // black draws as a template that the menubar recolors
-            let center = NSPoint(x: inset.midX, y: inset.midY)
-            let radius = min(inset.width, inset.height) / 2
-
-            // Track ring.
-            let track = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
-                                                    width: radius * 2, height: radius * 2))
-            track.lineWidth = lineWidth
-            color.withAlphaComponent(0.35).setStroke()
-            track.stroke()
-
-            // Progress arc (clockwise from 12 o'clock).
-            let clamped = min(max(fraction, 0), 1)
-            if hasProject && clamped > 0 {
-                let arc = NSBezierPath()
-                arc.appendArc(withCenter: center, radius: radius,
-                              startAngle: 90, endAngle: 90 - 360 * clamped, clockwise: true)
-                arc.lineWidth = lineWidth
-                color.setStroke()
-                arc.stroke()
-            }
-            return true
-        }
-        img.isTemplate = (tint == nil)  // colored (stale) rings must not be template-recolored
-        return img
     }
 }
 

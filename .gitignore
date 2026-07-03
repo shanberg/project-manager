@@ -17,3 +17,4 @@ DerivedData/
 
 # raycast dev wrapper: compiled scheme helper
 raycast-extension/scripts/.cache/
+pm-swift/build/
