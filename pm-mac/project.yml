@@ -13,19 +13,27 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.6.0"
+    MARKETING_VERSION: "0.8.0"
     CURRENT_PROJECT_VERSION: "1"
-    # Sign with the local Apple Development identity (not ad-hoc). This gives a stable, identifier-
-    # based designated requirement so macOS TCC grants (Documents / Full Disk Access) persist across
-    # rebuilds — an ad-hoc "-" signature uses a per-build cdhash that TCC can't durably record.
     CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "Apple Development: Stuart Hanberg (L4L7G83F22)"
     DEVELOPMENT_TEAM: 9626CTDMM9
-    ENABLE_HARDENED_RUNTIME: false
     # Don't let Xcode inject get-task-allow=true (the debuggable flag). TCC can refuse to honor a
     # Full Disk Access grant for a debuggable app, which manifests as the folder access hanging then
     # being denied even though the app is listed in FDA.
     CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  configs:
+    Debug:
+      # Local dev: sign with the Apple Development identity (not ad-hoc). Gives a stable, identifier-
+      # based designated requirement so macOS TCC grants (Documents / Full Disk Access) persist across
+      # rebuilds — an ad-hoc "-" signature uses a per-build cdhash that TCC can't durably record.
+      # Hardened runtime stays off locally: it isn't needed and keeps debug attach simple.
+      CODE_SIGN_IDENTITY: "Apple Development: Stuart Hanberg (L4L7G83F22)"
+      ENABLE_HARDENED_RUNTIME: false
+    Release:
+      # Distribution: Developer ID Application + hardened runtime. Apple notarization requires both,
+      # and notarization is what lets consumers open the app without Gatekeeper blocking it.
+      CODE_SIGN_IDENTITY: "Developer ID Application: Stuart Hanberg (9626CTDMM9)"
+      ENABLE_HARDENED_RUNTIME: true
 
 targets:
   PM:

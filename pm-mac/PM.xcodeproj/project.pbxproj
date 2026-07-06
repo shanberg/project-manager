@@ -7,16 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0DAF5B2B72F622D5F3F5C246 /* PMReminderSchemas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */; };
 		1702ADEBF7B5049CEA3DC46B /* RelativeDue.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B28724379E1B0A1A3DA2DC /* RelativeDue.swift */; };
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19EFCE48163B4933B104DA26 /* AppIcons.swift */; };
 		3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F714E00F765F5D12885D0F68 /* PMIntents.swift */; };
-		E17A0001E17A0001E17A0001 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0002E17A0002E17A0002 /* PMEntities.swift */; };
-		E17A0003E17A0003E17A0003 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0004E17A0004E17A0004 /* PMSpotlight.swift */; };
-		E17A0005E17A0005E17A0005 /* PMReminderSchemas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */; };
+		6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F024FD91F7AEB31A5D296AB /* PMEntities.swift */; };
 		682B885D994EC5F7B065C269 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3644D4885A6C393A632399AA /* main.swift */; };
 		70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */; };
 		86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857714074D07452813367D28 /* HotKey.swift */; };
+		8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */; };
 		90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46709D20934C0BFAC22FD087 /* PanelView.swift */; };
 		906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3025790996749621C9EBB543 /* PMFiles.swift */; };
 		AEB26A36D3A80E60177994A4 /* PmLib in Frameworks */ = {isa = PBXBuildFile; productRef = 386E7476C0693BFAA29A250D /* PmLib */; };
@@ -34,12 +34,15 @@
 /* Begin PBXFileReference section */
 		03A7709B2DE4D155EAE70CCF /* PMStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMStore.swift; sourceTree = "<group>"; };
 		03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenuRow.swift; sourceTree = "<group>"; };
+		053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMSpotlight.swift; sourceTree = "<group>"; };
 		19EFCE48163B4933B104DA26 /* AppIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIcons.swift; sourceTree = "<group>"; };
 		2935F4093EF10B1AB99E0563 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2F024FD91F7AEB31A5D296AB /* PMEntities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMEntities.swift; sourceTree = "<group>"; };
 		3025790996749621C9EBB543 /* PMFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMFiles.swift; sourceTree = "<group>"; };
 		3644D4885A6C393A632399AA /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		46709D20934C0BFAC22FD087 /* PanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelView.swift; sourceTree = "<group>"; };
+		48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 		4F1F5044D1862C47FA5F6F05 /* pm-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "pm-swift"; path = "../pm-swift"; sourceTree = SOURCE_ROOT; };
 		71D7F2284A625649B207A627 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7D7548520C03B6F6076B86CC /* TaskTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTiming.swift; sourceTree = "<group>"; };
@@ -54,9 +57,6 @@
 		E1B28724379E1B0A1A3DA2DC /* RelativeDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeDue.swift; sourceTree = "<group>"; };
 		F492935965C6142489D845E3 /* PM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PM.entitlements; sourceTree = "<group>"; };
 		F714E00F765F5D12885D0F68 /* PMIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMIntents.swift; sourceTree = "<group>"; };
-		E17A0002E17A0002E17A0002 /* PMEntities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMEntities.swift; sourceTree = "<group>"; };
-		E17A0004E17A0004E17A0004 /* PMSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMSpotlight.swift; sourceTree = "<group>"; };
-		E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,10 +99,10 @@
 		A50B9CF9C8221EEEECDDD57D /* Intents */ = {
 			isa = PBXGroup;
 			children = (
+				2F024FD91F7AEB31A5D296AB /* PMEntities.swift */,
 				F714E00F765F5D12885D0F68 /* PMIntents.swift */,
-				E17A0002E17A0002E17A0002 /* PMEntities.swift */,
-				E17A0004E17A0004E17A0004 /* PMSpotlight.swift */,
-				E17A0006E17A0006E17A0006 /* PMReminderSchemas.swift */,
+				48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */,
+				053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */,
 			);
 			path = Intents;
 			sourceTree = "<group>";
@@ -237,11 +237,11 @@
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
 				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,
 				C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */,
+				6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */,
 				906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */,
 				3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */,
-				E17A0001E17A0001E17A0001 /* PMEntities.swift in Sources */,
-				E17A0003E17A0003E17A0003 /* PMSpotlight.swift in Sources */,
-				E17A0005E17A0005E17A0005 /* PMReminderSchemas.swift in Sources */,
+				0DAF5B2B72F622D5F3F5C246 /* PMReminderSchemas.swift in Sources */,
+				8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */,
 				EF13FDBC361FD2123FF4CD3D /* PMStore.swift in Sources */,
 				70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */,
 				CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */,
@@ -290,14 +290,14 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "Apple Development: Stuart Hanberg (L4L7G83F22)";
+				CODE_SIGN_IDENTITY = "Developer ID Application: Stuart Hanberg (9626CTDMM9)";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9626CTDMM9;
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -309,7 +309,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.8.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -416,7 +416,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.8.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

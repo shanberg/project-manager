@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Bump version, push, tag, update Homebrew formula, push tap.
+# Bump version, push, tag, build+upload CLI tarball and notarized PM.app, update Homebrew
+# formula + cask, push tap.
 # Requires: GitHub token for release upload and formula tarball — use one of:
 #   gh auth login   (then this script uses `gh auth token`)
 #   export GITHUB_TOKEN=... or HOMEBREW_GITHUB_API_TOKEN=...
+# For the app: a "Developer ID Application" cert and a notarytool keychain profile (see docs/RELEASE.md).
 #
 # Usage: ./scripts/release.sh <version | bump>
 #   version   literal version, e.g. 0.2.0
 #   bump      patch (bug fixes), minor (new features), major (breaking changes)
 #
-# Env:   TAP_DIR  path to homebrew-s repo (default: ../homebrew-s)
+# Env:   TAP_DIR         path to homebrew-s repo (default: ../homebrew-s)
+#        SKIP_APP=1      release only the CLI (skip building/notarizing/publishing PM.app)
+#        NOTARY_PROFILE  notarytool keychain profile name (default: notary)
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -155,12 +159,38 @@ else
   rm -f "$TARBALL"
 fi
 
+# Build, notarize, and publish the native macOS app (PM.app) alongside the CLI.
+# Set SKIP_APP=1 to release only the CLI (e.g. on a machine without the Developer ID cert / notary
+# profile). NOTARY_PROFILE overrides the keychain profile name (default: notary).
+if [[ "${SKIP_APP:-0}" != "1" ]]; then
+  echo "==> Build + notarize PM.app"
+  APP_ZIP="$("$ROOT/scripts/build-app-dist.sh" "$VERSION" "${NOTARY_PROFILE:-notary}" | tail -1)"
+  APP_NAME="PM-v${VERSION}.zip"
+  echo "==> Upload $APP_NAME to release $TAG"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh release upload "$TAG" "$APP_ZIP" --repo "$REPO" --clobber
+  else
+    RELEASE_TOKEN="${GITHUB_TOKEN:-${HOMEBREW_GITHUB_API_TOKEN:-}}"
+    [[ -n "$RELEASE_TOKEN" ]] || { echo "No GitHub auth to upload app zip (run gh auth login or set GITHUB_TOKEN)." >&2; exit 1; }
+    if [[ "$RELEASE_TOKEN" == github_pat_* ]]; then AUTH_HEADER="Bearer $RELEASE_TOKEN"; else AUTH_HEADER="token $RELEASE_TOKEN"; fi
+    REL=$(curl -sL -H "Authorization: $AUTH_HEADER" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/releases/tags/$TAG")
+    UP=$(echo "$REL" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log((d.upload_url||'').replace(/\{.*\}/,'').trim())")
+    [[ -n "$UP" ]] || { echo "No upload_url for app zip; check token/repo." >&2; exit 1; }
+    curl -sL -X POST -H "Authorization: $AUTH_HEADER" -H "Content-Type: application/zip" \
+      --data-binary "@$APP_ZIP" "${UP}?name=${APP_NAME}" >/dev/null
+  fi
+  echo "==> Update cask"
+  "$ROOT/scripts/update-cask.sh" "$VERSION" "$(shasum -a 256 "$APP_ZIP" | awk '{print $1}')"
+fi
+
 echo "==> Update Homebrew formula"
 "$ROOT/scripts/update-homebrew-formula.sh" "$TAG"
 
 echo "==> Commit and push tap"
 cd "$TAP_DIR"
 git add Formula/project-manager.rb
+[[ "${SKIP_APP:-0}" != "1" && -f Casks/pm.rb ]] && git add Casks/pm.rb
 git diff --staged --quiet || git commit -m "project-manager $VERSION"
 git push
 

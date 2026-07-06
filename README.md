@@ -12,8 +12,11 @@ Requires **macOS 13 or later** (Apple Silicon arm64 only).
 
 ```bash
 brew tap shanberg/s
-brew install shanberg/s/project-manager
+brew install shanberg/s/project-manager   # the `pm` CLI
+brew install --cask shanberg/s/pm         # the PM.app menubar app
 ```
+
+The cask installs a **notarized, Developer ID–signed** build, so it opens on any Mac without Gatekeeper prompts, and `brew upgrade --cask pm` replaces it in place (existing Full Disk Access grants persist). If an older, self-built copy is already in `/Applications`, the cask install overwrites it cleanly.
 
 Then install the Raycast extension from source (clone this repo, `cd raycast-extension && npm install`, then in Raycast add the `raycast-extension` folder). Paths come from pm config; the extension does not override them.
 
