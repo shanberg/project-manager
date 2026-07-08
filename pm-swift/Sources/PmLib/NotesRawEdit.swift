@@ -665,6 +665,82 @@ public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, la
     return lines.joined(separator: "\n")
 }
 
+/// If `line` is an ATX heading shallower than H4 (one to three `#`), demote it to H4 so it nests
+/// *within* a session (whose heading is H3) instead of colliding with the document's structural
+/// markers — a two-hash line is the `## Section` boundary and a three-hash line can be a `### <date>`
+/// session heading. Returns nil for non-headings and for H4–H6 (already session-safe).
+private func demotedHeading(_ line: String) -> String? {
+    let hashes = line.prefix { $0 == "#" }.count
+    guard hashes >= 1, hashes <= 3 else { return nil }
+    let after = line.dropFirst(hashes)
+    guard after.isEmpty || after.first == " " || after.first == "\t" else { return nil }  // ATX needs a space
+    return String(repeating: "#", count: 4) + after
+}
+
+/// Normalize freeform note text so it can live safely as a session's prose without altering document
+/// structure. Two transforms, matching the app's contract that a note is prose sitting above a session's
+/// task list:
+/// - **Task checkboxes graduate**: every `- [ ] …` / `- [x] …` line is pulled out of the prose and
+///   returned separately (the caller appends them to the session's task list). Their relative
+///   indentation is preserved, shifted so the shallowest sits at the root.
+/// - **Headings clamp**: any heading shallower than H4 is demoted to H4, so a stray `##`/`### <date>`
+///   can't end the Sessions region or split the session.
+/// Everything else (prose, plain bullets, callouts, H4–H6, `#` is clamped too) round-trips verbatim.
+public func sanitizeSessionNoteProse(_ prose: String) -> (prose: String, taskLines: [String]) {
+    var proseLines: [String] = []
+    var taskLines: [String] = []
+    for line in prose.components(separatedBy: "\n") {
+        if matches(rawTaskPattern, line) {
+            taskLines.append(line)
+        } else if let demoted = demotedHeading(line) {
+            proseLines.append(demoted)
+        } else {
+            proseLines.append(line)
+        }
+    }
+    if !taskLines.isEmpty {
+        let minIndent = taskLines.map { leadingSpaces($0) }.min() ?? 0
+        if minIndent > 0 { taskLines = taskLines.map { String($0.dropFirst(minIndent)) } }
+    }
+    let cleanProse = proseLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    return (cleanProse, taskLines)
+}
+
+/// Commit a session note the way the panel editor does: sanitize the freeform text (`sanitizeSessionNoteProse`)
+/// so headings can't break structure and any typed checkboxes graduate into real tasks appended to the
+/// session's task list, then splice the clean prose and the (existing + graduated) tasks back into the
+/// session, preserving everything outside it. Idempotent once the editor adopts the returned clean prose
+/// (no checkboxes remain to re-extract). Returns nil if the session can't be located.
+public func commitSessionNotePreservingFormat(rawText: String, sessionIndex: Int, prose: String) -> String? {
+    let (cleanProse, taskLines) = sanitizeSessionNoteProse(prose)
+    var lines = rawText.components(separatedBy: "\n")
+    guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }
+    let end = rawSessionEnd(lines, headingLine: heading)
+    let bodyLines = Array(lines[(heading + 1)..<end])
+    let firstTaskIdx = bodyLines.firstIndex { matches(rawTaskPattern, $0) }
+
+    // The session's existing tasks (and any trailing lines) are preserved verbatim; trim surrounding
+    // blank lines so the joins below normalize to a single blank.
+    var tail = firstTaskIdx.map { Array(bodyLines[$0...]) } ?? []
+    while tail.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { tail.removeFirst() }
+    while tail.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { tail.removeLast() }
+
+    var region: [String] = []
+    if !cleanProse.isEmpty {
+        region.append("")
+        region.append(contentsOf: cleanProse.components(separatedBy: "\n"))
+    }
+    let tasks = tail + taskLines   // existing tasks, then the newly-graduated ones
+    if !tasks.isEmpty {
+        region.append("")
+        region.append(contentsOf: tasks)
+    }
+    if end < lines.count { region.append("") }   // one blank before a following heading/section
+
+    lines.replaceSubrange((heading + 1)..<end, with: region)
+    return lines.joined(separator: "\n")
+}
+
 /// Delete a session — its heading and whole body region — preserving format. When deleting the last
 /// session, also drops the blank line that separated it from the previous one so the file doesn't end
 /// on a dangling blank. Returns nil if the session can't be located. The caller gates this to empty

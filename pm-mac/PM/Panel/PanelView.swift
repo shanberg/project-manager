@@ -24,15 +24,12 @@ struct PanelView: View {
     /// The panel's color-scheme override, persisted across sessions. `.system` follows the OS setting;
     /// `.light`/`.dark` pin the appearance (of both the content and the glass/vibrancy material).
     @AppStorage("PMPanelColorMode") private var colorMode: PanelColorMode = .system
-    /// Whether the collapsible project-details section is open. Toggled from the header's view-options
-    /// menu; the content renders inline below the header when true, in any tasks mode. Persisted across
-    /// panel sessions like `tasksMode`, so reopening the panel restores the last-chosen state.
+    /// The single "notes" view mode, toggled from the header's view-options menu and persisted across
+    /// panel sessions. When on, the panel shows the project-details brief below the header *and* reveals
+    /// every session (including empty ones) as a first-class header with its editable prose note and
+    /// management affordances. Off (the default) is the compact task view — no brief, and sessions are
+    /// just quiet captions above their tasks with empty ones hidden.
     @AppStorage("PMPanelDetailsExpanded") private var detailsExpanded = false
-    /// Whether sessions are revealed as first-class notes in the task list: every session (including
-    /// empty ones) renders as a header with its editable prose note and management affordances (rename,
-    /// add task, delete). Off (the default) keeps today's behavior — a quiet caption above each session's
-    /// tasks, with empty sessions hidden. Persisted across panel sessions like the other view settings.
-    @AppStorage("PMPanelShowSessionNotes") private var showSessionNotes = false
     /// Whether the project-details section is in inline-edit mode (entered by double-clicking its
     /// content). Reset when the section collapses, the project changes, or Escape is pressed.
     @State private var editingDetails = false
@@ -59,6 +56,14 @@ struct PanelView: View {
     @StateObject private var outsideClick = OutsideClickMonitor()
     /// Clears drag state on a no-move drag press's mouse-up (see `LeftMouseUpMonitor`).
     @StateObject private var mouseUp = LeftMouseUpMonitor()
+    /// The panel's content height, tracked only while the main view is showing (frozen during the note
+    /// takeover). The takeover reads it as a floor so it never shrinks the panel below its current height.
+    @State private var measuredHeight: CGFloat = 0
+    /// Natural height of the pinned header and of the scrollable body, measured separately so the window's
+    /// auto-fit can target their sum (the body lives in a `ScrollView`, whose own frame can't report the
+    /// content's natural height). See `reportMainHeight`.
+    @State private var headerHeight: CGFloat = 0
+    @State private var scrollContentHeight: CGFloat = 0
 
     /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
     /// pointer against. Shared with `TaskRow`, so it lives on the type.
@@ -68,6 +73,11 @@ struct PanelView: View {
     static let rowContentInset: CGFloat = 12
     /// Horizontal pixels per nesting level (matches `TaskRow.indent`'s step).
     static let indentStep: CGFloat = 16
+    /// The one animation used for showing/hiding the details brief. A single shared value, applied by
+    /// every subview that moves on the toggle (keyed on `detailsExpanded`), so the details content, the
+    /// divider, the "Tasks" heading, and the regrouped rows all settle on the same clock rather than at
+    /// different rates.
+    static let detailsMotion: Animation = .snappy
 
     /// True whenever some inline editor (a task row's, or the project-details form) is open.
     private var isAnyEditorActive: Bool { activeEditor != nil || editingDetails }
@@ -81,45 +91,62 @@ struct PanelView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                // With details open they sit directly under the title as one continuous brief; the
-                // rule stays only to fence the title off from the task list.
-                if !detailsShowing { Divider() }
-                if store.projectName == nil {
-                    emptyState
-                } else {
-                    if detailsExpanded {
-                        ProjectDetailsView(notes: store.notes, store: store, isEditing: $editingDetails)
+        Group {
+            if let takeover = sessionNoteTakeover {
+                // Editing a session note takes over the whole panel for a focused, richer experience;
+                // it enters with a navigation-style push (list slides left, editor in from the right).
+                // It has its own header and a fixed height, so it stands outside the sticky-header split.
+                SessionNoteTakeover(
+                    index: takeover.index,
+                    session: takeover.session,
+                    projectName: store.notes?.title.trimmed ?? store.projectName ?? "",
+                    height: takeoverTargetHeight,
+                    store: store,
+                    onBack: { activeEditor = nil }
+                )
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+                })
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .trailing).combined(with: .opacity)))
+            } else {
+                VStack(spacing: 0) {
+                    // The header (title + toolbar) stays pinned; only the content below scrolls, sliding
+                    // under it when it overflows the panel's max height. The header reports its own height
+                    // separately so the window's auto-fit still targets header + content.
+                    stickyHeader
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: HeaderHeightKey.self, value: geo.size.height)
+                        })
+                    ScrollView {
+                        scrollBody
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+                            })
                     }
-                    // While editing details, hide everything below so the form stands alone.
-                    if !editingDetails {
-                        // A project with no tasks at all gets a plain, emoji-free empty state with an
-                        // add CTA — the "all complete 🎉" copy would be wrong (nothing was completed)
-                        // and neither section has an obvious way to add the first task.
-                        // With session notes revealed, route to the session-oriented list even with no
-                        // tasks yet, so empty sessions and the "New session" affordance still show.
-                        if store.todos.isEmpty && !showSessionNotes {
-                            emptyProjectTasks
-                        } else if tasksMode == .focused {
-                            focusedSection
-                        } else {
-                            tasksSection
-                        }
-                    }
+                    // Hide the scrollbar while the window is animating its resize (it would otherwise
+                    // flash as the viewport and content briefly mismatch); it returns for genuine overflow.
+                    .scrollIndicators(chrome.isResizing ? .never : .automatic)
+                    // Soften the scroll edges (macOS 26+): content fades as it passes under the pinned
+                    // header and off the panel's bottom, the idiomatic replacement for a hard clip.
+                    .modifier(SoftScrollEdges())
                 }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .leading).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)))
             }
-            .animation(.snappy, value: detailsExpanded)
-            .animation(.snappy, value: tasksMode)
-            .animation(.snappy, value: showSessionNotes)
-            .background(GeometryReader { geo in
-                Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
-            })
         }
-        // Hide the scrollbar while the window is animating its resize (it would otherwise flash as the
-        // viewport and content briefly mismatch); it returns for genuine overflow past the max height.
-        .scrollIndicators(chrome.isResizing ? .never : .automatic)
+        // Show/hide details rides one shared animation (`detailsMotion`). It must be an implicit
+        // value-based modifier, not `withAnimation` at the toggle site: `detailsExpanded` is
+        // `@AppStorage`, whose change republishes on the next runloop tick — outside any explicit
+        // transaction — so `withAnimation` wouldn't take. Every subview that moves on the toggle keys
+        // its own animation off `detailsExpanded` with this same value, so nothing drifts.
+        .animation(Self.detailsMotion, value: detailsExpanded)
+        .animation(.snappy, value: tasksMode)
+        .animation(.snappy, value: sessionNoteTakeover != nil)
+        .clipped()
         .frame(width: 420)
         // Pin the appearance when the user overrides it; `.system` (nil) follows the OS. Applied above
         // the background so the glass/vibrancy material (a child NSView) inherits the same scheme.
@@ -131,7 +158,24 @@ struct PanelView: View {
         // ~one row short of what's shown and the window scrolls. Ignoring the top safe area makes the
         // measured height match the rendered height, so auto-fit is exact and no scrollbar appears.
         .ignoresSafeArea(.container, edges: .top)
-        .onPreferenceChange(ContentHeightKey.self) { onContentHeight($0) }
+        // Track the panel's height, but freeze it while the takeover is up so it keeps the main view's
+        // height — the takeover reads it as a "don't shrink below" floor. (The window still fits to the
+        // takeover's own reported height via onContentHeight.)
+        // The window fits to header + scrollable content. In the takeover, `h` is the takeover's own
+        // full height (it carries its own header), reported straight through; otherwise `h` is just the
+        // scroll body's natural height and the pinned header's height is added on.
+        .onPreferenceChange(ContentHeightKey.self) { h in
+            if sessionNoteTakeover == nil {
+                scrollContentHeight = h
+                reportMainHeight()
+            } else {
+                onContentHeight(h)
+            }
+        }
+        .onPreferenceChange(HeaderHeightKey.self) { hh in
+            headerHeight = hh
+            if sessionNoteTakeover == nil { reportMainHeight() }
+        }
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .onExitCommand(perform: handleEscape)
         // ⌘Z / ⇧⌘Z undo & redo the panel's edits (move, complete, due, text, add, wrap…). Hidden
@@ -169,15 +213,89 @@ struct PanelView: View {
     /// out of the layout and hit-testing while still binding the shortcut on the key window; each is
     /// disabled when there's nothing to (un/re)do, so the shortcut no-ops (system beep) rather than firing.
     private var undoRedoShortcuts: some View {
-        Group {
+        // Suppressed while the note editor is up, so ⌘Z / ⇧⌘Z reach the NSTextView's own (per-keystroke)
+        // undo instead of the document-level history.
+        let inNoteEditor = sessionNoteTakeover != nil
+        return Group {
             Button("Undo", action: store.undo)
                 .keyboardShortcut("z", modifiers: .command)
-                .disabled(!store.canUndo)
+                .disabled(!store.canUndo || inNoteEditor)
             Button("Redo", action: store.redo)
                 .keyboardShortcut("z", modifiers: [.command, .shift])
-                .disabled(!store.canRedo)
+                .disabled(!store.canRedo || inNoteEditor)
         }
         .hidden()
+    }
+
+    /// The pinned header — the project title/toolbar, plus the rule that fences it off from the task list
+    /// (only when details are collapsed; with details open they sit directly under the title as one
+    /// continuous brief). Stays fixed above the scroll area; swapped out entirely for the note takeover.
+    private var stickyHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if !detailsShowing { Divider() }
+        }
+    }
+
+    /// The scrollable content below the pinned header: the optional details brief and the task/session
+    /// list. This is what scrolls under the header when it overflows the panel's max height.
+    @ViewBuilder private var scrollBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if store.projectName == nil {
+                emptyState
+            } else {
+                if detailsExpanded {
+                    ProjectDetailsView(notes: store.notes, store: store, isEditing: $editingDetails)
+                }
+                // While editing details, hide everything below so the form stands alone.
+                if !editingDetails {
+                    // A project with no tasks at all gets a plain, emoji-free empty state with an add
+                    // CTA. In notes mode, route to the session-oriented list even with no tasks yet, so
+                    // empty sessions and the "New session" affordance still show.
+                    if store.todos.isEmpty && !detailsExpanded {
+                        emptyProjectTasks
+                    } else if tasksMode == .focused {
+                        focusedSection
+                    } else {
+                        tasksSection
+                    }
+                }
+            }
+        }
+    }
+
+    /// Report the main view's total content height (pinned header + scroll body) to the window's auto-fit.
+    /// Called whenever either part is remeasured. Frozen-height behavior during the takeover is handled by
+    /// its own reporting path; this only runs while the main view is showing.
+    private func reportMainHeight() {
+        let total = headerHeight + scrollContentHeight
+        measuredHeight = total
+        onContentHeight(total)
+    }
+
+    /// When the active editor is a session note, the (index, session) it targets — driving the full-panel
+    /// takeover editor. Nil for every other editor state.
+    private var sessionNoteTakeover: (index: Int, session: Session)? {
+        guard let ed = activeEditor, ed.kind == .sessionNote,
+              ed.key.hasPrefix("sess:"),
+              let idx = Int(ed.key.dropFirst("sess:".count)),
+              let sessions = store.notes?.sessions, idx < sessions.count
+        else { return nil }
+        return (idx, sessions[idx])
+    }
+
+    /// The window's max content height, matching `PanelController.fit`'s cap (the tarot-card ratio, or
+    /// 95% of the screen, whichever is smaller).
+    private var maxContentHeight: CGFloat {
+        let screen = NSScreen.main?.visibleFrame.height ?? 900
+        return min(PanelController.width * PanelController.maxHeightRatio, (screen * 0.95).rounded(.down))
+    }
+
+    /// The takeover's height: never below the panel's height when it opened (so it can't shrink the
+    /// panel), grown to a comfortable 70% of the max only when the panel was smaller than that, and
+    /// capped at the max so long notes scroll inside the editor rather than the panel.
+    private var takeoverTargetHeight: CGFloat {
+        min(max(measuredHeight, maxContentHeight * 0.70), maxContentHeight)
     }
 
     private func handleEscape() {
@@ -216,10 +334,9 @@ struct PanelView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 12)
-        // Pull the details up snug under the title when they're open; keep breathing room above the
-        // divider otherwise.
-        .padding(.bottom, detailsShowing ? 2 : 10)
+        // Equal breathing room above and below the title, so the pinned header reads as a balanced bar.
+        // Constant regardless of the details toggle, so the sticky header keeps a stable height.
+        .padding(.vertical, 14)
         // Double-click empty header space (or the title) toggles the details brief. On a background
         // layer *behind* the controls so the switcher / view-options / open buttons in front consume
         // their own clicks and are excluded; `simultaneousGesture` so it still coexists with
@@ -295,7 +412,7 @@ struct PanelView: View {
     /// Whether the view is in any non-default state (mode other than incomplete, or details showing),
     /// used to tint the view-options icon so there's a subtle "customized" cue.
     private var isViewCustomized: Bool {
-        tasksMode != .incomplete || detailsExpanded || showSessionNotes || colorMode != .system
+        tasksMode != .incomplete || detailsExpanded || colorMode != .system
     }
 
     /// Single header menu holding all view state: the tasks-mode picker (Focused / Incomplete / All)
@@ -329,8 +446,7 @@ struct PanelView: View {
         }
         .pickerStyle(.inline)
         Divider()
-        Toggle(isOn: $detailsExpanded) { Label("Show details", systemImage: "info.circle") }
-        Toggle(isOn: $showSessionNotes) { Label("Show session notes", systemImage: "note.text") }
+        Toggle(isOn: $detailsExpanded) { Label("Show notes", systemImage: "note.text") }
         Divider()
         Picker("Appearance", selection: $colorMode) {
             Label("System", systemImage: "circle.lefthalf.filled").tag(PanelColorMode.system)
@@ -482,9 +598,9 @@ struct PanelView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            // With session notes revealed, always show the session-oriented list (headers + affordances)
-            // even when no tasks are currently visible; otherwise fall back to the empty-state copy.
-            if visibleTodos.isEmpty && !showSessionNotes {
+            // In notes mode, always show the session-oriented list (headers + affordances) even when no
+            // tasks are currently visible; otherwise fall back to the empty-state copy.
+            if visibleTodos.isEmpty && !detailsExpanded {
                 Text(tasksMode == .all ? "No tasks yet" : "All tasks complete")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -495,9 +611,13 @@ struct PanelView: View {
             }
         }
         .padding(.bottom, 8)
-        // Animate rows entering/leaving — covers both completing a task and switching the tasks mode,
-        // since the visible set derives from both the todos and the mode.
-        .animation(.snappy, value: visibleTodos)
+        // One implicit animation, keyed on both triggers, so this subtree never re-scopes to its own
+        // clock: rows entering/leaving (completing a task, switching tasks mode) AND the details toggle
+        // both animate here with the shared `detailsMotion`. Keying it *also* on `detailsExpanded` is
+        // what keeps the "Tasks" heading and rows sliding in lockstep with the details reveal above them
+        // — without it, this subtree's own `.animation(_, value: visibleTodos)` suppresses the ambient
+        // toggle animation and the heading drifts at a different rate.
+        .animation(Self.detailsMotion, value: TasksMotionKey(todos: visibleTodos, expanded: detailsExpanded))
     }
 
     /// The task rows, grouped by session, wrapped in a single list-level drop target. One coordinate
@@ -512,7 +632,7 @@ struct PanelView: View {
             .flatMap { k in store.todos.first { PMStore.key(for: $0) == k } }
             .map { store.subtreeKeys(of: $0) } ?? []
         return VStack(alignment: .leading, spacing: 4) {
-            if showSessionNotes {
+            if detailsExpanded {
                 revealedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             } else {
                 groupedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
@@ -942,6 +1062,14 @@ enum TasksMode: String {
     case focused, incomplete, all
 }
 
+/// Combined trigger for the tasks section's single implicit animation. It must fire on both the visible
+/// task set changing *and* the details toggle, so the section animates on the same shared clock as the
+/// details reveal above it rather than re-scoping to its own — see `tasksSection`.
+private struct TasksMotionKey: Equatable {
+    let todos: [Todo]
+    let expanded: Bool
+}
+
 /// The panel's color-scheme override. Raw values persist via `@AppStorage`; `.system` maps to `nil`
 /// so SwiftUI falls back to the OS appearance.
 enum PanelColorMode: String {
@@ -999,6 +1127,26 @@ struct DropTarget: Equatable {
 private struct ContentHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// The pinned header's natural height, measured separately from the scrollable body so the window's
+/// auto-fit can target their sum (see `PanelView.reportMainHeight`).
+private struct HeaderHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Applies the soft scroll-edge effect (macOS 26+) so scrolling content fades at the top/bottom edges
+/// — under the pinned header and off the panel's bottom — rather than hard-clipping. A no-op on older
+/// systems, where the plain clipped edge remains.
+private struct SoftScrollEdges: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
+        } else {
+            content
+        }
+    }
 }
 
 // MARK: Hero edit transition (in-place wipe)
@@ -1656,9 +1804,17 @@ private struct SessionHeader: View {
 
     private var key: String { "sess:\(index)" }
     private var isRenaming: Bool { activeEditor == EditorTarget(key: key, kind: .sessionLabel) }
-    private var isEditingNote: Bool { activeEditor == EditorTarget(key: key, kind: .sessionNote) }
     /// The session's editable note — its leading prose (lines before the first task), trimmed.
     private var prose: String { leadingSessionProse(body: session.body) }
+
+    /// The serif reading face for the rendered note, matching the project-details brief.
+    private static let noteFont: NSFont = {
+        let size: CGFloat = 13
+        if let serif = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif) {
+            return NSFont(descriptor: serif, size: size) ?? NSFont.systemFont(ofSize: size)
+        }
+        return NSFont.systemFont(ofSize: size)
+    }()
     private var context: String { session.label.isEmpty ? session.date : "\(session.date) · \(session.label)" }
 
     var body: some View {
@@ -1674,16 +1830,11 @@ private struct SessionHeader: View {
                 headerLine
             }
 
-            if isEditingNote {
-                SessionNoteEditor(seed: prose) { newProse in
-                    store.setSessionNote(index, prose: newProse)
-                    activeEditor = nil
-                } onCancel: { activeEditor = nil }
-                    .reportEditorFrame()
-            } else if !prose.isEmpty {
-                Text(prose)
-                    .font(.system(size: 13, design: .serif))
-                    .foregroundStyle(.secondary)
+            // The note read view / placeholder; opening it (double-click or "Edit Note…") takes over the
+            // whole panel with the rich editor — see PanelView.sessionNoteTakeover. The read view renders
+            // the note's markdown (formatting applied, markers removed) in the details brief's serif face.
+            if !prose.isEmpty {
+                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .secondaryLabelColor))
                     .lineSpacing(1.5)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentShape(Rectangle())
@@ -1700,7 +1851,6 @@ private struct SessionHeader: View {
         .padding(.top, 8)
         .padding(.bottom, 2)
         .animation(.snappy, value: isRenaming)
-        .animation(.snappy, value: isEditingNote)
     }
 
     private var headerLine: some View {
@@ -1737,36 +1887,98 @@ private struct SessionHeader: View {
     private func openNote() { activeEditor = EditorTarget(key: key, kind: .sessionNote) }
 }
 
-/// A multiline editor for a session's prose note, styled like the details editor's fields. Saving an
-/// empty value clears the note. Auto-focuses; cancels on Escape via the panel's `handleEscape`.
-private struct SessionNoteEditor: View {
-    let onSave: (String) -> Void
-    let onCancel: () -> Void
-    @State private var text: String
-    @FocusState private var focused: Bool
+/// The full-panel, focused editor for a session's prose note. The panel is taken over by a header
+/// (Back button + the project name over the session name) and a rich `MarkdownTextEditor` with live
+/// syntax highlighting and ⌘B/⌘I/⌘K shortcuts. There are no Save/Cancel buttons: the note **auto-saves**
+/// whenever you leave — Back, Escape, an outside click (all remove the view → `onDisappear`), or the
+/// panel losing key focus (blur-hide → `didResignKey`). `store.setSessionNote` is byte-idempotent, so a
+/// repeated commit with no changes is a free no-op and yields no extra undo entry.
+private struct SessionNoteTakeover: View {
+    let index: Int
+    let session: Session
+    let projectName: String
+    /// The panel height to occupy — sized by `PanelView.takeoverTargetHeight` so the takeover never
+    /// shrinks the current panel, only grows a small one.
+    let height: CGFloat
+    @ObservedObject var store: PMStore
+    let onBack: () -> Void
 
-    init(seed: String, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
-        self.onSave = onSave
-        self.onCancel = onCancel
-        _text = State(initialValue: seed)
+    @State private var text: String
+
+    init(index: Int, session: Session, projectName: String, height: CGFloat,
+         store: PMStore, onBack: @escaping () -> Void) {
+        self.index = index
+        self.session = session
+        self.projectName = projectName
+        self.height = height
+        self.store = store
+        self.onBack = onBack
+        _text = State(initialValue: leadingSessionProse(body: session.body))
+    }
+
+    private var sessionName: String {
+        session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("Session note", text: $text, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...6)
-                .focused($focused)
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save") { onSave(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
-                    .keyboardShortcut(.defaultAction)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            MarkdownTextEditor(text: $text, onSubmit: onBack)   // ⌘↩ closes → onDisappear auto-saves
+                .frame(maxHeight: .infinity)                    // fill the remaining takeover height
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: height)
+        // Cover the whole takeover as the "active editor" region so in-panel clicks count as inside it.
+        .reportEditorFrame()
+        // Auto-save on every way out: Back / Escape / outside-click remove the view (onDisappear); a
+        // blur-hide leaves the view mounted but resigns key.
+        .onDisappear { commit() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if (note.object as? NSWindow)?.identifier?.rawValue == PanelController.windowIdentifier {
+                commit()
             }
         }
-        .controlSize(.small)
-        .padding(.vertical, 2)
-        .onAppear { focused = true }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Back to tasks")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(projectName.isEmpty ? "Note" : projectName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(sessionName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// Write the current text back to the session's note. The store sanitizes it (headings clamp to
+    /// within-session levels; typed checkboxes graduate into real tasks), so we adopt the same cleaned
+    /// prose locally — that drops the graduated checkboxes from the editor and makes repeated commits
+    /// (this fires from several exit paths) byte-idempotent instead of re-extracting the same tasks.
+    private func commit() {
+        let cleaned = sanitizeSessionNoteProse(text).prose
+        store.setSessionNote(index, prose: text)
+        if cleaned != text { text = cleaned }
     }
 }
 

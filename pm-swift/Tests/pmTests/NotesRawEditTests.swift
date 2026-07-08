@@ -564,6 +564,78 @@ final class NotesRawEditTests: XCTestCase {
                        "The note remains the session's leading prose")
     }
 
+    // MARK: - Session note sanitization (structure-safe commits)
+
+    static let commitBase = """
+    ## Sessions
+
+    ### Wed, Mar 05, 2025 Today
+
+    My note.
+
+    - [ ] Real task
+    """
+
+    /// Headings shallower than H4 clamp to H4 so they nest within the session instead of colliding with
+    /// the `## Section` / `### <date>` structural markers.
+    func testSanitizeDemotesShallowHeadings() {
+        let (prose, tasks) = sanitizeSessionNoteProse("# One\n## Two\n### Wed, Mar 05, 2025\n#### Deep\nplain")
+        XCTAssertEqual(prose, "#### One\n#### Two\n#### Wed, Mar 05, 2025\n#### Deep\nplain")
+        XCTAssertTrue(tasks.isEmpty)
+    }
+
+    /// Checkbox lines are pulled out of the prose (to graduate into tasks), preserving their checked
+    /// state and relative nesting, shifted so the shallowest sits at the root.
+    func testSanitizeExtractsCheckboxesPreservingStructure() {
+        let (prose, tasks) = sanitizeSessionNoteProse("note\n  - [ ] a\n    - [x] b\nmore")
+        XCTAssertEqual(prose, "note\nmore")
+        XCTAssertEqual(tasks, ["- [ ] a", "  - [x] b"])
+    }
+
+    /// A checkbox typed in a note graduates into a real task in the session's list; the note keeps only
+    /// the prose.
+    func testCommitGraduatesCheckboxToTask() throws {
+        let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
+            rawText: Self.commitBase, sessionIndex: 0, prose: "kept note\n- [ ] Graduated"))
+        let notes = try parseNotes(markdown: updated)
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.map { $0.text }, ["Real task", "Graduated"])
+        XCTAssertEqual(leadingSessionProse(body: notes.sessions[0].body), "kept note")
+    }
+
+    /// A stray `## ` in a note no longer ends the Sessions region — the session's tasks survive and the
+    /// heading is clamped to H4.
+    func testCommitH2DoesNotTruncateSessions() throws {
+        let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
+            rawText: Self.commitBase, sessionIndex: 0, prose: "before\n## Random\nafter"))
+        let notes = try parseNotes(markdown: updated)
+        XCTAssertEqual(notes.sessions.count, 1)
+        XCTAssertEqual(try parseTodos(notes: notes).count, 1, "Real task not lost")
+        XCTAssertTrue(updated.contains("#### Random"))
+    }
+
+    /// A `### <date>` typed in a note no longer splits the session; it clamps to a harmless H4.
+    func testCommitSessionHeadingDoesNotSplit() throws {
+        let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
+            rawText: Self.commitBase, sessionIndex: 0, prose: "### Fri, Feb 28, 2025 Foo"))
+        let notes = try parseNotes(markdown: updated)
+        XCTAssertEqual(notes.sessions.count, 1)
+        XCTAssertTrue(updated.contains("#### Fri, Feb 28, 2025 Foo"))
+    }
+
+    /// The corruption case: committing again (the editor adopts the cleaned prose after the first save)
+    /// must be a byte-identical no-op — no duplicated tasks or headings.
+    func testCommitIsIdempotentAfterAdoptingCleanProse() throws {
+        let raw = "note\n### Fri, Feb 28, 2025 Foo\n- [ ] x"
+        let first = try XCTUnwrap(commitSessionNotePreservingFormat(
+            rawText: Self.commitBase, sessionIndex: 0, prose: raw))
+        let cleaned = sanitizeSessionNoteProse(raw).prose   // what the editor now holds
+        let second = try XCTUnwrap(commitSessionNotePreservingFormat(
+            rawText: first, sessionIndex: 0, prose: cleaned))
+        XCTAssertEqual(second, first, "Re-commit is a no-op")
+        XCTAssertEqual(try parseTodos(notes: parseNotes(markdown: second)).count, 2, "Real task + one graduated x")
+    }
+
     /// Every session editor returns nil for a session index that doesn't exist (caller skips the write).
     func testSessionEditsReturnNilForBadIndex() {
         XCTAssertNil(setSessionNotePreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, prose: "x"))

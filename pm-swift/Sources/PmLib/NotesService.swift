@@ -281,12 +281,13 @@ public func renameSession(project: String, sessionIndex: Int, label: String) thr
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
-/// Set (create/replace/clear) a session's leading-prose note. Empty `prose` removes the note. Tasks
-/// under the session are left untouched.
+/// Set (create/replace/clear) a session's note. The freeform text is sanitized so it can't break the
+/// document (headings clamp to within-session levels; typed checkboxes graduate into real tasks in the
+/// session's task list). Empty prose removes the note.
 public func setSessionNote(project: String, sessionIndex: Int, prose: String) throws {
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
-    guard let updated = setSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex, prose: prose) else {
+    guard let updated = commitSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex, prose: prose) else {
         throw PmError.notesNotFound(handle.notesPath)
     }
     try handle.io.writeContent(path: handle.notesPath, content: updated)

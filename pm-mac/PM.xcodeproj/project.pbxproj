@@ -18,6 +18,7 @@
 		86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857714074D07452813367D28 /* HotKey.swift */; };
 		8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */; };
 		90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46709D20934C0BFAC22FD087 /* PanelView.swift */; };
+		B804A829024A8A1214246647 /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */; };
 		906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3025790996749621C9EBB543 /* PMFiles.swift */; };
 		AEB26A36D3A80E60177994A4 /* PmLib in Frameworks */ = {isa = PBXBuildFile; productRef = 386E7476C0693BFAA29A250D /* PmLib */; };
 		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
@@ -42,6 +43,7 @@
 		3644D4885A6C393A632399AA /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		46709D20934C0BFAC22FD087 /* PanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelView.swift; sourceTree = "<group>"; };
+		C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 		4F1F5044D1862C47FA5F6F05 /* pm-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "pm-swift"; path = "../pm-swift"; sourceTree = SOURCE_ROOT; };
 		71D7F2284A625649B207A627 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -136,6 +138,7 @@
 			children = (
 				B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */,
 				46709D20934C0BFAC22FD087 /* PanelView.swift */,
+				C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */,
 			);
 			path = Panel;
 			sourceTree = "<group>";
@@ -246,6 +249,7 @@
 				70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */,
 				CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */,
 				90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */,
+				B804A829024A8A1214246647 /* MarkdownTextEditor.swift in Sources */,
 				1702ADEBF7B5049CEA3DC46B /* RelativeDue.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */,
