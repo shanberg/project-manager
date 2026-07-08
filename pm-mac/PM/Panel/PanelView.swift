@@ -591,12 +591,16 @@ struct PanelView: View {
 
     private var tasksSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Tasks").font(.subheadline).bold()
-                Spacer()
+            // A quiet rule where the "Tasks" heading used to be, fencing the list off from the details
+            // brief above it. When details are collapsed the pinned header already carries that rule, so
+            // we don't draw a second one — just keep the list's top breathing room.
+            if detailsExpanded {
+                Divider()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+            } else {
+                Color.clear.frame(height: 4)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
 
             // In notes mode, always show the session-oriented list (headers + affordances) even when no
             // tasks are currently visible; otherwise fall back to the empty-state copy.
@@ -2347,13 +2351,17 @@ private struct LinksBlock: View {
         let label = (link.label ?? "").trimmingCharacters(in: .whitespaces)
         let urlStr = (link.url ?? "").trimmingCharacters(in: .whitespaces)
         if isSafeURL(urlStr), let url = URL(string: urlStr) {
+            // Show the label (or a tidied host if unlabeled) beside the site's favicon; the full URL
+            // moves to the hover tooltip so the row stays compact.
             let pretty = prettyURL(urlStr)
             HStack(spacing: 6) {
-                Link(label.isEmpty ? pretty : label, destination: url).font(.system(size: 12))
-                if !label.isEmpty && pretty != label {
-                    Text(pretty).font(.caption2).foregroundStyle(.tertiary)
-                }
+                FaviconView(host: url.host ?? pretty)
+                Link(label.isEmpty ? pretty : label, destination: url)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+            .help(urlStr)
         } else {
             let text = (!label.isEmpty && !urlStr.isEmpty) ? "\(label): \(urlStr)" : (label.isEmpty ? urlStr : label)
             Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
@@ -2372,6 +2380,68 @@ private struct LinksBlock: View {
         }
         if out.hasSuffix("/") { out = String(out.dropLast()) }
         return out
+    }
+}
+
+/// A site favicon for a link row: the fetched icon once it arrives, and a quiet globe glyph while it
+/// loads or when the site has none. Sized to sit inline with the 12pt label.
+private struct FaviconView: View {
+    let host: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.high)
+            } else {
+                Image(systemName: "globe").foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: 14, height: 14)
+        .task(id: host) { image = await FaviconLoader.shared.favicon(for: host) }
+    }
+}
+
+/// Fetches and caches site favicons for the Links block. Each host is fetched once — directly from the
+/// site's own `/favicon.ico`, so no third-party favicon service sees which sites are linked — decoded to
+/// an `NSImage`, and served from an in-memory cache thereafter. Hosts with no usable icon are remembered
+/// as misses so the view stops retrying. Fetches are deduped, so repeated rows for one host share a load.
+@MainActor
+final class FaviconLoader {
+    static let shared = FaviconLoader()
+
+    private var cache: [String: NSImage] = [:]
+    private var misses: Set<String> = []
+    private var inflight: [String: Task<NSImage?, Never>] = [:]
+
+    func favicon(for host: String) async -> NSImage? {
+        let key = host.lowercased()
+        guard !key.isEmpty else { return nil }
+        if let img = cache[key] { return img }
+        if misses.contains(key) { return nil }
+        if let task = inflight[key] { return await task.value }
+
+        let task = Task<NSImage?, Never> { await Self.fetch(host: key) }
+        inflight[key] = task
+        let img = await task.value
+        inflight[key] = nil
+        if let img { cache[key] = img } else { misses.insert(key) }
+        return img
+    }
+
+    nonisolated private static func fetch(host: String) async -> NSImage? {
+        guard let url = URL(string: "https://\(host)/favicon.ico") else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        // A browser-like UA — some hosts 403 the default URLSession agent.
+        req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }
+            return img
+        } catch {
+            return nil
+        }
     }
 }
 
