@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
+import ObjectiveC
 import PmLib
 
 /// The panel's SwiftUI content, reconstructing the retired Tauri panel: a collapsible "Project
@@ -36,10 +38,31 @@ struct PanelView: View {
     @State private var focusedAddPosition: TaskInsertPosition = .child
     /// True while the empty-project CTA has revealed its inline add editor (for the very first task).
     @State private var addingFirstTask = false
+    /// The key of the task subtree currently being dragged, set when a row's drag begins. Nil when no
+    /// drag is in flight. A subtree can't land on itself or its own descendants.
+    @State private var draggingKey: String?
+    /// Frames (Y-extent + depth) of every visible task row in the task-list coordinate space, collected
+    /// via a preference. The single list-level drop delegate reads these to resolve the pointer into a
+    /// gap + depth.
+    @State private var rowFrames: [RowFrame] = []
+    /// The single resolved drop indicator for the in-flight drag — the gap Y, the chosen depth, and
+    /// whether it's a legal target. Nil when nothing is being dragged over the list.
+    @State private var dropTarget: DropTarget?
     /// Tracks the ⌥ key so the Open button can swap between Obsidian and Finder live, like the menu.
     @StateObject private var modifiers = ModifierMonitor()
     /// Cancels an open editor when the user clicks outside it (see `OutsideClickMonitor`).
     @StateObject private var outsideClick = OutsideClickMonitor()
+    /// Clears drag state on a no-move drag press's mouse-up (see `LeftMouseUpMonitor`).
+    @StateObject private var mouseUp = LeftMouseUpMonitor()
+
+    /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
+    /// pointer against. Shared with `TaskRow`, so it lives on the type.
+    static let taskListSpace = "pmTaskList"
+    /// The x (in `taskListSpace`) where a depth-0 row's content begins — matches the rows' leading
+    /// padding. The insertion indicator and the pointer→depth mapping both key off it.
+    static let rowContentInset: CGFloat = 12
+    /// Horizontal pixels per nesting level (matches `TaskRow.indent`'s step).
+    static let indentStep: CGFloat = 16
 
     /// True whenever some inline editor (a task row's, or the project-details form) is open.
     private var isAnyEditorActive: Bool { activeEditor != nil || editingDetails }
@@ -103,7 +126,12 @@ struct PanelView: View {
         .onPreferenceChange(ContentHeightKey.self) { onContentHeight($0) }
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .onExitCommand(perform: handleEscape)
+        // ⌘Z / ⇧⌘Z undo & redo the panel's edits (move, complete, due, text, add, wrap…). Hidden
+        // zero-size buttons carry the shortcuts so they work whenever the panel is key.
+        .background(undoRedoShortcuts)
         .onChange(of: store.projectName) { _ in editingDetails = false; addingFirstTask = false }
+        // A completed move (or any reload) reindexes the todos, so drop the now-stale drag state.
+        .onChange(of: store.todos) { _ in draggingKey = nil; dropTarget = nil }
         // Collapsing details (from the menu) also leaves any details-edit form.
         .onChange(of: detailsExpanded) { expanded in if !expanded { editingDetails = false } }
         // Start/stop the outside-click monitor with edit mode; an outside click cancels any editor.
@@ -118,8 +146,27 @@ struct PanelView: View {
                 outsideClick.stop()
             }
         }
-        .onAppear { modifiers.start() }
-        .onDisappear { modifiers.stop(); outsideClick.stop() }
+        .onAppear {
+            modifiers.start()
+            mouseUp.onMouseUp = { if draggingKey != nil { draggingKey = nil; dropTarget = nil } }
+            mouseUp.start()
+        }
+        .onDisappear { modifiers.stop(); outsideClick.stop(); mouseUp.stop() }
+    }
+
+    /// Invisible buttons that register the panel's undo/redo keyboard shortcuts. `.hidden()` keeps them
+    /// out of the layout and hit-testing while still binding the shortcut on the key window; each is
+    /// disabled when there's nothing to (un/re)do, so the shortcut no-ops (system beep) rather than firing.
+    private var undoRedoShortcuts: some View {
+        Group {
+            Button("Undo", action: store.undo)
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!store.canUndo)
+            Button("Redo", action: store.redo)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!store.canRedo)
+        }
+        .hidden()
     }
 
     private func handleEscape() {
@@ -430,31 +477,136 @@ struct PanelView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 16)
             } else {
-                let wrapDescendants = wrapDescendantKeys
-                ForEach(sessionOrder, id: \.self) { si in
-                    let context = sessionContext(si)
-                    if !context.isEmpty {
-                        Text(context)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 6)
-                    }
-                    ForEach(visibleTodos.filter { $0.sessionIndex == si }, id: \.rawLine) { todo in
-                        TaskRow(
-                            todo: todo,
-                            store: store,
-                            activeEditor: $activeEditor,
-                            ancestorWrapBoost: wrapDescendants.contains(PMStore.key(for: todo)) ? 1 : 0
-                        )
-                    }
-                }
+                taskRowsList
             }
         }
         .padding(.bottom, 8)
         // Animate rows entering/leaving — covers both completing a task and switching the tasks mode,
         // since the visible set derives from both the todos and the mode.
         .animation(.snappy, value: visibleTodos)
+    }
+
+    /// The task rows, grouped by session, wrapped in a single list-level drop target. One coordinate
+    /// space anchors the row frames (published via preference) and the drop delegate's pointer, so the
+    /// delegate resolves the drag into exactly one gap + depth and the overlay paints exactly one
+    /// insertion line. Rows within a session tile with no spacing so the gaps abut with no dead bands.
+    private var taskRowsList: some View {
+        let wrapDescendants = wrapDescendantKeys
+        // The keys of the subtree currently being dragged, so those rows dim in place while the ghost
+        // floats. Empty when no drag is in flight.
+        let draggedSubtree: Set<String> = draggingKey
+            .flatMap { k in store.todos.first { PMStore.key(for: $0) == k } }
+            .map { store.subtreeKeys(of: $0) } ?? []
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(sessionOrder, id: \.self) { si in
+                let context = sessionContext(si)
+                if !context.isEmpty {
+                    Text(context)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(visibleTodos.filter { $0.sessionIndex == si }, id: \.rawLine) { todo in
+                        TaskRow(
+                            todo: todo,
+                            store: store,
+                            activeEditor: $activeEditor,
+                            draggingKey: $draggingKey,
+                            dimmed: draggedSubtree.contains(PMStore.key(for: todo)),
+                            ancestorWrapBoost: wrapDescendants.contains(PMStore.key(for: todo)) ? 1 : 0
+                        )
+                    }
+                }
+            }
+        }
+        .coordinateSpace(name: Self.taskListSpace)
+        .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+        .overlay(alignment: .topLeading) { dropIndicator }
+        .onDrop(of: [UTType.text], delegate: ListDropDelegate(
+            isActive: draggingKey != nil,
+            onCompute: { computeDropTarget(at: $0) },
+            onUpdate: { dropTarget = $0 },
+            onPerform: { performListDrop($0) }
+        ))
+    }
+
+    /// The single insertion indicator: a caret dot + rule drawn at the resolved gap's Y and the chosen
+    /// depth's indent. Only shown for a legal target; an illegal one shows the "no drop" cursor instead.
+    @ViewBuilder private var dropIndicator: some View {
+        if let t = dropTarget, t.valid {
+            HStack(spacing: 0) {
+                Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                Capsule().fill(Color.accentColor).frame(height: 2)
+            }
+            .padding(.leading, Self.rowContentInset + CGFloat(t.depth) * Self.indentStep)
+            .padding(.trailing, 12)
+            // Center the 6pt dot on the boundary line.
+            .offset(y: t.gapY - 3)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Resolve a pointer location (in `taskListSpace`) into a drop target: which gap (by Y), which depth
+    /// (by X, clamped to the legal `[rowBelow.depth ... rowAbove.depth+1]` range at that gap), and the
+    /// anchor row + side that names the exact document slot. Nil when nothing is being dragged or there
+    /// are no rows.
+    private func computeDropTarget(at p: CGPoint) -> DropTarget? {
+        guard let dk = draggingKey,
+              let dragged = store.todos.first(where: { PMStore.key(for: $0) == dk }) else { return nil }
+        let subtree = store.subtreeKeys(of: dragged)
+        let rows = rowFrames.sorted { $0.minY < $1.minY }
+        guard !rows.isEmpty else { return nil }
+
+        // Gap index = how many rows sit (by midpoint) at or above the pointer → 0 = above the first row,
+        // rows.count = below the last (the trailing gap).
+        let gapIndex = rows.filter { ($0.minY + $0.maxY) / 2 <= p.y }.count
+        let rowAbove: RowFrame? = gapIndex > 0 ? rows[gapIndex - 1] : nil
+        let rowBelow: RowFrame? = gapIndex < rows.count ? rows[gapIndex] : nil
+
+        // Legal depth range at this gap: no shallower than the row below (else you'd re-parent it), no
+        // deeper than one under the row above (its deepest legal child).
+        let minDepth = rowBelow?.depth ?? 0
+        let maxDepth = max(minDepth, rowAbove.map { $0.depth + 1 } ?? 0)
+        let rawDepth = Int(((p.x - Self.rowContentInset) / Self.indentStep).rounded())
+        let depth = min(max(rawDepth, minDepth), maxDepth)
+
+        // Resolve the document slot. Nesting deeper than the row below anchors on the row above (which
+        // supplies the parent chain); otherwise anchor the row below and insert before it — this keeps a
+        // cross-session boundary landing in the right session, and a plain sibling insert precise.
+        let anchor: RowFrame
+        let insertAfter: Bool
+        if rowBelow == nil {
+            anchor = rowAbove!; insertAfter = true
+        } else if rowAbove == nil {
+            anchor = rowBelow!; insertAfter = false
+        } else if depth > rowBelow!.depth {
+            anchor = rowAbove!; insertAfter = true
+        } else {
+            anchor = rowBelow!; insertAfter = false
+        }
+
+        let gapY = rowAbove?.maxY ?? rowBelow?.minY ?? 0
+        let valid = !subtree.contains(anchor.key)
+        return DropTarget(gapY: gapY, depth: depth, valid: valid,
+                          anchorSession: anchor.session, anchorLine: anchor.line, insertAfter: insertAfter)
+    }
+
+    /// Commit a resolved drop: move the dragged subtree to the target's slot + depth, then clear state.
+    private func performListDrop(_ t: DropTarget) -> Bool {
+        guard t.valid,
+              let dk = draggingKey,
+              let source = store.todos.first(where: { PMStore.key(for: $0) == dk }),
+              let anchor = store.todos.first(where: {
+                  $0.sessionIndex == t.anchorSession && $0.lineIndex == t.anchorLine
+              })
+        else { return false }
+        store.moveSubtree(source, anchor: anchor, insertAfter: t.insertAfter, depth: t.depth)
+        draggingKey = nil
+        dropTarget = nil
+        return true
     }
 
     // MARK: Focused mode
@@ -721,6 +873,38 @@ struct EditorTarget: Equatable {
     let kind: Kind
 }
 
+/// A visible task row's vertical extent and depth in the task-list coordinate space, published via
+/// preference so the single list-level drop delegate can resolve the pointer into a gap + depth without
+/// per-row drop targets. Carries the row's document identity (session/line) to name the move anchor.
+struct RowFrame: Equatable {
+    let key: String
+    let session: Int
+    let line: Int
+    let depth: Int
+    let minY: CGFloat
+    let maxY: CGFloat
+}
+
+/// Collects every visible row's frame into one array for the drop delegate.
+struct RowFramesKey: PreferenceKey {
+    static var defaultValue: [RowFrame] = []
+    static func reduce(value: inout [RowFrame], nextValue: () -> [RowFrame]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// The single resolved drop indicator for an in-flight drag: the gap's Y (a row boundary), the chosen
+/// nesting depth, whether it's a legal target, and the document slot (anchor row + side) the move will
+/// use. Produced from the pointer by `computeDropTarget`.
+struct DropTarget: Equatable {
+    let gapY: CGFloat
+    let depth: Int
+    let valid: Bool
+    let anchorSession: Int
+    let anchorLine: Int
+    let insertAfter: Bool
+}
+
 private struct ContentHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -854,6 +1038,11 @@ private struct TaskRow: View {
     let todo: Todo
     @ObservedObject var store: PMStore
     @Binding var activeEditor: EditorTarget?
+    /// The key of the subtree being dragged (nil when no drag is active), set on this row's drag start.
+    @Binding var draggingKey: String?
+    /// True while this row belongs to the subtree currently being dragged, so it dims in place under
+    /// the floating ghost.
+    var dimmed: Bool = false
     /// Extra indent levels applied because an ancestor is being wrapped and this row is in its
     /// cascading subtree. 0 for the wrap target itself (it uses `isWrapping`) and for unrelated rows.
     var ancestorWrapBoost: Int = 0
@@ -900,7 +1089,42 @@ private struct TaskRow: View {
             } else {
                 taskLine
                     .padding(.leading, indent(todo.depth + ancestorWrapBoost + (isWrapping ? 1 : 0)))
+                    // The row's breathing room lives *inside* the published frame so adjacent rows tile
+                    // edge-to-edge and the gaps the drop delegate computes abut with no dead bands.
+                    .padding(.vertical, 3)
+                    .background(GeometryReader { g in
+                        let f = g.frame(in: .named(PanelView.taskListSpace))
+                        Color.clear.preference(key: RowFramesKey.self, value: [RowFrame(
+                            key: key, session: todo.sessionIndex, line: todo.lineIndex,
+                            depth: todo.depth, minY: f.minY, maxY: f.maxY)])
+                    })
+                    // Carve the row out of the window-drag region so the mouse-drag starts an item
+                    // reorder rather than moving the panel.
+                    .background(WindowDragExcluder())
+                    .contentShape(Rectangle())
+                    // Dragging is off while any editor is open, so the panel stays calm in edit mode. No
+                    // custom preview: the default snapshot lifts the ghost from the row's real frame. The
+                    // dim `.opacity` is applied *after* `.onDrag`, so the snapshot stays full-opacity.
+                    .ifCondition(activeEditor == nil) { view in
+                        view.onDrag {
+                            let k = key
+                            draggingKey = k
+                            let provider = NSItemProvider(object: k as NSString)
+                            // A real drag's end (drop OR cancel-outside) releases the provider, deallocating
+                            // this sentinel, which clears the drag key. (A no-move press is caught instead by
+                            // the panel's leftMouseUp monitor.)
+                            let sentinel = DragEndSentinel { [dragging = $draggingKey] in
+                                if dragging.wrappedValue == k { dragging.wrappedValue = nil }
+                            }
+                            objc_setAssociatedObject(provider, &TaskRow.dragSentinelKey,
+                                                     sentinel, .OBJC_ASSOCIATION_RETAIN)
+                            return provider
+                        }
+                    }
                     .contextMenu { TaskMenu(todo: todo, store: store, openEditor: openEditor, openAdd: openAdd) }
+                    // Dim the dragged subtree in place under the floating ghost.
+                    .opacity(dimmed ? 0.35 : 1)
+                    .animation(.easeOut(duration: 0.15), value: dimmed)
             }
 
             // Forms whose row/edit lands BELOW this one: due edit, Add After (sibling), Add Subtask
@@ -918,7 +1142,6 @@ private struct TaskRow: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 1)
         .onHover { hovering = $0 }
         .animation(.snappy, value: localEditorKind)
         .animation(.snappy, value: ancestorWrapBoost)
@@ -999,6 +1222,21 @@ private struct TaskRow: View {
         pendingAddPosition = position
         openEditor(.add)
     }
+
+    /// Associated-object key holding a drag's end sentinel on its item provider (see `.onDrag`).
+    static var dragSentinelKey: UInt8 = 0
+}
+
+/// Clears drag state when a drag session ends. Held as an associated object on the drag's item
+/// provider, so its `deinit` runs when the session releases the provider — on a drop *or* a cancel,
+/// the end signal SwiftUI's `.onDrag` doesn't otherwise give us.
+private final class DragEndSentinel {
+    private let onEnd: () -> Void
+    init(onEnd: @escaping () -> Void) { self.onEnd = onEnd }
+    deinit {
+        let onEnd = self.onEnd
+        DispatchQueue.main.async(execute: onEnd)
+    }
 }
 
 /// Right-click actions for a task, mirroring the hover controls plus completion/focus. Idiomatic
@@ -1045,6 +1283,67 @@ private struct TaskMenu: View {
         if todo.dueDate != nil {
             Button { store.setDue(todo, due: nil) } label: { Label("Remove Due Date", systemImage: "calendar.badge.minus") }
         }
+        Divider()
+        // Global document undo/redo — discoverable here; the ⌘Z / ⇧⌘Z shortcuts live on the panel.
+        Button { store.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+            .disabled(!store.canUndo)
+        Button { store.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+            .disabled(!store.canRedo)
+    }
+}
+
+// MARK: Drag-to-reorder drop delegate
+
+/// The single list-level drop target. Resolves the pointer (in the task-list coordinate space) into a
+/// gap + depth via the parent's `onCompute`, reports it so the list can paint the one insertion line,
+/// and commits the move on drop. All row/store access lives in the parent-supplied closures, so this
+/// stays a plain value type.
+private struct ListDropDelegate: DropDelegate {
+    /// Whether a drag is in flight (nothing to resolve otherwise).
+    let isActive: Bool
+    /// Resolve a pointer location into the drop target (nil when illegal / no rows).
+    let onCompute: (CGPoint) -> DropTarget?
+    /// Publish the current target (nil clears the indicator).
+    let onUpdate: (DropTarget?) -> Void
+    /// Commit the resolved move; returns whether it was accepted.
+    let onPerform: (DropTarget) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool { isActive }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let target = onCompute(info.location)
+        onUpdate(target)
+        return DropProposal(operation: (target?.valid ?? false) ? .move : .forbidden)
+    }
+
+    func dropExited(info: DropInfo) { onUpdate(nil) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let target = onCompute(info.location), target.valid else { onUpdate(nil); return false }
+        return onPerform(target)
+    }
+}
+
+private extension View {
+    /// Apply a modifier only when `condition` holds, leaving the view untouched otherwise. Used to
+    /// attach `.onDrag` only while dragging is allowed (no open editor).
+    @ViewBuilder func ifCondition<Transformed: View>(
+        _ condition: Bool, transform: (Self) -> Transformed
+    ) -> some View {
+        if condition { transform(self) } else { self }
+    }
+}
+
+/// A backing AppKit view that opts its region out of the panel's `isMovableByWindowBackground`, so a
+/// mouse-drag that begins on it starts a SwiftUI `.onDrag` (item reorder) instead of being claimed by
+/// AppKit as a window move. Placed behind the draggable task rows; the rest of the panel background
+/// still moves the window as before.
+struct WindowDragExcluder: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { ExcluderView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class ExcluderView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
     }
 }
 
@@ -1690,6 +1989,28 @@ struct PanelBackground: NSViewRepresentable {
         return effect
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Fires on any left mouse-up in the app while the panel is shown. Used as a reliable end signal for a
+/// *no-move* drag press: SwiftUI starts a drag (setting the drag key) but if the pointer never moves,
+/// the release is an ordinary click whose mouse-up is delivered here — a real drag's concluding mouse-up
+/// is consumed by the drag loop instead, and handled by the item-provider sentinel / the drop itself.
+final class LeftMouseUpMonitor: ObservableObject {
+    var onMouseUp: (() -> Void)?
+    private var monitor: Any?
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            self?.onMouseUp?()
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
 }
 
 /// Publishes whether ⌥ is currently held, so a button can swap its icon/action live (as macOS menus

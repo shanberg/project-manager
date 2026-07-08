@@ -75,6 +75,20 @@ final class PMStore: ObservableObject {
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     }
 
+    /// A whole-document snapshot for undo/redo — the notes path plus its exact raw bytes at a point in
+    /// time. Restoring one writes the bytes back verbatim, so undo is format-preserving like every edit.
+    struct DocSnapshot: Equatable { let notesPath: String; let raw: String }
+
+    /// Undo/redo history of pre-mutation document snapshots, for panel-initiated edits (move, complete,
+    /// due, text, add, wrap, unwrap…). Coarse but reliable: each step restores the full prior document.
+    /// Published so the menu/keyboard affordances can reflect availability; cleared on a project switch.
+    @Published private(set) var undoStack: [DocSnapshot] = []
+    @Published private(set) var redoStack: [DocSnapshot] = []
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+    /// Cap the history so a long session can't grow it without bound.
+    private let maxHistory = 100
+
     /// Serial queue for all `PmLib` notes IO (reads and writes) — prevents interleaved writes.
     private let io = DispatchQueue(label: "com.stuarthanberg.pm.notes-io")
 
@@ -136,6 +150,7 @@ final class PMStore: ObservableObject {
             todos = []
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
+            undoStack = []; redoStack = []   // history belongs to a project
             errorMessage = key == nil ? nil : "Invalid focused project."
             hasLoaded = true
             warmRecents()
@@ -165,6 +180,7 @@ final class PMStore: ObservableObject {
                     // Classify how the hero task moved since the last load, but never animate across a
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
+                    if projectChanged { self.undoStack.removeAll(); self.redoStack.removeAll() }
                     self.projectKey = key
                     self.projectName = name
                     self.notesPath = path
@@ -276,15 +292,65 @@ final class PMStore: ObservableObject {
 
     // MARK: Mutations (each performs the NotesService call, then reloads)
 
-    private func mutate(_ work: @escaping (String) throws -> Void) {
+    /// Run a document mutation off-main, then reload. When `recordsUndo` (the default), the pre-edit
+    /// document is banked for undo if the edit actually changed bytes. Navigation-only writes (focus)
+    /// pass `recordsUndo: false` so ⌘Z reverts real edits, not selection changes.
+    private func mutate(recordsUndo: Bool = true, _ work: @escaping (String) throws -> Void) {
         guard let name = projectName else { return }
         io.async { [weak self] in
+            let before = recordsUndo ? try? Self.snapshot(project: name) : nil
             do {
                 try work(name)
             } catch {
                 Task { @MainActor in self?.errorMessage = String(describing: error) }
             }
+            // Only record when the edit actually changed the bytes (skips no-op mutations).
+            if let before, let after = try? Self.snapshot(project: name), before.raw != after.raw {
+                Task { @MainActor in self?.recordUndo(before) }
+            }
             Task { @MainActor in self?.reload() }
+        }
+    }
+
+    /// Read the current raw document for `project` as a snapshot. Protected-folder IO — off-main only.
+    private nonisolated static func snapshot(project: String) throws -> DocSnapshot {
+        let handle = try resolveNotesHandle(project: project)
+        return DocSnapshot(notesPath: handle.notesPath, raw: try handle.io.readContent(path: handle.notesPath))
+    }
+
+    /// Push a pre-edit snapshot onto the undo stack (capped), invalidating any pending redo.
+    private func recordUndo(_ snap: DocSnapshot) {
+        undoStack.append(snap)
+        if undoStack.count > maxHistory { undoStack.removeFirst(undoStack.count - maxHistory) }
+        redoStack.removeAll()
+    }
+
+    /// Restore the most recent pre-edit document, banking the current one for redo. No-op when empty.
+    func undo() { restore(from: \.undoStack, to: \.redoStack) }
+
+    /// Re-apply the most recently undone document, banking the current one for undo. No-op when empty.
+    func redo() { restore(from: \.redoStack, to: \.undoStack) }
+
+    /// Shared undo/redo primitive: pop a snapshot off `source`, write it to disk, and bank the pre-write
+    /// document onto `dest` so the move is reversible. Reload paints the restored state.
+    private func restore(from source: ReferenceWritableKeyPath<PMStore, [DocSnapshot]>,
+                         to dest: ReferenceWritableKeyPath<PMStore, [DocSnapshot]>) {
+        guard let name = projectName, let target = self[keyPath: source].last else { return }
+        io.async { [weak self] in
+            let current = try? Self.snapshot(project: name)
+            do {
+                let handle = try resolveNotesHandle(project: name)
+                try handle.io.writeContent(path: handle.notesPath, content: target.raw)
+            } catch {
+                Task { @MainActor in self?.errorMessage = String(describing: error) }
+                return
+            }
+            Task { @MainActor in
+                guard let self else { return }
+                if !self[keyPath: source].isEmpty { self[keyPath: source].removeLast() }
+                if let current { self[keyPath: dest].append(current) }
+                self.reload()
+            }
         }
     }
 
@@ -315,7 +381,8 @@ final class PMStore: ObservableObject {
     }
 
     func focus(_ todo: Todo) {
-        mutate { try focusTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+        // Focus is navigation, not a content edit, so keep it out of the undo history.
+        mutate(recordsUndo: false) { try focusTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
     }
 
     func undo(_ todo: Todo) {
@@ -341,6 +408,34 @@ final class PMStore: ObservableObject {
     /// tasks with children — `hasChildren(_:)` gates the UI affordance. Inverse of `wrap`.
     func unwrap(_ todo: Todo) {
         mutate { try unwrapTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+    }
+
+    /// Move `todo` (and its whole subtree) to a precise slot — after/before the `anchor` todo's line,
+    /// with the subtree's root re-indented to `depth`. Drives the panel's drag-to-reorder: the drop's
+    /// Y resolves the anchor + side, its X the depth. Illegal drops (anchor inside the moved subtree)
+    /// are rejected by the backend; the drop handler avoids offering them.
+    func moveSubtree(_ todo: Todo, anchor: Todo, insertAfter: Bool, depth: Int) {
+        mutate {
+            try PmLib.moveSubtree(project: $0,
+                                  sourceSessionIndex: todo.sessionIndex, sourceLineIndex: todo.lineIndex,
+                                  anchorSessionIndex: anchor.sessionIndex, anchorLineIndex: anchor.lineIndex,
+                                  insertAfterAnchor: insertAfter, depth: depth)
+        }
+    }
+
+    /// The keys of `todo` and its subtree — the task itself plus the contiguous run of deeper todos
+    /// right after it in document order. Used by the panel to reject drops onto a task's own descendants.
+    func subtreeKeys(of todo: Todo) -> Set<String> {
+        guard let idx = todos.firstIndex(where: {
+            $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
+        }) else { return [] }
+        var keys: Set<String> = [Self.key(for: todo)]
+        var j = idx + 1
+        while j < todos.count, todos[j].depth > todos[idx].depth {
+            keys.insert(Self.key(for: todos[j]))
+            j += 1
+        }
+        return keys
     }
 
     /// Whether `todo` has at least one child task — i.e. the next task in document order (same

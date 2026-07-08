@@ -299,4 +299,150 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertNil(unwrapTaskPreservingFormat(rawText: raw, sessionIndex: 0, lineIndex: 0),
                      "A task with no children can't be dissolved")
     }
+
+    // MARK: - Move subtree (slot + depth drag-reorder)
+
+    private static let moveFixture = """
+    ## Sessions
+
+    ### Wed, Feb 25, 2025
+
+    - [ ] One
+      - [ ] One child
+    - [ ] Two
+    - [ ] Three
+    """
+
+    /// Reorder among root siblings: insert before "One" at depth 0 (anchor "One", insert-before).
+    func testMoveSubtreeBeforeSibling() throws {
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: Self.moveFixture, sourceSessionIndex: 0, sourceLineIndex: 3,   // "Three"
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: false, depth: 0))
+        XCTAssertTrue(updated.contains("- [ ] Three\n- [ ] One\n  - [ ] One child\n- [ ] Two"),
+                      "Three moved to the top at depth 0")
+    }
+
+    /// Insert-after a parent's own line at the parent's depth+1 nests as the first child, above the
+    /// parent's existing children.
+    func testMoveSubtreeAsFirstChild() throws {
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: Self.moveFixture, sourceSessionIndex: 0, sourceLineIndex: 2,   // "Two"
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: true, depth: 1))
+        XCTAssertTrue(updated.contains("- [ ] One\n  - [ ] Two\n  - [ ] One child"),
+                      "Two nested as One's first child, above the existing child")
+    }
+
+    /// Insert after the last row of a parent's subtree at that child's depth lands as the parent's
+    /// last child — the depth is chosen independently of the slot.
+    func testMoveSubtreeAsLastChild() throws {
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: Self.moveFixture, sourceSessionIndex: 0, sourceLineIndex: 3,   // "Three"
+            anchorSessionIndex: 0, anchorLineIndex: 1, insertAfterAnchor: true, depth: 1))  // after "One child" @1
+        XCTAssertTrue(updated.contains("- [ ] One\n  - [ ] One child\n  - [ ] Three\n- [ ] Two"),
+                      "Three placed as One's last child (sibling of One child, depth 1)")
+    }
+
+    /// Depth 0 after the deepest last row appends at the top level — the end-of-list slot that a
+    /// trailing subtree used to make unreachable.
+    func testMoveSubtreeToEndAtTopLevel() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Mover
+        - [ ] Parent
+          - [ ] Child
+        """
+        // Anchor the deepest last row ("Child"), insert after it, at depth 0 → end of list, top level.
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0,   // "Mover"
+            anchorSessionIndex: 0, anchorLineIndex: 2, insertAfterAnchor: true, depth: 0))
+        XCTAssertTrue(updated.contains("- [ ] Parent\n  - [ ] Child\n- [ ] Mover"),
+                      "Mover appended at the very end at the top level")
+    }
+
+    /// A moved subtree carries its descendants and re-indents them all by the same delta.
+    func testMoveSubtreeCarriesAndReindents() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Target
+        - [ ] Mover
+          - [ ] Child
+            - [ ] Grandchild
+        """
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 1,   // "Mover"
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: true, depth: 1))  // first child of Target
+        XCTAssertTrue(updated.contains("- [ ] Target\n  - [ ] Mover\n    - [ ] Child\n      - [ ] Grandchild"),
+                      "Whole subtree moved and each line indented one level deeper")
+    }
+
+    /// The moved line travels verbatim — checkbox state, due date, and focus marker all ride along.
+    func testMoveSubtreePreservesLineContentAndFocus() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Anchor
+        - [x] Done @ due: 2025-03-01
+        """
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 1,
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: false, depth: 0))
+        XCTAssertTrue(updated.contains("- [x] Done @ due: 2025-03-01\n- [ ] Anchor"),
+                      "Checkbox, focus marker, and due travel with the moved line")
+    }
+
+    /// Dropping relative to a row inside the moved subtree is illegal and returns nil.
+    func testMoveSubtreeAnchorInsideSelfReturnsNil() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Parent
+          - [ ] Child
+        """
+        XCTAssertNil(moveSubtreePreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0,   // "Parent" (subtree)
+            anchorSessionIndex: 0, anchorLineIndex: 1, insertAfterAnchor: true, depth: 2),  // "Child" — inside self
+            "A subtree can't be dropped relative to its own descendant")
+    }
+
+    /// Moves can cross session boundaries — the destination session is the anchor's.
+    func testMoveSubtreeAcrossSessions() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Mar 05, 2025
+
+        - [ ] Newer
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Older
+        """
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: raw, sourceSessionIndex: 1, sourceLineIndex: 0,   // "Older"
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: true, depth: 1))  // first child of Newer
+        XCTAssertTrue(updated.contains("- [ ] Newer\n  - [ ] Older"), "Task nested under a task in another session")
+        XCTAssertTrue(updated.contains("### Wed, Feb 25, 2025\n"), "The now-empty older session heading is preserved")
+    }
+
+    /// A task move leaves all non-task content (frontmatter, callouts, tags) byte-for-byte intact.
+    func testMoveSubtreePreservesUnrelatedFormatting() throws {
+        let updated = try XCTUnwrap(moveSubtreePreservingFormat(
+            rawText: Self.messyMarkdown, sourceSessionIndex: 0, sourceLineIndex: 2,   // "Todo three"
+            anchorSessionIndex: 0, anchorLineIndex: 0, insertAfterAnchor: false, depth: 0))
+        XCTAssertTrue(updated.contains("tags: [project, design]"))
+        XCTAssertTrue(updated.contains("> 1.   First goal with extra spaces"))
+        XCTAssertTrue(updated.contains("#project-tag"))
+        XCTAssertTrue(updated.contains("- [x] Todo three\n- [ ] Todo one\n- [ ] Todo two"))
+    }
 }
+

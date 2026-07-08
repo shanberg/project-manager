@@ -287,6 +287,92 @@ public func unwrapTaskPreservingFormat(
     return nil
 }
 
+// MARK: - Subtree move (format-preserving)
+//
+// Drag-to-reorder in the panel moves a whole subtree (a task plus its contiguous deeper descendants)
+// to a precise slot — a document position (an insertion gap) plus an explicit target depth. The block
+// travels verbatim (checkbox, due, focus marker included) and is only re-indented so its root lands at
+// the chosen depth; descendants keep their relative nesting. The panel resolves the drop's Y (which
+// gap) and X (which depth, clamped to the legal range at that gap) into these arguments.
+
+/// The 0-based line number of the task at (sessionIndex, taskIndex), indexed exactly as parseTodos
+/// walks the Sessions region, or nil if it can't be located.
+private func rawTaskLineNumber(_ lines: [String], sessionIndex targetSession: Int, taskIndex targetTask: Int) -> Int? {
+    var inSessions = false
+    var sessionIndex = -1
+    var taskIndex = 0
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) { sessionIndex += 1; taskIndex = 0; continue }
+        if matches(rawSectionPattern, line) { inSessions = false; continue }
+        guard sessionIndex >= 0, matches(rawTaskPattern, line) else { continue }
+        if sessionIndex == targetSession && taskIndex == targetTask { return n }
+        taskIndex += 1
+    }
+    return nil
+}
+
+/// The half-open line range [start, end) of the subtree rooted at `start`: the root line plus the
+/// contiguous run of deeper task lines immediately following it (the same subtree rule wrap/unwrap use).
+private func rawSubtreeRange(_ lines: [String], start: Int) -> Range<Int> {
+    let indent = leadingSpaces(lines[start])
+    var end = start + 1
+    while end < lines.count, matches(rawTaskPattern, lines[end]), leadingSpaces(lines[end]) > indent {
+        end += 1
+    }
+    return start..<end
+}
+
+/// Move the subtree rooted at the source task to a precise slot: immediately after the anchor task's
+/// own line (`insertAfterAnchor`) or immediately before it, with the subtree's root re-indented to
+/// `depth` (× two spaces). Descendants ride along at their relative nesting. Format-preserving — the
+/// moved lines are spliced verbatim apart from the uniform indent shift. Returns the new markdown, or
+/// nil if either task can't be located or the anchor is the source itself or one of its descendants
+/// (an illegal drop inside the moved subtree). Moves may cross session boundaries — the destination
+/// session is whichever the anchor belongs to. The caller is responsible for passing a `depth` that's
+/// legal at the slot (the panel clamps to the [rowBelow.depth ... rowAbove.depth+1] range).
+public func moveSubtreePreservingFormat(
+    rawText: String,
+    sourceSessionIndex: Int,
+    sourceLineIndex: Int,
+    anchorSessionIndex: Int,
+    anchorLineIndex: Int,
+    insertAfterAnchor: Bool,
+    depth: Int
+) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let sourceStart = rawTaskLineNumber(lines, sessionIndex: sourceSessionIndex, taskIndex: sourceLineIndex),
+          let anchorLine = rawTaskLineNumber(lines, sessionIndex: anchorSessionIndex, taskIndex: anchorLineIndex)
+    else { return nil }
+
+    let sourceRange = rawSubtreeRange(lines, start: sourceStart)
+    // Can't drop the subtree into itself or one of its own descendants.
+    if sourceRange.contains(anchorLine) { return nil }
+
+    let insertAt = insertAfterAnchor ? anchorLine + 1 : anchorLine
+    let sourceIndent = leadingSpaces(lines[sourceStart])
+    let newRootIndent = max(0, depth) * 2
+
+    // Re-indent every block line by the same delta so relative nesting is preserved. A negative delta
+    // can't underflow: each line's indent is ≥ sourceIndent, and newRootIndent ≥ 0.
+    let block = Array(lines[sourceRange])
+    let delta = newRootIndent - sourceIndent
+    let reindented = block.map { line -> String in
+        delta >= 0 ? String(repeating: " ", count: delta) + line : String(line.dropFirst(-delta))
+    }
+
+    // Splice: drop the source block, then insert the re-indented copy. Insertion points at or after the
+    // removed block shift left by its length; points before it are unaffected.
+    let adjustedInsert = insertAt >= sourceRange.upperBound ? insertAt - block.count : insertAt
+    lines.removeSubrange(sourceRange)
+    lines.insert(contentsOf: reindented, at: adjustedInsert)
+    return lines.joined(separator: "\n")
+}
+
 /// Append a new task at the end of a session's task list (or right after its heading when the
 /// session has no tasks yet), preserving format. Returns the new markdown and the (sessionIndex,
 /// lineIndex) of the inserted task, or nil if the session can't be located.

@@ -155,6 +155,34 @@ public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throw
     try handle.io.writeContent(path: handle.notesPath, content: finalText)
 }
 
+/// Move a todo (and its subtree) to a precise slot — after/before an anchor todo, with the root
+/// re-indented to `depth` — preserving format. The source lines travel verbatim (checkbox, due, and
+/// focus marker included), only their indent changes, so focus follows the moved task. Moves may cross
+/// session boundaries. Drives the panel's drag-reorder (Y picks the anchor/slot, X picks the depth).
+public func moveSubtree(
+    project: String,
+    sourceSessionIndex: Int,
+    sourceLineIndex: Int,
+    anchorSessionIndex: Int,
+    anchorLineIndex: Int,
+    insertAfterAnchor: Bool,
+    depth: Int
+) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = moveSubtreePreservingFormat(
+        rawText: rawText,
+        sourceSessionIndex: sourceSessionIndex,
+        sourceLineIndex: sourceLineIndex,
+        anchorSessionIndex: anchorSessionIndex,
+        anchorLineIndex: anchorLineIndex,
+        insertAfterAnchor: insertAfterAnchor,
+        depth: depth) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
 /// Set (or clear, with `due == nil`) the inline `due:` value on a todo line.
 public func setDueOnTodo(project: String, sessionIndex: Int, lineIndex: Int, due: String?) throws {
     if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
