@@ -477,4 +477,37 @@ final class PMStore: ObservableObject {
         }
         mutate { try PmLib.addTodo(project: $0, text: text, due: due, position: placement) }
     }
+
+    // MARK: Session mutations (each flows through `mutate`, so ⌘Z undo/redo covers it)
+
+    /// Whether the session at `index` has any task lines — gates the panel's "Delete session" affordance
+    /// so tasks are never removed with it.
+    func hasTasks(sessionIndex index: Int) -> Bool {
+        todos.contains { $0.sessionIndex == index }
+    }
+
+    /// Add a new (empty) session dated today at the top of the Sessions list, with an optional label.
+    func addSession(label: String = "") {
+        mutate { try PmLib.addSession(project: $0, label: label, date: Date()) }
+    }
+
+    /// Rename the session at `index` (its trailing label; the date is preserved).
+    func renameSession(_ index: Int, label: String) {
+        mutate { try PmLib.renameSession(project: $0, sessionIndex: index, label: label) }
+    }
+
+    /// Set (or clear, with empty `prose`) the leading-prose note under the session at `index`.
+    func setSessionNote(_ index: Int, prose: String) {
+        mutate { try PmLib.setSessionNote(project: $0, sessionIndex: index, prose: prose) }
+    }
+
+    /// Delete the session at `index`. The panel only offers this for sessions with no tasks.
+    func deleteSession(_ index: Int) {
+        mutate { try PmLib.deleteSession(project: $0, sessionIndex: index) }
+    }
+
+    /// Append a task to the session at `index` (used to populate an otherwise-empty session).
+    func addTaskToSession(_ index: Int, text: String, due: String? = nil) {
+        mutate { try PmLib.appendTaskToSession(project: $0, sessionIndex: index, text: text, due: due) }
+    }
 }

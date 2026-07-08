@@ -388,6 +388,9 @@ public func appendTaskToSession(
     var taskIndex = 0
     var headingLine: Int? = nil
     var lastTaskLine: Int? = nil
+    /// Last non-blank prose line of the target session (only meaningful before its first task): a new
+    /// first task lands after it, so the session's leading-prose note stays above the task list.
+    var lastProseLine: Int? = nil
     var prefix = "- "
 
     for n in lines.indices {
@@ -402,6 +405,7 @@ public func appendTaskToSession(
                 headingLine = n
                 taskIndex = 0
                 lastTaskLine = nil
+                lastProseLine = nil
             } else if sessionIndex > targetSession {
                 break
             }
@@ -412,16 +416,22 @@ public func appendTaskToSession(
             inSessions = false
             continue
         }
-        guard sessionIndex == targetSession, matches(rawTaskPattern, line) else { continue }
-        lastTaskLine = n
-        prefix = listPrefix(of: line)
-        taskIndex += 1
+        guard sessionIndex == targetSession else { continue }
+        if matches(rawTaskPattern, line) {
+            lastTaskLine = n
+            prefix = listPrefix(of: line)
+            taskIndex += 1
+        } else if lastTaskLine == nil, !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            lastProseLine = n
+        }
     }
 
     guard let heading = headingLine else { return nil }
     // Tasks inherit the session's indent level (root); reuse the last task's prefix when present.
     let inserted = newTaskLine(prefix: lastTaskLine != nil ? prefix : "- ", text: text, due: due)
-    let insertAt = (lastTaskLine ?? heading) + 1
+    // After the last task if there is one; otherwise after the session's leading prose (its note), so
+    // the note isn't stranded below the task; otherwise right after the heading.
+    let insertAt = (lastTaskLine ?? lastProseLine ?? heading) + 1
     lines.insert(inserted, at: insertAt)
     return (lines.joined(separator: "\n"), targetSession, taskIndex)
 }
@@ -439,6 +449,10 @@ private let goalsAnchor = try? NSRegularExpression(pattern: #"^>\s*\[!info\]\s*G
 private let approachAnchor = try? NSRegularExpression(pattern: #"^>\s*\[!info\]\s*Approach"#, options: .caseInsensitive)
 private let linksAnchor = try? NSRegularExpression(pattern: #"^##\s+Links\s*$"#, options: .caseInsensitive)
 private let learningsAnchor = try? NSRegularExpression(pattern: #"^##\s+Learnings\s*$"#, options: .caseInsensitive)
+/// Start of any callout block (`> [!type] ...`). A callout's body ends here — the next callout's
+/// header — even when there's no blank line between the two, so replacing one body can't run into the
+/// next callout.
+private let rawCalloutStartPattern = try? NSRegularExpression(pattern: #"^>\s*\[!"#)
 
 /// Write a full ProjectNotes by splicing only the changed sections into `rawText`, preserving
 /// everything else byte-for-byte. Returns nil when the change can't be spliced safely (a changed
@@ -496,8 +510,13 @@ private func itemLines(_ serialized: String) -> [String] {
 /// the header line and everything outside the block untouched. Returns false if the anchor is absent.
 private func replaceCalloutBody(_ lines: inout [String], anchor: NSRegularExpression?, body: [String]) -> Bool {
     guard let start = lines.firstIndex(where: { matches(anchor, $0) }) else { return false }
+    // The body runs to the next non-`>` line OR the next callout header — callouts can abut with no
+    // blank line between them (the default template does), so a bare `hasPrefix(">")` scan would run
+    // straight through the following callout and overwrite it.
     var end = start + 1
-    while end < lines.count, lines[end].hasPrefix(">") { end += 1 }
+    while end < lines.count, lines[end].hasPrefix(">"), !matches(rawCalloutStartPattern, lines[end]) {
+        end += 1
+    }
     lines.replaceSubrange((start + 1)..<end, with: body)
     return true
 }
@@ -537,5 +556,127 @@ public func sessionAddPreservingFormat(rawText: String, label: String, date: Dat
         block.append("")
     }
     lines.insert(contentsOf: block, at: nextIndex)
+    return lines.joined(separator: "\n")
+}
+
+// MARK: - Session-level edits (format-preserving)
+//
+// The panel surfaces sessions (the dated "### ..." entries under "## Sessions") as first-class
+// notes: rename their label, delete an empty one, and write an editable prose body. A session's
+// "note" is its *leading prose* — the lines between the heading and its first task line — so the
+// task list underneath is never disturbed. These helpers walk the Sessions region with the same
+// indexing parseSessionsBlock/parseTodos use, and splice only the affected lines.
+
+/// The 0-based line number of the session heading at `sessionIndex` (indexed as parseSessionsBlock
+/// walks the Sessions region), or nil if there aren't that many sessions.
+private func rawSessionHeadingLineNumber(_ lines: [String], sessionIndex targetSession: Int) -> Int? {
+    var inSessions = false
+    var sessionIndex = -1
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) {
+            sessionIndex += 1
+            if sessionIndex == targetSession { return n }
+            continue
+        }
+        if matches(rawSectionPattern, line) { return nil }  // ran past the Sessions region
+    }
+    return nil
+}
+
+/// The end (exclusive) of the session whose heading is at `headingLine`: the next session heading or
+/// "## " section line, or lines.count. Mirrors parseSessionsBlock's body boundary.
+private func rawSessionEnd(_ lines: [String], headingLine: Int) -> Int {
+    var n = headingLine + 1
+    while n < lines.count, !matches(rawSessionHeadingPattern, lines[n]), !matches(rawSectionPattern, lines[n]) {
+        n += 1
+    }
+    return n
+}
+
+/// The leading prose of a session body: the lines before its first task line, trimmed. Empty when
+/// the body starts with a task (or is blank). Used by the panel to render/seed a session's editable
+/// note; prose that appears *after* a task is preserved on disk but not surfaced here.
+public func leadingSessionProse(body: String) -> String {
+    let lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var prose: [String] = []
+    for line in lines {
+        if matches(rawTaskPattern, line) { break }
+        prose.append(line)
+    }
+    return prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// Set (create/replace/clear) a session's leading-prose note, preserving format. The region between
+/// the heading and the session's first task line (or the session end, when it has no tasks) is
+/// rewritten to a canonical block — a blank line, the prose, and a trailing blank when a task or
+/// another heading follows — so exactly one blank separates heading/prose/tasks. Empty `prose`
+/// removes the note. Everything from the first task onward is left byte-for-byte. Returns nil if the
+/// session can't be located.
+public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, prose: String) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }
+    let end = rawSessionEnd(lines, headingLine: heading)
+
+    // The leading-prose region ends at the session's first task line, else at the session end.
+    var firstTask: Int? = nil
+    var n = heading + 1
+    while n < end {
+        if matches(rawTaskPattern, lines[n]) { firstTask = n; break }
+        n += 1
+    }
+    let regionEnd = firstTask ?? end
+    // A following task, or another heading/section after this session, needs a blank line before it.
+    let followed = firstTask != nil || end < lines.count
+
+    let trimmed = prose.trimmingCharacters(in: .whitespacesAndNewlines)
+    var replacement: [String] = []
+    if trimmed.isEmpty {
+        if followed { replacement = [""] }
+    } else {
+        replacement = [""] + trimmed.components(separatedBy: "\n")
+        if followed { replacement.append("") }
+    }
+    lines.replaceSubrange((heading + 1)..<regionEnd, with: replacement)
+    return lines.joined(separator: "\n")
+}
+
+/// Rename a session's label (the trailing text after the date), preserving format. The heading line
+/// is rebuilt from its captured date parts + the new label — `"### <date>"` or `"### <date> <label>"`,
+/// matching the parser exactly — so the date and the session's body are untouched. An empty label
+/// removes the trailing text. Returns nil if the session can't be located.
+public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, label: String) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex),
+          let pattern = rawSessionHeadingPattern else { return nil }
+    let line = lines[heading]
+    guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+          let r1 = Range(m.range(at: 1), in: line),
+          let r2 = Range(m.range(at: 2), in: line),
+          let r3 = Range(m.range(at: 3), in: line),
+          let r4 = Range(m.range(at: 4), in: line) else { return nil }
+    let date = "\(line[r1]), \(line[r2]) \(line[r3]), \(line[r4])"
+    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    lines[heading] = trimmed.isEmpty ? "### \(date)" : "### \(date) \(trimmed)"
+    return lines.joined(separator: "\n")
+}
+
+/// Delete a session — its heading and whole body region — preserving format. When deleting the last
+/// session, also drops the blank line that separated it from the previous one so the file doesn't end
+/// on a dangling blank. Returns nil if the session can't be located. The caller gates this to empty
+/// sessions (no task lines) so tasks are never removed with it.
+public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }
+    let end = rawSessionEnd(lines, headingLine: heading)
+    var start = heading
+    if end >= lines.count, start > 0, lines[start - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+        start -= 1
+    }
+    lines.removeSubrange(start..<end)
     return lines.joined(separator: "\n")
 }

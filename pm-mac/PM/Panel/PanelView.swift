@@ -28,6 +28,11 @@ struct PanelView: View {
     /// menu; the content renders inline below the header when true, in any tasks mode. Persisted across
     /// panel sessions like `tasksMode`, so reopening the panel restores the last-chosen state.
     @AppStorage("PMPanelDetailsExpanded") private var detailsExpanded = false
+    /// Whether sessions are revealed as first-class notes in the task list: every session (including
+    /// empty ones) renders as a header with its editable prose note and management affordances (rename,
+    /// add task, delete). Off (the default) keeps today's behavior — a quiet caption above each session's
+    /// tasks, with empty sessions hidden. Persisted across panel sessions like the other view settings.
+    @AppStorage("PMPanelShowSessionNotes") private var showSessionNotes = false
     /// Whether the project-details section is in inline-edit mode (entered by double-clicking its
     /// content). Reset when the section collapses, the project changes, or Escape is pressed.
     @State private var editingDetails = false
@@ -93,7 +98,9 @@ struct PanelView: View {
                         // A project with no tasks at all gets a plain, emoji-free empty state with an
                         // add CTA — the "all complete 🎉" copy would be wrong (nothing was completed)
                         // and neither section has an obvious way to add the first task.
-                        if store.todos.isEmpty {
+                        // With session notes revealed, route to the session-oriented list even with no
+                        // tasks yet, so empty sessions and the "New session" affordance still show.
+                        if store.todos.isEmpty && !showSessionNotes {
                             emptyProjectTasks
                         } else if tasksMode == .focused {
                             focusedSection
@@ -105,6 +112,7 @@ struct PanelView: View {
             }
             .animation(.snappy, value: detailsExpanded)
             .animation(.snappy, value: tasksMode)
+            .animation(.snappy, value: showSessionNotes)
             .background(GeometryReader { geo in
                 Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
             })
@@ -132,6 +140,9 @@ struct PanelView: View {
         .onChange(of: store.projectName) { _ in editingDetails = false; addingFirstTask = false }
         // A completed move (or any reload) reindexes the todos, so drop the now-stale drag state.
         .onChange(of: store.todos) { _ in draggingKey = nil; dropTarget = nil }
+        // Adding/deleting a session shifts session indices, so close any open session editor when the
+        // count changes (a keyed editor would otherwise point at the wrong session).
+        .onChange(of: store.notes?.sessions.count) { _ in activeEditor = nil }
         // Collapsing details (from the menu) also leaves any details-edit form.
         .onChange(of: detailsExpanded) { expanded in if !expanded { editingDetails = false } }
         // Start/stop the outside-click monitor with edit mode; an outside click cancels any editor.
@@ -284,7 +295,7 @@ struct PanelView: View {
     /// Whether the view is in any non-default state (mode other than incomplete, or details showing),
     /// used to tint the view-options icon so there's a subtle "customized" cue.
     private var isViewCustomized: Bool {
-        tasksMode != .incomplete || detailsExpanded || colorMode != .system
+        tasksMode != .incomplete || detailsExpanded || showSessionNotes || colorMode != .system
     }
 
     /// Single header menu holding all view state: the tasks-mode picker (Focused / Incomplete / All)
@@ -319,6 +330,7 @@ struct PanelView: View {
         .pickerStyle(.inline)
         Divider()
         Toggle(isOn: $detailsExpanded) { Label("Show details", systemImage: "info.circle") }
+        Toggle(isOn: $showSessionNotes) { Label("Show session notes", systemImage: "note.text") }
         Divider()
         Picker("Appearance", selection: $colorMode) {
             Label("System", systemImage: "circle.lefthalf.filled").tag(PanelColorMode.system)
@@ -470,7 +482,9 @@ struct PanelView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            if visibleTodos.isEmpty {
+            // With session notes revealed, always show the session-oriented list (headers + affordances)
+            // even when no tasks are currently visible; otherwise fall back to the empty-state copy.
+            if visibleTodos.isEmpty && !showSessionNotes {
                 Text(tasksMode == .all ? "No tasks yet" : "All tasks complete")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -498,28 +512,10 @@ struct PanelView: View {
             .flatMap { k in store.todos.first { PMStore.key(for: $0) == k } }
             .map { store.subtreeKeys(of: $0) } ?? []
         return VStack(alignment: .leading, spacing: 4) {
-            ForEach(sessionOrder, id: \.self) { si in
-                let context = sessionContext(si)
-                if !context.isEmpty {
-                    Text(context)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(visibleTodos.filter { $0.sessionIndex == si }, id: \.rawLine) { todo in
-                        TaskRow(
-                            todo: todo,
-                            store: store,
-                            activeEditor: $activeEditor,
-                            draggingKey: $draggingKey,
-                            dimmed: draggedSubtree.contains(PMStore.key(for: todo)),
-                            ancestorWrapBoost: wrapDescendants.contains(PMStore.key(for: todo)) ? 1 : 0
-                        )
-                    }
-                }
+            if showSessionNotes {
+                revealedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+            } else {
+                groupedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             }
         }
         .coordinateSpace(name: Self.taskListSpace)
@@ -531,6 +527,99 @@ struct PanelView: View {
             onUpdate: { dropTarget = $0 },
             onPerform: { performListDrop($0) }
         ))
+    }
+
+    /// Default rendering: only sessions that have visible tasks, each introduced by a quiet caption.
+    /// Empty sessions stay hidden. This is the panel's behavior when session notes aren't revealed.
+    @ViewBuilder private func groupedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
+        ForEach(sessionOrder, id: \.self) { si in
+            let context = sessionContext(si)
+            if !context.isEmpty {
+                Text(context)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+            }
+            sessionTaskRows(si, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+        }
+    }
+
+    /// Revealed rendering: every session (including empty ones) as a first-class header with its
+    /// editable prose note, its tasks, and an add-task affordance, plus a "New session" affordance on top.
+    @ViewBuilder private func revealedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
+        let sessions = store.notes?.sessions ?? []
+        newSessionAffordance
+        ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
+            SessionHeader(index: index, session: session, store: store, activeEditor: $activeEditor)
+            sessionTaskRows(index, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+            // An explicit add affordance for a session with nothing visible to anchor a per-row add on.
+            if !visibleTodos.contains(where: { $0.sessionIndex == index }) {
+                sessionAddTaskAffordance(index)
+            }
+        }
+    }
+
+    /// One session's visible task rows, tiled with no spacing so their drop gaps abut.
+    private func sessionTaskRows(_ si: Int, wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(visibleTodos.filter { $0.sessionIndex == si }, id: \.rawLine) { todo in
+                TaskRow(
+                    todo: todo,
+                    store: store,
+                    activeEditor: $activeEditor,
+                    draggingKey: $draggingKey,
+                    dimmed: draggedSubtree.contains(PMStore.key(for: todo)),
+                    ancestorWrapBoost: wrapDescendants.contains(PMStore.key(for: todo)) ? 1 : 0
+                )
+            }
+        }
+    }
+
+    /// The "New session" control (revealed mode): a quiet button that opens an inline optional-label
+    /// editor; submitting adds a today-dated session at the top of the list.
+    @ViewBuilder private var newSessionAffordance: some View {
+        let target = EditorTarget(key: "sess:new", kind: .sessionNew)
+        if activeEditor == target {
+            InlineTextEditor(placeholder: "Session label (optional)", submitLabel: "Add", allowsEmpty: true) { label in
+                store.addSession(label: label)
+                activeEditor = nil
+            } onCancel: { activeEditor = nil }
+                .reportEditorFrame()
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+        } else {
+            Button { activeEditor = target } label: {
+                Label("New session", systemImage: "plus.circle").font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+        }
+    }
+
+    /// The per-session "Add task" affordance (revealed mode), shown when a session has no visible tasks
+    /// to hang a per-row add on. Opening it reveals an inline add editor that appends to the session.
+    @ViewBuilder private func sessionAddTaskAffordance(_ index: Int) -> some View {
+        let target = EditorTarget(key: "sess:\(index)", kind: .sessionAddTask)
+        if activeEditor == target {
+            AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
+                store.addTaskToSession(index, text: text, due: due)
+                activeEditor = nil
+            } onCancel: { activeEditor = nil }
+                .reportEditorFrame()
+                .padding(.horizontal, 12)
+        } else {
+            Button { activeEditor = target } label: {
+                Label("Add task", systemImage: "plus").font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 2)
+        }
     }
 
     /// The single insertion indicator: a caret dot + rule drawn at the resolved gap's Y and the chosen
@@ -866,10 +955,12 @@ enum PanelColorMode: String {
     }
 }
 
-/// Identifies which row has an open inline editor, and which kind.
+/// Identifies which row has an open inline editor, and which kind. Task editors key on
+/// "sessionIndex:lineIndex"; session editors key on "sess:<index>" (or "sess:new"), so the two
+/// namespaces can't collide and only one editor is ever open at a time.
 struct EditorTarget: Equatable {
-    enum Kind { case add, due, edit, wrap }
-    let key: String       // "sessionIndex:lineIndex"
+    enum Kind { case add, due, edit, wrap, sessionLabel, sessionNote, sessionAddTask, sessionNew }
+    let key: String
     let kind: Kind
 }
 
@@ -1507,6 +1598,10 @@ private struct InlineTextEditor: View {
     /// Optional leading status glyph, so the task keeps its identity while its text is edited (the
     /// existing task's own checkbox state) or a wrap parent is named (an empty circle).
     let leadingIcon: AnyView?
+    /// When true, an empty (blank) value is a valid submission — used by the session-label editor,
+    /// where clearing the field removes the label. Task text editors leave this false so a blank
+    /// submit is a no-op.
+    let allowsEmpty: Bool
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
@@ -1514,10 +1609,12 @@ private struct InlineTextEditor: View {
     @FocusState private var focused: Bool
 
     init(seed: String = "", placeholder: String, submitLabel: String, leadingIcon: AnyView? = nil,
+         allowsEmpty: Bool = false,
          onSubmit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.placeholder = placeholder
         self.submitLabel = submitLabel
         self.leadingIcon = leadingIcon
+        self.allowsEmpty = allowsEmpty
         self.onSubmit = onSubmit
         self.onCancel = onCancel
         _text = State(initialValue: seed)
@@ -1540,8 +1637,136 @@ private struct InlineTextEditor: View {
 
     private func submit() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard allowsEmpty || !trimmed.isEmpty else { return }
         onSubmit(trimmed)
+    }
+}
+
+// MARK: Session header + note editor
+
+/// A revealed session's first-class header: its date/label line (double-click or right-click to
+/// rename), its editable leading-prose note (double-click to edit, or a quiet "Add note…" placeholder
+/// when empty), and a context menu for renaming, adding a note/task, and deleting an empty session.
+/// Publishes no `RowFrame`, so it doesn't participate in the task drag-reorder geometry.
+private struct SessionHeader: View {
+    let index: Int
+    let session: Session
+    @ObservedObject var store: PMStore
+    @Binding var activeEditor: EditorTarget?
+
+    private var key: String { "sess:\(index)" }
+    private var isRenaming: Bool { activeEditor == EditorTarget(key: key, kind: .sessionLabel) }
+    private var isEditingNote: Bool { activeEditor == EditorTarget(key: key, kind: .sessionNote) }
+    /// The session's editable note — its leading prose (lines before the first task), trimmed.
+    private var prose: String { leadingSessionProse(body: session.body) }
+    private var context: String { session.label.isEmpty ? session.date : "\(session.date) · \(session.label)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if isRenaming {
+                InlineTextEditor(seed: session.label, placeholder: "Session label (optional)",
+                                 submitLabel: "Rename", allowsEmpty: true) { label in
+                    store.renameSession(index, label: label)
+                    activeEditor = nil
+                } onCancel: { activeEditor = nil }
+                    .reportEditorFrame()
+            } else {
+                headerLine
+            }
+
+            if isEditingNote {
+                SessionNoteEditor(seed: prose) { newProse in
+                    store.setSessionNote(index, prose: newProse)
+                    activeEditor = nil
+                } onCancel: { activeEditor = nil }
+                    .reportEditorFrame()
+            } else if !prose.isEmpty {
+                Text(prose)
+                    .font(.system(size: 13, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { openNote() }
+            } else {
+                Text("Add note…")
+                    .font(.system(size: 13, design: .serif))
+                    .foregroundStyle(.quaternary)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { openNote() }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .animation(.snappy, value: isRenaming)
+        .animation(.snappy, value: isEditingNote)
+    }
+
+    private var headerLine: some View {
+        HStack(spacing: 6) {
+            Text(context)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { activeEditor = EditorTarget(key: key, kind: .sessionLabel) }
+        .contextMenu { sessionMenu }
+    }
+
+    @ViewBuilder private var sessionMenu: some View {
+        Button { activeEditor = EditorTarget(key: key, kind: .sessionLabel) } label: {
+            Label("Rename Session…", systemImage: "pencil")
+        }
+        Button { openNote() } label: {
+            Label(prose.isEmpty ? "Add Note…" : "Edit Note…", systemImage: "note.text")
+        }
+        Button { activeEditor = EditorTarget(key: key, kind: .sessionAddTask) } label: {
+            Label("Add Task…", systemImage: "plus")
+        }
+        // Deleting is offered only for a session with no tasks, so tasks are never removed with it.
+        if !store.hasTasks(sessionIndex: index) {
+            Divider()
+            Button(role: .destructive) { store.deleteSession(index) } label: {
+                Label("Delete Session", systemImage: "trash")
+            }
+        }
+    }
+
+    private func openNote() { activeEditor = EditorTarget(key: key, kind: .sessionNote) }
+}
+
+/// A multiline editor for a session's prose note, styled like the details editor's fields. Saving an
+/// empty value clears the note. Auto-focuses; cancels on Escape via the panel's `handleEscape`.
+private struct SessionNoteEditor: View {
+    let onSave: (String) -> Void
+    let onCancel: () -> Void
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(seed: String, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _text = State(initialValue: seed)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Session note", text: $text, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...6)
+                .focused($focused)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save") { onSave(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .controlSize(.small)
+        .padding(.vertical, 2)
+        .onAppear { focused = true }
     }
 }
 

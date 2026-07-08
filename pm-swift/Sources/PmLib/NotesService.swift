@@ -256,3 +256,61 @@ public func addTodo(
     }
     try handle.io.writeContent(path: handle.notesPath, content: finalText)
 }
+
+// MARK: - Session operations (create / rename / delete / prose note)
+
+/// Add a new (empty) session at the top of the Sessions list, dated `date` with an optional `label`.
+/// Format-preserving; falls back to nothing if there's no "## Sessions" heading to splice into.
+public func addSession(project: String, label: String, date: Date = Date()) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let updated = sessionAddPreservingFormat(rawText: rawText, label: trimmed, date: date) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
+/// Rename a session's label (its trailing text after the date), preserving the date and body.
+public func renameSession(project: String, sessionIndex: Int, label: String) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = renameSessionPreservingFormat(rawText: rawText, sessionIndex: sessionIndex, label: label) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
+/// Set (create/replace/clear) a session's leading-prose note. Empty `prose` removes the note. Tasks
+/// under the session are left untouched.
+public func setSessionNote(project: String, sessionIndex: Int, prose: String) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = setSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex, prose: prose) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
+/// Delete a session (heading + body). The caller gates this to sessions with no tasks.
+public func deleteSession(project: String, sessionIndex: Int) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = deleteSessionPreservingFormat(rawText: rawText, sessionIndex: sessionIndex) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
+/// Append a task to the end of a specific session's task list (or right after its heading when it has
+/// no tasks yet), preserving format. Lets the panel populate an otherwise-empty session directly.
+public func appendTaskToSession(project: String, sessionIndex: Int, text: String, due: String?) throws {
+    guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
+    if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let result = appendTaskToSession(rawText: rawText, sessionIndex: sessionIndex, text: text, due: due) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
+}

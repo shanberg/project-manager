@@ -444,5 +444,156 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertTrue(updated.contains("#project-tag"))
         XCTAssertTrue(updated.contains("- [x] Todo three\n- [ ] Todo one\n- [ ] Todo two"))
     }
+
+    // MARK: - Session notes (reveal / create / rename / delete / prose)
+
+    /// Three sessions: one with a label, leading prose, and a focused task; one bare with a task; one
+    /// empty (no label content beyond its own, no prose, no tasks) that trails the file.
+    private static let sessionFixture = """
+    ## Sessions
+
+    ### Wed, Mar 05, 2025 Today
+
+    Kicked things off with a quick sync.
+
+    - [ ] Current focus @
+    - [ ] Another
+
+    ### Mon, Mar 03, 2025
+
+    - [ ] Old open
+
+    ### Fri, Feb 28, 2025 Planning
+    """
+
+    /// Leading prose is the run of lines before a body's first task, trimmed; a body that opens with a
+    /// task has none, and a task-free body is all prose.
+    func testLeadingSessionProse() {
+        XCTAssertEqual(leadingSessionProse(body: "Kicked things off.\n\n- [ ] Task"), "Kicked things off.")
+        XCTAssertEqual(leadingSessionProse(body: "- [ ] Task first\nprose after"), "")
+        XCTAssertEqual(leadingSessionProse(body: "Only prose\nmore prose"), "Only prose\nmore prose")
+        XCTAssertEqual(leadingSessionProse(body: ""), "")
+    }
+
+    /// Creating a note on a session that has tasks but no prose inserts it between the heading and the
+    /// first task, one blank line either side; the tasks are untouched.
+    func testSetSessionNoteCreatesAboveTasks() throws {
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 1, prose: "A note."))
+        XCTAssertTrue(updated.contains("### Mon, Mar 03, 2025\n\nA note.\n\n- [ ] Old open"),
+                      "Note sits between the heading and the first task")
+    }
+
+    /// Replacing an existing note swaps only the prose; the focused task and its marker ride through.
+    func testSetSessionNoteReplacesExisting() throws {
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 0, prose: "Rewritten."))
+        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\nRewritten.\n\n- [ ] Current focus @"))
+        XCTAssertFalse(updated.contains("Kicked things off"), "Old prose replaced")
+    }
+
+    /// An empty note clears the prose, leaving one blank line between heading and first task.
+    func testSetSessionNoteClears() throws {
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 0, prose: "   "))
+        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\n- [ ] Current focus @"))
+        XCTAssertFalse(updated.contains("Kicked things off"))
+    }
+
+    /// A note on the trailing empty session appends heading → blank → prose, with no spurious trailing.
+    func testSetSessionNoteOnEmptyTrailingSession() throws {
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 2, prose: "First entry."))
+        XCTAssertTrue(updated.hasSuffix("### Fri, Feb 28, 2025 Planning\n\nFirst entry."))
+    }
+
+    /// Renaming adds/changes the trailing label, preserving the date and the session body verbatim.
+    func testRenameSessionAddsLabel() throws {
+        let updated = try XCTUnwrap(renameSessionPreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 1, label: "Standup"))
+        XCTAssertTrue(updated.contains("### Mon, Mar 03, 2025 Standup\n\n- [ ] Old open"))
+    }
+
+    /// An empty label strips the trailing text back to a bare dated heading.
+    func testRenameSessionRemovesLabel() throws {
+        let updated = try XCTUnwrap(renameSessionPreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 0, label: ""))
+        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025\n\nKicked things off"))
+        XCTAssertFalse(updated.contains("Today"), "Label removed")
+    }
+
+    /// Deleting the trailing empty session removes it (and its separating blank) and leaves the rest.
+    func testDeleteTrailingEmptySession() throws {
+        let updated = try XCTUnwrap(deleteSessionPreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 2))
+        XCTAssertFalse(updated.contains("Feb 28"))
+        XCTAssertFalse(updated.contains("Planning"))
+        XCTAssertTrue(updated.hasSuffix("- [ ] Old open"), "No dangling blank line left behind")
+    }
+
+    /// Deleting a middle session leaves its neighbours intact with a single blank between them.
+    func testDeleteMiddleSessionKeepsNeighbours() throws {
+        let updated = try XCTUnwrap(deleteSessionPreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 1))
+        XCTAssertFalse(updated.contains("Old open"))
+        XCTAssertTrue(updated.contains("- [ ] Another\n\n### Fri, Feb 28, 2025 Planning"),
+                      "One blank line separates the surviving neighbours")
+    }
+
+    /// Appending a task to an empty session drops it right under the heading.
+    func testAppendTaskToEmptySession() throws {
+        let result = try XCTUnwrap(appendTaskToSession(
+            rawText: Self.sessionFixture, sessionIndex: 2, text: "New task", due: nil))
+        XCTAssertTrue(result.rawText.contains("### Fri, Feb 28, 2025 Planning\n- [ ] New task"))
+    }
+
+    /// A first task appended to a session that has a prose note lands *after* the note, so the note
+    /// stays leading (visible) rather than being stranded below the task.
+    func testAppendTaskLandsAfterSessionNote() throws {
+        let raw = """
+        ## Sessions
+
+        ### Fri, Feb 28, 2025 Planning
+
+        Kickoff notes.
+        """
+        let result = try XCTUnwrap(appendTaskToSession(rawText: raw, sessionIndex: 0, text: "First task", due: nil))
+        XCTAssertTrue(result.rawText.contains("Kickoff notes.\n- [ ] First task"))
+        let session = try XCTUnwrap(parseNotes(markdown: result.rawText).sessions.first)
+        XCTAssertEqual(leadingSessionProse(body: session.body), "Kickoff notes.",
+                       "The note remains the session's leading prose")
+    }
+
+    /// Every session editor returns nil for a session index that doesn't exist (caller skips the write).
+    func testSessionEditsReturnNilForBadIndex() {
+        XCTAssertNil(setSessionNotePreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, prose: "x"))
+        XCTAssertNil(renameSessionPreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, label: "x"))
+        XCTAssertNil(deleteSessionPreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9))
+    }
+
+    /// Editing two callouts at once (the default template abuts them with no blank line between) must
+    /// splice each independently — a body scan that ran past the next callout header used to overwrite
+    /// the following callouts, silently dropping one of the two edits.
+    func testWriteSplicesTwoAdjacentCallouts() throws {
+        let template = serializeNotes(ProjectNotes(title: "T"))
+        var incoming = try parseNotes(markdown: template)
+        incoming.problem = "The problem"
+        incoming.goals = ["First goal", "", ""]
+        let spliced = try XCTUnwrap(writeNotesPreservingFormat(rawText: template, incoming: incoming))
+        let reparsed = try parseNotes(markdown: spliced)
+        XCTAssertEqual(reparsed.problem, "The problem")
+        XCTAssertEqual(reparsed.goals.first, "First goal")
+        XCTAssertTrue(spliced.contains("> [!info] Goals"), "Goals callout survived")
+        XCTAssertTrue(spliced.contains("> [!info] Approach"), "Following Approach callout not clobbered")
+    }
+
+    /// Setting a session note leaves all unrelated content (frontmatter, tags, trailing prose) intact.
+    func testSetSessionNotePreservesUnrelatedFormatting() throws {
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.messyMarkdown, sessionIndex: 0, prose: "Session recap."))
+        XCTAssertTrue(updated.contains("tags: [project, design]"))
+        XCTAssertTrue(updated.contains("#project-tag"))
+        XCTAssertTrue(updated.contains("### Wed, Feb 25, 2025\n\nSession recap.\n\n- [ ] Todo one"))
+    }
 }
 
