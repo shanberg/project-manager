@@ -5,6 +5,11 @@ import CoreImage
 
 /// SwiftUI-observable panel chrome state. Currently tracks whether a resize animation is in flight so
 /// the content view can hide its scrollbar for the duration (avoiding a flash mid-animation).
+///
+/// Deliberately minimal: every property here is read by `PanelView`'s root, so a write republishes the
+/// whole panel body. The window's height used to live here too, which meant each frame of a resize
+/// drag rebuilt the entire tree — the content sizes itself off the window now instead (see
+/// `hosting.sizingOptions` in `init`).
 final class PanelChrome: ObservableObject {
     @Published var isResizing = false
 }
@@ -12,19 +17,40 @@ final class PanelChrome: ObservableObject {
 /// Owns the floating PM Panel window (an `NSPanel` hosting `PanelView`). Reproduces the retired Tauri
 /// panel's behavior: fixed 380 pt width with auto-fitting height, summon/dismiss, blur-to-hide with a
 /// grace period (suppressed when pinned), and float-above-others when the float setting is on.
+/// A borderless panel that can still take key focus. `NSWindow` refuses key status to borderless windows
+/// by default, and the panel hosts text fields (task titles, the note editor) that need it.
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     private let store: PMStore
     private let panel: NSPanel
     private var settings: PanelSettings
 
-    /// Fixed panel width (the content lays out to this; height auto-fits).
-    static let width: CGFloat = 420
+    /// Fixed width of the panel's content column (tasks, header, details). Never changes.
+    static let contentWidth: CGFloat = 420
+    /// Width the optional project sidebar adds to the left of the content column. Sized for its
+    /// two-line rows (project name over its next task) without crowding them.
+    static let sidebarWidth: CGFloat = 224
+    /// `UserDefaults` key behind `PanelView`'s sidebar toggle (an `@AppStorage`), read directly here
+    /// because the window needs its width in `init` — before any SwiftUI layout has run.
+    static let sidebarDefaultsKey = "PMPanelSidebar"
+    static var isSidebarVisible: Bool { UserDefaults.standard.bool(forKey: sidebarDefaultsKey) }
+
+    /// The panel's current width: the content column, plus the sidebar when it's showing. The height
+    /// auto-fits; this changes only when the sidebar is toggled.
+    static var width: CGFloat { contentWidth + (isSidebarVisible ? sidebarWidth : 0) }
     /// Window identifier so the panel's outside-click monitor can scope to this window.
     static let windowIdentifier = "PMPanel"
     /// Max height as a Tarot-card proportion of the width (~2.75×4.75). Content beyond this scrolls;
     /// below it, the panel fits exactly.
     static let maxHeightRatio: CGFloat = 4.75 / 2.75
+    /// The panel's rounded-corner radius. Since the window is borderless, nothing rounds it for us: the
+    /// glass background and the SwiftUI content each clip to this, and the window shadow follows from
+    /// the shape they render.
+    static let cornerRadius: CGFloat = 16
 
     /// SwiftUI-observable chrome shared with `PanelView` (hides the scrollbar during a resize).
     private let chrome: PanelChrome
@@ -65,42 +91,60 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         self.chrome = PanelChrome()
         hosting = NSHostingController(rootView: PanelView(store: store, chrome: PanelChrome()))
-        panel = NSPanel(
+        // Borderless: a `.titled` window carries an `NSThemeFrame` that paints its own rounded backing
+        // and hairline border, which showed through this transparent panel as an outline sitting behind
+        // the shadow. With no frame view, the only thing drawn is our glass, and the window shadow is
+        // derived from that shape alone.
+        panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 420),
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel, .utilityWindow],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         super.init()
 
-        // Inject panel callbacks now that `self` exists: Escape-to-hide and content-driven auto-fit.
+        // Restore the height the user last dragged the panel to (with the sidebar open).
+        let saved = UserDefaults.standard.double(forKey: Self.userHeightKey)
+        userHeight = saved > 0 ? saved : nil
+
+        // Inject panel callbacks now that `self` exists: Escape-to-hide, content-driven auto-fit, and
+        // the bottom grab handle's live height drag.
         hosting.rootView = PanelView(
             store: store,
             chrome: chrome,
             onDismiss: { [weak self] in self?.hide() },
-            onContentHeight: { [weak self] height in self?.fit(toContentHeight: height) }
+            onContentHeight: { [weak self] height in self?.fit(toContentHeight: height) },
+            onResizeBegan: { [weak self] in self?.resizeBegan() },
+            onResizeChanged: { [weak self] delta in self?.resize(byHeightDelta: delta) },
+            onResizeEnded: { [weak self] in self?.resizeEnded() }
         )
 
-        // The hosting controller owns content sizing (reliable auto-fit); the glass/vibrant material
-        // is a SwiftUI background inside PanelView, so it fills the content's layout rather than
-        // fighting it. The window is non-opaque so that material shows through.
+        // The glass/vibrant material is a SwiftUI background inside PanelView, so it fills the
+        // content's layout rather than fighting it. The window is non-opaque so that material shows
+        // through.
         panel.contentViewController = hosting
+        // `fit(toContentHeight:)` is the *only* thing that sizes this window.
+        //
+        // The default (`.preferredContentSize`) has AppKit resize the window whenever the SwiftUI
+        // content's ideal size changes — which, with the sidebar in the layout, closed a loop: the
+        // sidebar column sized itself to the window's height, so the content's ideal height *was* the
+        // window's height, feeding straight back into the window frame. Two authorities on the same
+        // number, one reading its answer from the other. With sizing off, the hosting view simply
+        // fills whatever frame `fit` sets, and the columns fill it in turn.
+        hosting.sizingOptions = []
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
+        // The panel has no titlebar to drag by, so its background is the drag region. Everything the
+        // user clicks *into* has to carve itself back out with `WindowDragExcluder` — a mouse-down on a
+        // draggable region is swallowed by AppKit's drag-tracking loop and never reaches the view, which
+        // reads as a click that didn't take.
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         // Tag the window so PanelView's outside-click monitor can tell our clicks from other windows'.
         panel.identifier = NSUserInterfaceItemIdentifier(Self.windowIdentifier)
-        // Dismissal is via Escape / blur / hotkey / menu, so hide all traffic-light buttons — this
-        // also removes the close button that was overlapping the title.
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         applySettings(settings)
         restorePosition()
     }
@@ -175,6 +219,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         return (vf.maxY - panel.frame.maxY) <= (panel.frame.minY - vf.minY)
     }
 
+    /// The horizontal counterpart, matching `savePosition`'s `fromRight`. Toggling the sidebar changes
+    /// the panel's width, and keeping the anchored vertical edge fixed means a right-anchored panel
+    /// grows leftward (into the screen) rather than sliding off the right edge.
+    private var horizontalAnchorNearRight: Bool {
+        guard let vf = visibleFrame else { return false }
+        return (vf.maxX - panel.frame.maxX) < (panel.frame.minX - vf.minX)
+    }
+
     private func savePosition() {
         guard let vf = visibleFrame else { return }
         let f = panel.frame
@@ -225,19 +277,53 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// guarding against a degenerate window if a transient measurement reports a near-zero height.
     static let minHeight: CGFloat = 80
 
-    /// Auto-fit the panel height to its content (width stays 380), clamped to a sane min and 95% of
-    /// the screen — the native equivalent of the old panel's double-click "fit to content".
-    private func fit(toContentHeight height: CGFloat) {
+    /// The smallest it will shrink to *with the project sidebar open*, where the panel stops being a
+    /// task card and becomes a two-column workspace: tall enough for a useful stretch of the project
+    /// list. The hug-a-single-task heights only make sense with the sidebar hidden.
+    static let sidebarMinHeight: CGFloat = 400
+
+    /// The tallest the panel goes: a Tarot-card proportion of the *content* column (not the window,
+    /// so opening the sidebar widens the panel without also letting it grow taller), or 95% of the
+    /// screen, whichever is smaller.
+    private var maxPanelHeight: CGFloat {
         let screenMax = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
-        let maxHeight = min(Self.width * Self.maxHeightRatio, floor(screenMax * 0.95))
-        let target = min(max(ceil(height), Self.minHeight), maxHeight)
-        guard abs(panel.frame.height - target) > 1 else { return }
+        return min(Self.contentWidth * Self.maxHeightRatio, floor(screenMax * 0.95))
+    }
+
+    /// The height the user dragged the panel to while the sidebar was open. Nil until they resize it
+    /// — until then the panel still auto-fits its content, just never below `sidebarMinHeight`.
+    /// App-local (`UserDefaults`); written on mouse-up rather than on every frame of a drag.
+    private static let userHeightKey = "PMPanelSidebarHeight"
+    private var userHeight: CGFloat?
+    /// Height at the start of the current grab, so a drag is applied as one absolute offset rather
+    /// than an accumulation of deltas that could drift.
+    private var resizeStartHeight: CGFloat = 0
+
+    /// Auto-fit the panel to its content: height from the measured content, width from whether the
+    /// project sidebar is showing.
+    ///
+    /// With the sidebar open the height is the user's instead: their dragged height if they have one,
+    /// else the content's, and never below `sidebarMinHeight`. So this stays a no-op for height while
+    /// they're working in a resized panel, and still tracks the content when the sidebar is hidden.
+    private func fit(toContentHeight height: CGFloat) {
+        let maxHeight = maxPanelHeight
+        let target: CGFloat
+        if Self.isSidebarVisible {
+            target = min(max(userHeight ?? ceil(height), Self.sidebarMinHeight), maxHeight)
+        } else {
+            target = min(max(ceil(height), Self.minHeight), maxHeight)
+        }
+        let targetWidth = Self.width
+        // The sidebar toggle can change the width with the height unchanged, so both are checked here.
+        guard abs(panel.frame.height - target) > 1 || abs(panel.frame.width - targetWidth) > 1 else { return }
         var frame = panel.frame
-        // Grow/shrink from whichever horizontal screen edge the panel is anchored to: keep the top
-        // edge fixed when anchored near the top (grows downward), else keep the bottom edge fixed
-        // (grows upward). Either way the panel expands away from the nearby edge, not across it.
+        // Grow/shrink from whichever screen edge the panel is anchored to: keep the top edge fixed when
+        // anchored near the top (grows downward), else keep the bottom edge fixed (grows upward), and
+        // likewise keep the right edge fixed when anchored near the right. Either way the panel expands
+        // away from the nearby edge, not across it.
         if verticalAnchorNearTop { frame.origin.y += frame.height - target }
-        frame.size = NSSize(width: Self.width, height: target)
+        if horizontalAnchorNearRight { frame.origin.x += frame.width - targetWidth }
+        frame.size = NSSize(width: targetWidth, height: target)
 
         // Animate the resize, except for the first fit right after summon and while hidden, which
         // should snap. The scrollbar is hidden for the duration so it doesn't flash while the viewport
@@ -255,11 +341,53 @@ final class PanelController: NSObject, NSWindowDelegate {
             } completionHandler: { [weak self] in
                 self?.chrome.isResizing = false
                 self?.isProgrammaticMove = false
+                // The shadow is cached from the window's rendered alpha, so a resize leaves the old
+                // shape behind until it's invalidated — visible as a stale outline around the panel.
+                self?.panel.invalidateShadow()
             }
         } else {
             panel.setFrame(frame, display: true, animate: false)
             isProgrammaticMove = false
+            panel.invalidateShadow()
         }
+    }
+
+    // MARK: Height drag (the panel's own grab handle, offered only with the sidebar open)
+
+    /// A borderless window has no frame to grab, so the panel draws its own handle along the bottom
+    /// edge and drives these. The top edge stays put for the whole drag — a bottom grip pulls the
+    /// bottom edge down, whichever screen edge the panel is otherwise anchored to.
+
+    func resizeBegan() {
+        resizeStartHeight = panel.frame.height
+    }
+
+    /// `delta` is the drag's total translation from where it began (positive downward), so the height
+    /// follows the pointer exactly instead of accumulating rounding drift.
+    func resize(byHeightDelta delta: CGFloat) {
+        let target = min(max((resizeStartHeight + delta).rounded(), Self.sidebarMinHeight), maxPanelHeight)
+        userHeight = target
+        guard abs(panel.frame.height - target) > 0.5 else { return }
+        var frame = panel.frame
+        frame.origin.y += frame.height - target   // top edge fixed
+        frame.size.height = target
+        // A panel sitting low on the screen would otherwise grow off the bottom; slide it up instead.
+        if let vf = visibleFrame, frame.minY < vf.minY {
+            frame.origin.y = min(vf.minY, vf.maxY - frame.height)
+        }
+        isProgrammaticMove = true
+        panel.setFrame(frame, display: true, animate: false)
+        isProgrammaticMove = false
+        // No `invalidateShadow()` here: on a borderless, non-opaque window it re-rasterizes the whole
+        // window's alpha to re-derive the shadow shape, which is far too much to do per mouse-moved
+        // event. The shadow lags the edge during the drag and is corrected on mouse-up.
+    }
+
+    /// Persist the height and the (possibly shifted) position once the mouse comes up.
+    func resizeEnded() {
+        panel.invalidateShadow()
+        UserDefaults.standard.set(userHeight ?? 0, forKey: Self.userHeightKey)
+        savePosition()
     }
 
     // MARK: NSWindowDelegate
@@ -407,6 +535,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 /// fades in/out and glides between anchors, and sits just beneath the panel so the panel stays on top.
 @MainActor
 final class SnapGhostWindow {
+    /// Matches `PanelController.cornerRadius` (copied rather than referenced: this is read from the
+    /// ghost's non-isolated mask drawing, which can't touch a main-actor constant).
     static let cornerRadius: CGFloat = 16
     /// Resting opacity — translucent so it reads as a placeholder, not a second live panel.
     private static let restingAlpha: CGFloat = 0.72

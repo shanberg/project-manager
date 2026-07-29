@@ -63,6 +63,13 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.stuarthanberg.pm
             CFBundleURLSchemes: [pmpanel]
+        # The private drag type a task selection carries alongside its public markdown
+        # representation, so an in-app reorder can be told apart from a text drag out of another
+        # app. See Panel/TaskPasteboard.swift.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.stuarthanberg.pm.task-keys
+            UTTypeDescription: PM Task Selection
+            UTTypeConformsTo: [public.data]
         # Speakable aliases so Siri can recognize App Shortcut phrases — the bundle name "PM" is a
         # homophone of "p.m." and doesn't work as a spoken trigger. Say e.g. "Show Project Manager
         # panel", "Complete my Project Manager task".

@@ -3,98 +3,186 @@ import {
   addTodoAfterInNotes,
   addTodoBeforeInNotes,
   addTodoAsChildInNotes,
+  addTodoToTodaySession,
+  editTodoInNotes,
   updateDueDateInNotes,
+  wrapTodoInNotes,
+  toggleAllTodosInNotes,
+  stripInlineDueFromText,
+  type NotesShowOutput,
   type ProjectNotes,
-  type Session,
   type Todo,
 } from "../notes-api";
 import type { PreferenceValues } from "../types";
-import { runPmWithStdin } from "../pm";
+import { runPmWithPrefs } from "../pm";
 
 vi.mock("../pm", () => ({
   buildEnv: vi.fn(() => ({})),
   runPmWithPrefs: vi.fn(),
-  runPmWithStdin: vi.fn().mockResolvedValue({ code: 0, stderr: "" }),
+  runPmWithStdin: vi.fn().mockResolvedValue({ stdout: "", code: 0, stderr: "" }),
   syncObsidianPrefsToPmConfig: vi.fn().mockResolvedValue(undefined),
 }));
 
-beforeEach(() => {
-  vi.mocked(runPmWithStdin).mockResolvedValue({ stdout: "", code: 0, stderr: "" });
-});
-
 const prefs: PreferenceValues = { configPath: "/tmp/config", pmCliPath: "pm" };
 
-function makeNotes(body: string): ProjectNotes {
-  const session: Session = {
-    date: "2025-03-03",
-    label: "Mon, Mar 3, 2025",
-    body,
-  };
+function makeTodo(lineIndex: number, text: string, extra: Partial<Todo> = {}) {
   return {
-    title: "Test",
-    summary: "",
-    problem: "",
-    goals: [],
-    approach: "",
-    links: [],
-    learnings: [],
-    sessions: [session],
-  };
+    rawLine: `- [ ] ${text}`,
+    text,
+    checked: false,
+    context: "",
+    depth: 0,
+    sessionIndex: 0,
+    lineIndex,
+    ...extra,
+  } satisfies Todo;
 }
 
+const notes: ProjectNotes = {
+  title: "Test",
+  summary: "",
+  problem: "",
+  goals: [],
+  approach: "",
+  links: [],
+  learnings: [],
+  sessions: [{ date: "Mon, Mar 3, 2025", label: "", body: "- [ ] First" }],
+};
+
+/** What `pm notes show` returns. focusedKey is set so getNotes doesn't auto-focus. */
+let showOutput: NotesShowOutput = {
+  notes,
+  todos: [makeTodo(0, "First")],
+  focusedKey: "0:0",
+};
+
+beforeEach(() => {
+  showOutput = { notes, todos: [makeTodo(0, "First")], focusedKey: "0:0" };
+  vi.mocked(runPmWithPrefs).mockReset();
+  vi.mocked(runPmWithPrefs).mockImplementation(async (_prefs, args) => {
+    if (args[0] === "notes" && args[1] === "show") {
+      return { stdout: JSON.stringify(showOutput), stderr: "", code: 0 };
+    }
+    return { stdout: "", stderr: "", code: 0 };
+  });
+});
+
+/** Args of every pm invocation, in order, excluding `notes show` reads. */
+function writeCalls(): string[][] {
+  return vi
+    .mocked(runPmWithPrefs)
+    .mock.calls.map((c) => c[1] as string[])
+    .filter((args) => !(args[0] === "notes" && args[1] === "show"));
+}
+
+describe("updateDueDateInNotes", () => {
+  it("sets the due via pm notes todo due", async () => {
+    await updateDueDateInNotes(
+      prefs,
+      "p",
+      notes,
+      makeTodo(1, "Child"),
+      "2026-03-15 00:00",
+    );
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "due", "p", "0", "1", "2026-03-15 00:00"],
+    ]);
+  });
+
+  it("clears the due with --clear", async () => {
+    await updateDueDateInNotes(prefs, "p", notes, makeTodo(0, "Task"), null);
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "due", "p", "0", "0", "--clear"],
+    ]);
+  });
+
+  it("surfaces the CLI's error message", async () => {
+    vi.mocked(runPmWithPrefs).mockResolvedValue({
+      stdout: "",
+      stderr: "Invalid due value: nope\n",
+      code: 1,
+    });
+    await expect(
+      updateDueDateInNotes(prefs, "p", notes, makeTodo(0, "Task"), "nope"),
+    ).rejects.toThrow("Invalid due value: nope");
+  });
+});
+
+describe("editTodoInNotes", () => {
+  it("edits text via pm notes todo text", async () => {
+    await editTodoInNotes(prefs, "p", notes, makeTodo(2, "Old"), "  New  ");
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "text", "p", "0", "2", "New"],
+    ]);
+  });
+
+  it("ignores an empty edit", async () => {
+    await editTodoInNotes(prefs, "p", notes, makeTodo(2, "Old"), "   ");
+    expect(writeCalls()).toEqual([]);
+  });
+});
+
+describe("wrapTodoInNotes", () => {
+  it("wraps via pm notes todo wrap", async () => {
+    await wrapTodoInNotes(prefs, "p", notes, makeTodo(1, "Child"), "Parent");
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "wrap", "p", "0", "1", "Parent"],
+    ]);
+  });
+});
+
+describe("addTodoToTodaySession", () => {
+  it("quick-adds via pm notes todo add", async () => {
+    await addTodoToTodaySession(prefs, "p", "New task");
+    expect(writeCalls()).toEqual([["notes", "todo", "add", "p", "New task"]]);
+  });
+
+  it("passes the due through as --due", async () => {
+    await addTodoToTodaySession(prefs, "p", "New task", "2026-03-15 09:00");
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "add", "p", "New task", "--due", "2026-03-15 09:00"],
+    ]);
+  });
+});
+
 describe("addTodoAfterInNotes", () => {
-  it("inserts a new task after the given todo and returns updated notes and insertedTodo", async () => {
-    const body = "- [ ] First\n- [ ] Second\n- [ ] Third";
-    const notes = makeNotes(body);
-    const afterTodo: Todo = {
-      rawLine: "- [ ] Second",
-      text: "Second",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 1,
+  it("inserts with --after and returns the inserted todo from the refreshed notes", async () => {
+    const anchor = makeTodo(1, "Second");
+    showOutput = {
+      notes,
+      todos: [
+        makeTodo(0, "First"),
+        anchor,
+        makeTodo(2, "New task"),
+        makeTodo(3, "Third"),
+      ],
+      focusedKey: "0:0",
     };
 
-    const result = await addTodoAfterInNotes(
-      prefs,
-      "my-project",
-      notes,
-      afterTodo,
-      "New task",
-    );
+    const result = await addTodoAfterInNotes(prefs, "p", notes, anchor, "New task");
 
-    expect(result.notes.sessions[0].body).toBe(
-      "- [ ] First\n- [ ] Second\n- [ ] New task\n- [ ] Third",
-    );
-    expect(result.insertedTodo.rawLine).toBe("- [ ] New task");
-    expect(result.insertedTodo.sessionIndex).toBe(0);
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "add", "p", "New task", "--after", "0", "1"],
+    ]);
     expect(result.insertedTodo.lineIndex).toBe(2);
     expect(result.insertedTodo.text).toBe("New task");
   });
 
-  it("chaining: second add uses returned notes so first task is preserved", async () => {
-    const body = "- [ ] Anchor";
-    const notes = makeNotes(body);
-    const anchor: Todo = {
-      rawLine: "- [ ] Anchor",
-      text: "Anchor",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    const first = await addTodoAfterInNotes(
-      prefs,
-      "p",
+  it("chaining: the returned todo is the next anchor", async () => {
+    const anchor = makeTodo(0, "Anchor");
+    showOutput = {
       notes,
-      anchor,
-      "First added",
-    );
-    expect(first.notes.sessions[0].body).toBe(
-      "- [ ] Anchor\n- [ ] First added",
-    );
+      todos: [anchor, makeTodo(1, "First added")],
+      focusedKey: "0:0",
+    };
+    const first = await addTodoAfterInNotes(prefs, "p", notes, anchor, "First added");
+    expect(first.insertedTodo.lineIndex).toBe(1);
 
+    showOutput = {
+      notes,
+      todos: [anchor, makeTodo(1, "First added"), makeTodo(2, "Second added")],
+      focusedKey: "0:0",
+    };
     const second = await addTodoAfterInNotes(
       prefs,
       "p",
@@ -102,327 +190,102 @@ describe("addTodoAfterInNotes", () => {
       first.insertedTodo,
       "Second added",
     );
-    expect(second.notes.sessions[0].body).toBe(
-      "- [ ] Anchor\n- [ ] First added\n- [ ] Second added",
-    );
+    expect(writeCalls().at(-1)).toEqual([
+      "notes",
+      "todo",
+      "add",
+      "p",
+      "Second added",
+      "--after",
+      "0",
+      "1",
+    ]);
+    expect(second.insertedTodo.lineIndex).toBe(2);
   });
 
-  it("preserves list prefix/indent from anchor", async () => {
-    const body = "  - [ ] Indented";
-    const notes = makeNotes(body);
-    const afterTodo: Todo = {
-      rawLine: "  - [ ] Indented",
-      text: "Indented",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    const result = await addTodoAfterInNotes(
+  it("passes the due through as --due", async () => {
+    await addTodoAfterInNotes(
       prefs,
       "p",
       notes,
-      afterTodo,
-      "Child",
-    );
-    expect(result.notes.sessions[0].body).toBe(
-      "  - [ ] Indented\n  - [ ] Child",
-    );
-  });
-
-  it("works with rawLine-only todo (no sessionIndex/lineIndex)", async () => {
-    const body = "- [ ] Only";
-    const notes = makeNotes(body);
-    const afterTodo: Todo = {
-      rawLine: "- [ ] Only",
-      text: "Only",
-      checked: false,
-      context: "",
-    };
-
-    const result = await addTodoAfterInNotes(
-      prefs,
-      "p",
-      notes,
-      afterTodo,
-      "After only",
-    );
-    expect(result.notes.sessions[0].body).toBe("- [ ] Only\n- [ ] After only");
-    expect(result.insertedTodo.rawLine).toBe("- [ ] After only");
-  });
-
-  it("stores due inline when anchor has due", async () => {
-    const body = "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00";
-    const notes = makeNotes(body);
-    const child: Todo = {
-      rawLine: "  - [ ] Child due: 2026-03-11 00:00",
-      text: "Child",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 1,
-      dueDate: "2026-03-11 00:00",
-    };
-
-    const result = await addTodoAfterInNotes(
-      prefs,
-      "p",
-      notes,
-      child,
+      makeTodo(1, "Child"),
       "New sibling",
       "2026-03-12 00:00",
     );
-    const resultBody = result.notes.sessions[0].body;
-    expect(resultBody).toBe(
-      "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00\n  - [ ] New sibling due: 2026-03-12 00:00",
-    );
-    expect((resultBody.match(/due:/g) ?? []).length).toBe(2);
-  });
-
-  it("adds tasks in sequence at same hierarchy level as focused task", async () => {
-    const body = "- [ ] Root\n  - [ ] Focused child";
-    const notes = makeNotes(body);
-    const focused: Todo = {
-      rawLine: "  - [ ] Focused child",
-      text: "Focused child",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 1,
-    };
-
-    const first = await addTodoAfterInNotes(
-      prefs,
+    expect(writeCalls()[0]).toEqual([
+      "notes",
+      "todo",
+      "add",
       "p",
-      notes,
-      focused,
-      "First",
-    );
-    expect(first.notes.sessions[0].body).toBe(
-      "- [ ] Root\n  - [ ] Focused child\n  - [ ] First",
-    );
-
-    const second = await addTodoAfterInNotes(
-      prefs,
-      "p",
-      first.notes,
-      first.insertedTodo,
-      "Second",
-    );
-    expect(second.notes.sessions[0].body).toBe(
-      "- [ ] Root\n  - [ ] Focused child\n  - [ ] First\n  - [ ] Second",
-    );
-
-    const third = await addTodoAfterInNotes(
-      prefs,
-      "p",
-      second.notes,
-      second.insertedTodo,
-      "Third",
-    );
-    expect(third.notes.sessions[0].body).toBe(
-      "- [ ] Root\n  - [ ] Focused child\n  - [ ] First\n  - [ ] Second\n  - [ ] Third",
-    );
-    expect(third.notes.sessions[0].body).toContain("  - [ ] First");
-    expect(third.notes.sessions[0].body).toContain("  - [ ] Second");
-    expect(third.notes.sessions[0].body).toContain("  - [ ] Third");
+      "New sibling",
+      "--due",
+      "2026-03-12 00:00",
+      "--after",
+      "0",
+      "1",
+    ]);
   });
 });
 
 describe("addTodoBeforeInNotes", () => {
-  it("inserts a new task before the given todo and returns updated notes and nextBeforeTodo", async () => {
-    const body = "- [ ] First\n- [ ] Second\n- [ ] Third";
-    const notes = makeNotes(body);
-    const beforeTodo: Todo = {
-      rawLine: "- [ ] Second",
-      text: "Second",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 1,
+  it("inserts with --before and returns the anchor at its new position", async () => {
+    const anchor = makeTodo(1, "Second");
+    showOutput = {
+      notes,
+      todos: [
+        makeTodo(0, "First"),
+        makeTodo(1, "New task"),
+        makeTodo(2, "Second"),
+      ],
+      focusedKey: "0:0",
     };
 
-    const result = await addTodoBeforeInNotes(
-      prefs,
-      "my-project",
-      notes,
-      beforeTodo,
-      "New task",
-    );
+    const result = await addTodoBeforeInNotes(prefs, "p", notes, anchor, "New task");
 
-    expect(result.notes.sessions[0].body).toBe(
-      "- [ ] First\n- [ ] New task\n- [ ] Second\n- [ ] Third",
-    );
-    expect(result.nextBeforeTodo.rawLine).toBe("- [ ] Second");
-    expect(result.nextBeforeTodo.sessionIndex).toBe(0);
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "add", "p", "New task", "--before", "0", "1"],
+    ]);
     expect(result.nextBeforeTodo.lineIndex).toBe(2);
-  });
-
-  it("chaining: second add uses returned notes so first task is preserved", async () => {
-    const body = "- [ ] Anchor";
-    const notes = makeNotes(body);
-    const anchor: Todo = {
-      rawLine: "- [ ] Anchor",
-      text: "Anchor",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    const first = await addTodoBeforeInNotes(
-      prefs,
-      "p",
-      notes,
-      anchor,
-      "First added",
-    );
-    expect(first.notes.sessions[0].body).toBe(
-      "- [ ] First added\n- [ ] Anchor",
-    );
-
-    const second = await addTodoBeforeInNotes(
-      prefs,
-      "p",
-      first.notes,
-      first.nextBeforeTodo,
-      "Second added",
-    );
-    expect(second.notes.sessions[0].body).toBe(
-      "- [ ] First added\n- [ ] Second added\n- [ ] Anchor",
-    );
-  });
-
-  it("adds tasks in sequence (1, then 2, then 3) before the anchor", async () => {
-    const body = "- [ ] Anchor";
-    const notes = makeNotes(body);
-    const anchor: Todo = {
-      rawLine: "- [ ] Anchor",
-      text: "Anchor",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    const first = await addTodoBeforeInNotes(prefs, "p", notes, anchor, "1");
-    expect(first.notes.sessions[0].body).toBe("- [ ] 1\n- [ ] Anchor");
-
-    const second = await addTodoBeforeInNotes(
-      prefs,
-      "p",
-      first.notes,
-      first.nextBeforeTodo,
-      "2",
-    );
-    expect(second.notes.sessions[0].body).toBe(
-      "- [ ] 1\n- [ ] 2\n- [ ] Anchor",
-    );
-
-    const third = await addTodoBeforeInNotes(
-      prefs,
-      "p",
-      second.notes,
-      second.nextBeforeTodo,
-      "3",
-    );
-    expect(third.notes.sessions[0].body).toBe(
-      "- [ ] 1\n- [ ] 2\n- [ ] 3\n- [ ] Anchor",
-    );
-  });
-});
-
-describe("updateDueDateInNotes", () => {
-  it("updates inline due when setting due", async () => {
-    const body = "- [ ] Parent\n  - [ ] Child due: 2026-03-11 00:00";
-    const notes = makeNotes(body);
-    const child: Todo = {
-      rawLine: "  - [ ] Child due: 2026-03-11 00:00",
-      text: "Child",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 1,
-      dueDate: "2026-03-11 00:00",
-    };
-
-    await updateDueDateInNotes(prefs, "p", notes, child, "2026-03-15 00:00");
-
-    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
-    expect(lastCall).toBeDefined();
-    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
-    expect(written.sessions[0].body).toContain(
-      "  - [ ] Child due: 2026-03-15 00:00",
-    );
-    expect((written.sessions[0].body.match(/due:/g) ?? []).length).toBe(1);
-  });
-
-  it("removes inline due when clearing", async () => {
-    const body = "- [ ] Task due: 2026-03-11 00:00";
-    const notes = makeNotes(body);
-    const todo: Todo = {
-      rawLine: "- [ ] Task due: 2026-03-11 00:00",
-      text: "Task",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-      dueDate: "2026-03-11 00:00",
-    };
-
-    await updateDueDateInNotes(prefs, "p", notes, todo, null);
-
-    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
-    expect(lastCall).toBeDefined();
-    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
-    expect(written.sessions[0].body).toBe("- [ ] Task");
+    expect(result.nextBeforeTodo.text).toBe("Second");
   });
 });
 
 describe("addTodoAsChildInNotes", () => {
-  beforeEach(() => {
-    vi.mocked(runPmWithStdin).mockClear();
+  it("inserts with --child (pm focuses the new child)", async () => {
+    await addTodoAsChildInNotes(prefs, "p", notes, makeTodo(0, "Parent"), "Child task");
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "add", "p", "Child task", "--child", "0", "0"],
+    ]);
+  });
+});
+
+describe("toggleAllTodosInNotes", () => {
+  it("completes each open todo without advancing focus", async () => {
+    const todos = [
+      makeTodo(0, "One"),
+      makeTodo(1, "Two", { checked: true }),
+      makeTodo(2, "Three"),
+    ];
+    await toggleAllTodosInNotes(prefs, "p", notes, todos);
+    expect(writeCalls()).toEqual([
+      ["notes", "todo", "complete", "p", "0", "0", "--no-advance"],
+      ["notes", "todo", "complete", "p", "0", "2", "--no-advance"],
+    ]);
+  });
+});
+
+describe("stripInlineDueFromText", () => {
+  it("strips a canonical due and focus marker", () => {
+    expect(stripInlineDueFromText("Task due: 2026-03-15 09:00 @")).toBe("Task");
   });
 
-  it("inserts child under parent and sets focus marker on new child", async () => {
-    const body = "- [ ] Parent";
-    const notes = makeNotes(body);
-    const parentTodo: Todo = {
-      rawLine: "- [ ] Parent",
-      text: "Parent",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    await addTodoAsChildInNotes(prefs, "p", notes, parentTodo, "Child task");
-
-    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
-    expect(lastCall).toBeDefined();
-    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
-    expect(written.sessions[0].body).toBe("- [ ] Parent\n  - [ ] Child task @");
+  it("strips a legacy due written after the focus marker", () => {
+    expect(stripInlineDueFromText("Task @ due: 2026-03-15 09:00")).toBe("Task");
   });
 
-  it("strips focus from parent when adding child", async () => {
-    const body = "- [ ] Parent @\n  - [ ] Sibling";
-    const notes = makeNotes(body);
-    const parentTodo: Todo = {
-      rawLine: "- [ ] Parent @",
-      text: "Parent",
-      checked: false,
-      context: "",
-      sessionIndex: 0,
-      lineIndex: 0,
-    };
-
-    await addTodoAsChildInNotes(prefs, "p", notes, parentTodo, "New child");
-
-    const lastCall = vi.mocked(runPmWithStdin).mock.calls.at(-1);
-    expect(lastCall).toBeDefined();
-    const written = JSON.parse(lastCall![3] as string) as ProjectNotes;
-    expect(written.sessions[0].body).toContain("- [ ] Parent\n");
-    expect(written.sessions[0].body).toContain("  - [ ] New child @");
+  it("leaves plain text alone", () => {
+    expect(stripInlineDueFromText("Email bob@example.com")).toBe(
+      "Email bob@example.com",
+    );
   });
 });

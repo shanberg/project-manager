@@ -39,6 +39,15 @@ enum PMFiles {
         return name.isEmpty ? nil : name
     }
 
+    /// The project folder's path from a project key "basePath:name" — the base and the folder name
+    /// rejoined. Used to reveal a project in the Finder without re-scanning the projects folders.
+    static func projectPath(fromKey key: String) -> String? {
+        guard let idx = key.firstIndex(of: ":"), let name = projectName(fromKey: key) else { return nil }
+        let base = String(key[key.startIndex..<idx])
+        guard !base.isEmpty else { return nil }
+        return (base as NSString).appendingPathComponent(name)
+    }
+
     // MARK: recent-projects.json — [ { "projectKey", "name" } ], most-recent first, capped at 10
 
     struct RecentProject: Codable, Equatable {

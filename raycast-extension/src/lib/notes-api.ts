@@ -1,6 +1,13 @@
 /**
  * Notes API via pm CLI (pm notes show / pm notes write).
  * Types match Swift PmLib JSON output.
+ *
+ * Task-line edits (add / due / text / wrap / complete / undo / focus) all go through
+ * `pm notes todo …`, which owns the on-disk task format: the canonical `<text> due: <date> @`
+ * ordering, the single focus marker, and format-preserving line splicing. Doing that surgery here
+ * instead would mean a second implementation of the format — and a full-document rewrite via
+ * `pm notes write`, which drops frontmatter and any section the model doesn't capture. `writeNotes`
+ * is therefore only for the detail sections (summary/problem/goals/approach/links/learnings).
  */
 
 import {
@@ -33,8 +40,6 @@ export interface ProjectNotes {
   learnings: string[];
   sessions: Session[];
 }
-
-export type FocusTarget = { rawLine: string };
 
 export interface Todo {
   text: string;
@@ -120,12 +125,20 @@ export function getNextDueForProject(todos: Todo[]): string | null {
   );
 }
 
+/** A trailing inline `due: <date>`, optionally followed by the focus marker. */
+const INLINE_DUE_SUFFIX =
+  /\s+due:\s*(?:\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?:\s*@)?$/;
+
+/**
+ * Display helper: drop a trailing inline `due:` (and focus marker) from task text. `pm notes show`
+ * already returns text with both stripped — this is for raw lines and for text carrying the tokens
+ * in either order, so a legacy `<text> @ due: <date>` line still renders as just its text.
+ */
 export function stripInlineDueFromText(text: string): string {
   return text
-    .replace(
-      /\s+due:\s*(?:\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?:\s*@)?$/,
-      "",
-    )
+    .replace(INLINE_DUE_SUFFIX, "")
+    .replace(/\s+@$/, "")
+    .replace(INLINE_DUE_SUFFIX, "")
     .trimEnd();
 }
 
@@ -217,6 +230,28 @@ export async function writeNotes(
   if (code !== 0) throw new Error(stderr || "pm notes write failed");
 }
 
+/** Position of a todo as pm indexes them: session, then task line within that session. */
+function todoPosition(todo: Todo): { si: string; li: string } {
+  return { si: String(todo.sessionIndex ?? 0), li: String(todo.lineIndex ?? 0) };
+}
+
+/** Run a `pm notes todo <sub> …` command. Throws with the CLI's own message on failure. */
+async function runTodoCommand(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  sub: string,
+  args: string[],
+): Promise<void> {
+  const { stderr, code } = await runPmWithPrefs(prefs, [
+    "notes",
+    "todo",
+    sub,
+    ...args,
+  ]);
+  if (code !== 0) {
+    throw new Error(stderr.trim() || `pm notes todo ${sub} failed`);
+  }
+}
+
 /** Complete a todo and its descendants via pm notes todo complete. */
 async function completeTodoViaCli(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
@@ -224,19 +259,49 @@ async function completeTodoViaCli(
   todo: Todo,
   advanceFocus: boolean,
 ): Promise<void> {
-  const si = todo.sessionIndex ?? 0;
-  const li = todo.lineIndex ?? 0;
-  const args = [
-    "notes",
-    "todo",
-    "complete",
-    projectName,
-    String(si),
-    String(li),
-  ];
+  const { si, li } = todoPosition(todo);
+  const args = [projectName, si, li];
   if (!advanceFocus) args.push("--no-advance");
-  const { stderr, code } = await runPmWithPrefs(prefs, args);
-  if (code !== 0) throw new Error(stderr || "pm notes todo complete failed");
+  await runTodoCommand(prefs, "complete", args);
+}
+
+/**
+ * Insert a task via `pm notes todo add` and return the notes as they are on disk afterwards, plus
+ * the todo now sitting at `resultIndex` — the caller's next anchor. pm inserts a `before` task into
+ * the anchor's own slot (pushing the anchor down one) and an `after`/`child` task into the slot right
+ * below it, so the caller can name which of the two it wants back.
+ */
+async function insertTodoViaCli(
+  prefs: PreferenceValues,
+  projectName: string,
+  anchor: Todo,
+  text: string,
+  dueDate: string | null | undefined,
+  position: "before" | "after" | "child",
+  resultIndex: (anchorLineIndex: number) => number,
+): Promise<{ notes: ProjectNotes; todo: Todo }> {
+  const { si, li } = todoPosition(anchor);
+  const args = [projectName, text];
+  if (dueDate) args.push("--due", dueDate);
+  args.push(`--${position}`, si, li);
+  await runTodoCommand(prefs, "add", args);
+
+  const data = await getNotes(prefs, projectName);
+  const wantedSession = anchor.sessionIndex ?? 0;
+  const wantedLine = resultIndex(anchor.lineIndex ?? 0);
+  const found = data.todos.find(
+    (t) =>
+      (t.sessionIndex ?? 0) === wantedSession &&
+      (t.lineIndex ?? 0) === wantedLine,
+  );
+  return {
+    notes: data.notes,
+    todo: found ?? {
+      ...anchor,
+      sessionIndex: wantedSession,
+      lineIndex: wantedLine,
+    },
+  };
 }
 
 /** Get notes file path via pm notes path. */
@@ -272,408 +337,151 @@ export async function toggleTodoInNotes(
   }
 }
 
-/** Toggle multiple todos (all to [x]) and write back. */
+/** Complete every open todo in the list, leaving focus where it is. Uses CLI. */
 export async function toggleAllTodosInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todos: Todo[],
 ): Promise<void> {
-  let updated = notes;
+  // Completing a task also completes its descendants, and checking a line never shifts any line
+  // index — so the positions captured before the loop stay valid, and a task already completed by an
+  // earlier parent is simply a no-op.
   for (const todo of todos) {
     if (todo.checked) continue;
-    const newLine = todo.rawLine.replace(/\[ \]/, "[x]");
-    updated = replaceTodoRawLineInNotes(updated, todo.rawLine, newLine);
+    await completeTodoViaCli(prefs, projectName, todo, false);
   }
-  await writeNotes(prefs, projectName, updated);
 }
 
-const TODO_LINE_REGEX = /^\s*-\s+\[([ xX])\]\s+(.*)$/;
-
-/** List-item prefix (indent + "- ") from a raw task line. Used so new tasks match the anchor's hierarchy level. */
-function getListPrefix(rawLine: string): string {
-  return rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
-}
-
-function replaceTodoRawLineInNotes(
-  notes: ProjectNotes,
-  oldLine: string,
-  newLine: string,
-): ProjectNotes {
-  const sessions = notes.sessions.map((s) =>
-    s.body.includes(oldLine)
-      ? { ...s, body: s.body.replace(oldLine, newLine) }
-      : s,
-  );
-  return { ...notes, sessions };
-}
-
-/** Replace the task at (sessionIndex, lineIndex) with newLine. Use when rawLine is ambiguous (duplicates). */
-function replaceTodoAtPositionInNotes(
-  notes: ProjectNotes,
-  sessionIndex: number,
-  lineIndex: number,
-  newLine: string,
-): ProjectNotes {
-  const session = notes.sessions[sessionIndex];
-  if (!session) return notes;
-  const lines = session.body.split(/\r?\n/);
-  let taskCount = 0;
-  const newLines = lines.map((line) => {
-    if (!TODO_LINE_REGEX.test(line)) return line;
-    if (taskCount === lineIndex) {
-      taskCount++;
-      return newLine;
-    }
-    taskCount++;
-    return line;
-  });
-  const newBody = newLines.join("\n");
-  const sessions = notes.sessions.map((s, i) =>
-    i === sessionIndex ? { ...s, body: newBody } : s,
-  );
-  return { ...notes, sessions };
-}
-
-/** Set or remove due date on a task. Due is stored inline at end of the task line. */
+/** Set or remove the inline due date on a task. Uses CLI. */
 export async function updateDueDateInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
   dueDate: string | null,
 ): Promise<void> {
-  const si = todo.sessionIndex ?? 0;
-  const session = notes.sessions[si];
-  if (!session) return;
-  const lines = session.body.split(/\r?\n/);
-  let taskCount = 0;
-  let taskLineIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (TODO_LINE_REGEX.test(lines[i])) {
-      if (taskCount === (todo.lineIndex ?? 0)) {
-        taskLineIdx = i;
-        break;
-      }
-      taskCount++;
-    }
-  }
-  if (taskLineIdx < 0) return;
-
-  const line = lines[taskLineIdx];
-  const focusMarker = line.endsWith(" @") ? " @" : "";
-  const withoutFocus = focusMarker ? line.slice(0, -focusMarker.length) : line;
-  const baseLine = withoutFocus.replace(/\s+due:\s*.+$/, "").trimEnd();
-  const newBase = `${baseLine}${focusMarker}`;
-
-  const hasDue = /\s+due:\s*.+$/.test(line);
-  if (!dueDate && !hasDue) return;
-
-  const newLine = dueDate ? `${newBase} due: ${dueDate}` : newBase;
-  const updated = replaceTodoAtPositionInNotes(notes, si, taskLineIdx, newLine);
-  await writeNotes(prefs, projectName, updated);
+  const { si, li } = todoPosition(todo);
+  await runTodoCommand(prefs, "due", [
+    projectName,
+    si,
+    li,
+    dueDate ?? "--clear",
+  ]);
 }
 
-/** Add a todo to today's session. Creates today's session if missing. Sets focus to the new task. Optional dueDate is stored inline on the task line. */
+/** Add a todo to today's session (creating it if missing) and focus it. Uses CLI. */
 export async function addTodoToTodaySession(
   prefs: PreferenceValues,
   projectName: string,
   text: string,
   dueDate?: string | null,
 ): Promise<void> {
-  const data = await getNotes(prefs, projectName);
-  const notes = data.notes;
-  const today = formatSessionDate(new Date());
-  let sessions = [...notes.sessions];
-  const todayIdx = sessions.findIndex((s) => s.date === today);
-  if (todayIdx < 0) {
-    await runPmWithPrefs(prefs, ["notes", "session", "add", projectName, ""]);
-    const refreshed = await getNotes(prefs, projectName);
-    sessions = refreshed.notes.sessions;
-  }
-  const idx = todayIdx >= 0 ? todayIdx : 0;
-  const session = sessions[idx];
-  const dueSuffix = dueDate ? ` due: ${dueDate}` : "";
-  const newBody = session.body
-    ? `${session.body}\n- [ ] ${text}${dueSuffix}`
-    : `- [ ] ${text}${dueSuffix}`;
-  const updatedSessions = sessions.map((s, i) =>
-    i === idx ? { ...s, body: newBody } : s,
-  );
-  let updated = { ...notes, sessions: updatedSessions };
-  const newLine = `- [ ] ${text}`;
-  updated = applyFocusToTodoInNotes(updated, { rawLine: newLine });
-  await writeNotes(prefs, projectName, updated);
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return;
+  const args = [projectName, trimmed];
+  if (dueDate) args.push("--due", dueDate);
+  await runTodoCommand(prefs, "add", args);
 }
 
-/** Add a todo line before the given todo in notes. Tasks are inserted in sequence (1, then 2, then …) before the anchor. New tasks use the same hierarchy level (indent) as the anchor. Optional dueDate is stored inline on the task line. Returns updated notes and the anchor at its new position (for chaining "Add Another"). */
+/** Add a todo before the given todo, at the same hierarchy level. Uses CLI. Returns the notes as
+ * written and the anchor at its new position (for chaining "Add Another"). */
 export async function addTodoBeforeInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   beforeTodo: Todo,
   text: string,
   dueDate?: string | null,
 ): Promise<{ notes: ProjectNotes; nextBeforeTodo: Todo }> {
-  const prefix = getListPrefix(beforeTodo.rawLine);
-  const dueSuffix = dueDate ? ` due: ${dueDate}` : "";
-  const newLine = `${prefix}[ ] ${text}${dueSuffix}`;
-  const inserted = `${newLine}\n${beforeTodo.rawLine}`;
-  const pos =
-    typeof beforeTodo.sessionIndex === "number" &&
-    typeof beforeTodo.lineIndex === "number"
-      ? {
-          sessionIndex: beforeTodo.sessionIndex,
-          lineIndex: beforeTodo.lineIndex,
-        }
-      : findTodoPositionInNotes(notes, beforeTodo.rawLine);
-  const updated = pos
-    ? replaceTodoAtPositionInNotes(
-        notes,
-        pos.sessionIndex,
-        pos.lineIndex,
-        inserted,
-      )
-    : replaceTodoRawLineInNotes(notes, beforeTodo.rawLine, inserted);
-  await writeNotes(prefs, projectName, updated);
-  const nextBeforeTodo: Todo =
-    typeof beforeTodo.sessionIndex === "number" &&
-    typeof beforeTodo.lineIndex === "number"
-      ? {
-          ...beforeTodo,
-          lineIndex: beforeTodo.lineIndex + 1,
-          rawLine: beforeTodo.rawLine,
-        }
-      : (() => {
-          const p = findTodoPositionInNotes(updated, beforeTodo.rawLine);
-          return p
-            ? {
-                ...beforeTodo,
-                sessionIndex: p.sessionIndex,
-                lineIndex: p.lineIndex,
-                rawLine: beforeTodo.rawLine,
-              }
-            : beforeTodo;
-        })();
-  return { notes: updated, nextBeforeTodo };
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    const data = await getNotes(prefs, projectName);
+    return { notes: data.notes, nextBeforeTodo: beforeTodo };
+  }
+  const { notes, todo } = await insertTodoViaCli(
+    prefs,
+    projectName,
+    beforeTodo,
+    trimmed,
+    dueDate,
+    "before",
+    (anchorLine) => anchorLine + 1,
+  );
+  return { notes, nextBeforeTodo: todo };
 }
 
-/** Add a todo line after the given todo in notes. Tasks are inserted in sequence (each after the previous). New tasks use the same hierarchy level (indent) as the anchor. Optional dueDate is stored inline on the task line. Returns updated notes and the inserted todo (for chaining "Add Another"). */
+/** Add a todo after the given todo, at the same hierarchy level. Uses CLI. Returns the notes as
+ * written and the inserted todo (for chaining "Add Another"). */
 export async function addTodoAfterInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   afterTodo: Todo,
   text: string,
   dueDate?: string | null,
 ): Promise<{ notes: ProjectNotes; insertedTodo: Todo }> {
-  const prefix = getListPrefix(afterTodo.rawLine);
-  const dueSuffix = dueDate ? ` due: ${dueDate}` : "";
-  const newLine = `${prefix}[ ] ${text}${dueSuffix}`;
-  const inserted = `${afterTodo.rawLine}\n${newLine}`;
-  const pos =
-    typeof afterTodo.sessionIndex === "number" &&
-    typeof afterTodo.lineIndex === "number"
-      ? { sessionIndex: afterTodo.sessionIndex, lineIndex: afterTodo.lineIndex }
-      : findTodoPositionInNotes(notes, afterTodo.rawLine);
-  const updated = pos
-    ? replaceTodoAtPositionInNotes(
-        notes,
-        pos.sessionIndex,
-        pos.lineIndex,
-        inserted,
-      )
-    : replaceTodoRawLineInNotes(notes, afterTodo.rawLine, inserted);
-  await writeNotes(prefs, projectName, updated);
-  const insertedRawLine = `${prefix}[ ] ${text}`;
-  const insertedTodo: Todo =
-    typeof afterTodo.sessionIndex === "number" &&
-    typeof afterTodo.lineIndex === "number"
-      ? {
-          rawLine: insertedRawLine,
-          sessionIndex: afterTodo.sessionIndex,
-          lineIndex: afterTodo.lineIndex + 1,
-          text,
-          checked: false,
-          context: "",
-        }
-      : (() => {
-          const p = findTodoPositionInNotes(updated, insertedRawLine);
-          return p
-            ? {
-                rawLine: insertedRawLine,
-                sessionIndex: p.sessionIndex,
-                lineIndex: p.lineIndex,
-                text,
-                checked: false,
-                context: "",
-              }
-            : { rawLine: insertedRawLine, text, checked: false, context: "" };
-        })();
-  return { notes: updated, insertedTodo };
-}
-
-function normalizeLineForMatch(line: string): string {
-  return line.replace(/\r/g, "").trimEnd();
-}
-
-function findTodoPositionInNotes(
-  notes: ProjectNotes,
-  rawLine: string,
-): { sessionIndex: number; lineIndex: number } | null {
-  const rawNorm = normalizeLineForMatch(rawLine);
-  for (let si = 0; si < notes.sessions.length; si++) {
-    const lines = notes.sessions[si].body.split(/\r?\n/);
-    let taskCount = 0;
-    for (const line of lines) {
-      if (TODO_LINE_REGEX.test(line)) {
-        if (line === rawLine || normalizeLineForMatch(line) === rawNorm) {
-          return { sessionIndex: si, lineIndex: taskCount };
-        }
-        taskCount++;
-      }
-    }
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    const data = await getNotes(prefs, projectName);
+    return { notes: data.notes, insertedTodo: afterTodo };
   }
-  return null;
+  const { notes, todo } = await insertTodoViaCli(
+    prefs,
+    projectName,
+    afterTodo,
+    trimmed,
+    dueDate,
+    "after",
+    (anchorLine) => anchorLine + 1,
+  );
+  return { notes, insertedTodo: todo };
 }
 
-/** Add a todo as a child of the given parent (insert right after parent, indent + 2 spaces). Sets focus to the new child. Optional dueDate is stored inline on the task line. */
+/** Add a todo as a child of the given parent (one indent level deeper) and focus it. Uses CLI. */
 export async function addTodoAsChildInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   parentTodo: Todo,
   text: string,
   dueDate?: string | null,
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0) return;
-  const parentPrefix = parentTodo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
-  const childPrefix = "  " + parentPrefix;
-  const dueSuffix = dueDate ? ` due: ${dueDate}` : "";
-  const newTaskLine = `${childPrefix}[ ] ${trimmed}`;
-  const newLine = newTaskLine + dueSuffix;
-  const inserted = `${parentTodo.rawLine}\n${newLine}`;
-  const pos =
-    typeof parentTodo.sessionIndex === "number" &&
-    typeof parentTodo.lineIndex === "number"
-      ? {
-          sessionIndex: parentTodo.sessionIndex,
-          lineIndex: parentTodo.lineIndex,
-        }
-      : findTodoPositionInNotes(notes, parentTodo.rawLine);
-  let updated = pos
-    ? replaceTodoAtPositionInNotes(
-        notes,
-        pos.sessionIndex,
-        pos.lineIndex,
-        inserted,
-      )
-    : replaceTodoRawLineInNotes(notes, parentTodo.rawLine, inserted);
-  const newChildPos =
-    typeof parentTodo.sessionIndex === "number" &&
-    typeof parentTodo.lineIndex === "number"
-      ? {
-          sessionIndex: parentTodo.sessionIndex,
-          lineIndex: parentTodo.lineIndex + 1,
-        }
-      : findTodoPositionInNotes(updated, newTaskLine);
-  if (newChildPos) {
-    updated = applyFocusToTodoInNotes(updated, { rawLine: newTaskLine });
-  }
-  await writeNotes(prefs, projectName, updated);
+  const { si, li } = todoPosition(parentTodo);
+  const args = [projectName, trimmed];
+  if (dueDate) args.push("--due", dueDate);
+  args.push("--child", si, li);
+  await runTodoCommand(prefs, "add", args);
 }
 
-/** Edit a todo's text in place; preserves indent, checkbox state, and focus marker. Returns updated notes for chaining (e.g. with updateDueDateInNotes). */
+/** Edit a todo's text in place; indent, checkbox state, due, and focus marker are preserved. Uses CLI. */
 export async function editTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
   newText: string,
-): Promise<ProjectNotes> {
+): Promise<void> {
   const trimmed = newText.trim();
-  if (trimmed.length === 0) return notes;
-  const prefix = todo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
-  const checkMatch = todo.rawLine.match(/\[([ xX])\]/);
-  const checkbox = checkMatch ? checkMatch[1] : " ";
-  let newLine = `${prefix}[${checkbox}] ${trimmed}`;
-  if (todo.isFocused) {
-    newLine += FOCUS_MARKER;
-  }
-  const sessionIndex = todo.sessionIndex ?? 0;
-  const lineIndex = todo.lineIndex ?? 0;
-  const updated = replaceTodoAtPositionInNotes(
-    notes,
-    sessionIndex,
-    lineIndex,
-    newLine,
-  );
-  await writeNotes(prefs, projectName, updated);
-  return updated;
+  if (trimmed.length === 0) return;
+  const { si, li } = todoPosition(todo);
+  await runTodoCommand(prefs, "text", [projectName, si, li, trimmed]);
 }
 
-/** Wrap the given todo in a new parent task (insert parent above, indent current by 2 spaces); focus stays on the wrapped task. */
+/** Wrap the given todo (and its subtree) in a new parent task; focus stays on the wrapped task. Uses CLI. */
 export async function wrapTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   todo: Todo,
   newParentText: string,
 ): Promise<void> {
   const trimmed = newParentText.trim();
   if (trimmed.length === 0) return;
-  const prefix = todo.rawLine.match(/^(\s*-\s+)/)?.[1] ?? "- ";
-  const parentLine = `${prefix}[ ] ${trimmed}`;
-  const childLine = "  " + todo.rawLine;
-  const sessionIndex = todo.sessionIndex ?? 0;
-  const lineIndex = todo.lineIndex ?? 0;
-  const updated = replaceTodoAtPositionInNotes(
-    notes,
-    sessionIndex,
-    lineIndex,
-    `${parentLine}\n${childLine}`,
-  );
-  await writeNotes(prefs, projectName, updated);
-}
-
-const FOCUS_MARKER = " @";
-
-/** Pure: return notes with " @" only on the given todo's line. Matches by content (rawLine) not position. */
-function applyFocusToTodoInNotes(
-  notes: ProjectNotes,
-  todo: FocusTarget | null,
-): ProjectNotes {
-  if (!todo) {
-    const sessions = notes.sessions.map((session) => {
-      const lines = session.body.split(/\r?\n/);
-      const newLines = lines.map((line) =>
-        TODO_LINE_REGEX.test(line) && line.endsWith(FOCUS_MARKER)
-          ? line.slice(0, -FOCUS_MARKER.length)
-          : line,
-      );
-      return { ...session, body: newLines.join("\n") };
-    });
-    return { ...notes, sessions };
-  }
-  const targetNorm = normalizeLineForMatch(
-    todo.rawLine.endsWith(FOCUS_MARKER)
-      ? todo.rawLine.slice(0, -FOCUS_MARKER.length)
-      : todo.rawLine,
-  );
-  const sessions = notes.sessions.map((session) => {
-    const lines = session.body.split(/\r?\n/);
-    const newLines = lines.map((line) => {
-      if (!TODO_LINE_REGEX.test(line)) return line;
-      const stripped = line.endsWith(FOCUS_MARKER)
-        ? line.slice(0, -FOCUS_MARKER.length)
-        : line;
-      const isTarget = normalizeLineForMatch(stripped) === targetNorm;
-      return isTarget ? stripped + FOCUS_MARKER : stripped;
-    });
-    return { ...session, body: newLines.join("\n") };
-  });
-  return { ...notes, sessions };
+  const { si, li } = todoPosition(todo);
+  await runTodoCommand(prefs, "wrap", [projectName, si, li, trimmed]);
 }
 
 /** Move the single " @" focus marker to the given todo's line. Uses CLI. */
@@ -683,17 +491,8 @@ export async function setFocusToTodoInNotes(
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const si = todo.sessionIndex ?? 0;
-  const li = todo.lineIndex ?? 0;
-  const { stderr, code } = await runPmWithPrefs(prefs, [
-    "notes",
-    "todo",
-    "focus",
-    projectName,
-    String(si),
-    String(li),
-  ]);
-  if (code !== 0) throw new Error(stderr || "pm notes todo focus failed");
+  const { si, li } = todoPosition(todo);
+  await runTodoCommand(prefs, "focus", [projectName, si, li]);
 }
 
 /** Complete the now task and its descendants, move focus to next open task. Uses CLI. See docs/task-focus-flow.md for how next focus is chosen. */
@@ -714,17 +513,8 @@ export async function undoCompleteInNotes(
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const si = todo.sessionIndex ?? 0;
-  const li = todo.lineIndex ?? 0;
-  const { stderr, code } = await runPmWithPrefs(prefs, [
-    "notes",
-    "todo",
-    "undo",
-    projectName,
-    String(si),
-    String(li),
-  ]);
-  if (code !== 0) throw new Error(stderr || "pm notes todo undo failed");
+  const { si, li } = todoPosition(todo);
+  await runTodoCommand(prefs, "undo", [projectName, si, li]);
 }
 
 /** Update sections (summary, problem, goals, approach, links, learnings). */

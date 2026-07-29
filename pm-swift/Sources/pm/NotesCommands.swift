@@ -204,6 +204,26 @@ func runNotesTodoDue(args: [String]) {
     } catch { fail(error) }
 }
 
+func runNotesTodoText(args: [String]) {
+    guard args.count >= 4, let sessionIndex = Int(args[1]), let lineIndex = Int(args[2]) else {
+        stderr("Usage: pm notes todo text <project> <sessionIndex> <lineIndex> <text>")
+        exit(1)
+    }
+    do {
+        try setTodoText(project: args[0], sessionIndex: sessionIndex, lineIndex: lineIndex, text: args[3])
+    } catch { fail(error) }
+}
+
+func runNotesTodoWrap(args: [String]) {
+    guard args.count >= 4, let sessionIndex = Int(args[1]), let lineIndex = Int(args[2]) else {
+        stderr("Usage: pm notes todo wrap <project> <sessionIndex> <lineIndex> <parentText>")
+        exit(1)
+    }
+    do {
+        try wrapTodo(project: args[0], sessionIndex: sessionIndex, lineIndex: lineIndex, text: args[3])
+    } catch { fail(error) }
+}
+
 func runNotes(args: [String]) {
     guard let sub = args.first else {
         stderr("Usage: pm notes <path|create|show|write|current-day|session|todo> ...")
@@ -222,7 +242,7 @@ func runNotes(args: [String]) {
         runNotesCurrentDay()
     case "todo":
         guard args.count >= 3 else {
-            stderr("Usage: pm notes todo <complete|focus|undo> <project> <sessionIndex> <lineIndex> [--no-advance for complete]")
+            stderr("Usage: pm notes todo <complete|focus|undo|add|due|text|wrap> <project> <sessionIndex> <lineIndex> [--no-advance for complete]")
             exit(1)
         }
         let sub = args[1]
@@ -238,8 +258,12 @@ func runNotes(args: [String]) {
             runNotesTodoAdd(args: todoArgs)
         case "due":
             runNotesTodoDue(args: todoArgs)
+        case "text":
+            runNotesTodoText(args: todoArgs)
+        case "wrap":
+            runNotesTodoWrap(args: todoArgs)
         default:
-            stderr("Usage: pm notes todo <complete|focus|undo|add|due> ...")
+            stderr("Usage: pm notes todo <complete|focus|undo|add|due|text|wrap> ...")
             exit(1)
         }
     case "session":

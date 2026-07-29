@@ -46,5 +46,18 @@
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>PM Task Selection</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.stuarthanberg.pm.task-keys</string>
+		</dict>
+	</array>
 </dict>
 </plist>

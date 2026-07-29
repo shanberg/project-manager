@@ -1,0 +1,413 @@
+import SwiftUI
+import AppKit
+
+/// Which projects the sidebar lists, persisted across panel sessions.
+enum ProjectStatusFilter: String {
+    case active, archived, all
+
+    func includes(_ entry: PMStore.ProjectEntry) -> Bool {
+        switch self {
+        case .active: return !entry.isArchived
+        case .archived: return entry.isArchived
+        case .all: return true
+        }
+    }
+}
+
+/// How the sidebar's rows are gathered into sections.
+enum ProjectGrouping: String { case due, domain }
+
+/// How rows are ordered inside a section.
+enum ProjectSortOrder: String {
+    case code, name, recency
+
+    /// Code sorts on the parsed (code, number) pair rather than the folder name, so "H-9" precedes
+    /// "H-10"; name sorts on the name with its code prefix stripped, which is the whole point of having
+    /// both; recency is newest-edited first.
+    func precedes(_ a: PMStore.ProjectEntry, _ b: PMStore.ProjectEntry) -> Bool {
+        switch self {
+        case .code: return (a.code, a.number) < (b.code, b.number)
+        case .name: return a.shortName.localizedStandardCompare(b.shortName) == .orderedAscending
+        case .recency: return a.modified > b.modified
+        }
+    }
+}
+
+/// A due-date section. Cases are declared in the order they're shown, so a project's most urgent work
+/// sits at the top of the list.
+enum DueBucket: String, CaseIterable {
+    case overdue, today, week, later, none
+
+    var title: String {
+        switch self {
+        case .overdue: return "Overdue"
+        case .today: return "Today"
+        case .week: return "Next 7 days"
+        case .later: return "Later"
+        case .none: return "No due date"
+        }
+    }
+
+    /// Bucket a project by its earliest open due date. Projects whose notes haven't been read yet (and
+    /// those with nothing due) land in `.none`.
+    static func of(_ entry: PMStore.ProjectEntry) -> DueBucket {
+        guard let due = entry.nextDue, let days = RelativeDue.dayDelta(due) else { return .none }
+        switch days {
+        case ..<0: return .overdue
+        case 0: return .today
+        case 1...7: return .week
+        default: return .later
+        }
+    }
+}
+
+/// One rendered section: a heading and the rows under it.
+private struct ProjectGroup: Identifiable {
+    let title: String
+    let entries: [PMStore.ProjectEntry]
+    var id: String { title }
+}
+
+/// The panel's optional project sidebar: the projects, in sections, each row carrying the same
+/// completion ring the menubar and the switcher draw plus the project's next task — the switcher menu's
+/// "name — task" line, given room to breathe. Clicking a row focuses that project, so the sidebar is
+/// the always-visible form of the title's switcher menu, for when you're moving between projects rather
+/// than working inside one.
+///
+/// Which projects show, how they're grouped and how they're sorted all live in a menu at the top right
+/// and are persisted. None of them touch the scan: `store.allProjects` is published once in recency
+/// order and re-arranged here, so changing a setting is instant.
+///
+/// The scan itself only runs while something asks for it (see `PMStore.setWantsAllProjects`), so a
+/// hidden sidebar costs nothing. The row for the focused project takes its progress from the live store
+/// rather than the cached scan, so completing a task updates its ring immediately.
+struct ProjectSidebar: View {
+    @ObservedObject var store: PMStore
+    /// The panel header's measured height, so the sidebar's own header bar and rule line up with it.
+    var headerHeight: CGFloat
+    /// The selected projects, owned by `PanelView` so its ⌘C can act on this pane when it holds
+    /// keyboard focus. Selecting a project doesn't switch to it — that's the double-click (or Return).
+    @Binding var selection: Set<String>
+    /// Which pane the panel's keyboard commands drive. Bound to the list itself, so focus follows a
+    /// click into it without anything having to set it by hand.
+    @FocusState.Binding var focusedPane: PanelPane?
+
+    @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
+    @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
+    @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            headerBar
+            Divider()
+            list
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { store.setWantsAllProjects(true) }
+        .onDisappear { store.setWantsAllProjects(false) }
+    }
+
+    /// The projects, as a real `List`.
+    ///
+    /// This was hand-built once — a `ScrollView` of rows with their own hover state, click handling,
+    /// range maths and arrow-key navigation — and every one of those was a worse copy of what `List`
+    /// already does. A native list brings click / ⇧-click / ⌘-click, arrow keys, type-select,
+    /// scrolling (including scrolling the selection into view), the three-state selection highlight
+    /// that dims when the pane or window loses focus, and the accessibility that comes with a real
+    /// table. It's a flat list of selectable rows: exactly what `List` is for.
+    ///
+    /// Only the panel's own dressing is applied on top: the scroll background is dropped so the
+    /// window's glass shows through, and the rows carry their own insets since the panel is narrow.
+    private var list: some View {
+        List(selection: $selection) {
+            ForEach(groups) { group in
+                Section {
+                    ForEach(group.entries) { entry in
+                        ProjectSidebarRow(
+                            entry: entry,
+                            isFocusedProject: entry.projectKey == store.projectKey,
+                            liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
+                        )
+                        .tag(entry.projectKey)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+                        .listRowSeparator(.hidden)
+                    }
+                } header: {
+                    SidebarEyebrow(group.title)
+                }
+            }
+            if groups.isEmpty {
+                Text(store.allProjects.isEmpty ? "No projects" : "None \(status.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .focused($focusedPane, equals: .projects)
+        // Selection is the single click (the list's own); the double click switches the panel to a
+        // project, and the right-click menu acts on whatever was clicked.
+        //
+        // Both hang off the *list*, not the rows. The selection-aware `contextMenu` is the API written
+        // for this: it hands the menu the rows the click applies to — the whole selection when the
+        // click lands inside it, just the clicked row when it doesn't — with AppKit's own highlight
+        // behind it. A per-row `.contextMenu` can't see that and has to work the selection out itself,
+        // which means mutating state from inside a view body: every row would queue its own "select
+        // me", each queued write would rebuild the list, and the rebuild would queue them all again.
+        // For the same reason the double click is `primaryAction:` here rather than a `TapGesture` on
+        // each row, which competed with the click the list needs to select with.
+        .contextMenu(forSelectionType: String.self) { keys in
+            let targets = entries(for: keys)
+            if !targets.isEmpty {
+                ProjectMenu(targets: targets, onActivate: { focusProject($0) })
+            }
+        } primaryAction: { keys in
+            guard keys.count == 1, let entry = entries(for: keys).first else { return }
+            focusProject(entry)
+        }
+    }
+
+    /// The sidebar's own header: a quiet label and the arrange menu, sized to the panel header beside it
+    /// so the two rules meet.
+    private var headerBar: some View {
+        HStack(spacing: 4) {
+            SidebarEyebrow("Projects")
+            Spacer(minLength: 0)
+            arrangeMenu
+        }
+        .padding(.horizontal, 12)
+        // Match the panel header's height exactly (less its own 1pt rule) when it's been measured, so
+        // the sidebar's divider continues the header's; fall back to a sensible height before then.
+        .frame(height: headerHeight > 1 ? headerHeight - 1 : 47)
+    }
+
+    /// Status / grouping / sorting, one submenu each — the sidebar's counterpart to the panel
+    /// header's view-options button, and the shape the Finder's View menu uses for the same job
+    /// ("Sort By ▸"). Three short lists behind their own titles read as three separate decisions;
+    /// flattened into one column they'd run together into eleven items with no visible boundary
+    /// between what filters, what groups, and what orders.
+    ///
+    /// Each submenu holds an inline `Picker`, so its options carry checkmarks and the current value
+    /// is visible one level down rather than being spelled out in the parent row.
+    private var arrangeMenu: some View {
+        Menu {
+            Menu {
+                Picker("Status", selection: $status) {
+                    Label("Active", systemImage: "circle").tag(ProjectStatusFilter.active)
+                    Label("Archived", systemImage: "archivebox").tag(ProjectStatusFilter.archived)
+                    Label("All", systemImage: "square.stack").tag(ProjectStatusFilter.all)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Show", systemImage: "line.3.horizontal.decrease.circle")
+            }
+            Menu {
+                Picker("Group by", selection: $grouping) {
+                    Label("Due", systemImage: "calendar").tag(ProjectGrouping.due)
+                    Label("Domain", systemImage: "folder").tag(ProjectGrouping.domain)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Group By", systemImage: "rectangle.3.group")
+            }
+            Menu {
+                Picker("Sort by", selection: $sortOrder) {
+                    Label("Code", systemImage: "number").tag(ProjectSortOrder.code)
+                    Label("Name", systemImage: "textformat").tag(ProjectSortOrder.name)
+                    Label("Recency", systemImage: "clock").tag(ProjectSortOrder.recency)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Sort By", systemImage: "arrow.up.arrow.down")
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Filter, group & sort projects")
+    }
+
+    /// The projects behind a set of keys, in the store's order. Pure — it's read while a menu is being
+    /// built, so it must not touch any state.
+    private func entries(for keys: Set<String>) -> [PMStore.ProjectEntry] {
+        store.allProjects.filter { keys.contains($0.projectKey) }
+    }
+
+    private func focusProject(_ entry: PMStore.ProjectEntry) {
+        guard entry.projectKey != store.projectKey else { return }
+        store.setFocusedProject(key: entry.projectKey)
+    }
+
+    /// The filtered projects, sorted, then gathered into sections.
+    private var groups: [ProjectGroup] {
+        Self.arranged(store.allProjects, status: status, grouping: grouping, sort: sortOrder)
+    }
+
+    /// Filter, sort, then gather into sections. `Dictionary(grouping:)` preserves the order of the
+    /// values it's handed, so sorting once up front orders every section.
+    private static func arranged(_ projects: [PMStore.ProjectEntry],
+                                 status: ProjectStatusFilter,
+                                 grouping: ProjectGrouping,
+                                 sort: ProjectSortOrder) -> [ProjectGroup] {
+        let sorted = projects
+            .filter { status.includes($0) }
+            .sorted { sort.precedes($0, $1) }
+        switch grouping {
+        case .domain:
+            let byDomain = Dictionary(grouping: sorted, by: \.domain)
+            return byDomain.keys.sorted().map { ProjectGroup(title: $0, entries: byDomain[$0] ?? []) }
+        case .due:
+            let byBucket = Dictionary(grouping: sorted, by: DueBucket.of)
+            return DueBucket.allCases.compactMap { bucket in
+                guard let entries = byBucket[bucket] else { return nil }
+                return ProjectGroup(title: bucket.title, entries: entries)
+            }
+        }
+    }
+}
+
+/// A single project row: completion ring, name, and the project's next task beneath it. The row draws
+/// only its content — selection, hover and focus highlighting all belong to the enclosing `List`,
+/// which gets the active/inactive and emphasized/unemphasized states right for free. The project the
+/// app is currently *on* is marked separately (its name reads semibold), since selection and focus
+/// are different things here. Archived projects (visible under the Archived / All filters) read a
+/// step quieter than active ones.
+private struct ProjectSidebarRow: View {
+    let entry: PMStore.ProjectEntry
+    /// Whether this is the project the panel is currently showing.
+    let isFocusedProject: Bool
+    /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
+    /// other row, which falls back to the warmed values.
+    let liveProgress: (done: Int, total: Int)?
+
+    private var total: Int { liveProgress?.total ?? entry.total }
+    private var done: Int { liveProgress?.done ?? entry.done }
+    private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+
+    /// Every row is this tall whether or not it has a task line.
+    ///
+    /// Not a style choice — a correctness one. The scan paints project names first and fills in each
+    /// project's next task a moment later, so a row that sized to its content would grow from one line
+    /// to two *after* the list had laid out. The table keeps the row rectangles it measured, and from
+    /// then on the highlight it draws under the pointer belongs to a different row than the one you're
+    /// over. A constant height means the rows never move under the mouse, and it gives the list an even
+    /// rhythm besides.
+    private static let height: CGFloat = 32
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            // The ring is a template image, so it takes the row's foreground color, the same way the
+            // menubar recolors it.
+            Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
+                .renderingMode(.template)
+                .opacity(entry.detailsLoaded ? 1 : 0.35)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name)
+                    .font(.system(size: 12, weight: isFocusedProject ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let task = entry.nextTask {
+                    Text(task)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        // Fixed, so a task line arriving mid-scan can't resize the row (see `height`). One-line rows
+        // centre in it rather than riding the top edge.
+        .frame(height: Self.height)
+        // The whole row is the click target, not just its text.
+        .contentShape(Rectangle())
+        // Carve the row out of the panel's window-drag region, or AppKit's drag-tracking loop eats the
+        // mouse-down and the row never registers the click. This has to sit on the row rather than
+        // behind the `List` (where it was): a `List` builds its own scroll and table views, and those
+        // are in front of anything the list's SwiftUI `.background` puts down — so the excluder was
+        // never the view AppKit hit-tested. Inside the row it *is* the deepest view under the pointer.
+        .background(WindowDragExcluder())
+        // Archived projects stay legible but recede, so a mixed ("All") list still reads at a glance.
+        .opacity(entry.isArchived ? 0.6 : 1)
+        .help(helpText)
+        // Two text lines and a ring read as one row, with the tooltip's fuller description as its
+        // label. The list supplies the row's selected state and actions.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(helpText)
+    }
+
+    /// Tooltip: the counts and due date the one-line-per-field row has no room for.
+    private var helpText: String {
+        var parts: [String] = [entry.name]
+        if total > 0 { parts.append("\(done)/\(total)") }
+        if let due = entry.nextDue { parts.append("due \(RelativeDue.short(due))") }
+        if let task = entry.nextTask { parts.append(task) }
+        return parts.joined(separator: "  ·  ")
+    }
+}
+
+/// Right-click actions for the selected projects. Switching is single-target (the panel shows one
+/// project at a time); revealing and copying work on the whole selection, so a multi-select is worth
+/// making. Nothing here is destructive — a project is a folder of the user's own files, and removing
+/// one belongs in the Finder, not in a HUD panel.
+private struct ProjectMenu: View {
+    let targets: [PMStore.ProjectEntry]
+    let onActivate: (PMStore.ProjectEntry) -> Void
+
+    private var isMulti: Bool { targets.count > 1 }
+
+    var body: some View {
+        if let only = targets.first, !isMulti {
+            Button { onActivate(only) } label: {
+                Label("Switch to Project", systemImage: "arrow.right.circle")
+            }
+            Divider()
+        }
+        Button { reveal() } label: {
+            Label(isMulti ? "Reveal \(targets.count) in Finder" : "Reveal in Finder", systemImage: "folder")
+        }
+        Button { copyNames() } label: {
+            Label(isMulti ? "Copy \(targets.count) Names" : "Copy Name", systemImage: "doc.on.doc")
+        }
+        .keyboardShortcut("c", modifiers: .command)
+    }
+
+    /// One Finder window with every selected project's folder highlighted.
+    private func reveal() {
+        let urls = targets
+            .compactMap { PMFiles.projectPath(fromKey: $0.projectKey) }
+            .map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    private func copyNames() {
+        let names = targets.map(\.name).joined(separator: "\n")
+        guard !names.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(names, forType: .string)
+    }
+}
+
+/// An editorial section label: uppercase, letter-spaced, tertiary — the sidebar's echo of the details
+/// brief's eyebrow.
+private struct SidebarEyebrow: View {
+    let title: String
+    init(_ title: String) { self.title = title }
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(0.9)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+    }
+}
+

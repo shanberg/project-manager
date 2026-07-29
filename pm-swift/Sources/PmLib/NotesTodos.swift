@@ -3,42 +3,107 @@ import Foundation
 /// Focus marker: space + @ at end of task line. Only one such line should exist in the notes file.
 private let focusMarkerSuffix = " @"
 
-/// Normalizes session bodies so at most one task line ends with " @". The first such line (by session order, then line order) is kept; all others have " @" stripped.
-public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
-    let todoLinePattern: NSRegularExpression
-    do {
-        todoLinePattern = try NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
-    } catch {
-        return notes
+private let dueInlinePattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?=\s*@|\s*$)"#)
+}()
+
+// MARK: - Task line content
+//
+// Every mutation below decomposes a task line into (list prefix, checkbox, content) and rewrites the
+// content. `TaskContent` is the one place that knows how a content string encodes its text, its
+// inline `due:` and its focus marker — so no caller has to re-derive it with a raw `hasSuffix(" @")`,
+// which silently misreads any line where the two tokens aren't in the canonical order.
+
+/// A task line's content, split into its parts. Canonical storage order is `<text> due: <date> @`,
+/// but a line written by an older or third-party client can carry the two tokens the other way round
+/// (`<text> @ due: <date>`); `split` accepts both so a stray order can never hide the focus marker or
+/// the due from an edit, and `render` always writes the canonical order back — so any line touched by
+/// an edit is repaired in place.
+public struct TaskContent: Equatable {
+    /// The task text, with the due and focus tokens removed.
+    public var text: String
+    /// Inline `due:` value, stored as-is for display. nil when the task has no own due.
+    public var due: String?
+    /// True when this line carries the ` @` focus marker.
+    public var focused: Bool
+
+    public init(text: String, due: String? = nil, focused: Bool = false) {
+        self.text = text
+        self.due = due
+        self.focused = focused
     }
+
+    /// Split a task line's content (everything after the checkbox) into its parts. The focus marker is
+    /// peeled before *and* after the due so either order parses identically.
+    public static func split(_ content: String) -> TaskContent {
+        var rest = content.trimmingCharacters(in: .whitespaces)
+        var focused = false
+        if let stripped = strippingFocusMarker(rest) { rest = stripped; focused = true }
+        var due: String?
+        if let (value, without) = strippingInlineDue(rest) { due = value; rest = without }
+        if let stripped = strippingFocusMarker(rest) { rest = stripped; focused = true }
+        return TaskContent(
+            text: rest.trimmingCharacters(in: .whitespaces),
+            due: (due?.isEmpty == false) ? due : nil,
+            focused: focused
+        )
+    }
+
+    /// Render back to a content string in canonical order: `<text> due: <date> @`.
+    public func render() -> String {
+        var out = text.trimmingCharacters(in: .whitespaces)
+        if let due = due, !due.isEmpty { out += " due: \(due)" }
+        if focused { out += focusMarkerSuffix }
+        return out
+    }
+
+    /// Drop a trailing ` @` (the marker is a separate token — a word ending in "@" isn't one).
+    private static func strippingFocusMarker(_ s: String) -> String? {
+        guard s.hasSuffix(focusMarkerSuffix) else { return nil }
+        return String(s.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Drop a trailing inline `due: <date>`, returning its value and the remaining content.
+    private static func strippingInlineDue(_ s: String) -> (due: String, without: String)? {
+        guard let pattern = dueInlinePattern,
+              let m = pattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let r0 = Range(m.range(at: 0), in: s),
+              let r1 = Range(m.range(at: 1), in: s) else {
+            return nil
+        }
+        let without = String(s[..<r0.lowerBound]) + String(s[r0.upperBound...])
+        return (String(s[r1]), without.trimmingCharacters(in: .whitespaces))
+    }
+}
+
+/// Normalizes session bodies so at most one task line carries the ` @` focus marker. The first such
+/// line (by session order, then line order) keeps it; all others have it stripped. Every task line is
+/// re-rendered in canonical `<text> due: <date> @` order, so a line stored the other way round is
+/// repaired the next time the notes are edited.
+public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
+    guard let pattern = todoLinePattern else { return notes }
     var foundFirst = false
     var outSessions: [Session] = []
     for session in notes.sessions {
         let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var outLines: [String] = []
         for line in lines {
-            guard let m = todoLinePattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+            guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                   let r1 = Range(m.range(at: 1), in: line),
                   let r2 = Range(m.range(at: 2), in: line),
                   let r3 = Range(m.range(at: 3), in: line) else {
                 outLines.append(line)
                 continue
             }
-            var content = String(line[r3])
-            let hasFocus = content.hasSuffix(focusMarkerSuffix)
-            if hasFocus {
+            var content = TaskContent.split(String(line[r3]))
+            if content.focused {
                 if foundFirst {
-                    content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-                    let prefix = String(line[r1])
-                    let check = String(line[r2])
-                    outLines.append("\(prefix)[\(check)] \(content)")
+                    content.focused = false
                 } else {
                     foundFirst = true
-                    outLines.append(line)
                 }
-            } else {
-                outLines.append(line)
             }
+            outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
         }
         let newBody = outLines.joined(separator: "\n")
         outSessions.append(Session(date: session.date, label: session.label, body: newBody))
@@ -55,36 +120,9 @@ public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
     )
 }
 
-private let dueInlinePattern: NSRegularExpression? = {
-    try? NSRegularExpression(pattern: #"\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?=\s*@|\s*$)"#)
-}()
-
-private func parseDueFromLine(_ line: String) -> (due: String?, contentWithoutDue: String) {
-    guard let pattern = dueInlinePattern,
-          let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-          let r0 = Range(m.range(at: 0), in: line),
-          let r1 = Range(m.range(at: 1), in: line) else {
-        return (nil, line)
-    }
-    let due = String(line[r1])
-    var without = String(line[..<r0.lowerBound])
-    let tail = String(line[r0.upperBound...]).trimmingCharacters(in: .whitespaces)
-    if tail == "@" {
-        without = without.trimmingCharacters(in: .whitespaces) + focusMarkerSuffix
-    } else if without.hasSuffix("@") && !without.hasSuffix(focusMarkerSuffix) {
-        without = String(without.dropLast()) + focusMarkerSuffix
-    } else {
-        without = without.trimmingCharacters(in: .whitespaces)
-    }
-    return (due, without)
-}
-
 
 public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
-    let todoLinePattern: NSRegularExpression
-    do {
-        todoLinePattern = try NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
-    } catch {
+    guard let todoLinePattern = todoLinePattern else {
         throw PmError.notesRegexError(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
     }
     var todos: [Todo] = []
@@ -100,22 +138,13 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
             let leadingSpaces = line.prefix(while: { $0 == " " }).count
             let depth = leadingSpaces / 2
             let checked = line[r2].lowercased() == "x"
-            let content = String(line[r3])
-            let (inlineDue, contentWithoutDue) = parseDueFromLine(content)
-            let dueDate = inlineDue
-            var text = contentWithoutDue
-            let isFocused: Bool
-            if text.hasSuffix(focusMarkerSuffix) {
-                text = String(text.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-                if !foundFocused {
-                    foundFocused = true
-                    isFocused = true
-                } else {
-                    isFocused = false
-                }
-            } else {
-                isFocused = false
-            }
+            let content = TaskContent.split(String(line[r3]))
+            let dueDate = content.due
+            let text = content.text
+            // Only the first marked line counts as focused; normalizeFocusMarker prunes the rest on
+            // the next write.
+            let isFocused = content.focused && !foundFocused
+            if isFocused { foundFocused = true }
             todos.append(Todo(
                 text: text,
                 checked: checked,
@@ -378,18 +407,10 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
         let isUnchecked = check.lowercased() != "x"
         let shouldComplete = indicesToComplete.contains(taskCount) && isUnchecked
         if shouldComplete {
-            var newContent = content
-            if newContent.hasSuffix(focusMarkerSuffix) {
-                newContent = String(newContent.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-            }
-            let (inlineDue, contentWithoutDue) = parseDueFromLine(newContent)
-            let contentForLine = contentWithoutDue
-            let prefix = String(line[r1])
-            var completed = "\(prefix)[x] \(contentForLine)"
-            if let due = inlineDue {
-                completed += " due: \(due)"
-            }
-            outLines.append(completed)
+            // A completed task keeps its due but drops focus — where focus lands next is decided below.
+            var completed = TaskContent.split(content)
+            completed.focused = false
+            outLines.append("\(String(line[r1]))[x] \(completed.render())")
         } else {
             outLines.append(line)
         }
@@ -436,14 +457,9 @@ public func applyFocusToTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex
                 outLines.append(line)
                 continue
             }
-            let isTarget = si == sessionIndex && taskCount == lineIndex
-            var content = String(line[r3])
-            if content.hasSuffix(focusMarkerSuffix) {
-                content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-            }
-            let prefix = String(line[r1])
-            let check = String(line[r2])
-            outLines.append("\(prefix)[\(check)] \(content)\(isTarget ? focusMarkerSuffix : "")")
+            var content = TaskContent.split(String(line[r3]))
+            content.focused = si == sessionIndex && taskCount == lineIndex
+            outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
             taskCount += 1
         }
         outSessions.append(Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n")))
@@ -481,27 +497,10 @@ public func setDueOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: In
             taskCount += 1
             continue
         }
-        let prefix = String(line[r1])
-        let check = String(line[r2])
-        var content = String(line[r3])
-        // Peel off the focus marker, then any existing due, leaving the bare task text.
-        let hasFocus = content.hasSuffix(focusMarkerSuffix)
-        if hasFocus {
-            content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        let (_, withoutDue) = parseDueFromLine(content)
-        var base = withoutDue
-        if base.hasSuffix(focusMarkerSuffix) {
-            base = String(base.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        var newContent = base
-        if let due = due, !due.isEmpty {
-            newContent += " due: \(due)"
-        }
-        if hasFocus {
-            newContent += focusMarkerSuffix
-        }
-        outLines.append("\(prefix)[\(check)] \(newContent)")
+        // Swap in the new due; the text and the focus marker ride along untouched.
+        var content = TaskContent.split(String(line[r3]))
+        content.due = (due?.isEmpty == false) ? due : nil
+        outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
         taskCount += 1
     }
     var updated = notes
@@ -530,23 +529,10 @@ public func setTextOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: I
             taskCount += 1
             continue
         }
-        let prefix = String(line[r1])
-        let check = String(line[r2])
-        var content = String(line[r3])
-        // Peel focus marker, then keep any existing due; swap in the new text.
-        let hasFocus = content.hasSuffix(focusMarkerSuffix)
-        if hasFocus {
-            content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        let (due, _) = parseDueFromLine(content)
-        var newContent = text.trimmingCharacters(in: .whitespaces)
-        if let due = due, !due.isEmpty {
-            newContent += " due: \(due)"
-        }
-        if hasFocus {
-            newContent += focusMarkerSuffix
-        }
-        outLines.append("\(prefix)[\(check)] \(newContent)")
+        // Swap in the new text; the due and the focus marker ride along untouched.
+        var content = TaskContent.split(String(line[r3]))
+        content.text = text.trimmingCharacters(in: .whitespaces)
+        outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
         taskCount += 1
     }
     var updated = notes
@@ -572,14 +558,13 @@ public func undoTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int) t
         }
         let prefix = String(line[r1])
         var check = String(line[r2])
-        var content = String(line[r3])
-        if content.hasSuffix(focusMarkerSuffix) {
-            content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-        }
+        // Focus is cleared everywhere here, then applied to the target line below.
+        var content = TaskContent.split(String(line[r3]))
+        content.focused = false
         if taskCount == lineIndex {
             check = " "
         }
-        outLines.append("\(prefix)[\(check)] \(content)")
+        outLines.append("\(prefix)[\(check)] \(content.render())")
         taskCount += 1
     }
     var updatedNotes = ProjectNotes(
@@ -613,14 +598,9 @@ private func applyFocusToTodoInNotes(notes: ProjectNotes, todo: Todo?) -> Projec
                 outLines.append(line)
                 continue
             }
-            let isTarget = todo != nil && si == targetSessionIndex && taskCount == targetLineIndex
-            var content = String(line[r3])
-            if content.hasSuffix(focusMarkerSuffix) {
-                content = String(content.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
-            }
-            let prefix = String(line[r1])
-            let check = String(line[r2])
-            outLines.append("\(prefix)[\(check)] \(content)\(isTarget ? focusMarkerSuffix : "")")
+            var content = TaskContent.split(String(line[r3]))
+            content.focused = todo != nil && si == targetSessionIndex && taskCount == targetLineIndex
+            outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
             taskCount += 1
         }
         outSessions.append(Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n")))

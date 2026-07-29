@@ -7,6 +7,16 @@ This doc describes how the **focused task** (the single “now” task per proje
 - **In notes:** One task line in the project notes file ends with ` @` (space + `@`). No other task line has this suffix. The parser treats the first such line (by session order, then line order) as focused; any others are normalized away.
 - **In code:** The focused task is the one with `isFocused: true` (parsed from that line). The CLI’s `notes show` output includes `focusedKey` (e.g. `"sessionIndex:lineIndex"`).
 
+### Line format
+
+A task line is `<indent>- [ ] <text> due: <date> @` — the inline `due:` comes **before** the focus marker, and the marker is always last. `TaskContent` (`pm-swift/Sources/PmLib/NotesTodos.swift`) is the single place that reads and writes this; it also accepts the reverse order (`<text> @ due: <date>`) so a line written by an older client still parses, and re-emits it canonically, repairing the line the next time the notes are edited.
+
+Writing the tokens the other way round is what a raw `hasSuffix(" @")` check misses: the line still *displays* correctly (the parser strips the due first), but the next edit doesn’t see a focus marker and drops it. Every mutation therefore goes through `TaskContent.split` / `render` rather than trimming suffixes itself.
+
+### Who writes task lines
+
+Only the Swift layer. The panel calls `PmLib` in-process; the Raycast extension shells out to `pm notes todo <add|due|text|wrap|complete|undo|focus>`, which splices single lines and leaves the rest of the file byte-for-byte. `pm notes write` (whole-document JSON) is for the detail sections only — it falls back to a full re-serialize when sessions differ, which would drop frontmatter and anything else the model doesn’t capture.
+
 ## When focus advances (completing a task)
 
 When you **complete the focused task** (Complete Focused Task, or marking the focused task done in the menubar / View Focused Project), the extension calls the CLI; the Swift layer **advances focus by default** and picks the **next** focused task using a fixed order of candidates. Use `--no-advance` to complete without advancing.

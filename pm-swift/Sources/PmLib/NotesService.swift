@@ -155,6 +155,50 @@ public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throw
     try handle.io.writeContent(path: handle.notesPath, content: finalText)
 }
 
+/// The line indices, within `sessionIndex`, of the task at `lineIndex` and its descendants — the
+/// contiguous run of deeper tasks right after it. Mirrors the subtree rule the raw edits use.
+private func subtreeLineIndices(todos: [Todo], sessionIndex: Int, lineIndex: Int) -> Set<Int> {
+    let session = todos.filter { $0.sessionIndex == sessionIndex }.sorted { $0.lineIndex < $1.lineIndex }
+    guard lineIndex < session.count else { return [] }
+    let depth = session[lineIndex].depth
+    var indices: Set<Int> = [lineIndex]
+    var i = lineIndex + 1
+    while i < session.count, session[i].depth > depth {
+        indices.insert(i)
+        i += 1
+    }
+    return indices
+}
+
+/// Delete a todo and its whole subtree. Format-preserving — only the removed lines change.
+///
+/// If the removed block carried the ` @` focus marker, focus moves to the next open leaf of what
+/// remains (`nextDiveInLeaf` with nothing focused picks the first open leaf in document order), so a
+/// delete never leaves the project focus-less. A project with nothing open left simply has no marker.
+public func deleteTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    let before = try parseTodos(notes: parseNotes(markdown: rawText))
+    let removed = subtreeLineIndices(todos: before, sessionIndex: sessionIndex, lineIndex: lineIndex)
+    let losesFocus = before.contains {
+        $0.sessionIndex == sessionIndex && removed.contains($0.lineIndex) && $0.isFocused
+    }
+    guard let updated = deleteSubtreePreservingFormat(
+        rawText: rawText, sessionIndex: sessionIndex, lineIndex: lineIndex) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    var finalText = updated
+    if losesFocus,
+       let next = nextDiveInLeaf(todos: try parseTodos(notes: parseNotes(markdown: updated))),
+       let refocused = try editTodosPreservingFormat(rawText: updated, mutate: { notes in
+           applyFocusToTodoAt(notes: normalizeFocusMarker(notes: notes),
+                              sessionIndex: next.sessionIndex, lineIndex: next.lineIndex)
+       }) {
+        finalText = refocused
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: finalText)
+}
+
 /// Move a todo (and its subtree) to a precise slot — after/before an anchor todo, with the root
 /// re-indented to `depth` — preserving format. The source lines travel verbatim (checkbox, due, and
 /// focus marker included), only their indent changes, so focus follows the moved task. Moves may cross

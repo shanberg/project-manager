@@ -300,6 +300,73 @@ final class NotesRawEditTests: XCTestCase {
                      "A task with no children can't be dissolved")
     }
 
+    // MARK: - Delete subtree
+
+    private static let deleteFixture = """
+    ## Sessions
+
+    ### Wed, Feb 25, 2025
+
+    Some leading prose about the session.
+
+    - [ ] One
+    - [ ] Group
+      - [ ] Two
+        - [ ] Deep
+    - [x] Four
+
+    ### Tue, Feb 24, 2025
+
+    - [ ] Earlier
+    """
+
+    /// Deleting a leaf removes exactly its line; its siblings and the session's prose are untouched.
+    func testDeleteLeafRemovesOnlyThatLine() throws {
+        let updated = try XCTUnwrap(deleteSubtreePreservingFormat(
+            rawText: Self.deleteFixture, sessionIndex: 0, lineIndex: 0))   // "One"
+        XCTAssertFalse(updated.contains("- [ ] One"), "The deleted line is gone")
+        XCTAssertTrue(updated.contains("- [ ] Group\n  - [ ] Two\n    - [ ] Deep\n- [x] Four"),
+                      "Every other task line is untouched")
+        XCTAssertTrue(updated.contains("Some leading prose about the session."),
+                      "Session prose is preserved")
+    }
+
+    /// Deleting a parent takes its whole subtree with it — a task never leaves orphaned children.
+    func testDeleteParentRemovesWholeSubtree() throws {
+        let updated = try XCTUnwrap(deleteSubtreePreservingFormat(
+            rawText: Self.deleteFixture, sessionIndex: 0, lineIndex: 1))   // "Group"
+        for gone in ["Group", "Two", "Deep"] {
+            XCTAssertFalse(updated.contains(gone), "\(gone) removed with the subtree")
+        }
+        XCTAssertTrue(updated.contains("- [ ] One\n- [x] Four"), "Siblings close up around the hole")
+    }
+
+    /// A delete in one session leaves the others alone (indices are per-session).
+    func testDeleteLeavesOtherSessionsAlone() throws {
+        let updated = try XCTUnwrap(deleteSubtreePreservingFormat(
+            rawText: Self.deleteFixture, sessionIndex: 1, lineIndex: 0))   // "Earlier"
+        XCTAssertFalse(updated.contains("Earlier"), "Target removed from the second session")
+        XCTAssertTrue(updated.contains("- [ ] One\n- [ ] Group"), "First session untouched")
+    }
+
+    /// A line index past the session's task count can't be located — nil, so the caller skips the write.
+    func testDeleteMissingTaskReturnsNil() throws {
+        XCTAssertNil(deleteSubtreePreservingFormat(rawText: Self.deleteFixture, sessionIndex: 0, lineIndex: 99))
+    }
+
+    /// The messy fixture's frontmatter, callout, and spacing survive a delete — the edit only ever
+    /// removes the subtree's own lines.
+    func testDeletePreservesSurroundingFormat() throws {
+        let todos = try parseTodos(notes: parseNotes(markdown: Self.messyMarkdown))
+        guard let first = todos.first else { return XCTFail("fixture has no todos") }
+        let updated = try XCTUnwrap(deleteSubtreePreservingFormat(
+            rawText: Self.messyMarkdown, sessionIndex: first.sessionIndex, lineIndex: first.lineIndex))
+        XCTAssertTrue(updated.hasPrefix("---\ntags: [project, design]"), "Frontmatter preserved verbatim")
+        XCTAssertTrue(updated.contains("> [!summary] Summary"), "Callout preserved verbatim")
+        XCTAssertEqual(try parseTodos(notes: parseNotes(markdown: updated)).count, todos.count - 1,
+                       "Exactly one task line removed (the first is a leaf in this fixture)")
+    }
+
     // MARK: - Move subtree (slot + depth drag-reorder)
 
     private static let moveFixture = """

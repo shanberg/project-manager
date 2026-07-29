@@ -373,6 +373,25 @@ public func moveSubtreePreservingFormat(
     return lines.joined(separator: "\n")
 }
 
+/// Delete the subtree rooted at the task at (sessionIndex, lineIndex): its own line plus the
+/// contiguous run of deeper task lines right after it — the same subtree rule wrap/unwrap/move use,
+/// so a task never leaves orphaned children behind. Format-preserving: nothing else in the document
+/// is touched, including any prose interleaved elsewhere in the session. Returns the new markdown, or
+/// nil if the task can't be located. Focus is *not* repaired here — `deleteTodo` does that once it
+/// knows whether the removed block carried the marker.
+public func deleteSubtreePreservingFormat(
+    rawText: String,
+    sessionIndex: Int,
+    lineIndex: Int
+) -> String? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let start = rawTaskLineNumber(lines, sessionIndex: sessionIndex, taskIndex: lineIndex) else {
+        return nil
+    }
+    lines.removeSubrange(rawSubtreeRange(lines, start: start))
+    return lines.joined(separator: "\n")
+}
+
 /// Append a new task at the end of a session's task list (or right after its heading when the
 /// session has no tasks yet), preserving format. Returns the new markdown and the (sessionIndex,
 /// lineIndex) of the inserted task, or nil if the session can't be located.

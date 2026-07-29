@@ -61,6 +61,43 @@ final class PMStore: ObservableObject {
     /// `reload()`, shared so the two switchers can't diverge.
     @Published private(set) var recents: [Recent] = []
 
+    /// Every project in the active and archive folders, newest-edited first within each group, each
+    /// carrying cached progress + hero task for the panel's optional project sidebar. Unlike `recents`
+    /// this keeps the focused project and isn't truncated, so its (much larger) scan is gated on
+    /// `wantsAllProjects` — nothing pays for it while the sidebar is hidden.
+    @Published private(set) var allProjects: [ProjectEntry] = []
+
+    /// One row of the full project list: the project, its folder-name parts (the sidebar groups and
+    /// sorts on these), whether it lives in the archive folder, and the same cached completion/next-task
+    /// pair the switchers show. `detailsLoaded` is false for the name-only skeleton the first scan paints
+    /// before the per-project notes reads land (and for projects past `maxDetailWarm`, whose notes are
+    /// never read) — those rows have no progress, next task, or due date yet.
+    struct ProjectEntry: Identifiable, Equatable {
+        /// Full folder name, e.g. "H-004 Maxwell Carmody" — also the `pm` project identifier.
+        let name: String
+        let projectKey: String
+        /// Domain code ("H") and sequence number (4) parsed off the folder name, for code sorting.
+        /// Empty/zero if the name doesn't parse (it always should — the scan only returns matches).
+        let code: String
+        let number: Int
+        /// The name without its "CODE-NNN " prefix, for name sorting and the row's label.
+        let shortName: String
+        /// The code's configured domain label ("Home"), falling back to the bare code.
+        let domain: String
+        let isArchived: Bool
+        /// Notes-file mtime (folder mtime as a fallback), for recency sorting.
+        let modified: Date
+        let done: Int
+        let total: Int
+        /// The project's focused task, else its first open one — the row's second line.
+        let nextTask: String?
+        /// Earliest due among its open tasks, for due grouping.
+        let nextDue: String?
+        let detailsLoaded: Bool
+        var id: String { projectKey }
+        var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    }
+
     /// A recent project plus its cached completion/due/summary. `fraction` is the ring fill.
     /// `focusedText` is the project's focused (or next open) task, for the switchers' second line.
     struct Recent: Identifiable, Equatable {
@@ -97,6 +134,16 @@ final class PMStore: ObservableObject {
     private let recentsQueue = DispatchQueue(label: "com.stuarthanberg.pm.recents")
     private var recentsWarmedAt: Date = .distantPast
     private var recentsWarmedForKey: String?
+
+    /// Background queue for the sidebar's full-project scan, kept off both `io` and `recentsQueue` so a
+    /// long list of per-project notes reads can't delay a mutation or the recents warm.
+    private let projectsQueue = DispatchQueue(label: "com.stuarthanberg.pm.all-projects")
+    private var allProjectsWarmedAt: Date = .distantPast
+    /// Whether any UI is currently showing the full project list (see `setWantsAllProjects`).
+    private var wantsAllProjects = false
+    /// How many projects get their notes read for progress/hero text. Past this the list still shows
+    /// every project, just without a ring — a guard against a pathological project folder.
+    private static let maxDetailWarm = 100
 
     // MARK: Derived state for the UI
 
@@ -154,6 +201,7 @@ final class PMStore: ObservableObject {
             errorMessage = key == nil ? nil : "Invalid focused project."
             hasLoaded = true
             warmRecents()
+            warmAllProjects()
             return
         }
         io.async { [weak self] in
@@ -200,6 +248,9 @@ final class PMStore: ObservableObject {
                     }
                     self.heroSnapshot = newHero
                     self.warmRecents()
+                    // A switch reorders the sidebar (the new project jumps to the top of its group) and
+                    // moves the selection, so re-scan straight away rather than waiting out the TTL.
+                    self.warmAllProjects(force: projectChanged)
                 case .failure(let error):
                     // Keep the last-good render on transient failures; only surface the error text.
                     self.errorMessage = String(describing: error)
@@ -250,6 +301,125 @@ final class PMStore: ObservableObject {
                 self.recents = warmed
             }
         }
+    }
+
+    // MARK: All projects (the panel's optional sidebar)
+
+    /// Turn the full-project scan on or off. The sidebar calls this as it appears/disappears, so a
+    /// hidden sidebar costs nothing; turning it on warms immediately (bypassing the TTL). The last
+    /// list is kept when it's turned off, so re-showing paints the previous rows while the fresh scan
+    /// runs rather than flashing empty.
+    func setWantsAllProjects(_ on: Bool) {
+        guard wantsAllProjects != on else { return }
+        wantsAllProjects = on
+        if on { warmAllProjects(force: true) }
+    }
+
+    /// Rebuild `allProjects` in the background: every project in both folders, newest-edited first, with
+    /// progress, next task and next due. Two-stage so a long list paints immediately — the names land
+    /// first, then the same rows again with their notes-derived detail. A 30s TTL keeps the frequent
+    /// (watcher-driven) reloads from re-scanning; a project switch forces a fresh pass.
+    ///
+    /// The list is published in one order (recency); which projects show, how they're grouped and how
+    /// they're sorted is the sidebar's business, so changing those settings never costs a re-scan.
+    private func warmAllProjects(force: Bool = false) {
+        guard wantsAllProjects else { return }
+        if !force, Date().timeIntervalSince(allProjectsWarmedAt) < 30 { return }
+        allProjectsWarmedAt = Date()
+        projectsQueue.async { [weak self] in
+            guard let listing = Self.allProjectsByEdit() else { return }
+            Task { @MainActor in self?.seedAllProjects(listing) }
+            let warmed: [ProjectEntry] = listing.enumerated().map { index, item in
+                guard index < Self.maxDetailWarm, let out = try? notesShow(project: item.name) else {
+                    return item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil, detailsLoaded: false)
+                }
+                return item.entry(done: out.todos.filter { $0.checked }.count,
+                                  total: out.todos.count,
+                                  nextTask: Self.heroTaskText(out.todos),
+                                  nextDue: Self.earliestDue(out.todos),
+                                  detailsLoaded: true)
+            }
+            Task { @MainActor in
+                guard let self, warmed != self.allProjects else { return }
+                self.allProjects = warmed
+            }
+        }
+    }
+
+    /// Paint the freshly-scanned membership/order right away, reusing any detail already warmed for a
+    /// project so rings don't blink off on a re-scan. New projects come in name-only until the detail
+    /// pass lands.
+    private func seedAllProjects(_ listing: [ProjectListing]) {
+        let known = Dictionary(allProjects.map { ($0.projectKey, $0) }, uniquingKeysWith: { a, _ in a })
+        let seeded = listing.map { item -> ProjectEntry in
+            if let cached = known[item.projectKey], cached.isArchived == item.isArchived { return cached }
+            return item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil, detailsLoaded: false)
+        }
+        if seeded != allProjects { allProjects = seeded }
+    }
+
+    /// A project as the folder scan finds it, before any notes are read: the identity and the parts of
+    /// the folder name the sidebar groups and sorts on.
+    struct ProjectListing {
+        let projectKey: String
+        let name: String
+        let code: String
+        let number: Int
+        let shortName: String
+        let domain: String
+        let isArchived: Bool
+        let modified: Date
+
+        /// Complete this listing with the values a notes read produces (or the zeroes that stand in
+        /// until one lands).
+        func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool) -> ProjectEntry {
+            ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
+                         shortName: shortName, domain: domain, isArchived: isArchived, modified: modified,
+                         done: done, total: total, nextTask: nextTask, nextDue: nextDue,
+                         detailsLoaded: detailsLoaded)
+        }
+    }
+
+    /// Every project in the active and archive folders, ordered by notes-file mtime (newest first,
+    /// falling back to folder mtime) across both. Does protected-folder IO, so only ever call this off
+    /// the main thread.
+    private nonisolated static func allProjectsByEdit() -> [ProjectListing]? {
+        guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
+        let codes = Array(config.domains.keys)
+        var result: [ProjectListing] = []
+        for base in [paths.activePath, paths.archivePath] {
+            let isArchived = base == paths.archivePath
+            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
+            result += folders.map { name in
+                let projectPath = (base as NSString).appendingPathComponent(name)
+                let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil
+                let attrs = try? FileManager.default.attributesOfItem(atPath: notesPath ?? projectPath)
+                let parts = nameParts(name, domains: config.domains)
+                return ProjectListing(projectKey: "\(base):\(name)", name: name,
+                                      code: parts.code, number: parts.number, shortName: parts.shortName,
+                                      domain: parts.domain, isArchived: isArchived,
+                                      modified: (attrs?[.modificationDate] as? Date) ?? .distantPast)
+            }
+        }
+        return result.sorted { $0.modified > $1.modified }
+    }
+
+    /// Split a project folder name ("H-004 Maxwell Carmody") into its domain code, sequence number and
+    /// display name, and look the code up in the configured domains ("Home"). The scan only ever hands
+    /// us names that matched `getProjectFolders`' pattern, so the fallbacks are belt-and-braces: an
+    /// unparseable name keeps its whole self as the display name and groups under "Other".
+    private nonisolated static func nameParts(
+        _ name: String, domains: [String: String]
+    ) -> (code: String, number: Int, shortName: String, domain: String) {
+        guard let dash = name.firstIndex(of: "-"),
+              let space = name[dash...].firstIndex(of: " ") else {
+            return ("", 0, name, "Other")
+        }
+        let code = String(name[name.startIndex..<dash])
+        let number = Int(name[name.index(after: dash)..<space]) ?? 0
+        let shortName = String(name[name.index(after: space)...])
+            .trimmingCharacters(in: .whitespaces)
+        return (code, number, shortName.isEmpty ? name : shortName, domains[code] ?? code)
     }
 
     /// All projects across the active + archive folders, ordered by notes-file mtime (newest first,
@@ -421,6 +591,124 @@ final class PMStore: ObservableObject {
                                   anchorSessionIndex: anchor.sessionIndex, anchorLineIndex: anchor.lineIndex,
                                   insertAfterAnchor: insertAfter, depth: depth)
         }
+    }
+
+    // MARK: Selection-wide operations
+    //
+    // The panel's task list supports multi-selection, so these take a set of tasks and perform the
+    // whole batch inside ONE `mutate` — a single pre-edit snapshot is banked, so ⌘Z reverses the
+    // entire action rather than unwinding it task by task.
+
+    /// The outermost tasks among `todos`, in document order: any task that already sits inside
+    /// another's subtree is dropped, since an operation on the ancestor covers it. Keeps a batch from
+    /// acting on the same line twice (which, for delete, would consume a stale index).
+    func outermost(_ todos: [Todo]) -> [Todo] {
+        var covered: Set<String> = []
+        for todo in todos {
+            let key = Self.key(for: todo)
+            for descendant in subtreeKeys(of: todo) where descendant != key { covered.insert(descendant) }
+        }
+        return todos
+            .filter { !covered.contains(Self.key(for: $0)) }
+            .sorted { ($0.sessionIndex, $0.lineIndex) < ($1.sessionIndex, $1.lineIndex) }
+    }
+
+    /// The subtree rooted at `todo` in document order — the task plus the contiguous run of deeper
+    /// todos right after it. The list form of `subtreeKeys(of:)`.
+    func subtree(of todo: Todo) -> [Todo] {
+        guard let idx = todos.firstIndex(where: {
+            $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
+        }) else { return [] }
+        var out = [todos[idx]]
+        var j = idx + 1
+        while j < todos.count, todos[j].depth > todos[idx].depth {
+            out.append(todos[j])
+            j += 1
+        }
+        return out
+    }
+
+    /// What deleting `todos` would remove: the tasks actually picked (after collapsing any that are
+    /// already inside another's subtree) and the extra descendants that ride along. The panel's
+    /// confirmation names both, so a delete never silently takes more than it showed.
+    func deletionSummary(_ todos: [Todo]) -> (tasks: Int, descendants: Int) {
+        let roots = outermost(todos)
+        let all = roots.reduce(into: Set<String>()) { $0.formUnion(subtreeKeys(of: $1)) }
+        return (roots.count, max(0, all.count - roots.count))
+    }
+
+    /// Delete `todos` and their subtrees in one document edit (one undo step).
+    ///
+    /// Deletion is the one batch where order matters: removing a task shifts the line indices of
+    /// everything after it in the same session, so the roots are deleted *bottom-up* and every
+    /// remaining target's index stays valid.
+    func deleteTasks(_ todos: [Todo]) {
+        let roots = outermost(todos)
+        guard !roots.isEmpty else { return }
+        let bottomUp = roots.sorted { ($0.sessionIndex, $0.lineIndex) > ($1.sessionIndex, $1.lineIndex) }
+        mutate { project in
+            for todo in bottomUp {
+                try PmLib.deleteTodo(project: project,
+                                     sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
+            }
+        }
+    }
+
+    /// Complete every open task in `todos`, or — when they're all complete already — reopen them all.
+    /// Mirrors how a Mac checkbox batch behaves on a mixed selection: the majority action is "finish
+    /// what's left". Completion is in place, so no index shifting to worry about.
+    func toggleAll(_ todos: [Todo]) {
+        guard !todos.isEmpty else { return }
+        let open = todos.filter { !$0.checked }
+        let targets = open.isEmpty ? todos : open
+        let completing = !open.isEmpty
+        if completing {
+            lastCompletedKey = targets.last.map(Self.key(for:))
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        }
+        mutate { project in
+            for todo in targets {
+                if completing {
+                    // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
+                    // still moves focus if one of the completed tasks was holding it.
+                    try completeTodo(project: project, sessionIndex: todo.sessionIndex,
+                                     lineIndex: todo.lineIndex, advanceFocus: false)
+                } else {
+                    try undoTodo(project: project, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
+                }
+            }
+        }
+    }
+
+    /// Set (or clear, with `due == nil`) the due date on every task in `todos` as one edit.
+    func setDueAll(_ todos: [Todo], due: String?) {
+        guard !todos.isEmpty else { return }
+        mutate { project in
+            for todo in todos {
+                try setDueOnTodo(project: project, sessionIndex: todo.sessionIndex,
+                                 lineIndex: todo.lineIndex, due: due)
+            }
+        }
+    }
+
+    /// `todos` rendered as a markdown block for the pasteboard: each task with its whole subtree, in
+    /// document order, dedented so the shallowest line sits at the left margin.
+    ///
+    /// The lines travel as they're stored (checkbox, `due:`, list marker and relative nesting intact),
+    /// so a copied selection pastes back into these notes — or any markdown document — as real tasks.
+    /// The ` @` focus marker is stripped: focus names one task *within a document*, and carrying it to
+    /// the clipboard would smuggle a second marker into wherever it lands.
+    func markdown(for todos: [Todo]) -> String {
+        let lines = outermost(todos).flatMap { subtree(of: $0) }.map(\.rawLine)
+        guard !lines.isEmpty else { return "" }
+        let dedent = lines.map { $0.prefix { $0 == " " }.count }.min() ?? 0
+        return lines
+            .map { line -> String in
+                var out = String(line.dropFirst(dedent))
+                if out.hasSuffix(" @") { out.removeLast(2) }
+                return out
+            }
+            .joined(separator: "\n")
     }
 
     /// The keys of `todo` and its subtree — the task itself plus the contiguous run of deeper todos

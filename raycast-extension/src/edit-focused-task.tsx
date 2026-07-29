@@ -108,18 +108,12 @@ export default function Command() {
       return;
     }
     try {
-      const updatedNotes = await editTodoInNotes(
-        prefs,
-        data!.projectName,
-        data!.notes,
-        nowTask,
-        text,
-      );
+      await editTodoInNotes(prefs, data!.projectName, data!.notes, nowTask, text);
       if (values.dueDate != null) {
         await updateDueDateInNotes(
           prefs,
           data!.projectName,
-          updatedNotes,
+          data!.notes,
           nowTask,
           formatDueForStorage(values.dueDate),
         );

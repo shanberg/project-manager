@@ -12,13 +12,15 @@
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19EFCE48163B4933B104DA26 /* AppIcons.swift */; };
 		3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F714E00F765F5D12885D0F68 /* PMIntents.swift */; };
+		481C8323751CF79BAA8E1ED3 /* ProjectSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548D2BF6025A41F86157FD6 /* ProjectSidebar.swift */; };
 		6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F024FD91F7AEB31A5D296AB /* PMEntities.swift */; };
 		682B885D994EC5F7B065C269 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3644D4885A6C393A632399AA /* main.swift */; };
 		70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */; };
+		71F52CFAAFA7D4FCD25CD136 /* TaskPasteboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 540B76A76BEAB320E28FEAF0 /* TaskPasteboard.swift */; };
+		73BD1D65FAB898DBF9182B53 /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6056C66096C08659FFEA3A6F /* MarkdownTextEditor.swift */; };
 		86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857714074D07452813367D28 /* HotKey.swift */; };
 		8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */; };
 		90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46709D20934C0BFAC22FD087 /* PanelView.swift */; };
-		B804A829024A8A1214246647 /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */; };
 		906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3025790996749621C9EBB543 /* PMFiles.swift */; };
 		AEB26A36D3A80E60177994A4 /* PmLib in Frameworks */ = {isa = PBXBuildFile; productRef = 386E7476C0693BFAA29A250D /* PmLib */; };
 		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
@@ -43,9 +45,10 @@
 		3644D4885A6C393A632399AA /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		46709D20934C0BFAC22FD087 /* PanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelView.swift; sourceTree = "<group>"; };
-		C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 		4F1F5044D1862C47FA5F6F05 /* pm-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "pm-swift"; path = "../pm-swift"; sourceTree = SOURCE_ROOT; };
+		540B76A76BEAB320E28FEAF0 /* TaskPasteboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPasteboard.swift; sourceTree = "<group>"; };
+		6056C66096C08659FFEA3A6F /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		71D7F2284A625649B207A627 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7D7548520C03B6F6076B86CC /* TaskTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTiming.swift; sourceTree = "<group>"; };
 		84A8DE07C53FA9ECB9C061BC /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
@@ -55,6 +58,7 @@
 		B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigWatcher.swift; sourceTree = "<group>"; };
 		B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
 		B358A62B026F88C33AA9FF42 /* MenubarRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarRing.swift; sourceTree = "<group>"; };
+		D548D2BF6025A41F86157FD6 /* ProjectSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSidebar.swift; sourceTree = "<group>"; };
 		D69731046CF949BED6A9B753 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		E1B28724379E1B0A1A3DA2DC /* RelativeDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeDue.swift; sourceTree = "<group>"; };
 		F492935965C6142489D845E3 /* PM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PM.entitlements; sourceTree = "<group>"; };
@@ -136,9 +140,11 @@
 		D9F80BD1C5D712EB04F59078 /* Panel */ = {
 			isa = PBXGroup;
 			children = (
+				6056C66096C08659FFEA3A6F /* MarkdownTextEditor.swift */,
 				B235A8F9CCBF7BA6DE2C676B /* PanelController.swift */,
 				46709D20934C0BFAC22FD087 /* PanelView.swift */,
-				C39AB7B5E36FD26C3E65E314 /* MarkdownTextEditor.swift */,
+				D548D2BF6025A41F86157FD6 /* ProjectSidebar.swift */,
+				540B76A76BEAB320E28FEAF0 /* TaskPasteboard.swift */,
 			);
 			path = Panel;
 			sourceTree = "<group>";
@@ -238,6 +244,7 @@
 				21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
+				73BD1D65FAB898DBF9182B53 /* MarkdownTextEditor.swift in Sources */,
 				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,
 				C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */,
 				6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */,
@@ -249,10 +256,11 @@
 				70B58B73C5FFDF11112CBD39 /* PanelController.swift in Sources */,
 				CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */,
 				90370940A4E7FC7B1F42EF4C /* PanelView.swift in Sources */,
-				B804A829024A8A1214246647 /* MarkdownTextEditor.swift in Sources */,
+				481C8323751CF79BAA8E1ED3 /* ProjectSidebar.swift in Sources */,
 				1702ADEBF7B5049CEA3DC46B /* RelativeDue.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */,
+				71F52CFAAFA7D4FCD25CD136 /* TaskPasteboard.swift in Sources */,
 				E4012FFE5E8FB1E976753460 /* TaskTiming.swift in Sources */,
 				682B885D994EC5F7B065C269 /* main.swift in Sources */,
 			);
