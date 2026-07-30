@@ -7,7 +7,15 @@ import PmLib
 /// around a single `PMStore`. The app is a resident menubar-only agent (`.accessory` policy).
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = PMStore()
+    /// The store for whatever project `focused.json` names — what the menubar item, notifications and
+    /// Spotlight all follow. Acquired from `StoreRegistry`, so when a window is showing that same
+    /// project this *is* that window's store.
+    private var store: PMStore = StoreRegistry.shared.emptyStore
+    private var storeKey: String?
+    private var hasSyncedStore = false
+    /// The `store.objectWillChange` subscription, torn down and remade when the store is re-pointed.
+    private var storeSubscription: AnyCancellable?
+
     private var settings = PanelSettings.load()
 
     private var statusController: StatusItemController!
@@ -15,12 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var watcher: ConfigWatcher!
     private var notifier: NotificationManager!
-    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("=== PM launched (build \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "?")) configDir=\(PMFiles.configDir.path) ===")
         NSApp.setActivationPolicy(.accessory)
         installMainMenu()
+
+        // Point the menubar at the focused project before anything reads `store`.
+        syncFocusedStore()
 
         panelController = PanelController(store: store, settings: settings)
         statusController = StatusItemController(store: store)
@@ -29,14 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).
         notifier = NotificationManager(store: store)
         notifier.requestAuthorization()
-
-        // Keep the menubar glyph and the notes-file watch in sync with store state.
-        store.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in
-                DispatchQueue.main.async { self?.storeDidChange() }
-            }
-            .store(in: &cancellables)
 
         // Global summon shortcut (Ctrl+Alt+P), matching the retired Tauri panel.
         hotKey = HotKey { [weak self] in self?.panelController.toggle() }
@@ -47,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Be active for the first protected-folder access so a TCC prompt (if any) can present.
         NSApp.activate(ignoringOtherApps: true)
-        store.reload()
+        reloadAllStores()
 
         // Reopen the panel if it was open when the app was last quit.
         panelController.restoreIfNeeded()
@@ -138,6 +140,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController.applySettings(s)
     }
 
+    // MARK: The focused project's store
+
+    /// Point the menubar (and notifications, and Spotlight follow-ups) at the store for whatever project
+    /// `focused.json` currently names. Called on launch, whenever the watcher sees the file change, and
+    /// whenever a window becomes main and moves the focus itself.
+    ///
+    /// The store is acquired from `StoreRegistry`, so if a window already has that project open this
+    /// hands back *its* store rather than a second copy — which is what keeps the menubar's undo and
+    /// last-completed task in step with what you just did in the window.
+    func syncFocusedStore() {
+        let key = PMFiles.focusedProjectKey()
+        // `hasSyncedStore` distinguishes the first call from a no-op one: on launch with no focused
+        // project both `key` and `storeKey` are nil, and the wiring below still has to run once.
+        guard key != storeKey || !hasSyncedStore else { return }
+        hasSyncedStore = true
+        let previous = storeKey
+        storeKey = key
+        store = StoreRegistry.shared.acquire(key)
+        StoreRegistry.shared.release(previous)
+
+        statusController?.store = store
+        notifier?.store = store
+
+        // Re-subscribe: the menubar glyph and the notes watch follow whichever store is current.
+        storeSubscription = store.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                DispatchQueue.main.async { self?.storeDidChange() }
+            }
+        storeDidChange()
+    }
+
+    /// Reload every live store — the focused one plus any a window is holding.
+    private func reloadAllStores() {
+        syncFocusedStore()
+        for store in StoreRegistry.shared.liveStores { store.reload() }
+    }
+
     /// External change (watcher fired): reload data and re-apply panel settings that Raycast may have
     /// written to panel-settings.json.
     private func handleExternalChange() {
@@ -146,21 +186,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings = disk
             panelController.applySettings(disk)
         }
-        store.reload()
+        reloadAllStores()
     }
 
-    private var watchedNotesPath: String?
+    private var watchedNotesPaths: [String] = []
 
     private func storeDidChange() {
-        statusController.storeChanged()
+        statusController?.storeChanged()
         // After storeChanged() (which refreshes the focused task's seen-at), reschedule notifications.
-        notifier.sync()
+        notifier?.sync()
         maybeShowAccessHelp()
-        // Re-point the notes-file watch only when the focused project's notes path actually changes,
-        // using the path the store already resolved (no extra protected-directory scan here).
-        if store.notesPath != watchedNotesPath {
-            watchedNotesPath = store.notesPath
-            watcher.watchNotes(at: store.notesPath)
+        // Re-point the notes-file watches only when the set of open projects' notes paths actually
+        // changes, using the paths the stores already resolved (no extra protected-directory scan here).
+        let paths = StoreRegistry.shared.watchedNotesPaths.sorted()
+        if paths != watchedNotesPaths {
+            watchedNotesPaths = paths
+            watcher?.watchNotes(paths: paths)
         }
     }
 
@@ -214,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             return
         }
-        store.reload()
+        reloadAllStores()
         panelController.show()
         NSApp.activate(ignoringOtherApps: true)
     }

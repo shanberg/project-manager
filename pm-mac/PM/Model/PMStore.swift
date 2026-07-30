@@ -55,62 +55,20 @@ final class PMStore: ObservableObject {
     private struct HeroSnapshot { let key: String; let text: String; let depth: Int; let session: Int; let line: Int }
     private var heroSnapshot: HeroSnapshot?
 
-    /// Recent projects for the menubar's and panel's quick-switchers, ordered by notes-file mtime with
-    /// the focused project excluded, each carrying cached progress/due/summary so a switcher can render
-    /// rings + hints without protected-folder reads while it's being built. Warmed off-thread from
-    /// `reload()`, shared so the two switchers can't diverge.
-    @Published private(set) var recents: [Recent] = []
-
-    /// Every project in the active and archive folders, newest-edited first within each group, each
-    /// carrying cached progress + hero task for the panel's optional project sidebar. Unlike `recents`
-    /// this keeps the focused project and isn't truncated, so its (much larger) scan is gated on
-    /// `wantsAllProjects` — nothing pays for it while the sidebar is hidden.
+    /// The shared scans, mirrored in so views observing this store still repaint when they land.
+    /// See `ProjectIndex` for why they live outside the store.
+    @Published private var indexRecents: [Recent] = []
     @Published private(set) var allProjects: [ProjectEntry] = []
 
-    /// One row of the full project list: the project, its folder-name parts (the sidebar groups and
-    /// sorts on these), whether it lives in the archive folder, and the same cached completion/next-task
-    /// pair the switchers show. `detailsLoaded` is false for the name-only skeleton the first scan paints
-    /// before the per-project notes reads land (and for projects past `maxDetailWarm`, whose notes are
-    /// never read) — those rows have no progress, next task, or due date yet.
-    struct ProjectEntry: Identifiable, Equatable {
-        /// Full folder name, e.g. "H-004 Maxwell Carmody" — also the `pm` project identifier.
-        let name: String
-        let projectKey: String
-        /// Domain code ("H") and sequence number (4) parsed off the folder name, for code sorting.
-        /// Empty/zero if the name doesn't parse (it always should — the scan only returns matches).
-        let code: String
-        let number: Int
-        /// The name without its "CODE-NNN " prefix, for name sorting and the row's label.
-        let shortName: String
-        /// The code's configured domain label ("Home"), falling back to the bare code.
-        let domain: String
-        let isArchived: Bool
-        /// Notes-file mtime (folder mtime as a fallback), for recency sorting.
-        let modified: Date
-        let done: Int
-        let total: Int
-        /// The project's focused task, else its first open one — the row's second line.
-        let nextTask: String?
-        /// Earliest due among its open tasks, for due grouping.
-        let nextDue: String?
-        let detailsLoaded: Bool
-        var id: String { projectKey }
-        var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
-    }
+    /// Recent projects for the menubar's and this store's quick-switchers: the shared recency list with
+    /// *this* store's project dropped (a switcher never offers the project you're already in) and capped
+    /// at the eight rows a switcher shows.
+    var recents: [Recent] { Array(indexRecents.lazy.filter { $0.projectKey != self.projectKey }.prefix(8)) }
 
-    /// A recent project plus its cached completion/due/summary. `fraction` is the ring fill.
-    /// `focusedText` is the project's focused (or next open) task, for the switchers' second line.
-    struct Recent: Identifiable, Equatable {
-        let projectKey: String
-        let name: String
-        let done: Int
-        let total: Int
-        let nextDue: String?
-        let summary: String?
-        let focusedText: String?
-        var id: String { projectKey }
-        var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
-    }
+    /// The scans' row types live on `ProjectIndex` now; these keep `PMStore.Recent` /
+    /// `PMStore.ProjectEntry` working for the sidebar and the menubar.
+    typealias ProjectEntry = ProjectIndex.ProjectEntry
+    typealias Recent = ProjectIndex.Recent
 
     /// A whole-document snapshot for undo/redo — the notes path plus its exact raw bytes at a point in
     /// time. Restoring one writes the bytes back verbatim, so undo is format-preserving like every edit.
@@ -129,21 +87,31 @@ final class PMStore: ObservableObject {
     /// Serial queue for all `PmLib` notes IO (reads and writes) — prevents interleaved writes.
     private let io = DispatchQueue(label: "com.stuarthanberg.pm.notes-io")
 
-    /// Background queue for the recents warm (its own protected-folder scan + per-project notes reads),
-    /// kept off `io` so it can't delay a focused-project mutation/reload.
-    private let recentsQueue = DispatchQueue(label: "com.stuarthanberg.pm.recents")
-    private var recentsWarmedAt: Date = .distantPast
-    private var recentsWarmedForKey: String?
-
-    /// Background queue for the sidebar's full-project scan, kept off both `io` and `recentsQueue` so a
-    /// long list of per-project notes reads can't delay a mutation or the recents warm.
-    private let projectsQueue = DispatchQueue(label: "com.stuarthanberg.pm.all-projects")
-    private var allProjectsWarmedAt: Date = .distantPast
-    /// Whether any UI is currently showing the full project list (see `setWantsAllProjects`).
+    /// Whether this store is currently holding the shared full-project scan open (see
+    /// `setWantsAllProjects`). Tracked per store so each one contributes at most one retain.
     private var wantsAllProjects = false
-    /// How many projects get their notes read for progress/hero text. Past this the list still shows
-    /// every project, just without a ring — a guard against a pathological project folder.
-    private static let maxDetailWarm = 100
+
+    /// The project this store shows. Every store is bound to exactly one project (nil = none, which
+    /// renders the empty state) rather than following `focused.json`, so two windows can show two
+    /// projects at once. Following the focus is the menubar's job: when `focused.json` changes it
+    /// acquires the store for the new key, which means it shares one store — one undo stack, one
+    /// `lastCompletedKey` — with any window already showing that project.
+    private(set) var boundKey: String?
+
+    /// Mirror the shared scans into this store's published state, so existing views that observe the
+    /// store keep repainting when a scan lands.
+    init(boundKey: String? = nil) {
+        self.boundKey = boundKey
+        ProjectIndex.shared.$recents.assign(to: &$indexRecents)
+        ProjectIndex.shared.$allProjects.assign(to: &$allProjects)
+    }
+
+    /// Point this store at a different project (or back at `focused.json`) and reload.
+    func bind(to key: String?) {
+        guard boundKey != key else { return }
+        boundKey = key
+        reload()
+    }
 
     // MARK: Derived state for the UI
 
@@ -185,9 +153,9 @@ final class PMStore: ObservableObject {
 
     // MARK: Loading
 
-    /// Re-read the focused project and its notes. Safe to call frequently (e.g. from the watcher).
+    /// Re-read this store's project and its notes. Safe to call frequently (e.g. from the watcher).
     func reload() {
-        let key = PMFiles.focusedProjectKey()
+        let key = boundKey
         guard let key, let name = PMFiles.projectName(fromKey: key) else {
             projectKey = nil
             projectName = nil
@@ -198,10 +166,10 @@ final class PMStore: ObservableObject {
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
             undoStack = []; redoStack = []   // history belongs to a project
-            errorMessage = key == nil ? nil : "Invalid focused project."
+            errorMessage = key == nil ? nil : "Invalid project."
             hasLoaded = true
-            warmRecents()
-            warmAllProjects()
+            ProjectIndex.shared.warmRecents()
+            ProjectIndex.shared.warmAllProjects()
             return
         }
         io.async { [weak self] in
@@ -247,10 +215,10 @@ final class PMStore: ObservableObject {
                         }
                     }
                     self.heroSnapshot = newHero
-                    self.warmRecents()
+                    ProjectIndex.shared.warmRecents()
                     // A switch reorders the sidebar (the new project jumps to the top of its group) and
                     // moves the selection, so re-scan straight away rather than waiting out the TTL.
-                    self.warmAllProjects(force: projectChanged)
+                    ProjectIndex.shared.warmAllProjects(force: projectChanged)
                 case .failure(let error):
                     // Keep the last-good render on transient failures; only surface the error text.
                     self.errorMessage = String(describing: error)
@@ -260,204 +228,39 @@ final class PMStore: ObservableObject {
         }
     }
 
-    /// Switch the focused project (updates focused.json + recent list) and reload.
-    func setFocusedProject(key: String) {
+    /// Write the *global* focused project — `focused.json` plus the recent list — which the CLI,
+    /// Raycast and the menubar all read. Whichever PM window is frontmost owns this value, so it's a
+    /// static: it isn't about any one store's project.
+    ///
+    /// `completion` runs on the main actor once the write has landed, so a caller that needs to re-read
+    /// `focused.json` (a focus-following store) doesn't race its own write.
+    static func setGlobalFocus(key: String, completion: (@MainActor () -> Void)? = nil) {
         guard let name = PMFiles.projectName(fromKey: key) else { return }
-        io.async { [weak self] in
+        focusQueue.async {
             try? PMFiles.setFocusedProjectKey(key)
             PMFiles.recordRecent(projectKey: key, name: name)
-            Task { @MainActor in self?.reload() }
+            if let completion { Task { @MainActor in completion() } }
         }
     }
 
-    // MARK: Recents (shared by both switchers)
+    /// Serial queue for focus writes, so two windows becoming main in quick succession can't interleave.
+    private static let focusQueue = DispatchQueue(label: "com.stuarthanberg.pm.focus")
 
-    /// Rebuild `recents` in the background: the projects ordered by notes-file mtime (like the Raycast
-    /// status command's `getRecentProjectsByEdit`) with their progress/due/summary. Derived purely from
-    /// the filesystem — no shared write is needed, so recents populate even on a fresh install. A 30s
-    /// TTL keyed on the focused project keeps the frequent (watcher-driven) reloads from re-scanning,
-    /// while a project switch re-warms immediately (the key changed).
-    private func warmRecents() {
-        let excludeKey = projectKey
-        if recentsWarmedForKey == excludeKey, Date().timeIntervalSince(recentsWarmedAt) < 30 { return }
-        recentsWarmedAt = Date()
-        recentsWarmedForKey = excludeKey
-        recentsQueue.async { [weak self] in
-            guard let list = Self.recentsByEdit(excludeKey: excludeKey, limit: 8) else { return }
-            let warmed: [Recent] = list.map { r in
-                guard let out = try? notesShow(project: r.name) else {
-                    return Recent(projectKey: r.projectKey, name: r.name, done: 0, total: 0, nextDue: nil, summary: nil, focusedText: nil)
-                }
-                let summary = out.notes.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                return Recent(projectKey: r.projectKey, name: r.name,
-                              done: out.todos.filter { $0.checked }.count,
-                              total: out.todos.count,
-                              nextDue: Self.earliestDue(out.todos),
-                              summary: summary.isEmpty ? nil : summary,
-                              focusedText: Self.heroTaskText(out.todos))
-            }
-            Task { @MainActor in
-                guard let self, warmed != self.recents else { return }
-                self.recents = warmed
-            }
-        }
+    /// Move the global focus to `key`. Callers that also need to *show* that project (a window
+    /// switching projects) go through `WindowManager.retarget`, which swaps in the store for the new
+    /// key; this only moves the focus.
+    func setFocusedProject(key: String) {
+        Self.setGlobalFocus(key: key)
     }
 
-    // MARK: All projects (the panel's optional sidebar)
+    // MARK: The shared scans
 
-    /// Turn the full-project scan on or off. The sidebar calls this as it appears/disappears, so a
-    /// hidden sidebar costs nothing; turning it on warms immediately (bypassing the TTL). The last
-    /// list is kept when it's turned off, so re-showing paints the previous rows while the fresh scan
-    /// runs rather than flashing empty.
+    /// Hold the shared full-project scan open while this store's sidebar is showing. Forwards to
+    /// `ProjectIndex`, which refcounts across windows so the scan runs once for all of them.
     func setWantsAllProjects(_ on: Bool) {
         guard wantsAllProjects != on else { return }
         wantsAllProjects = on
-        if on { warmAllProjects(force: true) }
-    }
-
-    /// Rebuild `allProjects` in the background: every project in both folders, newest-edited first, with
-    /// progress, next task and next due. Two-stage so a long list paints immediately — the names land
-    /// first, then the same rows again with their notes-derived detail. A 30s TTL keeps the frequent
-    /// (watcher-driven) reloads from re-scanning; a project switch forces a fresh pass.
-    ///
-    /// The list is published in one order (recency); which projects show, how they're grouped and how
-    /// they're sorted is the sidebar's business, so changing those settings never costs a re-scan.
-    private func warmAllProjects(force: Bool = false) {
-        guard wantsAllProjects else { return }
-        if !force, Date().timeIntervalSince(allProjectsWarmedAt) < 30 { return }
-        allProjectsWarmedAt = Date()
-        projectsQueue.async { [weak self] in
-            guard let listing = Self.allProjectsByEdit() else { return }
-            Task { @MainActor in self?.seedAllProjects(listing) }
-            let warmed: [ProjectEntry] = listing.enumerated().map { index, item in
-                guard index < Self.maxDetailWarm, let out = try? notesShow(project: item.name) else {
-                    return item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil, detailsLoaded: false)
-                }
-                return item.entry(done: out.todos.filter { $0.checked }.count,
-                                  total: out.todos.count,
-                                  nextTask: Self.heroTaskText(out.todos),
-                                  nextDue: Self.earliestDue(out.todos),
-                                  detailsLoaded: true)
-            }
-            Task { @MainActor in
-                guard let self, warmed != self.allProjects else { return }
-                self.allProjects = warmed
-            }
-        }
-    }
-
-    /// Paint the freshly-scanned membership/order right away, reusing any detail already warmed for a
-    /// project so rings don't blink off on a re-scan. New projects come in name-only until the detail
-    /// pass lands.
-    private func seedAllProjects(_ listing: [ProjectListing]) {
-        let known = Dictionary(allProjects.map { ($0.projectKey, $0) }, uniquingKeysWith: { a, _ in a })
-        let seeded = listing.map { item -> ProjectEntry in
-            if let cached = known[item.projectKey], cached.isArchived == item.isArchived { return cached }
-            return item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil, detailsLoaded: false)
-        }
-        if seeded != allProjects { allProjects = seeded }
-    }
-
-    /// A project as the folder scan finds it, before any notes are read: the identity and the parts of
-    /// the folder name the sidebar groups and sorts on.
-    struct ProjectListing {
-        let projectKey: String
-        let name: String
-        let code: String
-        let number: Int
-        let shortName: String
-        let domain: String
-        let isArchived: Bool
-        let modified: Date
-
-        /// Complete this listing with the values a notes read produces (or the zeroes that stand in
-        /// until one lands).
-        func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool) -> ProjectEntry {
-            ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
-                         shortName: shortName, domain: domain, isArchived: isArchived, modified: modified,
-                         done: done, total: total, nextTask: nextTask, nextDue: nextDue,
-                         detailsLoaded: detailsLoaded)
-        }
-    }
-
-    /// Every project in the active and archive folders, ordered by notes-file mtime (newest first,
-    /// falling back to folder mtime) across both. Does protected-folder IO, so only ever call this off
-    /// the main thread.
-    private nonisolated static func allProjectsByEdit() -> [ProjectListing]? {
-        guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
-        let codes = Array(config.domains.keys)
-        var result: [ProjectListing] = []
-        for base in [paths.activePath, paths.archivePath] {
-            let isArchived = base == paths.archivePath
-            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
-            result += folders.map { name in
-                let projectPath = (base as NSString).appendingPathComponent(name)
-                let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil
-                let attrs = try? FileManager.default.attributesOfItem(atPath: notesPath ?? projectPath)
-                let parts = nameParts(name, domains: config.domains)
-                return ProjectListing(projectKey: "\(base):\(name)", name: name,
-                                      code: parts.code, number: parts.number, shortName: parts.shortName,
-                                      domain: parts.domain, isArchived: isArchived,
-                                      modified: (attrs?[.modificationDate] as? Date) ?? .distantPast)
-            }
-        }
-        return result.sorted { $0.modified > $1.modified }
-    }
-
-    /// Split a project folder name ("H-004 Maxwell Carmody") into its domain code, sequence number and
-    /// display name, and look the code up in the configured domains ("Home"). The scan only ever hands
-    /// us names that matched `getProjectFolders`' pattern, so the fallbacks are belt-and-braces: an
-    /// unparseable name keeps its whole self as the display name and groups under "Other".
-    private nonisolated static func nameParts(
-        _ name: String, domains: [String: String]
-    ) -> (code: String, number: Int, shortName: String, domain: String) {
-        guard let dash = name.firstIndex(of: "-"),
-              let space = name[dash...].firstIndex(of: " ") else {
-            return ("", 0, name, "Other")
-        }
-        let code = String(name[name.startIndex..<dash])
-        let number = Int(name[name.index(after: dash)..<space]) ?? 0
-        let shortName = String(name[name.index(after: space)...])
-            .trimmingCharacters(in: .whitespaces)
-        return (code, number, shortName.isEmpty ? name : shortName, domains[code] ?? code)
-    }
-
-    /// All projects across the active + archive folders, ordered by notes-file mtime (newest first,
-    /// falling back to folder mtime), excluding the focused project, capped at `limit`. Does protected-
-    /// folder IO, so only ever call this off the main thread.
-    private nonisolated static func recentsByEdit(excludeKey: String?, limit: Int) -> [PMFiles.RecentProject]? {
-        guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
-        let codes = Array(config.domains.keys)
-        var entries: [(project: PMFiles.RecentProject, mtime: Date)] = []
-        for base in [paths.activePath, paths.archivePath] {
-            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
-            for name in folders {
-                let key = "\(base):\(name)"
-                if key == excludeKey { continue }
-                let projectPath = (base as NSString).appendingPathComponent(name)
-                let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil
-                let attrs = try? FileManager.default.attributesOfItem(atPath: notesPath ?? projectPath)
-                let mtime = (attrs?[.modificationDate] as? Date) ?? .distantPast
-                entries.append((PMFiles.RecentProject(projectKey: key, name: name), mtime))
-            }
-        }
-        return entries.sorted { $0.mtime > $1.mtime }.prefix(limit).map(\.project)
-    }
-
-    /// A recent project's "current task" — its focused task, else its first open one — for the
-    /// switchers' second line. Mirrors the menubar button's `focusedTodo ?? openTodos.first`, and is
-    /// nil when everything is done.
-    private nonisolated static func heroTaskText(_ todos: [Todo]) -> String? {
-        let hero = todos.first { $0.isFocused } ?? todos.first { !$0.checked }
-        let text = hero?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (text?.isEmpty ?? true) ? nil : text
-    }
-
-    /// Earliest due (own or inherited) among open todos, for the recent-project "next due" hint.
-    private nonisolated static func earliestDue(_ todos: [Todo]) -> String? {
-        todos.filter { !$0.checked }
-            .compactMap { $0.dueDate ?? $0.effectiveDueDate }
-            .min { (RelativeDue.parse($0) ?? .distantFuture) < (RelativeDue.parse($1) ?? .distantFuture) }
+        if on { ProjectIndex.shared.retain() } else { ProjectIndex.shared.release() }
     }
 
     // MARK: Mutations (each performs the NotesService call, then reloads)

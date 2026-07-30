@@ -10,7 +10,8 @@ import UserNotifications
 /// dates) actually changes, and only ever schedules future triggers (no backfill spam on launch).
 @MainActor
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
-    private weak var store: PMStore?
+    /// The focused project's store, re-pointed when the focus moves (see `StatusItemController.store`).
+    weak var store: PMStore? { didSet { sync() } }
     private let center = UNUserNotificationCenter.current()
     private var authorized = false
     private var lastSignature = ""

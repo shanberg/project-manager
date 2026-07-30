@@ -10,7 +10,10 @@ import PmLib
 /// deep-links for heavier edits, with ⌥ alternates (Complete→Undo, Add After→Add Before).
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private let store: PMStore
+    /// The store for whatever project is focused. Re-pointed (rather than reloaded) when the focus
+    /// moves, so the menubar shares one store — and therefore one undo history and one
+    /// last-completed task — with any window showing that same project.
+    var store: PMStore { didSet { updateButton() } }
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
 

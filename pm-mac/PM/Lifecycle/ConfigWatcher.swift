@@ -18,13 +18,14 @@ final class ConfigWatcher {
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var dirFD: Int32 = -1
-    private var notesSource: DispatchSourceFileSystemObject?
-    private var notesFD: Int32 = -1
+    /// One vnode watch per notes file — the app shows a project per window, so there are as many notes
+    /// files in play as there are open windows (plus the focused one the menubar tracks).
+    private var notesWatches: [String: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     private var pendingWork: DispatchWorkItem?
 
     private var pollTimer: DispatchSourceTimer?
-    /// Notes path currently being watched/polled (nil when no focused project).
-    private var currentNotesPath: String?
+    /// Notes paths currently being watched/polled (empty when nothing is open).
+    private var currentNotesPaths: [String] = []
     /// Last-seen combined mtime signature of the watched files; a change triggers `onChange`.
     private var lastSignature: String = ""
 
@@ -34,7 +35,8 @@ final class ConfigWatcher {
         self.pollInterval = pollInterval
     }
 
-    /// Start watching the config dir and begin polling. Call `watchNotes(at:)` when focus changes.
+    /// Start watching the config dir and begin polling. Call `watchNotes(paths:)` when the set of open
+    /// projects changes.
     func start() {
         watchDir(PMFiles.configDir.path)
         startPolling()
@@ -42,26 +44,32 @@ final class ConfigWatcher {
 
     func stop() {
         dirSource?.cancel(); dirSource = nil
-        notesSource?.cancel(); notesSource = nil
+        for (_, watch) in notesWatches { watch.source.cancel() }
+        notesWatches.removeAll()
         pollTimer?.cancel(); pollTimer = nil
     }
 
-    /// (Re)point the notes-file watch at the current focused project's notes path (or nil to clear).
-    func watchNotes(at path: String?) {
-        notesSource?.cancel(); notesSource = nil
-        if notesFD >= 0 { close(notesFD); notesFD = -1 }
-        queue.async { [weak self] in self?.currentNotesPath = path }
-        guard let path, FileManager.default.fileExists(atPath: path) else { return }
-        notesFD = open(path, O_EVTONLY)
-        guard notesFD >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: notesFD, eventMask: [.write, .rename, .delete, .extend], queue: queue)
-        source.setEventHandler { [weak self] in self?.fire() }
-        source.setCancelHandler { [weak self] in
-            if let fd = self?.notesFD, fd >= 0 { close(fd); self?.notesFD = -1 }
+    /// (Re)point the notes-file watches at the projects currently on screen. Watches already covering a
+    /// path are left alone, so opening a second window doesn't disturb the first window's watch.
+    func watchNotes(paths: [String]) {
+        let wanted = Set(paths)
+        for (path, watch) in notesWatches where !wanted.contains(path) {
+            watch.source.cancel()
+            notesWatches[path] = nil
         }
-        source.resume()
-        notesSource = source
+        for path in wanted where notesWatches[path] == nil {
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend], queue: queue)
+            source.setEventHandler { [weak self] in self?.fire() }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            notesWatches[path] = (source, fd)
+        }
+        let snapshot = Array(wanted)
+        queue.async { [weak self] in self?.currentNotesPaths = snapshot }
     }
 
     private func watchDir(_ path: String) {
@@ -106,7 +114,7 @@ final class ConfigWatcher {
             PMFiles.configDir.appendingPathComponent("focused.json").path,
             PMFiles.configDir.appendingPathComponent("panel-settings.json").path,
         ]
-        if let notes = currentNotesPath { paths.append(notes) }
+        paths.append(contentsOf: currentNotesPaths.sorted())
         for path in paths {
             if let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date {
                 parts.append("\(path):\(date.timeIntervalSince1970)")
