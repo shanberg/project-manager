@@ -201,12 +201,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         onClose?(self)
     }
 
-    /// ⌘T and the tab bar's `+`. A new tab on the same project would be a duplicate, so it opens the
-    /// project picker's default — a window on the currently focused project — and the user switches it
-    /// from the sidebar.
+    /// ⌘T and the tab bar's `+`. A tab on the project this window already shows would be a duplicate,
+    /// so New Tab means "another project alongside this one": the most recent one that isn't open yet,
+    /// added to this window's tab group.
     @objc override func newWindowForTab(_ sender: Any?) {
-        guard let key = projectKey else { return }
-        onOpenProject?(key, true)
+        guard let key = WindowManager.shared.nextUnopenedProjectKey else { return }
+        WindowManager.shared.open(projectKey: key, asTabOf: self)
     }
 
     // MARK: Menu commands answered by this window
@@ -222,7 +222,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(newTask(_:)):
             return store.projectName != nil
         case #selector(newWindowForTab(_:)):
-            return projectKey != nil && !chromeStyle.isPanel
+            // Borderless panels can't be tabbed, and there's nothing to open if every project is
+            // already on screen.
+            return !chromeStyle.isPanel && WindowManager.shared.nextUnopenedProjectKey != nil
         default:
             return true
         }

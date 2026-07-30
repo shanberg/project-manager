@@ -232,9 +232,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "show": windows.openFocusedProject()
         case "hide": windows.frontmost?.dismiss()
         case "open":
+            // A blank or unparseable key would otherwise open a second projectless window, which looks
+            // like a bug and can't be told from the empty state.
             if let key = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "project" })?.value {
+                .queryItems?.first(where: { $0.name == "project" })?.value,
+               PMFiles.projectName(fromKey: key) != nil {
                 windows.open(projectKey: key)
+            } else {
+                windows.openFocusedProject()
             }
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
