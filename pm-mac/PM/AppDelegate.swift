@@ -3,14 +3,15 @@ import Combine
 import CoreSpotlight
 import PmLib
 
-/// Wires the menubar item, the panel, the global hotkey, the URL scheme, and the config-dir watcher
-/// around a single `PMStore`. The app is a resident menubar-only agent (`.accessory` policy).
+/// Wires the menubar item, the project windows, the global hotkey, the URL scheme, and the config-dir
+/// watcher together. PM is a regular app — Dock icon, menu bar, windows — that also keeps a menubar
+/// item, so closing every window leaves it running rather than quitting.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The store for whatever project `focused.json` names — what the menubar item, notifications and
     /// Spotlight all follow. Acquired from `StoreRegistry`, so when a window is showing that same
     /// project this *is* that window's store.
-    private var store: PMStore = StoreRegistry.shared.emptyStore
+    private(set) var store: PMStore = StoreRegistry.shared.emptyStore
     private var storeKey: String?
     private var hasSyncedStore = false
     /// The `store.objectWillChange` subscription, torn down and remade when the store is re-pointed.
@@ -19,20 +20,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings = PanelSettings.load()
 
     private var statusController: StatusItemController!
-    private var panelController: PanelController!
     private var hotKey: HotKey?
     private var watcher: ConfigWatcher!
     private var notifier: NotificationManager!
+    private let windows = WindowManager.shared
+    /// Fills File ▸ Open Recent on demand; held here so it outlives the menu it serves.
+    let recentProjectsMenuDelegate = RecentProjectsMenuDelegate()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("=== PM launched (build \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "?")) configDir=\(PMFiles.configDir.path) ===")
-        NSApp.setActivationPolicy(.accessory)
-        installMainMenu()
+        NSApp.setActivationPolicy(.regular)
+        MainMenu.install(target: self)
 
         // Point the menubar at the focused project before anything reads `store`.
         syncFocusedStore()
 
-        panelController = PanelController(store: store, settings: settings)
+        windows.panelSettings = settings
         statusController = StatusItemController(store: store)
         wireStatusController()
 
@@ -41,9 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.requestAuthorization()
 
         // Global summon shortcut (Ctrl+Alt+P), matching the retired Tauri panel.
-        hotKey = HotKey { [weak self] in self?.panelController.toggle() }
+        hotKey = HotKey { [weak self] in self?.windows.toggleFocusedProject() }
 
-        // Watch the config dir (+ focused notes file) for CLI/Raycast/Obsidian edits.
+        // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
         watcher = ConfigWatcher { [weak self] in self?.handleExternalChange() }
         watcher.start()
 
@@ -51,8 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         reloadAllStores()
 
-        // Reopen the panel if it was open when the app was last quit.
-        panelController.restoreIfNeeded()
+        // Reopen the projects that were open when the app was last quit.
+        windows.restoreOnLaunch()
 
         // Index projects and open tasks for Spotlight / Siri semantic search (macOS 15+; no-op below).
         PMSpotlight.reindex()
@@ -90,43 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Install a minimal main menu carrying the standard Edit items. An `.accessory` / `LSUIElement`
-    /// app never displays the system menu bar, so without this there is no Edit menu — and the standard
-    /// text-editing shortcuts (⌘A Select All, ⌘C/⌘X/⌘V, ⌘Z/⇧⌘Z) are delivered *as key equivalents from
-    /// that menu*, so they simply do nothing in the panel's inline text fields. `NSApplication` still
-    /// dispatches a main menu's key equivalents down the responder chain even when the bar is hidden,
-    /// so installing the menu restores those shortcuts. Items use first-responder selectors so they
-    /// route to whichever field editor is focused, enabling/disabling themselves automatically.
-    private func installMainMenu() {
-        let mainMenu = NSMenu()
-
-        // A menu bar needs a (conventionally hidden) app menu as its first item to behave correctly.
-        let appItem = NSMenuItem()
-        appItem.submenu = NSMenu()
-        mainMenu.addItem(appItem)
-
-        let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redo.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editItem.submenu = editMenu
-        mainMenu.addItem(editItem)
-
-        NSApp.mainMenu = mainMenu
-    }
-
     private func wireStatusController() {
         statusController.settings = { [weak self] in self?.settings ?? .default }
-        statusController.onShowPanel = { [weak self] in self?.panelController.show() }
-        statusController.onTogglePanel = { [weak self] in self?.panelController.toggle() }
+        statusController.onShowPanel = { [weak self] in self?.windows.openFocusedProject() }
+        statusController.onTogglePanel = { [weak self] in self?.windows.toggleFocusedProject() }
         statusController.onSetPinned = { [weak self] on in self?.updateSettings { $0.pinned = on } }
         statusController.onSetFloating = { [weak self] on in self?.updateSettings { $0.floating = on } }
+        statusController.onOpenSettings = { SettingsWindowController.shared.show() }
     }
 
     // MARK: Settings
@@ -137,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard s != settings else { return }
         settings = s
         s.save()
-        panelController.applySettings(s)
+        windows.applyPanelSettings(s)
     }
 
     // MARK: The focused project's store
@@ -184,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let disk = PanelSettings.load()
         if disk != settings {
             settings = disk
-            panelController.applySettings(disk)
+            windows.applyPanelSettings(disk)
         }
         reloadAllStores()
     }
@@ -196,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After storeChanged() (which refreshes the focused task's seen-at), reschedule notifications.
         notifier?.sync()
         maybeShowAccessHelp()
+        windows.refreshTitles()
         // Re-point the notes-file watches only when the set of open projects' notes paths actually
         // changes, using the paths the stores already resolved (no extra protected-directory scan here).
         let paths = StoreRegistry.shared.watchedNotesPaths.sorted()
@@ -205,7 +179,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: URL scheme — pmpanel://toggle | show | hide | pin?on=… | float?on=…
+    // MARK: App lifecycle
+
+    /// PM keeps its menubar item (and its notifications, and its Shortcuts actions) whether or not a
+    /// window is open, so closing the last window is "put the work away", not "quit".
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Clicking the Dock icon with nothing open brings up a window on the focused project.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { windows.openFocusedProject() }
+        return true
+    }
+
+    /// The Dock menu mirrors the menubar's core actions, so the app is useful from the Dock without
+    /// opening a window first.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        if let focused = store.focusedTodo {
+            let complete = NSMenuItem(title: "Complete: \(focused.text.prefix(40))",
+                                      action: #selector(completeFocusedTask), keyEquivalent: "")
+            complete.target = self
+            menu.addItem(complete)
+        }
+        let diveIn = NSMenuItem(title: "Dive In", action: #selector(diveIn), keyEquivalent: "")
+        diveIn.target = self
+        menu.addItem(diveIn)
+        menu.addItem(.separator())
+        let open = NSMenuItem(title: "Open Window", action: #selector(newWindow), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        return menu
+    }
+
+    @objc private func completeFocusedTask() {
+        if let focused = store.focusedTodo { store.complete(focused) }
+    }
+
+    @objc private func diveIn() { store.diveIn() }
+
+    // MARK: URL scheme — pmpanel://toggle | show | hide | open?project=… | pin?on=… | float?on=…
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "pmpanel" {
@@ -216,9 +228,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(url: URL) {
         let host = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         switch host {
-        case "toggle": panelController.toggle()
-        case "show": panelController.show()
-        case "hide": panelController.hide()
+        case "toggle": windows.toggleFocusedProject()
+        case "show": windows.openFocusedProject()
+        case "hide": windows.frontmost?.dismiss()
+        case "open":
+            if let key = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "project" })?.value {
+                windows.open(projectKey: key)
+            }
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break
@@ -256,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         reloadAllStores()
-        panelController.show()
+        windows.openFocusedProject()
         NSApp.activate(ignoringOtherApps: true)
     }
 }

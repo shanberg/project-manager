@@ -12,6 +12,10 @@ struct PanelView: View {
     @ObservedObject var store: PMStore
     /// Shared chrome state (e.g. hide the scrollbar during a resize animation).
     @ObservedObject var chrome: PanelChrome
+    /// The state this pane shares with the project sidebar across the split (see `ProjectViewState`).
+    @ObservedObject var state: ProjectViewState
+    /// Whether this content is in a real window or the panel — see `WindowChromeStyle`.
+    var chromeStyle: WindowChromeStyle = .window
     /// Escape with no open editor asks the window to hide.
     var onDismiss: () -> Void = {}
     /// Measured content height, for the window's auto-fit.
@@ -34,11 +38,11 @@ struct PanelView: View {
     /// management affordances. Off (the default) is the compact task view — no brief, and sessions are
     /// just quiet captions above their tasks with empty ones hidden.
     @AppStorage("PMPanelDetailsExpanded") private var detailsExpanded = false
-    /// Whether the project sidebar is showing, persisted across panel sessions. It widens the window
-    /// rather than squeezing the content column, so the tasks always keep their full width. The key is
-    /// read straight from `UserDefaults` by `PanelController` too — it needs the width before any
-    /// SwiftUI layout has run (see `PanelController.isSidebarVisible`).
-    @AppStorage(PanelController.sidebarDefaultsKey) private var sidebarVisible = false
+    /// Whether the project sidebar is showing, persisted across sessions. The sidebar itself is the
+    /// other half of the window's split view; this is the persisted value the split's collapsed state
+    /// mirrors, and the window reads it straight from `UserDefaults` before any SwiftUI layout has run
+    /// (see `ProjectWindow.isSidebarVisible`).
+    @AppStorage(ProjectWindow.sidebarDefaultsKey) private var sidebarVisible = false
     /// Whether the project-details section is in inline-edit mode (entered by double-clicking its
     /// content). Reset when the section collapses, the project changes, or Escape is pressed.
     @State private var editingDetails = false
@@ -64,14 +68,11 @@ struct PanelView: View {
     @State private var selection: Set<String> = []
     /// The row a ⇧-click or ⇧-arrow extends the selection *from* — the last row picked without ⇧.
     @State private var selectionAnchor: String?
-    /// The selected projects in the sidebar, by project key. Owned here rather than in `ProjectSidebar`
-    /// so the panel's ⌘A / ⌘C shortcuts can act on whichever pane has keyboard focus. (The sidebar's
-    /// `List` maintains it — there's no anchor to track, since range selection is the list's own.)
-    @State private var projectSelection: Set<String> = []
-    /// Which of the two lists arrow keys, ⌫, ⌘A and ⌘C drive. Set by clicking in a pane; the task
-    /// list takes it on open. Also drives "emphasized" selection — the Mac's distinction between a
-    /// selection in the focused control and the same selection in an unfocused one.
-    @FocusState private var focusedPane: PanelPane?
+    /// Whether the task list holds keyboard focus. Drives "emphasized" selection — the Mac's
+    /// distinction between a selection in the focused control and the same selection in an unfocused
+    /// one — and mirrors itself into `state.focusedPane`, which is what routes ⌘A / ⌘C / Return across
+    /// the split to whichever pane the user is in.
+    @FocusState private var tasksFocused: Bool
     /// Tasks awaiting the inline delete confirmation. Empty when no delete is pending.
     @State private var pendingDelete: [Todo] = []
     /// A row the keyboard just moved onto, for the scroll view to reveal. Cleared once acted on.
@@ -89,10 +90,10 @@ struct PanelView: View {
     /// The panel's content height, tracked only while the main view is showing (frozen during the note
     /// takeover). The takeover reads it as a floor so it never shrinks the panel below its current height.
     @State private var measuredHeight: CGFloat = 0
-    /// Natural height of the pinned header and of the scrollable body, measured separately so the window's
-    /// auto-fit can target their sum (the body lives in a `ScrollView`, whose own frame can't report the
+    /// Natural height of the scrollable body. The pinned header's height is measured too, but lives on
+    /// `state` because the sidebar lines its own header up with it across the split. The window's
+    /// auto-fit targets their sum (the body lives in a `ScrollView`, whose own frame can't report the
     /// content's natural height). See `reportMainHeight`.
-    @State private var headerHeight: CGFloat = 0
     @State private var scrollContentHeight: CGFloat = 0
 
     /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
@@ -138,65 +139,44 @@ struct PanelView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            // The sidebar is a column *beside* the panel's content, not an overlay on it: the window
-            // grows by exactly the sidebar's width so the task column keeps its full 420pt either way.
-            if sidebarVisible {
-                // The sidebar is a real `List`, so it owns its own focus, selection and arrow keys —
-                // nothing is wrapped around it here.
-                ProjectSidebar(store: store, headerHeight: headerHeight,
-                               selection: $projectSelection, focusedPane: $focusedPane)
-                    .frame(width: PanelController.sidebarWidth)
-                    // Fills the window's height rather than sizing to its own (much longer) list. The
-                    // window's height is what `PanelController.fit` sets; the columns take it from there.
-                    .frame(maxHeight: .infinity)
-                Divider()
+        mainColumn
+            // The column keeps a readable width: fixed in the panel, and in a window free to grow to
+            // `maxContentWidth` and then stop, centered, so a wide window becomes margin rather than
+            // very long rows. The sidebar is no longer laid out here — it's the other half of the
+            // window's split view (see `ProjectSplitViewController`).
+            .frame(minWidth: ProjectWindow.minContentWidth,
+                   maxWidth: chromeStyle.isPanel ? ProjectWindow.minContentWidth : ProjectWindow.maxContentWidth)
+            .frame(maxWidth: .infinity)
+            // The height grip, drawn over the bottom edge rather than laid out in the column, so it
+            // costs the content nothing and never enters the measured height.
+            .overlay(alignment: .bottom) { resizeHandle }
+            // Pin the appearance when the user overrides it; `.system` (nil) follows the OS. Applied
+            // above the background so the glass/vibrancy material (a child NSView) inherits the scheme.
+            .preferredColorScheme(colorMode.colorScheme)
+            // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout.
+            .background(PanelBackground(rounded: chromeStyle.isPanel))
+            // Only the panel rounds itself: it's borderless, so nothing else would. A real window's
+            // frame does the clipping, and clipping again inside it would round the content away from
+            // the window's own corners.
+            .ifCondition(chromeStyle.isPanel) {
+                $0.clipShape(RoundedRectangle(cornerRadius: ProjectWindow.cornerRadius, style: .continuous))
             }
-            mainColumn
-                .frame(width: PanelController.contentWidth)
-        }
-        .animation(.snappy, value: sidebarVisible)
-        // The height grip, drawn over the bottom edge rather than laid out in the column, so it costs
-        // the content nothing and never enters the measured height.
-        .overlay(alignment: .bottom) { resizeHandle }
-        // Toggling the sidebar changes the window's width, which the height-driven auto-fit wouldn't
-        // otherwise hear about. `@AppStorage` republishes on the next runloop tick, so re-report then —
-        // `fit` applies the new width even when the height is unchanged. Also start/stop the store's
-        // full-project scan with it, so a hidden sidebar costs nothing.
-        .onChange(of: sidebarVisible) { on in
-            store.setWantsAllProjects(on)
-            DispatchQueue.main.async { reportMainHeight() }
-        }
-        .frame(width: panelWidth)
-        // Pin the appearance when the user overrides it; `.system` (nil) follows the OS. Applied above
-        // the background so the glass/vibrancy material (a child NSView) inherits the same scheme.
-        .preferredColorScheme(colorMode.colorScheme)
-        // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout.
-        .background(PanelBackground())
-        // The window is borderless, so nothing rounds the content for us — without this the header and
-        // scroll body square off the panel's rounded corners.
-        .clipShape(RoundedRectangle(cornerRadius: PanelController.cornerRadius, style: .continuous))
-        // The panel's titlebar is transparent and its content is meant to sit under it; without this
-        // the hosting controller insets the content by the titlebar height, so the measured height is
-        // ~one row short of what's shown and the window scrolls. Ignoring the top safe area makes the
-        // measured height match the rendered height, so auto-fit is exact and no scrollbar appears.
-        .ignoresSafeArea(.container, edges: .top)
+            // The panel's content is meant to run under its (absent) titlebar; without this the hosting
+            // controller insets it, so the measured height is ~one row short of what's shown and the
+            // panel scrolls. In a window the inset is exactly what we want — it's what keeps the header
+            // clear of the traffic lights.
+            .ifCondition(chromeStyle.isPanel) { $0.ignoresSafeArea(.container, edges: .top) }
     }
 
-    /// The panel's total width: the fixed content column plus the sidebar when it's showing.
-    private var panelWidth: CGFloat {
-        PanelController.contentWidth + (sidebarVisible ? PanelController.sidebarWidth : 0)
-    }
-
-    /// The panel's height grip: a quiet grabber along the bottom edge, shown only when the sidebar is
-    /// open (that's the only mode with a user-set height — with it hidden the panel hugs its content,
-    /// down to a single task, and there's nothing to drag).
+    /// The panel's height grip: a quiet grabber along the bottom edge. Panel-style only, and only with
+    /// the sidebar open — that's the only mode with a user-set height, since with it hidden the panel
+    /// hugs its content down to a single task and there's nothing to drag. A real window has resize
+    /// edges of its own.
     ///
-    /// A borderless window has no frame for AppKit to offer resize edges on, so the panel provides
-    /// its own. It sits in an overlay rather than the layout so it can't affect the measured content
-    /// height, and excludes itself from the window-drag region so a pull resizes instead of moving.
+    /// It sits in an overlay rather than the layout so it can't affect the measured content height, and
+    /// excludes itself from the window-drag region so a pull resizes instead of moving.
     @ViewBuilder private var resizeHandle: some View {
-        if sidebarVisible && sessionNoteTakeover == nil {
+        if chromeStyle.isPanel && sidebarVisible && sessionNoteTakeover == nil {
             PanelResizeHandle(onBegan: onResizeBegan, onChanged: onResizeChanged, onEnded: onResizeEnded)
         }
     }
@@ -284,11 +264,16 @@ struct PanelView: View {
             }
         }
         .onPreferenceChange(HeaderHeightKey.self) { hh in
-            headerHeight = hh
+            state.headerHeight = hh
             if sessionNoteTakeover == nil { reportMainHeight() }
         }
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
+        .background(WindowAccessor { outsideClick.window = $0 })
         .onExitCommand(perform: handleEscape)
+        // File ▸ New Task. The menu can't reach into the view, so the window bumps a counter and the
+        // add editor opens wherever it makes sense: the first-task CTA in an empty project, else an
+        // "after" editor on the hero task.
+        .onChange(of: state.newTaskRequest) { _ in beginNewTask() }
         // ⌘Z / ⇧⌘Z undo & redo the panel's edits (move, complete, due, text, add, wrap…). Hidden
         // zero-size buttons carry the shortcuts so they work whenever the panel is key.
         .background(panelShortcuts)
@@ -326,7 +311,7 @@ struct PanelView: View {
                 outsideClick.stop()
                 // Hand keyboard focus back to the list when a field gives it up, so ↑/↓ keep working
                 // after an edit without needing a click first.
-                focusedPane = .tasks
+                focusTasks()
             }
         }
         .onAppear {
@@ -337,9 +322,8 @@ struct PanelView: View {
                 if let key = rowHover.key { selectForContextMenu(key) }
             }
             rightClick.start()
-            store.setWantsAllProjects(sidebarVisible)
-            // Arrow keys should work on a freshly-summoned panel without a click to arm them.
-            DispatchQueue.main.async { focusedPane = .tasks }
+            // Arrow keys should work on a freshly-opened window without a click to arm them.
+            DispatchQueue.main.async { focusTasks() }
         }
         .onDisappear { modifiers.stop(); outsideClick.stop(); mouseUp.stop(); rightClick.stop() }
     }
@@ -363,9 +347,6 @@ struct PanelView: View {
             Button("Redo", action: store.redo)
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!store.canRedo || inNoteEditor)
-            // ⌥⌘S — the Finder/Mail "Show Sidebar" shortcut.
-            Button("Toggle Sidebar") { sidebarVisible.toggle() }
-                .keyboardShortcut("s", modifiers: [.command, .option])
             Button("Copy", action: copySelection)
                 .keyboardShortcut("c", modifiers: .command)
                 .disabled(inNoteEditor || !canCopySelection)
@@ -377,18 +358,27 @@ struct PanelView: View {
             Button("Delete") { requestDelete(actionTargets) }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(inNoteEditor || actionTargets.isEmpty)
-            // Return activates the selected project — a list's "open". Only live while the sidebar
-            // holds keyboard focus, so Return keeps its usual meaning in every editor and dialog.
-            Button("Switch to Project", action: activateSelectedProject)
+            // Return opens the selected project — a list's "open" — and ⌘Return opens it in a new
+            // window, the Finder's pairing. Only live while the sidebar holds keyboard focus, so Return
+            // keeps its usual meaning in every editor and dialog.
+            Button("Open Project") { activateSelectedProject(inNewWindow: false) }
                 .keyboardShortcut(.return, modifiers: [])
-                .disabled(focusedPane != .projects || projectSelection.count != 1 || !pendingDelete.isEmpty)
+                .disabled(!canActivateSelectedProject)
+            Button("Open Project in New Window") { activateSelectedProject(inNewWindow: true) }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!canActivateSelectedProject)
         }
         .hidden()
     }
 
-    private func activateSelectedProject() {
-        guard let key = projectSelection.first, key != store.projectKey else { return }
-        store.setFocusedProject(key: key)
+    private func activateSelectedProject(inNewWindow: Bool) {
+        guard let key = state.projectSelection.first else { return }
+        guard inNewWindow || key != store.projectKey else { return }
+        state.openProject(key, inNewWindow)
+    }
+
+    private var canActivateSelectedProject: Bool {
+        state.focusedPane == .projects && state.projectSelection.count == 1 && pendingDelete.isEmpty
     }
 
     // MARK: Selection
@@ -401,14 +391,31 @@ struct PanelView: View {
         return visibleTodos.filter { selection.contains(PMStore.key(for: $0)) }
     }
 
+    /// Open the inline add editor — File ▸ New Task, and the empty state's button.
+    private func beginNewTask() {
+        guard store.projectName != nil else { return }
+        if store.todos.isEmpty {
+            addingFirstTask = true
+        } else if let hero = focusedHero {
+            openFocusedAdd(.after, for: hero)
+        }
+    }
+
+    /// Put keyboard focus on the task list: the real focus (so arrow keys land there and the selection
+    /// draws emphasized) plus the shared routing value the sidebar reads across the split.
+    private func focusTasks() {
+        tasksFocused = true
+        state.focusedPane = .tasks
+    }
+
     /// Whether ⌘C has something to put on the pasteboard — tasks, or projects when the sidebar has
     /// keyboard focus.
     private var canCopySelection: Bool {
-        focusedPane == .projects ? !projectSelection.isEmpty : !actionTargets.isEmpty
+        state.focusedPane == .projects ? !state.projectSelection.isEmpty : !actionTargets.isEmpty
     }
 
     private func copySelection() {
-        if focusedPane == .projects {
+        if state.focusedPane == .projects {
             copySelectedProjects()
         } else {
             TaskPasteboard.copy(markdown: store.markdown(for: actionTargets))
@@ -416,8 +423,8 @@ struct PanelView: View {
     }
 
     private func selectAllInFocusedPane() {
-        if focusedPane == .projects {
-            projectSelection = Set(store.allProjects.map(\.projectKey))
+        if state.focusedPane == .projects {
+            state.projectSelection = Set(store.allProjects.map(\.projectKey))
         } else {
             selection = Set(visibleTodos.map(PMStore.key(for:)))
             selectionAnchor = selection.isEmpty ? nil : PMStore.key(for: visibleTodos[0])
@@ -428,7 +435,7 @@ struct PanelView: View {
     /// that row, ⇧ extends the range from the anchor, ⌘ toggles the row in and out of the selection.
     /// (Activating a task — making it the focused one — is the double-click, see `TaskRow`.)
     private func selectRow(_ todo: Todo, modifiers: NSEvent.ModifierFlags) {
-        focusedPane = .tasks
+        focusTasks()
         let key = PMStore.key(for: todo)
         if modifiers.contains(.shift), let anchor = selectionAnchor {
             selection = keysInRange(from: anchor, to: key)
@@ -462,7 +469,7 @@ struct PanelView: View {
         guard !selection.contains(key) else { return }
         selection = [key]
         selectionAnchor = key
-        focusedPane = .tasks
+        focusTasks()
     }
 
     /// Every visible row's key between two rows inclusive, in visible order.
@@ -499,7 +506,7 @@ struct PanelView: View {
             selectionAnchor = key
         }
         scrollTarget = key
-        focusedPane = .tasks
+        focusTasks()
     }
 
     // MARK: Delete
@@ -587,7 +594,7 @@ struct PanelView: View {
     /// Raycast commands and the Finder all use for a project.
     private func copySelectedProjects() {
         let names = store.allProjects
-            .filter { projectSelection.contains($0.projectKey) }
+            .filter { state.projectSelection.contains($0.projectKey) }
             .map(\.name)
         guard !names.isEmpty else { return }
         let pasteboard = NSPasteboard.general
@@ -639,10 +646,10 @@ struct PanelView: View {
     /// its own reporting path; this only runs while the main view is showing.
     ///
     /// This is only ever the *content's* height — what the window does with it depends on the sidebar
-    /// (see `PanelController.fit`): hidden, the window hugs this exactly; open, the window keeps the
+    /// (see `PanelChromeController.fit`): hidden, the panel hugs this exactly; open, it keeps the
     /// height the user dragged it to and this just seeds the first one.
     private func reportMainHeight() {
-        let total = headerHeight + scrollContentHeight
+        let total = state.headerHeight + scrollContentHeight
         measuredHeight = total
         onContentHeight(total)
     }
@@ -658,12 +665,12 @@ struct PanelView: View {
         return (idx, sessions[idx])
     }
 
-    /// The window's max content height, matching `PanelController.fit`'s cap (the tarot-card ratio, or
+    /// The panel's max content height, matching `PanelChromeController.fit`'s cap (the tarot-card ratio, or
     /// 95% of the screen, whichever is smaller).
     private var maxContentHeight: CGFloat {
         let screen = NSScreen.main?.visibleFrame.height ?? 900
         // Keyed to the content column, not the window: the sidebar shouldn't make the panel taller.
-        return min(PanelController.contentWidth * PanelController.maxHeightRatio, (screen * 0.95).rounded(.down))
+        return min(ProjectWindow.minContentWidth * ProjectWindow.maxHeightRatio, (screen * 0.95).rounded(.down))
     }
 
     /// The takeover's height: never below the panel's height when it opened (so it can't shrink the
@@ -685,10 +692,10 @@ struct PanelView: View {
             editingDetails = false
         } else if activeEditor != nil {
             activeEditor = nil
-        } else if !selection.isEmpty || !projectSelection.isEmpty {
+        } else if !selection.isEmpty || !state.projectSelection.isEmpty {
             selection = []
             selectionAnchor = nil
-            projectSelection = []
+            state.clearSelections()
         } else {
             onDismiss()
         }
@@ -835,7 +842,10 @@ struct PanelView: View {
         Toggle(isOn: $detailsExpanded) { Label("Show notes", systemImage: "note.text") }
         // The ⌥⌘S shortcut lives on a hidden button (see `panelShortcuts`) rather than here — a closed
         // SwiftUI menu's items aren't in the responder chain, so a key equivalent set here wouldn't fire.
-        Toggle(isOn: $sidebarVisible) { Label("Show projects  ⌥⌘S", systemImage: "sidebar.leading") }
+        Toggle(isOn: Binding(get: { sidebarVisible },
+                             set: { _ in state.toggleSidebar() })) {
+            Label("Show projects  ⌥⌘S", systemImage: "sidebar.leading")
+        }
         Divider()
         Picker("Appearance", selection: $colorMode) {
             Label("System", systemImage: "circle.lefthalf.filled").tag(PanelColorMode.system)
@@ -1048,7 +1058,7 @@ struct PanelView: View {
         // blue rectangle around the whole list would be heavy in a HUD panel — and which pane has
         // focus is shown the Mac way instead, by whether the selection reads emphasized or muted.
         .focusable()
-        .focused($focusedPane, equals: .tasks)
+        .focused($tasksFocused)
         .focusRingOff()
         .onMoveCommand { moveSelection($0) }
         .onDeleteCommand { requestDelete(actionTargets) }
@@ -1112,7 +1122,7 @@ struct PanelView: View {
                     isSelected: selection.contains(key),
                     // "Emphasized" in the AppKit sense: a selection in the pane that has keyboard
                     // focus reads stronger than the same selection in a pane that doesn't.
-                    isEmphasized: focusedPane == .tasks,
+                    isEmphasized: tasksFocused,
                     onClick: { selectRow(todo, modifiers: $0) },
                     onActivate: { store.focus(todo) },
                     contextTargets: { contextTargets(for: todo) },
@@ -1492,10 +1502,6 @@ enum TasksMode: String {
 
 /// The panel's two selectable lists. Whichever holds keyboard focus is the one arrow keys, ⌫, ⌘A and
 /// ⌘C drive, and the one whose selection reads emphasized.
-enum PanelPane: Hashable {
-    case tasks, projects
-}
-
 /// A visible task paired with the identity its row is diffed on — see `PanelView.identifiedTodos`.
 struct IdentifiedTodo: Identifiable {
     let id: String
@@ -1761,12 +1767,17 @@ private extension View {
     }
 }
 
-/// Watches for left mouse-downs in the panel window while an editor is open and cancels the editor
-/// when the click lands outside its reported frame (swallowing that click so it only dismisses).
-/// Scoped to the panel window by identifier, so clicks in other windows are left untouched.
+/// Watches for left mouse-downs in its own window while an editor is open and cancels the editor when
+/// the click lands outside its reported frame (swallowing that click so it only dismisses).
+///
+/// Scoped to one window: the app can have several project windows open, each with its own editor, and
+/// a click in one of them must not dismiss another's. (It used to match on a single shared window
+/// identifier, which was the same thing back when there was only ever one window.)
 final class OutsideClickMonitor: ObservableObject {
     var editorFrame: CGRect?
     var onOutsideClick: (() -> Void)?
+    /// The window this monitor belongs to; clicks anywhere else are left alone.
+    weak var window: NSWindow?
     private var monitor: Any?
 
     func start() {
@@ -1774,7 +1785,7 @@ final class OutsideClickMonitor: ObservableObject {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self,
                   let window = event.window,
-                  window.identifier?.rawValue == PanelController.windowIdentifier
+                  window === self.window
             else { return event }
             // SwiftUI's global space is top-left origin; AppKit's locationInWindow is bottom-left.
             guard let frame = self.editorFrame else { return event }
@@ -1790,6 +1801,32 @@ final class OutsideClickMonitor: ObservableObject {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         editorFrame = nil
+    }
+}
+
+/// Reports the `NSWindow` a SwiftUI subtree ended up in. Several behaviors here are per-window — the
+/// outside-click monitor, the note editor's save-on-blur — and with more than one project window open
+/// they need to know *which* window they're in, which SwiftUI doesn't otherwise say on macOS 13.
+struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView { ReportingView(onResolve: onResolve) }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class ReportingView: NSView {
+        let onResolve: (NSWindow?) -> Void
+        init(onResolve: @escaping (NSWindow?) -> Void) {
+            self.onResolve = onResolve
+            super.init(frame: .zero)
+        }
+        @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // Deferred: `viewDidMoveToWindow` runs mid-layout, and the callback writes SwiftUI state.
+            let window = self.window
+            DispatchQueue.main.async { [onResolve] in onResolve(window) }
+        }
     }
 }
 
@@ -2541,6 +2578,8 @@ private struct SessionNoteTakeover: View {
     let onBack: () -> Void
 
     @State private var text: String
+    /// The window this takeover is in, so the save-on-blur only fires for *this* window losing key.
+    @State private var hostWindow: NSWindow?
 
     init(index: Int, session: Session, projectName: String, height: CGFloat?,
          store: PMStore, onBack: @escaping () -> Void) {
@@ -2574,10 +2613,9 @@ private struct SessionNoteTakeover: View {
         // Auto-save on every way out: Back / Escape / outside-click remove the view (onDisappear); a
         // blur-hide leaves the view mounted but resigns key.
         .onDisappear { commit() }
+        .background(WindowAccessor { hostWindow = $0 })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
-            if (note.object as? NSWindow)?.identifier?.rawValue == PanelController.windowIdentifier {
-                commit()
-            }
+            if let hostWindow, (note.object as? NSWindow) === hostWindow { commit() }
         }
     }
 
@@ -3119,17 +3157,23 @@ private extension View {
 /// The window is borderless, so this shape is the panel's shape: it rounds its own corners rather than
 /// relying on the window frame to clip it, and the window's shadow follows from it.
 struct PanelBackground: NSViewRepresentable {
+    /// Whether the material rounds its own corners. The panel is borderless, so it has to; a real
+    /// window's frame does the rounding, and doing it again inside would cut the content away from the
+    /// window's own corners.
+    var rounded: Bool = true
+
     func makeNSView(context: Context) -> NSView {
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
             glass.style = .regular
-            glass.cornerRadius = PanelController.cornerRadius
+            glass.cornerRadius = rounded ? ProjectWindow.cornerRadius : 0
             return glass
         }
         let effect = MaskedVisualEffectView()
         effect.material = .popover
         effect.blendingMode = .behindWindow
         effect.state = .active
+        effect.rounded = rounded
         return effect
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
@@ -3139,10 +3183,12 @@ struct PanelBackground: NSViewRepresentable {
 /// rounding has to go through `maskImage` — a nine-part rounded rect whose caps let AppKit stretch it to
 /// whatever height the auto-fit lands on.
 private final class MaskedVisualEffectView: NSVisualEffectView {
+    var rounded = true
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard maskImage == nil else { return }
-        let r = PanelController.cornerRadius
+        guard rounded, maskImage == nil else { return }
+        let r = ProjectWindow.cornerRadius
         let side = r * 2 + 1
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             NSColor.black.setFill()

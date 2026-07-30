@@ -68,7 +68,7 @@ private struct ProjectGroup: Identifiable {
     var id: String { title }
 }
 
-/// The panel's optional project sidebar: the projects, in sections, each row carrying the same
+/// The project window's sidebar: the projects, in sections, each row carrying the same
 /// completion ring the menubar and the switcher draw plus the project's next task — the switcher menu's
 /// "name — task" line, given room to breathe. Clicking a row focuses that project, so the sidebar is
 /// the always-visible form of the title's switcher menu, for when you're moving between projects rather
@@ -78,19 +78,20 @@ private struct ProjectGroup: Identifiable {
 /// and are persisted. None of them touch the scan: `store.allProjects` is published once in recency
 /// order and re-arranged here, so changing a setting is instant.
 ///
-/// The scan itself only runs while something asks for it (see `PMStore.setWantsAllProjects`), so a
-/// hidden sidebar costs nothing. The row for the focused project takes its progress from the live store
-/// rather than the cached scan, so completing a task updates its ring immediately.
+/// The scan itself only runs while a sidebar is showing — the split view controller holds it open, since
+/// it's the only thing that can see the sidebar collapse — so a hidden sidebar costs nothing. The row for
+/// the current project takes its progress from the live store rather than the cached scan, so completing
+/// a task updates its ring immediately.
 struct ProjectSidebar: View {
     @ObservedObject var store: PMStore
-    /// The panel header's measured height, so the sidebar's own header bar and rule line up with it.
-    var headerHeight: CGFloat
-    /// The selected projects, owned by `PanelView` so its ⌘C can act on this pane when it holds
-    /// keyboard focus. Selecting a project doesn't switch to it — that's the double-click (or Return).
-    @Binding var selection: Set<String>
-    /// Which pane the panel's keyboard commands drive. Bound to the list itself, so focus follows a
-    /// click into it without anything having to set it by hand.
-    @FocusState.Binding var focusedPane: PanelPane?
+    /// The state shared with the task column across the split: the project selection (so the window's
+    /// ⌘C / ⌘A can act on this pane), which pane has focus, and the task header's measured height.
+    @ObservedObject var state: ProjectViewState
+
+    /// Whether the list holds keyboard focus. Local — a `@FocusState` can't span the two hosting
+    /// controllers the split view puts the panes in — and mirrored into `state.focusedPane` on the way
+    /// in, which is what the window's commands route on.
+    @FocusState private var listFocused: Bool
 
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
@@ -103,8 +104,11 @@ struct ProjectSidebar: View {
             list
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { store.setWantsAllProjects(true) }
-        .onDisappear { store.setWantsAllProjects(false) }
+        // Only ever written on *gaining* focus: a pane losing it (the window going inactive, a menu
+        // opening) shouldn't strand ⌘C with no target.
+        .onChange(of: listFocused) { focused in
+            if focused { state.focusedPane = .projects }
+        }
     }
 
     /// The projects, as a real `List`.
@@ -119,7 +123,7 @@ struct ProjectSidebar: View {
     /// Only the panel's own dressing is applied on top: the scroll background is dropped so the
     /// window's glass shows through, and the rows carry their own insets since the panel is narrow.
     private var list: some View {
-        List(selection: $selection) {
+        List(selection: $state.projectSelection) {
             ForEach(groups) { group in
                 Section {
                     ForEach(group.entries) { entry in
@@ -145,7 +149,7 @@ struct ProjectSidebar: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .focused($focusedPane, equals: .projects)
+        .focused($listFocused)
         // Selection is the single click (the list's own); the double click switches the panel to a
         // project, and the right-click menu acts on whatever was clicked.
         //
@@ -160,11 +164,13 @@ struct ProjectSidebar: View {
         .contextMenu(forSelectionType: String.self) { keys in
             let targets = entries(for: keys)
             if !targets.isEmpty {
-                ProjectMenu(targets: targets, onActivate: { focusProject($0) })
+                ProjectMenu(targets: targets,
+                            onActivate: { openProject($0, inNewWindow: false) },
+                            onOpenInNewWindow: { openProject($0, inNewWindow: true) })
             }
         } primaryAction: { keys in
             guard keys.count == 1, let entry = entries(for: keys).first else { return }
-            focusProject(entry)
+            openProject(entry, inNewWindow: false)
         }
     }
 
@@ -179,7 +185,7 @@ struct ProjectSidebar: View {
         .padding(.horizontal, 12)
         // Match the panel header's height exactly (less its own 1pt rule) when it's been measured, so
         // the sidebar's divider continues the header's; fall back to a sensible height before then.
-        .frame(height: headerHeight > 1 ? headerHeight - 1 : 47)
+        .frame(height: state.headerHeight > 1 ? state.headerHeight - 1 : 47)
     }
 
     /// Status / grouping / sorting, one submenu each — the sidebar's counterpart to the panel
@@ -240,9 +246,12 @@ struct ProjectSidebar: View {
         store.allProjects.filter { keys.contains($0.projectKey) }
     }
 
-    private func focusProject(_ entry: PMStore.ProjectEntry) {
-        guard entry.projectKey != store.projectKey else { return }
-        store.setFocusedProject(key: entry.projectKey)
+    /// Open a project — in this window (the double-click, Return) or a new one (⌘-double-click,
+    /// ⌘Return, the context menu). The window decides what that means; the sidebar just asks.
+    private func openProject(_ entry: PMStore.ProjectEntry, inNewWindow: Bool) {
+        let newWindow = inNewWindow || NSEvent.modifierFlags.contains(.command)
+        guard newWindow || entry.projectKey != store.projectKey else { return }
+        state.openProject(entry.projectKey, newWindow)
     }
 
     /// The filtered projects, sorted, then gathered into sections.
@@ -353,20 +362,24 @@ private struct ProjectSidebarRow: View {
     }
 }
 
-/// Right-click actions for the selected projects. Switching is single-target (the panel shows one
-/// project at a time); revealing and copying work on the whole selection, so a multi-select is worth
-/// making. Nothing here is destructive — a project is a folder of the user's own files, and removing
-/// one belongs in the Finder, not in a HUD panel.
+/// Right-click actions for the selected projects. Opening is single-target (a window shows one project
+/// at a time); revealing and copying work on the whole selection, so a multi-select is worth making.
+/// Nothing here is destructive — a project is a folder of the user's own files, and removing one belongs
+/// in the Finder.
 private struct ProjectMenu: View {
     let targets: [PMStore.ProjectEntry]
     let onActivate: (PMStore.ProjectEntry) -> Void
+    let onOpenInNewWindow: (PMStore.ProjectEntry) -> Void
 
     private var isMulti: Bool { targets.count > 1 }
 
     var body: some View {
         if let only = targets.first, !isMulti {
             Button { onActivate(only) } label: {
-                Label("Switch to Project", systemImage: "arrow.right.circle")
+                Label("Open Project", systemImage: "arrow.right.circle")
+            }
+            Button { onOpenInNewWindow(only) } label: {
+                Label("Open in New Window", systemImage: "macwindow.badge.plus")
             }
             Divider()
         }

@@ -50,13 +50,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.stuarthanberg.pm
         PRODUCT_NAME: PM
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: PM/Info.plist
       properties:
         CFBundleName: PM
         CFBundleDisplayName: PM
-        # Menubar-only agent: no Dock icon, no main window on launch.
-        LSUIElement: true
         LSMinimumSystemVersion: "13.0"
         # Custom URL scheme so Raycast (and other launchers) can drive the app:
         # pmpanel://toggle | show | hide | pin?on=… | float?on=…

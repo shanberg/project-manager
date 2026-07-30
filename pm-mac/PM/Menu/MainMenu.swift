@@ -1,0 +1,214 @@
+import AppKit
+
+/// The app's menu bar.
+///
+/// This used to be a single hidden Edit menu: an `.accessory` app never shows the menu bar, but
+/// `NSApplication` still dispatches a main menu's key equivalents down the responder chain, and without
+/// that menu ⌘A/⌘C/⌘X/⌘V/⌘Z simply did nothing in the panel's text fields. Now that PM is a regular app
+/// the bar is visible, so it has to be a real command model rather than a keyboard shim.
+///
+/// Two routing rules run through the whole thing:
+///
+///   * Text-editing items keep their **first-responder selectors** (`undo:`, `copy:`, `selectAll:`).
+///     AppKit offers a key equivalent to the main menu before the key window, so while a text field is
+///     focused those items claim the keystroke and edit the text — which is exactly why the content's
+///     own ⌘C / ⌘A sit *behind* them on hidden buttons (see `PanelView.panelShortcuts`).
+///   * Everything window-shaped targets `nil` too, so it walks the responder chain and lands on the
+///     `ProjectWindowController` of whichever window is in front — `toggleSidebar:` is answered by the
+///     split view controller, the rest by the window controller. App-wide items target the delegate.
+@MainActor
+enum MainMenu {
+    static func install(target: AppDelegate) {
+        let mainMenu = NSMenu()
+        mainMenu.addItem(appMenuItem(target: target))
+        mainMenu.addItem(fileMenuItem(target: target))
+        mainMenu.addItem(editMenuItem())
+        mainMenu.addItem(viewMenuItem(target: target))
+        mainMenu.addItem(taskMenuItem(target: target))
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        let helpItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        helpItem.submenu = helpMenu
+        mainMenu.addItem(helpItem)
+
+        NSApp.mainMenu = mainMenu
+        // AppKit fills these in itself — Minimize/Zoom/Bring All to Front and the window list, plus the
+        // tab items (Show Next Tab, Move Tab to New Window…) once a window declares a tabbing identifier.
+        NSApp.windowsMenu = windowMenu
+        NSApp.helpMenu = helpMenu
+    }
+
+    // MARK: PM
+
+    private static func appMenuItem(target: AppDelegate) -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "PM")
+
+        menu.addItem(withTitle: "About PM", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+                     keyEquivalent: "")
+        menu.addItem(.separator())
+        add(menu, "Settings…", #selector(AppDelegate.openSettings), target: target, key: ",")
+        menu.addItem(.separator())
+
+        let services = NSMenu(title: "Services")
+        let servicesItem = menu.addItem(withTitle: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = services
+        NSApp.servicesMenu = services
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Hide PM", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = menu.addItem(withTitle: "Hide Others",
+                                      action: #selector(NSApplication.hideOtherApplications(_:)),
+                                      keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)),
+                     keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit PM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: File
+
+    private static func fileMenuItem(target: AppDelegate) -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "File")
+
+        // ⌘N makes the app's primary content, ⌥⌘N makes a window — Mail's split, and the one that keeps
+        // ⌘T free for the standard New Tab.
+        add(menu, "New Task", #selector(ProjectWindowController.newTask), target: nil, key: "n")
+        add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
+            modifiers: [.command, .option])
+        add(menu, "New Tab", #selector(ProjectWindowController.newWindowForTab(_:)), target: nil, key: "t")
+        menu.addItem(.separator())
+
+        let recents = NSMenu(title: "Open Recent")
+        let recentsItem = menu.addItem(withTitle: "Open Recent", action: nil, keyEquivalent: "")
+        recentsItem.submenu = recents
+        recents.delegate = target.recentProjectsMenuDelegate
+        add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let closeAll = menu.addItem(withTitle: "Close All Windows",
+                                    action: #selector(AppDelegate.closeAllWindows), keyEquivalent: "w")
+        closeAll.keyEquivalentModifierMask = [.command, .option]
+        closeAll.target = target
+
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: Edit
+
+    /// Standard first-responder text editing. `undo:` / `redo:` reach the focused field editor's own
+    /// undo while one is up, and the content's document-level ⌘Z otherwise (its hidden button sits
+    /// behind these).
+    private static func editMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Edit")
+        menu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = menu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: View
+
+    private static func viewMenuItem(target: AppDelegate) -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "View")
+
+        for (index, mode) in [TasksMode.focused, .incomplete, .all].enumerated() {
+            let entry = add(menu, mode.menuTitle, #selector(AppDelegate.setTasksMode(_:)),
+                            target: target, key: "\(index + 1)")
+            entry.representedObject = mode.rawValue
+        }
+        menu.addItem(.separator())
+        add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
+        // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
+        // window's split view controller, so it animates and persists in one place.
+        add(menu, "Show Projects", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
+            key: "s", modifiers: [.command, .option])
+        menu.addItem(.separator())
+
+        let appearance = NSMenu(title: "Appearance")
+        let appearanceItem = menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "")
+        appearanceItem.submenu = appearance
+        for mode in [PanelColorMode.system, .light, .dark] {
+            let entry = add(appearance, mode.menuTitle, #selector(AppDelegate.setColorMode(_:)),
+                            target: target, key: "")
+            entry.representedObject = mode.rawValue
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)),
+                     keyEquivalent: "f").keyEquivalentModifierMask = [.command, .control]
+
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: Task
+
+    /// The domain menu — the actions the menubar item and the row context menus already offer, given a
+    /// home in the menu bar where they're discoverable and carry their shortcuts.
+    private static func taskMenuItem(target: AppDelegate) -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Task")
+        add(menu, "Complete Focused Task", #selector(AppDelegate.completeFocused), target: target,
+            key: "\r", modifiers: [.command, .shift])
+        add(menu, "Undo Last Completion", #selector(AppDelegate.undoLastCompletion), target: target, key: "")
+        menu.addItem(.separator())
+        add(menu, "Dive In", #selector(AppDelegate.diveInCommand), target: target, key: "d",
+            modifiers: [.command, .shift])
+        menu.addItem(.separator())
+        add(menu, "Reveal Project in Finder", #selector(AppDelegate.revealProject), target: target,
+            key: "r", modifiers: [.command, .shift])
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: Helper
+
+    @discardableResult
+    private static func add(_ menu: NSMenu, _ title: String, _ action: Selector, target: AnyObject?,
+                            key: String, modifiers: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+        if !key.isEmpty { item.keyEquivalentModifierMask = modifiers }
+        item.target = target
+        return item
+    }
+}
+
+extension TasksMode {
+    var menuTitle: String {
+        switch self {
+        case .focused: return "Focused Task"
+        case .incomplete: return "Incomplete Tasks"
+        case .all: return "All Tasks"
+        }
+    }
+}
+
+extension PanelColorMode {
+    var menuTitle: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+}

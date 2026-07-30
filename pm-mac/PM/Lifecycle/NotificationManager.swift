@@ -28,6 +28,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         super.init()
         center.delegate = self
         registerCategories()
+        NotificationCenter.default.addObserver(
+            forName: NotificationSettings.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sync() }
+        }
     }
 
     func requestAuthorization() {
@@ -65,7 +70,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 return "\(todo.sessionIndex):\(todo.lineIndex)=\(d)"
             }
             .joined(separator: ",")
-        let signature = "\(store.focusedKey ?? "")|\(seenAt)|\(dueSig)"
+        // The settings are part of the signature, so flipping one reschedules instead of being
+        // skipped as "nothing relevant changed".
+        let wantsStale = NotificationSettings.staleNudges, wantsDue = NotificationSettings.dueAlerts
+        let signature = "\(store.focusedKey ?? "")|\(seenAt)|\(dueSig)|\(wantsStale)\(wantsDue)"
         guard signature != lastSignature else { return }
         lastSignature = signature
 
@@ -74,7 +82,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let title = store.notes?.title ?? store.projectName ?? "PM"
 
         // Stale nudges for the focused task.
-        if let focused = store.focusedTodo, seenAt > 0 {
+        if wantsStale, let focused = store.focusedTodo, seenAt > 0 {
             let name = truncate(focused.text)
             schedule(id: "pm.stale.1", after: seenAt + 3600 - now, title: title,
                      body: "You've been focused on “\(name)” for an hour.", category: Self.staleCategory)
@@ -83,7 +91,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
         // Due alerts for open tasks with a future due date.
-        for todo in store.todos where !todo.checked {
+        for todo in store.todos where wantsDue && !todo.checked {
             guard let dueStr = todo.dueDate, let due = RelativeDue.parse(dueStr) else { continue }
             schedule(id: "pm.due.\(todo.sessionIndex):\(todo.lineIndex)", after: due.timeIntervalSince1970 - now,
                      title: title, body: "“\(truncate(todo.text))” is due.", category: Self.dueCategory)

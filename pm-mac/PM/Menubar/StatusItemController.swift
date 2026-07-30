@@ -22,6 +22,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var settings: () -> PanelSettings = { .default }
     var onSetPinned: (Bool) -> Void = { _ in }
     var onSetFloating: (Bool) -> Void = { _ in }
+    var onOpenSettings: () -> Void = {}
 
     /// Cached favicons for project links, keyed by host. Fetched once per host in the background.
     private var faviconCache: [String: NSImage] = [:]
@@ -186,7 +187,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(disabledItem("No focused project"))
             menu.addItem(.separator())
             menu.addItem(switchProjectMenuItem())
-            menu.addItem(actionItem("Show Panel", #selector(showPanel), symbol: "sidebar.right", key: "p"))
+            menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: "p"))
             menu.addItem(.separator())
             menu.addItem(settingsMenuItem())
             menu.addItem(actionItem("Quit PM", #selector(quit), key: "q"))
@@ -224,7 +225,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if shown >= Self.menuTaskCap { break }
         }
         if open.count > shown {
-            menu.addItem(actionItem("Show all \(open.count) tasks in panel…", #selector(showPanel), symbol: "ellipsis"))
+            menu.addItem(actionItem("Show all \(open.count) tasks…", #selector(showPanel), symbol: "ellipsis"))
         }
 
         // Constant actions inline; less-frequent actions collapsed into submenus (Balanced layout).
@@ -235,7 +236,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(switchProjectMenuItem())
-        menu.addItem(actionItem("Show Panel", #selector(showPanel), symbol: "sidebar.right", key: "p"))
+        menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: "p"))
 
         menu.addItem(.separator())
         menu.addItem(settingsMenuItem())
@@ -341,7 +342,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parts.joined(separator: "\n")
     }
 
-    /// "Settings ▸" — window behavior + launch at login.
+    /// "Settings…" — the app's real Settings window. The two window-behavior toggles stay here as
+    /// well, because they're the ones Raycast can flip too and it's useful to see their state without
+    /// opening a window.
     private func settingsMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Settings", symbol: "gearshape")
         let s = settings()
@@ -351,11 +354,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let float = actionItem("Float Above Other Windows", #selector(toggleFloat))
         float.state = s.floating ? .on : .off
         sub.addItem(float)
-        let login = actionItem("Launch at Login", #selector(toggleLoginItem))
-        login.state = isLoginItemEnabled ? .on : .off
-        sub.addItem(login)
+        sub.addItem(.separator())
+        sub.addItem(actionItem("All Settings…", #selector(openSettings), symbol: "gearshape", key: ","))
         return item
     }
+
+    @objc private func openSettings() { onOpenSettings() }
 
     // MARK: Custom row / header items
 
