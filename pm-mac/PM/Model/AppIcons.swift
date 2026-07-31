@@ -1,6 +1,6 @@
 import AppKit
 
-/// Resolves real application icons (Finder, Obsidian) for use in the menu and panel, so "Open in
+/// Resolves real application icons (Finder, Obsidian) for use in menus and task views, so "Open in
 /// Finder / Obsidian" actions carry their app's icon instead of a generic SF Symbol. Results are
 /// cached per size for the app's lifetime; a missing app simply returns nil and callers fall back to
 /// an SF Symbol.
@@ -8,7 +8,7 @@ enum AppIcons {
     enum App: String { case finder, obsidian, raycast }
 
     static func menuIcon(_ app: App) -> NSImage? { icon(app, side: 16) }
-    static func panelImage(_ app: App) -> NSImage? { icon(app, side: 15) }
+    static func smallImage(_ app: App) -> NSImage? { icon(app, side: 15) }
 
     private static var cache: [String: NSImage] = [:]
 

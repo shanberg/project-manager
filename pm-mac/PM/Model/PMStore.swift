@@ -4,7 +4,7 @@ import AppKit
 import PmLib
 
 /// A classified change of the focused ("hero") task between two loads, used to drive directional
-/// animations in the panel's focused card and the menubar button so the movement reads spatially.
+/// animations in the focus panel card and the menubar button so the movement reads spatially.
 /// Directions follow the outline geometry, so most moves are diagonal rather than cardinal: diving
 /// into a narrower subtask travels down-and-right (the child is both deeper and lower), a completion
 /// bubbling up to an ancestor travels up-and-left, while advancing to / stepping back from a
@@ -18,7 +18,7 @@ enum FocusMove: Equatable {
     case right   // focus dove into a deeper / narrower task → down-right
 }
 
-/// Single source of truth for the focused project, shared by the menubar item and the panel.
+/// Single source of truth for the focused project, shared by the menubar item, the focus panel and the project windows.
 ///
 /// Calls `PmLib` directly (no `pm` subprocess, no Rust bridge). All notes IO runs on a serial
 /// background queue so concurrent mutations can't interleave writes; published state is updated on
@@ -74,7 +74,7 @@ final class PMStore: ObservableObject {
     /// time. Restoring one writes the bytes back verbatim, so undo is format-preserving like every edit.
     struct DocSnapshot: Equatable { let notesPath: String; let raw: String }
 
-    /// Undo/redo history of pre-mutation document snapshots, for panel-initiated edits (move, complete,
+    /// Undo/redo history of pre-mutation document snapshots, for in-app edits (move, complete,
     /// due, text, add, wrap, unwrap…). Coarse but reliable: each step restores the full prior document.
     /// Published so the menu/keyboard affordances can reflect availability; cleared on a project switch.
     @Published private(set) var undoStack: [DocSnapshot] = []
@@ -132,7 +132,7 @@ final class PMStore: ObservableObject {
     static func key(for todo: Todo) -> String { "\(todo.sessionIndex):\(todo.lineIndex)" }
 
     /// The hero task a load presents — the focused todo, else the first open one — reduced to the
-    /// fields needed to classify how it moved. Mirrors the panel's `focusedHero`.
+    /// fields needed to classify how it moved. Mirrors the focus panel hero task.
     private func makeHeroSnapshot(_ todos: [Todo]) -> HeroSnapshot? {
         guard let h = todos.first(where: { $0.isFocused }) ?? todos.first(where: { !$0.checked }) else { return nil }
         return HeroSnapshot(key: Self.key(for: h), text: h.text, depth: h.depth,
@@ -384,7 +384,7 @@ final class PMStore: ObservableObject {
     }
 
     /// Move `todo` (and its whole subtree) to a precise slot — after/before the `anchor` todo's line,
-    /// with the subtree's root re-indented to `depth`. Drives the panel's drag-to-reorder: the drop's
+    /// with the subtree's root re-indented to `depth`. Drives the drag-to-reorder: the drop's
     /// Y resolves the anchor + side, its X the depth. Illegal drops (anchor inside the moved subtree)
     /// are rejected by the backend; the drop handler avoids offering them.
     func moveSubtree(_ todo: Todo, anchor: Todo, insertAfter: Bool, depth: Int) {
@@ -398,7 +398,7 @@ final class PMStore: ObservableObject {
 
     // MARK: Selection-wide operations
     //
-    // The panel's task list supports multi-selection, so these take a set of tasks and perform the
+    // The task list supports multi-selection, so these take a set of tasks and perform the
     // whole batch inside ONE `mutate` — a single pre-edit snapshot is banked, so ⌘Z reverses the
     // entire action rather than unwinding it task by task.
 
@@ -432,7 +432,7 @@ final class PMStore: ObservableObject {
     }
 
     /// What deleting `todos` would remove: the tasks actually picked (after collapsing any that are
-    /// already inside another's subtree) and the extra descendants that ride along. The panel's
+    /// already inside another's subtree) and the extra descendants that ride along. The
     /// confirmation names both, so a delete never silently takes more than it showed.
     func deletionSummary(_ todos: [Todo]) -> (tasks: Int, descendants: Int) {
         let roots = outermost(todos)
@@ -515,7 +515,7 @@ final class PMStore: ObservableObject {
     }
 
     /// The keys of `todo` and its subtree — the task itself plus the contiguous run of deeper todos
-    /// right after it in document order. Used by the panel to reject drops onto a task's own descendants.
+    /// right after it in document order. Used to reject drops onto a task's own descendants.
     func subtreeKeys(of todo: Todo) -> Set<String> {
         guard let idx = todos.firstIndex(where: {
             $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
@@ -542,10 +542,34 @@ final class PMStore: ObservableObject {
     }
 
     /// The task focus should advance to: the first open leaf under the focused task, else the next
-    /// open leaf after it in document order. Drives both "Dive in" and the focused-mode "Next" hint so
+    /// open leaf after it in document order. Drives both "Dive in" and the focus panel's "Next" hint so
     /// the two can't diverge. The leaf-finding logic lives in `PmLib.nextDiveInLeaf` (shared with the
     /// Raycast command and covered by unit tests).
     var nextTodo: Todo? { PmLib.nextDiveInLeaf(todos: todos) }
+
+    /// The chain of ancestor task texts above `todo`, joined with chevrons, or nil if it's a root task.
+    /// Walks the flat todo list backward, picking up one task at each shallower depth within the same
+    /// session — the same structure the list's indentation reflects.
+    ///
+    /// Lives on the store rather than in a view because it's the focus panel's breadcrumb *and* the
+    /// context any other surface would need to say where a task sits; a copy in each would drift.
+    func breadcrumb(for todo: Todo) -> String? {
+        guard let idx = todos.firstIndex(where: {
+            $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
+        }) else { return nil }
+        var ancestors: [String] = []
+        var wantDepth = todo.depth - 1
+        var i = idx - 1
+        while i >= 0, wantDepth >= 0 {
+            let t = todos[i]
+            if t.sessionIndex == todo.sessionIndex, t.depth == wantDepth {
+                ancestors.insert(t.text, at: 0)
+                wantDepth -= 1
+            }
+            i -= 1
+        }
+        return ancestors.isEmpty ? nil : ancestors.joined(separator: "  ›  ")
+    }
 
     /// "Dive in": move focus to the next open leaf. Mirrors the Raycast Dive In command.
     func diveIn() {
@@ -571,7 +595,7 @@ final class PMStore: ObservableObject {
 
     // MARK: Session mutations (each flows through `mutate`, so ⌘Z undo/redo covers it)
 
-    /// Whether the session at `index` has any task lines — gates the panel's "Delete session" affordance
+    /// Whether the session at `index` has any task lines — gates the "Delete session" affordance
     /// so tasks are never removed with it.
     func hasTasks(sessionIndex index: Int) -> Bool {
         todos.contains { $0.sessionIndex == index }
@@ -592,7 +616,7 @@ final class PMStore: ObservableObject {
         mutate { try PmLib.setSessionNote(project: $0, sessionIndex: index, prose: prose) }
     }
 
-    /// Delete the session at `index`. The panel only offers this for sessions with no tasks.
+    /// Delete the session at `index`. The app only offers this for sessions with no tasks.
     func deleteSession(_ index: Int) {
         mutate { try PmLib.deleteSession(project: $0, sessionIndex: index) }
     }

@@ -4,7 +4,7 @@ import AppKit
 ///
 /// This used to be a single hidden Edit menu: an `.accessory` app never shows the menu bar, but
 /// `NSApplication` still dispatches a main menu's key equivalents down the responder chain, and without
-/// that menu ⌘A/⌘C/⌘X/⌘V/⌘Z simply did nothing in the panel's text fields. Now that PM is a regular app
+/// that menu ⌘A/⌘C/⌘X/⌘V/⌘Z simply did nothing in the window text fields. Now that PM is a regular app
 /// the bar is visible, so it has to be a real command model rather than a keyboard shim.
 ///
 /// Two routing rules run through the whole thing:
@@ -12,7 +12,7 @@ import AppKit
 ///   * Text-editing items keep their **first-responder selectors** (`undo:`, `copy:`, `selectAll:`).
 ///     AppKit offers a key equivalent to the main menu before the key window, so while a text field is
 ///     focused those items claim the keystroke and edit the text — which is exactly why the content's
-///     own ⌘C / ⌘A sit *behind* them on hidden buttons (see `PanelView.panelShortcuts`).
+///     own ⌘C / ⌘A sit *behind* them on hidden buttons (see `ProjectView.keyboardShortcuts`).
 ///   * Everything window-shaped targets `nil` too, so it walks the responder chain and lands on the
 ///     `ProjectWindowController` of whichever window is in front — `toggleSidebar:` is answered by the
 ///     split view controller, the rest by the window controller. App-wide items target the delegate.
@@ -132,11 +132,16 @@ enum MainMenu {
         let item = NSMenuItem()
         let menu = NSMenu(title: "View")
 
-        for (index, mode) in [TasksMode.focused, .incomplete, .all].enumerated() {
+        for (index, mode) in [TasksMode.incomplete, .all].enumerated() {
             let entry = add(menu, mode.menuTitle, #selector(AppDelegate.setTasksMode(_:)),
                             target: target, key: "\(index + 1)")
             entry.representedObject = mode.rawValue
         }
+        menu.addItem(.separator())
+        // The focus panel is a window, not a view mode — but this is where you'd look for it, next to
+        // the list filters it replaced.
+        add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel), target: target,
+            key: "p", modifiers: [.control, .option])
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
@@ -148,7 +153,7 @@ enum MainMenu {
         let appearance = NSMenu(title: "Appearance")
         let appearanceItem = menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "")
         appearanceItem.submenu = appearance
-        for mode in [PanelColorMode.system, .light, .dark] {
+        for mode in [AppColorMode.system, .light, .dark] {
             let entry = add(appearance, mode.menuTitle, #selector(AppDelegate.setColorMode(_:)),
                             target: target, key: "")
             entry.representedObject = mode.rawValue
@@ -196,14 +201,13 @@ enum MainMenu {
 extension TasksMode {
     var menuTitle: String {
         switch self {
-        case .focused: return "Focused Task"
         case .incomplete: return "Incomplete Tasks"
         case .all: return "All Tasks"
         }
     }
 }
 
-extension PanelColorMode {
+extension AppColorMode {
     var menuTitle: String {
         switch self {
         case .system: return "System"

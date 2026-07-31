@@ -1,7 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// A task selection's identity outside the panel — what it becomes on the pasteboard and on a drag.
+/// A task selection's identity outside the app — what it becomes on the pasteboard and on a drag.
 ///
 /// Tasks travel as two representations at once:
 ///

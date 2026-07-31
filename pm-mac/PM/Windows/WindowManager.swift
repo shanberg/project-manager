@@ -11,9 +11,6 @@ final class WindowManager {
 
     private(set) var controllers: [ProjectWindowController] = []
 
-    /// Panel settings, kept here so a newly-opened window starts with the current values.
-    var panelSettings: PanelSettings = .default
-
     // MARK: Opening
 
     /// Bring up a window for `projectKey`, or focus the one already showing it.
@@ -77,19 +74,6 @@ final class WindowManager {
         open(projectKey: PMFiles.focusedProjectKey())
     }
 
-    /// The hotkey's toggle. Summon a window if PM isn't already in front; if it is, get out of the way
-    /// — which for a panel means hiding it (it's summoned, not opened) and for a real window means
-    /// hiding the app. Never *closing* it: ⌃⌥P is a "show me / not now" toggle, and losing a window
-    /// (and its size, its position, its place in the reopen list) to a glance would be a poor trade.
-    func toggleFocusedProject() {
-        guard let front = frontmost, front.isVisible, NSApp.isActive else {
-            openFocusedProject()
-            return
-        }
-        front.dismiss()
-        if front.isVisible { NSApp.hide(nil) }
-    }
-
     // MARK: Lifecycle
 
     private func makeController(projectKey: String?) -> ProjectWindowController {
@@ -98,8 +82,6 @@ final class WindowManager {
         // project beside it, not to carry a second copy of the project list.
         let controller = ProjectWindowController(projectKey: projectKey,
                                                  store: store,
-                                                 chromeStyle: WindowSettings.shared.chromeStyle,
-                                                 settings: panelSettings,
                                                  startsWithSidebar: controllers.isEmpty
                                                     && ProjectWindow.isSidebarVisible)
         controller.onClose = { [weak self] closed in self?.windowClosed(closed) }
@@ -152,14 +134,8 @@ final class WindowManager {
 
     // MARK: Broadcasts
 
-    /// Re-apply the panel settings (Raycast can change them behind our back) to every open window.
-    func applyPanelSettings(_ settings: PanelSettings) {
-        panelSettings = settings
-        for controller in controllers { controller.applyPanelSettings(settings) }
-    }
-
-    /// Re-apply the window-behavior settings — all-Spaces, floating — to every open window, so a
-    /// Settings change takes effect without reopening anything.
+    /// Re-apply the window-behavior settings to every open window, so a Settings change takes effect
+    /// without reopening anything.
     func applyWindowSettings() {
         for controller in controllers { controller.applyWindowSettings() }
     }

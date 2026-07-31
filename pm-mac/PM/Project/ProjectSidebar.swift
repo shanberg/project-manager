@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Which projects the sidebar lists, persisted across panel sessions.
+/// Which projects the sidebar lists, persisted across sessions.
 enum ProjectStatusFilter: String {
     case active, archived, all
 
@@ -120,8 +120,13 @@ struct ProjectSidebar: View {
     /// that dims when the pane or window loses focus, and the accessibility that comes with a real
     /// table. It's a flat list of selectable rows: exactly what `List` is for.
     ///
-    /// Only the panel's own dressing is applied on top: the scroll background is dropped so the
-    /// window's glass shows through, and the rows carry their own insets since the panel is narrow.
+    /// The source-list style is what gives a row its own identity: the selection and hover highlights
+    /// are inset rounded rectangles rather than full-bleed squared bands, so each project reads as a
+    /// discrete item the way a Finder sidebar entry does. It also supplies the row insets, the section
+    /// header treatment and the collapse affordance, so none of those are set by hand here.
+    ///
+    /// The one bit of the window own dressing kept on top: the scroll background is dropped, since the
+    /// split view's sidebar item already draws the material behind this and two would stack.
     private var list: some View {
         List(selection: $state.projectSelection) {
             ForEach(groups) { group in
@@ -133,7 +138,6 @@ struct ProjectSidebar: View {
                             liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
                         )
                         .tag(entry.projectKey)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
                         .listRowSeparator(.hidden)
                     }
                 } header: {
@@ -147,10 +151,10 @@ struct ProjectSidebar: View {
                     .listRowSeparator(.hidden)
             }
         }
-        .listStyle(.plain)
+        .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .focused($listFocused)
-        // Selection is the single click (the list's own); the double click switches the panel to a
+        // Selection is the single click (the list's own); the double click switches the window to a
         // project, and the right-click menu acts on whatever was clicked.
         //
         // Both hang off the *list*, not the rows. The selection-aware `contextMenu` is the API written
@@ -174,7 +178,7 @@ struct ProjectSidebar: View {
         }
     }
 
-    /// The sidebar's own header: a quiet label and the arrange menu, sized to the panel header beside it
+    /// The sidebar's own header: a quiet label and the arrange menu, sized to the task header beside it
     /// so the two rules meet.
     private var headerBar: some View {
         HStack(spacing: 4) {
@@ -183,12 +187,12 @@ struct ProjectSidebar: View {
             arrangeMenu
         }
         .padding(.horizontal, 12)
-        // Match the panel header's height exactly (less its own 1pt rule) when it's been measured, so
+        // Match the task header height exactly (less its own 1pt rule) when it's been measured, so
         // the sidebar's divider continues the header's; fall back to a sensible height before then.
         .frame(height: state.headerHeight > 1 ? state.headerHeight - 1 : 47)
     }
 
-    /// Status / grouping / sorting, one submenu each — the sidebar's counterpart to the panel
+    /// Status / grouping / sorting, one submenu each — the sidebar's counterpart to the task
     /// header's view-options button, and the shape the Finder's View menu uses for the same job
     /// ("Sort By ▸"). Three short lists behind their own titles read as three separate decisions;
     /// flattened into one column they'd run together into eleven items with no visible boundary
@@ -290,7 +294,7 @@ struct ProjectSidebar: View {
 /// step quieter than active ones.
 private struct ProjectSidebarRow: View {
     let entry: PMStore.ProjectEntry
-    /// Whether this is the project the panel is currently showing.
+    /// Whether this is the project the window is currently showing.
     let isFocusedProject: Bool
     /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
     /// other row, which falls back to the warmed values.
@@ -308,10 +312,14 @@ private struct ProjectSidebarRow: View {
     /// then on the highlight it draws under the pointer belongs to a different row than the one you're
     /// over. A constant height means the rows never move under the mouse, and it gives the list an even
     /// rhythm besides.
-    private static let height: CGFloat = 32
+    ///
+    /// Tall enough that the two text lines sit *inside* the source list's rounded highlight with air
+    /// above and below, rather than filling it to the edges — the difference between a row that reads
+    /// as an item and one that reads as a band.
+    private static let height: CGFloat = 38
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 7) {
             // The ring is a template image, so it takes the row's foreground color, the same way the
             // menubar recolors it.
             Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
@@ -319,7 +327,7 @@ private struct ProjectSidebarRow: View {
                 .opacity(entry.detailsLoaded ? 1 : 0.35)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.name)
-                    .font(.system(size: 12, weight: isFocusedProject ? .semibold : .regular))
+                    .font(.system(size: 13, weight: isFocusedProject ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let task = entry.nextTask {
@@ -337,7 +345,7 @@ private struct ProjectSidebarRow: View {
         .frame(height: Self.height)
         // The whole row is the click target, not just its text.
         .contentShape(Rectangle())
-        // Carve the row out of the panel's window-drag region, or AppKit's drag-tracking loop eats the
+        // Carve the row out of the focus panel window-drag region, or AppKit's drag-tracking loop eats the
         // mouse-down and the row never registers the click. This has to sit on the row rather than
         // behind the `List` (where it was): a `List` builds its own scroll and table views, and those
         // are in front of anything the list's SwiftUI `.background` puts down — so the excluder was

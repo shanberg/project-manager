@@ -1,7 +1,7 @@
 import AppKit
 
 /// A drawn circular progress ring (finer-grained than Raycast's 5-step CircleProgress), used both by
-/// the menubar glyph and by the panel's project switcher so a project's completion reads the same in
+/// the menubar glyph and by the project switcher so a project's completion reads the same in
 /// either place. `tint == nil` yields a template image the menubar recolors for its glyph; a non-nil
 /// tint (the stale yellow/red) draws in that color and opts out of template recoloring.
 enum MenubarRing {

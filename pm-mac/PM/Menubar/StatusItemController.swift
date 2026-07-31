@@ -46,7 +46,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Custom menu rows are sized to this width, which also sets the menu's minimum width.
     static let menuWidth: CGFloat = 300
-    /// Max task rows shown inline before overflowing to "Show all in panel", so a big project can't
+    /// Max task rows shown inline before overflowing to "Show all in the window", so a big project can't
     /// make the menu unwieldy.
     static let menuTaskCap = 8
 
@@ -187,7 +187,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(disabledItem("No focused project"))
             menu.addItem(.separator())
             menu.addItem(switchProjectMenuItem())
-            menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: "p"))
+            menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
+                                   modifiers: [.control, .option]))
+            menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
             menu.addItem(.separator())
             menu.addItem(settingsMenuItem())
             menu.addItem(actionItem("Quit PM", #selector(quit), key: "q"))
@@ -211,7 +213,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         // Open tasks grouped by context (custom rows). Click focuses; ⌥-click completes; the focused
-        // row completes on click. Capped at `menuTaskCap` rows — the rest live in the panel — so a
+        // row completes on click. Capped at `menuTaskCap` rows — the rest live in the window — so a
         // large project can't blow out the menu.
         let open = store.openTodos
         var shown = 0
@@ -236,7 +238,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(switchProjectMenuItem())
-        menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: "p"))
+        // ⌃⌥P is the focus panel's global shortcut, shown here so the menu teaches it. Opening a window has
+        // no single key of its own — it's the Dock icon, ⌥⌘N, and this.
+        menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
+                                   modifiers: [.control, .option]))
+        menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
 
         menu.addItem(.separator())
         menu.addItem(settingsMenuItem())
@@ -481,8 +487,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return item
     }
 
-    private func actionItem(_ title: String, _ action: Selector, symbol: String? = nil, key: String = "") -> NSMenuItem {
+    private func actionItem(_ title: String, _ action: Selector, symbol: String? = nil, key: String = "",
+                            modifiers: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        if !key.isEmpty { item.keyEquivalentModifierMask = modifiers }
         item.target = self
         if let symbol {
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
@@ -540,6 +548,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func focusTask(_ sender: NSMenuItem) { if let t = sender.representedObject as? Todo { store.focus(t) } }
     @objc private func switchProject(_ sender: NSMenuItem) { if let k = sender.representedObject as? String { store.setFocusedProject(key: k) } }
     @objc private func showPanel() { onShowPanel() }
+    @objc private func togglePanel() { onTogglePanel() }
     @objc private func togglePin() { onSetPinned(!settings().pinned) }
     @objc private func toggleFloat() { onSetFloating(!settings().floating) }
     @objc private func quit() { NSApp.terminate(nil) }

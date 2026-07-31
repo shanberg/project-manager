@@ -35,7 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Point the menubar at the focused project before anything reads `store`.
         syncFocusedStore()
 
-        windows.panelSettings = settings
+        FocusPanelController.shared.applyPanelSettings(settings)
+        FocusPanelController.shared.syncToFocusedProject()
         statusController = StatusItemController(store: store)
         wireStatusController()
 
@@ -43,8 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier = NotificationManager(store: store)
         notifier.requestAuthorization()
 
-        // Global summon shortcut (Ctrl+Alt+P), matching the retired Tauri panel.
-        hotKey = HotKey { [weak self] in self?.windows.toggleFocusedProject() }
+        // Global summon shortcut (⌃⌥P): show/hide the focus panel. It used to summon the project
+        // window, which made it decide between hiding a window and hiding the whole app; a HUD's toggle
+        // is just show/hide, and opening a project window is now the Dock icon and ⌥⌘N.
+        hotKey = HotKey { FocusPanelController.shared.toggle() }
 
         // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
         watcher = ConfigWatcher { [weak self] in self?.handleExternalChange() }
@@ -96,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wireStatusController() {
         statusController.settings = { [weak self] in self?.settings ?? .default }
         statusController.onShowPanel = { [weak self] in self?.windows.openFocusedProject() }
-        statusController.onTogglePanel = { [weak self] in self?.windows.toggleFocusedProject() }
+        statusController.onTogglePanel = { FocusPanelController.shared.toggle() }
         statusController.onSetPinned = { [weak self] on in self?.updateSettings { $0.pinned = on } }
         statusController.onSetFloating = { [weak self] on in self?.updateSettings { $0.floating = on } }
         statusController.onOpenSettings = { SettingsWindowController.shared.show() }
@@ -110,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard s != settings else { return }
         settings = s
         s.save()
-        windows.applyPanelSettings(s)
+        FocusPanelController.shared.applyPanelSettings(s)
     }
 
     // MARK: The focused project's store
@@ -135,6 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusController?.store = store
         notifier?.store = store
+        // The focus panel reads the focused project too — same store, so the two can't disagree about
+        // what's current or diverge on undo history.
+        FocusPanelController.shared.syncToFocusedProject()
 
         // Re-subscribe: the menubar glyph and the notes watch follow whichever store is current.
         storeSubscription = store.objectWillChange
@@ -157,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let disk = PanelSettings.load()
         if disk != settings {
             settings = disk
-            windows.applyPanelSettings(disk)
+            FocusPanelController.shared.applyPanelSettings(disk)
         }
         reloadAllStores()
     }
@@ -205,6 +211,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diveIn.target = self
         menu.addItem(diveIn)
         menu.addItem(.separator())
+        let panel = NSMenuItem(title: "Show Focus Panel", action: #selector(showFocusPanel), keyEquivalent: "")
+        panel.target = self
+        menu.addItem(panel)
         let open = NSMenuItem(title: "Open Window", action: #selector(newWindow), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
@@ -217,7 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func diveIn() { store.diveIn() }
 
-    // MARK: URL scheme — pmpanel://toggle | show | hide | open?project=… | pin?on=… | float?on=…
+    @objc private func showFocusPanel() { FocusPanelController.shared.show() }
+
+    // MARK: URL scheme
+    // pmpanel://toggle | show | hide   → the focus panel
+    // pmpanel://window | open?project= → a project window
+    // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "pmpanel" {
@@ -228,9 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(url: URL) {
         let host = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         switch host {
-        case "toggle": windows.toggleFocusedProject()
-        case "show": windows.openFocusedProject()
-        case "hide": windows.frontmost?.dismiss()
+        // `toggle`/`show`/`hide` have always meant "the panel" to Raycast; now there's a panel again.
+        case "toggle": FocusPanelController.shared.toggle()
+        case "show": FocusPanelController.shared.show()
+        case "hide": FocusPanelController.shared.hide()
+        case "window": windows.openFocusedProject()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks
             // like a bug and can't be told from the empty state.
@@ -254,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return value == "true" || value == "1" || value == "yes" || value == "on"
     }
 
-    // MARK: Spotlight — tapping an indexed project/task focuses it and shows the panel.
+    // MARK: Spotlight — tapping an indexed project/task focuses it and opens its window.
 
     func application(_ application: NSApplication, continue userActivity: NSUserActivity,
                      restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
@@ -265,7 +281,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// A Spotlight identifier is either a task entity id (`session:line␟projectKey`) or a bare project
-    /// key. Focus whichever it names, then surface the panel.
+    /// key. Focus whichever it names, then open its window — a Spotlight hit is a request to go *to*
+    /// something, so it earns the full view rather than the focus panel's one-task summary.
     private func focusFromSpotlight(identifier id: String) {
         if let task = TaskEntity.decode(id: id), let folder = PMFiles.projectName(fromKey: task.projectKey) {
             try? PMFiles.setFocusedProjectKey(task.projectKey)

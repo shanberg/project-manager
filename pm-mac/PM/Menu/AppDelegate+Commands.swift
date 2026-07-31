@@ -38,6 +38,12 @@ extension AppDelegate: NSMenuItemValidation {
         UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
     }
 
+    /// Show or hide the focus panel — the same toggle as ⌃⌥P and `pmpanel://toggle`, so the menu item
+    /// and the global shortcut can't drift apart.
+    @objc func toggleFocusPanel() {
+        FocusPanelController.shared.toggle()
+    }
+
     @objc func setColorMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String else { return }
         UserDefaults.standard.set(raw, forKey: "PMPanelColorMode")
@@ -74,8 +80,13 @@ extension AppDelegate: NSMenuItemValidation {
             item.state = (item.representedObject as? String) == current ? .on : .off
             return store.projectName != nil
         case #selector(setColorMode(_:)):
-            let current = UserDefaults.standard.string(forKey: "PMPanelColorMode") ?? PanelColorMode.system.rawValue
+            let current = UserDefaults.standard.string(forKey: "PMPanelColorMode") ?? AppColorMode.system.rawValue
             item.state = (item.representedObject as? String) == current ? .on : .off
+            return true
+        case #selector(toggleFocusPanel):
+            // A checkmark rather than a Show/Hide title swap: the focus panel can be dismissed by clicking
+            // away from it, and a title that only updates when the menu opens would read as stale.
+            item.state = FocusPanelController.shared.isVisible ? .on : .off
             return true
         case #selector(toggleNotes):
             item.state = UserDefaults.standard.bool(forKey: "PMPanelDetailsExpanded") ? .on : .off

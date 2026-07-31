@@ -195,7 +195,7 @@ enum DueState {
     }
 }
 
-/// A single open task, styled to match the panel: leading state glyph, title (bold when focused),
+/// A single open task, styled to match the task list: leading state glyph, title (bold when focused),
 /// and a trailing relative-due pill. Highlights via `MenuRowHighlight` for both mouse and keyboard.
 struct TaskMenuRowContent: View {
     let todo: Todo

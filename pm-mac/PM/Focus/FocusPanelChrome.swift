@@ -2,37 +2,25 @@ import AppKit
 import QuartzCore
 import CoreImage
 
-/// SwiftUI-observable chrome state. Currently tracks whether a resize animation is in flight so the
-/// content view can hide its scrollbar for the duration (avoiding a flash mid-animation).
-///
-/// Deliberately minimal: every property here is read by `PanelView`'s root, so a write republishes the
-/// whole body.
-final class PanelChrome: ObservableObject {
-    @Published var isResizing = false
-}
-
 /// A borderless panel that can still take key focus. `NSWindow` refuses key status to borderless
-/// windows by default, and the content hosts text fields (task titles, the note editor) that need it.
+/// windows by default, and the focus panel hosts text fields (task text, the add editor) that need it
+/// — and its ⏎-to-complete shortcut only binds while it's key.
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// The panel style's window behavior, for a project window whose chrome is set to Panel rather than
-/// Standard: a borderless window that auto-fits its height to its content, hides when it loses focus
-/// (unless pinned), floats above other windows when asked, and snaps to the screen's edges and corners.
+/// The focus panel's window behavior: a borderless window that hugs its content's height, floats above
+/// everything on every Space, and snaps to the screen's edges and corners.
 ///
-/// This was the whole of `PanelController` when the panel *was* the app. It's now one of two chrome
-/// styles a project window can wear, so it manages a window it's handed rather than owning the content:
-/// `ProjectWindowController` builds the window and the split view, and installs this on top when the
-/// style calls for it.
+/// This was the whole of `PanelController` back when the panel *was* the app, and then briefly an
+/// alternate chrome a project window could wear. It belongs to the focus panel now, which is the window
+/// it was always describing — so the parts that only made sense for a full project window (a fixed
+/// content column widened by a sidebar, a user-draggable height, per-project position memory) are gone.
+/// What's left is what a HUD needs: fit to content, remember where you put it, snap to the edges.
 @MainActor
-final class PanelChromeController {
+final class FocusPanelChrome {
     private let panel: NSPanel
-    /// Namespaces the saved position and height, so each project's panel remembers its own — the window
-    /// style gets the same per-project memory from `setFrameAutosaveName`.
-    private let projectKey: String
     private var settings: PanelSettings
-    private let chrome: PanelChrome
 
     /// Grace period before a blurred (unpinned) panel hides — long enough to ride out transient focus
     /// blips (a popover, a quick app switch, the summon shortcut itself).
@@ -62,28 +50,14 @@ final class PanelChromeController {
     /// screen be free-placement while the corners/edges are magnetic.
     static let snapThreshold: CGFloat = 150
 
-    /// The smallest the panel will shrink to. Kept just below the most compact real content (a focused
-    /// single task with no breadcrumb or Next line, ~93pt) so that case fits exactly, while still
-    /// guarding against a degenerate window if a transient measurement reports a near-zero height.
+    /// The smallest the panel will shrink to. Kept just below the most compact real content (a single
+    /// task with no breadcrumb or Next line) so that case fits exactly, while still guarding against a
+    /// degenerate window if a transient measurement reports a near-zero height.
     static let minHeight: CGFloat = 80
 
-    /// The smallest it will shrink to *with the project sidebar open*, where the panel stops being a
-    /// task card and becomes a two-column workspace: tall enough for a useful stretch of the project
-    /// list. The hug-a-single-task heights only make sense with the sidebar hidden.
-    static let sidebarMinHeight: CGFloat = 400
-
-    /// Whether the window this chrome drives has its sidebar showing. Supplied by the window rather
-    /// than read from the preference: sidebar visibility is per window now.
-    var sidebarVisible = false
-
-    init(panel: NSPanel, projectKey: String, settings: PanelSettings, chrome: PanelChrome) {
+    init(panel: NSPanel, settings: PanelSettings) {
         self.panel = panel
-        self.projectKey = projectKey
         self.settings = settings
-        self.chrome = chrome
-
-        let saved = UserDefaults.standard.double(forKey: userHeightKey)
-        userHeight = saved > 0 ? saved : nil
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -94,7 +68,9 @@ final class PanelChromeController {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         applySettings(settings)
-        restorePosition()
+        applyWindowSettings()
+        anchor = UserDefaults.standard.data(forKey: positionKey)
+            .flatMap { try? JSONDecoder().decode(SavedPosition.self, from: $0) }
     }
 
     // MARK: Settings
@@ -104,7 +80,28 @@ final class PanelChromeController {
         panel.level = new.floating ? .floating : .normal
     }
 
-    /// Whether a blur should hide the panel. Pinned panels stay put.
+    /// "Show on all Spaces", applied here rather than on the project window because this is the window
+    /// it was always meant for.
+    ///
+    /// `.canJoinAllSpaces` alone only follows you between ordinary desktops; it will *not* put the panel
+    /// over another app's full-screen window. `.fullScreenAuxiliary` is the flag that does, and a HUD
+    /// whose whole job is being visible while you work in a full-screen editor needs both.
+    func applyWindowSettings() {
+        var behavior: NSWindow.CollectionBehavior = [.ignoresCycle]
+        if WindowSettings.shared.showOnAllSpaces {
+            behavior.insert(.canJoinAllSpaces)
+            behavior.insert(.fullScreenAuxiliary)
+        } else {
+            behavior.insert(.moveToActiveSpace)
+        }
+        panel.collectionBehavior = behavior
+    }
+
+    /// Whether a blur should hide the panel.
+    ///
+    /// Inverted from the old panel's default. That panel was a summoned sheet of the whole app, so
+    /// getting out of the way on blur was the courteous thing; this one exists to stay visible *while*
+    /// you work elsewhere, so it only hides when the user has explicitly asked it to.
     var hidesOnBlur: Bool { !settings.pinned }
 
     func cancelPendingHide() { pendingHide?.cancel() }
@@ -146,8 +143,13 @@ final class PanelChromeController {
         var fromTop: Bool       // vertical anchor: nearer the top screen edge?
         var yOffset: CGFloat    // distance from that edge to the panel's near horizontal side
     }
-    private var positionKey: String { "PMPanelAnchor:\(projectKey)" }
-    private var userHeightKey: String { "PMPanelSidebarHeight:\(projectKey)" }
+    /// One key: there is exactly one focus panel, so its position isn't namespaced by project the way
+    /// the old per-project panel's was.
+    private let positionKey = "PMFocusPanelAnchor"
+
+    /// Where the user last left the panel, as edge offsets. Held in memory (not re-read from defaults
+    /// each time) because the auto-fit consults it on every resize.
+    private var anchor: SavedPosition?
 
     private var visibleFrame: NSRect? { (panel.screen ?? NSScreen.main)?.visibleFrame }
 
@@ -156,14 +158,6 @@ final class PanelChromeController {
     private var verticalAnchorNearTop: Bool {
         guard let vf = visibleFrame else { return true }
         return (vf.maxY - panel.frame.maxY) <= (panel.frame.minY - vf.minY)
-    }
-
-    /// The horizontal counterpart, matching `savePosition`'s `fromRight`. Toggling the sidebar changes
-    /// the panel's width, and keeping the anchored vertical edge fixed means a right-anchored panel
-    /// grows leftward (into the screen) rather than sliding off the right edge.
-    private var horizontalAnchorNearRight: Bool {
-        guard let vf = visibleFrame else { return false }
-        return (vf.maxX - panel.frame.maxX) < (panel.frame.minX - vf.minX)
     }
 
     func savePosition() {
@@ -177,105 +171,73 @@ final class PanelChromeController {
             fromTop: fromTop,
             yOffset: fromTop ? vf.maxY - f.maxY : f.minY - vf.minY
         )
+        anchor = pos
         if let data = try? JSONEncoder().encode(pos) {
             UserDefaults.standard.set(data, forKey: positionKey)
         }
     }
 
-    /// Restore the panel relative to its nearest-edge corner, or center on first run. A later auto-fit
-    /// keeps the anchored vertical edge fixed, preserving the position.
+    /// The origin a panel of `size` should sit at: recomputed from the saved edge offsets rather than
+    /// nudged from wherever the panel currently is.
     ///
-    /// This runs before the hosting controller has laid out the SwiftUI content, so `panel.frame.size`
-    /// may still be nominal. Anchor off the panel's known width rather than a not-yet-measured one: a
-    /// right-anchored panel sets its left edge here, and the auto-fit grows width from that left edge,
-    /// so a zero width would leave the panel one full width too far right. Height needs no such care —
-    /// the top-anchored case cancels height out (top edge = origin.y + height), and the bottom-anchored
-    /// case ignores it.
-    private func restorePosition() {
-        // Programmatic: restoring must not arm snapping, or a ⌃-placed (freely positioned) panel would
-        // snap to an anchor on the next launch.
-        isProgrammaticMove = true
-        defer { isProgrammaticMove = false }
-        let width = panel.frame.width
-        guard let data = UserDefaults.standard.data(forKey: positionKey),
-              let pos = try? JSONDecoder().decode(SavedPosition.self, from: data),
-              let vf = visibleFrame else {
-            panel.center()
-            return
+    /// Recomputing is what makes the position stable. Nudging by the height delta looks equivalent, and
+    /// was — until the panel started life at zero height (the hosting controller supplies the size, and
+    /// the first measurement arrives after the window exists). The very first fit then "grew" the panel
+    /// by its whole height and shifted it down by that much, every launch, forever. Offsets from the
+    /// near edges hold the anchored edge fixed by construction, whatever the panel's height was before.
+    private func origin(for size: NSSize) -> NSPoint {
+        guard let vf = visibleFrame else { return panel.frame.origin }
+        guard let a = anchor else {
+            return NSPoint(x: (vf.midX - size.width / 2).rounded(),
+                           y: (vf.midY - size.height / 2).rounded())
         }
-        let height = panel.frame.height
-        let rawX = pos.fromRight ? vf.maxX - pos.xOffset - width : vf.minX + pos.xOffset
-        let rawY = pos.fromTop ? vf.maxY - pos.yOffset - height : vf.minY + pos.yOffset
+        let rawX = a.fromRight ? vf.maxX - a.xOffset - size.width : vf.minX + a.xOffset
+        let rawY = a.fromTop ? vf.maxY - a.yOffset - size.height : vf.minY + a.yOffset
         // Clamp on-screen so a stale/odd saved offset can't strand the panel off the visible frame.
-        let x = min(max(rawX, vf.minX), max(vf.minX, vf.maxX - width))
-        let y = min(max(rawY, vf.minY), max(vf.minY, vf.maxY - height))
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        return NSPoint(x: min(max(rawX, vf.minX), max(vf.minX, vf.maxX - size.width)),
+                       y: min(max(rawY, vf.minY), max(vf.minY, vf.maxY - size.height)))
     }
 
     // MARK: Auto-fit
 
-    /// The tallest the panel goes: a Tarot-card proportion of the *content* column (not the window,
-    /// so opening the sidebar widens the panel without also letting it grow taller), or 95% of the
-    /// screen, whichever is smaller.
+    /// The tallest the panel goes: a Tarot-card proportion of its width, or 95% of the screen,
+    /// whichever is smaller. Content beyond this scrolls inside the card rather than growing the panel
+    /// into a second window.
     private var maxPanelHeight: CGFloat {
         let screenMax = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
-        return min(ProjectWindow.minContentWidth * ProjectWindow.maxHeightRatio, floor(screenMax * 0.95))
+        return min(ProjectWindow.focusPanelWidth * ProjectWindow.maxHeightRatio, floor(screenMax * 0.95))
     }
 
-    /// The panel's total width: the fixed content column, plus the sidebar when it's showing.
-    private var targetWidth: CGFloat {
-        ProjectWindow.minContentWidth + (sidebarVisible ? ProjectWindow.sidebarWidth : 0)
-    }
-
-    /// The height the user dragged the panel to while the sidebar was open. Nil until they resize it
-    /// — until then the panel still auto-fits its content, just never below `sidebarMinHeight`.
-    /// Written on mouse-up rather than on every frame of a drag.
-    private var userHeight: CGFloat?
-    /// Height at the start of the current grab, so a drag is applied as one absolute offset rather
-    /// than an accumulation of deltas that could drift.
-    private var resizeStartHeight: CGFloat = 0
-
-    /// Auto-fit the panel to its content: height from the measured content, width from whether the
-    /// project sidebar is showing.
+    /// Fit the panel to its content's height.
     ///
-    /// With the sidebar open the height is the user's instead: their dragged height if they have one,
-    /// else the content's, and never below `sidebarMinHeight`. So this stays a no-op for height while
-    /// they're working in a resized panel, and still tracks the content when the sidebar is hidden.
+    /// The width is set here too, though it never varies. Installing a hosting controller with
+    /// `sizingOptions` cleared leaves the window at that controller's (zero) preferred size, so the
+    /// first fit is also what gives the panel its width — and having one place own the whole frame
+    /// beats seeding a size that a later layout pass would silently contradict.
     func fit(toContentHeight height: CGFloat) {
-        let maxHeight = maxPanelHeight
-        let target: CGFloat
-        if sidebarVisible {
-            target = min(max(userHeight ?? ceil(height), Self.sidebarMinHeight), maxHeight)
-        } else {
-            target = min(max(ceil(height), Self.minHeight), maxHeight)
-        }
-        let targetWidth = self.targetWidth
-        // The sidebar toggle can change the width with the height unchanged, so both are checked here.
-        guard abs(panel.frame.height - target) > 1 || abs(panel.frame.width - targetWidth) > 1 else { return }
+        let target = min(max(ceil(height), Self.minHeight), maxPanelHeight)
+        let width = ProjectWindow.focusPanelWidth
+        guard abs(panel.frame.height - target) > 1 || abs(panel.frame.width - width) > 1 else { return }
+        // Grow/shrink from whichever screen edge the panel is anchored to, so it expands away from the
+        // nearby edge rather than across it — see `origin(for:)`.
         var frame = panel.frame
-        // Grow/shrink from whichever screen edge the panel is anchored to: keep the top edge fixed when
-        // anchored near the top (grows downward), else keep the bottom edge fixed (grows upward), and
-        // likewise keep the right edge fixed when anchored near the right. Either way the panel expands
-        // away from the nearby edge, not across it.
-        if verticalAnchorNearTop { frame.origin.y += frame.height - target }
-        if horizontalAnchorNearRight { frame.origin.x += frame.width - targetWidth }
-        frame.size = NSSize(width: targetWidth, height: target)
+        frame.size = NSSize(width: width, height: target)
+        frame.origin = origin(for: frame.size)
+        // Positioning here is programmatic; without this the move would look like a user drag and arm
+        // the snapping machinery.
+        isProgrammaticMove = true
 
         // Animate the resize, except for the first fit right after summon and while hidden, which
-        // should snap. The scrollbar is hidden for the duration so it doesn't flash while the viewport
-        // and content are briefly mismatched mid-animation.
+        // should snap.
         let animate = panel.isVisible && !suppressNextFitAnimation
         suppressNextFitAnimation = false
-        isProgrammaticMove = true
         if animate {
-            chrome.isResizing = true
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.24
+                ctx.duration = 0.22
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 ctx.allowsImplicitAnimation = true
                 panel.animator().setFrame(frame, display: true)
             } completionHandler: { [weak self] in
-                self?.chrome.isResizing = false
                 self?.isProgrammaticMove = false
                 // The shadow is cached from the window's rendered alpha, so a resize leaves the old
                 // shape behind until it's invalidated — visible as a stale outline around the panel.
@@ -286,44 +248,6 @@ final class PanelChromeController {
             isProgrammaticMove = false
             panel.invalidateShadow()
         }
-    }
-
-    // MARK: Height drag (the panel's own grab handle, offered only with the sidebar open)
-
-    /// A borderless window has no frame to grab, so the panel draws its own handle along the bottom
-    /// edge and drives these. The top edge stays put for the whole drag — a bottom grip pulls the
-    /// bottom edge down, whichever screen edge the panel is otherwise anchored to.
-
-    func resizeBegan() {
-        resizeStartHeight = panel.frame.height
-    }
-
-    /// `delta` is the drag's total translation from where it began (positive downward), so the height
-    /// follows the pointer exactly instead of accumulating rounding drift.
-    func resize(byHeightDelta delta: CGFloat) {
-        let target = min(max((resizeStartHeight + delta).rounded(), Self.sidebarMinHeight), maxPanelHeight)
-        userHeight = target
-        guard abs(panel.frame.height - target) > 0.5 else { return }
-        var frame = panel.frame
-        frame.origin.y += frame.height - target   // top edge fixed
-        frame.size.height = target
-        // A panel sitting low on the screen would otherwise grow off the bottom; slide it up instead.
-        if let vf = visibleFrame, frame.minY < vf.minY {
-            frame.origin.y = min(vf.minY, vf.maxY - frame.height)
-        }
-        isProgrammaticMove = true
-        panel.setFrame(frame, display: true, animate: false)
-        isProgrammaticMove = false
-        // No `invalidateShadow()` here: on a borderless, non-opaque window it re-rasterizes the whole
-        // window's alpha to re-derive the shadow shape, which is far too much to do per mouse-moved
-        // event. The shadow lags the edge during the drag and is corrected on mouse-up.
-    }
-
-    /// Persist the height and the (possibly shifted) position once the mouse comes up.
-    func resizeEnded() {
-        panel.invalidateShadow()
-        UserDefaults.standard.set(userHeight ?? 0, forKey: userHeightKey)
-        savePosition()
     }
 
     // MARK: Edge/corner snapping
@@ -465,7 +389,7 @@ final class SnapGhostWindow {
         effect.blendingMode = .behindWindow
         effect.state = .active
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: ProjectWindow.minContentWidth, height: 200),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: ProjectWindow.focusPanelWidth, height: 200),
                           styleMask: [.borderless], backing: .buffered, defer: true)
         window.isOpaque = false
         window.backgroundColor = .clear

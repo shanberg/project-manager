@@ -335,12 +335,15 @@ struct NewProjectIntent: AppIntent {
     }
 }
 
-// MARK: - Panel
+// MARK: - Opening PM
 
-/// Opens a project in PM: focuses it and summons the panel (launches the app if needed).
+/// Opens a project in PM: focuses it and opens its window (launching the app if needed).
+///
+/// A window, not the focus panel: "open this project" is a request for the whole project, and the
+/// panel only ever shows one task of it.
 struct OpenProjectIntent: OpenIntent {
     static var title: LocalizedStringResource = "Open Project in PM"
-    static var description = IntentDescription("Focuses a project and opens the PM panel.")
+    static var description = IntentDescription("Focuses a project and opens its window.")
     static var openAppWhenRun = true
 
     @Parameter(title: "Project") var target: ProjectEntity
@@ -349,15 +352,22 @@ struct OpenProjectIntent: OpenIntent {
     func perform() async throws -> some IntentResult {
         try PMFiles.setFocusedProjectKey(target.id)
         PMFiles.recordRecent(projectKey: target.id, name: target.folder)
-        if let url = URL(string: "pmpanel://show") { NSWorkspace.shared.open(url) }
+        // Name the project explicitly rather than relying on the focus write above having landed and
+        // been noticed by the time the URL is handled. Built through `URLComponents` because a project
+        // key is a filesystem path — it carries slashes, spaces and whatever else the folder is named.
+        var components = URLComponents()
+        components.scheme = "pmpanel"
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "project", value: target.id)]
+        if let url = components.url { NSWorkspace.shared.open(url) }
         return .result()
     }
 }
 
-/// Summons the PM panel (via the app's URL scheme, launching it if needed).
+/// Summons the focus panel (via the app's URL scheme, launching it if needed).
 struct ShowPanelIntent: AppIntent {
     static var title: LocalizedStringResource = "Show PM Panel"
-    static var description = IntentDescription("Opens the PM panel.")
+    static var description = IntentDescription("Shows the floating focus panel.")
     static var openAppWhenRun = true
 
     @MainActor

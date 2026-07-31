@@ -1,6 +1,6 @@
 import Foundation
 
-/// Relative due-date formatting shared by the menubar and the panel, ported from the Raycast
+/// Relative due-date formatting shared by the menubar and the task views, ported from the Raycast
 /// extension's `format-relative-due.ts` so both surfaces read identically. `due:` values are stored
 /// as `YYYY-MM-DD` (optionally ` HH:mm`); a bare date is treated as noon local time, matching the CLI.
 enum RelativeDue {

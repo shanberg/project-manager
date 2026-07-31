@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// One project window.
+/// One project window: a real Mac window with a hidden titlebar and a full-size content view. The
+/// traffic lights float over the sidebar, the content runs to the top of the frame, and the title is
+/// still set (invisible) so window tabs, the Window menu and ⌘` all name the project properly.
 ///
-/// The chrome follows the window style setting. `.window` is a real Mac window with a hidden titlebar
-/// and a full-size content view: the traffic lights float over the sidebar, the content runs to the top
-/// of the frame, and the title is still set (invisible) so window tabs, the Window menu and ⌘` all name
-/// the project properly. `.panel` is the app's original borderless HUD, with
-/// `PanelChromeController` supplying the auto-fit, blur-hide and edge snapping.
+/// This used to have a second chrome — the app's original borderless HUD, offered as a window-style
+/// setting. That chrome now belongs to the focus panel, which is the surface it was always describing,
+/// so a project window is unconditionally a window.
 @MainActor
 final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     /// The project this window shows. Changing it is `retarget(to:)`, not a write.
@@ -15,9 +15,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     private(set) var store: PMStore
 
     let state = ProjectViewState()
-    private let chromeStyle: WindowChromeStyle
-    private let panelChromeState = PanelChrome()
-    private var panelChrome: PanelChromeController?
     private let split: ProjectSplitViewController
 
     /// Called when the window has closed, so `WindowManager` can drop it.
@@ -25,45 +22,28 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Asks to open a project — in this window or a new one. Supplied by `WindowManager`.
     var onOpenProject: ((String, Bool) -> Void)?
 
-    init(projectKey: String?, store: PMStore, chromeStyle: WindowChromeStyle, settings: PanelSettings,
-         startsWithSidebar: Bool) {
+    init(projectKey: String?, store: PMStore, startsWithSidebar: Bool) {
         self.projectKey = projectKey
         self.store = store
-        self.chromeStyle = chromeStyle
 
         split = ProjectSplitViewController(store: store, state: state,
-                                           chromeStyle: chromeStyle, chrome: panelChromeState,
                                            startsWithSidebar: startsWithSidebar)
 
-        let window: NSWindow
-        switch chromeStyle {
-        case .window:
-            window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0,
-                                    width: ProjectWindow.minContentWidth + ProjectWindow.sidebarWidth,
-                                    height: 620),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                backing: .buffered, defer: false)
-            // Things' chrome: no toolbar, no visible title, content running under the titlebar. The
-            // title is still *set* below — `titleVisibility` only hides it from the titlebar, while
-            // tabs, the Window menu and ⌘` all keep reading it.
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.contentMinSize = NSSize(width: ProjectWindow.minContentWidth,
-                                           height: ProjectWindow.minWindowHeight)
-            window.tabbingIdentifier = ProjectWindow.tabbingIdentifier
-            window.tabbingMode = .automatic
-        case .panel:
-            window = KeyablePanel(
-                contentRect: NSRect(x: 0, y: 0,
-                                    width: ProjectWindow.minContentWidth
-                                        + (startsWithSidebar ? ProjectWindow.sidebarWidth : 0),
-                                    height: 420),
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered, defer: false)
-            // A borderless window can't be tabbed; the panel is a single-window affair by nature.
-            window.tabbingMode = .disallowed
-        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0,
+                                width: ProjectWindow.minContentWidth + ProjectWindow.sidebarWidth,
+                                height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        // Things' chrome: no toolbar, no visible title, content running under the titlebar. The title
+        // is still *set* below — `titleVisibility` only hides it from the titlebar, while tabs, the
+        // Window menu and ⌘` all keep reading it.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.contentMinSize = NSSize(width: ProjectWindow.minContentWidth,
+                                       height: ProjectWindow.minWindowHeight)
+        window.tabbingIdentifier = ProjectWindow.tabbingIdentifier
+        window.tabbingMode = .automatic
         super.init(window: window)
 
         window.contentViewController = split
@@ -72,26 +52,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.identifier = NSUserInterfaceItemIdentifier(ProjectWindow.windowIdentifier)
 
         // Wire the content's callbacks now that `self` exists.
-        split.onDismiss = { [weak self] in self?.dismiss() }
-        split.onContentHeight = { [weak self] height in self?.panelChrome?.fit(toContentHeight: height) }
-        split.onResizeBegan = { [weak self] in self?.panelChrome?.resizeBegan() }
-        split.onResizeChanged = { [weak self] delta in self?.panelChrome?.resize(byHeightDelta: delta) }
-        split.onResizeEnded = { [weak self] in self?.panelChrome?.resizeEnded() }
         state.openProject = { [weak self] key, inNewWindow in
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
 
-        if chromeStyle.isPanel, let panel = window as? NSPanel {
-            let chrome = PanelChromeController(panel: panel, projectKey: projectKey ?? "none",
-                                               settings: settings, chrome: panelChromeState)
-            chrome.sidebarVisible = startsWithSidebar
-            panelChrome = chrome
-        } else {
-            // Per-project frame memory. `setFrameAutosaveName` has to come after the window exists and
-            // before it's shown; with no project (the empty state) all such windows share one frame.
-            window.setFrameAutosaveName("PMProject:\(projectKey ?? "none")")
-        }
+        // Per-project frame memory. `setFrameAutosaveName` has to come after the window exists and
+        // before it's shown; with no project (the empty state) all such windows share one frame.
+        window.setFrameAutosaveName("PMProject:\(projectKey ?? "none")")
 
         applyTitle()
         applyWindowSettings()
@@ -102,18 +70,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: Presentation
 
     func show() {
-        panelChrome?.prepareToShow()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    /// Escape (panel style) or an explicit hide. A real window closes; a panel just orders out, since
-    /// it's summoned rather than opened.
-    func dismiss() {
-        guard chromeStyle.isPanel else { return }
-        panelChrome?.prepareToHide()
-        window?.orderOut(nil)
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
@@ -128,9 +87,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         projectKey = newKey
         store = newStore
         split.retarget(to: newStore)
-        if !chromeStyle.isPanel {
-            window?.setFrameAutosaveName("PMProject:\(newKey ?? "none")")
-        }
+        window?.setFrameAutosaveName("PMProject:\(newKey ?? "none")")
         applyTitle()
         pushFocusToDisk()
     }
@@ -148,40 +105,21 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     // MARK: Settings
 
-    func applyPanelSettings(_ settings: PanelSettings) {
-        panelChrome?.applySettings(settings)
-    }
-
-    /// Apply the window-behavior settings that aren't chrome-specific. "Show on all Spaces" is
-    /// `canJoinAllSpaces`: macOS has no way to put one window on every *display* — a window lives on
-    /// one screen — but joining all Spaces is what makes it follow you everywhere, which is what the
-    /// setting is for.
+    /// Float project windows above other apps' windows, if the user asked for it. "Show on all Spaces"
+    /// is deliberately *not* here — it belongs to the focus panel, which is the surface that's meant to
+    /// follow you around. A full editor window that shadows you onto every desktop is a nuisance, not a
+    /// feature.
     func applyWindowSettings() {
-        guard let window else { return }
-        var behavior = window.collectionBehavior
-        if WindowSettings.shared.showOnAllSpaces {
-            behavior.insert(.canJoinAllSpaces)
-            behavior.remove(.moveToActiveSpace)
-        } else {
-            behavior.remove(.canJoinAllSpaces)
-        }
-        window.collectionBehavior = behavior
-        if !chromeStyle.isPanel {
-            window.level = WindowSettings.shared.floatAboveOthers ? .floating : .normal
-        }
+        window?.level = WindowSettings.shared.floatAboveOthers ? .floating : .normal
     }
 
     // MARK: Sidebar
 
     /// The header's toggle, routed through the split view so it animates and persists in one place.
-    /// The panel chrome needs to hear about it too — its width and auto-fit floor both depend on it.
     func toggleSidebar() {
         split.toggleSidebar(nil)
-        panelChrome?.sidebarVisible = isSidebarVisible
     }
 
-    /// Whether this window's sidebar is showing — the panel chrome needs it for its width and height
-    /// rules, which used to read the (then app-wide) preference directly.
     var isSidebarVisible: Bool { !split.isSidebarCollapsed }
 
     // MARK: NSWindowDelegate
@@ -190,20 +128,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         pushFocusToDisk()
     }
 
-    func windowDidBecomeKey(_ notification: Notification) {
-        panelChrome?.cancelPendingHide()
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        panelChrome?.scheduleBlurHide()
-    }
-
-    func windowDidMove(_ notification: Notification) {
-        panelChrome?.windowDidMove()
-    }
-
     func windowWillClose(_ notification: Notification) {
-        panelChrome?.savePosition()
         split.prepareForClose()
         onClose?(self)
     }
@@ -229,9 +154,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(newTask(_:)):
             return store.projectName != nil
         case #selector(newWindowForTab(_:)):
-            // Borderless panels can't be tabbed, and there's nothing to open if every project is
-            // already on screen.
-            return !chromeStyle.isPanel && WindowManager.shared.nextUnopenedProjectKey != nil
+            // Nothing to open if every project is already on screen.
+            return WindowManager.shared.nextUnopenedProjectKey != nil
         default:
             return true
         }

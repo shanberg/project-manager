@@ -4,36 +4,27 @@ import UniformTypeIdentifiers
 import ObjectiveC
 import PmLib
 
-/// The panel's SwiftUI content, reconstructing the retired Tauri panel: a collapsible "Project
-/// details" section, a task list grouped by session, per-row focus / due editing / positional add,
-/// an "incomplete only" filter, and Escape-to-dismiss. Binds to `PMStore`; mutations go straight
-/// through it to `PmLib`. Reports its content height so the panel window can auto-fit.
-struct PanelView: View {
+/// A project window's content column: a collapsible "Project details" section, a task list grouped by
+/// session, per-row focus / due editing / positional add, and an "incomplete only" filter. Binds to
+/// `PMStore`; mutations go straight through it to `PmLib`.
+///
+/// This is the full view and editor. The "what am I on right now" reduction of it — one task, its
+/// breadcrumb, and what's next — is the focus panel, a separate always-on-top window (see
+/// `FocusPanelView`).
+struct ProjectView: View {
     @ObservedObject var store: PMStore
-    /// Shared chrome state (e.g. hide the scrollbar during a resize animation).
-    @ObservedObject var chrome: PanelChrome
     /// The state this pane shares with the project sidebar across the split (see `ProjectViewState`).
     @ObservedObject var state: ProjectViewState
-    /// Whether this content is in a real window or the panel — see `WindowChromeStyle`.
-    var chromeStyle: WindowChromeStyle = .window
-    /// Escape with no open editor asks the window to hide.
-    var onDismiss: () -> Void = {}
-    /// Measured content height, for the window's auto-fit.
-    var onContentHeight: (CGFloat) -> Void = { _ in }
-    /// The bottom grab handle's live height drag — begin, the drag's total translation, and mouse-up.
-    var onResizeBegan: () -> Void = {}
-    var onResizeChanged: (CGFloat) -> Void = { _ in }
-    var onResizeEnded: () -> Void = {}
 
-    /// How the tasks area presents itself, persisted across panel sessions. `.incomplete` (open tasks
-    /// only) is the default; `.all` also reveals completed tasks; `.focused` collapses to a single
-    /// focused-task card with an ancestor breadcrumb and a dim "next" line.
+    /// How the tasks area presents itself, persisted across sessions. `.incomplete` (open tasks only)
+    /// is the default; `.all` also reveals completed ones. The single-task view this used to offer as a
+    /// third mode is now its own surface — see `FocusPanelView`.
     @AppStorage("PMPanelTasksMode") private var tasksMode: TasksMode = .incomplete
-    /// The panel's color-scheme override, persisted across sessions. `.system` follows the OS setting;
+    /// The app color-scheme override, persisted across sessions. `.system` follows the OS setting;
     /// `.light`/`.dark` pin the appearance (of both the content and the glass/vibrancy material).
-    @AppStorage("PMPanelColorMode") private var colorMode: PanelColorMode = .system
+    @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
     /// The single "notes" view mode, toggled from the header's view-options menu and persisted across
-    /// panel sessions. When on, the panel shows the project-details brief below the header *and* reveals
+    /// sessions. When on, the window shows the project-details brief below the header *and* reveals
     /// every session (including empty ones) as a first-class header with its editable prose note and
     /// management affordances. Off (the default) is the compact task view — no brief, and sessions are
     /// just quiet captions above their tasks with empty ones hidden.
@@ -43,9 +34,6 @@ struct PanelView: View {
     @State private var editingDetails = false
     /// The row (and editor kind) with an open inline editor, if any. Only one at a time.
     @State private var activeEditor: EditorTarget?
-    /// Which position a freshly-opened add editor should seed to in focused mode (set by the focused
-    /// card's context-menu Add actions before opening the editor). The task list tracks this per-row.
-    @State private var focusedAddPosition: TaskInsertPosition = .child
     /// True while the empty-project CTA has revealed its inline add editor (for the very first task).
     @State private var addingFirstTask = false
     /// The key of the task subtree currently being dragged, set when a row's drag begins. Nil when no
@@ -82,14 +70,6 @@ struct PanelView: View {
     @StateObject private var rightClick = RightMouseDownMonitor()
     /// The task row the pointer is over, for that same right-click. Not `@State` — see `RowHoverTracker`.
     @State private var rowHover = RowHoverTracker()
-    /// The panel's content height, tracked only while the main view is showing (frozen during the note
-    /// takeover). The takeover reads it as a floor so it never shrinks the panel below its current height.
-    @State private var measuredHeight: CGFloat = 0
-    /// Natural height of the scrollable body. The pinned header's height is measured too, but lives on
-    /// `state` because the sidebar lines its own header up with it across the split. The window's
-    /// auto-fit targets their sum (the body lives in a `ScrollView`, whose own frame can't report the
-    /// content's natural height). See `reportMainHeight`.
-    @State private var scrollContentHeight: CGFloat = 0
 
     /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
     /// pointer against. Shared with `TaskRow`, so it lives on the type.
@@ -135,80 +115,47 @@ struct PanelView: View {
 
     var body: some View {
         mainColumn
-            // The column keeps a readable width: fixed in the panel, and in a window free to grow to
-            // `maxContentWidth` and then stop, centered, so a wide window becomes margin rather than
-            // very long rows. The sidebar is no longer laid out here — it's the other half of the
-            // window's split view (see `ProjectSplitViewController`).
-            .frame(minWidth: ProjectWindow.minContentWidth,
-                   maxWidth: chromeStyle.isPanel ? ProjectWindow.minContentWidth : ProjectWindow.maxContentWidth)
+            // The column keeps a readable width: free to grow to `maxContentWidth` and then stop,
+            // centered, so a wide window becomes margin rather than very long rows. The sidebar is not
+            // laid out here — it's the other half of the window's split view.
+            .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: ProjectWindow.maxContentWidth)
             .frame(maxWidth: .infinity)
-            // The height grip, drawn over the bottom edge rather than laid out in the column, so it
-            // costs the content nothing and never enters the measured height.
-            .overlay(alignment: .bottom) { resizeHandle }
             // Pin the appearance when the user overrides it; `.system` (nil) follows the OS. Applied
             // above the background so the glass/vibrancy material (a child NSView) inherits the scheme.
             .preferredColorScheme(colorMode.colorScheme)
-            // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout.
+            // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout. It runs
+            // under the titlebar even though the content doesn't: with `fullSizeContentView` the hosting
+            // view is inset below the (invisible) titlebar, so without this the strip above the header
+            // shows the bare window background — a black band that reads as a titlebar that failed to
+            // draw. The window frame does the corner rounding, so the material doesn't.
             .background {
-                // The material runs under the titlebar even though the content doesn't: with
-                // `fullSizeContentView` the hosting view is inset below the (invisible) titlebar, so
-                // without this the strip above the header shows the bare window background — a black
-                // band that reads as a titlebar that failed to draw.
-                PanelBackground(rounded: chromeStyle.isPanel)
-                    .ifCondition(!chromeStyle.isPanel) { $0.ignoresSafeArea(.container, edges: .top) }
+                GlassBackground(rounded: false)
+                    .ignoresSafeArea(.container, edges: .top)
             }
-            // Only the panel rounds itself: it's borderless, so nothing else would. A real window's
-            // frame does the clipping, and clipping again inside it would round the content away from
-            // the window's own corners.
-            .ifCondition(chromeStyle.isPanel) {
-                $0.clipShape(RoundedRectangle(cornerRadius: ProjectWindow.cornerRadius, style: .continuous))
-            }
-            // The panel's content is meant to run under its (absent) titlebar; without this the hosting
-            // controller insets it, so the measured height is ~one row short of what's shown and the
-            // panel scrolls. In a window the inset is exactly what we want — it's what keeps the header
-            // clear of the traffic lights.
-            .ifCondition(chromeStyle.isPanel) { $0.ignoresSafeArea(.container, edges: .top) }
     }
 
-    /// The panel's height grip: a quiet grabber along the bottom edge. Panel-style only, and only with
-    /// the sidebar open — that's the only mode with a user-set height, since with it hidden the panel
-    /// hugs its content down to a single task and there's nothing to drag. A real window has resize
-    /// edges of its own.
-    ///
-    /// It sits in an overlay rather than the layout so it can't affect the measured content height, and
-    /// excludes itself from the window-drag region so a pull resizes instead of moving.
-    @ViewBuilder private var resizeHandle: some View {
-        if chromeStyle.isPanel && state.sidebarVisible && sessionNoteTakeover == nil {
-            PanelResizeHandle(onBegan: onResizeBegan, onChanged: onResizeChanged, onEnded: onResizeEnded)
-        }
-    }
-
-    /// The panel's content column — everything that isn't the sidebar.
+    /// The window content column — everything that isn't the sidebar.
     private var mainColumn: some View {
         Group {
             if let takeover = sessionNoteTakeover {
-                // Editing a session note takes over the whole panel for a focused, richer experience;
+                // Editing a session note takes over the whole column for a focused, richer experience;
                 // it enters with a navigation-style push (list slides left, editor in from the right).
-                // It has its own header and a fixed height, so it stands outside the sticky-header split.
+                // It has its own header, so it stands outside the sticky-header split.
                 SessionNoteTakeover(
                     index: takeover.index,
                     session: takeover.session,
                     projectName: store.notes?.title.trimmed ?? store.projectName ?? "",
-                    height: takeoverTargetHeight,
                     store: store,
                     onBack: { activeEditor = nil }
                 )
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
-                })
                 .transition(.asymmetric(
                     insertion: .move(edge: .trailing).combined(with: .opacity),
                     removal: .move(edge: .trailing).combined(with: .opacity)))
             } else {
                 VStack(spacing: 0) {
                     // The header (title + toolbar) stays pinned; only the content below scrolls, sliding
-                    // under it when it overflows the panel's max height. The header reports its own height
-                    // separately so the window's auto-fit still targets header + content.
+                    // under it when it overflows the window. The header reports its own height so the
+                    // sidebar can line its own header bar up with it across the split.
                     stickyHeader
                         .background(GeometryReader { geo in
                             Color.clear.preference(key: HeaderHeightKey.self, value: geo.size.height)
@@ -219,15 +166,9 @@ struct PanelView: View {
                         ScrollView {
                             scrollBody
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(GeometryReader { geo in
-                                    Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
-                                })
                         }
-                        // Hide the scrollbar while the window is animating its resize (it would otherwise
-                        // flash as the viewport and content briefly mismatch); it returns for genuine overflow.
-                        .scrollIndicators(chrome.isResizing ? .never : .automatic)
                         // Soften the scroll edges (macOS 26+): content fades as it passes under the pinned
-                        // header and off the panel's bottom, the idiomatic replacement for a hard clip.
+                        // header and off the window's bottom edge, the idiomatic replacement for a hard clip.
                         .modifier(SoftScrollEdges())
                         .onChange(of: scrollTarget) { target in
                             guard let target else { return }
@@ -251,24 +192,9 @@ struct PanelView: View {
         .animation(.snappy, value: tasksMode)
         .animation(.snappy, value: sessionNoteTakeover != nil)
         .clipped()
-        // Track the panel's height, but freeze it while the takeover is up so it keeps the main view's
-        // height — the takeover reads it as a "don't shrink below" floor. (The window still fits to the
-        // takeover's own reported height via onContentHeight.)
-        // The window fits to header + scrollable content. In the takeover, `h` is the takeover's own
-        // full height (it carries its own header), reported straight through; otherwise `h` is just the
-        // scroll body's natural height and the pinned header's height is added on.
-        .onPreferenceChange(ContentHeightKey.self) { h in
-            if sessionNoteTakeover == nil {
-                scrollContentHeight = h
-                reportMainHeight()
-            } else {
-                onContentHeight(h)
-            }
-        }
-        .onPreferenceChange(HeaderHeightKey.self) { hh in
-            state.headerHeight = hh
-            if sessionNoteTakeover == nil { reportMainHeight() }
-        }
+        // Published so the sidebar can line its own header bar and rule up with this one across the
+        // split — the only measurement either pane still needs from the other.
+        .onPreferenceChange(HeaderHeightKey.self) { state.headerHeight = $0 }
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
         .onExitCommand(perform: handleEscape)
@@ -276,9 +202,9 @@ struct PanelView: View {
         // add editor opens wherever it makes sense: the first-task CTA in an empty project, else an
         // "after" editor on the hero task.
         .onChange(of: state.newTaskRequest) { _ in beginNewTask() }
-        // ⌘Z / ⇧⌘Z undo & redo the panel's edits (move, complete, due, text, add, wrap…). Hidden
-        // zero-size buttons carry the shortcuts so they work whenever the panel is key.
-        .background(panelShortcuts)
+        // ⌘Z / ⇧⌘Z undo & redo the window edits (move, complete, due, text, add, wrap…). Hidden
+        // zero-size buttons carry the shortcuts so they work whenever the window is key.
+        .background(keyboardShortcuts)
         .onChange(of: store.projectName) { _ in
             editingDetails = false
             addingFirstTask = false
@@ -330,7 +256,7 @@ struct PanelView: View {
         .onDisappear { modifiers.stop(); outsideClick.stop(); mouseUp.stop(); rightClick.stop() }
     }
 
-    /// Invisible buttons that register the panel's keyboard shortcuts. `.hidden()` keeps them out of the
+    /// Invisible buttons that register the window keyboard shortcuts. `.hidden()` keeps them out of the
     /// layout and hit-testing while still binding the shortcut on the key window; the undo/redo pair is
     /// disabled when there's nothing to (un/re)do, so the shortcut no-ops (system beep) rather than firing.
     ///
@@ -338,7 +264,7 @@ struct PanelView: View {
     /// `AppDelegate.installMainMenu`): AppKit offers a key equivalent to the main menu before the key
     /// window, so while a text field is focused those items claim the keystroke and edit the text.
     /// These fire only when no responder wants them — i.e. when the list, not a field, is in play.
-    private var panelShortcuts: some View {
+    private var keyboardShortcuts: some View {
         // Suppressed while the note editor is up, so ⌘Z / ⇧⌘Z reach the NSTextView's own (per-keystroke)
         // undo instead of the document-level history.
         let inNoteEditor = sessionNoteTakeover != nil
@@ -385,21 +311,20 @@ struct PanelView: View {
 
     // MARK: Selection
 
-    /// The tasks a command applies to: the selected rows in the list modes, or the hero card in
-    /// focused mode — there's one task on screen there and no list to select in, so ⌘C and ⌫ still
-    /// have an obvious target.
+    /// The tasks a command applies to: the selected rows.
     private var actionTargets: [Todo] {
-        if tasksMode == .focused { return focusedHero.map { [$0] } ?? [] }
-        return visibleTodos.filter { selection.contains(PMStore.key(for: $0)) }
+        visibleTodos.filter { selection.contains(PMStore.key(for: $0)) }
     }
 
-    /// Open the inline add editor — File ▸ New Task, and the empty state's button.
+    /// Open the inline add editor — File ▸ New Task, and the empty state's button. The new task lands
+    /// after the selected row, else after the focused task, so ⌘N in a long list adds where you're
+    /// looking rather than at the bottom.
     private func beginNewTask() {
         guard store.projectName != nil else { return }
         if store.todos.isEmpty {
             addingFirstTask = true
-        } else if let hero = focusedHero {
-            openFocusedAdd(.after, for: hero)
+        } else if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
+            activeEditor = EditorTarget(key: PMStore.key(for: anchor), kind: .add)
         }
     }
 
@@ -457,7 +382,7 @@ struct PanelView: View {
     /// row — not when the menu opens — so this runs for every visible row on every body pass. It used
     /// to move the highlight onto the clicked row from here via `DispatchQueue.main.async`, which meant
     /// each *unselected* row queued a "select me" on every pass; the queued write rebuilt the list, the
-    /// rebuild queued them all again, and the panel never settled. (The sidebar avoids the whole
+    /// rebuild queued them all again, and the list never settled. (The sidebar avoids the whole
     /// problem by using `contextMenu(forSelectionType:)`, which hands the menu its targets; there's no
     /// equivalent for a hand-built list.) The highlight is moved by `TaskListRightClickMonitor`
     /// instead, off a real right-click event, which agrees with what this returns for the same row.
@@ -533,9 +458,10 @@ struct PanelView: View {
 
     /// The inline delete confirmation, pinned under the header so it can't scroll out of reach.
     ///
-    /// It lives *inside* the panel rather than in an alert or sheet on purpose: an unpinned panel
-    /// hides as soon as it loses key focus, and a separate modal window would take that focus and
-    /// pull the panel out from under its own dialog. Return deletes, Escape cancels.
+    /// Inline rather than an alert or a sheet: this is a confirmation, not an interruption. It names
+    /// what's about to go (the subtasks riding along are the part you can't see from the rows you
+    /// picked) without blocking the rest of the window, so you can still look at the list you're about
+    /// to cut into. Return deletes, Escape cancels.
     @ViewBuilder private var deleteConfirmation: some View {
         if !pendingDelete.isEmpty {
             let summary = store.deletionSummary(pendingDelete)
@@ -617,7 +543,7 @@ struct PanelView: View {
     }
 
     /// The scrollable content below the pinned header: the optional details brief and the task/session
-    /// list. This is what scrolls under the header when it overflows the panel's max height.
+    /// list. This is what scrolls under the header when it overflows the window.
     @ViewBuilder private var scrollBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             if store.projectName == nil {
@@ -633,8 +559,6 @@ struct PanelView: View {
                     // empty sessions and the "New session" affordance still show.
                     if store.todos.isEmpty && !detailsExpanded {
                         emptyProjectTasks
-                    } else if tasksMode == .focused {
-                        focusedSection
                     } else {
                         tasksSection
                     }
@@ -643,20 +567,7 @@ struct PanelView: View {
         }
     }
 
-    /// Report the main view's total content height (pinned header + scroll body) to the window's auto-fit.
-    /// Called whenever either part is remeasured. Frozen-height behavior during the takeover is handled by
-    /// its own reporting path; this only runs while the main view is showing.
-    ///
-    /// This is only ever the *content's* height — what the window does with it depends on the sidebar
-    /// (see `PanelChromeController.fit`): hidden, the panel hugs this exactly; open, it keeps the
-    /// height the user dragged it to and this just seeds the first one.
-    private func reportMainHeight() {
-        let total = state.headerHeight + scrollContentHeight
-        measuredHeight = total
-        onContentHeight(total)
-    }
-
-    /// When the active editor is a session note, the (index, session) it targets — driving the full-panel
+    /// When the active editor is a session note, the (index, session) it targets — driving the full-column
     /// takeover editor. Nil for every other editor state.
     private var sessionNoteTakeover: (index: Int, session: Session)? {
         guard let ed = activeEditor, ed.kind == .sessionNote,
@@ -667,26 +578,8 @@ struct PanelView: View {
         return (idx, sessions[idx])
     }
 
-    /// The panel's max content height, matching `PanelChromeController.fit`'s cap (the tarot-card ratio, or
-    /// 95% of the screen, whichever is smaller).
-    private var maxContentHeight: CGFloat {
-        let screen = NSScreen.main?.visibleFrame.height ?? 900
-        // Keyed to the content column, not the window: the sidebar shouldn't make the panel taller.
-        return min(ProjectWindow.minContentWidth * ProjectWindow.maxHeightRatio, (screen * 0.95).rounded(.down))
-    }
-
-    /// The takeover's height: never below the panel's height when it opened (so it can't shrink the
-    /// panel), grown to a comfortable 70% of the max only when the panel was smaller than that, and
-    /// capped at the max so long notes scroll inside the editor rather than the panel.
-    ///
-    /// Nil with the sidebar open: there the panel's height is the user's and the window won't resize to
-    /// suit the editor, so the takeover fills the window it's given rather than asking for a height.
-    private var takeoverTargetHeight: CGFloat? {
-        state.sidebarVisible ? nil : min(max(measuredHeight, maxContentHeight * 0.70), maxContentHeight)
-    }
-
-    /// Escape unwinds the panel one layer at a time — the pending delete, then an open editor, then a
-    /// selection — and only dismisses the panel once there's nothing left to back out of.
+    /// Escape unwinds the window one layer at a time — the pending delete, then an open editor, then a
+    /// selection — and stops there. A window isn't summoned, so Escape has no business closing it.
     private func handleEscape() {
         if !pendingDelete.isEmpty {
             pendingDelete = []
@@ -698,9 +591,9 @@ struct PanelView: View {
             selection = []
             selectionAnchor = nil
             state.clearSelections()
-        } else {
-            onDismiss()
         }
+        // ...and stops there. A real window isn't summoned, so Escape has no business closing it —
+        // that's ⌘W. (The focus panel, which *is* summoned, still hides on its last Escape.)
     }
 
     // MARK: Header
@@ -835,14 +728,13 @@ struct PanelView: View {
     /// anywhere in the header surfaces the same view settings.
     @ViewBuilder private var viewOptionsMenuContent: some View {
         Picker("Tasks", selection: $tasksMode) {
-            Label("Focused", systemImage: "scope").tag(TasksMode.focused)
             Label("Incomplete", systemImage: "circle").tag(TasksMode.incomplete)
             Label("All", systemImage: "list.bullet").tag(TasksMode.all)
         }
         .pickerStyle(.inline)
         Divider()
         Toggle(isOn: $detailsExpanded) { Label("Show notes", systemImage: "note.text") }
-        // The ⌥⌘S shortcut lives on a hidden button (see `panelShortcuts`) rather than here — a closed
+        // The ⌥⌘S shortcut lives on a hidden button (see `keyboardShortcuts`) rather than here — a closed
         // SwiftUI menu's items aren't in the responder chain, so a key equivalent set here wouldn't fire.
         Toggle(isOn: Binding(get: { state.sidebarVisible },
                              set: { _ in state.toggleSidebar() })) {
@@ -850,9 +742,9 @@ struct PanelView: View {
         }
         Divider()
         Picker("Appearance", selection: $colorMode) {
-            Label("System", systemImage: "circle.lefthalf.filled").tag(PanelColorMode.system)
-            Label("Light", systemImage: "sun.max").tag(PanelColorMode.light)
-            Label("Dark", systemImage: "moon").tag(PanelColorMode.dark)
+            Label("System", systemImage: "circle.lefthalf.filled").tag(AppColorMode.system)
+            Label("Light", systemImage: "sun.max").tag(AppColorMode.light)
+            Label("Dark", systemImage: "moon").tag(AppColorMode.dark)
         }
         .pickerStyle(.inline)
     }
@@ -865,7 +757,7 @@ struct PanelView: View {
             }
         } label: {
             Group {
-                if let icon = AppIcons.panelImage(.raycast) {
+                if let icon = AppIcons.smallImage(.raycast) {
                     Image(nsImage: icon).resizable().frame(width: 15, height: 15)
                 } else {
                     Image(systemName: "magnifyingglass")
@@ -885,7 +777,7 @@ struct PanelView: View {
     /// text editor is open, where ⌥ is used for typing and the flicker is just distracting.
     private var openButton: some View {
         let finder = modifiers.optionDown && !isAnyEditorActive
-        let appIcon = AppIcons.panelImage(finder ? .finder : .obsidian)
+        let appIcon = AppIcons.smallImage(finder ? .finder : .obsidian)
         return Button {
             openProject(inFinder: finder)
         } label: {
@@ -1057,7 +949,7 @@ struct PanelView: View {
             onPerform: { performListDrop($0) }
         ))
         // The list is the keyboard target for ↑/↓, ⌫, ⌘A and ⌘C. The focus *ring* is suppressed — a
-        // blue rectangle around the whole list would be heavy in a HUD panel — and which pane has
+        // blue rectangle around the whole list would be heavy here — and which pane has
         // focus is shown the Mac way instead, by whether the selection reads emphasized or muted.
         .focusable()
         .focused($tasksFocused)
@@ -1077,7 +969,7 @@ struct PanelView: View {
     }
 
     /// Default rendering: only sessions that have visible tasks, each introduced by a quiet caption.
-    /// Empty sessions stay hidden. This is the panel's behavior when session notes aren't revealed.
+    /// Empty sessions stay hidden. This is the default when session notes aren't revealed.
     @ViewBuilder private func groupedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
         ForEach(sessionOrder, id: \.self) { si in
             let context = sessionContext(si)
@@ -1257,339 +1149,24 @@ struct PanelView: View {
         dropTarget = nil
         return true
     }
-
-    // MARK: Focused mode
-
-    /// The task the focused card centers on: the truly focused todo if there is one, else the first
-    /// open task so the card still has something to show.
-    private var focusedHero: Todo? { store.focusedTodo ?? store.openTodos.first }
-
-    /// Compact "what am I doing right now" card: an ancestor breadcrumb, the hero task (completable,
-    /// with its due date), and a dim tappable "Next" line. Falls back to a gentle empty state when
-    /// there's nothing open to focus.
-    @ViewBuilder private var focusedSection: some View {
-        if let hero = focusedHero {
-            focusedCard(hero)
-        } else {
-            VStack(alignment: .center, spacing: 6) {
-                Text("Nothing focused").font(.subheadline).foregroundStyle(.secondary)
-                Text("All tasks complete").font(.caption).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
-    }
-
-    /// The focused hero card. Right-clicking the hero opens the same `TaskMenu` as a list row; the
-    /// input-driven actions (edit / add / wrap / due) open inline editors in place around the hero,
-    /// mirroring the task list's per-row editing so focused mode is fully actionable, not read-only.
-    private func focusedCard(_ hero: Todo) -> some View {
-        let key = PMStore.key(for: hero)
-        let isEditingText = activeEditor == EditorTarget(key: key, kind: .edit)
-        let isEditingDue = activeEditor == EditorTarget(key: key, kind: .due)
-        let isAdding = activeEditor == EditorTarget(key: key, kind: .add)
-        let isWrapping = activeEditor == EditorTarget(key: key, kind: .wrap)
-
-        return VStack(alignment: .leading, spacing: 12) {
-            // Editors whose new row lands ABOVE the hero: wrap (the new parent) and Add Before.
-            if isWrapping {
-                InlineTextEditor(placeholder: "New parent task", submitLabel: "Wrap",
-                                 leadingIcon: AnyView(TaskStatusIcon(size: heroIconSize))) { text in
-                    store.wrap(hero, parentText: text)
-                    activeEditor = nil
-                } onCancel: { activeEditor = nil }
-                    .reportEditorFrame()
-            }
-            if isAdding && focusedAddPosition == .before {
-                focusedAddEditor(hero)
-            }
-
-            // The hero display (breadcrumb + task line) — or, while editing its text, an in-place
-            // editor. The display carries the movement animation: keyed by the task's identity + text,
-            // it transitions whenever the store reports a classified move (see `.animation` below), so
-            // navigating tasks slides directionally and an in-place edit wipes.
-            if isEditingText {
-                InlineTextEditor(seed: hero.text, placeholder: "Task text", submitLabel: "Save",
-                                 leadingIcon: AnyView(TaskStatusIcon(checked: hero.checked, size: heroIconSize))) { text in
-                    store.editText(hero, text: text)
-                    activeEditor = nil
-                } onCancel: { activeEditor = nil }
-                    .reportEditorFrame()
-            } else {
-                heroDisplay(hero)
-                    .id(heroSignature(hero))
-                    .transition(heroTransition(for: store.focusMove))
-            }
-
-            // Editors whose row/edit lands BELOW the hero: due edit, Add After (sibling), Add Subtask.
-            if isEditingDue {
-                DueEditor(seed: String((hero.dueDate ?? hero.effectiveDueDate ?? "").prefix(10)),
-                          leadingIcon: AnyView(TaskStatusIcon(checked: hero.checked, size: heroIconSize))) { newDue in
-                    store.setDue(hero, due: newDue)
-                    activeEditor = nil
-                } onCancel: { activeEditor = nil }
-                    .reportEditorFrame()
-            }
-            if isAdding && (focusedAddPosition == .after || focusedAddPosition == .child) {
-                focusedAddEditor(hero)
-            }
-
-            // The dim "Next" line, hidden while editing so the card stays calm in edit mode.
-            if activeEditor == nil, let next = store.nextTodo, next != hero {
-                Divider()
-                HStack(spacing: 6) {
-                    Text("Next").font(.caption2).foregroundStyle(.tertiary)
-                    Text(next.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { store.focus(next) }
-                .help("Focus this task")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        // Drive the hero transition off the store's move token: only a real, classified change
-        // animates (incidental reloads leave the token untouched), and the direction/curve match it.
-        .animation(heroAnimation(for: store.focusMove), value: store.focusMoveToken)
-        // Contain the sliding hero within the card so a directional push doesn't bleed into the header
-        // or the Next line.
-        .clipped()
-        // The whole focused card represents the active task, so a right-click anywhere in it — not
-        // just on the hero line — opens the task menu. `contentShape` makes the padding/empty area
-        // hit-testable too. Inline editors still show the field's own copy/paste menu on right-click.
-        .contentShape(Rectangle())
-        .contextMenu {
-            TaskMenu(todo: hero, store: store,
-                     openEditor: { openFocusedEditor($0, for: hero) },
-                     openAdd: { openFocusedAdd($0, for: hero) })
-        }
-        .animation(.snappy, value: activeEditor)
-    }
-
-    /// The focused hero's checkbox size, shared with its inline editors so the status glyph keeps the
-    /// same identity in view and edit modes.
-    private var heroIconSize: CGFloat { 18 }
-
-    /// The hero's static presentation — the ancestor breadcrumb above its completable line — as one
-    /// unit, so a movement transition slides the whole identity (context included), not just the text.
-    private func heroDisplay(_ hero: Todo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let crumb = breadcrumb(for: hero) {
-                Text(crumb)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            heroLine(hero)
-        }
-    }
-
-    /// Identity for the hero display's transition: the task key plus its text, so both navigating to a
-    /// different task (key changes) and editing the current one in place (text changes) swap identity
-    /// and animate, while incidental changes (due, indent) update in place.
-    private func heroSignature(_ hero: Todo) -> String { "\(PMStore.key(for: hero))|\(hero.text)" }
-
-    /// The transition for a hero change: a directional push whose incoming edge matches the direction
-    /// of travel, or an in-place wipe for a text edit.
-    private func heroTransition(for move: FocusMove) -> AnyTransition {
-        switch move {
-        case .right: return .cornerPush(horizontal: .trailing, vertical: .bottom)  // dove into a subtask → down-right
-        case .left:  return .cornerPush(horizontal: .leading,  vertical: .top)     // bubbled up to an ancestor → up-left
-        case .down:  return .cornerPush(horizontal: nil,       vertical: .bottom)  // next → rises up from below
-        case .up:    return .cornerPush(horizontal: nil,       vertical: .top)     // previous → drops down from above
-        case .wipe:  return .wipe
-        case .none:  return .identity
-        }
-    }
-
-    /// The curve for a hero change — a quick snappy slide for spatial moves, a smooth ease for a wipe.
-    private func heroAnimation(for move: FocusMove) -> Animation {
-        move == .wipe ? .easeInOut(duration: 0.3) : .snappy(duration: 0.32)
-    }
-
-    /// The hero's completable line: a large checkbox, its text, and (when dated) a read-only due chip.
-    private func heroLine(_ hero: Todo) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Button(action: { store.toggle(hero) }) {
-                Image(systemName: hero.checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: heroIconSize))
-                    .foregroundStyle(hero.checked ? Color.accentColor : Color.secondary)
-                    .symbolReplaceIfAvailable()
-                    .bounceIfAvailable(hero.checked)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(hero.text)
-                    .font(.system(size: 17, weight: .semibold))
-                    .strikethrough(hero.checked, color: .secondary)
-                    .foregroundStyle(hero.checked ? .secondary : .primary)
-                    .lineLimit(3)
-                if hero.dueDate != nil || hero.effectiveDueDate != nil {
-                    staticDueChip(hero)
-                }
-            }
-        }
-    }
-
-    /// The positional add editor for the focused card. Its slot (above/below) is chosen by the caller
-    /// from `focusedAddPosition`, matching the task list's previewed insert position.
-    private func focusedAddEditor(_ hero: Todo) -> some View {
-        AddEditor(leadingIcon: AnyView(TaskStatusIcon(size: heroIconSize))) { text, due in
-            store.addTodo(text: text, due: due, relativeTo: hero, position: focusedAddPosition)
-            activeEditor = nil
-        } onCancel: { activeEditor = nil }
-            .reportEditorFrame()
-    }
-
-    /// Open (never toggle) the given editor kind on the focused hero — used by its context menu.
-    private func openFocusedEditor(_ kind: EditorTarget.Kind, for hero: Todo) {
-        activeEditor = EditorTarget(key: PMStore.key(for: hero), kind: kind)
-    }
-
-    /// Seed the focused add position, then open the add editor on the hero.
-    private func openFocusedAdd(_ position: TaskInsertPosition, for hero: Todo) {
-        focusedAddPosition = position
-        openFocusedEditor(.add, for: hero)
-    }
-
-    /// The chain of ancestor task texts above `todo`, joined with chevrons, or nil if it's a root task.
-    /// Walks the flat todo list backward, picking up one task at each shallower depth within the same
-    /// session — the same structure the list indentation reflects.
-    private func breadcrumb(for todo: Todo) -> String? {
-        let list = store.todos
-        guard let idx = list.firstIndex(where: {
-            $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
-        }) else { return nil }
-        var ancestors: [String] = []
-        var wantDepth = todo.depth - 1
-        var i = idx - 1
-        while i >= 0, wantDepth >= 0 {
-            let t = list[i]
-            if t.sessionIndex == todo.sessionIndex, t.depth == wantDepth {
-                ancestors.insert(t.text, at: 0)
-                wantDepth -= 1
-            }
-            i -= 1
-        }
-        return ancestors.isEmpty ? nil : ancestors.joined(separator: "  ›  ")
-    }
-
-    /// Read-only due-date chip for the focused card (editing stays in list mode). Own dates read solid
-    /// orange; an inherited date reads dashed and secondary, matching the list's `DueChip`.
-    private func staticDueChip(_ todo: Todo) -> some View {
-        let own = todo.dueDate
-        let text = String((own ?? todo.effectiveDueDate ?? "").prefix(10))
-        let color: Color = own != nil ? .orange : .secondary
-        return Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: own != nil ? [] : [3]))
-            )
-            .foregroundStyle(color)
-    }
 }
 
-/// How the panel's tasks area presents itself. Raw values persist via `@AppStorage`.
+/// How the project window's tasks area presents itself. Raw values persist via `@AppStorage`.
+///
+/// A `focused` case used to sit alongside these, collapsing the window to a single task. That view is
+/// the focus panel now — a separate always-on-top window — so this is back to being what it reads as: a
+/// filter over the list. A stored `"focused"` no longer decodes, and `@AppStorage` falls back to the
+/// default, which is the right landing place for anyone upgrading mid-mode.
 enum TasksMode: String {
-    case focused, incomplete, all
+    case incomplete, all
 }
 
-/// The panel's two selectable lists. Whichever holds keyboard focus is the one arrow keys, ⌫, ⌘A and
+/// The project window two selectable lists. Whichever holds keyboard focus is the one arrow keys, ⌫, ⌘A and
 /// ⌘C drive, and the one whose selection reads emphasized.
-/// A visible task paired with the identity its row is diffed on — see `PanelView.identifiedTodos`.
+/// A visible task paired with the identity its row is diffed on — see `ProjectView.identifiedTodos`.
 struct IdentifiedTodo: Identifiable {
     let id: String
     let todo: Todo
-}
-
-/// The panel's height grip: a short grabber centred on the bottom edge, brightening on hover and
-/// while held, with the vertical-resize cursor over its (taller than it looks) hit area.
-///
-/// The drag reports its *total* translation from where it began, and the controller applies that as
-/// an absolute offset from the height at mouse-down — so the edge tracks the pointer exactly instead
-/// of accumulating per-frame deltas.
-private struct PanelResizeHandle: View {
-    let onBegan: () -> Void
-    let onChanged: (CGFloat) -> Void
-    let onEnded: () -> Void
-
-    @State private var hovering = false
-    @State private var dragging = false
-    /// Whether *this view* currently owns a pushed cursor. `NSCursor.push`/`pop` is a stack, so an
-    /// unbalanced pair leaks: pop once too often and some other view's cursor is discarded; push once
-    /// too often and the resize arrows stay on after the pointer has left. Hover-in/hover-out and
-    /// drag-end can interleave in either order (a drag can end well outside the handle), so ownership
-    /// is tracked explicitly rather than inferred from `hovering` and `dragging`.
-    @State private var pushedCursor = false
-
-    var body: some View {
-        ZStack {
-            Color.clear
-            Capsule()
-                .fill(Color.primary.opacity(dragging ? 0.45 : (hovering ? 0.3 : 0.12)))
-                .frame(width: 32, height: 4)
-        }
-        .frame(maxWidth: .infinity)
-        // Thin enough to sit inside the list's own bottom padding, so it isn't stealing clicks from
-        // the last row.
-        .frame(height: 9)
-        .contentShape(Rectangle())
-        // Without this the pull would be claimed by `isMovableByWindowBackground` and move the panel.
-        .background(WindowDragExcluder())
-        .onHover { inside in
-            hovering = inside
-            // Hold the cursor for the whole drag even if the pointer leaves the handle, which it will:
-            // the handle stays at the window's bottom edge and the pointer runs ahead of it.
-            if inside { pushCursor() } else if !dragging { popCursor() }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 1)
-                .onChanged { value in
-                    if !dragging { dragging = true; onBegan() }
-                    onChanged(value.translation.height)
-                }
-                .onEnded { _ in
-                    dragging = false
-                    onEnded()
-                    if !hovering { popCursor() }
-                }
-        )
-        .animation(.easeOut(duration: 0.12), value: hovering)
-        // Toggling the sidebar off (or the takeover opening) removes the handle mid-hover, which would
-        // otherwise leave the resize cursor pushed with nothing left to pop it.
-        .onDisappear { popCursor() }
-        .help("Drag to resize the panel")
-        .accessibilityLabel("Resize panel")
-    }
-
-    private func pushCursor() {
-        guard !pushedCursor else { return }
-        pushedCursor = true
-        NSCursor.resizeUpDown.push()
-    }
-
-    private func popCursor() {
-        guard pushedCursor else { return }
-        pushedCursor = false
-        NSCursor.pop()
-    }
-}
-
-extension View {
-    /// Drop the system focus ring from a focusable container. The panel shows which pane has keyboard
-    /// focus through its selection (emphasized vs muted) rather than a ring around the whole list, so
-    /// the ring would be noise. `focusEffectDisabled` arrived in macOS 14; below it the ring stays.
-    @ViewBuilder func focusRingOff() -> some View {
-        if #available(macOS 14.0, *) { focusEffectDisabled() } else { self }
-    }
 }
 
 /// Combined trigger for the tasks section's single implicit animation. It must fire on both the visible
@@ -1600,9 +1177,9 @@ private struct TasksMotionKey: Equatable {
     let expanded: Bool
 }
 
-/// The panel's color-scheme override. Raw values persist via `@AppStorage`; `.system` maps to `nil`
+/// The app color-scheme override. Raw values persist via `@AppStorage`; `.system` maps to `nil`
 /// so SwiftUI falls back to the OS appearance.
-enum PanelColorMode: String {
+enum AppColorMode: String {
     case system, light, dark
     var colorScheme: ColorScheme? {
         switch self {
@@ -1611,15 +1188,6 @@ enum PanelColorMode: String {
         case .dark:   return .dark
         }
     }
-}
-
-/// Identifies which row has an open inline editor, and which kind. Task editors key on
-/// "sessionIndex:lineIndex"; session editors key on "sess:<index>" (or "sess:new"), so the two
-/// namespaces can't collide and only one editor is ever open at a time.
-struct EditorTarget: Equatable {
-    enum Kind { case add, due, edit, wrap, sessionLabel, sessionNote, sessionAddTask, sessionNew }
-    let key: String
-    let kind: Kind
 }
 
 /// A visible task row's vertical extent and depth in the task-list coordinate space, published via
@@ -1654,20 +1222,15 @@ struct DropTarget: Equatable {
     let insertAfter: Bool
 }
 
-private struct ContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
-/// The pinned header's natural height, measured separately from the scrollable body so the window's
-/// auto-fit can target their sum (see `PanelView.reportMainHeight`).
+/// The pinned header's natural height, published so the sidebar can line its own header bar and rule
+/// up with it across the split.
 private struct HeaderHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// Applies the soft scroll-edge effect (macOS 26+) so scrolling content fades at the top/bottom edges
-/// — under the pinned header and off the panel's bottom — rather than hard-clipping. A no-op on older
+/// — under the pinned header and off the bottom edge — rather than hard-clipping. A no-op on older
 /// systems, where the plain clipped edge remains.
 private struct SoftScrollEdges: ViewModifier {
     func body(content: Content) -> some View {
@@ -1675,159 +1238,6 @@ private struct SoftScrollEdges: ViewModifier {
             content.scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
         } else {
             content
-        }
-    }
-}
-
-// MARK: Hero edit transition (in-place wipe)
-
-/// A soft, feathered mask reveal used when a task's text is edited in place. Editing isn't a spatial
-/// event, so this deliberately avoids the directional slide of a navigation: a gently feathered edge
-/// sweeps the new text in while it also crossfades (see `AnyTransition.wipe`), reading as the text
-/// refreshing/shimmering in place rather than moving. Alpha-only, so it's correct in light and dark.
-struct WipeModifier: ViewModifier, Animatable {
-    /// 0 = fully masked (hidden), 1 = fully revealed.
-    var animatableData: CGFloat
-
-    /// Width of the soft reveal edge, as a fraction of the content — wide enough to read as a shimmer
-    /// rather than a hard wipe line.
-    private let feather: CGFloat = 0.35
-
-    func body(content: Content) -> some View {
-        let p = animatableData
-        content.mask(
-            GeometryReader { geo in
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: p),
-                        .init(color: .clear, location: min(1, p + feather)),
-                        .init(color: .clear, location: 1),
-                    ],
-                    startPoint: .leading, endPoint: .trailing
-                )
-                .frame(width: geo.size.width, height: geo.size.height)
-            }
-        )
-    }
-}
-
-extension AnyTransition {
-    /// The in-place edit transition: a feathered mask wipe crossfaded with opacity, so an edit dissolves
-    /// and shimmers in place instead of sliding like a move.
-    static var wipe: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .modifier(
-                active: WipeModifier(animatableData: 0),
-                identity: WipeModifier(animatableData: 1))),
-            removal: .opacity
-        )
-    }
-
-    /// A `push`-style slide that can travel diagonally. The built-in `.push(from:)` only moves along a
-    /// single edge, but task-focus moves are usually diagonal: diving into a subtask travels
-    /// down-and-right (the child is both deeper and further down the outline), and a completion bubbling
-    /// up to a sibling-less ancestor travels up-and-left. `horizontal` and `vertical` name the edges the
-    /// *incoming* content enters from (either may be nil for a purely vertical or horizontal move); the
-    /// outgoing content leaves toward the opposite corner. Crossfaded so it reads like `.push`, and
-    /// size-proportional (built from `.move`), so it scales to whatever it animates.
-    static func cornerPush(horizontal: Edge?, vertical: Edge?) -> AnyTransition {
-        func opposite(_ e: Edge) -> Edge {
-            switch e {
-            case .leading:  return .trailing
-            case .trailing: return .leading
-            case .top:      return .bottom
-            case .bottom:   return .top
-            }
-        }
-        var insertion: AnyTransition = .opacity
-        var removal: AnyTransition = .opacity
-        for edge in [horizontal, vertical].compactMap({ $0 }) {
-            insertion = insertion.combined(with: .move(edge: edge))
-            removal = removal.combined(with: .move(edge: opposite(edge)))
-        }
-        return .asymmetric(insertion: insertion, removal: removal)
-    }
-}
-
-// MARK: Outside-click dismissal
-
-/// The active inline editor reports its window-space frame so a mouse-down monitor can tell an
-/// outside click (which cancels the editor) from a click within it. Only one editor is open at a
-/// time, so the first non-nil frame wins.
-private struct ActiveEditorFrameKey: PreferenceKey {
-    static var defaultValue: CGRect?
-    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = value ?? nextValue() }
-}
-
-private extension View {
-    /// Publish this editor's frame (SwiftUI global / window space) for the outside-click monitor.
-    func reportEditorFrame() -> some View {
-        background(GeometryReader { geo in
-            Color.clear.preference(key: ActiveEditorFrameKey.self, value: geo.frame(in: .global))
-        })
-    }
-}
-
-/// Watches for left mouse-downs in its own window while an editor is open and cancels the editor when
-/// the click lands outside its reported frame (swallowing that click so it only dismisses).
-///
-/// Scoped to one window: the app can have several project windows open, each with its own editor, and
-/// a click in one of them must not dismiss another's. (It used to match on a single shared window
-/// identifier, which was the same thing back when there was only ever one window.)
-final class OutsideClickMonitor: ObservableObject {
-    var editorFrame: CGRect?
-    var onOutsideClick: (() -> Void)?
-    /// The window this monitor belongs to; clicks anywhere else are left alone.
-    weak var window: NSWindow?
-    private var monitor: Any?
-
-    func start() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self,
-                  let window = event.window,
-                  window === self.window
-            else { return event }
-            // SwiftUI's global space is top-left origin; AppKit's locationInWindow is bottom-left.
-            guard let frame = self.editorFrame else { return event }
-            let flipped = CGRect(x: frame.minX, y: window.frame.height - frame.maxY,
-                                 width: frame.width, height: frame.height)
-            if flipped.contains(event.locationInWindow) { return event }
-            self.onOutsideClick?()
-            return nil   // consume: an outside click only dismisses, it doesn't also act
-        }
-    }
-
-    func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        editorFrame = nil
-    }
-}
-
-/// Reports the `NSWindow` a SwiftUI subtree ended up in. Several behaviors here are per-window — the
-/// outside-click monitor, the note editor's save-on-blur — and with more than one project window open
-/// they need to know *which* window they're in, which SwiftUI doesn't otherwise say on macOS 13.
-struct WindowAccessor: NSViewRepresentable {
-    let onResolve: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView { ReportingView(onResolve: onResolve) }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class ReportingView: NSView {
-        let onResolve: (NSWindow?) -> Void
-        init(onResolve: @escaping (NSWindow?) -> Void) {
-            self.onResolve = onResolve
-            super.init(frame: .zero)
-        }
-        @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            // Deferred: `viewDidMoveToWindow` runs mid-layout, and the callback writes SwiftUI state.
-            let window = self.window
-            DispatchQueue.main.async { [onResolve] in onResolve(window) }
         }
     }
 }
@@ -1858,8 +1268,8 @@ private struct TaskRow: View {
     /// The tasks a context-menu command should apply to — the whole selection when this row is part
     /// of it, else just this row (which the parent also selects, Finder-style).
     var contextTargets: () -> [Todo] = { [] }
-    /// The pointer entering or leaving this row. The panel notes which row it's over so a right-click
-    /// can move the highlight there before the menu opens — see `PanelView.selectForContextMenu`.
+    /// The pointer entering or leaving this row. The list notes which row it's over so a right-click
+    /// can move the highlight there before the menu opens — see `ProjectView.selectForContextMenu`.
     var onHoverChanged: (Bool) -> Void = { _ in }
     /// The pasteboard payload for a drag starting on this row.
     var dragProvider: () -> NSItemProvider = { NSItemProvider() }
@@ -1868,7 +1278,7 @@ private struct TaskRow: View {
     /// multi-selection lands on the whole selection, like the context menu's version.
     var onSetDue: (String?) -> Void = { _ in }
     @State private var hovering = false
-    /// Whether the panel's window is the key window — a selection in an inactive window is muted, as
+    /// Whether the row window is the key window — a selection in an inactive window is muted, as
     /// in every native list.
     @Environment(\.controlActiveState) private var controlActiveState
     /// Which position a freshly-opened add editor should seed to (set by the plus button and the
@@ -1880,7 +1290,7 @@ private struct TaskRow: View {
     private var isEditingDue: Bool { activeEditor == EditorTarget(key: key, kind: .due) }
     private var isEditingText: Bool { activeEditor == EditorTarget(key: key, kind: .edit) }
     private var isWrapping: Bool { activeEditor == EditorTarget(key: key, kind: .wrap) }
-    /// Hover-revealed controls (plus, "＋date") are suppressed while any editor is open, so the panel
+    /// Hover-revealed controls (plus, "＋date") are suppressed while any editor is open, so the window
     /// stays calm in edit mode instead of flashing affordances as the pointer crosses rows.
     private var revealControls: Bool { hovering && activeEditor == nil }
 
@@ -1917,16 +1327,16 @@ private struct TaskRow: View {
                     // edge-to-edge and the gaps the drop delegate computes abut with no dead bands.
                     .padding(.vertical, 3)
                     .background(GeometryReader { g in
-                        let f = g.frame(in: .named(PanelView.taskListSpace))
+                        let f = g.frame(in: .named(ProjectView.taskListSpace))
                         Color.clear.preference(key: RowFramesKey.self, value: [RowFrame(
                             key: key, session: todo.sessionIndex, line: todo.lineIndex,
                             depth: todo.depth, minY: f.minY, maxY: f.maxY)])
                     })
                     // Carve the row out of the window-drag region so the mouse-drag starts an item
-                    // reorder rather than moving the panel.
+                    // reorder rather than moving the window.
                     .background(WindowDragExcluder())
                     .contentShape(Rectangle())
-                    // Dragging is off while any editor is open, so the panel stays calm in edit mode. No
+                    // Dragging is off while any editor is open, so the list stays calm in edit mode. No
                     // custom preview: the default snapshot lifts the ghost from the row's real frame. The
                     // dim `.opacity` is applied *after* `.onDrag`, so the snapshot stays full-opacity.
                     .ifCondition(activeEditor == nil) { view in
@@ -1938,7 +1348,7 @@ private struct TaskRow: View {
                             let provider = dragProvider()
                             // A real drag's end (drop OR cancel-outside) releases the provider, deallocating
                             // this sentinel, which clears the drag key. (A no-move press is caught instead by
-                            // the panel's leftMouseUp monitor.)
+                            // the leftMouseUp monitor.)
                             let sentinel = DragEndSentinel { [dragging = $draggingKey] in
                                 if dragging.wrappedValue == k { dragging.wrappedValue = nil }
                             }
@@ -2013,7 +1423,7 @@ private struct TaskRow: View {
 
     /// A zero-size view carrying this row's key as a scroll id, so keyboard navigation can reveal the
     /// row. It rides in the *background* deliberately: putting `.id()` on the row itself would
-    /// override the identity `ForEach` assigns it (see `PanelView.identifiedTodos`) and undo the
+    /// override the identity `ForEach` assigns it (see `ProjectView.identifiedTodos`) and undo the
     /// stable-across-reindex row animations.
     private var scrollMarker: some View {
         Color.clear.frame(width: 0, height: 0).id(key)
@@ -2111,101 +1521,6 @@ private final class DragEndSentinel {
     }
 }
 
-/// Right-click actions for a task, mirroring the hover controls plus completion/focus. Idiomatic
-/// macOS per-task affordance: keyboard- and VoiceOver-accessible, and keeps the surface visually
-/// clean. Shared by the task list rows and the focused-mode hero card so both offer the same menu.
-/// Wording follows the rest of the app: the add positions match `AddEditor`'s Before/Subtask/After
-/// picker (and Raycast's "Add Before"/"Add After"), due wording matches Raycast's "Set Due Date"/
-/// "Remove Due Date", and an ellipsis marks actions that open a further input editor (as the
-/// menubar does).
-private struct TaskMenu: View {
-    let todo: Todo
-    /// The tasks the commands apply to — the whole selection when this row belongs to one, else just
-    /// this row. Commands that need a single subject (edit, wrap, the positional adds) are hidden on
-    /// a multi-selection rather than silently acting on one arbitrary member of it.
-    var targets: [Todo] = []
-    @ObservedObject var store: PMStore
-    /// Open (never toggle) the given editor kind on this task.
-    let openEditor: (EditorTarget.Kind) -> Void
-    /// Seed the add position, then open the add editor.
-    let openAdd: (TaskInsertPosition) -> Void
-    var onDelete: ([Todo]) -> Void = { _ in }
-
-    /// The set commands act on, never empty (a menu opened on a row always has that row).
-    private var scope: [Todo] { targets.isEmpty ? [todo] : targets }
-    private var isMulti: Bool { scope.count > 1 }
-    /// A batch is "completing" unless every task in it is already done, matching `PMStore.toggleAll`.
-    private var allChecked: Bool { scope.allSatisfy(\.checked) }
-
-    var body: some View {
-        if isMulti {
-            Button { store.toggleAll(scope) } label: {
-                allChecked
-                    ? Label("Reopen \(scope.count) Tasks", systemImage: "arrow.uturn.backward")
-                    : Label("Complete \(scope.count) Tasks", systemImage: "checkmark.circle")
-            }
-        } else if todo.checked {
-            Button { store.toggle(todo) } label: { Label("Reopen", systemImage: "arrow.uturn.backward") }
-        } else {
-            Button { store.toggle(todo) } label: { Label("Complete", systemImage: "checkmark.circle") }
-        }
-        if !isMulti, !todo.checked, !todo.isFocused {
-            Button { store.focus(todo) } label: { Label("Focus", systemImage: "arrow.right.circle") }
-        }
-        if !isMulti {
-            Button { openEditor(.edit) } label: { Label("Edit Task…", systemImage: "pencil") }
-        }
-        Divider()
-        Button { TaskPasteboard.copy(markdown: store.markdown(for: scope)) } label: {
-            Label(isMulti ? "Copy \(scope.count) Tasks" : "Copy", systemImage: "doc.on.doc")
-        }
-        .keyboardShortcut("c", modifiers: .command)
-        if !isMulti {
-            Divider()
-            // Add-position symbols match the menubar's Add submenu (Before ↑, Subtask ↳, After ↓).
-            Button { openAdd(.before) } label: { Label("Add Before…", systemImage: "arrow.up") }
-            Button { openAdd(.child) } label: { Label("Add Subtask…", systemImage: "arrow.turn.down.right") }
-            Button { openAdd(.after) } label: { Label("Add After…", systemImage: "arrow.down") }
-            Button { openEditor(.wrap) } label: {
-                Label("Wrap Task…", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-            }
-            // Only a parent can be dissolved — an immediate action (no further input), so no ellipsis.
-            if store.hasChildren(todo) {
-                Button { store.unwrap(todo) } label: {
-                    Label("Unwrap", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-            }
-        }
-        Divider()
-        if isMulti {
-            // A batch date needs one editor, not one per row, so it goes through the clicked row's.
-            Button { openEditor(.due) } label: { Label("Set Due Date…", systemImage: "calendar") }
-            if scope.contains(where: { $0.dueDate != nil }) {
-                Button { store.setDueAll(scope, due: nil) } label: {
-                    Label("Remove Due Dates", systemImage: "calendar.badge.minus")
-                }
-            }
-        } else {
-            Button { openEditor(.due) } label: { Label("Set Due Date…", systemImage: "calendar") }
-            if todo.dueDate != nil {
-                Button { store.setDue(todo, due: nil) } label: { Label("Remove Due Date", systemImage: "calendar.badge.minus") }
-            }
-        }
-        Divider()
-        // Deleting takes each task's whole subtree; the confirmation says how much that is.
-        Button(role: .destructive) { onDelete(scope) } label: {
-            Label(isMulti ? "Delete \(scope.count) Tasks…" : "Delete…", systemImage: "trash")
-        }
-        .keyboardShortcut(.delete, modifiers: .command)
-        Divider()
-        // Global document undo/redo — discoverable here; the ⌘Z / ⇧⌘Z shortcuts live on the panel.
-        Button { store.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-            .disabled(!store.canUndo)
-        Button { store.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
-            .disabled(!store.canRedo)
-    }
-}
-
 // MARK: Drag-to-reorder drop delegate
 
 /// The single list-level drop target. Resolves the pointer (in the task-list coordinate space) into a
@@ -2235,48 +1550,6 @@ private struct ListDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         guard let target = onCompute(info.location), target.valid else { onUpdate(nil); return false }
         return onPerform(target)
-    }
-}
-
-private extension View {
-    /// Apply a modifier only when `condition` holds, leaving the view untouched otherwise. Used to
-    /// attach `.onDrag` only while dragging is allowed (no open editor).
-    @ViewBuilder func ifCondition<Transformed: View>(
-        _ condition: Bool, transform: (Self) -> Transformed
-    ) -> some View {
-        if condition { transform(self) } else { self }
-    }
-}
-
-/// A backing AppKit view that opts its region out of the panel's `isMovableByWindowBackground`, so a
-/// mouse-drag that begins on it starts a SwiftUI `.onDrag` (item reorder) instead of being claimed by
-/// AppKit as a window move. Placed behind the draggable task rows; the rest of the panel background
-/// still moves the window as before.
-struct WindowDragExcluder: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { ExcluderView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class ExcluderView: NSView {
-        override var mouseDownCanMoveWindow: Bool { false }
-    }
-}
-
-// MARK: Task status icon
-
-/// A task's leading status glyph — an open circle, or a filled check when done. The inline editors
-/// (edit / add / wrap / due) render it alongside their input so a task keeps the same visual identity
-/// while it's being modified or created that it has as a normal row. `size` matches the surrounding
-/// context (nil = the list row's default body size; the focused hero passes its larger 18pt). A
-/// brand-new task (add / wrap) reads as an empty circle, since it isn't complete yet.
-private struct TaskStatusIcon: View {
-    var checked: Bool = false
-    var size: CGFloat? = nil
-
-    var body: some View {
-        Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-            .font(size.map { Font.system(size: $0) } ?? .body)
-            .foregroundStyle(checked ? Color.accentColor : Color.secondary)
-            .symbolReplaceIfAvailable()
     }
 }
 
@@ -2325,146 +1598,6 @@ private struct DueChip: View {
     }
 }
 
-private struct DueEditor: View {
-    let seed: String
-    /// Optional leading status glyph, so the task keeps its identity while its due date is edited.
-    let leadingIcon: AnyView?
-    let onSet: (String?) -> Void
-    let onCancel: () -> Void
-    @State private var date: Date
-
-    init(seed: String, leadingIcon: AnyView? = nil,
-         onSet: @escaping (String?) -> Void, onCancel: @escaping () -> Void) {
-        self.seed = seed
-        self.leadingIcon = leadingIcon
-        self.onSet = onSet
-        self.onCancel = onCancel
-        _date = State(initialValue: DueFormat.parse(seed) ?? Date())
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let leadingIcon { leadingIcon }
-            DatePicker("", selection: $date, displayedComponents: .date)
-                .datePickerStyle(.field)
-                .labelsHidden()
-            Button("Set") { onSet(DueFormat.string(date)) }
-            Button("Clear") { onSet(nil) }
-            Button("Cancel", action: onCancel)
-        }
-        .controlSize(.small)
-        .padding(.vertical, 2)
-    }
-}
-
-// MARK: Add editor
-
-/// Text (+ optional due) entry for a new task. The insert position is chosen by the caller (via the
-/// context menu / plus button) and previewed by where this form is placed in the row layout, so the
-/// form no longer carries a position picker of its own.
-private struct AddEditor: View {
-    /// Optional leading status glyph (an empty circle for the not-yet-created task), so the new task
-    /// reads with the same visual identity as a real row while it's being typed.
-    var leadingIcon: AnyView? = nil
-    let onAdd: (String, String?) -> Void
-    let onCancel: () -> Void
-
-    @State private var text = ""
-    @State private var useDue = false
-    @State private var date = Date()
-    @FocusState private var textFocused: Bool
-
-    var body: some View {
-        // Icon leads the whole form, aligned to the text-field row; the controls below indent under
-        // the field so the icon column stays clear, mirroring a task row's icon + text layout.
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if let leadingIcon { leadingIcon }
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Task text", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($textFocused)
-                    .onSubmit(submit)
-
-                HStack(spacing: 6) {
-                    Toggle("Due", isOn: $useDue).toggleStyle(.checkbox)
-                    if useDue {
-                        DatePicker("", selection: $date, displayedComponents: .date)
-                            .datePickerStyle(.field)
-                            .labelsHidden()
-                    }
-                    Spacer()
-                    Button("Add", action: submit).keyboardShortcut(.defaultAction)
-                    Button("Cancel", action: onCancel)
-                }
-            }
-        }
-        .controlSize(.small)
-        .padding(.vertical, 2)
-        .onAppear { textFocused = true }
-    }
-
-    private func submit() {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        onAdd(trimmed, useDue ? DueFormat.string(date) : nil)
-    }
-}
-
-// MARK: Single-field inline editor (edit text / wrap)
-
-/// A one-line text editor used for the row's "Edit Task" (seeded with the current text) and "Wrap
-/// Task" (empty, for the new parent) actions. Auto-focuses, submits on Return, cancels on Escape via
-/// the panel's `handleEscape`. Matches the styling of `AddEditor`/`DueEditor`.
-private struct InlineTextEditor: View {
-    let placeholder: String
-    let submitLabel: String
-    /// Optional leading status glyph, so the task keeps its identity while its text is edited (the
-    /// existing task's own checkbox state) or a wrap parent is named (an empty circle).
-    let leadingIcon: AnyView?
-    /// When true, an empty (blank) value is a valid submission — used by the session-label editor,
-    /// where clearing the field removes the label. Task text editors leave this false so a blank
-    /// submit is a no-op.
-    let allowsEmpty: Bool
-    let onSubmit: (String) -> Void
-    let onCancel: () -> Void
-
-    @State private var text: String
-    @FocusState private var focused: Bool
-
-    init(seed: String = "", placeholder: String, submitLabel: String, leadingIcon: AnyView? = nil,
-         allowsEmpty: Bool = false,
-         onSubmit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
-        self.placeholder = placeholder
-        self.submitLabel = submitLabel
-        self.leadingIcon = leadingIcon
-        self.allowsEmpty = allowsEmpty
-        self.onSubmit = onSubmit
-        self.onCancel = onCancel
-        _text = State(initialValue: seed)
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let leadingIcon { leadingIcon }
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
-                .onSubmit(submit)
-            Button(submitLabel, action: submit).keyboardShortcut(.defaultAction)
-            Button("Cancel", action: onCancel)
-        }
-        .controlSize(.small)
-        .padding(.vertical, 2)
-        .onAppear { focused = true }
-    }
-
-    private func submit() {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard allowsEmpty || !trimmed.isEmpty else { return }
-        onSubmit(trimmed)
-    }
-}
-
 // MARK: Session header + note editor
 
 /// A revealed session's first-class header: its date/label line (double-click or right-click to
@@ -2506,7 +1639,7 @@ private struct SessionHeader: View {
             }
 
             // The note read view / placeholder; opening it (double-click or "Edit Note…") takes over the
-            // whole panel with the rich editor — see PanelView.sessionNoteTakeover. The read view renders
+            // whole column with the rich editor — see ProjectView.sessionNoteTakeover. The read view renders
             // the note's markdown (formatting applied, markers removed) in the details brief's serif face.
             if !prose.isEmpty {
                 Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .secondaryLabelColor))
@@ -2562,20 +1695,16 @@ private struct SessionHeader: View {
     private func openNote() { activeEditor = EditorTarget(key: key, kind: .sessionNote) }
 }
 
-/// The full-panel, focused editor for a session's prose note. The panel is taken over by a header
+/// The full-column, focused editor for a session's prose note. The column is taken over by a header
 /// (Back button + the project name over the session name) and a rich `MarkdownTextEditor` with live
 /// syntax highlighting and ⌘B/⌘I/⌘K shortcuts. There are no Save/Cancel buttons: the note **auto-saves**
 /// whenever you leave — Back, Escape, an outside click (all remove the view → `onDisappear`), or the
-/// panel losing key focus (blur-hide → `didResignKey`). `store.setSessionNote` is byte-idempotent, so a
+/// the window losing key focus (`didResignKey`). `store.setSessionNote` is byte-idempotent, so a
 /// repeated commit with no changes is a free no-op and yields no extra undo entry.
 private struct SessionNoteTakeover: View {
     let index: Int
     let session: Session
     let projectName: String
-    /// The panel height to occupy — sized by `PanelView.takeoverTargetHeight` so the takeover never
-    /// shrinks the current panel, only grows a small one. Nil means "fill the window", which is the
-    /// sidebar case: there the height is the user's and the takeover doesn't get to change it.
-    let height: CGFloat?
     @ObservedObject var store: PMStore
     let onBack: () -> Void
 
@@ -2583,12 +1712,11 @@ private struct SessionNoteTakeover: View {
     /// The window this takeover is in, so the save-on-blur only fires for *this* window losing key.
     @State private var hostWindow: NSWindow?
 
-    init(index: Int, session: Session, projectName: String, height: CGFloat?,
+    init(index: Int, session: Session, projectName: String,
          store: PMStore, onBack: @escaping () -> Void) {
         self.index = index
         self.session = session
         self.projectName = projectName
-        self.height = height
         self.store = store
         self.onBack = onBack
         _text = State(initialValue: leadingSessionProse(body: session.body))
@@ -2608,9 +1736,10 @@ private struct SessionNoteTakeover: View {
                 .padding(.vertical, 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .ifCondition(height != nil) { $0.frame(height: height) }
-        .ifCondition(height == nil) { $0.frame(maxHeight: .infinity) }
-        // Cover the whole takeover as the "active editor" region so in-panel clicks count as inside it.
+        // Fill the window. The takeover used to negotiate a height with a window that sized itself to
+        // its content; a real window's height is the user's, so the editor takes what it's given.
+        .frame(maxHeight: .infinity)
+        // Cover the whole takeover as the "active editor" region so in-window clicks count as inside it.
         .reportEditorFrame()
         // Auto-save on every way out: Back / Escape / outside-click remove the view (onDisappear); a
         // blur-hide leaves the view mounted but resigns key.
@@ -2868,7 +1997,7 @@ private struct DetailsEditor: View {
     @State private var links: [EditableLink]  // flat label/URL rows (grouped links preserved separately)
     @State private var learningsText: String  // one learning per line
     /// Nested link groups (a label with child URLs) aren't expressible in this compact flat form, so
-    /// they're held aside verbatim and re-appended on save — the panel never destroys them.
+    /// they're held aside verbatim and re-appended on save — the editor never destroys them.
     private let preservedGroups: [LinkEntry]
 
     init(notes: ProjectNotes, onSave: @escaping (EditedDetails) -> Void, onCancel: @escaping () -> Void) {
@@ -3008,7 +2137,7 @@ private struct LinksBlock: View {
     }
 
     /// A nested link group: its label as a quiet heading, then its child URLs as an indented list of
-    /// clickable links. Editing groups isn't supported in the panel (they round-trip untouched).
+    /// clickable links. Editing groups is not supported in the app (they round-trip untouched).
     @ViewBuilder private func linkGroup(_ link: LinkEntry, children: [LinkEntry]) -> some View {
         let label = (link.label ?? "").trimmingCharacters(in: .whitespaces)
         VStack(alignment: .leading, spacing: 2) {
@@ -3121,47 +2250,15 @@ final class FaviconLoader {
 
 // MARK: Helpers
 
-/// `due:` values are stored/displayed as `YYYY-MM-DD`.
-enum DueFormat {
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-    static func parse(_ s: String) -> Date? { formatter.date(from: String(s.prefix(10))) }
-    static func string(_ d: Date) -> String { formatter.string(from: d) }
-}
-
-private extension String {
-    var trimmed: String? {
-        let t = trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
-    }
-    var isBlank: Bool { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    func truncated(_ n: Int) -> String { count <= n ? self : String(prefix(n - 1)) + "…" }
-}
-
-/// SF Symbol animation modifiers, applied only where available (macOS 14+); no-ops below.
-private extension View {
-    @ViewBuilder func symbolReplaceIfAvailable() -> some View {
-        if #available(macOS 14.0, *) { contentTransition(.symbolEffect(.replace)) } else { self }
-    }
-    @ViewBuilder func bounceIfAvailable<V: Equatable>(_ value: V) -> some View {
-        if #available(macOS 14.0, *) { symbolEffect(.bounce, value: value) } else { self }
-    }
-}
-
-/// The panel's translucent background: Liquid Glass (`NSGlassEffectView`) on macOS 26+, falling back
-/// to `NSVisualEffectView` vibrancy below. Used as a SwiftUI `.background` so it fills the content's
-/// layout and resizes with the auto-fit instead of fighting it.
-/// The window is borderless, so this shape is the panel's shape: it rounds its own corners rather than
-/// relying on the window frame to clip it, and the window's shadow follows from it.
-struct PanelBackground: NSViewRepresentable {
-    /// Whether the material rounds its own corners. The panel is borderless, so it has to; a real
-    /// window's frame does the rounding, and doing it again inside would cut the content away from the
-    /// window's own corners.
+/// The app's translucent background: Liquid Glass (`NSGlassEffectView`) on macOS 26+, falling back to
+/// `NSVisualEffectView` vibrancy below. Used as a SwiftUI `.background` so it fills the content's
+/// layout rather than fighting it.
+struct GlassBackground: NSViewRepresentable {
+    /// Whether the material rounds its own corners.
+    ///
+    /// The focus panel is borderless, so it has to: nothing else would round it, and the window's
+    /// shadow is derived from this shape. A project window's frame does its own rounding, and doing it
+    /// again inside would cut the content away from the window's corners.
     var rounded: Bool = true
 
     func makeNSView(context: Context) -> NSView {
@@ -3203,7 +2300,7 @@ private final class MaskedVisualEffectView: NSVisualEffectView {
     }
 }
 
-/// Fires on any left mouse-up in the app while the panel is shown. Used as a reliable end signal for a
+/// Fires on any left mouse-up in the app while the window is shown. Used as a reliable end signal for a
 /// *no-move* drag press: SwiftUI starts a drag (setting the drag key) but if the pointer never moves,
 /// the release is an ordinary click whose mouse-up is delivered here — a real drag's concluding mouse-up
 /// is consumed by the drag loop instead, and handled by the item-provider sentinel / the drop itself.
@@ -3238,12 +2335,12 @@ final class RowHoverTracker {
     }
 }
 
-/// Fires on any right mouse-down in the app while the panel is shown, so the task list can move its
+/// Fires on any right mouse-down in the app while the window is shown, so the task list can move its
 /// highlight onto the row whose context menu is about to open.
 ///
 /// This is an event monitor rather than something computed while the menu is built because SwiftUI
 /// builds a row's `.contextMenu` content during the row's body pass, not on the click — so anything
-/// that mutates state from there runs once per row per render (see `PanelView.contextTargets`). A
+/// that mutates state from there runs once per row per render (see `ProjectView.contextTargets`). A
 /// local monitor sees the event before it reaches the view, so the selection is committed by the time
 /// the menu appears.
 final class RightMouseDownMonitor: ObservableObject {
@@ -3265,7 +2362,7 @@ final class RightMouseDownMonitor: ObservableObject {
 }
 
 /// Publishes whether ⌥ is currently held, so a button can swap its icon/action live (as macOS menus
-/// do for alternate items). Backed by a local `flagsChanged` monitor active while the panel is key.
+/// do for alternate items). Backed by a local `flagsChanged` monitor active while the window is key.
 final class ModifierMonitor: ObservableObject {
     @Published var optionDown = false
     private var monitor: Any?
@@ -3276,7 +2373,7 @@ final class ModifierMonitor: ObservableObject {
             // Only publish on a real change. `flagsChanged` fires for *every* modifier, press and
             // release — ⌘ and ⇧ included, which are exactly the keys held while multi-selecting — and
             // an unconditional write to an `@Published` republishes whether or not the value moved.
-            // That rebuilt the whole panel body, sidebar list and all, several times per click.
+            // That rebuilt the whole view body, sidebar list and all, several times per click.
             let down = event.modifierFlags.contains(.option)
             if let self, self.optionDown != down { self.optionDown = down }
             return event

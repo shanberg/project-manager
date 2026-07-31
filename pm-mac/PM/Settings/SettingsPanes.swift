@@ -4,7 +4,7 @@ import PmLib
 
 /// General: appearance, launch behavior, and what PM does when it isn't showing a window.
 struct GeneralSettingsView: View {
-    @AppStorage("PMPanelColorMode") private var colorMode: PanelColorMode = .system
+    @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
     @ObservedObject private var settings = WindowSettings.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -12,9 +12,9 @@ struct GeneralSettingsView: View {
         Form {
             Section {
                 Picker("Appearance", selection: $colorMode) {
-                    Text("System").tag(PanelColorMode.system)
-                    Text("Light").tag(PanelColorMode.light)
-                    Text("Dark").tag(PanelColorMode.dark)
+                    Text("System").tag(AppColorMode.system)
+                    Text("Light").tag(AppColorMode.light)
+                    Text("Dark").tag(AppColorMode.dark)
                 }
                 .pickerStyle(.segmented)
             }
@@ -42,65 +42,57 @@ struct GeneralSettingsView: View {
     }
 }
 
-/// Windows: how project windows behave — the settings that used to be the menubar's Panel submenu,
-/// plus the chrome choice that replaced the panel itself.
+/// Windows: how project windows behave, and how the focus panel behaves.
+///
+/// Two sections, because they're two surfaces with genuinely different jobs. The panel's "on all
+/// Spaces" and "float" are what make it a HUD; a project window mostly wants to be left alone as a
+/// normal window, and only gets the float toggle because some people do want their editor on top.
 struct WindowsSettingsView: View {
     @ObservedObject private var settings = WindowSettings.shared
-    /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, so they're
-    /// read and written through the app delegate's copy.
+    /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, because
+    /// Raycast toggles them too.
     @State private var panelSettings = PanelSettings.load()
 
     var body: some View {
         Form {
             Section {
-                Picker("Window style", selection: $settings.chromeStyle) {
-                    Text("Standard").tag(WindowChromeStyle.window)
-                    Text("Floating panel").tag(WindowChromeStyle.panel)
-                }
-                .pickerStyle(.radioGroup)
-                .onChange(of: settings.chromeStyle) { _ in reopenWindowsNotice = true }
+                Toggle("Show on all Spaces", isOn: $settings.showOnAllSpaces)
+                    .onChange(of: settings.showOnAllSpaces) { _ in
+                        FocusPanelController.shared.applyWindowSettings()
+                    }
+                Toggle("Float above other windows", isOn: $panelSettings.floating)
+                    .onChange(of: panelSettings.floating) { _ in savePanelSettings() }
+                Toggle("Keep open when it loses focus", isOn: $panelSettings.pinned)
+                    .onChange(of: panelSettings.pinned) { _ in savePanelSettings() }
+            } header: {
+                Text("Focus Panel")
             } footer: {
-                Text(settings.chromeStyle == .panel
-                     ? "A borderless panel that sizes itself to its content, snaps to the screen edges, and hides when it loses focus."
-                     : "A normal Mac window: resizable, tabbable, and remembered per project.")
+                Text("The focus panel shows the task you're on and stays put while you work elsewhere — ⌃⌥P shows and hides it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                Toggle("Show on all Spaces", isOn: $settings.showOnAllSpaces)
-                    .onChange(of: settings.showOnAllSpaces) { _ in WindowManager.shared.applyWindowSettings() }
                 Toggle("Float above other windows", isOn: $settings.floatAboveOthers)
-                    .onChange(of: settings.floatAboveOthers) { _ in WindowManager.shared.applyWindowSettings() }
+                    .onChange(of: settings.floatAboveOthers) { _ in
+                        WindowManager.shared.applyWindowSettings()
+                    }
+            } header: {
+                Text("Project Windows")
             } footer: {
-                Text("On all Spaces, a PM window follows you between desktops and full-screen apps. (A window still lives on one display — macOS has no way to show the same window on every screen at once.)")
+                Text("Project windows are normal Mac windows: resizable, tabbable, and remembered per project.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            if settings.chromeStyle == .panel {
-                Section("Panel") {
-                    Toggle("Keep open when it loses focus", isOn: $panelSettings.pinned)
-                        .onChange(of: panelSettings.pinned) { _ in savePanelSettings() }
-                }
             }
         }
         .formStyle(.grouped)
         .scenePadding()
-        .alert("Reopen your windows to change their style", isPresented: $reopenWindowsNotice) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Windows already open keep their current chrome. Close and reopen one to see the new style.")
-        }
     }
 
-    @State private var reopenWindowsNotice = false
-
-    /// Write through the same file Raycast reads, and let the app apply it to open windows. The float
-    /// toggle above is the app's own setting; `floating` in this file stays the Raycast contract.
+    /// Write through the same file Raycast reads, and let the panel apply it live.
     private func savePanelSettings() {
         panelSettings.save()
-        WindowManager.shared.applyPanelSettings(panelSettings)
+        FocusPanelController.shared.applyPanelSettings(panelSettings)
     }
 }
 

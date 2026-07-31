@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Which pane a window's keyboard commands drive. Kept as a value (rather than a `@FocusState`) so it
 /// survives the two panes living in separate view hierarchies — see `ProjectViewState.focusedPane`.
-enum PanelPane: Hashable {
+enum ProjectPane: Hashable {
     case tasks
     case projects
 }
@@ -10,12 +10,12 @@ enum PanelPane: Hashable {
 /// The state a project window's two panes share.
 ///
 /// The sidebar and the task column used to be one SwiftUI hierarchy, so this was ordinary `@State` on
-/// `PanelView` handed down as bindings. Once the split view puts each pane in its own hosting
+/// `ProjectView` handed down as bindings. Once the split view puts each pane in its own hosting
 /// controller they can't share `@State` — or a `@FocusState`, whose scope is a single hierarchy — so
 /// the handful of genuinely shared values live here instead, one instance per window.
 ///
 /// Only what *both* panes touch belongs here. The task list's own selection stays private to
-/// `PanelView`; it never leaves that pane.
+/// `ProjectView`; it never leaves that pane.
 @MainActor
 final class ProjectViewState: ObservableObject {
     /// The selected projects in the sidebar. Shared because ⌘C and ⌘A act on whichever pane has
@@ -29,7 +29,7 @@ final class ProjectViewState: ObservableObject {
     /// selection and takes arrow keys — and writes here when it *gains* focus. Nothing writes nil: a
     /// pane losing focus (the window going inactive, a menu opening) shouldn't strand the commands
     /// with no target, so the last focused pane stays remembered.
-    @Published var focusedPane: PanelPane? = .tasks
+    @Published var focusedPane: ProjectPane? = .tasks
 
     /// The task column header's measured height, so the sidebar's own header bar and rule line up with
     /// it across the split.
