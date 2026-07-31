@@ -23,6 +23,7 @@
 		6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F024FD91F7AEB31A5D296AB /* PMEntities.swift */; };
 		62808FC8DAD2E8A4027C29A0 /* ProjectIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17FA0B4FC52FB9DC24629BF6 /* ProjectIndex.swift */; };
 		682B885D994EC5F7B065C269 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3644D4885A6C393A632399AA /* main.swift */; };
+		7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF1B5393B4FF9F362814CC03 /* SearchField.swift */; };
 		86788960127F77B65F99A9FE /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579B29914CA5A13A9C21CCC8 /* ProjectView.swift */; };
 		86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857714074D07452813367D28 /* HotKey.swift */; };
 		8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */; };
@@ -41,6 +42,7 @@
 		D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEAC5A29157104A97390627 /* StoreRegistry.swift */; };
 		D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 670C6E6568761BF6AA2FF6AB /* FocusPanelView.swift */; };
 		D8BE24F0CFAEE72661EA688E /* ProjectSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88484A02D67B9B9A7B5D57B7 /* ProjectSidebar.swift */; };
+		DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5715734872D251CCEA72D7D2 /* GlassBackground.swift */; };
 		DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */; };
 		E156B63F77BE44F4081ACA7A /* ProjectWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */; };
 		E4012FFE5E8FB1E976753460 /* TaskTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7548520C03B6F6076B86CC /* TaskTiming.swift */; };
@@ -71,6 +73,7 @@
 		48C822C464FB5D97E1BED457 /* PMReminderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMReminderSchemas.swift; sourceTree = "<group>"; };
 		4F1F5044D1862C47FA5F6F05 /* pm-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "pm-swift"; path = "../pm-swift"; sourceTree = SOURCE_ROOT; };
 		54E583F2A7FC849845365F2B /* AppDelegate+Commands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Commands.swift"; sourceTree = "<group>"; };
+		5715734872D251CCEA72D7D2 /* GlassBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassBackground.swift; sourceTree = "<group>"; };
 		579B29914CA5A13A9C21CCC8 /* ProjectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectView.swift; sourceTree = "<group>"; };
 		5AFCE913C956EF623A80D658 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61C73A122FF07CC3880248E3 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
@@ -95,6 +98,7 @@
 		BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindow.swift; sourceTree = "<group>"; };
 		BE12AF236B77E3727D0F3C5F /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
 		C5C091CF8691F406FDF304F2 /* TaskEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditors.swift; sourceTree = "<group>"; };
+		CF1B5393B4FF9F362814CC03 /* SearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchField.swift; sourceTree = "<group>"; };
 		D1C48657562CC9C603C6F6D3 /* MainMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
 		D69731046CF949BED6A9B753 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		E1B28724379E1B0A1A3DA2DC /* RelativeDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeDue.swift; sourceTree = "<group>"; };
@@ -157,6 +161,7 @@
 				62961DC25E3A42B6B0C38D7A /* FocusPanelChrome.swift */,
 				8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */,
 				670C6E6568761BF6AA2FF6AB /* FocusPanelView.swift */,
+				5715734872D251CCEA72D7D2 /* GlassBackground.swift */,
 			);
 			path = Focus;
 			sourceTree = "<group>";
@@ -168,6 +173,7 @@
 				88484A02D67B9B9A7B5D57B7 /* ProjectSidebar.swift */,
 				579B29914CA5A13A9C21CCC8 /* ProjectView.swift */,
 				960CBA413D74FFF7E3DCCEA3 /* ProjectViewState.swift */,
+				CF1B5393B4FF9F362814CC03 /* SearchField.swift */,
 			);
 			path = Project;
 			sourceTree = "<group>";
@@ -355,6 +361,7 @@
 				BF85FC31F04BE19EA84467C4 /* FocusPanelChrome.swift in Sources */,
 				F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */,
 				D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */,
+				DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
 				173B371DDE759BC440514326 /* MainMenu.swift in Sources */,
@@ -376,6 +383,7 @@
 				E156B63F77BE44F4081ACA7A /* ProjectWindow.swift in Sources */,
 				B0E9BFFA635AC01C891756F3 /* ProjectWindowController.swift in Sources */,
 				1702ADEBF7B5049CEA3DC46B /* RelativeDue.swift in Sources */,
+				7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */,
 				F620D94113D96BFDDEE77367 /* SettingsPanes.swift in Sources */,
 				18D0FFC79E7293686F9F11D2 /* SettingsWindowController.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,

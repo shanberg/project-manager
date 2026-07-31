@@ -63,7 +63,7 @@ struct FocusPanelView: View {
         .preferredColorScheme(colorMode.colorScheme)
         // The window is borderless, so this material *is* the panel's shape — it rounds its own corners
         // and the window's shadow follows from it.
-        .background { GlassBackground(rounded: true) }
+        .background { GlassBackground() }
         .clipShape(RoundedRectangle(cornerRadius: ProjectWindow.cornerRadius, style: .continuous))
         // The content is meant to run to the window's own edges; without this the hosting controller
         // insets it below an absent titlebar and the measured height comes up short.

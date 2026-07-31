@@ -122,7 +122,24 @@ enum MainMenu {
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(.separator())
+        menu.addItem(findMenuItem())
         item.submenu = menu
+        return item
+    }
+
+    /// Edit ▸ Find. A submenu with one item today, but it's the submenu Mac users open looking for
+    /// search — flattening ⌘F up into Edit would put it somewhere nobody looks for it.
+    ///
+    /// `performFindPanelAction:` is the standard Find selector, so it routes through the responder
+    /// chain to whichever window is front (see `ProjectWindowController`) and disables itself when no
+    /// window can answer it.
+    private static func findMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Find")
+        menu.addItem(withTitle: "Find…", action: Selector(("performFindPanelAction:")), keyEquivalent: "f")
+        item.submenu = menu
+        item.title = "Find"
         return item
     }
 

@@ -73,6 +73,20 @@ final class ProjectSplitViewController: NSSplitViewController {
         contentItem.canCollapse = false
         contentItem.holdingPriority = .defaultLow
 
+        // Both panes run the full height of the window, under the (hidden) titlebar — each header
+        // positions itself past the traffic lights rather than sitting below them. Declaring it here
+        // rather than only in the views is what tells AppKit the layout is deliberate.
+        //
+        // The matching `automaticallyAdjustsSafeAreaInsets = false` is macOS 26 only, so the panes'
+        // SwiftUI content still declines the top safe area itself — that form works on every target.
+        for item in [sidebarItem!, contentItem!] {
+            item.allowsFullHeightLayout = true
+            // No toolbar and no visible title, so there's no titlebar for AppKit to draw a separator
+            // under; the rule below each header is the app's own, and a second line at the titlebar's
+            // bottom edge would sit a few points above it.
+            item.titlebarSeparatorStyle = .none
+        }
+
         addSplitViewItem(sidebarItem)
         addSplitViewItem(contentItem)
 

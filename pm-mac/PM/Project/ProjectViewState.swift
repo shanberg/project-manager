@@ -43,6 +43,14 @@ final class ProjectViewState: ObservableObject {
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}
 
+    /// How far in from this window's leading edge its close/minimise/zoom buttons reach, plus a
+    /// margin. Whichever pane is leftmost insets its header by this so the two never overlap.
+    ///
+    /// Measured from the real buttons once the window is on screen rather than hard-coded: Apple has
+    /// moved these between releases, and a stale constant shows up as a title either colliding with the
+    /// zoom button or floating oddly far from the edge.
+    @Published var leadingTitlebarInset: CGFloat = ProjectWindow.trafficLightsWidth
+
     /// Whether *this window's* sidebar is showing. Per window, like every other source-list app — the
     /// persisted `PMPanelSidebar` is only the default a session's first window opens with, so the
     /// content can't read it and be right.
@@ -54,6 +62,13 @@ final class ProjectViewState: ObservableObject {
     @Published var newTaskRequest = 0
 
     func requestNewTask() { newTaskRequest &+= 1 }
+
+    /// Bumped by Edit ▸ Find ▸ Find…, for the same reason `newTaskRequest` is a counter rather than a
+    /// closure: a SwiftUI `View` is a value rebuilt on every body pass, so a closure registered from
+    /// one captures a stale copy of its state.
+    @Published var findRequest = 0
+
+    func requestFind() { findRequest &+= 1 }
 
     /// Clear both panes' selections (Escape's last stop before it gives up).
     func clearSelections() {

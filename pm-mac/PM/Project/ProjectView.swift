@@ -36,6 +36,13 @@ struct ProjectView: View {
     @State private var activeEditor: EditorTarget?
     /// True while the empty-project CTA has revealed its inline add editor (for the very first task).
     @State private var addingFirstTask = false
+    /// The find bar's query. Empty while it's closed — closing clears it, so the list is never left
+    /// quietly filtered by a bar you can't see.
+    @State private var findQuery = ""
+    /// Whether the find bar is showing, and a counter that pulls focus back into its field (⌘F while
+    /// it's already open re-focuses and selects, as it does in Safari).
+    @State private var findVisible = false
+    @State private var findFocusToken = 0
     /// The key of the task subtree currently being dragged, set when a row's drag begins. Nil when no
     /// drag is in flight. A subtree can't land on itself or its own descendants.
     @State private var draggingKey: String?
@@ -93,8 +100,16 @@ struct ProjectView: View {
     private var detailsShowing: Bool { store.projectName != nil && detailsExpanded }
 
     private var visibleTodos: [Todo] {
-        tasksMode == .all ? store.todos : store.todos.filter { !$0.checked }
+        let byMode = tasksMode == .all ? store.todos : store.todos.filter { !$0.checked }
+        guard let query = findQuery.trimmed?.lowercased() else { return byMode }
+        // Matches the task's own text only — not its ancestors'. Filtering by a parent would pull in
+        // every child of a matching task and read as "3 matches" over a dozen visible rows.
+        return byMode.filter { $0.text.lowercased().contains(query) }
     }
+
+    /// Whether a search is narrowing the list right now — as opposed to the bar merely being open with
+    /// nothing typed, which shouldn't change what's shown or claim there are no results.
+    private var isFiltering: Bool { findVisible && findQuery.trimmed != nil }
 
     /// The visible tasks paired with the identity their rows are diffed on.
     ///
@@ -120,20 +135,21 @@ struct ProjectView: View {
             // laid out here — it's the other half of the window's split view.
             .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: ProjectWindow.maxContentWidth)
             .frame(maxWidth: .infinity)
-            // Pin the appearance when the user overrides it; `.system` (nil) follows the OS. Applied
-            // above the background so the glass/vibrancy material (a child NSView) inherits the scheme.
+            // Pin the appearance when the user overrides it; `.system` (nil) follows the OS.
             .preferredColorScheme(colorMode.colorScheme)
-            // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout. It runs
-            // under the titlebar even though the content doesn't: with `fullSizeContentView` the hosting
-            // view is inset below the (invisible) titlebar, so without this the strip above the header
-            // shows the bare window background — a black band that reads as a titlebar that failed to
-            // draw. The window frame does the corner rounding, so the material doesn't.
-            .background { GlassBackground(rounded: false) }
-            // Run the content up under the (hidden, transparent) titlebar rather than sitting below
-            // it. Left inset, the window opens with a bare strip along its top that reads as a titlebar
-            // that failed to draw; the header belongs *in* that strip, level with the traffic lights.
-            // Content under a transparent titlebar is hit-testable — only the traffic lights themselves
-            // claim their own points — so the header's controls still work up there.
+            // No background of its own: the window's is the right one.
+            //
+            // This column used to paint `.behindWindow` vibrancy across itself — correct back when the
+            // whole app *was* a floating panel, and left behind when it became a window. A content pane
+            // beside a source list is opaque on every Mac: the sidebar is the vibrant surface (the split
+            // view's sidebar item supplies that material itself), and the contrast between the two is
+            // what makes a source list read as one. Two vibrant panes read as a HUD.
+            //
+            // Run the content up under the (hidden, transparent) titlebar rather than sitting below it.
+            // Left inset, the window opens with a bare strip along its top that reads as a titlebar that
+            // failed to draw; the header belongs *in* that strip, level with the traffic lights. Content
+            // under a transparent titlebar is hit-testable — only the traffic lights claim their own
+            // points — so the header's controls still work up there.
             .ignoresSafeArea(.container, edges: .top)
     }
 
@@ -205,6 +221,8 @@ struct ProjectView: View {
         // add editor opens wherever it makes sense: the first-task CTA in an empty project, else an
         // "after" editor on the hero task.
         .onChange(of: state.newTaskRequest) { _ in beginNewTask() }
+        // Edit ▸ Find ▸ Find… — same counter trick as New Task, for the same reason.
+        .onChange(of: state.findRequest) { _ in beginFind() }
         // ⌘Z / ⇧⌘Z undo & redo the window edits (move, complete, due, text, add, wrap…). Hidden
         // zero-size buttons carry the shortcuts so they work whenever the window is key.
         .background(keyboardShortcuts)
@@ -539,10 +557,61 @@ struct ProjectView: View {
     private var stickyHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if !detailsShowing { Divider() }
+            findBar
+            if !detailsShowing || findVisible { Divider() }
             deleteConfirmation
         }
         .animation(.snappy, value: pendingDelete.isEmpty)
+        .animation(.snappy, value: findVisible)
+    }
+
+    /// The find bar: a real search field and a match count, in a strip below the header.
+    ///
+    /// Below the header rather than inside it, because that's where a Mac find bar goes — it's what
+    /// `NSTextFinder` puts under a toolbar, and what Safari and Xcode show. It also keeps the header a
+    /// stable height, which the sidebar's own header bar matches across the split.
+    @ViewBuilder private var findBar: some View {
+        if findVisible {
+            HStack(spacing: 8) {
+                SearchField(text: $findQuery,
+                            placeholder: "Search tasks",
+                            focusToken: findFocusToken,
+                            onCancel: closeFind,
+                            onCommit: focusTasks)
+                    .frame(maxWidth: 260)
+                if isFiltering {
+                    Text(matchSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                Button("Done", action: closeFind)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private var matchSummary: String {
+        let n = visibleTodos.count
+        return n == 1 ? "1 match" : "\(n) matches"
+    }
+
+    /// Edit ▸ Find ▸ Find… (⌘F). Opening it when it's already open re-focuses and selects, so a second
+    /// ⌘F is "search again" rather than a no-op.
+    private func beginFind() {
+        findVisible = true
+        findFocusToken &+= 1
+    }
+
+    /// Close the bar and drop the query with it — a filter you can't see is a filter you'll forget.
+    private func closeFind() {
+        findVisible = false
+        findQuery = ""
+        focusTasks()
     }
 
     /// The scrollable content below the pinned header: the optional details brief and the task/session
@@ -560,7 +629,9 @@ struct ProjectView: View {
                     // A project with no tasks at all gets a plain, emoji-free empty state with an add
                     // CTA. In notes mode, route to the session-oriented list even with no tasks yet, so
                     // empty sessions and the "New session" affordance still show.
-                    if store.todos.isEmpty && !detailsExpanded {
+                    if isFiltering && visibleTodos.isEmpty {
+                        noMatches
+                    } else if store.todos.isEmpty && !detailsExpanded {
                         emptyProjectTasks
                     } else {
                         tasksSection
@@ -590,6 +661,8 @@ struct ProjectView: View {
             editingDetails = false
         } else if activeEditor != nil {
             activeEditor = nil
+        } else if findVisible {
+            closeFind()
         } else if !selection.isEmpty || !state.projectSelection.isEmpty {
             selection = []
             selectionAnchor = nil
@@ -626,7 +699,7 @@ struct ProjectView: View {
         .padding(.trailing, 14)
         // Clear the traffic lights when this column is the leftmost thing in the window. With the
         // sidebar showing they sit over *it*, and the title can start at the normal margin.
-        .padding(.leading, state.sidebarVisible ? 14 : ProjectWindow.trafficLightsWidth)
+        .padding(.leading, state.sidebarVisible ? 14 : state.leadingTitlebarInset)
         // Tuned so the title sits level with the traffic lights rather than below them, and so the
         // header is still tall enough that the sidebar's own header bar — which has to clear those
         // lights too — isn't squeezed. Constant regardless of the details toggle, so the sticky header
@@ -764,6 +837,29 @@ struct ProjectView: View {
         } else if let url = URL(string: "raycast://extensions/shanberg/project-manager/open-focused-in-obsidian") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Nothing matched the search. Distinct from the empty-project state on purpose: one is "this
+    /// project has no tasks", the other is "your query has no hits", and offering the empty state's
+    /// "add the first task" button here would be answering a question nobody asked.
+    private var noMatches: some View {
+        VStack(alignment: .center, spacing: 6) {
+            Text("No matching tasks")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("No \(tasksMode == .all ? "task" : "open task") in this project contains “\(findQuery.trimmed ?? "")”.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+            if tasksMode != .all {
+                Button("Search Completed Tasks Too") { tasksMode = .all }
+                    .controlSize(.small)
+                    .padding(.top, 2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
     }
 
     private var emptyState: some View {
@@ -2209,56 +2305,6 @@ final class FaviconLoader {
 }
 
 // MARK: Helpers
-
-/// The app's translucent background: Liquid Glass (`NSGlassEffectView`) on macOS 26+, falling back to
-/// `NSVisualEffectView` vibrancy below. Used as a SwiftUI `.background` so it fills the content's
-/// layout rather than fighting it.
-struct GlassBackground: NSViewRepresentable {
-    /// Whether the material rounds its own corners.
-    ///
-    /// The focus panel is borderless, so it has to: nothing else would round it, and the window's
-    /// shadow is derived from this shape. A project window's frame does its own rounding, and doing it
-    /// again inside would cut the content away from the window's corners.
-    var rounded: Bool = true
-
-    func makeNSView(context: Context) -> NSView {
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.style = .regular
-            glass.cornerRadius = rounded ? ProjectWindow.cornerRadius : 0
-            return glass
-        }
-        let effect = MaskedVisualEffectView()
-        effect.material = .popover
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.rounded = rounded
-        return effect
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-/// Pre-26 fallback background. `.behindWindow` vibrancy isn't clipped by a layer corner radius, so the
-/// rounding has to go through `maskImage` — a nine-part rounded rect whose caps let AppKit stretch it to
-/// whatever height the auto-fit lands on.
-private final class MaskedVisualEffectView: NSVisualEffectView {
-    var rounded = true
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard rounded, maskImage == nil else { return }
-        let r = ProjectWindow.cornerRadius
-        let side = r * 2 + 1
-        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: r, left: r, bottom: r, right: r)
-        image.resizingMode = .stretch
-        maskImage = image
-    }
-}
 
 /// Fires on any left mouse-up in the app while the window is shown. Used as a reliable end signal for a
 /// *no-move* drag press: SwiftUI starts a drag (setting the drag key) but if the pointer never moves,

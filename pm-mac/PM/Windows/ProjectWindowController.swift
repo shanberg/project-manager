@@ -71,11 +71,22 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func show() {
         showWindow(nil)
+        measureTitlebarButtons()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
+
+    /// Publish where the window's traffic lights actually end, so the leftmost pane's header can start
+    /// past them. Their frames are only meaningful once the window has been ordered in, hence the call
+    /// from `show()` rather than the initialiser.
+    private func measureTitlebarButtons() {
+        guard let zoom = window?.standardWindowButton(.zoomButton) else { return }
+        let inset = zoom.frame.maxX + 12
+        guard inset > 0, abs(state.leadingTitlebarInset - inset) > 0.5 else { return }
+        state.leadingTitlebarInset = inset
+    }
 
     // MARK: Retargeting
 
@@ -149,9 +160,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         state.requestNewTask()
     }
 
+    /// Edit ▸ Find ▸ Find…. Opens the window's find bar and puts the cursor in it.
+    @objc func performFindPanelAction(_ sender: Any?) {
+        state.requestFind()
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(newTask(_:)):
+        case #selector(newTask(_:)), #selector(performFindPanelAction(_:)):
             return store.projectName != nil
         case #selector(newWindowForTab(_:)):
             // Nothing to open if every project is already on screen.

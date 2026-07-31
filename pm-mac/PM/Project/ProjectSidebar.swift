@@ -192,7 +192,7 @@ struct ProjectSidebar: View {
         }
         // The window's close/minimise/zoom buttons sit in this bar, over the sidebar — so the label
         // starts past them rather than under them.
-        .padding(.leading, ProjectWindow.trafficLightsWidth)
+        .padding(.leading, state.leadingTitlebarInset)
         .padding(.trailing, 12)
         // Match the task header height exactly (less its own 1pt rule) when it's been measured, so
         // the sidebar's divider continues the header's; fall back to a sensible height before then.
