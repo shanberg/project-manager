@@ -21,6 +21,14 @@ enum ProjectWindow {
     static let sidebarDefaultsKey = "PMPanelSidebar"
     static var isSidebarVisible: Bool { UserDefaults.standard.bool(forKey: sidebarDefaultsKey) }
 
+    /// How far in from a window's leading edge the close/minimise/zoom buttons reach, plus clearance.
+    ///
+    /// Both panes run their content under the (hidden, transparent) titlebar so the window has no dead
+    /// strip along its top — which means whichever pane is leftmost has to keep its own header clear of
+    /// the traffic lights by hand. AppKit publishes no metric for this; the buttons sit at x = 20 / 40 /
+    /// 60 with a ~14pt diameter, so the third one ends around 74.
+    static let trafficLightsWidth: CGFloat = 78
+
     /// Smallest window the content stays usable in.
     static let minWindowHeight: CGFloat = 320
 

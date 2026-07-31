@@ -104,6 +104,10 @@ struct ProjectSidebar: View {
             list
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The sidebar runs under the (hidden, transparent) titlebar too, so the two panes' header bars
+        // start at the same y and their rules meet. The traffic lights land in this pane's header —
+        // `headerBar` insets itself past them.
+        .ignoresSafeArea(.container, edges: .top)
         // Only ever written on *gaining* focus: a pane losing it (the window going inactive, a menu
         // opening) shouldn't strand ⌘C with no target.
         .onChange(of: listFocused) { focused in
@@ -186,7 +190,10 @@ struct ProjectSidebar: View {
             Spacer(minLength: 0)
             arrangeMenu
         }
-        .padding(.horizontal, 12)
+        // The window's close/minimise/zoom buttons sit in this bar, over the sidebar — so the label
+        // starts past them rather than under them.
+        .padding(.leading, ProjectWindow.trafficLightsWidth)
+        .padding(.trailing, 12)
         // Match the task header height exactly (less its own 1pt rule) when it's been measured, so
         // the sidebar's divider continues the header's; fall back to a sensible height before then.
         .frame(height: state.headerHeight > 1 ? state.headerHeight - 1 : 47)

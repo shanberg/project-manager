@@ -128,10 +128,13 @@ struct ProjectView: View {
             // view is inset below the (invisible) titlebar, so without this the strip above the header
             // shows the bare window background — a black band that reads as a titlebar that failed to
             // draw. The window frame does the corner rounding, so the material doesn't.
-            .background {
-                GlassBackground(rounded: false)
-                    .ignoresSafeArea(.container, edges: .top)
-            }
+            .background { GlassBackground(rounded: false) }
+            // Run the content up under the (hidden, transparent) titlebar rather than sitting below
+            // it. Left inset, the window opens with a bare strip along its top that reads as a titlebar
+            // that failed to draw; the header belongs *in* that strip, level with the traffic lights.
+            // Content under a transparent titlebar is hit-testable — only the traffic lights themselves
+            // claim their own points — so the header's controls still work up there.
+            .ignoresSafeArea(.container, edges: .top)
     }
 
     /// The window content column — everything that isn't the sidebar.
@@ -600,11 +603,10 @@ struct ProjectView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Title (double-click toggles the details brief) with the switcher arrow tucked after it.
-            HStack(spacing: 4) {
-                projectTitle
-                projectSwitcherMenu
-            }
+            // Title only. Switching projects is the sidebar's job — a chevron here offered a second,
+            // smaller version of the same list, and the two disagreed about what "open" meant: this one
+            // moved the app's global focus, while the sidebar retargets the window you're in.
+            projectTitle
             Spacer()
             let p = store.progress
             if p.total > 0 {
@@ -621,10 +623,16 @@ struct ProjectView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        // Equal breathing room above and below the title, so the pinned header reads as a balanced bar.
-        // Constant regardless of the details toggle, so the sticky header keeps a stable height.
-        .padding(.vertical, 14)
+        .padding(.trailing, 14)
+        // Clear the traffic lights when this column is the leftmost thing in the window. With the
+        // sidebar showing they sit over *it*, and the title can start at the normal margin.
+        .padding(.leading, state.sidebarVisible ? 14 : ProjectWindow.trafficLightsWidth)
+        // Tuned so the title sits level with the traffic lights rather than below them, and so the
+        // header is still tall enough that the sidebar's own header bar — which has to clear those
+        // lights too — isn't squeezed. Constant regardless of the details toggle, so the sticky header
+        // keeps a stable height.
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         // Double-click empty header space (or the title) toggles the details brief. On a background
         // layer *behind* the controls so the switcher / view-options / open buttons in front consume
         // their own clicks and are excluded; `simultaneousGesture` so it still coexists with
@@ -641,60 +649,12 @@ struct ProjectView: View {
     }
 
     /// The project title. Plain text — the details-toggle double-click lives on the header background
-    /// behind it, and the switcher lives on the adjacent arrow, so the title itself carries no gesture.
+    /// behind it, so the title itself carries no gesture.
     private var projectTitle: some View {
         Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project")
             .font(.title3.weight(.semibold))
             .lineLimit(1)
             .truncationMode(.tail)
-    }
-
-    /// The project switcher: a subtle chevron after the title (the macOS navigation-title / document-
-    /// title idiom). Opening it lists the recent projects — each with the same completion ring the
-    /// menubar draws — then "All projects…" to Raycast's searchable list for anything beyond recents.
-    /// Present even with no focused project, so you can switch in from the empty state. Reads
-    /// `store.recents`, warmed off-thread and shared with the menubar's switcher.
-    private var projectSwitcherMenu: some View {
-        Menu {
-            if store.recents.isEmpty {
-                Text("No recent projects").font(.caption)
-            } else {
-                ForEach(store.recents) { recent in
-                    Button {
-                        store.setFocusedProject(key: recent.projectKey)
-                    } label: {
-                        Label {
-                            // Native menus render a single line, so the focused task rides after the
-                            // name as a dimmed fragment rather than a true second line.
-                            Text(recent.name)
-                                + Text(recent.focusedText.map { "  —  \($0.truncated(48))" } ?? "")
-                                    .foregroundColor(.secondary)
-                        } icon: {
-                            Image(nsImage: MenubarRing.image(fraction: recent.fraction,
-                                                             hasProject: recent.total > 0, tint: nil))
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button {
-                if let url = URL(string: "raycast://extensions/shanberg/project-manager/list-projects") {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                Label("All projects…", systemImage: "magnifyingglass")
-            }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 16, height: 18)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Switch project")
     }
 
     /// Whether the view is in any non-default state (mode other than incomplete, or details showing),
