@@ -38,11 +38,6 @@ struct PanelView: View {
     /// management affordances. Off (the default) is the compact task view — no brief, and sessions are
     /// just quiet captions above their tasks with empty ones hidden.
     @AppStorage("PMPanelDetailsExpanded") private var detailsExpanded = false
-    /// Whether the project sidebar is showing, persisted across sessions. The sidebar itself is the
-    /// other half of the window's split view; this is the persisted value the split's collapsed state
-    /// mirrors, and the window reads it straight from `UserDefaults` before any SwiftUI layout has run
-    /// (see `ProjectWindow.isSidebarVisible`).
-    @AppStorage(ProjectWindow.sidebarDefaultsKey) private var sidebarVisible = false
     /// Whether the project-details section is in inline-edit mode (entered by double-clicking its
     /// content). Reset when the section collapses, the project changes, or Escape is pressed.
     @State private var editingDetails = false
@@ -154,7 +149,14 @@ struct PanelView: View {
             // above the background so the glass/vibrancy material (a child NSView) inherits the scheme.
             .preferredColorScheme(colorMode.colorScheme)
             // Liquid Glass (macOS 26+) / vibrancy background, filling the content's layout.
-            .background(PanelBackground(rounded: chromeStyle.isPanel))
+            .background {
+                // The material runs under the titlebar even though the content doesn't: with
+                // `fullSizeContentView` the hosting view is inset below the (invisible) titlebar, so
+                // without this the strip above the header shows the bare window background — a black
+                // band that reads as a titlebar that failed to draw.
+                PanelBackground(rounded: chromeStyle.isPanel)
+                    .ifCondition(!chromeStyle.isPanel) { $0.ignoresSafeArea(.container, edges: .top) }
+            }
             // Only the panel rounds itself: it's borderless, so nothing else would. A real window's
             // frame does the clipping, and clipping again inside it would round the content away from
             // the window's own corners.
@@ -176,7 +178,7 @@ struct PanelView: View {
     /// It sits in an overlay rather than the layout so it can't affect the measured content height, and
     /// excludes itself from the window-drag region so a pull resizes instead of moving.
     @ViewBuilder private var resizeHandle: some View {
-        if chromeStyle.isPanel && sidebarVisible && sessionNoteTakeover == nil {
+        if chromeStyle.isPanel && state.sidebarVisible && sessionNoteTakeover == nil {
             PanelResizeHandle(onBegan: onResizeBegan, onChanged: onResizeChanged, onEnded: onResizeEnded)
         }
     }
@@ -680,7 +682,7 @@ struct PanelView: View {
     /// Nil with the sidebar open: there the panel's height is the user's and the window won't resize to
     /// suit the editor, so the takeover fills the window it's given rather than asking for a height.
     private var takeoverTargetHeight: CGFloat? {
-        sidebarVisible ? nil : min(max(measuredHeight, maxContentHeight * 0.70), maxContentHeight)
+        state.sidebarVisible ? nil : min(max(measuredHeight, maxContentHeight * 0.70), maxContentHeight)
     }
 
     /// Escape unwinds the panel one layer at a time — the pending delete, then an open editor, then a
@@ -805,7 +807,7 @@ struct PanelView: View {
     /// Whether the view is in any non-default state (mode other than incomplete, or details showing),
     /// used to tint the view-options icon so there's a subtle "customized" cue.
     private var isViewCustomized: Bool {
-        tasksMode != .incomplete || detailsExpanded || sidebarVisible || colorMode != .system
+        tasksMode != .incomplete || detailsExpanded || state.sidebarVisible || colorMode != .system
     }
 
     /// Single header menu holding all view state: the tasks-mode picker (Focused / Incomplete / All)
@@ -842,7 +844,7 @@ struct PanelView: View {
         Toggle(isOn: $detailsExpanded) { Label("Show notes", systemImage: "note.text") }
         // The ⌥⌘S shortcut lives on a hidden button (see `panelShortcuts`) rather than here — a closed
         // SwiftUI menu's items aren't in the responder chain, so a key equivalent set here wouldn't fire.
-        Toggle(isOn: Binding(get: { sidebarVisible },
+        Toggle(isOn: Binding(get: { state.sidebarVisible },
                              set: { _ in state.toggleSidebar() })) {
             Label("Show projects  ⌥⌘S", systemImage: "sidebar.leading")
         }

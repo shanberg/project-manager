@@ -25,13 +25,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Asks to open a project — in this window or a new one. Supplied by `WindowManager`.
     var onOpenProject: ((String, Bool) -> Void)?
 
-    init(projectKey: String?, store: PMStore, chromeStyle: WindowChromeStyle, settings: PanelSettings) {
+    init(projectKey: String?, store: PMStore, chromeStyle: WindowChromeStyle, settings: PanelSettings,
+         startsWithSidebar: Bool) {
         self.projectKey = projectKey
         self.store = store
         self.chromeStyle = chromeStyle
 
         split = ProjectSplitViewController(store: store, state: state,
-                                           chromeStyle: chromeStyle, chrome: panelChromeState)
+                                           chromeStyle: chromeStyle, chrome: panelChromeState,
+                                           startsWithSidebar: startsWithSidebar)
 
         let window: NSWindow
         switch chromeStyle {
@@ -55,7 +57,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             window = KeyablePanel(
                 contentRect: NSRect(x: 0, y: 0,
                                     width: ProjectWindow.minContentWidth
-                                        + (ProjectWindow.isSidebarVisible ? ProjectWindow.sidebarWidth : 0),
+                                        + (startsWithSidebar ? ProjectWindow.sidebarWidth : 0),
                                     height: 420),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered, defer: false)
@@ -81,8 +83,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
 
         if chromeStyle.isPanel, let panel = window as? NSPanel {
-            panelChrome = PanelChromeController(panel: panel, projectKey: projectKey ?? "none",
-                                                settings: settings, chrome: panelChromeState)
+            let chrome = PanelChromeController(panel: panel, projectKey: projectKey ?? "none",
+                                               settings: settings, chrome: panelChromeState)
+            chrome.sidebarVisible = startsWithSidebar
+            panelChrome = chrome
         } else {
             // Per-project frame memory. `setFrameAutosaveName` has to come after the window exists and
             // before it's shown; with no project (the empty state) all such windows share one frame.
@@ -169,13 +173,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     // MARK: Sidebar
 
-    /// The header's toggle. Goes through the split view (so it animates and persists in one place),
-    /// then brings the other windows into line — the preference is app-wide.
+    /// The header's toggle, routed through the split view so it animates and persists in one place.
+    /// The panel chrome needs to hear about it too — its width and auto-fit floor both depend on it.
     func toggleSidebar() {
         split.toggleSidebar(nil)
-        WindowManager.shared.applySidebarPreference()
+        panelChrome?.sidebarVisible = isSidebarVisible
     }
-    func applySidebarPreference() { split.applySidebarPreference() }
+
+    /// Whether this window's sidebar is showing — the panel chrome needs it for its width and height
+    /// rules, which used to read the (then app-wide) preference directly.
+    var isSidebarVisible: Bool { !split.isSidebarCollapsed }
 
     // MARK: NSWindowDelegate
 

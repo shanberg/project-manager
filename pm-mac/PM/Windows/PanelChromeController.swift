@@ -72,6 +72,10 @@ final class PanelChromeController {
     /// list. The hug-a-single-task heights only make sense with the sidebar hidden.
     static let sidebarMinHeight: CGFloat = 400
 
+    /// Whether the window this chrome drives has its sidebar showing. Supplied by the window rather
+    /// than read from the preference: sidebar visibility is per window now.
+    var sidebarVisible = false
+
     init(panel: NSPanel, projectKey: String, settings: PanelSettings, chrome: PanelChrome) {
         self.panel = panel
         self.projectKey = projectKey
@@ -220,7 +224,7 @@ final class PanelChromeController {
 
     /// The panel's total width: the fixed content column, plus the sidebar when it's showing.
     private var targetWidth: CGFloat {
-        ProjectWindow.minContentWidth + (ProjectWindow.isSidebarVisible ? ProjectWindow.sidebarWidth : 0)
+        ProjectWindow.minContentWidth + (sidebarVisible ? ProjectWindow.sidebarWidth : 0)
     }
 
     /// The height the user dragged the panel to while the sidebar was open. Nil until they resize it
@@ -240,7 +244,7 @@ final class PanelChromeController {
     func fit(toContentHeight height: CGFloat) {
         let maxHeight = maxPanelHeight
         let target: CGFloat
-        if ProjectWindow.isSidebarVisible {
+        if sidebarVisible {
             target = min(max(userHeight ?? ceil(height), Self.sidebarMinHeight), maxHeight)
         } else {
             target = min(max(ceil(height), Self.minHeight), maxHeight)

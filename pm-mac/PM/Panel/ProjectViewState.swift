@@ -43,6 +43,11 @@ final class ProjectViewState: ObservableObject {
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}
 
+    /// Whether *this window's* sidebar is showing. Per window, like every other source-list app — the
+    /// persisted `PMPanelSidebar` is only the default a session's first window opens with, so the
+    /// content can't read it and be right.
+    @Published var sidebarVisible = false
+
     /// Bumped by the File ▸ New Task command. The content watches the counter rather than being handed
     /// a closure: a SwiftUI `View` is a value rebuilt on every body pass, so a closure registered from
     /// one would capture a stale copy of its state.

@@ -94,10 +94,14 @@ final class WindowManager {
 
     private func makeController(projectKey: String?) -> ProjectWindowController {
         let store = StoreRegistry.shared.acquire(projectKey)
+        // Only a session's first window opens with the sidebar; the rest are opened to see another
+        // project beside it, not to carry a second copy of the project list.
         let controller = ProjectWindowController(projectKey: projectKey,
                                                  store: store,
                                                  chromeStyle: WindowSettings.shared.chromeStyle,
-                                                 settings: panelSettings)
+                                                 settings: panelSettings,
+                                                 startsWithSidebar: controllers.isEmpty
+                                                    && ProjectWindow.isSidebarVisible)
         controller.onClose = { [weak self] closed in self?.windowClosed(closed) }
         controller.onOpenProject = { [weak self, weak controller] key, inNewWindow in
             guard let self else { return }
@@ -158,12 +162,6 @@ final class WindowManager {
     /// Settings change takes effect without reopening anything.
     func applyWindowSettings() {
         for controller in controllers { controller.applyWindowSettings() }
-    }
-
-    /// Match every window's sidebar to the persisted preference, for when it's toggled from a header
-    /// button rather than the View menu.
-    func applySidebarPreference() {
-        for controller in controllers { controller.applySidebarPreference() }
     }
 
     /// Refresh window titles/subtitles after a store change (the project's name or progress moved).
