@@ -29,6 +29,9 @@ struct FocusPanelView: View {
     @State private var addPosition: TaskInsertPosition = .child
     /// Tasks awaiting the inline delete confirmation. Empty when no delete is pending.
     @State private var pendingDelete: [Todo] = []
+    /// True while the "nothing focused" state has opened its add editor. Separate from `activeEditor`,
+    /// which keys on a task — there isn't one here, which is the whole point of the state.
+    @State private var addingTask = false
     /// Cancels an open editor when the user clicks outside it.
     @StateObject private var outsideClick = OutsideClickMonitor()
 
@@ -40,7 +43,7 @@ struct FocusPanelView: View {
     /// so the panel still has something to show.
     private var hero: Todo? { store.focusedTodo ?? store.openTodos.first }
 
-    private var isEditing: Bool { activeEditor != nil }
+    private var isEditing: Bool { activeEditor != nil || addingTask }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -69,6 +72,7 @@ struct FocusPanelView: View {
         // insets it below an absent titlebar and the measured height comes up short.
         .ignoresSafeArea(.container, edges: .top)
         .animation(.snappy, value: activeEditor)
+        .animation(.snappy, value: addingTask)
         .animation(.snappy, value: pendingDelete.isEmpty)
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
@@ -78,11 +82,15 @@ struct FocusPanelView: View {
         // wrong task once focus moves on.
         .onChange(of: store.projectKey) { _ in
             activeEditor = nil
+            addingTask = false
             pendingDelete = []
         }
         .onChange(of: isEditing) { active in
             if active {
-                outsideClick.onOutsideClick = { activeEditor = nil }
+                outsideClick.onOutsideClick = {
+                    activeEditor = nil
+                    addingTask = false
+                }
                 outsideClick.start()
             } else {
                 outsideClick.stop()
@@ -405,13 +413,35 @@ struct FocusPanelView: View {
 
     // MARK: Empty states
 
-    private var nothingFocused: some View {
-        VStack(alignment: .center, spacing: 4) {
-            Text("Nothing focused").font(.subheadline).foregroundStyle(.secondary)
-            Text("All tasks complete").font(.caption).foregroundStyle(.tertiary)
+    /// Everything in this project is done. Rather than a dead end, this is the one moment where the
+    /// obvious next move is to add something — so the panel offers it here instead of sending you to
+    /// the project window for a one-line task.
+    @ViewBuilder private var nothingFocused: some View {
+        if addingTask {
+            AddEditor(leadingIcon: AnyView(TaskStatusIcon(size: heroIconSize))) { text, due in
+                // No anchor: with nothing focused there's nothing to position against, so this appends
+                // to the project's current session the way the menubar's Add does.
+                store.addTodo(text: text, due: due)
+                addingTask = false
+            } onCancel: { addingTask = false }
+                .reportEditorFrame()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+        } else {
+            VStack(alignment: .center, spacing: 8) {
+                VStack(spacing: 3) {
+                    Text("Nothing focused").font(.subheadline).foregroundStyle(.secondary)
+                    Text("All tasks complete").font(.caption).foregroundStyle(.tertiary)
+                }
+                Button { addingTask = true } label: {
+                    Label("New Task", systemImage: "plus")
+                }
+                .controlSize(.small)
+                .background(WindowDragExcluder())
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 22)
     }
 
     private var emptyState: some View {
@@ -458,6 +488,8 @@ struct FocusPanelView: View {
     private func handleEscape() {
         if !pendingDelete.isEmpty {
             pendingDelete = []
+        } else if addingTask {
+            addingTask = false
         } else if activeEditor != nil {
             activeEditor = nil
         } else {

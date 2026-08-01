@@ -44,6 +44,19 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                                        height: ProjectWindow.minWindowHeight)
         window.tabbingIdentifier = ProjectWindow.tabbingIdentifier
         window.tabbingMode = .automatic
+        // An empty toolbar, purely for its geometry. A window with one gets the taller unified titlebar
+        // and the lower, further-inset traffic lights that go with it — the proportions every current
+        // Mac app has. Without a toolbar you get the compact titlebar, with the buttons tucked hard
+        // into the corner.
+        //
+        // It has no delegate and therefore no items, `titlebarAppearsTransparent` keeps it from drawing
+        // a background, and the split items' `titlebarSeparatorStyle = .none` keeps it from drawing a
+        // line. So it costs nothing visually and is not a toolbar in the UI sense.
+        let toolbar = NSToolbar(identifier: "PMProjectTitlebar")
+        toolbar.allowsUserCustomization = false
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         super.init(window: window)
 
         window.contentViewController = split
@@ -82,10 +95,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// past them. Their frames are only meaningful once the window has been ordered in, hence the call
     /// from `show()` rather than the initialiser.
     private func measureTitlebarButtons() {
-        guard let zoom = window?.standardWindowButton(.zoomButton) else { return }
-        let inset = zoom.frame.maxX + 12
-        guard inset > 0, abs(state.leadingTitlebarInset - inset) > 0.5 else { return }
-        state.leadingTitlebarInset = inset
+        guard let window,
+              let close = window.standardWindowButton(.closeButton),
+              let zoom = window.standardWindowButton(.zoomButton) else { return }
+        let inset = zoom.convert(zoom.bounds, to: nil).maxX + 12
+        if inset > 0, abs(state.leadingTitlebarInset - inset) > 0.5 {
+            state.leadingTitlebarInset = inset
+        }
+        // AppKit's coordinates are bottom-left; the views' are top-down, so flip through the window's
+        // height to get "how far down from the top edge are these buttons centred".
+        let box = close.convert(close.bounds, to: nil)
+        let centerY = window.frame.height - box.midY
+        if centerY > 0, abs(state.titlebarButtonCenterY - centerY) > 0.5 {
+            state.titlebarButtonCenterY = centerY
+        }
     }
 
     // MARK: Retargeting

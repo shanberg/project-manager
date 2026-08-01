@@ -136,8 +136,12 @@ struct ProjectView: View {
             // The column keeps a readable width: free to grow to `maxContentWidth` and then stop,
             // centered, so a wide window becomes margin rather than very long rows. The sidebar is not
             // laid out here — it's the other half of the window's split view.
-            .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: ProjectWindow.maxContentWidth)
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: ProjectWindow.maxContentWidth,
+                   alignment: .leading)
+            // Leading, not centred. The cap keeps rows readable in a wide window; centring the capped
+            // column on top of that left the project name adrift in the middle of the pane, with no
+            // edge to line up against and the sidebar's own content a long way off to its left.
+            .frame(maxWidth: .infinity, alignment: .leading)
             // Pin the appearance when the user overrides it; `.system` (nil) follows the OS.
             .preferredColorScheme(colorMode.colorScheme)
             // No background of its own: the window's is the right one.
@@ -720,11 +724,11 @@ struct ProjectView: View {
         })
         .onPreferenceChange(HeaderOriginKey.self) { columnOffsetInPane = $0 }
         .animation(.easeInOut(duration: 0.25), value: titlebarOverhang)
-        // Tuned so the title sits level with the traffic lights rather than below them, and so the
-        // header is still tall enough that the sidebar's own header bar — which has to clear those
-        // lights too — isn't squeezed. Constant regardless of the details toggle, so the sticky header
-        // keeps a stable height.
-        .padding(.top, 12)
+        // Centre the title on the traffic lights, wherever the system has put them — the unified
+        // titlebar this window uses sits them twice as far down as a compact one would, and hard-coding
+        // either number means the title is level in one and adrift in the other. Half a title line is
+        // the only constant here.
+        .padding(.top, max(8, state.titlebarButtonCenterY - 11))
         .padding(.bottom, 14)
         // Double-click empty header space (or the title) toggles the details brief. On a background
         // layer *behind* the controls so the switcher / view-options / open buttons in front consume

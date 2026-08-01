@@ -194,11 +194,15 @@ struct ProjectSidebar: View {
         }
     }
 
-    /// The sidebar's own header: a quiet label and the arrange menu, sized to the task header beside it
-    /// so the two rules meet.
+    /// The sidebar's own header: just the arrange menu, sized to the task header beside it so the two
+    /// rules meet.
+    ///
+    /// It carried a "Projects" eyebrow, which said nothing the window didn't already make obvious and
+    /// competed with the section headings underneath it for the same job. Source lists in Finder, Mail
+    /// and Notes have no header text either — the bar is here to hold the traffic lights and the arrange
+    /// menu, not to caption the pane.
     private var headerBar: some View {
         HStack(spacing: 4) {
-            SidebarEyebrow("Projects")
             Spacer(minLength: 0)
             arrangeMenu
         }
@@ -323,20 +327,6 @@ private struct ProjectSidebarRow: View {
     private var done: Int { liveProgress?.done ?? entry.done }
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// Every row is this tall whether or not it has a task line.
-    ///
-    /// Not a style choice — a correctness one. The scan paints project names first and fills in each
-    /// project's next task a moment later, so a row that sized to its content would grow from one line
-    /// to two *after* the list had laid out. The table keeps the row rectangles it measured, and from
-    /// then on the highlight it draws under the pointer belongs to a different row than the one you're
-    /// over. A constant height means the rows never move under the mouse, and it gives the list an even
-    /// rhythm besides.
-    ///
-    /// Tall enough that the two text lines sit *inside* the source list's rounded highlight with air
-    /// above and below, rather than filling it to the edges — the difference between a row that reads
-    /// as an item and one that reads as a band.
-    private static let height: CGFloat = 38
-
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
             // The ring is a template image, so it takes the row's foreground color, the same way the
@@ -359,9 +349,16 @@ private struct ProjectSidebarRow: View {
             }
             Spacer(minLength: 0)
         }
-        // Fixed, so a task line arriving mid-scan can't resize the row (see `height`). One-line rows
-        // centre in it rather than riding the top edge.
-        .frame(height: Self.height)
+        // Sized to its content: a project with nothing in flight is a single line, and only the ones
+        // with a next task are two. A uniform height made every row as tall as the tallest, which read
+        // as a list of half-empty boxes.
+        //
+        // This was fixed for a reason once — the scan paints names first and fills in each project's
+        // next task a moment later, so rows grow after the list has laid out. That's survivable now
+        // because the seed reuses whatever detail it already has (see `ProjectIndex.seedAllProjects`),
+        // so a re-scan doesn't drop every task line and re-add it; only the very first scan of a
+        // session resizes rows, once.
+        .padding(.vertical, 4)
         // The whole row is the click target, not just its text.
         .contentShape(Rectangle())
         // Carve the row out of the focus panel window-drag region, or AppKit's drag-tracking loop eats the

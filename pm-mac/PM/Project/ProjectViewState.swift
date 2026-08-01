@@ -51,6 +51,11 @@ final class ProjectViewState: ObservableObject {
     /// zoom button or floating oddly far from the edge.
     @Published var leadingTitlebarInset: CGFloat = ProjectWindow.trafficLightsWidth
 
+    /// How far down from the window's top edge its traffic lights are centred, so a header running
+    /// under the titlebar can sit level with them. Larger with the taller unified titlebar than with
+    /// the compact one, which is exactly why it's measured rather than assumed.
+    @Published var titlebarButtonCenterY: CGFloat = 13
+
     /// Whether *this window's* sidebar is showing. Per window, like every other source-list app — the
     /// persisted `PMPanelSidebar` is only the default a session's first window opens with, so the
     /// content can't read it and be right.
