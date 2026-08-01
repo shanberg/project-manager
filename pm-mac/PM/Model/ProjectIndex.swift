@@ -155,13 +155,17 @@ final class ProjectIndex: ObservableObject {
 
     // MARK: All projects (the project sidebar)
 
-    /// Register a sidebar as wanting the full project list. The first holder warms immediately
-    /// (bypassing the TTL); the last one to `release` stops the scans. The last list is kept when the
-    /// count drops to zero, so re-showing a sidebar paints the previous rows while a fresh scan runs
-    /// rather than flashing empty.
+    /// Register a sidebar as wanting the full project list; the last one to `release` stops the scans.
+    /// The list is kept when the count drops to zero, so re-showing a sidebar paints the previous rows
+    /// while any fresh scan runs rather than flashing empty.
+    ///
+    /// The first holder only bypasses the TTL when there's nothing to show. Forcing it unconditionally
+    /// meant every ⌥⌘S kicked off a full scan of both project folders plus a `notesShow` per project —
+    /// work whose results are, within the TTL, identical to what's already on screen, and which lands
+    /// mid-collapse if you toggle the sidebar twice in quick succession.
     func retain() {
         wantsAllProjectsCount += 1
-        if wantsAllProjectsCount == 1 { warmAllProjects(force: true) }
+        if wantsAllProjectsCount == 1 { warmAllProjects(force: allProjects.isEmpty) }
     }
 
     func release() {

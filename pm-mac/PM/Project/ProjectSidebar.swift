@@ -103,7 +103,19 @@ struct ProjectSidebar: View {
             Divider()
             list
         }
+        // Lay out at no less than the pane's own minimum width, then clip to whatever width the pane
+        // currently has.
+        //
+        // Collapsing animates the pane's width to zero, and without this the content re-lays out at
+        // every intermediate width on the way — names re-truncating, the header's label and menu
+        // crushing together, rows reflowing — for a quarter second, every toggle. A native source list
+        // doesn't do that because `NSTableView` clips its rows rather than reflowing them, and this is
+        // that behaviour: the content holds its layout and slides out of view behind the clip. Dragging
+        // the divider still reflows normally, since the split item won't go below this width except by
+        // collapsing.
+        .frame(minWidth: ProjectWindow.sidebarMinWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
         // The sidebar runs under the (hidden, transparent) titlebar too, so the two panes' header bars
         // start at the same y and their rules meet. The traffic lights land in this pane's header —
         // `headerBar` insets itself past them.

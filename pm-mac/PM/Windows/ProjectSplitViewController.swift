@@ -66,7 +66,6 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Below the content's, so growing the window widens the task column and leaves the sidebar at
         // the width the user set — the behaviour every other source-list app has.
         sidebarItem.holdingPriority = .defaultLow - 1
-        sidebarItem.isCollapsed = !startsWithSidebar
 
         contentItem = NSSplitViewItem(viewController: contentHosting)
         contentItem.minimumThickness = ProjectWindow.minContentWidth
@@ -89,6 +88,11 @@ final class ProjectSplitViewController: NSSplitViewController {
 
         addSplitViewItem(sidebarItem)
         addSplitViewItem(contentItem)
+
+        // After `addSplitViewItem`, not before. An item that hasn't joined its controller yet has no
+        // split view to collapse in, and the assignment is quietly dropped — which is why windows meant
+        // to open with the sidebar hidden were opening with it showing.
+        sidebarItem.isCollapsed = !startsWithSidebar
 
         // One autosave name for every project window: the sidebar's width is a per-app preference, not
         // a per-project one, so dragging it in any window sets it for the next window you open.

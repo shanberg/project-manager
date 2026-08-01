@@ -36,6 +36,9 @@ struct ProjectView: View {
     @State private var activeEditor: EditorTarget?
     /// True while the empty-project CTA has revealed its inline add editor (for the very first task).
     @State private var addingFirstTask = false
+    /// The column's own offset within its pane — zero until the width cap starts centring it in a wide
+    /// window.
+    @State private var columnOffsetInPane: CGFloat = 0
     /// The find bar's query. Empty while it's closed — closing clears it, so the list is never left
     /// quietly filtered by a bar you can't see.
     @State private var findQuery = ""
@@ -697,9 +700,26 @@ struct ProjectView: View {
             }
         }
         .padding(.trailing, 14)
-        // Clear the traffic lights when this column is the leftmost thing in the window. With the
-        // sidebar showing they sit over *it*, and the title can start at the normal margin.
-        .padding(.leading, state.sidebarVisible ? 14 : state.leadingTitlebarInset)
+        // Start past the traffic lights, but only by however much they actually overhang this column.
+        //
+        // Two things decide that. The sidebar, when it's showing, holds the buttons over *itself*, so
+        // the column needs no inset at all. And once the window is wide enough that the width cap has
+        // centred the column, it may already begin clear of them — so a fixed inset would shove the
+        // title 60-odd points further right for no reason.
+        //
+        // The inset is animated because the sidebar's collapse is: the flag flips in one frame while
+        // the pane takes a quarter second to slide, and an unanimated jump in the middle of that is
+        // the reflow this used to show on every toggle.
+        .padding(.leading, 14 + titlebarOverhang)
+        // Measured *outside* the padding above, so it reports the column's own leading edge within its
+        // pane and can't feed back into the value it produces. Pane-local is all that's available —
+        // each pane's SwiftUI content is its own coordinate root — but pane-local is also all that's
+        // needed, given the sidebar case is settled by the flag.
+        .background(GeometryReader { geo in
+            Color.clear.preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
+        })
+        .onPreferenceChange(HeaderOriginKey.self) { columnOffsetInPane = $0 }
+        .animation(.easeInOut(duration: 0.25), value: titlebarOverhang)
         // Tuned so the title sits level with the traffic lights rather than below them, and so the
         // header is still tall enough that the sidebar's own header bar — which has to clear those
         // lights too — isn't squeezed. Constant regardless of the details toggle, so the sticky header
@@ -719,6 +739,12 @@ struct ProjectView: View {
         )
         // Right-clicking anywhere in the header opens the same view settings as the slider button.
         .contextMenu { viewOptionsMenuContent }
+    }
+
+    /// How much of the window's traffic lights this column sits under.
+    private var titlebarOverhang: CGFloat {
+        guard !state.sidebarVisible else { return 0 }
+        return max(0, state.leadingTitlebarInset - columnOffsetInPane)
     }
 
     /// The project title. Plain text — the details-toggle double-click lives on the header background
@@ -1276,6 +1302,13 @@ struct DropTarget: Equatable {
     let anchorSession: Int
     let anchorLine: Int
     let insertAfter: Bool
+}
+
+/// The content column's leading edge in window space, so the header can tell how much of the window's
+/// traffic lights it actually sits under.
+private struct HeaderOriginKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// The pinned header's natural height, published so the sidebar can line its own header bar and rule
