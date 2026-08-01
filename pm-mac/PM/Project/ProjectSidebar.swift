@@ -170,6 +170,16 @@ struct ProjectSidebar: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
+        // State the scroll edge effect rather than inheriting `.automatic` (macOS 26+).
+        //
+        // The list fills the whole pane and the header floats over its top 47pt as a content inset, so
+        // rows scroll *under* the header. The automatic effect is the one thing in the pane that
+        // changes state at exactly scroll offset 0 — it isn't drawn at the top of the list and snaps in
+        // the moment you move — and a band materialising behind a button that has nothing else behind
+        // it reads as the button jumping. A hard edge is drawn the same at every offset, which is both
+        // stable and what a source list wants: the header is a real bar, so content should stop at it
+        // rather than fade through. The bottom is a free window edge and fades, like the task column's.
+        .modifier(SidebarScrollEdges())
         .focused($listFocused)
         // Selection is the single click (the list's own); the double click switches the window to a
         // project, and the right-click menu acts on whatever was clicked.
@@ -309,6 +319,20 @@ struct ProjectSidebar: View {
                 guard let entries = byBucket[bucket] else { return nil }
                 return ProjectGroup(title: bucket.title, entries: entries)
             }
+        }
+    }
+}
+
+/// Hard at the top (a bar is there), soft at the bottom (a free window edge). See the call site.
+/// Availability-gated, since scroll edge effects are macOS 26 and up.
+private struct SidebarScrollEdges: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .scrollEdgeEffectStyle(.hard, for: .top)
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
+        } else {
+            content
         }
     }
 }
