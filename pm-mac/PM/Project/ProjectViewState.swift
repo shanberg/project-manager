@@ -56,6 +56,11 @@ final class ProjectViewState: ObservableObject {
     /// the compact one, which is exactly why it's measured rather than assumed.
     @Published var titlebarButtonCenterY: CGFloat = 13
 
+    /// True only while the sidebar is animating open or shut. The sidebar freezes its layout and clips
+    /// for the duration; the rest of the time it lays out normally, so a scrolling list isn't sitting
+    /// inside a clip layer it doesn't need.
+    @Published var sidebarAnimating = false
+
     /// Whether *this window's* sidebar is showing. Per window, like every other source-list app — the
     /// persisted `PMPanelSidebar` is only the default a session's first window opens with, so the
     /// content can't read it and be right.

@@ -116,6 +116,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     }
 
     private var didSeedDividerPosition = false
+    /// Clears `sidebarAnimating` once the collapse/expand animation has finished. AppKit offers no
+    /// completion for it, so this is a timer a comfortable margin past its ~0.25s duration.
+    private var animationSettle: DispatchWorkItem?
 
     /// Rebuild the SwiftUI content — used on first load and whenever the window is retargeted at a
     /// different project.
@@ -146,6 +149,14 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// doesn't reach into the others. The persisted value is only the default a first window opens
     /// with, so the app comes back the way you left it.
     override func toggleSidebar(_ sender: Any?) {
+        // Set before the animation starts, cleared once it's over: the sidebar only pins its layout and
+        // clips while it's actually moving (see `ProjectSidebar`).
+        state.sidebarAnimating = true
+        animationSettle?.cancel()
+        let settle = DispatchWorkItem { [weak self] in self?.state.sidebarAnimating = false }
+        animationSettle = settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: settle)
+
         super.toggleSidebar(sender)
         // `toggleSidebar` animates, so `isCollapsed` is already the new value but the animation is in
         // flight; the state and the scan can be updated straight away.

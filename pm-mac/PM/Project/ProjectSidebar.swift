@@ -100,22 +100,23 @@ struct ProjectSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
-            Divider()
             list
         }
-        // Lay out at no less than the pane's own minimum width, then clip to whatever width the pane
-        // currently has.
+        // While the pane is animating open or shut, lay out at no less than its minimum width and clip
+        // to whatever width it currently has.
         //
         // Collapsing animates the pane's width to zero, and without this the content re-lays out at
-        // every intermediate width on the way — names re-truncating, the header's label and menu
-        // crushing together, rows reflowing — for a quarter second, every toggle. A native source list
-        // doesn't do that because `NSTableView` clips its rows rather than reflowing them, and this is
-        // that behaviour: the content holds its layout and slides out of view behind the clip. Dragging
-        // the divider still reflows normally, since the split item won't go below this width except by
-        // collapsing.
-        .frame(minWidth: ProjectWindow.sidebarMinWidth, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
+        // every intermediate width on the way — names re-truncating, the header's menu sliding, rows
+        // reflowing — for a quarter second, every toggle. A native source list doesn't do that, because
+        // `NSTableView` clips its rows rather than reflowing them; this is that behaviour.
+        //
+        // Only while it moves, though. Leaving the clip on permanently wraps a scrolling list in a clip
+        // layer it has no use for, which is its own kind of jank the moment you start scrolling.
+        .ifCondition(state.sidebarAnimating || !state.sidebarVisible) {
+            $0.frame(minWidth: ProjectWindow.sidebarMinWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
+        }
         // The sidebar runs under the (hidden, transparent) titlebar too, so the two panes' header bars
         // start at the same y and their rules meet. The traffic lights land in this pane's header —
         // `headerBar` insets itself past them.
@@ -263,7 +264,10 @@ struct ProjectSidebar: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
+        // A fixed footprint rather than `.fixedSize()`. A borderless `Menu` reports an intrinsic width
+        // that isn't perfectly stable — it shifts with hover and key state — and with a `Spacer` pushing
+        // it to the trailing edge, every wobble in that width moved the button.
+        .frame(width: 22, height: 18)
         .help("Filter, group & sort projects")
     }
 
