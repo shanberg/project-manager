@@ -22,7 +22,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Asks to open a project — in this window or a new one. Supplied by `WindowManager`.
     var onOpenProject: ((String, Bool) -> Void)?
 
-    init(projectKey: String?, store: PMStore, startsWithSidebar: Bool) {
+    init(projectKey: String?, store: PMStore, startsWithSidebar: Bool, remembersFrame: Bool) {
         self.projectKey = projectKey
         self.store = store
 
@@ -70,9 +70,27 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
 
-        // Per-project frame memory. `setFrameAutosaveName` has to come after the window exists and
-        // before it's shown; with no project (the empty state) all such windows share one frame.
-        window.setFrameAutosaveName("PMProject:\(projectKey ?? "none")")
+        // One remembered frame for project windows, not one per project. A window is a window: it has
+        // the size and place you last left it at, and pointing it at a different project doesn't move
+        // or resize it. It used to autosave under `PMProject:<key>`, which meant every project carried
+        // its own geometry — so the same window jumped and resized as you switched projects in it, and
+        // each project's first window opened somewhere unrelated to where you were working.
+        //
+        // Only the window that opens with nothing else already up claims that frame. Later windows are
+        // cascaded off it by `WindowManager` and deliberately don't write back, or every "Open in New
+        // Window" would walk the remembered frame further down the screen.
+        //
+        // `setFrameAutosaveName` has to come after the window exists and before it's shown. Placement is
+        // decided here rather than left to `NSWindowController`'s own cascade, which interacts with a
+        // frame autosave name in ways that differ between the first window and later ones: centred by
+        // default, the remembered frame instead when there is one, and `WindowManager` steps any
+        // additional window off the one in front.
+        shouldCascadeWindows = false
+        window.center()
+        if remembersFrame {
+            window.setFrameAutosaveName("PMProject")
+            window.setFrameUsingName("PMProject")
+        }
 
         applyTitle()
         applyWindowSettings()
@@ -114,14 +132,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: Retargeting
 
     /// Show a different project in this window. The store is swapped (stores are shared per project),
-    /// the title and frame memory follow, and the new project becomes the global focus since this
-    /// window is the one in front.
+    /// the title follows, and the new project becomes the global focus since this window is the one in
+    /// front. The window itself doesn't move: what it's showing changed, not which window it is.
     func retarget(to newStore: PMStore, projectKey newKey: String?) {
         guard newKey != projectKey else { return }
         projectKey = newKey
         store = newStore
         split.retarget(to: newStore)
-        window?.setFrameAutosaveName("PMProject:\(newKey ?? "none")")
         applyTitle()
         pushFocusToDisk()
     }

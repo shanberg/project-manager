@@ -29,6 +29,10 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// can't tell it's been hidden, and would go on paying for a scan nobody can see.
     private var holdsProjectScan = false
 
+    /// Keeps `state.sidebarVisible` (and the scan retain) in step with the sidebar item's real collapsed
+    /// state, whoever changed it. See where it's installed in `viewDidLoad`.
+    private var collapseObservation: NSKeyValueObservation?
+
     init(store: PMStore, state: ProjectViewState, startsWithSidebar: Bool) {
         self.store = store
         self.state = state
@@ -47,7 +51,13 @@ final class ProjectSplitViewController: NSSplitViewController {
         // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal size,
         // which fights the user's own window size on every content change.
         contentHosting.sizingOptions = []
-        sidebarHosting.sizingOptions = []
+        // The sidebar keeps `.minSize`, and this is the whole reason its collapse animation looks like
+        // a sidebar rather than a glitch: while a split item animates, AppKit sizes the pane's content
+        // view to its *fitting* width and slides it in from behind the divider. A hosting view with no
+        // sizing options has no fitting width to speak of — AppKit gave it 10pt — so all that slid past
+        // was a 10pt slice of the middle of the rows. With `.minSize` the pane's content view keeps the
+        // width SwiftUI asks for (see `ProjectSidebar`'s frozen layout), and the whole sidebar slides.
+        sidebarHosting.sizingOptions = [.minSize]
 
         // An `NSHostingView` reports its SwiftUI ideal size as an intrinsic size and defends it with
         // the default (500) hugging and compression-resistance priorities — which outrank the split
@@ -72,35 +82,68 @@ final class ProjectSplitViewController: NSSplitViewController {
         contentItem.canCollapse = false
         contentItem.holdingPriority = .defaultLow
 
-        // Both panes run the full height of the window, under the (hidden) titlebar — each header
-        // positions itself past the traffic lights rather than sitting below them. Declaring it here
-        // rather than only in the views is what tells AppKit the layout is deliberate.
-        //
-        // The matching `automaticallyAdjustsSafeAreaInsets = false` is macOS 26 only, so the panes'
-        // SwiftUI content still declines the top safe area itself — that form works on every target.
+        // Both panes run the full height of the window, under the (hidden) titlebar.
         for item in [sidebarItem!, contentItem!] {
             item.allowsFullHeightLayout = true
             // No toolbar and no visible title, so there's no titlebar for AppKit to draw a separator
-            // under; the rule below each header is the app's own, and a second line at the titlebar's
-            // bottom edge would sit a few points above it.
+            // under; the rule below the task header is the app's own, and a second line at the
+            // titlebar's bottom edge would sit a few points above it.
             item.titlebarSeparatorStyle = .none
         }
 
+        // The task column runs *beneath* the floating sidebar, with a safe area keeping its content in
+        // the clear — the sidebar is a pane of glass over the window's content in the current design,
+        // not a column beside it, so the window reads as one surface rather than two abutting ones.
+        // This goes on the content item and not the sidebar: it describes what extends under what.
+        //
+        // The column's own header still declines the *top* safe area, because it deliberately runs up
+        // into the titlebar to sit level with the traffic lights. Only the leading inset is wanted here,
+        // and that's the one this supplies while the sidebar is showing.
+        contentItem.automaticallyAdjustsSafeAreaInsets = true
+
+        // The arrange menu, in the strip along the bottom of the source list. An accessory rather than
+        // a bar inside the sidebar's own SwiftUI: AppKit floats it over the list, insets the rows above
+        // it, and folds it into the scroll edge effect, none of which a view in the pane can do for
+        // itself. It's also what frees the pane of the header bar it used to need.
+        let bottomBar = NSSplitViewItemAccessoryViewController()
+        let bottomBarHosting = NSHostingController(rootView: SidebarBottomBar())
+        // `.minSize` so the accessory takes the bar's own height from SwiftUI rather than being sized
+        // by AppKit — the same reason the sidebar itself uses it.
+        bottomBarHosting.sizingOptions = [.minSize]
+        bottomBar.addChild(bottomBarHosting)
+        bottomBar.view = bottomBarHosting.view
+        sidebarItem.addBottomAlignedAccessoryViewController(bottomBar)
+
         addSplitViewItem(sidebarItem)
         addSplitViewItem(contentItem)
-
-        // After `addSplitViewItem`, not before. An item that hasn't joined its controller yet has no
-        // split view to collapse in, and the assignment is quietly dropped — which is why windows meant
-        // to open with the sidebar hidden were opening with it showing.
-        sidebarItem.isCollapsed = !startsWithSidebar
 
         // One autosave name for every project window: the sidebar's width is a per-app preference, not
         // a per-project one, so dragging it in any window sets it for the next window you open.
         splitView.autosaveName = "PMProjectSplit"
         splitView.dividerStyle = .thin
 
-        state.sidebarVisible = startsWithSidebar
-        syncProjectScan()
+        // After `addSplitViewItem`, not before: an item that hasn't joined its controller yet has no
+        // split view to collapse in, and the assignment is quietly dropped — which is why windows meant
+        // to open with the sidebar hidden were opening with it showing. And after the autosave name,
+        // because setting that restores the saved subview frames — which record a width *and* a
+        // collapsed flag, so a restore lands on top of this and re-opens a sidebar the window asked to
+        // start without. Autosave is here for the width; visibility is this window's call.
+        sidebarItem.isCollapsed = !startsWithSidebar
+
+        // `state.sidebarVisible` is a mirror of the pane, so it follows the pane rather than being
+        // written wherever something happens to collapse it. The two ways round it are exactly the ones
+        // above — an autosave restore, and dragging the divider onto the window edge, neither of which
+        // goes near `toggleSidebar` — and a stale mirror is visible in the content column, which reads
+        // it to decide whether its header has to start clear of the traffic lights. With the sidebar
+        // showing and the flag still saying otherwise, the project title was inset past lights that
+        // were sitting over the sidebar, leaving a gap the width of them beside the divider.
+        collapseObservation = sidebarItem.observe(\.isCollapsed, options: [.initial, .new]) { [weak self] item, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.state.sidebarVisible = !item.isCollapsed
+                self.syncProjectScan()
+            }
+        }
     }
 
     override func viewWillAppear() {
@@ -150,7 +193,11 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// with, so the app comes back the way you left it.
     override func toggleSidebar(_ sender: Any?) {
         // Set before the animation starts, cleared once it's over: the sidebar only pins its layout and
-        // clips while it's actually moving (see `ProjectSidebar`).
+        // clips while it's actually moving (see `ProjectSidebar`). The width it pins *to* is read here,
+        // while the pane is still at rest — a collapsed item keeps its last width, so this is the width
+        // the sidebar has now or is about to have again, in both directions.
+        state.sidebarRestingWidth = max(sidebarItem.viewController.view.frame.width,
+                                        ProjectWindow.sidebarMinWidth)
         state.sidebarAnimating = true
         animationSettle?.cancel()
         let settle = DispatchWorkItem { [weak self] in self?.state.sidebarAnimating = false }
@@ -159,10 +206,11 @@ final class ProjectSplitViewController: NSSplitViewController {
 
         super.toggleSidebar(sender)
         // `toggleSidebar` animates, so `isCollapsed` is already the new value but the animation is in
-        // flight; the state and the scan can be updated straight away.
-        state.sidebarVisible = !sidebarItem.isCollapsed
-        UserDefaults.standard.set(state.sidebarVisible, forKey: ProjectWindow.sidebarDefaultsKey)
-        syncProjectScan()
+        // flight; the observation has already mirrored it into the state and updated the scan. All
+        // that's left here is persisting the preference — and only from here, because this is the one
+        // path that means "the user asked for the sidebar to be like this from now on". A restore or a
+        // divider drag changes the pane without changing what the next window should open with.
+        UserDefaults.standard.set(!sidebarItem.isCollapsed, forKey: ProjectWindow.sidebarDefaultsKey)
     }
 
     /// Hold the shared project scan open exactly while this window's sidebar is showing.
@@ -176,6 +224,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Release the scan retain when the window closes; the split view controller outlives its window
     /// only briefly, but the retain has to be balanced either way.
     func prepareForClose() {
+        // Before the release, so a collapse on the way down can't hand the retain straight back.
+        collapseObservation?.invalidate()
+        collapseObservation = nil
         if holdsProjectScan {
             holdsProjectScan = false
             ProjectIndex.shared.release()

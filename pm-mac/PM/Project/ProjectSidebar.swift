@@ -98,29 +98,38 @@ struct ProjectSidebar: View {
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headerBar
-            list
-        }
-        // While the pane is animating open or shut, lay out at no less than its minimum width and clip
-        // to whatever width it currently has.
+        list
+        // While the pane is animating open or shut, lay out at the width it rests at and clip to
+        // whatever width it currently has.
         //
-        // Collapsing animates the pane's width to zero, and without this the content re-lays out at
-        // every intermediate width on the way — names re-truncating, the header's menu sliding, rows
-        // reflowing — for a quarter second, every toggle. A native source list doesn't do that, because
-        // `NSTableView` clips its rows rather than reflowing them; this is that behaviour.
+        // Collapsing animates the pane to zero, and without this the content re-lays out on the way —
+        // names re-truncating, rows reflowing — for a quarter second, every toggle. A native source
+        // list doesn't do that, because `NSTableView` clips its rows rather than reflowing them; this
+        // is that behaviour.
+        //
+        // The width has to be the pane's *resting* width, not its minimum, and the hosting controller
+        // has to be sizing on `.minSize` (it is) for either to matter. AppKit slides the pane's content
+        // view in from behind the divider at whatever fitting width that view claims, so this frozen
+        // layout is literally what the animation carries: pinned to the minimum, a wider sidebar
+        // reflowed once more as it landed; unpinned, nothing was carried at all.
         //
         // Only while it moves, though. Leaving the clip on permanently wraps a scrolling list in a clip
         // layer it has no use for, which is its own kind of jank the moment you start scrolling.
         .ifCondition(state.sidebarAnimating || !state.sidebarVisible) {
-            $0.frame(minWidth: ProjectWindow.sidebarMinWidth, alignment: .leading)
+            $0.frame(minWidth: state.sidebarRestingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .clipped()
         }
-        // The sidebar runs under the (hidden, transparent) titlebar too, so the two panes' header bars
-        // start at the same y and their rules meet. The traffic lights land in this pane's header —
-        // `headerBar` insets itself past them.
-        .ignoresSafeArea(.container, edges: .top)
+        // No `ignoresSafeArea` here, and no header bar of its own: the split item runs full height, so
+        // AppKit hands this pane a safe area that already clears the titlebar (and the traffic lights
+        // sitting in it) at the top and the bottom bar's floating accessory at the bottom. The list
+        // fills the pane and insets its rows into that safe area by itself, which is what makes them
+        // scroll *under* the titlebar the way a source list should.
+        //
+        // This pane used to carry its own header bar, hand-sized to the task column's header and
+        // hand-inset past the traffic lights, because there was no other way to reserve that space.
+        // The accessory API is that way (see `ProjectSplitViewController`).
+        //
         // Only ever written on *gaining* focus: a pane losing it (the window going inactive, a menu
         // opening) shouldn't strand ⌘C with no target.
         .onChange(of: listFocused) { focused in
@@ -170,16 +179,10 @@ struct ProjectSidebar: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        // State the scroll edge effect rather than inheriting `.automatic` (macOS 26+).
-        //
-        // The list fills the whole pane and the header floats over its top 47pt as a content inset, so
-        // rows scroll *under* the header. The automatic effect is the one thing in the pane that
-        // changes state at exactly scroll offset 0 — it isn't drawn at the top of the list and snaps in
-        // the moment you move — and a band materialising behind a button that has nothing else behind
-        // it reads as the button jumping. A hard edge is drawn the same at every offset, which is both
-        // stable and what a source list wants: the header is a real bar, so content should stop at it
-        // rather than fade through. The bottom is a free window edge and fades, like the task column's.
-        .modifier(SidebarScrollEdges())
+        // The scroll edge effect is left on `.automatic`. It was pinned to a hard top edge when this
+        // pane had a header bar of its own — a band fading in behind a button that had nothing else
+        // behind it read as the button jumping. The button is in the bottom bar now and the titlebar is
+        // what rows scroll under, which is exactly the case the automatic effect is written for.
         .focused($listFocused)
         // Selection is the single click (the list's own); the double click switches the window to a
         // project, and the right-click menu acts on whatever was clicked.
@@ -203,82 +206,6 @@ struct ProjectSidebar: View {
             guard keys.count == 1, let entry = entries(for: keys).first else { return }
             openProject(entry, inNewWindow: false)
         }
-    }
-
-    /// The sidebar's own header: just the arrange menu, sized to the task header beside it so the two
-    /// rules meet.
-    ///
-    /// It carried a "Projects" eyebrow, which said nothing the window didn't already make obvious and
-    /// competed with the section headings underneath it for the same job. Source lists in Finder, Mail
-    /// and Notes have no header text either — the bar is here to hold the traffic lights and the arrange
-    /// menu, not to caption the pane.
-    private var headerBar: some View {
-        HStack(spacing: 4) {
-            Spacer(minLength: 0)
-            arrangeMenu
-        }
-        // The window's close/minimise/zoom buttons sit in this bar, over the sidebar — so the label
-        // starts past them rather than under them.
-        .padding(.leading, state.leadingTitlebarInset)
-        .padding(.trailing, 12)
-        // Match the task header height exactly (less its own 1pt rule) when it's been measured, so
-        // the sidebar's divider continues the header's; fall back to a sensible height before then.
-        .frame(height: state.headerHeight > 1 ? state.headerHeight - 1 : 47)
-    }
-
-    /// Status / grouping / sorting, one submenu each — the sidebar's counterpart to the task
-    /// header's view-options button, and the shape the Finder's View menu uses for the same job
-    /// ("Sort By ▸"). Three short lists behind their own titles read as three separate decisions;
-    /// flattened into one column they'd run together into eleven items with no visible boundary
-    /// between what filters, what groups, and what orders.
-    ///
-    /// Each submenu holds an inline `Picker`, so its options carry checkmarks and the current value
-    /// is visible one level down rather than being spelled out in the parent row.
-    private var arrangeMenu: some View {
-        Menu {
-            Menu {
-                Picker("Status", selection: $status) {
-                    Label("Active", systemImage: "circle").tag(ProjectStatusFilter.active)
-                    Label("Archived", systemImage: "archivebox").tag(ProjectStatusFilter.archived)
-                    Label("All", systemImage: "square.stack").tag(ProjectStatusFilter.all)
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label("Show", systemImage: "line.3.horizontal.decrease.circle")
-            }
-            Menu {
-                Picker("Group by", selection: $grouping) {
-                    Label("Due", systemImage: "calendar").tag(ProjectGrouping.due)
-                    Label("Domain", systemImage: "folder").tag(ProjectGrouping.domain)
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label("Group By", systemImage: "rectangle.3.group")
-            }
-            Menu {
-                Picker("Sort by", selection: $sortOrder) {
-                    Label("Code", systemImage: "number").tag(ProjectSortOrder.code)
-                    Label("Name", systemImage: "textformat").tag(ProjectSortOrder.name)
-                    Label("Recency", systemImage: "clock").tag(ProjectSortOrder.recency)
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label("Sort By", systemImage: "arrow.up.arrow.down")
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 18)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        // A fixed footprint rather than `.fixedSize()`. A borderless `Menu` reports an intrinsic width
-        // that isn't perfectly stable — it shifts with hover and key state — and with a `Spacer` pushing
-        // it to the trailing edge, every wobble in that width moved the button.
-        .frame(width: 22, height: 18)
-        .help("Filter, group & sort projects")
     }
 
     /// The projects behind a set of keys, in the store's order. Pure — it's read while a menu is being
@@ -323,17 +250,84 @@ struct ProjectSidebar: View {
     }
 }
 
-/// Hard at the top (a bar is there), soft at the bottom (a free window edge). See the call site.
-/// Availability-gated, since scroll edge effects are macOS 26 and up.
-private struct SidebarScrollEdges: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-                .scrollEdgeEffectStyle(.hard, for: .top)
-                .scrollEdgeEffectStyle(.soft, for: .bottom)
-        } else {
-            content
+/// The sidebar's bottom bar: filter, group and sort, in the strip along the bottom of the source list.
+///
+/// This is where a source list's own controls belong — the sidebar column isn't a place to put toolbar
+/// items, and the bottom bar is the strip Mac apps use for the actions that act on the list itself.
+/// It's carried by a `NSSplitViewItemAccessoryViewController` (see `ProjectSplitViewController`), which
+/// is what floats it over the list, insets the rows above it, and fades them under it on scroll.
+///
+/// Its own `@AppStorage` rather than a binding passed across: the bar is a separate hosting controller
+/// in the accessory, so there's no view tree to thread a binding down. Both views read the same three
+/// keys and `@AppStorage` republishes to every reader, so the list re-arranges as the menu is used.
+struct SidebarBottomBar: View {
+    @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
+    @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
+    @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
+
+    var body: some View {
+        HStack(spacing: 4) {
+            arrangeMenu
+            Spacer(minLength: 0)
         }
+        // AppKit already insets the accessory from the pane's edges, so this is only the gap between
+        // the bar's own edge and the control in it.
+        .padding(.horizontal, 6)
+        .frame(height: 24)
+    }
+
+    /// Status / grouping / sorting, one submenu each — the shape the Finder's View menu uses for the
+    /// same job ("Sort By ▸"). Three short lists behind their own titles read as three separate
+    /// decisions; flattened into one column they'd run together into eleven items with no visible
+    /// boundary between what filters, what groups, and what orders.
+    ///
+    /// Each submenu holds an inline `Picker`, so its options carry checkmarks and the current value
+    /// is visible one level down rather than being spelled out in the parent row.
+    private var arrangeMenu: some View {
+        Menu {
+            Menu {
+                Picker("Status", selection: $status) {
+                    Label("Active", systemImage: "circle").tag(ProjectStatusFilter.active)
+                    Label("Archived", systemImage: "archivebox").tag(ProjectStatusFilter.archived)
+                    Label("All", systemImage: "square.stack").tag(ProjectStatusFilter.all)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Show", systemImage: "line.3.horizontal.decrease.circle")
+            }
+            Menu {
+                Picker("Group by", selection: $grouping) {
+                    Label("Due", systemImage: "calendar").tag(ProjectGrouping.due)
+                    Label("Domain", systemImage: "folder").tag(ProjectGrouping.domain)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Group By", systemImage: "rectangle.3.group")
+            }
+            Menu {
+                Picker("Sort by", selection: $sortOrder) {
+                    Label("Code", systemImage: "number").tag(ProjectSortOrder.code)
+                    Label("Name", systemImage: "textformat").tag(ProjectSortOrder.name)
+                    Label("Recency", systemImage: "clock").tag(ProjectSortOrder.recency)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Sort By", systemImage: "arrow.up.arrow.down")
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A fixed footprint rather than `.fixedSize()`. A borderless `Menu` reports an intrinsic width
+        // that isn't perfectly stable — it shifts with hover and key state — so pinning it keeps the
+        // button still.
+        .frame(width: 22, height: 18)
+        .help("Filter, group & sort projects")
     }
 }
 

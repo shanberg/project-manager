@@ -19,7 +19,11 @@ enum ProjectWindow {
     /// `UserDefaults` key behind the sidebar toggle (an `@AppStorage` in the view, read directly by the
     /// window when it needs the value before any SwiftUI layout has run).
     static let sidebarDefaultsKey = "PMPanelSidebar"
-    static var isSidebarVisible: Bool { UserDefaults.standard.bool(forKey: sidebarDefaultsKey) }
+    /// Defaults to showing, the way every Mac source-list app opens — `bool(forKey:)` would read a key
+    /// nobody has written yet as "hidden", so a first run would open with no projects list at all.
+    static var isSidebarVisible: Bool {
+        UserDefaults.standard.object(forKey: sidebarDefaultsKey) as? Bool ?? true
+    }
 
     /// Starting guess for how far in a window's close/minimise/zoom buttons reach.
     ///

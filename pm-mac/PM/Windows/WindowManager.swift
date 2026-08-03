@@ -32,6 +32,13 @@ final class WindowManager {
             new.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         } else {
+            // Every project window is the same window type at the same remembered frame, so a second
+            // one would open exactly on top of the first. Step it off the frontmost window the way
+            // AppKit cascades any other new window.
+            if let front = frontmost?.window, let new = controller.window,
+               front !== new, front.isVisible {
+                new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
+            }
             controller.show()
         }
         return controller
@@ -83,7 +90,11 @@ final class WindowManager {
         let controller = ProjectWindowController(projectKey: projectKey,
                                                  store: store,
                                                  startsWithSidebar: controllers.isEmpty
-                                                    && ProjectWindow.isSidebarVisible)
+                                                    && ProjectWindow.isSidebarVisible,
+                                                 // The frame is the window type's, not the project's,
+                                                 // so exactly one window owns it: the one opening into
+                                                 // an empty screen. See `ProjectWindowController.init`.
+                                                 remembersFrame: controllers.isEmpty)
         controller.onClose = { [weak self] closed in self?.windowClosed(closed) }
         controller.onOpenProject = { [weak self, weak controller] key, inNewWindow in
             guard let self else { return }

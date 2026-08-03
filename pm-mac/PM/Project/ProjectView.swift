@@ -180,12 +180,8 @@ struct ProjectView: View {
             } else {
                 VStack(spacing: 0) {
                     // The header (title + toolbar) stays pinned; only the content below scrolls, sliding
-                    // under it when it overflows the window. The header reports its own height so the
-                    // sidebar can line its own header bar up with it across the split.
+                    // under it when it overflows the window.
                     stickyHeader
-                        .background(GeometryReader { geo in
-                            Color.clear.preference(key: HeaderHeightKey.self, value: geo.size.height)
-                        })
                     // The reader lets arrow-key navigation reveal a row that's scrolled out of view —
                     // each row carries its key as a scroll id (see `TaskRow.scrollMarker`).
                     ScrollViewReader { proxy in
@@ -218,9 +214,6 @@ struct ProjectView: View {
         .animation(.snappy, value: tasksMode)
         .animation(.snappy, value: sessionNoteTakeover != nil)
         .clipped()
-        // Published so the sidebar can line its own header bar and rule up with this one across the
-        // split — the only measurement either pane still needs from the other.
-        .onPreferenceChange(HeaderHeightKey.self) { state.headerHeight = $0 }
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
         .onExitCommand(perform: handleEscape)
@@ -1315,23 +1308,11 @@ private struct HeaderOriginKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-/// The pinned header's natural height, published so the sidebar can line its own header bar and rule
-/// up with it across the split.
-private struct HeaderHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
-/// Applies the soft scroll-edge effect (macOS 26+) so scrolling content fades at the top/bottom edges
-/// — under the pinned header and off the bottom edge — rather than hard-clipping. A no-op on older
-/// systems, where the plain clipped edge remains.
+/// Applies the soft scroll-edge effect so scrolling content fades at the top/bottom edges — under the
+/// pinned header and off the bottom edge — rather than hard-clipping.
 private struct SoftScrollEdges: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
-        } else {
-            content
-        }
+        content.scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
     }
 }
 

@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.stuarthanberg
   createIntermediateGroups: true
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "26.0"
 
 packages:
   PmLib:
@@ -39,7 +39,7 @@ targets:
   PM:
     type: application
     platform: macOS
-    deploymentTarget: "13.0"
+    deploymentTarget: "26.0"
     sources:
       - path: PM
     dependencies:

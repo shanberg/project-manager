@@ -31,10 +31,6 @@ final class ProjectViewState: ObservableObject {
     /// with no target, so the last focused pane stays remembered.
     @Published var focusedPane: ProjectPane? = .tasks
 
-    /// The task column header's measured height, so the sidebar's own header bar and rule line up with
-    /// it across the split.
-    @Published var headerHeight: CGFloat = 0
-
     /// Open a project — the sidebar's double-click and Return. Supplied by the window, which decides
     /// whether that means retargeting this window or opening another one.
     var openProject: (_ projectKey: String, _ inNewWindow: Bool) -> Void = { _, _ in }
@@ -60,6 +56,11 @@ final class ProjectViewState: ObservableObject {
     /// for the duration; the rest of the time it lays out normally, so a scrolling list isn't sitting
     /// inside a clip layer it doesn't need.
     @Published var sidebarAnimating = false
+
+    /// The width the sidebar pane rests at, published by the split view controller just before it
+    /// animates. It's what the sidebar freezes its layout at, so the content that slides past the
+    /// divider is laid out at the width it will actually land on rather than the pane's bare minimum.
+    @Published var sidebarRestingWidth: CGFloat = ProjectWindow.sidebarMinWidth
 
     /// Whether *this window's* sidebar is showing. Per window, like every other source-list app — the
     /// persisted `PMPanelSidebar` is only the default a session's first window opens with, so the
