@@ -6,7 +6,7 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 ## Install
 
-Requires **macOS 13 or later** (Apple Silicon arm64 only).
+Requires Apple Silicon (arm64 only). The `pm` CLI runs on **macOS 13 or later**; the `PM.app` menubar app requires **macOS 26 or later**.
 
 **On another computer (Homebrew)**
 
