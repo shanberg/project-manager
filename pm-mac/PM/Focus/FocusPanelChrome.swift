@@ -2,11 +2,31 @@ import AppKit
 import QuartzCore
 import CoreImage
 
-/// A borderless panel that can still take key focus. `NSWindow` refuses key status to borderless
-/// windows by default, and the focus panel hosts text fields (task text, the add editor) that need it
-/// — and its ⏎-to-complete shortcut only binds while it's key.
+/// A borderless panel that can take key focus, but only when it says it needs to. `NSWindow` refuses
+/// key status to borderless windows by default, and the focus panel hosts text fields (task text, the
+/// add editor) that need it — and its ⏎-to-complete shortcut only binds while it's key.
+///
+/// Gated rather than unconditional, because key status is the keyboard: whichever window holds it takes
+/// every keystroke, and a floating panel that grabs it on any click leaves you typing into thin air in
+/// the window you were actually working in. AppKit's own guard for this is `becomesKeyOnlyIfNeeded`,
+/// which hands a panel key only for a click that lands somewhere needing text input — but it asks the
+/// view under the pointer, and an `NSHostingView` answers yes at *every* point, a plain button
+/// included. On a SwiftUI panel it's a no-op. So the panel decides instead: `acceptsKey` is set for the
+/// paths that genuinely want the keyboard — the ⌃⌥P summon, and the panel's own editors opening — and
+/// cleared as soon as key goes elsewhere.
 final class KeyablePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// Whether the panel may take key focus right now. Read by AppKit on every click that might move
+    /// key focus, so leaving it set is what stole the keystrokes in the first place.
+    var acceptsKey = false
+
+    override var canBecomeKey: Bool { acceptsKey }
+
+    /// Take key focus deliberately. `canBecomeKey` is consulted at this moment, so the gate opens just
+    /// long enough for the panel to become key; `FocusPanelController` shuts it again on resign.
+    func takeKey() {
+        acceptsKey = true
+        makeKey()
+    }
 }
 
 /// The focus panel's window behavior: a borderless window that hugs its content's height, floats above

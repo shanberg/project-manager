@@ -36,9 +36,6 @@ struct ProjectView: View {
     @State private var activeEditor: EditorTarget?
     /// True while the empty-project CTA has revealed its inline add editor (for the very first task).
     @State private var addingFirstTask = false
-    /// The column's own offset within its pane — zero until the width cap starts centring it in a wide
-    /// window.
-    @State private var columnOffsetInPane: CGFloat = 0
     /// The find bar's query. Empty while it's closed — closing clears it, so the list is never left
     /// quietly filtered by a bar you can't see.
     @State private var findQuery = ""
@@ -172,6 +169,7 @@ struct ProjectView: View {
                     session: takeover.session,
                     projectName: store.notes?.title.trimmed ?? store.projectName ?? "",
                     store: store,
+                    state: state,
                     onBack: { activeEditor = nil }
                 )
                 .transition(.asymmetric(
@@ -696,33 +694,7 @@ struct ProjectView: View {
                 }
             }
         }
-        .padding(.trailing, 14)
-        // Start past the traffic lights, but only by however much they actually overhang this column.
-        //
-        // Two things decide that. The sidebar, when it's showing, holds the buttons over *itself*, so
-        // the column needs no inset at all. And once the window is wide enough that the width cap has
-        // centred the column, it may already begin clear of them — so a fixed inset would shove the
-        // title 60-odd points further right for no reason.
-        //
-        // The inset is animated because the sidebar's collapse is: the flag flips in one frame while
-        // the pane takes a quarter second to slide, and an unanimated jump in the middle of that is
-        // the reflow this used to show on every toggle.
-        .padding(.leading, 14 + titlebarOverhang)
-        // Measured *outside* the padding above, so it reports the column's own leading edge within its
-        // pane and can't feed back into the value it produces. Pane-local is all that's available —
-        // each pane's SwiftUI content is its own coordinate root — but pane-local is also all that's
-        // needed, given the sidebar case is settled by the flag.
-        .background(GeometryReader { geo in
-            Color.clear.preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
-        })
-        .onPreferenceChange(HeaderOriginKey.self) { columnOffsetInPane = $0 }
-        .animation(.easeInOut(duration: 0.25), value: titlebarOverhang)
-        // Centre the title on the traffic lights, wherever the system has put them — the unified
-        // titlebar this window uses sits them twice as far down as a compact one would, and hard-coding
-        // either number means the title is level in one and adrift in the other. Half a title line is
-        // the only constant here.
-        .padding(.top, max(8, state.titlebarButtonCenterY - 11))
-        .padding(.bottom, 14)
+        .modifier(TitlebarClearance(state: state))
         // Double-click empty header space (or the title) toggles the details brief. On a background
         // layer *behind* the controls so the switcher / view-options / open buttons in front consume
         // their own clicks and are excluded; `simultaneousGesture` so it still coexists with
@@ -736,12 +708,6 @@ struct ProjectView: View {
         )
         // Right-clicking anywhere in the header opens the same view settings as the slider button.
         .contextMenu { viewOptionsMenuContent }
-    }
-
-    /// How much of the window's traffic lights this column sits under.
-    private var titlebarOverhang: CGFloat {
-        guard !state.sidebarVisible else { return 0 }
-        return max(0, state.leadingTitlebarInset - columnOffsetInPane)
     }
 
     /// The project title. Plain text — the details-toggle double-click lives on the header background
@@ -1308,6 +1274,62 @@ private struct HeaderOriginKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+/// Insets a header that runs up under the window's (hidden, transparent) titlebar so it clears the
+/// traffic lights and sits level with them.
+///
+/// Every header this column can show wears this — the task list's and the session-note takeover's —
+/// because they occupy the same strip and swap places. Hard-coding the padding in one of them is how
+/// the takeover's title ended up under the buttons on macOS 26, where the unified titlebar sits them
+/// lower than the compact one this app started against.
+private struct TitlebarClearance: ViewModifier {
+    @ObservedObject var state: ProjectViewState
+    /// The gap below the header. The task list's is fenced off by a rule, the takeover's by a divider
+    /// tight to the editor, so they don't want the same one.
+    var bottom: CGFloat = 14
+
+    /// The column's own offset within its pane — zero until the width cap starts centring it in a wide
+    /// window.
+    @State private var columnOffsetInPane: CGFloat = 0
+
+    /// How much of the window's traffic lights this column sits under.
+    private var overhang: CGFloat {
+        guard !state.sidebarVisible else { return 0 }
+        return max(0, state.leadingTitlebarInset - columnOffsetInPane)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.trailing, 14)
+            // Start past the traffic lights, but only by however much they actually overhang this
+            // column.
+            //
+            // Two things decide that. The sidebar, when it's showing, holds the buttons over *itself*,
+            // so the column needs no inset at all. And once the window is wide enough that the width
+            // cap has centred the column, it may already begin clear of them — so a fixed inset would
+            // shove the title 60-odd points further right for no reason.
+            //
+            // The inset is animated because the sidebar's collapse is: the flag flips in one frame
+            // while the pane takes a quarter second to slide, and an unanimated jump in the middle of
+            // that is the reflow this used to show on every toggle.
+            .padding(.leading, 14 + overhang)
+            // Measured *outside* the padding above, so it reports the column's own leading edge within
+            // its pane and can't feed back into the value it produces. Pane-local is all that's
+            // available — each pane's SwiftUI content is its own coordinate root — but pane-local is
+            // also all that's needed, given the sidebar case is settled by the flag.
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
+            })
+            .onPreferenceChange(HeaderOriginKey.self) { columnOffsetInPane = $0 }
+            .animation(.easeInOut(duration: 0.25), value: overhang)
+            // Centre the title on the traffic lights, wherever the system has put them — the unified
+            // titlebar this window uses sits them twice as far down as a compact one would, and
+            // hard-coding either number means the title is level in one and adrift in the other. Half a
+            // title line is the only constant here.
+            .padding(.top, max(8, state.titlebarButtonCenterY - 11))
+            .padding(.bottom, bottom)
+    }
+}
+
 /// Applies the soft scroll-edge effect so scrolling content fades at the top/bottom edges — under the
 /// pinned header and off the bottom edge — rather than hard-clipping.
 private struct SoftScrollEdges: ViewModifier {
@@ -1780,6 +1802,9 @@ private struct SessionNoteTakeover: View {
     let session: Session
     let projectName: String
     @ObservedObject var store: PMStore
+    /// Only for the titlebar clearance — this header stands in the same strip as the task list's, under
+    /// the same traffic lights, so it insets itself from the same measurements.
+    let state: ProjectViewState
     let onBack: () -> Void
 
     @State private var text: String
@@ -1787,11 +1812,12 @@ private struct SessionNoteTakeover: View {
     @State private var hostWindow: NSWindow?
 
     init(index: Int, session: Session, projectName: String,
-         store: PMStore, onBack: @escaping () -> Void) {
+         store: PMStore, state: ProjectViewState, onBack: @escaping () -> Void) {
         self.index = index
         self.session = session
         self.projectName = projectName
         self.store = store
+        self.state = state
         self.onBack = onBack
         _text = State(initialValue: leadingSessionProse(body: session.body))
     }
@@ -1847,9 +1873,7 @@ private struct SessionNoteTakeover: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .modifier(TitlebarClearance(state: state, bottom: 8))
     }
 
     /// Write the current text back to the session's note. The store sanitizes it (headings clamp to

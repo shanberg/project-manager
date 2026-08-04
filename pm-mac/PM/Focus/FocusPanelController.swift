@@ -45,7 +45,9 @@ final class FocusPanelController: NSObject, NSWindowDelegate {
         // ordering front first would flash a zero-sized window for a frame before the fit lands.
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
-        panel.makeKey()
+        // Every path here is an explicit summon — the hotkey, the menubar item, `pmpanel://show` — so
+        // taking the keyboard is what was asked for. Nothing else opens the panel on the user's behalf.
+        panel.takeKey()
         Log.write("focus panel shown: \(store.boundKey ?? "no project") frame=\(panel.frame)")
     }
 
@@ -130,7 +132,10 @@ final class FocusPanelController: NSObject, NSWindowDelegate {
             onOpenProject: { [weak self] in
                 guard let self else { return }
                 WindowManager.shared.open(projectKey: self.store.boundKey)
-            }
+            },
+            // The click that opens one of the panel's editors no longer makes the panel key on its own
+            // (see `KeyablePanel`), so the content asks for the keyboard when it has somewhere to put it.
+            onNeedsKeyboard: { [weak self] in self?.panel?.takeKey() }
         )
     }
 
@@ -148,6 +153,9 @@ final class FocusPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        // Shut the gate behind it. From here a click on the panel — ticking a task off, dragging it out
+        // of the way — leaves the keyboard where it is, which is the window you were typing in.
+        panel?.acceptsKey = false
         chrome?.scheduleBlurHide()
     }
 

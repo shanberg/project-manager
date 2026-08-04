@@ -20,6 +20,10 @@ struct FocusPanelView: View {
     var onContentHeight: (CGFloat) -> Void = { _ in }
     /// Open (or focus) the full project window for whatever project is showing.
     var onOpenProject: () -> Void = {}
+    /// Ask the panel for key focus, for the moments this content has the keyboard to use — an editor
+    /// open, or a delete waiting on ⏎/Escape. The panel doesn't take key just for being clicked (see
+    /// `KeyablePanel`), so without this an editor opened here would get no keystrokes.
+    var onNeedsKeyboard: () -> Void = {}
 
     /// The open inline editor, if any. Only one at a time, exactly as in the task list.
     @State private var activeEditor: EditorTarget?
@@ -44,6 +48,10 @@ struct FocusPanelView: View {
     private var hero: Todo? { store.focusedTodo ?? store.openTodos.first }
 
     private var isEditing: Bool { activeEditor != nil || addingTask }
+
+    /// Whether the panel's content currently has a use for the keyboard: an open editor to type into,
+    /// or a delete confirmation waiting on ⏎/Escape.
+    private var needsKeyboard: Bool { isEditing || !pendingDelete.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -85,6 +93,10 @@ struct FocusPanelView: View {
             addingTask = false
             pendingDelete = []
         }
+        // Only ever asks *for* the keyboard, never gives it back: the panel resigning key is the user
+        // clicking into another window, and closing an editor here shouldn't move focus off the panel
+        // they're still working in.
+        .onChange(of: needsKeyboard) { if $0 { onNeedsKeyboard() } }
         .onChange(of: isEditing) { active in
             if active {
                 outsideClick.onOutsideClick = {
