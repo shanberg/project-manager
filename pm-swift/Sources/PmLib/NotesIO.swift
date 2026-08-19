@@ -29,19 +29,53 @@ public func isObsidianCLIAvailable() -> Bool {
 }
 
 /// Choose NotesIO implementation from config. Returns DirectNotesIO when Obsidian is not configured or CLI is unavailable.
-public func makeNotesIO(notesPath: String, config: PmConfig) -> NotesIO {
+///
+/// `isCLIAvailable` is injectable so the fallback path can be tested without an Obsidian on the
+/// machine. Defaulted, so every production caller reads exactly as it did. A test that leaves it to
+/// the real probe isn't testing the branch it names — it takes the fallback only when Obsidian
+/// happens to be absent, and shells out to a GUI app when it isn't.
+public func makeNotesIO(notesPath: String,
+                        config: PmConfig,
+                        isCLIAvailable: () -> Bool = isObsidianCLIAvailable) -> NotesIO {
     guard config.useObsidianCLI == true,
           let vault = config.obsidianVault, !vault.isEmpty,
           let vaultPath = config.obsidianVaultPath, !vaultPath.isEmpty else {
         return DirectNotesIO()
     }
-    guard isObsidianCLIAvailable() else {
+    guard isCLIAvailable() else {
         return DirectNotesIO()
     }
     return ObsidianNotesIO(vaultName: vault, vaultPath: vaultPath)
 }
 
-private func runProcess(executable: String, arguments: [String], stdinData: Data? = nil) -> (stdout: Data, stderr: Data, terminationStatus: Int32) {
+/// Somewhere to put the pipe readers' results, since they finish on other threads. A lock rather
+/// than two `var`s captured by the closures: each reader writes its own field, but the reads on the
+/// calling thread still have to be ordered against those writes.
+private final class ProcessOutput {
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+
+    func set(stdout data: Data) { lock.lock(); out = data; lock.unlock() }
+    func set(stderr data: Data) { lock.lock(); err = data; lock.unlock() }
+    var stdout: Data { lock.lock(); defer { lock.unlock() }; return out }
+    var stderr: Data { lock.lock(); defer { lock.unlock() }; return err }
+}
+
+/// Run a child process to completion and collect everything it wrote.
+///
+/// Both pipes are drained *while the child runs*, and stdin is written after `run()` — none of which
+/// is optional. A pipe holds 64KB; past that the writer blocks until someone reads. Waiting for exit
+/// before reading therefore deadlocks outright on a child with more than 64KB to say: it blocks
+/// writing, we block waiting, and neither side ever moves again. That is not a theoretical size here —
+/// `ObsidianNotesIO.readViaCLI` returns a whole notes file through this, so it was every project whose
+/// notes grew past 64KB. Feeding a large `stdinData` before the child is running is the same trap
+/// mirrored: the child can't drain what it hasn't started to read.
+///
+/// `waitUntilExit` still follows, so the exit status is the real one. By then both pipes are at EOF,
+/// which the child reaching the end of its own output is what causes, so it returns promptly.
+/// Internal rather than private so the deadlock regression tests can reach it via `@testable`.
+func runProcess(executable: String, arguments: [String], stdinData: Data? = nil) -> (stdout: Data, stderr: Data, terminationStatus: Int32) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
@@ -49,21 +83,29 @@ private func runProcess(executable: String, arguments: [String], stdinData: Data
     let errPipe = Pipe()
     process.standardOutput = outPipe
     process.standardError = errPipe
-    if let data = stdinData {
-        let inPipe = Pipe()
-        process.standardInput = inPipe
-        inPipe.fileHandleForWriting.write(data)
-        try? inPipe.fileHandleForWriting.close()
-    }
+    let inPipe = stdinData.map { _ in Pipe() }
+    if let inPipe { process.standardInput = inPipe }
+
     do {
         try process.run()
-        process.waitUntilExit()
-        let stdout = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderr = errPipe.fileHandleForReading.readDataToEndOfFile()
-        return (stdout, stderr, process.terminationStatus)
     } catch {
         return (Data(), (error.localizedDescription).data(using: .utf8) ?? Data(), -1)
     }
+
+    let output = ProcessOutput()
+    let group = DispatchGroup()
+    let queue = DispatchQueue(label: "com.stuarthanberg.pm.run-process", attributes: .concurrent)
+    queue.async(group: group) { output.set(stdout: outPipe.fileHandleForReading.readDataToEndOfFile()) }
+    queue.async(group: group) { output.set(stderr: errPipe.fileHandleForReading.readDataToEndOfFile()) }
+    if let inPipe, let data = stdinData {
+        queue.async(group: group) {
+            inPipe.fileHandleForWriting.write(data)
+            try? inPipe.fileHandleForWriting.close()
+        }
+    }
+    group.wait()
+    process.waitUntilExit()
+    return (output.stdout, output.stderr, process.terminationStatus)
 }
 
 /// Uses the Obsidian CLI for read/write when the path is under the configured vault; otherwise falls back to direct file I/O.

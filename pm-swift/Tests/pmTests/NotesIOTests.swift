@@ -61,7 +61,13 @@ final class NotesIOTests: XCTestCase {
         XCTAssertEqual(readBack, "# Updated")
     }
 
-    /// When Obsidian is configured but CLI is not available (e.g. not on PATH), makeNotesIO falls back to DirectNotesIO; read/write still work.
+    /// When Obsidian is configured but the CLI is not available, makeNotesIO falls back to
+    /// DirectNotesIO; read/write still work.
+    ///
+    /// The probe is stubbed rather than left to the real one. Shelling out to `obsidian` made this
+    /// test the machine's business: it took the fallback branch only where Obsidian was missing, and
+    /// where it was installed it launched the app instead — which is how the suite came to hang for
+    /// nineteen minutes on a cold run.
     func testMakeNotesIOObsidianConfiguredButCLIUnavailableFallsBackToDirectIO() throws {
         let config = PmConfig(
             activePath: "/tmp/active",
@@ -78,13 +84,73 @@ final class NotesIOTests: XCTestCase {
         let notesPath = tmpDir.appendingPathComponent("note.md").path
         try "# From direct".write(toFile: notesPath, atomically: true, encoding: .utf8)
 
-        let io = makeNotesIO(notesPath: notesPath, config: config)
+        let io = makeNotesIO(notesPath: notesPath, config: config, isCLIAvailable: { false })
+        XCTAssertTrue(io is DirectNotesIO, "No CLI means direct I/O, whatever the config asked for")
         let content = try io.readContent(path: notesPath)
         XCTAssertEqual(content, "# From direct")
 
         try io.writeContent(path: notesPath, content: "# Written via fallback")
         let readBack = try io.readContent(path: notesPath)
         XCTAssertEqual(readBack, "# Written via fallback")
+    }
+
+    /// The other branch of the same choice: a configured vault plus an available CLI selects the
+    /// Obsidian path. Also stubbed, so it holds on a machine with no Obsidian at all.
+    func testMakeNotesIOUsesObsidianWhenConfiguredAndAvailable() {
+        let config = PmConfig(
+            activePath: "/tmp/active",
+            archivePath: "/tmp/archive",
+            domains: defaultDomains,
+            subfolders: defaultSubfolders,
+            useObsidianCLI: true,
+            obsidianVault: "TestVault",
+            obsidianVaultPath: "/tmp/vault"
+        )
+        let io = makeNotesIO(notesPath: "/tmp/vault/note.md", config: config, isCLIAvailable: { true })
+        XCTAssertTrue(io is ObsidianNotesIO)
+    }
+
+    // MARK: runProcess pipe draining
+
+    /// A child with more than a pipe buffer's worth to say must still be collected in full — on both
+    /// pipes at once, which is the case that pins the bug: draining only one still deadlocks on the
+    /// other. Waiting for exit before reading held here forever, and `readViaCLI` returns whole notes
+    /// files this way, so every project whose notes passed 64KB hung the app on open.
+    ///
+    /// Run off the main thread behind an expectation so a regression *fails* in thirty seconds rather
+    /// than hanging the suite the way the original bug did.
+    func testRunProcessCollectsOutputLargerThanThePipeBuffer() {
+        let count = 200_000  // comfortably past the 64KB pipe buffer
+        let finished = expectation(description: "runProcess returns")
+        var result: (stdout: Data, stderr: Data, terminationStatus: Int32)?
+        DispatchQueue.global().async {
+            result = runProcess(
+                executable: "/bin/sh",
+                arguments: ["-c", "head -c \(count) /dev/zero | tr '\\0' 'x'; "
+                                + "head -c \(count) /dev/zero | tr '\\0' 'y' >&2"]
+            )
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(result?.stdout.count, count, "stdout collected in full")
+        XCTAssertEqual(result?.stderr.count, count, "stderr collected in full")
+        XCTAssertEqual(result?.terminationStatus, 0)
+    }
+
+    /// The same trap mirrored: a large `stdinData` written before the child is running blocks against
+    /// a reader that hasn't started. Round-trips through `cat`, so the bytes back out prove the write
+    /// completed rather than merely not hanging.
+    func testRunProcessWritesStdinLargerThanThePipeBuffer() {
+        let payload = Data(repeating: UInt8(ascii: "z"), count: 200_000)
+        let finished = expectation(description: "runProcess returns")
+        var result: (stdout: Data, stderr: Data, terminationStatus: Int32)?
+        DispatchQueue.global().async {
+            result = runProcess(executable: "/bin/cat", arguments: [], stdinData: payload)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(result?.stdout, payload, "every byte written reaches the child and comes back")
+        XCTAssertEqual(result?.terminationStatus, 0)
     }
 
     /// readNotesFile and writeNotesFile with nil notesIO use direct I/O (backward compatibility).
