@@ -17,6 +17,42 @@ enum ProjectStatusFilter: String {
 /// How the sidebar's rows are gathered into sections.
 enum ProjectGrouping: String { case due, domain }
 
+/// How far ahead the Up Next band looks, and whether it appears at all.
+///
+/// A preference rather than a constant, because "soon" isn't the same distance for everyone: a week
+/// matches `DueBucket.week`, so the band and the Due grouping agree by default, but a list where most
+/// work lands the same afternoon wants Today, and one planned in fortnights wants fourteen days.
+///
+/// `.off` sits in the same picker rather than being a separate toggle beside it. Turning the band off
+/// *is* a horizon — the shortest one there is — and splitting it into a checkbox would make two
+/// controls out of one decision, with a disabled-looking picker whenever the checkbox was clear.
+enum UpNextHorizon: String, CaseIterable {
+    case off, today, three, week, fortnight
+
+    /// Whole days ahead a project may be due and still card. Nil when the band is off. Overdue
+    /// projects qualify at every horizon: a negative delta is under any ceiling, including Today's
+    /// zero, which is why that case reads "Overdue & Today" rather than "Today".
+    var days: Int? {
+        switch self {
+        case .off: return nil
+        case .today: return 0
+        case .three: return 3
+        case .week: return 7
+        case .fortnight: return 14
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .today: return "Overdue & Today"
+        case .three: return "Next 3 Days"
+        case .week: return "Next 7 Days"
+        case .fortnight: return "Next 14 Days"
+        }
+    }
+}
+
 /// How rows are ordered inside a section.
 enum ProjectSortOrder: String {
     case code, name, recency
@@ -101,6 +137,9 @@ struct ProjectSidebar: View {
     /// which one you're in. It's a display choice only: the tooltip, the copied name and the sort
     /// orders all still see the full name.
     @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
+    /// How far ahead the Up Next band looks (`.off` hides it). Read here and in the bottom bar, which
+    /// is where it's set — see `SidebarBottomBar`.
+    @AppStorage("PMSidebarUpNext") private var upNextHorizon: UpNextHorizon = .week
 
     var body: some View {
         list
@@ -160,6 +199,35 @@ struct ProjectSidebar: View {
     /// split view's sidebar item already draws the material behind this and two would stack.
     private var list: some View {
         List(selection: $state.projectSelection) {
+            // The Up Next band, as the list's first section rather than a `VStack` above the list.
+            //
+            // Inside, a card is an ordinary list item: it gets selection, arrow keys, type-select,
+            // scroll-into-view, the three-state highlight and the selection-aware context menu for
+            // free — the same argument this list already makes for not hand-building its rows. Above
+            // the list, every one of those would have to be rebuilt worse, and the band would sit in a
+            // strip that doesn't scroll under the titlebar the way the rest of the pane does.
+            //
+            // A card carries the *same* tag as its project's row further down, not a prefixed one, so
+            // selecting either highlights both. That's deliberate twice over: it shows which row a card
+            // stands for, and it keeps ⌘C, ⌘A, Return and the context menu — all of which resolve
+            // `state.projectSelection` against `store.allProjects` from outside this file — working on
+            // plain project keys with nothing to unwrap.
+            if !upNext.isEmpty {
+                Section {
+                    ForEach(upNext) { entry in
+                        UpNextCard(
+                            entry: entry,
+                            isSelected: state.projectSelection.contains(entry.projectKey),
+                            showsCode: showsCode,
+                            liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
+                        )
+                        .tag(entry.projectKey)
+                        .listRowSeparator(.hidden)
+                    }
+                } header: {
+                    SidebarEyebrow("Up Next")
+                }
+            }
             ForEach(groups) { group in
                 Section {
                     ForEach(group.entries) { entry in
@@ -229,6 +297,58 @@ struct ProjectSidebar: View {
         state.openProject(entry.projectKey, newWindow)
     }
 
+    /// The projects the Up Next band cards, most pressing first. Empty means no band at all.
+    private var upNext: [PMStore.ProjectEntry] {
+        Self.upNext(store.allProjects, status: status, grouping: grouping,
+                    sort: sortOrder, horizon: upNextHorizon)
+    }
+
+    /// How many projects the band cards. Past three it stops reading as a summary and becomes a second
+    /// list — and at 224 points, three cards already take about a third of the sidebar.
+    private static let maxUpNext = 3
+
+    /// Pick the projects worth carding: the ones the list is already showing, due inside the horizon,
+    /// soonest first, capped at `maxUpNext`.
+    ///
+    /// Three things make the band vanish entirely rather than show an empty container, because a band
+    /// that's always there stops being read:
+    ///
+    /// - the horizon is `.off`;
+    /// - the list is already grouped by Due, which puts an Overdue section at the top of its own
+    ///   accord. A band above that is the same list twice, four points apart, in two different shapes.
+    ///   The band earns its place precisely *because* the default grouping is by domain;
+    /// - nothing is due inside the horizon.
+    ///
+    /// Archived projects never card, even under the Archived or All filter: an archived project isn't
+    /// work, whatever date its notes still carry. Everything else is filtered by the same `status` the
+    /// list uses, so the band can never point at a project that isn't below it.
+    ///
+    /// Pure and static for the same reason `arranged` is: it's read while a body is being built.
+    private static func upNext(_ projects: [PMStore.ProjectEntry],
+                               status: ProjectStatusFilter,
+                               grouping: ProjectGrouping,
+                               sort: ProjectSortOrder,
+                               horizon: UpNextHorizon) -> [PMStore.ProjectEntry] {
+        guard let horizonDays = horizon.days, grouping != .due else { return [] }
+        let candidates = projects.filter { entry in
+            guard status.includes(entry), !entry.isArchived else { return false }
+            guard let due = entry.nextDue, let delta = RelativeDue.dayDelta(due) else { return false }
+            return delta <= horizonDays
+        }
+        // Soonest first, on the parsed date rather than the day delta, so two projects due the same day
+        // at different hours still order. A genuine tie falls back to the sort order the user picked,
+        // so the band never contradicts the list underneath it.
+        return Array(
+            candidates.sorted { a, b in
+                let da = a.nextDue.flatMap(RelativeDue.parse) ?? .distantFuture
+                let db = b.nextDue.flatMap(RelativeDue.parse) ?? .distantFuture
+                if da != db { return da < db }
+                return sort.precedes(a, b)
+            }
+            .prefix(maxUpNext)
+        )
+    }
+
     /// The filtered projects, sorted, then gathered into sections.
     private var groups: [ProjectGroup] {
         Self.arranged(store.allProjects, status: status, grouping: grouping, sort: sortOrder)
@@ -273,6 +393,8 @@ struct SidebarBottomBar: View {
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
     /// See `ProjectSidebar.showsCode` — same key, read here so the menu can toggle it.
     @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
+    /// See `ProjectSidebar.upNextHorizon` — same key, set here.
+    @AppStorage("PMSidebarUpNext") private var upNextHorizon: UpNextHorizon = .week
 
     var body: some View {
         HStack(spacing: 4) {
@@ -322,6 +444,23 @@ struct SidebarBottomBar: View {
                 .pickerStyle(.inline)
             } label: {
                 Label("Sort By", systemImage: "arrow.up.arrow.down")
+            }
+            // With the other three rather than below the divider: this decides *which* projects appear
+            // at the top of the list, which is the same kind of decision as filtering and grouping.
+            // Below the divider is where the one display-only choice lives.
+            //
+            // Nothing here spells out that Group By ▸ Due suppresses the band. Disabling the submenu in
+            // that case would be worse than silence — it reads as broken rather than as redundant, and
+            // the band reappearing the moment you group by Domain again explains itself.
+            Menu {
+                Picker("Up next", selection: $upNextHorizon) {
+                    ForEach(UpNextHorizon.allCases, id: \.self) { horizon in
+                        Text(horizon.title).tag(horizon)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Up Next", systemImage: "calendar.badge.clock")
             }
             Divider()
             // A checkbox rather than a fourth submenu: it's one binary display choice, not a choice
@@ -473,6 +612,138 @@ private struct SidebarDueLabel: View {
         case .soon: return Color(nsColor: .systemOrange)
         case .later, .inherited: return .secondary
         }
+    }
+}
+
+/// One Up Next card: the same three facts its row carries — ring, name, next task — with the due date
+/// promoted from `SidebarDueLabel`'s tinted text to the menubar's `DuePillView`, on a fill washed with
+/// the severity colour.
+///
+/// The wash is the point of the card. At 224 points there is no room to say anything the row doesn't
+/// already say, so what a card adds isn't information but *weight*: a shape, a semibold name and a tint
+/// you read before you read a word. The tint is redundant with the pill's own text ("2d ago", "today"),
+/// which is exactly what lets it sit under 10% — the card never depends on colour to be understood, so
+/// Increase Contrast and the colour-blind settings are a non-event.
+///
+/// Two things it deliberately isn't. It isn't a material: the sidebar is already vibrant, and a second
+/// material on top of the first composites to mud in light and to a smudge in dark, so the fill is a
+/// flat low-alpha colour the vibrancy still reads through. And it has no leading accent rail — that's a
+/// web convention no system app draws, and the app already owns two ways of saying "late" that cost
+/// nothing to reuse.
+///
+/// Selected, the card gives up its fill, its border and its tint and lets the list's own highlight
+/// through. That's the same trade `SidebarDueLabel` makes and for the same reason — a red or orange
+/// wash resolves against exactly one of the list's three highlight states — and it's what keeps a card
+/// from reading as a permanently-selected row while it sits directly above real ones. `DuePillView`
+/// already knows how to invert onto the highlight; it only needs telling.
+private struct UpNextCard: View {
+    let entry: PMStore.ProjectEntry
+    /// Whether the row sits in the list's selection. Drives the stand-down described above.
+    let isSelected: Bool
+    /// Whether the name keeps its "CODE-NNN " prefix (`PMSidebarShowCode`), as the rows do.
+    let showsCode: Bool
+    /// Live (done, total) when this is the window's own project, which the cached scan can lag behind.
+    let liveProgress: (done: Int, total: Int)?
+
+    private var total: Int { liveProgress?.total ?? entry.total }
+    private var done: Int { liveProgress?.done ?? entry.done }
+    private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    private var title: String { showsCode ? entry.name : entry.shortName }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
+                .renderingMode(.template)
+                .opacity(entry.detailsLoaded ? 1 : 0.35)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // Semibold is what marks the promotion. The rows below stay regular, so a carded
+                    // project reads heavier than its own row without needing a different size.
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    if let due = entry.nextDue {
+                        DuePillView(text: RelativeDue.short(due),
+                                    state: DueState(due: due, own: true),
+                                    selected: isSelected)
+                            // The name truncates before the pill gives up any width: the pill is three
+                            // or four characters and the name has ellipsis to fall back on.
+                            .layoutPriority(1)
+                    }
+                }
+                if let task = entry.nextTask {
+                    Text(task)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
+        // The row's own 4×6 plus the point the border takes.
+        .padding(.vertical, 7)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            // Radius 8, a step above the ~5 the source list's selection shape uses, so a card reads as
+            // a container rather than as a selected row.
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(fill)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(border, lineWidth: 0.5)
+                }
+        }
+        // Outside the shape, so it's the gap *between* cards rather than more padding inside them —
+        // sidebar list rows are contiguous, and without this two cards would touch.
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        // See `ProjectSidebarRow`: without this AppKit's window-drag tracking eats the mouse-down and
+        // the card never registers the click.
+        .background(WindowDragExcluder())
+        .help(helpText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(helpText)
+    }
+
+    /// The card's severity, on the same `DueState` scale the menubar pill and the sidebar's due label
+    /// use. `own: true` because a project's earliest due is just a date by the time it reaches here —
+    /// whether the task inherited it isn't carried this far.
+    private var severity: DueState {
+        guard let due = entry.nextDue else { return .later }
+        return DueState(due: due, own: true)
+    }
+
+    private var fill: Color {
+        guard !isSelected else { return .clear }
+        switch severity {
+        case .overdue: return Color(nsColor: .systemRed).opacity(0.09)
+        case .soon: return Color(nsColor: .systemOrange).opacity(0.10)
+        // `.controlBackgroundColor` is white over a light window and near-black over a dark one, so a
+        // neutral card reads as raised off the sidebar in both without branching on the appearance.
+        case .later, .inherited: return Color(nsColor: .controlBackgroundColor).opacity(0.7)
+        }
+    }
+
+    private var border: Color {
+        guard !isSelected else { return .clear }
+        switch severity {
+        case .overdue: return Color(nsColor: .systemRed).opacity(0.16)
+        case .soon: return Color(nsColor: .systemOrange).opacity(0.18)
+        case .later, .inherited: return Color(nsColor: .separatorColor)
+        }
+    }
+
+    /// Tooltip: the counts and due date the card's two lines have no room for. Same shape as the row's,
+    /// so hovering a card and hovering its row say the same thing.
+    private var helpText: String {
+        var parts: [String] = [entry.name]
+        if total > 0 { parts.append("\(done)/\(total)") }
+        if let due = entry.nextDue { parts.append("due \(RelativeDue.short(due))") }
+        if let task = entry.nextTask { parts.append(task) }
+        return parts.joined(separator: "  ·  ")
     }
 }
 
