@@ -52,6 +52,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // It has no delegate and therefore no items, `titlebarAppearsTransparent` keeps it from drawing
         // a background, and the split items' `titlebarSeparatorStyle = .none` keeps it from drawing a
         // line. So it costs nothing visually and is not a toolbar in the UI sense.
+        //
+        // A titlebar accessory is the obvious-looking alternative and doesn't work: an accessory with
+        // `layoutAttribute = .top` adds a strip *below* the titlebar (Safari's bookmarks bar) without
+        // making the titlebar itself taller or moving the window buttons. The unified toolbar is the
+        // supported route to these metrics, so this is the intended API rather than a trick — the only
+        // oddity is having no items in it. Nothing exposes it to the user: customization is off and the
+        // app's hand-built menus offer no Show/Hide Toolbar, so it can't be toggled out from under the
+        // header. And if it ever were, `measureTitlebarButtons` re-runs on the resize and the header
+        // follows the new geometry rather than holding the old one.
         let toolbar = NSToolbar(identifier: "PMProjectTitlebar")
         toolbar.allowsUserCustomization = false
         toolbar.showsBaselineSeparator = false
@@ -94,6 +103,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
         applyTitle()
         applyWindowSettings()
+
+        // Measure before the first frame is drawn, not after the window is ordered in. The defaults in
+        // `ProjectViewState` are only starting guesses — 92pt of traffic lights and a compact
+        // titlebar's 13pt drop — so measuring in `show()` meant the header was laid out against the
+        // guess and then visibly settled onto the real numbers as the window opened. `layoutIfNeeded`
+        // forces the theme frame to place its buttons, which is what makes them measurable this early.
+        window.layoutIfNeeded()
+        measureTitlebarButtons()
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -102,6 +119,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func show() {
         showWindow(nil)
+        // Already measured in the initialiser; this catches a window restored to a frame (or a screen)
+        // that changes the chrome between construction and appearing.
         measureTitlebarButtons()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -109,22 +128,44 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     var isVisible: Bool { window?.isVisible ?? false }
 
-    /// Publish where the window's traffic lights actually end, so the leftmost pane's header can start
-    /// past them. Their frames are only meaningful once the window has been ordered in, hence the call
-    /// from `show()` rather than the initialiser.
+    /// Publish where the window's traffic lights actually sit, so the leftmost pane's header can start
+    /// past them and sit level with them.
+    ///
+    /// Re-run on everything that can move them, not once on open. A window's chrome is not a constant:
+    /// full screen takes the titlebar away entirely, joining a tab group adds a bar that moves the
+    /// content area, and a resize can bring either about. Measured only in `show()`, a window that went
+    /// full screen kept a titlebar-sized gap above a header with no titlebar over it, and the same
+    /// stale-constant problem the measurement exists to avoid came back by another route.
     private func measureTitlebarButtons() {
-        guard let window,
-              let close = window.standardWindowButton(.closeButton),
+        guard let window, let content = window.contentView else { return }
+        // Full screen has no titlebar over the content and no traffic lights sitting in it, so the
+        // header wants neither the leading inset nor the vertical drop. Asking the buttons where they
+        // are here answers for the auto-hiding bar, which is not where the content is.
+        guard !window.styleMask.contains(.fullScreen) else {
+            publishTitlebarMetrics(inset: 0, centerY: 0)
+            return
+        }
+        guard let close = window.standardWindowButton(.closeButton),
               let zoom = window.standardWindowButton(.zoomButton) else { return }
-        let inset = zoom.convert(zoom.bounds, to: nil).maxX + 12
-        if inset > 0, abs(state.leadingTitlebarInset - inset) > 0.5 {
+        // Measured in the content view's own space, not the window's. The header is laid out from the
+        // top of the content view, and that is not reliably the top of the window frame — a tab bar
+        // moves one and not the other, and a window-frame-relative drop puts the header the height of
+        // the tab bar out of true.
+        //
+        // AppKit's coordinates are bottom-left and the views' are top-down, hence the flip through the
+        // content view's height for "how far down from the top are these buttons centred".
+        let inset = content.convert(zoom.bounds, from: zoom).maxX + 12
+        let box = content.convert(close.bounds, from: close)
+        publishTitlebarMetrics(inset: inset, centerY: content.bounds.height - box.midY)
+    }
+
+    /// Write measurements through to the view state, ignoring sub-point noise so a live resize doesn't
+    /// republish (and re-lay-out the whole column) on every frame for a value that hasn't moved.
+    private func publishTitlebarMetrics(inset: CGFloat, centerY: CGFloat) {
+        if inset >= 0, abs(state.leadingTitlebarInset - inset) > 0.5 {
             state.leadingTitlebarInset = inset
         }
-        // AppKit's coordinates are bottom-left; the views' are top-down, so flip through the window's
-        // height to get "how far down from the top edge are these buttons centred".
-        let box = close.convert(close.bounds, to: nil)
-        let centerY = window.frame.height - box.midY
-        if centerY > 0, abs(state.titlebarButtonCenterY - centerY) > 0.5 {
+        if centerY >= 0, abs(state.titlebarButtonCenterY - centerY) > 0.5 {
             state.titlebarButtonCenterY = centerY
         }
     }
@@ -177,6 +218,24 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidBecomeMain(_ notification: Notification) {
         pushFocusToDisk()
+        // Joining or leaving a tab group moves the content area without resizing the window, and there
+        // is no delegate callback for it. Becoming main is the moment that always follows.
+        measureTitlebarButtons()
+    }
+
+    /// The chrome-change hooks. All three land in the same place: whatever moved, re-ask the buttons
+    /// where they are. The measurement is two coordinate conversions and `publishTitlebarMetrics`
+    /// swallows sub-point changes, so running it on every frame of a live resize costs nothing.
+    func windowDidResize(_ notification: Notification) {
+        measureTitlebarButtons()
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        measureTitlebarButtons()
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        measureTitlebarButtons()
     }
 
     func windowWillClose(_ notification: Notification) {

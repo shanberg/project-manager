@@ -96,6 +96,11 @@ struct ProjectSidebar: View {
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
+    /// Whether rows keep the folder name's "CODE-NNN " prefix. Off, a row reads as the bare project
+    /// name — which is what you want once the codes are yours and the domain section already says
+    /// which one you're in. It's a display choice only: the tooltip, the copied name and the sort
+    /// orders all still see the full name.
+    @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
 
     var body: some View {
         list
@@ -161,6 +166,8 @@ struct ProjectSidebar: View {
                         ProjectSidebarRow(
                             entry: entry,
                             isFocusedProject: entry.projectKey == store.projectKey,
+                            isSelected: state.projectSelection.contains(entry.projectKey),
+                            showsCode: showsCode,
                             liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
                         )
                         .tag(entry.projectKey)
@@ -264,6 +271,8 @@ struct SidebarBottomBar: View {
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
+    /// See `ProjectSidebar.showsCode` — same key, read here so the menu can toggle it.
+    @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
 
     var body: some View {
         HStack(spacing: 4) {
@@ -314,6 +323,13 @@ struct SidebarBottomBar: View {
             } label: {
                 Label("Sort By", systemImage: "arrow.up.arrow.down")
             }
+            Divider()
+            // A checkbox rather than a fourth submenu: it's one binary display choice, not a choice
+            // between alternatives, and the three submenus above are all "which projects, in what
+            // order" — this one only changes how a row is written.
+            Toggle(isOn: $showsCode) {
+                Label("Show Project Code", systemImage: "number")
+            }
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 11, weight: .medium))
@@ -341,6 +357,11 @@ private struct ProjectSidebarRow: View {
     let entry: PMStore.ProjectEntry
     /// Whether this is the project the window is currently showing.
     let isFocusedProject: Bool
+    /// Whether the row sits in the list's selection — the due date's tint has to stand down on the
+    /// highlight, where a red or orange word doesn't read.
+    let isSelected: Bool
+    /// Whether the name keeps its "CODE-NNN " prefix (`PMSidebarShowCode`).
+    let showsCode: Bool
     /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
     /// other row, which falls back to the warmed values.
     let liveProgress: (done: Int, total: Int)?
@@ -348,6 +369,7 @@ private struct ProjectSidebarRow: View {
     private var total: Int { liveProgress?.total ?? entry.total }
     private var done: Int { liveProgress?.done ?? entry.done }
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    private var title: String { showsCode ? entry.name : entry.shortName }
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
@@ -357,10 +379,20 @@ private struct ProjectSidebarRow: View {
                 .renderingMode(.template)
                 .opacity(entry.detailsLoaded ? 1 : 0.35)
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.name)
-                    .font(.system(size: 13, weight: isFocusedProject ? .semibold : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                // The due date rides the name line rather than the task line: `nextDue` is the
+                // earliest due across the project's open tasks, which needn't be the next task's own.
+                // It's the same fact the Due grouping buckets on, so a due-grouped list reads as its
+                // section heading spelled out per row.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 13, weight: isFocusedProject ? .semibold : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    if let due = entry.nextDue {
+                        SidebarDueLabel(due: due, isSelected: isSelected)
+                    }
+                }
                 if let task = entry.nextTask {
                     Text(task)
                         .font(.system(size: 11))
@@ -369,7 +401,6 @@ private struct ProjectSidebarRow: View {
                         .truncationMode(.tail)
                 }
             }
-            Spacer(minLength: 0)
         }
         // Sized to its content: a project with nothing in flight is a single line, and only the ones
         // with a next task are two. A uniform height made every row as tall as the tallest, which read
@@ -405,6 +436,43 @@ private struct ProjectSidebarRow: View {
         if let due = entry.nextDue { parts.append("due \(RelativeDue.short(due))") }
         if let task = entry.nextTask { parts.append(task) }
         return parts.joined(separator: "  ·  ")
+    }
+}
+
+/// The project's soonest open due date, trailing its name — the one fact the row's two lines couldn't
+/// carry, and the reason a sidebar is worth scanning at all: which project needs you next.
+///
+/// Plain tinted text rather than the menubar's `DuePillView` capsule. A source list's rows are already
+/// small inset shapes; a filled capsule inside one reads as a badge on a badge, and the menubar's pill
+/// earns its background because it sits on a flat menu row with no shape of its own.
+///
+/// The tint stands down on a selected row: `.secondary` is the one style that resolves correctly
+/// against all three of the list's highlights (accent, unemphasized grey, none), where a fixed red or
+/// white is wrong for two of them. This is the same trade the pill makes when it inverts.
+private struct SidebarDueLabel: View {
+    let due: String
+    let isSelected: Bool
+
+    var body: some View {
+        Text(RelativeDue.short(due))
+            .font(.system(size: 11))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(isSelected ? Color.secondary : tint)
+            // A long project name truncates before the date gives up any of its width — the date is
+            // three or four characters and the name has ellipsis to fall back on.
+            .layoutPriority(1)
+    }
+
+    /// Red overdue, orange due today or tomorrow, quiet after that — the menubar pill's own scale, so
+    /// the two surfaces agree on what "late" looks like. `own: true` because a project's earliest due
+    /// is just a date by the time it reaches here; whether the task inherited it isn't carried.
+    private var tint: Color {
+        switch DueState(due: due, own: true) {
+        case .overdue: return Color(nsColor: .systemRed)
+        case .soon: return Color(nsColor: .systemOrange)
+        case .later, .inherited: return .secondary
+        }
     }
 }
 

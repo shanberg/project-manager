@@ -191,6 +191,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// window is open, so closing the last window is "put the work away", not "quit".
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Coming forward is the moment a stale view is most obvious — you have just been editing the notes
+    /// somewhere else — so check the watched files immediately instead of waiting out the poll.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        watcher?.pokeNow()
+    }
+
     /// Clicking the Dock icon with nothing open brings up a window on the focused project.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { windows.openFocusedProject() }

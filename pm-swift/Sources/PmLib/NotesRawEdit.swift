@@ -607,6 +607,22 @@ private func rawSessionHeadingLineNumber(_ lines: [String], sessionIndex targetS
     return nil
 }
 
+/// The 0-based line numbers of every session heading, in document order.
+private func rawSessionHeadingLineNumbers(_ lines: [String]) -> [Int] {
+    var inSessions = false
+    var headings: [Int] = []
+    for n in lines.indices {
+        let line = lines[n]
+        if !inSessions {
+            if matches(rawSessionsSectionPattern, line) { inSessions = true }
+            continue
+        }
+        if matches(rawSessionHeadingPattern, line) { headings.append(n); continue }
+        if matches(rawSectionPattern, line) { break }  // ran past the Sessions region
+    }
+    return headings
+}
+
 /// The end (exclusive) of the session whose heading is at `headingLine`: the next session heading or
 /// "## " section line, or lines.count. Mirrors parseSessionsBlock's body boundary.
 private func rawSessionEnd(_ lines: [String], headingLine: Int) -> Int {
@@ -774,4 +790,26 @@ public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) ->
     }
     lines.removeSubrange(start..<end)
     return lines.joined(separator: "\n")
+}
+
+/// Delete every *empty* session — one whose body holds nothing but blank lines, so no note and no
+/// tasks — preserving format. Sessions with any content at all are left untouched, so this can never
+/// take prose or tasks with it. Returns nil when there's nothing to prune, so the caller can skip the
+/// write. Sessions are walked back-to-front: each deletion only shifts lines *after* the headings
+/// still to be examined.
+public func pruneEmptySessionsPreservingFormat(rawText: String) -> (rawText: String, removed: Int)? {
+    var lines = rawText.components(separatedBy: "\n")
+    var removed = 0
+    for heading in rawSessionHeadingLineNumbers(lines).reversed() {
+        let end = rawSessionEnd(lines, headingLine: heading)
+        let hasContent = lines[(heading + 1)..<end].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        if hasContent { continue }
+        var start = heading
+        if end >= lines.count, start > 0, lines[start - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+            start -= 1
+        }
+        lines.removeSubrange(start..<end)
+        removed += 1
+    }
+    return removed > 0 ? (lines.joined(separator: "\n"), removed) : nil
 }

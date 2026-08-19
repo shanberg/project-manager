@@ -36,9 +36,9 @@ struct SearchField: NSViewRepresentable {
         if field.stringValue != text { field.stringValue = text }
         guard context.coordinator.lastFocusToken != focusToken else { return }
         context.coordinator.lastFocusToken = focusToken
-        // Deferred: `updateNSView` runs inside a layout pass, and taking first responder from there
-        // re-enters SwiftUI's update.
-        DispatchQueue.main.async {
+        // `updateNSView` runs inside a layout pass, and taking first responder from there re-enters
+        // SwiftUI's update.
+        afterCurrentUpdate {
             field.window?.makeFirstResponder(field)
             field.currentEditor()?.selectAll(nil)
         }

@@ -58,18 +58,61 @@ final class ConfigWatcher {
             notesWatches[path] = nil
         }
         for path in wanted where notesWatches[path] == nil {
-            guard FileManager.default.fileExists(atPath: path) else { continue }
-            let fd = open(path, O_EVTONLY)
-            guard fd >= 0 else { continue }
-            let source = DispatchSource.makeFileSystemObjectSource(
-                fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend], queue: queue)
-            source.setEventHandler { [weak self] in self?.fire() }
-            source.setCancelHandler { close(fd) }
-            source.resume()
-            notesWatches[path] = (source, fd)
+            addNotesWatch(path)
         }
         let snapshot = Array(wanted)
         queue.async { [weak self] in self?.currentNotesPaths = snapshot }
+    }
+
+    /// Open one notes-file vnode watch. Called from `watchNotes` and from `rearmNotesWatch`, both on the
+    /// main queue — which is the only queue that touches `notesWatches`.
+    private func addNotesWatch(_ path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend], queue: queue)
+        source.setEventHandler { [weak self, weak source] in
+            guard let self else { return }
+            self.fire()
+            // A vnode watch survives a write in place but not a *replacement*. Obsidian, the CLI and
+            // most editors save atomically — write a temp file, rename it over the target — which leaves
+            // this descriptor pointing at an inode nothing will ever write to again. The source stays
+            // alive and simply goes silent, so from the first atomic save onward the 2s poll was the
+            // only thing still noticing that file. Re-open on the path to put the fast path back.
+            if let flags = source?.data, flags.contains(.rename) || flags.contains(.delete) {
+                self.rearmNotesWatch(path)
+            }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        notesWatches[path] = (source, fd)
+    }
+
+    /// Replace a watch whose file has been swapped out from under it.
+    private func rearmNotesWatch(_ path: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let existing = self.notesWatches[path] else { return }
+            existing.source.cancel()
+            self.notesWatches[path] = nil
+            // The replacement isn't necessarily in place the instant the rename event lands, so give it
+            // a beat. If it never arrives, the path simply stays unwatched and the poll covers it —
+            // which is the same position we were in before, not a worse one.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, self.notesWatches[path] == nil else { return }
+                self.addNotesWatch(path)
+            }
+        }
+    }
+
+    /// Check the watched files right now, outside the poll's cadence.
+    ///
+    /// Called when the app comes forward. The poll interval is a background-cost tradeoff, but the
+    /// moment you switch back to PM from the editor you were just typing in is exactly when a stale
+    /// view is most obvious — and it's also a moment when doing the work is free, because you are
+    /// looking at the app rather than at whatever the poll was trying not to slow down.
+    func pokeNow() {
+        queue.async { [weak self] in self?.poll() }
     }
 
     private func watchDir(_ path: String) {

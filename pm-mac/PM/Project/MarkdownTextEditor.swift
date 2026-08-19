@@ -13,6 +13,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Called on ⌘↩ — the takeover uses it to save and close.
     var onSubmit: (() -> Void)? = nil
 
+    /// Height of the bar this editor runs up underneath, if it has one. Applied as the scroll view's
+    /// top content inset, which is what lets the prose scroll *under* the bar while still starting
+    /// below it at rest — the same arrangement `safeAreaInset` gives the task list's `ScrollView`.
+    /// Zero (the default) is an editor that owns its whole frame.
+    var topInset: CGFloat = 0
+
     /// The editor's base reading face — the system font at a comfortable editing size.
     static let baseFont = NSFont.systemFont(ofSize: 14)
 
@@ -24,6 +30,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
+        // No window-derived content insets: this editor's top offset comes from the bar above it and is
+        // applied to the text container (see `updateNSView`), so an AppKit-derived one would stack.
+        scrollView.automaticallyAdjustsContentInsets = false
 
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
@@ -61,6 +70,25 @@ struct MarkdownTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         (context.coordinator.textView as? ShortcutTextView)?.onSubmit = onSubmit
         guard let textView = context.coordinator.textView else { return }
+
+        // Push the text down by insetting the *text container*, not the scroll view.
+        //
+        // `contentInsets` is the semantically tidier API and it did not work here, twice: it reserves
+        // the space without moving the clip view, and every correction for that gets undone by
+        // something else on a later turn (taking first responder scrolls the caret into view and works
+        // "visible" out without the inset). The text container has no such argument to lose — the
+        // document itself simply starts lower, so y = 0 *is* the top, the caret at offset 0 is already
+        // in the right place, and there is no negative scroll position for anything to clamp away.
+        //
+        // `textContainerInset`'s height applies to top and bottom alike, so the note also gains that
+        // much room past its last line. In an editor that's welcome rather than a cost: it's the room
+        // that lets you scroll the line you're typing up off the bottom edge.
+        let wantedInset = NSSize(width: 4, height: 8 + topInset)
+        if textView.textContainerInset != wantedInset {
+            textView.textContainerInset = wantedInset
+            // The scroller still spans the whole height, so start its track below the bar.
+            scrollView.scrollerInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
+        }
         if textView.string != text {
             textView.string = text
             context.coordinator.highlight(textView)
@@ -69,8 +97,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // should be ready without a click.
         if !context.coordinator.didFocus {
             context.coordinator.didFocus = true
-            DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+            afterCurrentUpdate { textView.window?.makeFirstResponder(textView) }
         }
+
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

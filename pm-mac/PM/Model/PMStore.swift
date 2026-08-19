@@ -172,6 +172,8 @@ final class PMStore: ObservableObject {
             ProjectIndex.shared.warmAllProjects()
             return
         }
+        // Opening a project sweeps out any session left with nothing in it — see the prune below.
+        let isOpening = projectKey != key
         io.async { [weak self] in
             // Resolve the project directory once (this is the protected-folder access), then reuse
             // the handle for both the notes read and the cached notes path.
@@ -181,6 +183,12 @@ final class PMStore: ObservableObject {
                 Log.write("config: useObsidianCLI=\(cfg?.useObsidianCLI ?? false)")
                 let handle = try resolveNotesHandle(project: name)
                 Log.write("resolved: notesPath=\(handle.notesPath) io=\(type(of: handle.io))")
+                // Sessions with no note and no tasks are swept on open, so abandoned headings don't
+                // pile up. Only on open: a session added mid-session stays until you come back to the
+                // project. Best-effort — a failure here must not cost us the load.
+                if isOpening, let n = try? pruneEmptySessions(handle: handle), n > 0 {
+                    Log.write("pruned \(n) empty session(s)")
+                }
                 let output = try notesShow(handle: handle)
                 Log.write("notesShow ok: todos=\(output.todos.count)")
                 return (output, handle.notesPath, handle.projectPath)

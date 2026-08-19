@@ -265,11 +265,30 @@ struct WindowAccessor: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            // Deferred: `viewDidMoveToWindow` runs mid-layout, and the callback writes SwiftUI state.
+            // `viewDidMoveToWindow` runs mid-layout and the callback writes SwiftUI state.
             let window = self.window
-            DispatchQueue.main.async { [onResolve] in onResolve(window) }
+            MainActor.assumeIsolated {
+                afterCurrentUpdate { [onResolve] in onResolve(window) }
+            }
         }
     }
+}
+
+/// Run `work` after the update currently in progress has finished.
+///
+/// SwiftUI is re-entrant in ways AppKit is not. Taking first responder, or writing view state, from
+/// inside `updateNSView` or `viewDidMoveToWindow` lands in the middle of the update that called it —
+/// which SwiftUI either warns about ("Modifying state during view update") or resolves by dropping the
+/// change on the floor. A hop to the next runloop turn is the way out, and there is no API that avoids
+/// it: the AppKit callbacks these sit in have no "and now layout is done" counterpart.
+///
+/// This exists so those hops are one named thing with the reason attached, rather than a scattering of
+/// bare `DispatchQueue.main.async` calls that read like someone was papering over a race. If you are
+/// reaching for it for any *other* reason — waiting for an animation, letting a value settle — it is
+/// the wrong tool and the thing you want is a real completion handler.
+@MainActor
+func afterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
+    DispatchQueue.main.async(execute: work)
 }
 
 /// A backing AppKit view that opts its region out of a borderless window's

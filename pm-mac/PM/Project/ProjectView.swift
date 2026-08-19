@@ -28,7 +28,20 @@ struct ProjectView: View {
     /// every session (including empty ones) as a first-class header with its editable prose note and
     /// management affordances. Off (the default) is the compact task view — no brief, and sessions are
     /// just quiet captions above their tasks with empty ones hidden.
-    @AppStorage("PMPanelDetailsExpanded") private var detailsExpanded = false
+    /// The persisted value. App-wide, and written from outside this view too — the View menu sets the
+    /// same key (`AppDelegate+Commands`) — so it stays `@AppStorage`. Nothing lays out against it.
+    @AppStorage("PMPanelDetailsExpanded") private var storedDetailsExpanded = false
+
+    /// The value the view actually lays out against: a mirror of `storedDetailsExpanded` that is only
+    /// ever written inside an explicit animation.
+    ///
+    /// `@AppStorage` republishes on the *next* runloop tick, outside whatever transaction changed it, so
+    /// `withAnimation` at a toggle site simply doesn't take. The way round that was for every subview
+    /// moving on the toggle to key its own `.animation(detailsMotion, value:)` off the flag — which
+    /// works, but only for as long as each of them remembers to, and one that forgets jumps silently
+    /// while its neighbours glide. Mirroring into plain view state puts the change back inside a
+    /// transaction, so a single `withAnimation` in `setDetails` drives all of them at once.
+    @State private var detailsExpanded = false
     /// Whether the project-details section is in inline-edit mode (entered by double-clicking its
     /// content). Reset when the section collapses, the project changes, or Escape is pressed.
     @State private var editingDetails = false
@@ -66,7 +79,9 @@ struct ProjectView: View {
     /// Tasks awaiting the inline delete confirmation. Empty when no delete is pending.
     @State private var pendingDelete: [Todo] = []
     /// A row the keyboard just moved onto, for the scroll view to reveal. Cleared once acted on.
-    @State private var scrollTarget: String?
+    @State private var scrollTarget: ScrollRequest?
+    /// Bumped per request, so `ScrollRequest`s for the same row are distinct values. See `ScrollRequest`.
+    @State private var scrollToken = 0
     /// Tracks the ⌥ key so the Open button can swap between Obsidian and Finder live, like the menu.
     @StateObject private var modifiers = ModifierMonitor()
     /// Cancels an open editor when the user clicks outside it (see `OutsideClickMonitor`).
@@ -75,6 +90,7 @@ struct ProjectView: View {
     @StateObject private var mouseUp = LeftMouseUpMonitor()
     /// Moves the task list's highlight onto a right-clicked row (see `RightMouseDownMonitor`).
     @StateObject private var rightClick = RightMouseDownMonitor()
+    @StateObject private var dragEnd = DragEndWatcher()
     /// The task row the pointer is over, for that same right-click. Not `@State` — see `RowHoverTracker`.
     @State private var rowHover = RowHoverTracker()
 
@@ -91,6 +107,16 @@ struct ProjectView: View {
     /// divider, the "Tasks" heading, and the regrouped rows all settle on the same clock rather than at
     /// different rates.
     static let detailsMotion: Animation = .snappy
+
+    /// Show or hide the details brief: one transaction that every subview moving with it rides, plus
+    /// the write-through that keeps other windows and the View menu's checkmark in step. The guard is
+    /// what stops the mirror and the stored value chasing each other when the change arrives from
+    /// outside.
+    private func setDetails(_ expanded: Bool) {
+        guard detailsExpanded != expanded else { return }
+        withAnimation(Self.detailsMotion) { detailsExpanded = expanded }
+        if storedDetailsExpanded != expanded { storedDetailsExpanded = expanded }
+    }
 
     /// True whenever some inline editor (a task row's, or the project-details form) is open.
     private var isAnyEditorActive: Bool { activeEditor != nil || editingDetails }
@@ -130,15 +156,10 @@ struct ProjectView: View {
 
     var body: some View {
         mainColumn
-            // The column keeps a readable width: free to grow to `maxContentWidth` and then stop,
-            // centered, so a wide window becomes margin rather than very long rows. The sidebar is not
-            // laid out here — it's the other half of the window's split view.
-            .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: ProjectWindow.maxContentWidth,
-                   alignment: .leading)
-            // Leading, not centred. The cap keeps rows readable in a wide window; centring the capped
-            // column on top of that left the project name adrift in the middle of the pane, with no
-            // edge to line up against and the sidebar's own content a long way off to its left.
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Fill the pane. The readable-width cap that used to sit here now rides the column's
+            // *contents* instead — see `ReadableWidth`. The sidebar is not laid out here; it's the
+            // other half of the window's split view.
+            .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: .infinity, alignment: .leading)
             // Pin the appearance when the user overrides it; `.system` (nil) follows the OS.
             .preferredColorScheme(colorMode.colorScheme)
             // No background of its own: the window's is the right one.
@@ -176,26 +197,36 @@ struct ProjectView: View {
                     insertion: .move(edge: .trailing).combined(with: .opacity),
                     removal: .move(edge: .trailing).combined(with: .opacity)))
             } else {
-                VStack(spacing: 0) {
-                    // The header (title + toolbar) stays pinned; only the content below scrolls, sliding
-                    // under it when it overflows the window.
-                    stickyHeader
-                    // The reader lets arrow-key navigation reveal a row that's scrolled out of view —
-                    // each row carries its key as a scroll id (see `TaskRow.scrollMarker`).
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            scrollBody
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        // Soften the scroll edges (macOS 26+): content fades as it passes under the pinned
-                        // header and off the window's bottom edge, the idiomatic replacement for a hard clip.
-                        .modifier(SoftScrollEdges())
-                        .onChange(of: scrollTarget) { target in
-                            guard let target else { return }
-                            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target) }
-                            // Cleared so that stepping back onto the same row later scrolls again.
-                            DispatchQueue.main.async { scrollTarget = nil }
-                        }
+                // The reader lets arrow-key navigation reveal a row that's scrolled out of view —
+                // each row carries its key as a scroll id (see `TaskRow.scrollMarker`).
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        scrollBody
+                            .modifier(ReadableWidth())
+                    }
+                    // The header (title + controls) stays pinned in the titlebar strip while the tasks
+                    // scroll *under* it.
+                    //
+                    // A safe-area inset rather than a `VStack` sibling above the scroll view. Stacked,
+                    // the scroll view began below the header, so its content stopped dead at the header's
+                    // lower edge — nothing ever passed beneath it, the scroll edge effect had no work to
+                    // do, and the titlebar strip over this column stayed flat on macOS 26 while the
+                    // sidebar beside it (full-height, inset by AppKit) had the effect all along. Inset,
+                    // the scroll view owns that strip and the system draws the effect across it. The
+                    // inset reserves the header's height either way, so nothing moves at rest.
+                    //
+                    // The material spans the pane; the cap is applied inside `stickyHeader`, per text
+                    // row. With the cap outside, dragging the window past `maxContentWidth` left the bar
+                    // stopping short of the window's edge.
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        stickyHeader.background(TitlebarMaterial())
+                    }
+                    // Soften the scroll edges (macOS 26+): content fades as it passes under the pinned
+                    // header and off the window's bottom edge, the idiomatic replacement for a hard clip.
+                    .modifier(SoftScrollEdges())
+                    .onChange(of: scrollTarget) { target in
+                        guard let target else { return }
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target.key) }
                     }
                 }
                 .transition(.asymmetric(
@@ -203,15 +234,21 @@ struct ProjectView: View {
                     removal: .move(edge: .leading).combined(with: .opacity)))
             }
         }
-        // Show/hide details rides one shared animation (`detailsMotion`). It must be an implicit
-        // value-based modifier, not `withAnimation` at the toggle site: `detailsExpanded` is
-        // `@AppStorage`, whose change republishes on the next runloop tick — outside any explicit
-        // transaction — so `withAnimation` wouldn't take. Every subview that moves on the toggle keys
-        // its own animation off `detailsExpanded` with this same value, so nothing drifts.
-        .animation(Self.detailsMotion, value: detailsExpanded)
+        // No `.animation(detailsMotion, value: detailsExpanded)` here any more. That modifier existed
+        // because the flag was `@AppStorage` and its change landed outside any transaction; now that
+        // `setDetails` owns the write, one `withAnimation` there covers every subview the change
+        // touches, which is what the container modifier was approximating.
         .animation(.snappy, value: tasksMode)
         .animation(.snappy, value: sessionNoteTakeover != nil)
-        .clipped()
+        // No `.clipped()` here. The push transitions do need containing — the outgoing view slides out
+        // of the pane and would draw over the sidebar — but a SwiftUI clip modifier wraps this whole
+        // column, scrolling task list included, in a clip layer it only needs for the fraction of a
+        // second a takeover is entering or leaving. That's the same permanent-clip-around-a-scrolling-
+        // list cost `ProjectSidebar` takes pains to avoid.
+        //
+        // The containing happens at the pane boundary instead, where it belongs and costs nothing:
+        // `ProjectSplitViewController` sets `masksToBounds` on the hosting view, which is layer-backed
+        // already.
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
         .onExitCommand(perform: handleEscape)
@@ -244,8 +281,20 @@ struct ProjectView: View {
         // Adding/deleting a session shifts session indices, so close any open session editor when the
         // count changes (a keyed editor would otherwise point at the wrong session).
         .onChange(of: store.notes?.sessions.count) { _ in activeEditor = nil }
+        // Arm the drag-end backstop for the life of a drag. See `DragEndWatcher` for why the two
+        // existing end signals don't between them cover a real drag.
+        .onChange(of: draggingKey) { key in
+            if key != nil {
+                dragEnd.arm { draggingKey = nil; dropTarget = nil }
+            } else {
+                dragEnd.disarm()
+            }
+        }
         // Collapsing details (from the menu) also leaves any details-edit form.
         .onChange(of: detailsExpanded) { expanded in if !expanded { editingDetails = false } }
+        // Follow the flag when it's changed from outside this view — the View menu writes the key
+        // directly, and another window's toggle republishes it here.
+        .onChange(of: storedDetailsExpanded) { setDetails($0) }
         // Start/stop the outside-click monitor with edit mode; an outside click cancels any editor.
         .onChange(of: isAnyEditorActive) { active in
             if active {
@@ -262,6 +311,9 @@ struct ProjectView: View {
             }
         }
         .onAppear {
+            // Seed the mirror from the persisted value, unanimated — a window opening with the brief
+            // showing should already show it, not play the reveal.
+            detailsExpanded = storedDetailsExpanded
             modifiers.start()
             mouseUp.onMouseUp = { if draggingKey != nil { draggingKey = nil; dropTarget = nil } }
             mouseUp.start()
@@ -269,10 +321,14 @@ struct ProjectView: View {
                 if let key = rowHover.key { selectForContextMenu(key) }
             }
             rightClick.start()
-            // Arrow keys should work on a freshly-opened window without a click to arm them.
-            DispatchQueue.main.async { focusTasks() }
+            // Arrow keys should work on a freshly-opened window without a click to arm them. Deferred
+            // because taking focus from inside `onAppear` re-enters the update that is placing the view.
+            afterCurrentUpdate { focusTasks() }
         }
-        .onDisappear { modifiers.stop(); outsideClick.stop(); mouseUp.stop(); rightClick.stop() }
+        .onDisappear {
+            modifiers.stop(); outsideClick.stop(); mouseUp.stop(); rightClick.stop()
+            dragEnd.disarm()
+        }
     }
 
     /// Invisible buttons that register the window keyboard shortcuts. `.hidden()` keeps them out of the
@@ -451,7 +507,8 @@ struct ProjectView: View {
             selection = [key]
             selectionAnchor = key
         }
-        scrollTarget = key
+        scrollToken &+= 1
+        scrollTarget = ScrollRequest(key: key, token: scrollToken)
         focusTasks()
     }
 
@@ -552,12 +609,18 @@ struct ProjectView: View {
     /// The pinned header — the project title/toolbar, plus the rule that fences it off from the task list
     /// (only when details are collapsed; with details open they sit directly under the title as one
     /// continuous brief). Stays fixed above the scroll area; swapped out entirely for the note takeover.
+    ///
+    /// The readable-width cap sits on each text row rather than around the stack, and the rule is left
+    /// out of it deliberately. This header is two things at once: text, which belongs at the same width
+    /// as the rows it heads, and chrome — the material behind it and the rule under it — which belongs
+    /// to the window and runs the full width of the pane. Capping the stack capped the chrome with it,
+    /// leaving a rule that stopped short of a bar that didn't.
     private var stickyHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            findBar
+            header.modifier(ReadableWidth())
+            findBar.modifier(ReadableWidth())
             if !detailsShowing || findVisible { Divider() }
-            deleteConfirmation
+            deleteConfirmation.modifier(ReadableWidth())
         }
         .animation(.snappy, value: pendingDelete.isEmpty)
         .animation(.snappy, value: findVisible)
@@ -703,7 +766,7 @@ struct ProjectView: View {
             Color.clear
                 .contentShape(Rectangle())
                 .simultaneousGesture(TapGesture(count: 2).onEnded {
-                    if store.projectName != nil { detailsExpanded.toggle() }
+                    if store.projectName != nil { setDetails(!detailsExpanded) }
                 })
         )
         // Right-clicking anywhere in the header opens the same view settings as the slider button.
@@ -755,7 +818,9 @@ struct ProjectView: View {
         }
         .pickerStyle(.inline)
         Divider()
-        Toggle(isOn: $detailsExpanded) { Label("Show notes", systemImage: "note.text") }
+        Toggle(isOn: Binding(get: { detailsExpanded }, set: { setDetails($0) })) {
+            Label("Show notes", systemImage: "note.text")
+        }
         // The ⌥⌘S shortcut lives on a hidden button (see `keyboardShortcuts`) rather than here — a closed
         // SwiftUI menu's items aren't in the responder chain, so a key equivalent set here wouldn't fire.
         Toggle(isOn: Binding(get: { state.sidebarVisible },
@@ -1269,9 +1334,51 @@ struct DropTarget: Equatable {
 
 /// The content column's leading edge in window space, so the header can tell how much of the window's
 /// traffic lights it actually sits under.
+/// Optional, and reduced by "first one that actually reported", for the reason spelled out on
+/// `BarHeightKey`: these are read across a view and its `.background`, so one of the two subtrees sets
+/// a real measurement and the other sets nothing. With a plain value and `value = nextValue()`, the
+/// subtree that reduces last wins — and when that was the non-reporting one, the answer was the
+/// default. `nil` for "didn't measure" makes non-reporters skippable, so the single real measurement
+/// wins regardless of order.
 private struct HeaderOriginKey: PreferenceKey {
+    static var defaultValue: CGFloat?
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = value ?? nextValue() }
+}
+
+/// The header's own height, so its top padding can centre it on the traffic lights whatever it holds.
+///
+/// This one was silently broken by the reduction above: it defaulted to 22 — one `.title3` line — which
+/// is the task list header's height, so that header looked right and the note takeover's two-line header
+/// went on being centred as if it were one line, which is the bug measuring it was meant to fix.
+private struct HeaderHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat?
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = value ?? nextValue() }
+}
+
+/// A request to scroll a row into view.
+///
+/// The token is what makes two requests for the *same* row distinct values, so `onChange` sees them.
+/// That used to be bought by clearing the target on the next runloop turn — a hop whose only purpose
+/// was to make the next identical assignment register, and which left the target briefly stale in
+/// between. Carrying the token says the same thing in the value itself.
+private struct ScrollRequest: Equatable {
+    let key: String
+    let token: Int
+}
+
+/// The height of a whole header bar — header plus its rule and padding, not just the text — so content
+/// underneath can be inset by exactly as much as the bar covers.
+private struct BarHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+
+    /// `max`, not the `value = nextValue()` of the keys above. Those are read where exactly one subtree
+    /// sets them; this one is read across a stack where the bar sets a height and the editor beside it
+    /// sets nothing and so contributes the default. Last-writer-wins then comes down to which of the two
+    /// reduces last, and when it was the editor the answer was 0 — the bar's height never reached the
+    /// editor at all, and the note's first lines sat underneath it.
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }
 
 /// Insets a header that runs up under the window's (hidden, transparent) titlebar so it clears the
@@ -1290,6 +1397,10 @@ private struct TitlebarClearance: ViewModifier {
     /// The column's own offset within its pane — zero until the width cap starts centring it in a wide
     /// window.
     @State private var columnOffsetInPane: CGFloat = 0
+
+    /// The header's measured height. Seeded at one `.title3` line, which is the task list's header, so
+    /// the first frame lands where it will settle rather than jumping.
+    @State private var contentHeight: CGFloat = 22
 
     /// How much of the window's traffic lights this column sits under.
     private var overhang: CGFloat {
@@ -1317,24 +1428,85 @@ private struct TitlebarClearance: ViewModifier {
             // available — each pane's SwiftUI content is its own coordinate root — but pane-local is
             // also all that's needed, given the sidebar case is settled by the flag.
             .background(GeometryReader { geo in
-                Color.clear.preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
+                Color.clear
+                    .preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
+                    // Height is measured here too, and this is the right place for it: horizontal
+                    // padding doesn't change it, and the vertical padding that consumes it is applied
+                    // below, so it can't feed back either.
+                    .preference(key: HeaderHeightKey.self, value: geo.size.height)
             })
-            .onPreferenceChange(HeaderOriginKey.self) { columnOffsetInPane = $0 }
+            .onPreferenceChange(HeaderOriginKey.self) { if let x = $0 { columnOffsetInPane = x } }
+            .onPreferenceChange(HeaderHeightKey.self) { if let h = $0, h > 0 { contentHeight = h } }
             .animation(.easeInOut(duration: 0.25), value: overhang)
-            // Centre the title on the traffic lights, wherever the system has put them — the unified
+            // Centre the header on the traffic lights, wherever the system has put them — the unified
             // titlebar this window uses sits them twice as far down as a compact one would, and
-            // hard-coding either number means the title is level in one and adrift in the other. Half a
-            // title line is the only constant here.
-            .padding(.top, max(8, state.titlebarButtonCenterY - 11))
+            // hard-coding either number means the header is level in one and adrift in the other.
+            //
+            // Centred on the header's *measured* height, not on half a title line. Both headers that
+            // wear this are laid out by it, and they aren't the same height: the task list's is one
+            // `.title3` line, while the note takeover's is a two-line stack (project name over the
+            // session's date). A fixed half-line centres whichever one it was written for and hangs the
+            // other below the buttons — which is what the takeover's header was doing.
+            .padding(.top, max(8, state.titlebarButtonCenterY - contentHeight / 2))
             .padding(.bottom, bottom)
     }
 }
 
-/// Applies the soft scroll-edge effect so scrolling content fades at the top/bottom edges — under the
-/// pinned header and off the bottom edge — rather than hard-clipping.
+/// The readable-width cap: contents grow to `maxContentWidth` and then stop, sitting leading-aligned
+/// in whatever pane width is left over, so a wide window turns into margin rather than very long rows.
+///
+/// Leading, not centred. The cap keeps rows readable in a wide window; centring the capped column on
+/// top of that left the project name adrift in the middle of the pane, with no edge to line up against
+/// and the sidebar's own content a long way off to its left.
+///
+/// This rides the column's contents — the header, the scrolling rows, the note editor — rather than
+/// the column itself. Wrapped around the column, it capped everything inside including the header's
+/// material bar, so dragging the window wider than the cap left the bar stopping short of the window's
+/// edge while the pane kept going. Inside, each piece takes the cap where the cap belongs (the text)
+/// and the bar spans the pane.
+private struct ReadableWidth: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: ProjectWindow.maxContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The material behind a header that stands in the window's titlebar strip, so the strip reads as a
+/// bar rather than as bare window background with text floating in it.
+///
+/// `NSVisualEffectView` on the `.titlebar` material, not `NSGlassEffectView`: this is an edge-to-edge
+/// bar along the top of a pane, and the glass view is for free-floating elements — it rounds its own
+/// corners and carries a shadow, which is right for the focus panel (see `GlassBackground`) and wrong
+/// here. `.titlebar` is also the material the system itself uses in this strip, so it tracks whatever
+/// macOS draws there rather than pinning the app to one version's idea of it.
+///
+/// `.withinWindow` so the content scrolling underneath is what blurs through it. That is the whole
+/// point of the bar: with the content stopping above it there is nothing to blur and the material has
+/// nothing to say.
+private struct TitlebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .titlebar
+        view.blendingMode = .withinWindow
+        // Dim with the window, the way real window chrome does.
+        view.state = .followsWindowActiveState
+        return view
+    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// Applies the soft scroll-edge effect so scrolling content fades off the window's bottom edge rather
+/// than hard-clipping.
+///
+/// Bottom only. The top edge of this scroll view is the header strip, and that now carries a real
+/// material (`TitlebarMaterial`) — an edge effect there would draw a second blur inside the same band,
+/// stacking two treatments in one strip for a muddier version of either alone.
 private struct SoftScrollEdges: ViewModifier {
     func body(content: Content) -> some View {
-        content.scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
+        content
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .scrollEdgeEffectHidden(true, for: .top)
     }
 }
 
@@ -1697,7 +1869,7 @@ private struct DueChip: View {
 // MARK: Session header + note editor
 
 /// A revealed session's first-class header: its date/label line (double-click or right-click to
-/// rename), its editable leading-prose note (double-click to edit, or a quiet "Add note…" placeholder
+/// rename), its editable leading-prose note when it has one (double-click to edit; nothing is drawn
 /// when empty), and a context menu for renaming, adding a note/task, and deleting an empty session.
 /// Publishes no `RowFrame`, so it doesn't participate in the task drag-reorder geometry.
 private struct SessionHeader: View {
@@ -1711,14 +1883,10 @@ private struct SessionHeader: View {
     /// The session's editable note — its leading prose (lines before the first task), trimmed.
     private var prose: String { leadingSessionProse(body: session.body) }
 
-    /// The serif reading face for the rendered note, matching the project-details brief.
-    private static let noteFont: NSFont = {
-        let size: CGFloat = 13
-        if let serif = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif) {
-            return NSFont(descriptor: serif, size: size) ?? NSFont.systemFont(ofSize: size)
-        }
-        return NSFont.systemFont(ofSize: size)
-    }()
+    /// The reading face for the rendered note: the plain system face at full contrast. A session note
+    /// is working text read alongside the task rows, not the printed-brief typography of the project
+    /// details, so it takes the UI face rather than the details' dim serif.
+    private static let noteFont = NSFont.systemFont(ofSize: 13)
     private var context: String { session.label.isEmpty ? session.date : "\(session.date) · \(session.label)" }
 
     var body: some View {
@@ -1734,19 +1902,14 @@ private struct SessionHeader: View {
                 headerLine
             }
 
-            // The note read view / placeholder; opening it (double-click or "Edit Note…") takes over the
-            // whole column with the rich editor — see ProjectView.sessionNoteTakeover. The read view renders
-            // the note's markdown (formatting applied, markers removed) in the details brief's serif face.
+            // The note read view; opening it (double-click or "Edit Note…") takes over the whole column
+            // with the rich editor — see ProjectView.sessionNoteTakeover. The read view renders the note's
+            // markdown (formatting applied, markers removed). A session with no note shows nothing at all
+            // — no placeholder line — so an empty session costs one caption; the context menu still adds one.
             if !prose.isEmpty {
-                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .secondaryLabelColor))
-                    .lineSpacing(1.5)
+                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .labelColor))
+                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { openNote() }
-            } else {
-                Text("Add note…")
-                    .font(.system(size: 13, design: .serif))
-                    .foregroundStyle(.quaternary)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { openNote() }
             }
@@ -1810,6 +1973,8 @@ private struct SessionNoteTakeover: View {
     @State private var text: String
     /// The window this takeover is in, so the save-on-blur only fires for *this* window losing key.
     @State private var hostWindow: NSWindow?
+    /// The bar's measured height, fed to the editor as its text-container top inset.
+    @State private var barHeight: CGFloat = 0
 
     init(index: Int, session: Session, projectName: String,
          store: PMStore, state: ProjectViewState, onBack: @escaping () -> Void) {
@@ -1827,14 +1992,38 @@ private struct SessionNoteTakeover: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            MarkdownTextEditor(text: $text, onSubmit: onBack)   // ⌘↩ closes → onDisappear auto-saves
-                .frame(maxHeight: .infinity)                    // fill the remaining takeover height
+        // The bar stands over the editor rather than stacking above it, and the editor takes the bar's
+        // height as a text-container inset. That's the same arrangement the task list gets from
+        // `safeAreaInset`, reached differently because this content is an `NSTextView` in an
+        // `NSScrollView` rather than a SwiftUI `ScrollView`. Stacked, the prose stopped at the divider
+        // and the material had nothing but window background behind it — a bar in name only.
+        //
+        // A `ZStack` and not `.overlay`, because the bar's measured height has to reach the editor and
+        // siblings in a stack propagate their preferences to the stack's parent beyond any doubt. Read
+        // off an overlay it never arrived, leaving `barHeight` at zero and the first lines of the note
+        // underneath the bar.
+        ZStack(alignment: .top) {
+            MarkdownTextEditor(text: $text, onSubmit: onBack, topInset: barHeight)  // ⌘↩ → auto-saves
                 .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.bottom, 6)
+                // Prose wants the readable cap as much as the task rows do; it used to inherit it from
+                // a frame around the whole column.
+                .modifier(ReadableWidth())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: 0) {
+                // Same bar as the task list's header — this stands in the same titlebar strip, so it
+                // wears the same material. Cap inside the material, as there: the title stays with the
+                // prose it heads, the bar spans the pane.
+                header.modifier(ReadableWidth())
+                Divider()
+            }
+            .background(TitlebarMaterial())
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
+            })
         }
+        .onPreferenceChange(BarHeightKey.self) { barHeight = $0 }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Fill the window. The takeover used to negotiate a height with a window that sized itself to
         // its content; a real window's height is the user's, so the editor takes what it's given.
@@ -2352,6 +2541,45 @@ final class FaviconLoader {
 /// *no-move* drag press: SwiftUI starts a drag (setting the drag key) but if the pointer never moves,
 /// the release is an ordinary click whose mouse-up is delivered here — a real drag's concluding mouse-up
 /// is consumed by the drag loop instead, and handled by the item-provider sentinel / the drop itself.
+/// A backstop for the end of a *real* drag.
+///
+/// Neither existing end signal covers one on its own. `LeftMouseUpMonitor` sees only a press that never
+/// moved — a real drag's concluding mouse-up is consumed by the drag loop, as its own note says. And
+/// `DragEndSentinel` fires when ARC releases the drag's item provider, which is the right moment but
+/// not a guarantee the framework makes. Left to those two, a release the sentinel is late for strands
+/// the list: rows stay dimmed under a drag that has already finished, and only another drag clears it.
+///
+/// So while a drag is in flight, poll for the button coming up. Same technique and the same reason as
+/// `FocusPanelChrome.startDragTracking` — inside AppKit's drag loop, a timer in `.common` modes is the
+/// thing that still runs. Whichever signal arrives first wins and disarms the rest, so in the ordinary
+/// case this ticks a few times during the drag and stops without ever being the one to act.
+@MainActor
+final class DragEndWatcher: ObservableObject {
+    private var timer: Timer?
+    private var onEnd: (() -> Void)?
+
+    func arm(onEnd: @escaping () -> Void) {
+        guard timer == nil else { return }
+        self.onEnd = onEnd
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, NSEvent.pressedMouseButtons & 0x1 == 0 else { return }
+                let end = self.onEnd
+                self.disarm()
+                end?()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    func disarm() {
+        timer?.invalidate()
+        timer = nil
+        onEnd = nil
+    }
+}
+
 final class LeftMouseUpMonitor: ObservableObject {
     var onMouseUp: (() -> Void)?
     private var monitor: Any?

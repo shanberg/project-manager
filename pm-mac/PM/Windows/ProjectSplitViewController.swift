@@ -59,6 +59,15 @@ final class ProjectSplitViewController: NSSplitViewController {
         // width SwiftUI asks for (see `ProjectSidebar`'s frozen layout), and the whole sidebar slides.
         sidebarHosting.sizingOptions = [.minSize]
 
+        // Contain the content column's push transitions (the session-note takeover slides in from the
+        // trailing edge while the task list slides out the leading one) to the pane. The column used to
+        // do this itself with a SwiftUI `.clipped()`, which meant its scrolling task list sat inside a
+        // clip layer permanently for the sake of a quarter-second animation. A layer mask on the pane
+        // that hosts it is free — the hosting view is layer-backed regardless — and the pane's edge is
+        // the boundary the transition should respect anyway.
+        contentHosting.view.wantsLayer = true
+        contentHosting.view.layer?.masksToBounds = true
+
         // An `NSHostingView` reports its SwiftUI ideal size as an intrinsic size and defends it with
         // the default (500) hugging and compression-resistance priorities — which outrank the split
         // view's own dragging constraints, so the divider simply won't move. Standing both panes down
@@ -159,9 +168,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     }
 
     private var didSeedDividerPosition = false
-    /// Clears `sidebarAnimating` once the collapse/expand animation has finished. AppKit offers no
-    /// completion for it, so this is a timer a comfortable margin past its ~0.25s duration.
-    private var animationSettle: DispatchWorkItem?
+    /// Identifies the in-flight sidebar animation, so a completion handler that belongs to a toggle
+    /// that's already been superseded can't clear `sidebarAnimating` out from under the current one.
+    private var settleToken = 0
 
     /// Rebuild the SwiftUI content — used on first load and whenever the window is retargeted at a
     /// different project.
@@ -199,12 +208,27 @@ final class ProjectSplitViewController: NSSplitViewController {
         state.sidebarRestingWidth = max(sidebarItem.viewController.view.frame.width,
                                         ProjectWindow.sidebarMinWidth)
         state.sidebarAnimating = true
-        animationSettle?.cancel()
-        let settle = DispatchWorkItem { [weak self] in self?.state.sidebarAnimating = false }
-        animationSettle = settle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: settle)
 
-        super.toggleSidebar(sender)
+        // Cleared by the animation's own completion, not by a timer set to outlast it. This used to be
+        // a 0.4s `DispatchWorkItem` guessing at a ~0.25s slide, which is only ever right by margin: the
+        // duration isn't ours to know, and under Reduce Motion, low power or load the unfreeze could
+        // land mid-slide — causing exactly the reflow the freeze exists to prevent.
+        //
+        // `super.toggleSidebar` animates through the item's animator proxy, so running it inside an
+        // animation group makes it this group's animation and the completion handler fires when it
+        // actually ends. Re-entrancy is safe: a second toggle mid-flight starts its own group, and the
+        // first group's completion sets the flag the second one has already re-raised, so the token
+        // check keeps the stale completion from clearing it early.
+        settleToken &+= 1
+        let token = settleToken
+        NSAnimationContext.runAnimationGroup { _ in
+            super.toggleSidebar(sender)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.settleToken == token else { return }
+                self.state.sidebarAnimating = false
+            }
+        }
         // `toggleSidebar` animates, so `isCollapsed` is already the new value but the animation is in
         // flight; the observation has already mirrored it into the state and updated the scan. All
         // that's left here is persisting the preference — and only from here, because this is the one

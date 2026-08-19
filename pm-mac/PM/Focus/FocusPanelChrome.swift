@@ -51,7 +51,8 @@ final class FocusPanelChrome {
 
     /// Edge/corner snapping. A drop settles onto one of eight anchors (four corners + four edge
     /// centers), each held a deliberate gap in from the screen edges. `dragTimer` polls for the drag to
-    /// end (button released), `dragControlHeld` records whether ⌃ was down during the drag (which
+    /// end (button released) — see `startDragTracking` for why polling is the only option inside
+    /// AppKit's drag loop — `dragControlHeld` records whether ⌃ was down during the drag (which
     /// disables snapping for free placement), and `isProgrammaticMove` marks our own auto-fit/snap
     /// frame changes so `windowDidMove` doesn't mistake them for a user drag and re-trigger snapping.
     private var dragTimer: Timer?
@@ -285,13 +286,23 @@ final class FocusPanelChrome {
         startDragTracking()
     }
 
-    /// A repeating tick that runs for the duration of a drag (added in `.common` modes so it fires
-    /// during AppKit's window-drag tracking loop). It settles the snap on mouse-up and — crucially —
-    /// keeps the preview in sync when only ⌃ changes, so pressing/releasing ⌃ mid-drag shows/hides the
-    /// ghost immediately, without needing a mouse move to drive `windowDidMove`.
+    /// A repeating tick that runs for the duration of a drag. It settles the snap on mouse-up and —
+    /// crucially — keeps the preview in sync when only ⌃ changes, so pressing/releasing ⌃ mid-drag
+    /// shows/hides the ghost immediately, without needing a mouse move to drive `windowDidMove`.
+    ///
+    /// Polling, deliberately, and not replaceable by an event monitor. `isMovableByWindowBackground`
+    /// hands the drag to AppKit, which runs it as a modal tracking loop: it consumes the mouse and
+    /// modifier events itself, so a `.leftMouseUp`/`.flagsChanged` monitor never sees them. A timer
+    /// added in `.common` modes is what still runs inside that loop, which is why this is a tick rather
+    /// than a callback.
+    ///
+    /// One display frame at a 60Hz floor, rather than the 0.05s it used to be. The rate is a latency
+    /// budget on noticing the mouse came up — the snap fires on the tick that sees it, so a coarse tick
+    /// is a visible pause between letting go and the panel settling. Cheap either way: a tick that
+    /// finds nothing changed does two `NSEvent` reads and returns.
     private func startDragTracking() {
         guard dragTimer == nil else { return }
-        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.dragTick() }
         }
         RunLoop.main.add(t, forMode: .common)

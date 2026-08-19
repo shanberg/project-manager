@@ -347,6 +347,23 @@ public func deleteSession(project: String, sessionIndex: Int) throws {
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
+/// Sweep out every session left with nothing in it — no note, no tasks, just a heading. Returns the
+/// number removed (0 when there was nothing to prune, in which case the file isn't touched). Callers
+/// use this on *open*, not on every write, so a session you add stays put while you're working in it.
+@discardableResult
+public func pruneEmptySessions(project: String) throws -> Int {
+    try pruneEmptySessions(handle: try resolveNotesHandle(project: project))
+}
+
+/// `pruneEmptySessions(project:)` for a caller that already resolved the notes handle.
+@discardableResult
+public func pruneEmptySessions(handle: NotesHandle) throws -> Int {
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText) else { return 0 }
+    try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
+    return result.removed
+}
+
 /// Append a task to the end of a specific session's task list (or right after its heading when it has
 /// no tasks yet), preserving format. Lets the panel populate an otherwise-empty session directly.
 public func appendTaskToSession(project: String, sessionIndex: Int, text: String, due: String?) throws {

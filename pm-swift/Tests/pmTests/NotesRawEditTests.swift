@@ -607,6 +607,64 @@ final class NotesRawEditTests: XCTestCase {
                       "One blank line separates the surviving neighbours")
     }
 
+    /// Pruning sweeps out the session with nothing under it and leaves every session that has content.
+    func testPruneEmptySessions() throws {
+        let result = try XCTUnwrap(pruneEmptySessionsPreservingFormat(rawText: Self.sessionFixture))
+        XCTAssertEqual(result.removed, 1)
+        XCTAssertFalse(result.rawText.contains("Feb 28"), "The heading-only session is gone")
+        XCTAssertTrue(result.rawText.contains("Kicked things off"), "Prose survives")
+        XCTAssertTrue(result.rawText.hasSuffix("- [ ] Old open"), "No dangling blank line left behind")
+        XCTAssertEqual(try parseNotes(markdown: result.rawText).sessions.count, 2)
+    }
+
+    /// A session holding only a note (no tasks) is content — pruning must not take it.
+    func testPruneKeepsNoteOnlySession() {
+        let raw = """
+        ## Sessions
+
+        ### Fri, Feb 28, 2025 Planning
+
+        Kickoff notes.
+        """
+        XCTAssertNil(pruneEmptySessionsPreservingFormat(rawText: raw), "Nothing to prune → no write")
+    }
+
+    /// Adjacent empty sessions all go in one pass, including the first one in the region, and content
+    /// outside the Sessions region is untouched.
+    func testPruneRemovesAdjacentEmptySessionsAndKeepsTrailingSection() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Mar 05, 2025
+
+        ### Mon, Mar 03, 2025
+
+        ### Fri, Feb 28, 2025
+
+        - [ ] Keep me
+
+        ## Learnings
+
+        - Something
+        """
+        let result = try XCTUnwrap(pruneEmptySessionsPreservingFormat(rawText: raw))
+        XCTAssertEqual(result.removed, 2)
+        let notes = try parseNotes(markdown: result.rawText)
+        XCTAssertEqual(notes.sessions.count, 1)
+        XCTAssertEqual(notes.sessions.first?.date, "Fri, Feb 28, 2025")
+        XCTAssertTrue(result.rawText.contains("## Learnings\n\n- Something"))
+        XCTAssertTrue(result.rawText.contains("## Sessions\n\n### Fri, Feb 28, 2025"))
+    }
+
+    /// A run of blank lines is still empty, and a file with no sessions at all prunes to nothing.
+    func testPruneTreatsBlankBodyAsEmptyAndNoOpsWithoutSessions() throws {
+        let blankBody = "## Sessions\n\n### Fri, Feb 28, 2025\n\n\n\n"
+        let result = try XCTUnwrap(pruneEmptySessionsPreservingFormat(rawText: blankBody))
+        XCTAssertEqual(result.removed, 1)
+        XCTAssertEqual(try parseNotes(markdown: result.rawText).sessions.count, 0)
+        XCTAssertNil(pruneEmptySessionsPreservingFormat(rawText: "## Learnings\n\n- Only this"))
+    }
+
     /// Appending a task to an empty session drops it right under the heading.
     func testAppendTaskToEmptySession() throws {
         let result = try XCTUnwrap(appendTaskToSession(
