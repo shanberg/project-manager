@@ -680,6 +680,36 @@ public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, p
     return lines.joined(separator: "\n")
 }
 
+/// Append `prose` to the note of the session dated `date`, creating that session at the top of the
+/// Sessions list when the file hasn't got one yet. Returns the updated text, or nil if the session
+/// can't be located (and couldn't be added — no `## Sessions` heading to splice into).
+///
+/// "The session dated `date`" is the *first* one carrying that date: sessions are added at the top of
+/// the list, so that's the most recent, and the same one the quick add appends its tasks to.
+///
+/// The note is appended rather than replaced — a day's note is a running log, so a second entry joins
+/// the first under a blank line. The prose goes through the same sanitizing as any other session note
+/// (see `commitSessionNotePreservingFormat`), so pasted headings and checkboxes can't break the
+/// document.
+public func appendSessionNotePreservingFormat(rawText: String, prose: String, date: Date = Date()) throws -> String? {
+    let addition = prose.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !addition.isEmpty else { return rawText }
+
+    let target = formatSessionDate(date)
+    var text = rawText
+    var notes = try parseNotes(markdown: text)
+    if !notes.sessions.contains(where: { $0.date == target }) {
+        guard let withSession = sessionAddPreservingFormat(rawText: text, label: "", date: date) else { return nil }
+        text = withSession
+        notes = try parseNotes(markdown: text)
+    }
+    guard let index = notes.sessions.firstIndex(where: { $0.date == target }) else { return nil }
+
+    let existing = leadingSessionProse(body: notes.sessions[index].body)
+    let combined = existing.isEmpty ? addition : existing + "\n\n" + addition
+    return commitSessionNotePreservingFormat(rawText: text, sessionIndex: index, prose: combined)
+}
+
 /// Rename a session's label (the trailing text after the date), preserving format. The heading line
 /// is rebuilt from its captured date parts + the new label — `"### <date>"` or `"### <date> <label>"`,
 /// matching the parser exactly — so the date and the session's body are untouched. An empty label

@@ -337,6 +337,25 @@ public func setSessionNote(project: String, sessionIndex: Int, prose: String) th
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
+/// Append `prose` to today's session note, creating today's session when the project hasn't got one
+/// yet. Returns the session's date string, so a caller can say which session it landed in.
+///
+/// Appending, not replacing: the note is a running log of the day, so a second note joins the first
+/// under a blank line rather than overwriting it. Empty prose is rejected.
+@discardableResult
+public func appendNoteToTodaySession(project: String, prose: String) throws -> String {
+    guard !prose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw PmError.emptySessionNote
+    }
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = try appendSessionNotePreservingFormat(rawText: rawText, prose: prose) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+    return formatSessionDate()
+}
+
 /// Delete a session (heading + body). The caller gates this to sessions with no tasks.
 public func deleteSession(project: String, sessionIndex: Int) throws {
     let handle = try resolveNotesHandle(project: project)

@@ -112,6 +112,19 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
     } catch { fail(error) }
 }
 
+/// `pm notes session note <project> <text>` — append a note to today's session, creating today's
+/// session if the project hasn't got one yet.
+func runNotesSessionNote(args: [String]) {
+    guard args.count >= 2 else {
+        stderr("Usage: pm notes session note <project> <text>")
+        exit(1)
+    }
+    do {
+        let date = try appendNoteToTodaySession(project: args[0], prose: args[1])
+        print("Added note to session: \(date)")
+    } catch { fail(error) }
+}
+
 func runNotesTodoComplete(args: [String]) {
     let filtered = args.filter { $0 != "--no-advance" }
     guard filtered.count >= 3,
@@ -267,9 +280,13 @@ func runNotes(args: [String]) {
             exit(1)
         }
     case "session":
-        guard args.count >= 3, args[1] == "add" else {
-            stderr("Usage: pm notes session add <project> [label] [-d|--date YYYY-MM-DD]")
+        guard args.count >= 3, args[1] == "add" || args[1] == "note" else {
+            stderr("Usage: pm notes session <add|note> <project> ...")
             exit(1)
+        }
+        if args[1] == "note" {
+            runNotesSessionNote(args: Array(args.dropFirst(2)))
+            return
         }
         var addArgs = Array(args.dropFirst(2))
         var dateStr: String?

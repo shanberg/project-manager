@@ -117,7 +117,10 @@ struct AddEditor: View {
         }
         .controlSize(.small)
         .padding(.vertical, 2)
-        .onAppear { textFocused = true }
+        // Next runloop turn, not this one: an editor appears *during* the update that reveals it, and
+        // a focus request made from inside that update is resolved against a view that isn't in the
+        // responder chain yet — so it lands on nothing and the field opens without a caret.
+        .onAppear { afterCurrentUpdate { textFocused = true } }
     }
 
     private func submit() {
@@ -172,7 +175,9 @@ struct InlineTextEditor: View {
         }
         .controlSize(.small)
         .padding(.vertical, 2)
-        .onAppear { focused = true }
+        // Deferred for the reason spelled out on `AddEditor`: focus requested from inside the update
+        // that inserts the field has nothing to land on.
+        .onAppear { afterCurrentUpdate { focused = true } }
     }
 
     private func submit() {
@@ -185,10 +190,11 @@ struct InlineTextEditor: View {
 // MARK: Editor identity + outside-click plumbing
 
 /// Identifies which row has an open inline editor, and which kind. Task editors key on
-/// "sessionIndex:lineIndex"; session editors key on "sess:<index>" (or "sess:new"), so the two
-/// namespaces can't collide and only one editor is ever open at a time.
+/// "sessionIndex:lineIndex" and session editors on "sess:<index>", so the two namespaces can't
+/// collide; the unanchored quick add belongs to no row and takes its own kind. Only one editor is
+/// ever open at a time.
 struct EditorTarget: Equatable {
-    enum Kind { case add, due, edit, wrap, sessionLabel, sessionNote, sessionAddTask, sessionNew }
+    enum Kind { case add, due, edit, wrap, quickAdd, sessionLabel, sessionNote, sessionAddTask }
     let key: String
     let kind: Kind
 }

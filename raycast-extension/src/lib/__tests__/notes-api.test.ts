@@ -4,6 +4,7 @@ import {
   addTodoBeforeInNotes,
   addTodoAsChildInNotes,
   addTodoToTodaySession,
+  appendNoteToTodaySession,
   editTodoInNotes,
   updateDueDateInNotes,
   wrapTodoInNotes,
@@ -19,7 +20,9 @@ import { runPmWithPrefs } from "../pm";
 vi.mock("../pm", () => ({
   buildEnv: vi.fn(() => ({})),
   runPmWithPrefs: vi.fn(),
-  runPmWithStdin: vi.fn().mockResolvedValue({ stdout: "", code: 0, stderr: "" }),
+  runPmWithStdin: vi
+    .fn()
+    .mockResolvedValue({ stdout: "", code: 0, stderr: "" }),
   syncObsidianPrefsToPmConfig: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -145,6 +148,31 @@ describe("addTodoToTodaySession", () => {
   });
 });
 
+describe("appendNoteToTodaySession", () => {
+  it("appends via pm notes session note", async () => {
+    await appendNoteToTodaySession(prefs, "p", "  Shipped the fix.  ");
+    expect(writeCalls()).toEqual([
+      ["notes", "session", "note", "p", "Shipped the fix."],
+    ]);
+  });
+
+  it("does nothing for a blank note", async () => {
+    await appendNoteToTodaySession(prefs, "p", "   \n ");
+    expect(writeCalls()).toEqual([]);
+  });
+
+  it("throws with the CLI's message when the command fails", async () => {
+    vi.mocked(runPmWithPrefs).mockResolvedValueOnce({
+      stdout: "",
+      stderr: "Project not found: p",
+      code: 1,
+    });
+    await expect(appendNoteToTodaySession(prefs, "p", "Note")).rejects.toThrow(
+      "Project not found: p",
+    );
+  });
+});
+
 describe("addTodoAfterInNotes", () => {
   it("inserts with --after and returns the inserted todo from the refreshed notes", async () => {
     const anchor = makeTodo(1, "Second");
@@ -159,7 +187,13 @@ describe("addTodoAfterInNotes", () => {
       focusedKey: "0:0",
     };
 
-    const result = await addTodoAfterInNotes(prefs, "p", notes, anchor, "New task");
+    const result = await addTodoAfterInNotes(
+      prefs,
+      "p",
+      notes,
+      anchor,
+      "New task",
+    );
 
     expect(writeCalls()).toEqual([
       ["notes", "todo", "add", "p", "New task", "--after", "0", "1"],
@@ -175,7 +209,13 @@ describe("addTodoAfterInNotes", () => {
       todos: [anchor, makeTodo(1, "First added")],
       focusedKey: "0:0",
     };
-    const first = await addTodoAfterInNotes(prefs, "p", notes, anchor, "First added");
+    const first = await addTodoAfterInNotes(
+      prefs,
+      "p",
+      notes,
+      anchor,
+      "First added",
+    );
     expect(first.insertedTodo.lineIndex).toBe(1);
 
     showOutput = {
@@ -240,7 +280,13 @@ describe("addTodoBeforeInNotes", () => {
       focusedKey: "0:0",
     };
 
-    const result = await addTodoBeforeInNotes(prefs, "p", notes, anchor, "New task");
+    const result = await addTodoBeforeInNotes(
+      prefs,
+      "p",
+      notes,
+      anchor,
+      "New task",
+    );
 
     expect(writeCalls()).toEqual([
       ["notes", "todo", "add", "p", "New task", "--before", "0", "1"],
@@ -252,7 +298,13 @@ describe("addTodoBeforeInNotes", () => {
 
 describe("addTodoAsChildInNotes", () => {
   it("inserts with --child (pm focuses the new child)", async () => {
-    await addTodoAsChildInNotes(prefs, "p", notes, makeTodo(0, "Parent"), "Child task");
+    await addTodoAsChildInNotes(
+      prefs,
+      "p",
+      notes,
+      makeTodo(0, "Parent"),
+      "Child task",
+    );
     expect(writeCalls()).toEqual([
       ["notes", "todo", "add", "p", "Child task", "--child", "0", "0"],
     ]);

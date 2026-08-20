@@ -59,6 +59,7 @@ pm new <domain> <title>
 pm list [-a|--archive] [--all]
 pm archive <name>
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
+pm notes session note <project> <text>   # Appends to today's session, creating it if needed
 pm notes create <project>   # Requires valid config (active/archive paths) for template path
 pm notes current-day
 pm notes path <project>   # Exits 0 only if the notes file exists; 1 otherwise (for scripting)

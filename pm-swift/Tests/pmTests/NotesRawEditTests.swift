@@ -574,6 +574,63 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertTrue(updated.hasSuffix("### Fri, Feb 28, 2025 Planning\n\nFirst entry."))
     }
 
+    // MARK: - Appending a note to a dated session
+
+    /// A day pm itself would have written a heading for, so the fixture's date string and
+    /// `formatSessionDate`'s agree exactly (the shared `sessionFixture` zero-pads its days, which pm
+    /// never does).
+    private static let noteDay = try! parseSessionDateArgument("2025-03-05")
+    private static let otherDay = try! parseSessionDateArgument("2025-03-03")
+
+    private static func datedFixture() -> String {
+        """
+        ## Sessions
+
+        ### \(formatSessionDate(noteDay))
+
+        Kicked things off with a quick sync.
+
+        - [ ] Current focus @
+
+        ### \(formatSessionDate(otherDay))
+
+        - [ ] Old open
+        """
+    }
+
+    /// A second note joins the first under a blank line rather than replacing it, and stays above the
+    /// session's tasks.
+    func testAppendSessionNoteJoinsExistingProse() throws {
+        let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
+            rawText: Self.datedFixture(), prose: "Then reviewed the plan.", date: Self.noteDay))
+        XCTAssertTrue(updated.contains("Kicked things off with a quick sync.\n\nThen reviewed the plan.\n\n- [ ] Current focus @"),
+                      "Appended under the existing note, still above the tasks")
+    }
+
+    /// With no session for that day, one is created at the top of the list and takes the note.
+    func testAppendSessionNoteCreatesMissingSession() throws {
+        let day = try parseSessionDateArgument("2025-04-01")
+        let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
+            rawText: Self.datedFixture(), prose: "Fresh start.", date: day))
+        XCTAssertTrue(updated.contains("## Sessions\n\n### \(formatSessionDate(day))\n\nFresh start."),
+                      "New session heads the list, carrying the note")
+        XCTAssertTrue(updated.contains("Kicked things off with a quick sync."), "Older sessions untouched")
+    }
+
+    /// The other session's note is not the one appended to.
+    func testAppendSessionNoteTargetsItsOwnDay() throws {
+        let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
+            rawText: Self.datedFixture(), prose: "Only here.", date: Self.otherDay))
+        XCTAssertTrue(updated.contains("### \(formatSessionDate(Self.otherDay))\n\nOnly here.\n\n- [ ] Old open"))
+        XCTAssertEqual(updated.components(separatedBy: "Only here.").count - 1, 1)
+    }
+
+    /// Blank prose is a no-op: the file comes back byte-for-byte.
+    func testAppendSessionNoteIgnoresBlankProse() throws {
+        let raw = Self.datedFixture()
+        XCTAssertEqual(try appendSessionNotePreservingFormat(rawText: raw, prose: "   \n "), raw)
+    }
+
     /// Renaming adds/changes the trailing label, preserving the date and the session body verbatim.
     func testRenameSessionAddsLabel() throws {
         let updated = try XCTUnwrap(renameSessionPreservingFormat(

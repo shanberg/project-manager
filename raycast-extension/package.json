@@ -181,7 +181,7 @@
     {
       "name": "add-focused-session-note",
       "title": "Add Session Note",
-      "description": "Add a session note to the focused project",
+      "description": "Append a note to today's session in the focused project",
       "mode": "view",
       "keywords": [
         "add",

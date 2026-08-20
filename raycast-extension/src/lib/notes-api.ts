@@ -232,7 +232,10 @@ export async function writeNotes(
 
 /** Position of a todo as pm indexes them: session, then task line within that session. */
 function todoPosition(todo: Todo): { si: string; li: string } {
-  return { si: String(todo.sessionIndex ?? 0), li: String(todo.lineIndex ?? 0) };
+  return {
+    si: String(todo.sessionIndex ?? 0),
+    li: String(todo.lineIndex ?? 0),
+  };
 }
 
 /** Run a `pm notes todo <sub> …` command. Throws with the CLI's own message on failure. */
@@ -382,6 +385,26 @@ export async function addTodoToTodaySession(
   const args = [projectName, trimmed];
   if (dueDate) args.push("--due", dueDate);
   await runTodoCommand(prefs, "add", args);
+}
+
+/** Append a note to today's session (creating the session if missing). Uses CLI. */
+export async function appendNoteToTodaySession(
+  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
+  projectName: string,
+  note: string,
+): Promise<void> {
+  const trimmed = note.trim();
+  if (trimmed.length === 0) return;
+  const { stderr, code } = await runPmWithPrefs(prefs, [
+    "notes",
+    "session",
+    "note",
+    projectName,
+    trimmed,
+  ]);
+  if (code !== 0) {
+    throw new Error(stderr.trim() || "pm notes session note failed");
+  }
 }
 
 /** Add a todo before the given todo, at the same hierarchy level. Uses CLI. Returns the notes as

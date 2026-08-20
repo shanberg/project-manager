@@ -306,6 +306,8 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidTodoDue(String)
     /// Todo text was empty or only whitespace.
     case emptyTodoText
+    /// Session note text was empty or only whitespace.
+    case emptySessionNote
 
     public var description: String {
         switch self {
@@ -333,6 +335,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .emptyRenameTitle: return "New project title cannot be empty."
         case .invalidTodoDue(let value): return "Invalid due value: \(value)"
         case .emptyTodoText: return "Task text is required."
+        case .emptySessionNote: return "Session note text is required."
         }
     }
 }

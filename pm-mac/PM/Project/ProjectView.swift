@@ -102,6 +102,9 @@ struct ProjectView: View {
     static let rowContentInset: CGFloat = 12
     /// Horizontal pixels per nesting level (matches `TaskRow.indent`'s step).
     static let indentStep: CGFloat = 16
+    /// The unanchored add editor's identity. Its own kind, so its key can't collide with a task row's
+    /// `"session:line"` or a session's `"sess:<index>"`.
+    static let quickAddTarget = EditorTarget(key: "quick", kind: .quickAdd)
     /// The one animation used for showing/hiding the details brief. A single shared value, applied by
     /// every subview that moves on the toggle (keyed on `detailsExpanded`), so the details content, the
     /// divider, the "Tasks" heading, and the regrouped rows all settle on the same clock rather than at
@@ -204,6 +207,17 @@ struct ProjectView: View {
                         scrollBody
                             .modifier(ReadableWidth())
                     }
+                    // Double-clicking blank space adds a task to today's session (creating today's
+                    // session when there isn't one) — a Finder window's "act on the container, not on
+                    // an item" double-click.
+                    //
+                    // Attached to the scroll view itself rather than to a filler view stretched over
+                    // the leftover space, which would have to be sized from the viewport height minus
+                    // the content's. Everything that wants a double-click of its own — the rows, the
+                    // session captions, the details brief — carries one, and an inner gesture wins, so
+                    // what reaches this is exactly what nothing else claimed.
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { beginQuickAdd() }
                     // The header (title + controls) stays pinned in the titlebar strip while the tasks
                     // scroll *under* it.
                     //
@@ -298,6 +312,11 @@ struct ProjectView: View {
         // Start/stop the outside-click monitor with edit mode; an outside click cancels any editor.
         .onChange(of: isAnyEditorActive) { active in
             if active {
+                // Hand focus off before the editor asks for it. The task list is `.focusable()` and
+                // its `.focused($tasksFocused)` binding is still true at this point, so leaving it set
+                // means the list re-asserts focus in the same update the field is requesting it — a
+                // race the field loses often enough that add editors opened up without a caret.
+                tasksFocused = false
                 outsideClick.onOutsideClick = {
                     activeEditor = nil
                     editingDetails = false
@@ -393,13 +412,29 @@ struct ProjectView: View {
 
     /// Open the inline add editor — File ▸ New Task, and the empty state's button. The new task lands
     /// after the selected row, else after the focused task, so ⌘N in a long list adds where you're
-    /// looking rather than at the bottom.
+    /// looking rather than at the bottom. With nothing to anchor on — an empty project, or one whose
+    /// tasks are all complete and hidden — it falls through to the unanchored quick add.
     private func beginNewTask() {
         guard store.projectName != nil else { return }
-        if store.todos.isEmpty {
-            addingFirstTask = true
-        } else if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
+        if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
             activeEditor = EditorTarget(key: PMStore.key(for: anchor), kind: .add)
+        } else {
+            beginQuickAdd()
+        }
+    }
+
+    /// Open the unanchored add editor: the new task goes to today's session, which `PMStore.addTodo`
+    /// creates when the project hasn't got one yet. This is what a double-click in the window's blank
+    /// space opens, and where ⌘N lands when there's no row to add after.
+    ///
+    /// When the empty-project CTA is on screen it carries an add editor of its own, so this reveals
+    /// that one rather than opening a second editor underneath it.
+    private func beginQuickAdd() {
+        guard store.projectName != nil, !editingDetails, sessionNoteTakeover == nil else { return }
+        if showsEmptyProjectCTA {
+            addingFirstTask = true
+        } else {
+            activeEditor = Self.quickAddTarget
         }
     }
 
@@ -692,13 +727,38 @@ struct ProjectView: View {
                     // empty sessions and the "New session" affordance still show.
                     if isFiltering && visibleTodos.isEmpty {
                         noMatches
-                    } else if store.todos.isEmpty && !detailsExpanded {
+                    } else if showsEmptyProjectCTA {
                         emptyProjectTasks
                     } else {
                         tasksSection
                     }
+                    quickAddEditor
                 }
             }
+        }
+    }
+
+    /// Whether the tasks area is showing the empty-project call to action. Read both by the layout
+    /// above and by `beginQuickAdd`, so the two can't drift into disagreeing about which add editor
+    /// is the one on screen.
+    private var showsEmptyProjectCTA: Bool {
+        store.projectName != nil && !editingDetails
+            && !(isFiltering && visibleTodos.isEmpty)
+            && store.todos.isEmpty && !detailsExpanded
+    }
+
+    /// The unanchored add editor, at the foot of the list. Open only while `beginQuickAdd` has it
+    /// targeted; `store.addTodo` with no anchor appends to today's session and focuses the new task.
+    @ViewBuilder private var quickAddEditor: some View {
+        if activeEditor == Self.quickAddTarget {
+            AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
+                store.addTodo(text: text, due: due)
+                activeEditor = nil
+            } onCancel: { activeEditor = nil }
+                .reportEditorFrame()
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
         }
     }
 
@@ -941,6 +1001,13 @@ struct ProjectView: View {
         return order
     }
 
+    /// A session's bare label (no date), for seeding the rename editor. Empty when the index no
+    /// longer names a session — the same tolerance `sessionContext` takes.
+    private func sessionLabel(_ index: Int) -> String {
+        guard let sessions = store.notes?.sessions, index >= 0, index < sessions.count else { return "" }
+        return sessions[index].label
+    }
+
     private func sessionContext(_ index: Int) -> String {
         guard let sessions = store.notes?.sessions, index < sessions.count else { return "" }
         let s = sessions[index]
@@ -1084,14 +1151,37 @@ struct ProjectView: View {
         ForEach(sessionOrder, id: \.self) { si in
             let context = sessionContext(si)
             if !context.isEmpty {
-                Text(context)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
+                sessionCaption(si, context: context)
             }
             sessionTaskRows(si, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+        }
+    }
+
+    /// A session's quiet caption in the compact list, and the rename editor it swaps for on a
+    /// double-click. The revealed header offers the same editor behind the same gesture (see
+    /// `SessionHeader`); a session shouldn't need the notes view turned on to be labelled.
+    @ViewBuilder private func sessionCaption(_ si: Int, context: String) -> some View {
+        let target = EditorTarget(key: "sess:\(si)", kind: .sessionLabel)
+        if activeEditor == target {
+            InlineTextEditor(seed: sessionLabel(si),
+                             placeholder: "Session label (optional)",
+                             submitLabel: "Rename", allowsEmpty: true) { label in
+                store.renameSession(si, label: label)
+                activeEditor = nil
+            } onCancel: { activeEditor = nil }
+                .reportEditorFrame()
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+        } else {
+            Text(context)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { activeEditor = target }
         }
     }
 
@@ -1139,27 +1229,21 @@ struct ProjectView: View {
         }
     }
 
-    /// The "New session" control (revealed mode): a quiet button that opens an inline optional-label
-    /// editor; submitting adds a today-dated session at the top of the list.
-    @ViewBuilder private var newSessionAffordance: some View {
-        let target = EditorTarget(key: "sess:new", kind: .sessionNew)
-        if activeEditor == target {
-            InlineTextEditor(placeholder: "Session label (optional)", submitLabel: "Add", allowsEmpty: true) { label in
-                store.addSession(label: label)
-                activeEditor = nil
-            } onCancel: { activeEditor = nil }
-                .reportEditorFrame()
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
-        } else {
-            Button { activeEditor = target } label: {
-                Label("New session", systemImage: "plus.circle").font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.top, 4)
+    /// The "New session" control (revealed mode): a quiet button that adds a today-dated session at
+    /// the top of the list.
+    ///
+    /// It doesn't ask for a label first. A session is identified by its date, the label is optional
+    /// decoration, and making the button open a text field put a form in front of a one-click action —
+    /// so it creates the session outright and the label is added afterwards, by double-clicking the
+    /// session's title, which is how every other title in this window is renamed.
+    private var newSessionAffordance: some View {
+        Button { store.addSession() } label: {
+            Label("New session", systemImage: "plus.circle").font(.caption)
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
     }
 
     /// The per-session "Add task" affordance (revealed mode), shown when a session has no visible tasks
@@ -2113,15 +2197,21 @@ private struct ProjectDetailsView: View {
                             placeholderContent
                         }
                     }
-                    // Double-click anywhere in the details content switches to edit mode — including the
-                    // empty placeholders, so a project with no details yet can gain them right here.
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { isEditing = true }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+            // Double-click anywhere in the details band switches to edit mode — including the empty
+            // placeholders, so a project with no details yet can gain them right here.
+            //
+            // The whole band, padding and all, rather than just the content it wraps: the window's
+            // blank space carries a double-click of its own (add a task), so a target that stopped at
+            // the text's edge would hand clicks in the details' own margins to the task list.
+            .ifCondition(!isEditing) { view in
+                view.contentShape(Rectangle())
+                    .onTapGesture(count: 2) { isEditing = true }
+            }
         }
     }
 
