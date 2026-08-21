@@ -61,7 +61,11 @@ targets:
         CFBundleDisplayName: PM
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        LSMinimumSystemVersion: "13.0"
+        # Derived, not restated: the app is built for deploymentTarget above and won't launch below
+        # it, but this key is what LaunchServices and Gatekeeper read. Hardcoded, it said 13.0 while
+        # the target was 26.0 — the cask's `depends_on macos:` covers Homebrew users, but anyone
+        # taking the zip straight from the GitHub release got told it runs on Ventura.
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         # Custom URL scheme so Raycast (and other launchers) can drive the app:
         # pmpanel://toggle | show | hide | pin?on=… | float?on=…
         CFBundleURLTypes:

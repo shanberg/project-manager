@@ -43,7 +43,7 @@
 		</dict>
 	</array>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
