@@ -61,6 +61,30 @@ final class MarkdownHighlightTests: XCTestCase {
         XCTAssertTrue(syntaxPieces(t).contains("["))
     }
 
+    func testWikilink() {
+        XCTAssertEqual(pieces("see [[Design Notes]] first", .wikilink), ["Design Notes"])
+        XCTAssertTrue(syntaxPieces("see [[Design Notes]] first").contains("[["))
+    }
+
+    func testWikilinkAliasReadsAndTargetDims() {
+        let t = "see [[design-notes|the notes]]"
+        XCTAssertEqual(pieces(t, .wikilink), ["the notes"])
+        XCTAssertTrue(syntaxPieces(t).contains("design-notes"), "the target is dimmed syntax")
+        XCTAssertTrue(syntaxPieces(t).contains("|"))
+    }
+
+    func testMarkdownLinksCarryTheirDestination() {
+        let t = "a [one](https://x.dev) and [two](../notes/b.md)"
+        let links = markdownLinks(in: t)
+        XCTAssertEqual(links.map { $0.destination }, ["https://x.dev", "../notes/b.md"])
+        XCTAssertEqual(links.map { String(t[$0.labelRange]) }, ["one", "two"])
+        XCTAssertEqual(links.first.map { String(t[$0.range]) }, "[one](https://x.dev)")
+    }
+
+    func testWikilinksAreNotReadAsLinks() {
+        XCTAssertTrue(markdownLinks(in: "see [[note]] there").isEmpty)
+    }
+
     func testListMarker() {
         XCTAssertEqual(pieces("- item", .listMarker), ["- "])
         XCTAssertEqual(pieces("1. item", .listMarker), ["1. "])

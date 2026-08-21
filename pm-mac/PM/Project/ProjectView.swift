@@ -2637,7 +2637,8 @@ private struct SessionHeader: View {
             // A session with no note draws nothing here — the header line above is the target either
             // way, so there's no placeholder standing in for a note that isn't written yet.
             if !prose.isEmpty {
-                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .labelColor))
+                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .labelColor,
+                                      note: store.notesPath.map { URL(fileURLWithPath: $0) }))
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -2784,7 +2785,11 @@ private struct SessionNoteTakeover: View {
         // Read off an overlay it never arrived, leaving `barHeight` at zero and the first lines of the
         // note underneath the bar.
         ZStack(alignment: .top) {
-            MarkdownTextEditor(text: $text, onSubmit: onBack, topInset: barHeight)  // ⌘↩ → auto-saves
+            // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
+            // it and a relative link can be followed back out of it.
+            MarkdownTextEditor(text: $text, onSubmit: onBack,
+                               noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
+                               topInset: barHeight)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
                 // Prose wants the readable cap as much as the task rows do; it used to inherit it from

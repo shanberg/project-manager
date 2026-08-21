@@ -14,6 +14,9 @@ public enum MarkdownSpanKind: Equatable {
     case italic
     case code
     case link
+    /// An Obsidian-style `[[note]]` reference. These notes live in a vault, where this is how one note
+    /// points at another; styled like a link, because that's what it is.
+    case wikilink
     case listMarker
     case blockquote
     case strikethrough
@@ -36,6 +39,8 @@ private enum MarkdownRE {
     static let list = try? NSRegularExpression(pattern: #"(?m)^([ \t]*(?:[-*+]|\d{1,9}\.)[ \t]+)"#)
     static let code = try? NSRegularExpression(pattern: #"`([^`\n]+)`"#)
     static let link = try? NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\]\()([^)\n]+)(\))"#)
+    // `[[note]]` or `[[note|shown as this]]` — the alias, when there is one, is what reads.
+    static let wikilink = try? NSRegularExpression(pattern: #"(\[\[)([^\]\n|]+)(?:(\|)([^\]\n]*))?(\]\])"#)
     static let bold = try? NSRegularExpression(pattern: #"(\*\*|__)(.+?)\1"#)
     static let strike = try? NSRegularExpression(pattern: #"(~~)(.+?)(~~)"#)
     static let italicStar = try? NSRegularExpression(pattern: #"(?<![\*\w])\*(?!\*)([^*\n]+?)\*(?![\*\w])"#)
@@ -95,6 +100,18 @@ public func markdownSpans(in text: String) -> [MarkdownSpan] {
         addSyntax(m.range(at: 4))   // url
         addSyntax(m.range(at: 5))   // )
     }
+    // Wikilinks: [[note]] or [[note|alias]] — the alias (or the target, when there's no alias) is what
+    // reads; the brackets, the pipe and the target it hides are dimmable syntax.
+    each(MarkdownRE.wikilink) { m in
+        let alias = m.range(at: 4)
+        addContent(alias.location == NSNotFound ? m.range(at: 2) : alias, .wikilink)
+        addSyntax(m.range(at: 1))   // [[
+        if alias.location != NSNotFound {
+            addSyntax(m.range(at: 2))   // the target
+            addSyntax(m.range(at: 3))   // |
+        }
+        addSyntax(m.range(at: 5))   // ]]
+    }
     // Emphasis: bold and strikethrough carry paired markers; italic is a single char each side.
     func paired(_ re: NSRegularExpression?, _ kind: MarkdownSpanKind) {
         each(re) { m in
@@ -120,6 +137,35 @@ public func markdownSpans(in text: String) -> [MarkdownSpan] {
     italic(MarkdownRE.italicUnderscore)
 
     return content + syntax
+}
+
+/// A resolved `[label](destination)` link: where the whole construct sits, where its label sits, and
+/// what it points at. `markdownSpans` treats the destination as dimmable syntax and says nothing about
+/// what it is, so anything that needs to *follow* a link — ⌘-click in the editor, a real link in the
+/// rendered read view — asks here instead.
+public struct MarkdownLink: Equatable {
+    public let range: Range<String.Index>
+    public let labelRange: Range<String.Index>
+    public let destination: String
+    public init(range: Range<String.Index>, labelRange: Range<String.Index>, destination: String) {
+        self.range = range
+        self.labelRange = labelRange
+        self.destination = destination
+    }
+}
+
+/// Locate the markdown links in `text`, in source order.
+public func markdownLinks(in text: String) -> [MarkdownLink] {
+    let full = NSRange(location: 0, length: (text as NSString).length)
+    var out: [MarkdownLink] = []
+    MarkdownRE.link?.enumerateMatches(in: text, range: full) { m, _, _ in
+        guard let m,
+              let whole = Range(m.range, in: text),
+              let label = Range(m.range(at: 2), in: text),
+              let url = Range(m.range(at: 4), in: text) else { return }
+        out.append(MarkdownLink(range: whole, labelRange: label, destination: String(text[url])))
+    }
+    return out
 }
 
 // MARK: - Formatting shortcuts (pure, testable)
