@@ -84,6 +84,26 @@ if [[ -f "$VERSION_SWIFT" ]]; then
   echo "==> Set Version.swift to $VERSION"
 fi
 
+# Keep the app's marketing version in sync (CFBundleShortVersionString reads $(MARKETING_VERSION)).
+# build-app-dist.sh also passes MARKETING_VERSION on the xcodebuild command line, so the release
+# build is right either way — this is what keeps a plain local build, and the committed source,
+# from claiming an older version than the one we just shipped.
+PROJECT_YML="$ROOT/pm-mac/project.yml"
+if [[ -f "$PROJECT_YML" ]]; then
+  if sed -i.bak "s/^\( *MARKETING_VERSION: \).*/\1\"$VERSION\"/" "$PROJECT_YML" 2>/dev/null; then
+    rm -f "${PROJECT_YML}.bak"
+  else
+    # macOS sed
+    sed -i '' "s/^\( *MARKETING_VERSION: \).*/\1\"$VERSION\"/" "$PROJECT_YML"
+  fi
+  ON_DISK_MV=$(sed -n 's/^ *MARKETING_VERSION: "\(.*\)"/\1/p' "$PROJECT_YML")
+  if [[ "$ON_DISK_MV" != "$VERSION" ]]; then
+    echo "Could not set MARKETING_VERSION in $PROJECT_YML (on disk: \"$ON_DISK_MV\")." >&2
+    exit 1
+  fi
+  echo "==> Set MARKETING_VERSION to $VERSION"
+fi
+
 # Verify again right before commit (editor may have overwritten after our write)
 ON_DISK=$(node -p "require(process.argv[1]).version" "$PACKAGE_JSON" 2>/dev/null || true)
 if [[ "$ON_DISK" != "$VERSION" ]]; then
@@ -94,6 +114,7 @@ fi
 echo "==> Commit and push"
 git add package.json
 [[ -f "$ROOT/pm-swift/Sources/pm/Version.swift" ]] && git add pm-swift/Sources/pm/Version.swift
+[[ -f "$ROOT/pm-mac/project.yml" ]] && git add pm-mac/project.yml
 if ! git diff --staged --quiet; then
   git commit -m "Release $TAG"
   git push
