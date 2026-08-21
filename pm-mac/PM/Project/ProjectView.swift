@@ -444,32 +444,44 @@ struct ProjectView: View {
     /// layout and hit-testing while still binding the shortcut on the key window; the undo/redo pair is
     /// disabled when there's nothing to (un/re)do, so the shortcut no-ops (system beep) rather than firing.
     ///
-    /// ⌘C and ⌘A intentionally sit *behind* the Edit menu's own Copy / Select All (see
-    /// `AppDelegate.installMainMenu`): AppKit offers a key equivalent to the main menu before the key
-    /// window, so while a text field is focused those items claim the keystroke and edit the text.
-    /// These fire only when no responder wants them — i.e. when the list, not a field, is in play.
+    /// **Every one of these stands down while a text editor holds the keyboard** (`isEditingText`), and
+    /// that is not belt-and-braces — it is the only thing keeping ⌘A, ⌘C, ⌘Z and ⌘⌫ out of the field
+    /// you are typing in. A SwiftUI `.keyboardShortcut` is offered the keystroke through the key
+    /// *window*'s `performKeyEquivalent`, which AppKit runs **before** the main menu — so an enabled
+    /// button here beats Edit ▸ Select All to it and the field editor never sees the key at all. That
+    /// is what this comment used to claim happened the other way round, and the symptom was ⌘A in a
+    /// task field selecting every project in the sidebar instead of the text in front of you.
+    /// Disabled, the button declines the keystroke, the main menu gets its turn, and `selectAll:` and
+    /// friends route to the field editor the way `MainMenu` intends.
     private var keyboardShortcuts: some View {
         // Suppressed while the note editor is up, so ⌘Z / ⇧⌘Z reach the NSTextView's own (per-keystroke)
-        // undo instead of the document-level history.
+        // undo instead of the document-level history. `isEditingText` covers the same ground while the
+        // editor actually has the keyboard; this also covers a note editor up but not focused.
         let inNoteEditor = sessionNoteTakeover != nil
+        // Any text editor in this window, tracked from the real first responder — see
+        // `ProjectViewState.isEditingText`. Every field in both panes is covered by that one read,
+        // including the ones the view has no flag for (the find bar, the details form's fields).
+        let isEditingText = state.isEditingText
+        let contentCommandsStandDown = inNoteEditor || isEditingText
         return Group {
             Button("Undo", action: store.undo)
                 .keyboardShortcut("z", modifiers: .command)
-                .disabled(!store.canUndo || inNoteEditor)
+                .disabled(!store.canUndo || contentCommandsStandDown)
             Button("Redo", action: store.redo)
                 .keyboardShortcut("z", modifiers: [.command, .shift])
-                .disabled(!store.canRedo || inNoteEditor)
+                .disabled(!store.canRedo || contentCommandsStandDown)
             Button("Copy", action: copySelection)
                 .keyboardShortcut("c", modifiers: .command)
-                .disabled(inNoteEditor || !canCopySelection)
+                .disabled(contentCommandsStandDown || !canCopySelection)
             Button("Select All", action: selectAllInFocusedPane)
                 .keyboardShortcut("a", modifiers: .command)
-                .disabled(inNoteEditor)
+                .disabled(contentCommandsStandDown)
             // ⌘⌫ is the Finder delete; plain ⌫ is handled by the list's `onDeleteCommand`, which only
-            // fires while the list itself (rather than a text field) holds focus.
+            // fires while the list itself (rather than a text field) holds focus. In a field ⌘⌫ is
+            // "delete to the start of the line", which is why this stands down with the rest.
             Button("Delete") { requestDelete(actionTargets) }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(inNoteEditor || actionTargets.isEmpty)
+                .disabled(contentCommandsStandDown || actionTargets.isEmpty)
             // Return activates the selected row, whichever pane holds focus — a list's "open". ⌘Return
             // is the Finder's pairing for the sidebar, opening the project in a new window.
             Button("Open") { activateSelection() }
@@ -508,7 +520,7 @@ struct ProjectView: View {
     /// button — a hidden key equivalent that fired anyway would take it from all four.
     private var canActivateSelection: Bool {
         guard activeEditor == nil, !editingDetails, !addingFirstTask,
-              !findVisible, pendingDelete.isEmpty else { return false }
+              !findVisible, !state.isEditingText, pendingDelete.isEmpty else { return false }
         return state.focusedPane == .projects ? state.projectSelection.count == 1 : selection.count == 1
     }
 
@@ -519,7 +531,8 @@ struct ProjectView: View {
     }
 
     private var canActivateSelectedProject: Bool {
-        state.focusedPane == .projects && state.projectSelection.count == 1 && pendingDelete.isEmpty
+        state.focusedPane == .projects && state.projectSelection.count == 1
+            && !state.isEditingText && pendingDelete.isEmpty
     }
 
     // MARK: Selection

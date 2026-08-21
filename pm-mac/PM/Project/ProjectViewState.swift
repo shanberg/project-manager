@@ -34,6 +34,20 @@ final class ProjectViewState: ObservableObject {
     /// with no target, so the last focused pane stays remembered.
     @Published var focusedPane: ProjectPane? = .tasks
 
+    /// Whether a text editor in this window currently holds the keyboard — a row's inline field, the
+    /// find bar, a details form field, a session note.
+    ///
+    /// Published by the window itself (`TextFocusWindow`, which watches its own first responder)
+    /// rather than assembled from the view's editor flags, because it has to be true for *every* field
+    /// in either pane and only while that field really has the keyboard. A flag like `findVisible` is
+    /// neither: the find bar can be open with the list focused, and no flag at all stands for the
+    /// details form's fields.
+    ///
+    /// What reads it: `ProjectView.keyboardShortcuts`, where it takes the window's ⌘A / ⌘C / ⌘Z / ⌘⌫
+    /// out of play so the keystroke reaches the field you are typing in. See that comment for why the
+    /// main menu can't be relied on to win the race by itself.
+    @Published var isEditingText = false
+
     /// Open a project — the sidebar's double-click and Return. Supplied by the window, which decides
     /// whether that means retargeting this window or opening another one.
     var openProject: (_ projectKey: String, _ inNewWindow: Bool) -> Void = { _, _ in }

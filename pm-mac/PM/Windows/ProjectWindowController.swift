@@ -29,7 +29,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split = ProjectSplitViewController(store: store, state: state,
                                            startsWithSidebar: startsWithSidebar)
 
-        let window = NSWindow(
+        let window = TextFocusWindow(
             contentRect: NSRect(x: 0, y: 0,
                                 width: ProjectWindow.minContentWidth + ProjectWindow.sidebarWidth,
                                 height: 620),
@@ -89,6 +89,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
+        // Publish "a field has the keyboard" into the shared state, which is what stands the window's
+        // own ⌘A / ⌘C / ⌘Z / ⌘⌫ down while you're typing — see `ProjectViewState.isEditingText`.
+        // Deferred by a turn of the run loop because AppKit changes the first responder from inside
+        // SwiftUI's own focus update, and publishing into an `ObservableObject` from there is a write
+        // during a view update. A turn is far quicker than the next keystroke.
+        window.onTextFocusChange = { [weak self] editing in
+            afterCurrentUpdate {
+                guard let self, self.state.isEditingText != editing else { return }
+                self.state.isEditingText = editing
+            }
+        }
 
         // One remembered frame for project windows, not one per project. A window is a window: it has
         // the size and place you last left it at, and pointing it at a different project doesn't move
@@ -318,5 +329,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             // menubar here makes the switch feel immediate.
             (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
         }
+    }
+}
+
+/// The project window itself: an `NSWindow` that reports whether a text editor holds the keyboard.
+///
+/// `makeFirstResponder` is the one funnel every focus change goes through — a SwiftUI `TextField`
+/// taking the keyboard makes its *field editor* (an `NSTextView`) the responder, the note editor's own
+/// text view goes the same way, and moving focus back to a list swaps in a plain view. So watching it
+/// answers "is the user typing" for every field in either pane, present or future, without the panes
+/// having to declare themselves.
+///
+/// Why the window needs to answer that at all: see `ProjectView.keyboardShortcuts`. In short, SwiftUI
+/// key equivalents are offered the keystroke before the main menu is, so the content's commands have to
+/// stand aside for the field rather than trusting Edit ▸ Select All to get there first.
+final class TextFocusWindow: NSWindow {
+    /// Called on every first-responder change with whether the new one is an editable text view.
+    var onTextFocusChange: ((Bool) -> Void)?
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = super.makeFirstResponder(responder)
+        // Read back `firstResponder` rather than trusting the argument: handing a window an
+        // `NSTextField` installs the shared field editor instead, and that editor is the responder the
+        // keystrokes actually reach.
+        onTextFocusChange?((firstResponder as? NSText)?.isEditable ?? false)
+        return accepted
     }
 }

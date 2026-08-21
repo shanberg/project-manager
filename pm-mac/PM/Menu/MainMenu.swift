@@ -9,10 +9,12 @@ import AppKit
 ///
 /// Two routing rules run through the whole thing:
 ///
-///   * Text-editing items keep their **first-responder selectors** (`undo:`, `copy:`, `selectAll:`).
-///     AppKit offers a key equivalent to the main menu before the key window, so while a text field is
-///     focused those items claim the keystroke and edit the text — which is exactly why the content's
-///     own ⌘C / ⌘A sit *behind* them on hidden buttons (see `ProjectView.keyboardShortcuts`).
+///   * Text-editing items keep their **first-responder selectors** (`undo:`, `copy:`, `selectAll:`), so
+///     while a text field is focused they route to its field editor and edit the text. That only
+///     happens if nothing in the key window claims the keystroke first: AppKit offers a key equivalent
+///     to the key *window* before this menu, and a SwiftUI `.keyboardShortcut` is exactly such a claim.
+///     So the content's own ⌘C / ⌘A stand down while a field has the keyboard rather than merely
+///     sitting behind these — see `ProjectView.keyboardShortcuts` and `ProjectViewState.isEditingText`.
 ///   * Everything window-shaped targets `nil` too, so it walks the responder chain and lands on the
 ///     `ProjectWindowController` of whichever window is in front — `toggleSidebar:` is answered by the
 ///     split view controller, the rest by the window controller. App-wide items target the delegate.
