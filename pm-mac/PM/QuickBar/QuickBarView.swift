@@ -66,6 +66,18 @@ struct QuickBarView: View {
                 .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
                 .onKeyPress(.tab) { model.switchMode(); return .handled }
                 .onKeyPress(.escape) { model.onDismiss(); return .handled }
+            // The date the line parsed to, beside the line it came out of. It belongs to the text,
+            // not to any one destination — repeated down a column of rows that all share it, it reads
+            // as a difference between them when it's the one thing they have in common.
+            if let due = model.parsedDueLabel {
+                Text(due)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(.quaternary))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -76,7 +88,8 @@ struct QuickBarView: View {
     private var rowList: some View {
         VStack(spacing: 0) {
             ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                QuickBarRowView(row: row, isSelected: index == model.selection)
+                QuickBarRowView(row: row, isSelected: index == model.selection,
+                                optionDown: model.optionDown)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         model.selection = index
@@ -90,15 +103,27 @@ struct QuickBarView: View {
         .padding(.vertical, 4)
     }
 
-    /// The line under the rows. Says what ⏎ will do *here*, which differs by mode, rather than listing
-    /// every key the panel knows.
+    /// The line under the rows.
+    ///
+    /// In capture it names the project, because that's the one thing the rows can't show you and the
+    /// one thing you most need to be sure of when you're typing from inside another app. The rows
+    /// themselves say what ⏎ does, so the keys listed here are only the ones that aren't on screen.
     private var hint: String? {
         switch model.mode {
         case .capture:
-            guard model.focusedProjectName != nil else { return "No focused project — nowhere to add a task." }
-            return model.rows.isEmpty
-                ? "Type a task. End with due:tomorrow to set a date.  ⇥ go to project"
-                : "↩ add  ·  ⇥ go to project"
+            guard let project = model.focusedProjectName else {
+                return "No focused project — nowhere to add a task."
+            }
+            guard !model.rows.isEmpty else {
+                return "Type a task. End with due:tomorrow to set a date.  ⇥ go to project"
+            }
+            var parts = ["Adding to \(project)", "↩ run"]
+            // Only while ⌥ is up: once it's held the row itself says "Add before", and a hint still
+            // offering to do what's already been done reads as a second, different option.
+            let hasSibling = model.rows.contains { if case .capture(.after, _, _, _) = $0 { return true } else { return false } }
+            if hasSibling, !model.optionDown { parts.append("⌥ add before") }
+            parts.append("⇥ go to project")
+            return parts.joined(separator: "  ·  ")
         case .goToProject:
             return model.rows.isEmpty && !model.query.isEmpty
                 ? "No project matches “\(model.query)”."
@@ -111,6 +136,7 @@ struct QuickBarView: View {
 private struct QuickBarRowView: View {
     let row: QuickBarRow
     let isSelected: Bool
+    let optionDown: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -147,45 +173,39 @@ private struct QuickBarRowView: View {
 
     private var symbol: String {
         switch row {
-        case .addTask: return "plus.circle.fill"
+        case .capture(let placement, _, _, _): return placement.symbol(optionDown: optionDown)
         case .project(_, _, _, _, let isArchived): return isArchived ? "archivebox" : "folder"
         }
     }
 
+    /// A capture row is titled by what it *does*, not by what you typed — the typed line is in the
+    /// field directly above, and four rows repeating it back is noise where the difference between
+    /// them is the whole point.
     private var title: String {
         switch row {
-        case .addTask(let text, _, _): return text
+        case .capture(let placement, _, _, let anchor):
+            return placement.title(anchor: anchor, optionDown: optionDown)
         case .project(_, _, let shortName, _, _): return shortName
         }
     }
 
     private var subtitle: String? {
         switch row {
-        case .addTask(_, _, let project): return "Add to \(project)"
+        case .capture: return nil
         case .project(_, let name, _, let domain, _):
             let code = name.split(separator: " ").first.map(String.init) ?? name
             return domain.isEmpty ? code : "\(code)  ·  \(domain)"
         }
     }
 
-    /// The right-hand column: a due date for a task, "Archived" for a project that is.
-    ///
-    /// The date is spelled out — "Fri, Aug 28" — where a task row's badge would say "in 1w". They're
-    /// answering different questions: a badge on an existing task tells you how much time is left,
-    /// while this is confirming that the "friday" you just typed landed on the day you meant.
+    /// The right-hand column. Only a project row has anything to say here — a capture row's due date
+    /// is shown once, up in the field, since every row shares it.
     private var trailing: String? {
         switch row {
-        case .addTask(_, let due, _):
-            return due.flatMap { RelativeDue.parse($0) }.map { Self.dueFormatter.string(from: $0) }
+        case .capture: return nil
         case .project(_, _, _, _, let isArchived): return isArchived ? "Archived" : nil
         }
     }
-
-    private static let dueFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d")
-        return formatter
-    }()
 }
 
 enum QuickBarMetrics {

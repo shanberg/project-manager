@@ -22,6 +22,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private var previousApp: NSRunningApplication?
     /// Whether the full project list is currently retained for the bar (its scan is gated).
     private var holdsProjectIndex = false
+    /// Watches ⌥ while the bar is up, so a row's label can flip under it. Installed on summon and
+    /// removed on dismiss — there's nothing to watch when the bar isn't taking keystrokes.
+    private var flagsMonitor: Any?
 
     private override init() {
         super.init()
@@ -58,6 +61,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // The bar is nothing but a text field; every path here is a request to type into it.
         panel.takeKey()
         assertKeyOnceSettled(panel)
+        installFlagsMonitor()
         Log.write("quick bar shown: mode=\(mode) frame=\(panel.frame) key=\(panel.isKeyWindow) appActive=\(wasActive)->\(NSApp.isActive)")
     }
 
@@ -81,9 +85,30 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Follow ⌥ for as long as the bar is up.
+    ///
+    /// Only the labels want this: holding ⌥ turns "Add after" into "Add before" the moment the key
+    /// goes down, the same live flip the menubar's alternate item does. Running a row doesn't consult
+    /// it — that reads the modifiers off the keystroke that ran it, which is the authoritative answer
+    /// at the only instant it matters.
+    private func installFlagsMonitor() {
+        guard flagsMonitor == nil else { return }
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.model.optionDown = event.modifierFlags.contains(.option)
+            return event
+        }
+    }
+
+    private func removeFlagsMonitor() {
+        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
+        flagsMonitor = nil
+        model.optionDown = false
+    }
+
     func hide(restoringFocus: Bool = true) {
         pendingHide?.cancel()
         pendingHide = nil
+        removeFlagsMonitor()
         let previous = previousApp
         previousApp = nil
         guard let panel, panel.isVisible else { return }
@@ -107,6 +132,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.recents = index.recents
         model.allProjects = index.allProjects
         model.focusedProjectName = PMFiles.focusedProjectKey().flatMap { PMFiles.projectName(fromKey: $0) }
+        model.focusedTaskText = anchorTask?.text
         model.reset(mode: mode)
     }
 
@@ -124,18 +150,37 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         ProjectIndex.shared.release()
     }
 
+    // MARK: The focused project
+
+    /// The store the bar writes to: the delegate's, which follows `focused.json` and is the *same*
+    /// instance the menubar and any window on that project are showing — so a captured task appears
+    /// everywhere at once, under one undo history.
+    ///
+    /// Taken from the delegate rather than acquired from `StoreRegistry` on the spot because this one
+    /// is already loaded. A freshly acquired store reloads asynchronously, so its task list is empty
+    /// for the first moments — exactly the moments the bar is being seeded and drawn.
+    private var focusedStore: PMStore? {
+        guard let store = (NSApp.delegate as? AppDelegate)?.store, store.projectName != nil else {
+            return nil
+        }
+        return store
+    }
+
+    /// The task a relative placement acts on: the focused one, or the first open task when the project
+    /// has no explicit focus. The same fallback every other surface uses, so "narrow" always has a
+    /// target in a project you haven't focused anything in yet.
+    private var anchorTask: Todo? {
+        guard let store = focusedStore else { return nil }
+        return store.focusedTodo ?? store.openTodos.first
+    }
+
     // MARK: Running a row
 
     private func run(_ row: QuickBarRow, modifiers: EventModifiers) {
         switch row {
-        case .addTask(let text, let due, _):
-            guard let key = PMFiles.focusedProjectKey() else { return }
-            // The focused project's store, which is the *same* store the menubar and any window on that
-            // project are showing — so the task appears everywhere at once, with one undo history.
-            let store = StoreRegistry.shared.acquire(key)
-            store.addTodo(text: text, due: due)
-            StoreRegistry.shared.release(key)
-            Log.write("quick bar added task to \(key): \(text)\(due.map { " due:\($0)" } ?? "")")
+        case .capture(let placement, let text, let due, _):
+            guard let store = focusedStore else { return }
+            apply(placement, text: text, due: due, in: store, modifiers: modifiers)
             hide()
 
         case .project(let key, let name, _, _, _):
@@ -148,6 +193,30 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             if opensWindow {
                 WindowManager.shared.open(projectKey: key)
             }
+        }
+    }
+
+    /// Write a captured line where the chosen row said it would go.
+    private func apply(_ placement: CapturePlacement, text: String, due: String?,
+                       in store: PMStore, modifiers: EventModifiers) {
+        switch placement {
+        case .narrow, .after:
+            // Resolved now rather than held from the summon. The anchor is a value snapshot carrying
+            // line coordinates, and the bar can sit open while a window or the menubar moves the focus
+            // or edits the file underneath it — acting on stale coordinates would put the task on the
+            // wrong line. Every other surface acts on the project's current focus too.
+            guard let anchor = anchorTask else { return }
+            let position: TaskInsertPosition = placement == .narrow
+                ? .child
+                : (modifiers.contains(.option) ? .before : .after)
+            store.addTodo(text: text, due: due, relativeTo: anchor, position: position)
+            Log.write("quick bar \(placement.rawValue): \(text)\(due.map { " due:\($0)" } ?? "")")
+        case .sessionEnd:
+            store.addTodo(text: text, due: due)
+            Log.write("quick bar added task: \(text)\(due.map { " due:\($0)" } ?? "")")
+        case .sessionNote:
+            store.appendSessionNote(text)
+            Log.write("quick bar added session note: \(text)")
         }
     }
 

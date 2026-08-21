@@ -662,4 +662,13 @@ final class PMStore: ObservableObject {
     func addTaskToSession(_ index: Int, text: String, due: String? = nil) {
         mutate { try PmLib.appendTaskToSession(project: $0, sessionIndex: index, text: text, due: due) }
     }
+
+    /// Add prose to today's session note, creating today's session when the project hasn't got one.
+    ///
+    /// Appending, not setting: `setSessionNote` replaces the session's whole leading-prose region, so a
+    /// line typed into the quick bar would silently swallow whatever the day's note already said. The
+    /// note is a running log, and a second entry joins the first.
+    func appendSessionNote(_ prose: String) {
+        mutate { _ = try PmLib.appendNoteToTodaySession(project: $0, prose: prose) }
+    }
 }
