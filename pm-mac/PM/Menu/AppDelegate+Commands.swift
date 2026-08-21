@@ -19,11 +19,17 @@ extension AppDelegate: NSMenuItemValidation {
         for controller in WindowManager.shared.controllers { controller.close() }
     }
 
-    /// Everything beyond the recents lives in Raycast's searchable list, which is where project
-    /// browsing already lives for the menubar item too.
+    /// Browse every project: bring up a window and open its project list with the keyboard in it. The
+    /// sidebar is already the full, filterable list of both folders — this is the command that goes
+    /// straight there instead of making you reveal it first.
     @objc func browseAllProjects() {
-        guard let url = URL(string: "raycast://extensions/shanberg/project-manager/list-projects") else { return }
-        NSWorkspace.shared.open(url)
+        WindowManager.shared.openFocusedProject().revealProjectList()
+    }
+
+    /// Ask for a domain and a title, create the project, and open it. Runs without a window — it's on
+    /// the menu bar item's menu too, and PM keeps running with everything closed.
+    @objc func newProject() {
+        ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
     }
 
     // MARK: View

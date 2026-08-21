@@ -1,4 +1,5 @@
 import AppKit
+import PmLib
 import SwiftUI
 
 /// The focus panel: one small always-on-top window showing the focused project's current task.
@@ -63,6 +64,16 @@ final class FocusPanelController: NSObject, NSWindowDelegate {
     /// has to decide whether "hide" means the window or the whole app, because it isn't the app.
     func toggle() {
         if isVisible { hide() } else { show() }
+    }
+
+    /// Show the panel with one of its editors already open on the focused task — the menu bar item's
+    /// Add ▸ commands, which used to hand off to Raycast's forms.
+    ///
+    /// Shown first, then asked: the request is observed by the panel's content, so the content has to
+    /// exist to hear it.
+    func show(editor kind: EditorTarget.Kind, position: TaskInsertPosition = .child) {
+        show()
+        FocusPanelRequests.shared.open(kind, position: position)
     }
 
     // MARK: Focus tracking

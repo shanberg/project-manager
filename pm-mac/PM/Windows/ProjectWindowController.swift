@@ -247,6 +247,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: Sidebar
 
     /// The header's toggle, routed through the split view so it animates and persists in one place.
+    /// Show the project list and put the keyboard in it — File ▸ All Projects…, which is "browse
+    /// everything" rather than "toggle a pane", so it only ever opens the sidebar.
+    func revealProjectList() {
+        if isSidebarCollapsedNow { split.toggleSidebar(nil) }
+        state.requestFocusProjectList()
+    }
+
+    private var isSidebarCollapsedNow: Bool { !isSidebarVisible }
+
     func toggleSidebar() {
         split.toggleSidebar(nil)
     }

@@ -1096,10 +1096,7 @@ struct ProjectView: View {
                         .padding(.horizontal, 4)
                 }
                 if store.projectName != nil { viewOptionsMenu }
-                if store.projectPath != nil {
-                    openButton
-                    raycastButton
-                }
+                if store.projectPath != nil { openButton }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
@@ -1177,29 +1174,6 @@ struct ProjectView: View {
         .pickerStyle(.inline)
     }
 
-    /// Opens the focused project's view in Raycast (same deep link as the menu's "View Project").
-    private var raycastButton: some View {
-        Button {
-            if let url = URL(string: "raycast://extensions/shanberg/project-manager/view-focused-project") {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            Group {
-                if let icon = AppIcons.smallImage(.raycast) {
-                    Image(nsImage: icon).resizable().frame(width: 15, height: 15)
-                } else {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 20, height: 18)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Open project in Raycast")
-    }
-
     /// Opens the project in Obsidian, or in Finder while ⌥ is held (icon swaps to match), mirroring
     /// the menubar's "Open in Obsidian / ⌥ Open in Finder" alternate. The ⌥ swap is suppressed while a
     /// text editor is open, where ⌥ is used for typing and the flicker is just distracting.
@@ -1229,8 +1203,8 @@ struct ProjectView: View {
         if inFinder {
             guard let path = store.projectPath else { return }
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-        } else if let url = URL(string: "raycast://extensions/shanberg/project-manager/open-focused-in-obsidian") {
-            NSWorkspace.shared.open(url)
+        } else {
+            ObsidianLink.open(store: store)
         }
     }
 

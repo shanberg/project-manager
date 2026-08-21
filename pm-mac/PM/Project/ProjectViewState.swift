@@ -98,6 +98,13 @@ final class ProjectViewState: ObservableObject {
 
     func requestFind() { findRequest &+= 1 }
 
+    /// Bumped by File ▸ All Projects…, which reveals the sidebar and puts the keyboard in it. Same
+    /// counter pattern as `newTaskRequest`: the sidebar's focus is a `@FocusState` it owns, so the only
+    /// way in from outside is to ask.
+    @Published var focusProjectListRequest = 0
+
+    func requestFocusProjectList() { focusProjectListRequest &+= 1 }
+
     /// Bumped by File ▸ New Session, on the same counter pattern as `newTaskRequest`.
     @Published var newSessionRequest = 0
 

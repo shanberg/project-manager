@@ -264,28 +264,33 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return (item, sub)
     }
 
-    /// "Add ▸" — the task add/edit commands (Raycast stays the main add/edit surface).
+    /// "Add ▸" — the task add/edit commands. Each summons the focus panel with that editor already
+    /// open on the focused task: the panel is a non-activating HUD, so typing into it doesn't pull you
+    /// out of whatever you were doing, which is the property these commands wanted from Raycast.
     private func addMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Add", symbol: "plus")
-        sub.addItem(raycastItem("Narrow Focus…", command: "add-focused-todo", symbol: "arrow.turn.down.right"))
-        sub.addItem(raycastItem("Add After…", command: "add-focused-after-todo", symbol: "arrow.down"))
-        let before = raycastItem("Add Before…", command: "add-focused-prior-todo", symbol: "arrow.up")
+        sub.addItem(editorItem("Narrow Focus…", kind: .add, position: .child,
+                               symbol: "arrow.turn.down.right"))
+        sub.addItem(editorItem("Add After…", kind: .add, position: .after, symbol: "arrow.down"))
+        let before = editorItem("Add Before…", kind: .add, position: .before, symbol: "arrow.up")
         before.isAlternate = true
         before.keyEquivalentModifierMask = .option
         sub.addItem(before)
         sub.addItem(.separator())
-        sub.addItem(raycastItem("Edit Task…", command: "edit-focused-task", symbol: "pencil"))
-        sub.addItem(raycastItem("Wrap Task…", command: "wrap-focused-task", symbol: "arrow.up.and.down.and.arrow.left.and.right"))
+        sub.addItem(editorItem("Edit Task…", kind: .edit, symbol: "pencil"))
+        sub.addItem(editorItem("Wrap Task…", kind: .wrap,
+                               symbol: "arrow.up.and.down.and.arrow.left.and.right"))
         return item
     }
 
-    /// "Project ▸" — open/view/edit the project, plus its links (already loaded, no extra IO).
+    /// "Project ▸" — open/rename the project and add to its notes, plus its links (already loaded, no
+    /// extra IO).
     private func projectMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Project", symbol: "folder")
         let finder = actionItem("Open in Finder", #selector(openInFinder), symbol: "folder")
         if let icon = AppIcons.menuIcon(.finder) { finder.image = icon }
         sub.addItem(finder)
-        let obsidian = raycastItem("Open in Obsidian", command: "open-focused-in-obsidian", symbol: "book.closed")
+        let obsidian = actionItem("Open in Obsidian", #selector(openInObsidian), symbol: "book.closed")
         if let icon = AppIcons.menuIcon(.obsidian) { obsidian.image = icon }
         sub.addItem(obsidian)
         // Open in Cursor, only for code projects (a `src/` dir), matching the old Raycast behavior.
@@ -294,10 +299,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             sub.addItem(actionItem("Open in Cursor", #selector(openInCursor), symbol: "chevron.left.forwardslash.chevron.right"))
         }
         sub.addItem(.separator())
-        sub.addItem(raycastItem("View Project…", command: "view-focused-project", symbol: "doc.text"))
-        sub.addItem(raycastItem("Edit Project…", command: "edit-focused-project", symbol: "square.and.pencil"))
-        sub.addItem(raycastItem("Add Session Note…", command: "add-focused-session-note", symbol: "note.text"))
-        sub.addItem(raycastItem("Add Link…", command: "add-focused-link", symbol: "link"))
+        sub.addItem(actionItem("Open Project Window", #selector(showPanel), symbol: "doc.text"))
+        sub.addItem(actionItem("Rename Project…", #selector(renameProject), symbol: "square.and.pencil"))
+        sub.addItem(actionItem("Add Session Note…", #selector(addSessionNote), symbol: "note.text"))
+        sub.addItem(actionItem("Add Link…", #selector(addLink), symbol: "link"))
         let links = linkItems()
         if !links.isEmpty {
             sub.addItem(.separator())
@@ -307,8 +312,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return item
     }
 
-    /// "Switch Project ▸" — a few recents for quick switching, then hand off to Raycast's searchable
-    /// list for everything else so the menu stays the same height as the project count grows.
+    /// "Switch Project ▸" — a few recents for quick switching, then out to the project window's own
+    /// searchable list for everything else, so the menu stays the same height as the project count grows.
     private func switchProjectMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Switch Project", symbol: "arrow.left.arrow.right")
         let recents = store.recents   // mtime-ordered, focused project already excluded, capped
@@ -326,9 +331,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             sub.addItem(r)
         }
         if !recents.isEmpty { sub.addItem(.separator()) }
-        sub.addItem(raycastItem("All Projects…", command: "list-projects", symbol: "magnifyingglass"))
-        sub.addItem(raycastItem("New Project…", command: "new-project", symbol: "plus.square"))
-        sub.addItem(raycastItem("Configure…", command: "configure", symbol: "gearshape"))
+        sub.addItem(actionItem("All Projects…", #selector(browseAllProjects), symbol: "magnifyingglass"))
+        sub.addItem(actionItem("New Project…", #selector(newProject), symbol: "plus.square"))
+        sub.addItem(actionItem("Settings…", #selector(openSettings), symbol: "gearshape"))
         return item
     }
 
@@ -509,24 +514,60 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         item.setValue(NSNumber(value: 1), forKey: "preferredImageVisibility")
     }
 
-    private func raycastItem(_ title: String, command: String, symbol: String? = nil) -> NSMenuItem {
-        let item = actionItem(title, #selector(openRaycast(_:)), symbol: symbol)
-        item.representedObject = Self.raycastBase + command
+    /// A menu item that summons the focus panel with one of its editors open.
+    private func editorItem(_ title: String, kind: EditorTarget.Kind,
+                            position: TaskInsertPosition = .child, symbol: String?) -> NSMenuItem {
+        let item = actionItem(title, #selector(openFocusEditor(_:)), symbol: symbol)
+        item.representedObject = FocusEditorCommand(kind: kind, position: position)
+        item.isEnabled = store.focusedTodo != nil || store.openTodos.first != nil
         return item
     }
 
     // MARK: Actions
 
-    private static let raycastBase = "raycast://extensions/shanberg/project-manager/"
-
-    @objc private func openRaycast(_ sender: NSMenuItem) {
-        if let str = sender.representedObject as? String, let url = URL(string: str) {
-            NSWorkspace.shared.open(url)
+    /// What an Add ▸ item carries. A boxed value rather than the request itself, so the menu doesn't
+    /// mint request ids for commands nobody chose.
+    private final class FocusEditorCommand: NSObject {
+        let kind: EditorTarget.Kind
+        let position: TaskInsertPosition
+        init(kind: EditorTarget.Kind, position: TaskInsertPosition) {
+            self.kind = kind
+            self.position = position
         }
+    }
+
+    @objc private func openFocusEditor(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? FocusEditorCommand else { return }
+        FocusPanelController.shared.show(editor: command.kind, position: command.position)
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
+    }
+
+    @objc private func openInObsidian() { ObsidianLink.open(store: store) }
+
+    @objc private func renameProject() {
+        guard let name = store.projectName, let key = store.projectKey else { return }
+        // Archived or not is a question about where the folder lives, which the key already answers.
+        let isArchived = (try? loadConfigAndPaths()).map { key.hasPrefix("\($0.1.archivePath):") } ?? false
+        ProjectPrompts.rename(projectNamed: name, isArchived: isArchived)
+    }
+
+    /// Start (or jump to) today's session in the project window — the note goes in the notes, so this
+    /// opens the place that edits them rather than offering a second, smaller editor for the same text.
+    @objc private func addSessionNote() {
+        WindowManager.shared.openFocusedProject().newSession(nil)
+    }
+
+    @objc private func addLink() { ProjectPrompts.addLink(store: store) }
+
+    @objc private func browseAllProjects() {
+        WindowManager.shared.openFocusedProject().revealProjectList()
+    }
+
+    @objc private func newProject() {
+        ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
     }
 
     @objc private func openInFinder() {

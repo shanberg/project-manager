@@ -90,6 +90,9 @@ enum MainMenu {
         // what replaced the "New session" button that used to sit in the list.
         add(menu, "New Session", #selector(ProjectWindowController.newSession), target: nil, key: "n",
             modifiers: [.command, .shift])
+        // ⌃⌘N: the third "new" in the File menu, after the task and the session it sits above in scale.
+        add(menu, "New Project…", #selector(AppDelegate.newProject), target: target, key: "n",
+            modifiers: [.command, .control])
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
             modifiers: [.command, .option])
         add(menu, "New Tab", #selector(ProjectWindowController.newWindowForTab(_:)), target: nil, key: "t")

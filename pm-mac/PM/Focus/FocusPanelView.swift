@@ -38,6 +38,8 @@ struct FocusPanelView: View {
     @State private var addingTask = false
     /// Cancels an open editor when the user clicks outside it.
     @StateObject private var outsideClick = OutsideClickMonitor()
+    /// Editors asked for from outside the panel — the menu bar item's Add ▸ commands.
+    @ObservedObject private var requests = FocusPanelRequests.shared
 
     /// Shared with the project window: the appearance override is an app-wide preference, not a
     /// per-surface one.
@@ -84,6 +86,14 @@ struct FocusPanelView: View {
         .animation(.snappy, value: pendingDelete.isEmpty)
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
+        .onChange(of: requests.pending) { request in
+            guard let request, let hero else { return }
+            addPosition = request.position
+            openEditor(request.kind, for: hero)
+            // The panel is deliberately non-activating, so an editor opened without asking for the
+            // keyboard would come up with nowhere for the typing to go.
+            onNeedsKeyboard()
+        }
         .onExitCommand(perform: handleEscape)
         .background(shortcuts)
         // A different project's tasks are behind the same keys, so an open editor would point at the

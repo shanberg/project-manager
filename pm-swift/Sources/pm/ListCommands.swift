@@ -143,17 +143,18 @@ private func emitMatchErrorAndExit(folders: [String], query: String, notFoundMes
 private func runMoveProject(fromActive: Bool, name: String) {
     do {
         let (config, paths) = try loadConfigAndPaths()
-        let domainCodes = Array(config.domains.keys)
-        let (sourcePath, destPath, notFoundMsg, listLabel, doneVerb) = fromActive
-            ? (paths.activePath, paths.archivePath, "No project found matching: \(name)", "Active projects", "Archived")
-            : (paths.archivePath, paths.activePath, "No archived project found matching: \(name)", "Archived projects", "Unarchived")
-        let folders = try getProjectFolders(basePath: sourcePath, domainCodes: domainCodes)
+        let source: ProjectScope = fromActive ? .active : .archive
+        let (notFoundMsg, listLabel, doneVerb) = fromActive
+            ? ("No project found matching: \(name)", "Active projects", "Archived")
+            : ("No archived project found matching: \(name)", "Archived projects", "Unarchived")
+        // Matching stays here rather than in the move itself: the CLI is the caller that gets a typed
+        // query, and it can name the candidates when one is ambiguous.
+        let folders = try getProjectFolders(basePath: source.path(in: paths),
+                                            domainCodes: Array(config.domains.keys))
         guard let matched = matchProject(folders: folders, query: name) else {
             emitMatchErrorAndExit(folders: folders, query: name, notFoundMessage: notFoundMsg, listLabel: listLabel)
         }
-        let src = (sourcePath as NSString).appendingPathComponent(matched)
-        let dest = (destPath as NSString).appendingPathComponent(matched)
-        try FileManager.default.moveItem(atPath: src, toPath: dest)
+        try moveProject(named: matched, from: source, to: source.opposite, paths: paths)
         print("\(doneVerb): \(matched)")
     } catch { fail(error) }
 }

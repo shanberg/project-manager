@@ -195,6 +195,7 @@ struct ProjectSidebar: View {
         //
         // Only ever written on *gaining* focus: a pane losing it (the window going inactive, a menu
         // opening) shouldn't strand ⌘C with no target.
+        .onChange(of: state.focusProjectListRequest) { _ in listFocused = true }
         .onChange(of: listFocused) { focused in
             if focused { state.focusedPane = .projects }
         }
@@ -295,7 +296,8 @@ struct ProjectSidebar: View {
             if !targets.isEmpty {
                 ProjectMenu(targets: targets,
                             onActivate: { openProject($0, inNewWindow: false) },
-                            onOpenInNewWindow: { openProject($0, inNewWindow: true) })
+                            onOpenInNewWindow: { openProject($0, inNewWindow: true) },
+                            onRename: { ProjectPrompts.rename(projectNamed: $0.name, isArchived: $0.isArchived) })
             }
         } primaryAction: { keys in
             // The first click of the double already switched (see `selectionChanged`), so this only
@@ -829,15 +831,23 @@ private struct UpNextCard: View {
 }
 
 /// Right-click actions for the selected projects. Opening is single-target (a window shows one project
-/// at a time); revealing and copying work on the whole selection, so a multi-select is worth making.
-/// Nothing here is destructive — a project is a folder of the user's own files, and removing one belongs
-/// in the Finder.
+/// at a time); revealing, copying and archiving work on the whole selection, so a multi-select is worth
+/// making. Nothing here deletes anything — a project is a folder of the user's own files, archiving is a
+/// move you can undo by unarchiving, and removing one belongs in the Finder.
 private struct ProjectMenu: View {
     let targets: [PMStore.ProjectEntry]
     let onActivate: (PMStore.ProjectEntry) -> Void
     let onOpenInNewWindow: (PMStore.ProjectEntry) -> Void
+    let onRename: (PMStore.ProjectEntry) -> Void
 
     private var isMulti: Bool { targets.count > 1 }
+
+    /// Whether the selection archives or unarchives as one act — nil on a mixed selection, which has no
+    /// single answer and so isn't offered.
+    private var archiveDirection: Bool? {
+        guard let first = targets.first else { return nil }
+        return targets.allSatisfy { $0.isArchived == first.isArchived } ? first.isArchived : nil
+    }
 
     var body: some View {
         if let only = targets.first, !isMulti {
@@ -856,6 +866,24 @@ private struct ProjectMenu: View {
             Label(isMulti ? "Copy \(targets.count) Names" : "Copy Name", systemImage: "doc.on.doc")
         }
         .keyboardShortcut("c", modifiers: .command)
+        if let only = targets.first, !isMulti {
+            Divider()
+            Button { onRename(only) } label: {
+                Label("Rename Project…", systemImage: "pencil")
+            }
+        }
+        if let isArchived = archiveDirection {
+            if !isMulti { Divider() }
+            Button { ProjectLifecycle.move(projects: targets) } label: {
+                Label(archiveTitle(isArchived: isArchived),
+                      systemImage: isArchived ? "tray.and.arrow.up" : "archivebox")
+            }
+        }
+    }
+
+    private func archiveTitle(isArchived: Bool) -> String {
+        if isMulti { return isArchived ? "Unarchive \(targets.count) Projects" : "Archive \(targets.count) Projects" }
+        return isArchived ? "Unarchive Project" : "Archive Project"
     }
 
     /// One Finder window with every selected project's folder highlighted.

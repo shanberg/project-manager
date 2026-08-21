@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.start(handlers: [
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
             .openProjectWindow: { [weak self] in self?.newWindow() },
+            .newProject: { [weak self] in self?.newProject() },
             .completeFocusedTask: { [weak self] in self?.completeFocused() },
             .undoLastCompletion: { [weak self] in self?.undoLastCompletion() },
             .diveIn: { [weak self] in self?.diveInCommand() },

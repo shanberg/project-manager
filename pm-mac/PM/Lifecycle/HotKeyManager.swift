@@ -11,6 +11,7 @@ import Combine
 enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     case toggleFocusPanel
     case openProjectWindow
+    case newProject
     case completeFocusedTask
     case undoLastCompletion
     case diveIn
@@ -22,6 +23,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .toggleFocusPanel: return "Show or Hide Focus Panel"
         case .openProjectWindow: return "Open Focused Project"
+        case .newProject: return "New Project…"
         case .completeFocusedTask: return "Complete Focused Task"
         case .undoLastCompletion: return "Undo Last Completion"
         case .diveIn: return "Dive In"

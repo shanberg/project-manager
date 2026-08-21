@@ -102,6 +102,11 @@ public func createDefaultConfig(activePath: String, archivePath: String) -> PmCo
 public struct ResolvedPaths {
     public let activePath: String
     public let archivePath: String
+
+    public init(activePath: String, archivePath: String) {
+        self.activePath = activePath
+        self.archivePath = archivePath
+    }
 }
 
 /// Resolve active/archive paths from config (and optional env). Pass nil for env to use process environment.
@@ -292,6 +297,8 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidSessionDate(value: String)
     /// Project title must not contain path separators (e.g. / or \).
     case invalidProjectTitle(title: String)
+    /// A domain code that isn't in the configured domains.
+    case unknownDomain(String)
     /// Obsidian CLI read failed (path, message from CLI or process).
     case obsidianCLIReadFailed(path: String, message: String)
     /// Obsidian CLI write/create failed (path, message from CLI or process).
@@ -300,6 +307,8 @@ public enum PmError: Error, CustomStringConvertible {
     case projectFolderMalformed(String)
     /// Rename target path already exists.
     case renameTargetExists(String)
+    /// A project of that name is already in the folder it's being moved into.
+    case moveTargetExists(String)
     /// `pm rename` new title was empty or only whitespace.
     case emptyRenameTitle
     /// Todo `due:` value was empty, multi-line, or contained reserved tokens (`due:`, `@`).
@@ -328,10 +337,12 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidProjectPattern(let pattern): return "Invalid project pattern (check domains in config): \(pattern)"
         case .invalidSessionDate(let value): return "Invalid date for session: \(value). Use YYYY-MM-DD."
         case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
+        case .unknownDomain(let code): return "Unknown domain: \(code)"
         case .obsidianCLIReadFailed(let path, let message): return "Obsidian CLI read failed for \(path): \(message)"
         case .obsidianCLIWriteFailed(let path, let message): return "Obsidian CLI write failed for \(path): \(message)"
         case .projectFolderMalformed(let name): return "Project folder name is not valid for configured domains: \(name)"
         case .renameTargetExists(let path): return "A project folder already exists at: \(path)"
+        case .moveTargetExists(let path): return "A project with that name is already there: \(path)"
         case .emptyRenameTitle: return "New project title cannot be empty."
         case .invalidTodoDue(let value): return "Invalid due value: \(value)"
         case .emptyTodoText: return "Task text is required."

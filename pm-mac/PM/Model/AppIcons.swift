@@ -5,7 +5,7 @@ import AppKit
 /// cached per size for the app's lifetime; a missing app simply returns nil and callers fall back to
 /// an SF Symbol.
 enum AppIcons {
-    enum App: String { case finder, obsidian, raycast }
+    enum App: String { case finder, obsidian }
 
     static func menuIcon(_ app: App) -> NSImage? { icon(app, side: 16) }
     static func smallImage(_ app: App) -> NSImage? { icon(app, side: 15) }
@@ -27,12 +27,6 @@ enum AppIcons {
             return NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
         case .obsidian:
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "md.obsidian") else { return nil }
-            return NSWorkspace.shared.icon(forFile: url.path)
-        case .raycast:
-            // Resolve via the raycast:// scheme handler so it finds whichever Raycast (stable or the
-            // Raycast 2 beta) is registered, rather than a hardcoded bundle id.
-            guard let scheme = URL(string: "raycast://"),
-                  let url = NSWorkspace.shared.urlForApplication(toOpen: scheme) else { return nil }
             return NSWorkspace.shared.icon(forFile: url.path)
         }
     }
