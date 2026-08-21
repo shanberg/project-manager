@@ -340,10 +340,11 @@ struct FocusPanelView: View {
     /// solid orange; an inherited date reads dashed and secondary, matching the task list's chip.
     private func staticDueChip(_ todo: Todo) -> some View {
         let own = todo.dueDate
-        let text = String((own ?? todo.effectiveDueDate ?? "").prefix(10))
+        let raw = own ?? todo.effectiveDueDate ?? ""
         let color: Color = own != nil ? .orange : .secondary
-        return Text(text)
+        return Text(RelativeDue.short(raw))
             .font(.caption2)
+            .monospacedDigit()
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .overlay(
@@ -351,6 +352,10 @@ struct FocusPanelView: View {
                     .strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: own != nil ? [] : [3]))
             )
             .foregroundStyle(color)
+            // The exact date the badge stands for. Read-only here, so the tooltip is the only place
+            // it's available at all.
+            .help(own != nil ? "Due \(RelativeDue.full(raw))"
+                             : "Inherited due \(RelativeDue.full(raw))")
     }
 
     // MARK: Editors

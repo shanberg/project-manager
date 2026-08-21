@@ -154,7 +154,11 @@ final class PMStore: ObservableObject {
     // MARK: Loading
 
     /// Re-read this store's project and its notes. Safe to call frequently (e.g. from the watcher).
-    func reload() {
+    ///
+    /// `then` runs on the main actor once the re-read has landed and been published, so a caller that
+    /// needs to act on the *new* document — pointing an editor at a session it just added — can wait
+    /// for the indices to be real rather than guessing at them.
+    func reload(then: (@MainActor () -> Void)? = nil) {
         let key = boundKey
         guard let key, let name = PMFiles.projectName(fromKey: key) else {
             projectKey = nil
@@ -170,6 +174,7 @@ final class PMStore: ObservableObject {
             hasLoaded = true
             ProjectIndex.shared.warmRecents()
             ProjectIndex.shared.warmAllProjects()
+            then?()
             return
         }
         // Opening a project sweeps out any session left with nothing in it — see the prune below.
@@ -232,6 +237,9 @@ final class PMStore: ObservableObject {
                     self.errorMessage = String(describing: error)
                     self.hasLoaded = true
                 }
+                // After the publish, either way: a completion that only ran on success would strand a
+                // caller waiting on it the one time the read failed.
+                then?()
             }
         }
     }
@@ -276,7 +284,9 @@ final class PMStore: ObservableObject {
     /// Run a document mutation off-main, then reload. When `recordsUndo` (the default), the pre-edit
     /// document is banked for undo if the edit actually changed bytes. Navigation-only writes (focus)
     /// pass `recordsUndo: false` so ⌘Z reverts real edits, not selection changes.
-    private func mutate(recordsUndo: Bool = true, _ work: @escaping (String) throws -> Void) {
+    private func mutate(recordsUndo: Bool = true,
+                        then: (@MainActor () -> Void)? = nil,
+                        _ work: @escaping (String) throws -> Void) {
         guard let name = projectName else { return }
         io.async { [weak self] in
             let before = recordsUndo ? try? Self.snapshot(project: name) : nil
@@ -289,7 +299,7 @@ final class PMStore: ObservableObject {
             if let before, let after = try? Self.snapshot(project: name), before.raw != after.raw {
                 Task { @MainActor in self?.recordUndo(before) }
             }
-            Task { @MainActor in self?.reload() }
+            Task { @MainActor in self?.reload(then: then) }
         }
     }
 
@@ -609,9 +619,28 @@ final class PMStore: ObservableObject {
         todos.contains { $0.sessionIndex == index }
     }
 
-    /// Add a new (empty) session dated today at the top of the Sessions list, with an optional label.
-    func addSession(label: String = "") {
-        mutate { try PmLib.addSession(project: $0, label: label, date: Date()) }
+    /// The index of today's session, or nil when the project hasn't got one yet.
+    var todaySessionIndex: Int? {
+        let today = formatSessionDate()
+        return notes?.sessions.firstIndex { $0.date == today }
+    }
+
+    /// Open today's session for writing, creating it only if the project hasn't got one, and hand its
+    /// index back once the document has been re-read.
+    ///
+    /// "New session" means *today's* session, not another one. A session is identified by its date —
+    /// `addTodo` and the menubar's note both find today's by matching that string — so a second
+    /// heading with the same date leaves every one of those with two candidates and no way to choose.
+    /// This makes the command idempotent: ask for today twice and you land in the same place.
+    func openTodaySession(then: @escaping @MainActor (Int) -> Void) {
+        if let index = todaySessionIndex {
+            then(index)
+            return
+        }
+        mutate(then: { [weak self] in
+            guard let self, let index = self.todaySessionIndex else { return }
+            then(index)
+        }) { try PmLib.addSession(project: $0, label: "", date: Date()) }
     }
 
     /// Rename the session at `index` (its trailing label; the date is preserved).

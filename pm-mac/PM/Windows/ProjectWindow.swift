@@ -7,9 +7,31 @@ enum ProjectWindow {
     /// The narrowest the task column goes. The layout is drawn for a column about this wide.
     static let minContentWidth: CGFloat = 420
 
-    /// The widest the task column goes in a real window. Past this, extra window width becomes margin
-    /// and the column centers, rather than stretching rows to the full width of a large display.
+    /// The widest *prose* goes: the session-note editor, and anything else that is paragraphs to be
+    /// read rather than rows to be scanned. Past this, extra window width becomes margin — a line of
+    /// text much longer than this is measurably harder to read, which is the whole reason for a cap.
     static let maxContentWidth: CGFloat = 700
+
+    /// The widest a project window's *content* gets — sidebar and task column together. This is the
+    /// app's answer to "how big should this window be allowed to be", and it's deliberately answered
+    /// on the window rather than inside it.
+    ///
+    /// Capping the column inside an unbounded window is the arrangement that doesn't work: past the
+    /// cap the rows stop tracking the window's right edge and the extra width becomes a stranded band
+    /// of nothing, which is neither a wider list nor a narrower window. Capping the window means the
+    /// content always fills what's there, and "don't stretch a task list across a 6K display" is
+    /// enforced once, in the one place a user can actually see it — the resize handle stops.
+    ///
+    /// With the sidebar showing this leaves the column a little under 900pt; hidden, it gets the
+    /// sidebar's share too. Both are comfortable widths for a list of short lines with a due chip
+    /// pinned right.
+    static let maxWindowContentWidth: CGFloat = 1120
+
+    /// The widest the task column goes. Equal to the window's cap by construction — that *is* the
+    /// widest column a capped window can produce, with the sidebar hidden — so in a normal window this
+    /// never bites and the rows track the right edge at every size. It stands as the backstop for a
+    /// window that somehow escapes the cap.
+    static let maxListWidth: CGFloat = maxWindowContentWidth
 
     /// The sidebar's default width, and the range the divider can be dragged through.
     static let sidebarWidth: CGFloat = 224

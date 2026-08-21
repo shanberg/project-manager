@@ -106,9 +106,15 @@ private struct ProjectGroup: Identifiable {
 
 /// The project window's sidebar: the projects, in sections, each row carrying the same
 /// completion ring the menubar and the switcher draw plus the project's next task — the switcher menu's
-/// "name — task" line, given room to breathe. Clicking a row focuses that project, so the sidebar is
-/// the always-visible form of the title's switcher menu, for when you're moving between projects rather
-/// than working inside one.
+/// "name — task" line, given room to breathe. Clicking a row switches the window to that project, so the
+/// sidebar is the always-visible form of the title's switcher menu, for when you're moving between
+/// projects rather than working inside one.
+///
+/// **The selection is the window's project.** A source list has one current item, and this one used to
+/// draw two: a selection highlight that meant nothing on its own, and a separate semibold row for the
+/// project the window was actually on. Picking a row — by click, by arrow key, by type-select — is what
+/// switches, exactly as picking a mailbox switches Mail. Only a *multiple* selection stands apart from
+/// the window's project, because a batch to act on isn't a place to go.
 ///
 /// Which projects show, how they're grouped and how they're sorted all live in a menu at the top right
 /// and are persisted. None of them touch the scan: `store.allProjects` is published once in recency
@@ -141,8 +147,21 @@ struct ProjectSidebar: View {
     /// is where it's set — see `SidebarBottomBar`.
     @AppStorage("PMSidebarUpNext") private var upNextHorizon: UpNextHorizon = .week
 
+    /// The pending keyboard-driven switch, cancelled by the next selection change. See
+    /// `selectionChanged`: a walk down the list shouldn't switch to every project it passes through.
+    @State private var switchTask: Task<Void, Never>?
+
     var body: some View {
         list
+            // A source list opens with its current item selected. Nothing else seeds this: the window
+            // is already showing a project, and a list that draws no selection until you touch it
+            // reads as though the window isn't on anything.
+            .onAppear { seedSelection() }
+            // A store created for a window that's still opening doesn't know its project until its
+            // first read lands, so the seed above can arrive too early to have anything to select.
+            .onChange(of: store.projectKey) { _ in seedSelection() }
+            .onChange(of: state.projectSelection) { keys in selectionChanged(to: keys) }
+            .onDisappear { switchTask?.cancel() }
         // While the pane is animating open or shut, lay out at the width it rests at and clip to
         // whatever width it currently has.
         //
@@ -259,8 +278,8 @@ struct ProjectSidebar: View {
         // behind it read as the button jumping. The button is in the bottom bar now and the titlebar is
         // what rows scroll under, which is exactly the case the automatic effect is written for.
         .focused($listFocused)
-        // Selection is the single click (the list's own); the double click switches the window to a
-        // project, and the right-click menu acts on whatever was clicked.
+        // Selection is the single click (the list's own) and switching the window is the same act —
+        // see `selectionChanged`. The right-click menu acts on whatever was clicked.
         //
         // Both hang off the *list*, not the rows. The selection-aware `contextMenu` is the API written
         // for this: it hands the menu the rows the click applies to — the whole selection when the
@@ -269,7 +288,8 @@ struct ProjectSidebar: View {
         // which means mutating state from inside a view body: every row would queue its own "select
         // me", each queued write would rebuild the list, and the rebuild would queue them all again.
         // For the same reason the double click is `primaryAction:` here rather than a `TapGesture` on
-        // each row, which competed with the click the list needs to select with.
+        // each row, which competed with the click the list needs to select with — and why the switch
+        // hangs off the selection rather than off a click handler this list has no room for.
         .contextMenu(forSelectionType: String.self) { keys in
             let targets = entries(for: keys)
             if !targets.isEmpty {
@@ -278,8 +298,65 @@ struct ProjectSidebar: View {
                             onOpenInNewWindow: { openProject($0, inNewWindow: true) })
             }
         } primaryAction: { keys in
+            // The first click of the double already switched (see `selectionChanged`), so this only
+            // has to cover the one case a plain click can't reach: the project is open in another
+            // window, which `WindowManager` brings forward rather than duplicating here.
             guard keys.count == 1, let entry = entries(for: keys).first else { return }
             openProject(entry, inNewWindow: false)
+        }
+    }
+
+    /// Select the window's project when nothing is selected. Never overrides a selection that's
+    /// already there: that one is the user's, and it may be a multiple.
+    private func seedSelection() {
+        guard state.projectSelection.isEmpty, let key = store.projectKey else { return }
+        state.projectSelection = [key]
+    }
+
+    /// The selection moved — switch the window to it.
+    ///
+    /// This is the whole click behaviour, and the whole keyboard behaviour with it, because selecting
+    /// *is* switching here. The modifiers fall out of that:
+    ///
+    /// - plain click / ↑↓ / type-select — switch this window;
+    /// - ⌥-click — switch a *new* window, leaving this one where it is (the app's "⌥ is the alternate
+    ///   destination", same as the header's Open button);
+    /// - ⇧-click / ⌘-click — extend or toggle the selection and switch nothing, since a multiple
+    ///   selection isn't a place to go. ⌘-clicking a single unselected row is therefore also how you
+    ///   select a project without opening it.
+    ///
+    /// New windows are on ⌥ rather than the ⌘ they used to be on, because ⌘-click is how AppKit
+    /// extends a list selection and the two can't both have it.
+    private func selectionChanged(to keys: Set<String>) {
+        switchTask?.cancel()
+        switchTask = nil
+        // Empty (a click below the last row) or multiple: nothing to switch to.
+        guard keys.count == 1, let key = keys.first else { return }
+
+        // `NSApp.currentEvent` is the event being dispatched, so this runs against the click or
+        // keystroke that moved the selection — the same read `openProject` has always made.
+        let event = NSApp.currentEvent
+        let fromMouse = event.map { $0.type == .leftMouseDown || $0.type == .leftMouseUp } ?? false
+
+        if fromMouse, event?.modifierFlags.contains(.option) == true {
+            // The click moved the list's selection on its way to here, but this window isn't going
+            // anywhere — put the selection back on the project it's actually showing.
+            state.projectSelection = store.projectKey.map { [$0] } ?? []
+            state.openProject(key, true)
+            return
+        }
+        guard key != store.projectKey else { return }
+        guard !fromMouse else {
+            state.openProject(key, false)
+            return
+        }
+        // Arrow keys walk the list, and a walk shouldn't leave ten projects in the recents list and
+        // ten writes to `focused.json` behind it — switching is what records both. A click is a
+        // decision and switches at once; a keystroke waits for the selection to settle.
+        switchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, state.projectSelection == keys, key != store.projectKey else { return }
+            state.openProject(key, false)
         }
     }
 
@@ -289,10 +366,10 @@ struct ProjectSidebar: View {
         store.allProjects.filter { keys.contains($0.projectKey) }
     }
 
-    /// Open a project — in this window (the double-click, Return) or a new one (⌘-double-click,
-    /// ⌘Return, the context menu). The window decides what that means; the sidebar just asks.
+    /// Open a project — in this window, or a new one (⌥-click, ⌘Return, the context menu). The window
+    /// decides what that means; the sidebar just asks.
     private func openProject(_ entry: PMStore.ProjectEntry, inNewWindow: Bool) {
-        let newWindow = inNewWindow || NSEvent.modifierFlags.contains(.command)
+        let newWindow = inNewWindow || NSEvent.modifierFlags.contains(.option)
         guard newWindow || entry.projectKey != store.projectKey else { return }
         state.openProject(entry.projectKey, newWindow)
     }
@@ -489,9 +566,9 @@ struct SidebarBottomBar: View {
 /// A single project row: completion ring, name, and the project's next task beneath it. The row draws
 /// only its content — selection, hover and focus highlighting all belong to the enclosing `List`,
 /// which gets the active/inactive and emphasized/unemphasized states right for free. The project the
-/// app is currently *on* is marked separately (its name reads semibold), since selection and focus
-/// are different things here. Archived projects (visible under the Archived / All filters) read a
-/// step quieter than active ones.
+/// window is on also reads semibold; normally that's the selected row too, and the weight only says
+/// anything of its own while a multiple selection is up. Archived projects (visible under the Archived
+/// / All filters) read a step quieter than active ones.
 private struct ProjectSidebarRow: View {
     let entry: PMStore.ProjectEntry
     /// Whether this is the project the window is currently showing.
@@ -601,6 +678,9 @@ private struct SidebarDueLabel: View {
             // A long project name truncates before the date gives up any of its width — the date is
             // three or four characters and the name has ellipsis to fall back on.
             .layoutPriority(1)
+            // The exact date behind the badge. This one summarises a whole project's earliest due, so
+            // the tooltip names it rather than leaving "in 2w" as the only answer available.
+            .help("Next due \(RelativeDue.full(due))")
     }
 
     /// Red overdue, orange due today or tomorrow, quiet after that — the menubar pill's own scale, so
@@ -671,6 +751,7 @@ private struct UpNextCard: View {
                             // The name truncates before the pill gives up any width: the pill is three
                             // or four characters and the name has ellipsis to fall back on.
                             .layoutPriority(1)
+                            .help("Next due \(RelativeDue.full(due))")
                     }
                 }
                 if let task = entry.nextTask {

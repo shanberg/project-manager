@@ -58,6 +58,10 @@ final class WindowManager {
     func retarget(_ controller: ProjectWindowController, to projectKey: String) {
         if let existing = controllers.first(where: { $0.projectKey == projectKey }), existing !== controller {
             existing.show()
+            // The asking window stays on the project it was already showing, so its sidebar has to say
+            // so: the selection there *is* the window's project, and the click that brought us here
+            // moved it onto a project that turned out to live somewhere else.
+            controller.syncSidebarSelection()
             return
         }
         let previous = controller.projectKey

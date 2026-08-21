@@ -44,8 +44,16 @@ enum RelativeDue {
         return cal.dateComponents([.day], from: from, to: to).day
     }
 
-    /// Compact menubar form: "today", "tomorrow", "in 2d", "3d ago", "in 2w", "7/4". Mirrors
-    /// `formatDueForMenubar`/`formatRelativeDueShort` (day-granularity variant).
+    /// The badge form, everywhere a due date is shown small: "today", "tomorrow", "in 2d", "3d ago",
+    /// "in 2w", "in 3mo", "2y ago".
+    ///
+    /// Relative all the way out. This used to fall back to a bare "7/4" past a month, which is the one
+    /// answer a badge can't use — a date is a fact you have to do arithmetic on, and the whole reason
+    /// a badge is three characters wide is that you read it without doing any. Distant dates just get
+    /// a coarser unit. The exact date is never lost: it's the tooltip, `full(_:)`.
+    ///
+    /// Units are floored, not rounded, so a badge never claims more time than there is — "in 1mo" can
+    /// mean anything from 30 to 59 days away, and never fewer than it says.
     static func short(_ raw: String) -> String {
         guard let days = dayDelta(raw) else { return String(raw.prefix(10)) }
         switch days {
@@ -56,10 +64,41 @@ enum RelativeDue {
         case -6 ..< 0: return "\(-days)d ago"
         case 7..<30: return "in \(days / 7)w"
         case -29 ... -7: return "\(-days / 7)w ago"
-        default:
-            guard let date = parse(raw) else { return String(raw.prefix(10)) }
-            let c = Calendar.current.dateComponents([.month, .day], from: date)
-            return "\(c.month ?? 0)/\(c.day ?? 0)"
+        case 30..<365: return "in \(days / 30)mo"
+        case -364 ... -30: return "\(-days / 30)mo ago"
+        case 365...: return "in \(days / 365)y"
+        default: return "\(-days / 365)y ago"
         }
+    }
+
+    /// The unabbreviated date behind a badge, for its tooltip: "Tuesday, August 25, 2026", with the
+    /// time appended when the stored value carried one.
+    ///
+    /// This is the other half of `short(_:)`. A relative badge is quicker to read and worse to act on —
+    /// "in 3mo" doesn't tell you whether that clears a deadline — so the precise date has to stay one
+    /// hover away rather than being dropped. Localized, because unlike the stored `YYYY-MM-DD` this is
+    /// prose the user reads.
+    ///
+    /// Unparseable input returns itself: a tooltip showing the raw stored text is the most useful
+    /// thing to say about a date the app couldn't read, and it's what makes the bad value visible.
+    static func full(_ raw: String) -> String {
+        guard let date = parse(raw) else { return raw.trimmingCharacters(in: .whitespaces) }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = carriesTime(raw) ? .short : .none
+        return formatter.string(from: date)
+    }
+
+    /// Whether a stored value pins a time of day, rather than being a bare date that `parse` defaults
+    /// to noon. Only the tooltip cares — showing "12:00 PM" on every dateless date would be inventing
+    /// a precision the user never set.
+    private static func carriesTime(_ raw: String) -> Bool {
+        let cleaned = raw
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "due:", with: "", options: [.caseInsensitive, .anchored])
+            .trimmingCharacters(in: .whitespaces)
+        guard cleaned.count >= 10 else { return false }
+        let rest = cleaned.dropFirst(10).trimmingCharacters(in: .whitespaces)
+        return rest.count >= 4 && rest.contains(":")
     }
 }

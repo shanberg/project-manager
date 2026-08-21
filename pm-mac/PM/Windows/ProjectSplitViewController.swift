@@ -183,12 +183,18 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Point this window at a different project. The store is swapped rather than rebound: stores are
     /// shared per project (see `StoreRegistry`), so rebinding one would quietly change the project for
     /// every other holder of it.
-    func retarget(to newStore: PMStore) {
+    func retarget(to newStore: PMStore, projectKey: String?) {
         guard newStore !== store else { return }
         store = newStore
-        state.projectSelection = []
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
         contentHosting.rootView = makeContentView()
+        // The sidebar's selection *is* the window's project (see `ProjectSidebar`), so a switch moves
+        // it — including a switch that came from somewhere else entirely, like Open Recent. Written
+        // after the sidebar has been rebound to the new store, so the change is read against the
+        // project the window is now on rather than the one it was on a line ago.
+        // The key rather than `newStore.projectKey`: a store created for this switch doesn't know its
+        // own project until its first (asynchronous) read lands.
+        state.projectSelection = projectKey.map { [$0] } ?? []
     }
 
     // MARK: Sidebar

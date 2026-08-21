@@ -42,6 +42,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.titleVisibility = .hidden
         window.contentMinSize = NSSize(width: ProjectWindow.minContentWidth,
                                        height: ProjectWindow.minWindowHeight)
+        // A ceiling on width, none on height. A task list gains from every extra row it can show and
+        // nothing from being stretched sideways across a large display, so the window stops widening
+        // where the content stops benefiting — see `ProjectWindow.maxWindowContentWidth`.
+        window.contentMaxSize = NSSize(width: ProjectWindow.maxWindowContentWidth,
+                                       height: .greatestFiniteMagnitude)
+        // No full screen, because there's nothing for it to do: a window that can't pass 1120pt wide
+        // would sit pinned at that width in the middle of an otherwise empty display. With
+        // `.fullScreenNone` the green button reverts to plain zoom — grow to the maximum — which is the
+        // honest affordance for a window with a maximum. (Full-height is still free: only width is
+        // capped, so zoom takes the whole screen vertically.)
+        window.collectionBehavior.insert(.fullScreenNone)
         window.tabbingIdentifier = ProjectWindow.tabbingIdentifier
         window.tabbingMode = .automatic
         // An empty toolbar, purely for its geometry. A window with one gets the taller unified titlebar
@@ -99,6 +110,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         if remembersFrame {
             window.setFrameAutosaveName("PMProject")
             window.setFrameUsingName("PMProject")
+            // A frame saved before the cap existed — or under a taller titlebar — can be wider than
+            // the cap allows. `setFrameUsingName` restores it verbatim rather than constraining it, so
+            // the first window after an upgrade would open wider than the user could ever drag it.
+            let capped = window.frameRect(forContentRect:
+                NSRect(x: 0, y: 0, width: ProjectWindow.maxWindowContentWidth, height: 100)).width
+            if window.frame.width > capped {
+                var frame = window.frame
+                frame.size.width = capped
+                window.setFrame(frame, display: false)
+            }
         }
 
         applyTitle()
@@ -179,9 +200,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         guard newKey != projectKey else { return }
         projectKey = newKey
         store = newStore
-        split.retarget(to: newStore)
+        split.retarget(to: newStore, projectKey: newKey)
         applyTitle()
         pushFocusToDisk()
+    }
+
+    /// Put the sidebar's selection back on the project this window is actually showing. Used when a
+    /// switch doesn't happen after all — the project turned out to be open in another window, which
+    /// comes forward instead (see `WindowManager.retarget`).
+    func syncSidebarSelection() {
+        state.projectSelection = projectKey.map { [$0] } ?? []
     }
 
     /// The window's title — invisible in the titlebar, but what the Window menu, ⌘`, and the tab bar
@@ -259,6 +287,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         state.requestNewTask()
     }
 
+    /// File ▸ New Session. Same hand-off as New Task: the content opens today's session's note.
+    @objc func newSession(_ sender: Any?) {
+        state.requestNewSession()
+    }
+
     /// Edit ▸ Find ▸ Find…. Opens the window's find bar and puts the cursor in it.
     @objc func performFindPanelAction(_ sender: Any?) {
         state.requestFind()
@@ -266,7 +299,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(newTask(_:)), #selector(performFindPanelAction(_:)):
+        case #selector(newTask(_:)), #selector(newSession(_:)), #selector(performFindPanelAction(_:)):
             return store.projectName != nil
         case #selector(newWindowForTab(_:)):
             // Nothing to open if every project is already on screen.

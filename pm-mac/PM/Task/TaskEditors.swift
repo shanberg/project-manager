@@ -42,6 +42,68 @@ enum DueFormat {
     static func string(_ d: Date) -> String { formatter.string(from: d) }
 }
 
+/// The relative answers a due-date menu offers before it offers a calendar.
+///
+/// Badges read "tomorrow" and "in 2w" (see `RelativeDue`), so an editor that demanded 08/25/2026 left
+/// the user converting in both directions: the list says how far away, the editor asked which day.
+/// These are the same language pointed the other way — the dates people actually pick, named the way
+/// they'd say them, each carrying the day it resolves to so the name is never a guess.
+enum DueSuggestion {
+    struct Option: Identifiable {
+        let id: String
+        let title: String
+        let date: Date
+
+        /// "Wed, Aug 20" — what the title works out to, shown beside it.
+        var hint: String { Option.hintFormatter.string(from: date) }
+
+        private static let hintFormatter: DateFormatter = {
+            let f = DateFormatter()
+            f.setLocalizedDateFormatFromTemplate("EEE MMM d")
+            return f
+        }()
+    }
+
+    /// The menu's presets, in the order they're offered.
+    ///
+    /// Deduplicated by the day they land on, which is what keeps the list honest as the week turns:
+    /// on a Friday "This Weekend" *is* tomorrow, and on a Saturday it's today, and offering the same
+    /// date twice under two names invites the reader to believe the second one means something else.
+    static func options(now: Date = Date(), calendar: Calendar = .current) -> [Option] {
+        let today = calendar.startOfDay(for: now)
+        let weekday = calendar.component(.weekday, from: today)
+        let isWeekend = weekday == 7 || weekday == 1
+
+        var raw: [(String, Date?)] = [
+            ("Today", today),
+            ("Tomorrow", calendar.date(byAdding: .day, value: 1, to: today)),
+            // Saturday, unless it already is the weekend — then the weekend in question is this one.
+            ("This Weekend", isWeekend ? today
+                : calendar.nextDate(after: today, matching: DateComponents(weekday: 7),
+                                    matchingPolicy: .nextTime)),
+            ("Next Week", calendar.nextDate(after: today, matching: DateComponents(weekday: 2),
+                                            matchingPolicy: .nextTime)),
+            ("In Two Weeks", calendar.date(byAdding: .day, value: 14, to: today)),
+        ]
+        // Anything the calendar couldn't resolve simply isn't offered.
+        raw = raw.filter { $0.1 != nil }
+
+        var seen = Set<String>()
+        return raw.compactMap { title, date in
+            guard let date else { return nil }
+            let key = DueFormat.string(date)
+            guard seen.insert(key).inserted else { return nil }
+            return Option(id: key, title: title, date: date)
+        }
+    }
+}
+
+/// The precise date picker — the "Pick a Date…" branch of the due menu, for an answer the presets
+/// haven't got.
+///
+/// A calendar, not the `.field` stepper this used to be. The field was the only way to set a date at
+/// all, so it had to serve both "next Tuesday" and "the 23rd"; now that the common answers are one
+/// menu item away, the thing left over is browsing to a specific day, which is what a calendar is for.
 struct DueEditor: View {
     let seed: String
     /// Optional leading status glyph, so the task keeps its identity while its due date is edited.
@@ -60,17 +122,25 @@ struct DueEditor: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             if let leadingIcon { leadingIcon }
-            DatePicker("", selection: $date, displayedComponents: .date)
-                .datePickerStyle(.field)
-                .labelsHidden()
-            Button("Set") { onSet(DueFormat.string(date)) }
-            Button("Clear") { onSet(nil) }
-            Button("Cancel", action: onCancel)
+            VStack(alignment: .leading, spacing: 6) {
+                DatePicker("", selection: $date, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    // A graphical picker takes every point it's offered; left to itself it stretches
+                    // the calendar across the whole column.
+                    .fixedSize()
+                HStack(spacing: 6) {
+                    Button("Set") { onSet(DueFormat.string(date)) }
+                        .keyboardShortcut(.defaultAction)
+                    Button("Clear") { onSet(nil) }
+                    Button("Cancel", action: onCancel)
+                }
+                .controlSize(.small)
+            }
         }
-        .controlSize(.small)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 }
 
@@ -123,10 +193,23 @@ struct AddEditor: View {
         .onAppear { afterCurrentUpdate { textFocused = true } }
     }
 
+    /// Commit one task and reset for the next one.
+    ///
+    /// The editor doesn't close itself — the caller decides whether there's a next task and where it
+    /// goes, and closes the editor by clearing its own `activeEditor` if there isn't. So this resets
+    /// unconditionally: if the caller *has* closed it, this runs on a view that's already leaving and
+    /// costs nothing.
+    ///
+    /// The due date resets with the text. Carrying it forward would make a date set once stick to every
+    /// task typed after it, and the loudest version of that bug is silent — a list of tasks that all
+    /// quietly acquired Friday. One preset from the badge's menu puts it back.
     private func submit() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         onAdd(trimmed, useDue ? DueFormat.string(date) : nil)
+        text = ""
+        useDue = false
+        textFocused = true
     }
 }
 

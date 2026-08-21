@@ -78,6 +78,9 @@ struct ProjectView: View {
     @FocusState private var tasksFocused: Bool
     /// Tasks awaiting the inline delete confirmation. Empty when no delete is pending.
     @State private var pendingDelete: [Todo] = []
+    /// Set while this window is adding a session on purpose, so the session-count watcher doesn't read
+    /// its own change as a reason to close the editor it's opening. See `beginTodaySession`.
+    @State private var sessionCountChangeIsOurs = false
     /// A row the keyboard just moved onto, for the scroll view to reveal. Cleared once acted on.
     @State private var scrollTarget: ScrollRequest?
     /// Bumped per request, so `ScrollRequest`s for the same row are distinct values. See `ScrollRequest`.
@@ -93,6 +96,28 @@ struct ProjectView: View {
     @StateObject private var dragEnd = DragEndWatcher()
     /// The task row the pointer is over, for that same right-click. Not `@State` — see `RowHoverTracker`.
     @State private var rowHover = RowHoverTracker()
+    /// Where an open add editor will put its next task, relative to the row it's anchored on.
+    ///
+    /// Window state, not row state. It used to live on `TaskRow`, which was fine while an add editor
+    /// was a single shot on one row and wrong the moment it stopped being one: a continuous add walks
+    /// the editor down the list, and a position stored on the row it started from doesn't travel with
+    /// it — every task after the first would take the *new* row's default instead.
+    @State private var addPosition: TaskInsertPosition = .child
+    /// The content column's measured width, and the one place it's held. Every piece of the column that
+    /// wears `ReadableWidth` reads it out of the environment to size its gutters, so they open and close
+    /// together instead of each measuring itself. Seeded at zero — no gutter — because that's the safe
+    /// direction for the frame before the first measurement lands: the margins only ever open up.
+    @State private var columnWidth: CGFloat = 0
+    /// Whether the pointer is anywhere in the header strip. With the window's active state below, this
+    /// is the whole input to `HeaderChrome` — the header's glass reveals itself on either.
+    @State private var headerHovering = false
+    /// Whether this window is the active one. The other half of the same decision.
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    /// The width cap the header and the task list share. They have to be the same one — the header's
+    /// trailing capsule and the rows' right edges line up against each other, and two caps would put
+    /// them in different places in a wide window.
+    private static var listWidth: ReadableWidth { ReadableWidth(cap: ProjectWindow.maxListWidth) }
 
     /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
     /// pointer against. Shared with `TaskRow`, so it lives on the type.
@@ -105,6 +130,14 @@ struct ProjectView: View {
     /// The unanchored add editor's identity. Its own kind, so its key can't collide with a task row's
     /// `"session:line"` or a session's `"sess:<index>"`.
     static let quickAddTarget = EditorTarget(key: "quick", kind: .quickAdd)
+    /// A session row's key. The `"sess:"` prefix is what keeps it apart from a task's `"session:line"`,
+    /// so one selection set can hold both kinds of row.
+    static func sessionKey(_ index: Int) -> String { "sess:\(index)" }
+    /// The session index behind a row key — nil when the key names a task.
+    static func sessionIndex(fromRowKey key: String) -> Int? {
+        guard key.hasPrefix("sess:") else { return nil }
+        return Int(key.dropFirst("sess:".count))
+    }
     /// The one animation used for showing/hiding the details brief. A single shared value, applied by
     /// every subview that moves on the toggle (keyed on `detailsExpanded`), so the details content, the
     /// divider, the "Tasks" heading, and the regrouped rows all settle on the same clock rather than at
@@ -117,16 +150,21 @@ struct ProjectView: View {
     /// outside.
     private func setDetails(_ expanded: Bool) {
         guard detailsExpanded != expanded else { return }
+        // Session headers are rows only while notes are showing (see `rowKeys`), so a selected one
+        // doesn't survive the collapse — left behind, it would keep ⌘N and Return pointing at a row
+        // that isn't on screen.
+        if !expanded {
+            selection = selection.filter { Self.sessionIndex(fromRowKey: $0) == nil }
+            if let anchor = selectionAnchor, Self.sessionIndex(fromRowKey: anchor) != nil {
+                selectionAnchor = nil
+            }
+        }
         withAnimation(Self.detailsMotion) { detailsExpanded = expanded }
         if storedDetailsExpanded != expanded { storedDetailsExpanded = expanded }
     }
 
     /// True whenever some inline editor (a task row's, or the project-details form) is open.
     private var isAnyEditorActive: Bool { activeEditor != nil || editingDetails }
-
-    /// True while the project-details section is rendered directly below the header. Drives the
-    /// header/divider spacing so the details read as a continuation of the title, not a fenced pane.
-    private var detailsShowing: Bool { store.projectName != nil && detailsExpanded }
 
     private var visibleTodos: [Todo] {
         let byMode = tasksMode == .all ? store.todos : store.todos.filter { !$0.checked }
@@ -139,6 +177,29 @@ struct ProjectView: View {
     /// Whether a search is narrowing the list right now — as opposed to the bar merely being open with
     /// nothing typed, which shouldn't change what's shown or claim there are no results.
     private var isFiltering: Bool { findVisible && findQuery.trimmed != nil }
+
+    /// Every selectable row's key, in the order they're drawn — what the arrow keys walk, what a
+    /// ⇧-click ranges over, and what a selection is checked against when the document reloads.
+    ///
+    /// In notes mode a session header is a row in its own right. That's what makes an empty session
+    /// reachable at all — there's nothing inside it to click — and what lets ⌘N and Return act on the
+    /// session you're looking at, which is why neither needs a button sitting in the list. In the
+    /// compact list it isn't a row: there the caption is a quiet separator between groups of tasks, and
+    /// stopping on one every few presses would only lengthen the walk from one task to the next.
+    private var rowKeys: [String] {
+        guard detailsExpanded else { return visibleTodos.map(PMStore.key(for:)) }
+        let sessions = store.notes?.sessions.count ?? 0
+        return (0..<sessions).flatMap { si in
+            [Self.sessionKey(si)] + visibleTodos.filter { $0.sessionIndex == si }.map(PMStore.key(for:))
+        }
+    }
+
+    /// The session a command should act on: the one whose header is selected, on its own. Nil whenever
+    /// the selection is a task, or spans more than one row.
+    private var selectedSessionIndex: Int? {
+        guard selection.count == 1, let key = selection.first else { return nil }
+        return Self.sessionIndex(fromRowKey: key)
+    }
 
     /// The visible tasks paired with the identity their rows are diffed on.
     ///
@@ -163,6 +224,20 @@ struct ProjectView: View {
             // *contents* instead — see `ReadableWidth`. The sidebar is not laid out here; it's the
             // other half of the window's split view.
             .frame(minWidth: ProjectWindow.minContentWidth, maxWidth: .infinity, alignment: .leading)
+            // Measure the column once, here, and hand the number down. `ReadableWidth` needs it to
+            // decide how much margin the pane can spare, and it's worn by the header, the rows, the
+            // details brief and the note editor — each reading its own geometry would be four
+            // `GeometryReader`s answering the same question, and inside a scroll view a
+            // `GeometryReader` also takes all the space it's offered.
+            //
+            // No animation on the write. The gutter ramps with width rather than switching at a
+            // threshold, so a live resize is already smooth, and animating a value that changes every
+            // frame of a window drag only makes the margins lag behind the edge being dragged.
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ColumnWidthKey.self, value: geo.size.width)
+            })
+            .onPreferenceChange(ColumnWidthKey.self) { columnWidth = $0 }
+            .environment(\.pmColumnWidth, columnWidth)
             // Pin the appearance when the user overrides it; `.system` (nil) follows the OS.
             .preferredColorScheme(colorMode.colorScheme)
             // No background of its own: the window's is the right one.
@@ -205,7 +280,10 @@ struct ProjectView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         scrollBody
-                            .modifier(ReadableWidth())
+                            .modifier(Self.listWidth)
+                            // The same margin the sides get, at the foot of the list, so the last task
+                            // can clear the window's bottom edge rather than ending flush against it.
+                            .padding(.bottom, ReadableWidth.gutter(for: columnWidth))
                     }
                     // Double-clicking blank space adds a task to today's session (creating today's
                     // session when there isn't one) — a Finder window's "act on the container, not on
@@ -229,11 +307,14 @@ struct ProjectView: View {
                     // the scroll view owns that strip and the system draws the effect across it. The
                     // inset reserves the header's height either way, so nothing moves at rest.
                     //
-                    // The material spans the pane; the cap is applied inside `stickyHeader`, per text
-                    // row. With the cap outside, dragging the window past `maxContentWidth` left the bar
-                    // stopping short of the window's edge.
+                    // No material on the inset itself any more — the header is floating glass and the
+                    // strip behind it is open window, so what keeps the rows readable as they pass
+                    // under it is the soft scroll edge below. `stickyHeader` still backs its own
+                    // find/delete strips, and applies the width cap per text row: with the cap outside,
+                    // dragging the window past `maxListWidth` left those bars stopping short of the
+                    // window's edge.
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        stickyHeader.background(TitlebarMaterial())
+                        stickyHeader
                     }
                     // Soften the scroll edges (macOS 26+): content fades as it passes under the pinned
                     // header and off the window's bottom edge, the idiomatic replacement for a hard clip.
@@ -289,12 +370,21 @@ struct ProjectView: View {
         .onChange(of: store.todos) { _ in
             draggingKey = nil
             dropTarget = nil
-            let live = Set(visibleTodos.map(PMStore.key(for:)))
+            let live = Set(rowKeys)
             if !selection.isSubset(of: live) { selection.formIntersection(live) }
         }
         // Adding/deleting a session shifts session indices, so close any open session editor when the
-        // count changes (a keyed editor would otherwise point at the wrong session).
-        .onChange(of: store.notes?.sessions.count) { _ in activeEditor = nil }
+        // count changes (a keyed editor would otherwise point at the wrong session) — unless this
+        // window is the one that added it and is on its way into it. See `beginTodaySession`.
+        .onChange(of: store.notes?.sessions.count) { _ in
+            if sessionCountChangeIsOurs {
+                sessionCountChangeIsOurs = false
+            } else {
+                activeEditor = nil
+            }
+        }
+        // File ▸ New Session, on the same counter as New Task and for the same reason.
+        .onChange(of: state.newSessionRequest) { _ in beginTodaySession() }
         // Arm the drag-end backstop for the life of a drag. See `DragEndWatcher` for why the two
         // existing end signals don't between them cover a real drag.
         .onChange(of: draggingKey) { key in
@@ -380,17 +470,46 @@ struct ProjectView: View {
             Button("Delete") { requestDelete(actionTargets) }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(inNoteEditor || actionTargets.isEmpty)
-            // Return opens the selected project — a list's "open" — and ⌘Return opens it in a new
-            // window, the Finder's pairing. Only live while the sidebar holds keyboard focus, so Return
-            // keeps its usual meaning in every editor and dialog.
-            Button("Open Project") { activateSelectedProject(inNewWindow: false) }
+            // Return activates the selected row, whichever pane holds focus — a list's "open". ⌘Return
+            // is the Finder's pairing for the sidebar, opening the project in a new window.
+            Button("Open") { activateSelection() }
                 .keyboardShortcut(.return, modifiers: [])
-                .disabled(!canActivateSelectedProject)
+                .disabled(!canActivateSelection)
             Button("Open Project in New Window") { activateSelectedProject(inNewWindow: true) }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!canActivateSelectedProject)
         }
         .hidden()
+    }
+
+    /// Return: activate whatever's selected in the pane with keyboard focus.
+    ///
+    /// - a project — switch to it if the window isn't on it already (a click would have; arrowing to it
+    ///   and hitting Return before the walk settles wouldn't), then hand focus to the tasks. That last
+    ///   part is Return's real job now that selecting a project is what switches to it: it's how you
+    ///   stop browsing and start working, the same move as Mail's Return out of the mailbox list.
+    /// - a session — open its note, the same act as its double-click.
+    /// - a task — make it the focused one, the same act as its double-click.
+    private func activateSelection() {
+        if state.focusedPane == .projects {
+            if let key = state.projectSelection.first, key != store.projectKey {
+                state.openProject(key, false)
+            }
+            focusTasks()
+        } else if let si = selectedSessionIndex {
+            openSessionNote(si)
+        } else if actionTargets.count == 1, let todo = actionTargets.first {
+            store.focus(todo)
+        }
+    }
+
+    /// Whether Return has a row to open. Nothing doing while a form is up: Return belongs to the field
+    /// being typed in, to the details editor, to the find bar, and to the delete confirmation's default
+    /// button — a hidden key equivalent that fired anyway would take it from all four.
+    private var canActivateSelection: Bool {
+        guard activeEditor == nil, !editingDetails, !addingFirstTask,
+              !findVisible, pendingDelete.isEmpty else { return false }
+        return state.focusedPane == .projects ? state.projectSelection.count == 1 : selection.count == 1
     }
 
     private func activateSelectedProject(inNewWindow: Bool) {
@@ -416,7 +535,15 @@ struct ProjectView: View {
     /// tasks are all complete and hidden — it falls through to the unanchored quick add.
     private func beginNewTask() {
         guard store.projectName != nil else { return }
-        if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
+        // A selected session header anchors the add on the session itself, appending to it. That's how
+        // a task gets into a session with nothing in it yet, now that no button offers to.
+        if let si = selectedSessionIndex {
+            activeEditor = EditorTarget(key: Self.sessionKey(si), kind: .sessionAddTask)
+        } else if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
+            // Explicitly *after*, which is what the paragraph above has always claimed. The position
+            // used to come from whatever the anchor row's own state happened to hold, and that state
+            // defaulted to `.child` — so ⌘N on a selected task quietly made a subtask of it.
+            addPosition = .after
             activeEditor = EditorTarget(key: PMStore.key(for: anchor), kind: .add)
         } else {
             beginQuickAdd()
@@ -436,6 +563,52 @@ struct ProjectView: View {
         } else {
             activeEditor = Self.quickAddTarget
         }
+    }
+
+    /// Commit one task from a row's add editor, then leave the editor open one slot further down so a
+    /// list can be typed straight through — Return, Return, Return — and Escape ends it.
+    ///
+    /// The editor has to *move*, not merely stay open. `insertTaskRelative` puts an `.after` or
+    /// `.child` task immediately below its anchor, so a second task committed against the same anchor
+    /// lands above the first and a list typed in order comes out backwards. Advancing the anchor to the
+    /// task just written is what keeps typed order and document order the same thing.
+    ///
+    /// One key covers all three positions. `.before` inserts at the anchor's index and pushes the
+    /// anchor down to `line + 1`; `.after` and `.child` insert at `line + 1` themselves. So the next
+    /// anchor is `line + 1` either way — it just means "the row I should insert before" in one case and
+    /// "the row I just made" in the other. A `.child` chain continues as `.after`, because the sibling
+    /// of the subtask you just made is the next thing you meant, not a grandchild.
+    ///
+    /// The key is computed rather than read back from the store: the write is asynchronous, so there's
+    /// nothing to read yet. Until the reload lands this points at whatever row currently holds that
+    /// slot, which is the row directly below the anchor — the same place on screen the editor is
+    /// already sitting.
+    private func commitAdd(text: String, due: String?, anchor: Todo) {
+        store.addTodo(text: text, due: due, relativeTo: anchor, position: addPosition)
+        let nextKey = "\(anchor.sessionIndex):\(anchor.lineIndex + 1)"
+        if addPosition != .before { addPosition = .after }
+        activeEditor = EditorTarget(key: nextKey, kind: .add)
+        // The list grows above the editor, so without this the thing you're typing into walks off the
+        // bottom of the window somewhere around the fourth task.
+        scrollToken &+= 1
+        scrollTarget = ScrollRequest(key: nextKey, token: scrollToken)
+    }
+
+    /// File ▸ New Session (⇧⌘N), and what the old "New session" button becomes.
+    ///
+    /// It means *today's* session: the project's existing one if it has it, a new one if not — see
+    /// `PMStore.openTodaySession` for why a second heading with the same date is a data problem rather
+    /// than a second session. Either way it lands in the note editor with the caret ready, because a
+    /// session you just asked for is one you're about to write in; dropping an empty heading into the
+    /// list and leaving you to find your way into it was the long way round to the same place.
+    private func beginTodaySession() {
+        guard store.projectName != nil, !editingDetails else { return }
+        // Adding a session shifts every session index, which normally closes an open session editor
+        // (see the `sessions.count` watcher below). This is the one change that's *opening* one, so
+        // it's exempt — claimed here, before the write, so it doesn't matter which side of the
+        // reload the watcher fires on.
+        if store.todaySessionIndex == nil { sessionCountChangeIsOurs = true }
+        store.openTodaySession { index in openSessionNote(index) }
     }
 
     /// Put keyboard focus on the task list: the real focus (so arrow keys land there and the selection
@@ -463,17 +636,17 @@ struct ProjectView: View {
         if state.focusedPane == .projects {
             state.projectSelection = Set(store.allProjects.map(\.projectKey))
         } else {
-            selection = Set(visibleTodos.map(PMStore.key(for:)))
-            selectionAnchor = selection.isEmpty ? nil : PMStore.key(for: visibleTodos[0])
+            selection = Set(rowKeys)
+            selectionAnchor = rowKeys.first
         }
     }
 
-    /// Click behaviour for a task row, following the standard Mac list: a plain click selects just
-    /// that row, ⇧ extends the range from the anchor, ⌘ toggles the row in and out of the selection.
-    /// (Activating a task — making it the focused one — is the double-click, see `TaskRow`.)
-    private func selectRow(_ todo: Todo, modifiers: NSEvent.ModifierFlags) {
+    /// Click behaviour for a row — a task's or a session header's, which select alike. The standard
+    /// Mac list: a plain click selects just that row, ⇧ extends the range from the anchor, ⌘ toggles
+    /// the row in and out of the selection. (Activating a row — focusing a task, opening a session's
+    /// note — is the double-click, see `TaskRow` and `SessionHeader`.)
+    private func selectRow(_ key: String, modifiers: NSEvent.ModifierFlags) {
         focusTasks()
-        let key = PMStore.key(for: todo)
         if modifiers.contains(.shift), let anchor = selectionAnchor {
             selection = keysInRange(from: anchor, to: key)
         } else if modifiers.contains(.command) {
@@ -511,7 +684,7 @@ struct ProjectView: View {
 
     /// Every visible row's key between two rows inclusive, in visible order.
     private func keysInRange(from anchor: String, to key: String) -> Set<String> {
-        let keys = visibleTodos.map(PMStore.key(for:))
+        let keys = rowKeys
         guard let i = keys.firstIndex(of: anchor), let j = keys.firstIndex(of: key) else { return [key] }
         return Set(keys[min(i, j)...max(i, j)])
     }
@@ -523,7 +696,7 @@ struct ProjectView: View {
     /// `onMoveCommand` doesn't report modifiers, so ⇧ is read from the current event state; that read
     /// happens while the keystroke is being handled, so it reflects the key that caused it.
     private func moveSelection(_ direction: MoveCommandDirection) {
-        let keys = visibleTodos.map(PMStore.key(for:))
+        let keys = rowKeys
         guard !keys.isEmpty else { return }
         let step: Int
         switch direction {
@@ -641,21 +814,29 @@ struct ProjectView: View {
         pasteboard.setString(names.joined(separator: "\n"), forType: .string)
     }
 
-    /// The pinned header — the project title/toolbar, plus the rule that fences it off from the task list
-    /// (only when details are collapsed; with details open they sit directly under the title as one
-    /// continuous brief). Stays fixed above the scroll area; swapped out entirely for the note takeover.
+    /// The pinned header — the project's floating chrome, and below it the strips that occasionally
+    /// stand under it. Stays fixed above the scroll area; swapped out entirely for the note takeover.
     ///
-    /// The readable-width cap sits on each text row rather than around the stack, and the rule is left
-    /// out of it deliberately. This header is two things at once: text, which belongs at the same width
-    /// as the rows it heads, and chrome — the material behind it and the rule under it — which belongs
-    /// to the window and runs the full width of the pane. Capping the stack capped the chrome with it,
-    /// leaving a rule that stopped short of a bar that didn't.
+    /// Two layers, because they're two different kinds of thing. The header itself is chrome that
+    /// floats: a pill and a capsule of glass with bare window between them, and the task rows fading
+    /// out from under it via the scroll view's soft top edge. The find bar and the delete confirmation
+    /// are strips — full-width bands of controls — so they keep a real material behind them and a rule
+    /// under them. Nothing is drawn for them when they're absent: an empty stack is zero-height, so its
+    /// material is too.
+    ///
+    /// The readable-width cap sits on each text row rather than around the stack, and the material is
+    /// left out of it deliberately: text belongs at the same width as the rows it heads, while a bar
+    /// belongs to the window and runs the full width of the pane. Capping the stack capped the chrome
+    /// with it, leaving a rule that stopped short of a bar that didn't.
     private var stickyHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header.modifier(ReadableWidth())
-            findBar.modifier(ReadableWidth())
-            if !detailsShowing || findVisible { Divider() }
-            deleteConfirmation.modifier(ReadableWidth())
+            header.modifier(Self.listWidth)
+            VStack(alignment: .leading, spacing: 0) {
+                findBar.modifier(Self.listWidth)
+                if findVisible { Divider() }
+                deleteConfirmation.modifier(Self.listWidth)
+            }
+            .background(TitlebarMaterial())
         }
         .animation(.snappy, value: pendingDelete.isEmpty)
         .animation(.snappy, value: findVisible)
@@ -749,11 +930,17 @@ struct ProjectView: View {
 
     /// The unanchored add editor, at the foot of the list. Open only while `beginQuickAdd` has it
     /// targeted; `store.addTodo` with no anchor appends to today's session and focuses the new task.
+    ///
+    /// Stays open after each task, like the anchored editor — and unlike it, needs no help to do so.
+    /// This one appends, so tasks come out in the order they were typed with the editor sitting still
+    /// at the foot of the list; there's no anchor to advance.
     @ViewBuilder private var quickAddEditor: some View {
         if activeEditor == Self.quickAddTarget {
             AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
+                // The first task into a project with no session for today creates one, and the
+                // session-count watcher closes any open editor when that happens. This one is ours.
+                if store.todaySessionIndex == nil { sessionCountChangeIsOurs = true }
                 store.addTodo(text: text, due: due)
-                activeEditor = nil
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
                 .padding(.horizontal, 12)
@@ -766,11 +953,18 @@ struct ProjectView: View {
     /// takeover editor. Nil for every other editor state.
     private var sessionNoteTakeover: (index: Int, session: Session)? {
         guard let ed = activeEditor, ed.kind == .sessionNote,
-              ed.key.hasPrefix("sess:"),
-              let idx = Int(ed.key.dropFirst("sess:".count)),
+              let idx = Self.sessionIndex(fromRowKey: ed.key),
               let sessions = store.notes?.sessions, idx < sessions.count
         else { return nil }
         return (idx, sessions[idx])
+    }
+
+    /// Whether the sidebar holds a selection Escape has anything to undo: more than one project, or a
+    /// single one that isn't the project this window is showing. The ordinary case — the current
+    /// project selected, which is what a source list always looks like — isn't something to clear.
+    private var hasProjectMultiSelection: Bool {
+        state.projectSelection.count > 1
+            || (state.projectSelection.first.map { $0 != store.projectKey } ?? false)
     }
 
     /// Escape unwinds the window one layer at a time — the pending delete, then an open editor, then a
@@ -784,10 +978,10 @@ struct ProjectView: View {
             activeEditor = nil
         } else if findVisible {
             closeFind()
-        } else if !selection.isEmpty || !state.projectSelection.isEmpty {
+        } else if !selection.isEmpty || hasProjectMultiSelection {
             selection = []
             selectionAnchor = nil
-            state.clearSelections()
+            state.collapseProjectSelection(to: store.projectKey)
         }
         // ...and stops there. A real window isn't summoned, so Escape has no business closing it —
         // that's ⌘W. (The focus panel, which *is* summoned, still hides on its last Escape.)
@@ -795,33 +989,33 @@ struct ProjectView: View {
 
     // MARK: Header
 
+    /// The header strip: the project's identity in a glass pill at the leading edge, its controls in a
+    /// glass capsule at the trailing one, and nothing at all in between.
+    ///
+    /// This is the shape a titlebar strip takes on macOS 26 — the Messages conversation header. There's
+    /// no bar; there's chrome floating over content that fades out from under it, which the scroll
+    /// view's soft top edge does (see `SoftScrollEdges`). And the chrome is deliberately only
+    /// *sometimes* there: in a background window the glass is gone and the strip is bare text, the
+    /// window becoming active brings it in, and the pointer arriving in the strip lights it. The three
+    /// states are `HeaderChrome`.
+    ///
+    /// Title only, on the left. Switching projects is the sidebar's job — a chevron here offered a
+    /// second, smaller version of the same list, and the two disagreed about what "open" meant: this one
+    /// moved the app's global focus, while the sidebar retargets the window you're in.
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Title only. Switching projects is the sidebar's job — a chevron here offered a second,
-            // smaller version of the same list, and the two disagreed about what "open" meant: this one
-            // moved the app's global focus, while the sidebar retargets the window you're in.
-            projectTitle
-            Spacer()
-            let p = store.progress
-            if p.total > 0 {
-                Text("\(p.done)/\(p.total)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            if store.projectName != nil { viewOptionsMenu }
-            if store.projectPath != nil {
-                HStack(spacing: 4) {
-                    openButton
-                    raycastButton
-                }
-            }
+            projectPill
+            Spacer(minLength: 12)
+            headerControls
         }
+        // Recede with the window, the way real window chrome does. The glass has already gone by this
+        // point; this is what keeps the text from being the one thing in the strip still at full
+        // strength.
+        .opacity(headerChrome.contentOpacity)
         .modifier(TitlebarClearance(state: state))
-        // Double-click empty header space (or the title) toggles the details brief. On a background
-        // layer *behind* the controls so the switcher / view-options / open buttons in front consume
-        // their own clicks and are excluded; `simultaneousGesture` so it still coexists with
-        // drag-by-window-background.
+        // Double-click empty header space toggles the details brief. On a background layer *behind* the
+        // controls so the pill / view-options / open buttons in front consume their own clicks and are
+        // excluded; `simultaneousGesture` so it still coexists with drag-by-window-background.
         .background(
             Color.clear
                 .contentShape(Rectangle())
@@ -829,12 +1023,86 @@ struct ProjectView: View {
                     if store.projectName != nil { setDetails(!detailsExpanded) }
                 })
         )
+        // Hover is tracked for the strip as a whole rather than per element: this is one toolbar
+        // revealing itself, so crossing the gap between the pill and the controls mustn't put it away
+        // again on the way. On the outer view, whose `onHover` tracking area is its whole frame — the
+        // background layer above sits behind the controls and would miss them.
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.18)) { headerHovering = hovering }
+        }
+        .animation(.easeOut(duration: 0.18), value: controlActiveState)
         // Right-clicking anywhere in the header opens the same view settings as the slider button.
         .contextMenu { viewOptionsMenuContent }
     }
 
-    /// The project title. Plain text — the details-toggle double-click lives on the header background
-    /// behind it, so the title itself carries no gesture.
+    /// What the header's glass is doing right now — see `HeaderChrome`.
+    private var headerChrome: HeaderChrome {
+        HeaderChrome(active: controlActiveState, hovering: headerHovering)
+    }
+
+    /// The project's identity, in a glass pill: Messages' name pill, doing the same job. It says what
+    /// you're looking at, and clicking it opens what's behind the name — there a contact card, here the
+    /// project's notes brief.
+    ///
+    /// The hit area is the capsule the glass paints and only that. A pill that lights up under the
+    /// pointer and then drops the click into the scroll view behind it is exactly the bug that was
+    /// reported against the session and task rows.
+    private var projectPill: some View {
+        let live = store.projectName != nil
+        return projectTitle
+            // Enough inset that the title sits *in* the pill rather than against its edges — a capsule
+            // this tight on its text reads as a tag, not as chrome.
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .headerBacking(headerChrome, in: Capsule())
+            .contentShape(Capsule())
+            .onTapGesture { if live { setDetails(!detailsExpanded) } }
+            // A click on the pill is a click on the pill, not the start of a window drag.
+            .background(WindowDragExcluder())
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project"))
+            .help(detailsExpanded ? "Hide notes" : "Show notes")
+    }
+
+    /// The header's controls, gathered into one glass capsule at the trailing edge: progress, view
+    /// options, and the two "open this elsewhere" buttons.
+    ///
+    /// One capsule rather than three separate pieces of glass — they're a single group of window
+    /// controls and read as one, the way the Messages header's trailing button does. With no bar behind
+    /// the strip any more, the capsule is also what keeps the progress count legible over whatever has
+    /// scrolled underneath it.
+    @ViewBuilder private var headerControls: some View {
+        if hasHeaderControls {
+            HStack(spacing: 2) {
+                let p = store.progress
+                if p.total > 0 {
+                    Text("\(p.done)/\(p.total)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .padding(.horizontal, 4)
+                }
+                if store.projectName != nil { viewOptionsMenu }
+                if store.projectPath != nil {
+                    openButton
+                    raycastButton
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .headerBacking(headerChrome, in: Capsule())
+            .background(WindowDragExcluder())
+        }
+    }
+
+    /// Whether the trailing capsule has anything to hold. With no project focused it doesn't, and an
+    /// empty pill of glass is worse than no pill.
+    private var hasHeaderControls: Bool {
+        store.projectName != nil || store.projectPath != nil || store.progress.total > 0
+    }
+
+    /// The project title. Plain text — the pill around it carries the gesture, so the text itself
+    /// carries none.
     private var projectTitle: some View {
         Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project")
             .font(.title3.weight(.semibold))
@@ -1037,8 +1305,13 @@ struct ProjectView: View {
         VStack(spacing: 10) {
             if addingFirstTask {
                 AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
+                    if store.todaySessionIndex == nil { sessionCountChangeIsOurs = true }
                     store.addTodo(text: text, due: due)
+                    // The call to action is gone the moment the project has a task, taking this editor
+                    // with it — so hand the typing straight to the one that appears in its place,
+                    // rather than ending the flow on the word "first".
                     addingFirstTask = false
+                    activeEditor = Self.quickAddTarget
                 } onCancel: { addingFirstTask = false }
                     .padding(.horizontal, 12)
             } else {
@@ -1072,14 +1345,11 @@ struct ProjectView: View {
                 Color.clear.frame(height: 4)
             }
 
-            // In notes mode, always show the session-oriented list (headers + affordances) even when no
-            // tasks are currently visible; otherwise fall back to the empty-state copy.
-            if visibleTodos.isEmpty && !detailsExpanded {
-                Text(tasksMode == .all ? "No tasks yet" : "All tasks complete")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 16)
+            // In notes mode, keep the session-oriented list even when no tasks are visible — the
+            // headers are the content there. A project with no sessions at all is the one case that
+            // leaves nothing to draw, and gets the empty state instead of a blank column.
+            if hasNothingToList {
+                emptyListState
             } else {
                 taskRowsList
             }
@@ -1092,6 +1362,35 @@ struct ProjectView: View {
         // — without it, this subtree's own `.animation(_, value: visibleTodos)` suppresses the ambient
         // toggle animation and the heading drifts at a different rate.
         .animation(Self.detailsMotion, value: TasksMotionKey(todos: visibleTodos, expanded: detailsExpanded))
+    }
+
+    /// Whether the list has nothing to draw: no visible tasks, and — in notes mode, where empty
+    /// sessions are still rows — no sessions either.
+    private var hasNothingToList: Bool {
+        guard visibleTodos.isEmpty else { return false }
+        return !detailsExpanded || (store.notes?.sessions.isEmpty ?? true)
+    }
+
+    /// The quiet line standing in for an empty list. In notes mode it also names the shortcut that
+    /// fills it: this is the one screen with nothing on it to right-click, and the "New session" button
+    /// that used to sit here is a command now.
+    @ViewBuilder private var emptyListState: some View {
+        VStack(spacing: 3) {
+            if detailsExpanded {
+                Text("No sessions yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("⇧⌘N starts today's.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(tasksMode == .all ? "No tasks yet" : "All tasks complete")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 16)
     }
 
     /// The task rows, grouped by session, wrapped in a single list-level drop target. One coordinate
@@ -1157,11 +1456,12 @@ struct ProjectView: View {
         }
     }
 
-    /// A session's quiet caption in the compact list, and the rename editor it swaps for on a
-    /// double-click. The revealed header offers the same editor behind the same gesture (see
-    /// `SessionHeader`); a session shouldn't need the notes view turned on to be labelled.
+    /// A session's quiet caption in the compact list: the same target as the revealed header, behind
+    /// the same gestures — double-click opens the session's note, right-click offers the rest — so a
+    /// session doesn't need the notes view turned on to be written in. It swaps for the rename editor
+    /// while that's what's open.
     @ViewBuilder private func sessionCaption(_ si: Int, context: String) -> some View {
-        let target = EditorTarget(key: "sess:\(si)", kind: .sessionLabel)
+        let target = EditorTarget(key: Self.sessionKey(si), kind: .sessionLabel)
         if activeEditor == target {
             InlineTextEditor(seed: sessionLabel(si),
                              placeholder: "Session label (optional)",
@@ -1181,23 +1481,41 @@ struct ProjectView: View {
                 .padding(.top, 6)
                 .padding(.bottom, 2)
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { activeEditor = target }
+                .onTapGesture(count: 2) { openSessionNote(si) }
+                .contextMenu {
+                    SessionMenu(index: si, hasNote: !sessionProse(si).isEmpty,
+                                store: store, activeEditor: $activeEditor)
+                }
         }
     }
 
-    /// Revealed rendering: every session (including empty ones) as a first-class header with its
-    /// editable prose note, its tasks, and an add-task affordance, plus a "New session" affordance on top.
+    /// Revealed rendering: every session (including empty ones) as a first-class row — its header, its
+    /// editable prose note, and its tasks. Nothing else: adding a task or a session is a command
+    /// (⌘N, ⇧⌘N) and a context-menu item, not a button parked in the list.
     @ViewBuilder private func revealedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
         let sessions = store.notes?.sessions ?? []
-        newSessionAffordance
         ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
-            SessionHeader(index: index, session: session, store: store, activeEditor: $activeEditor)
+            SessionHeader(index: index, session: session, store: store, activeEditor: $activeEditor,
+                          isSelected: selection.contains(Self.sessionKey(index)),
+                          // "Emphasized" in the AppKit sense, exactly as a task row reads it.
+                          isEmphasized: tasksFocused,
+                          onClick: { selectRow(Self.sessionKey(index), modifiers: $0) },
+                          onActivate: { openSessionNote(index) })
             sessionTaskRows(index, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
-            // An explicit add affordance for a session with nothing visible to anchor a per-row add on.
-            if !visibleTodos.contains(where: { $0.sessionIndex == index }) {
-                sessionAddTaskAffordance(index)
-            }
+            sessionAddEditor(index)
         }
+    }
+
+    /// A session's note prose, for deciding whether the menu offers "Add" or "Edit".
+    private func sessionProse(_ index: Int) -> String {
+        guard let sessions = store.notes?.sessions, index >= 0, index < sessions.count else { return "" }
+        return leadingSessionProse(body: sessions[index].body)
+    }
+
+    /// Open a session's note in the full-column editor — the double-click on any part of a session,
+    /// Return on a selected one, and the context menu's Add/Edit Note.
+    private func openSessionNote(_ index: Int) {
+        activeEditor = EditorTarget(key: Self.sessionKey(index), kind: .sessionNote)
     }
 
     /// One session's visible task rows, tiled with no spacing so their drop gaps abut.
@@ -1217,54 +1535,36 @@ struct ProjectView: View {
                     // "Emphasized" in the AppKit sense: a selection in the pane that has keyboard
                     // focus reads stronger than the same selection in a pane that doesn't.
                     isEmphasized: tasksFocused,
-                    onClick: { selectRow(todo, modifiers: $0) },
+                    onClick: { selectRow(key, modifiers: $0) },
                     onActivate: { store.focus(todo) },
                     contextTargets: { contextTargets(for: todo) },
                     onHoverChanged: { rowHover.set(key, inside: $0) },
                     dragProvider: { dragProvider(for: todo) },
                     onDelete: { requestDelete($0) },
-                    onSetDue: { applyDue($0, from: todo) }
+                    onSetDue: { applyDue($0, from: todo) },
+                    onAddTask: { text, due in commitAdd(text: text, due: due, anchor: todo) },
+                    addPosition: $addPosition
                 )
             }
         }
     }
 
-    /// The "New session" control (revealed mode): a quiet button that adds a today-dated session at
-    /// the top of the list.
+    /// The per-session add editor, appended to the session it belongs to. It's opened by ⌘N with that
+    /// session's header selected and by the session menu's "Add Task…" — there's no button for it.
     ///
-    /// It doesn't ask for a label first. A session is identified by its date, the label is optional
-    /// decoration, and making the button open a text field put a form in front of a one-click action —
-    /// so it creates the session outright and the label is added afterwards, by double-clicking the
-    /// session's title, which is how every other title in this window is renamed.
-    private var newSessionAffordance: some View {
-        Button { store.addSession() } label: {
-            Label("New session", systemImage: "plus.circle").font(.caption)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
-    }
-
-    /// The per-session "Add task" affordance (revealed mode), shown when a session has no visible tasks
-    /// to hang a per-row add on. Opening it reveals an inline add editor that appends to the session.
-    @ViewBuilder private func sessionAddTaskAffordance(_ index: Int) -> some View {
-        let target = EditorTarget(key: "sess:\(index)", kind: .sessionAddTask)
-        if activeEditor == target {
+    /// A session used to carry a visible "Add task" button whenever it had no tasks to hang a per-row
+    /// add on, and the list carried a "New session" button above it. Both were doing hit-target duty
+    /// for things that are properly commands, and read as form controls loose in a document. What
+    /// replaced them is a session header you can select: ⌘N adds to it, Return opens its note, and
+    /// ⇧⌘N starts today's.
+    @ViewBuilder private func sessionAddEditor(_ index: Int) -> some View {
+        if activeEditor == EditorTarget(key: Self.sessionKey(index), kind: .sessionAddTask) {
             AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
+                // Appends, so it chains in order with the editor staying put — see `quickAddEditor`.
                 store.addTaskToSession(index, text: text, due: due)
-                activeEditor = nil
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
                 .padding(.horizontal, 12)
-        } else {
-            Button { activeEditor = target } label: {
-                Label("Add task", systemImage: "plus").font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 2)
         }
     }
 
@@ -1353,6 +1653,38 @@ struct ProjectView: View {
 /// default, which is the right landing place for anyone upgrading mid-mode.
 enum TasksMode: String {
     case incomplete, all
+}
+
+/// The fill behind a selectable row in the task list — a task's or a session header's: the selection
+/// band, or a whisper of one on hover.
+///
+/// Three states, as in every native list — selected in the focused pane of the key window (accent),
+/// selected but not (grey), and not selected. It's a tint rather than a solid accent fill so the row's
+/// own colours — the orange due chip, the secondary strikethrough of a completed task, a session's
+/// prose — stay themselves instead of needing a second, inverted palette.
+struct RowSelectionBand: View {
+    let isSelected: Bool
+    let isEmphasized: Bool
+    let isHovering: Bool
+    /// Whether the row's window is the key window — a selection in an inactive window is muted, as in
+    /// every native list.
+    @Environment(\.controlActiveState) private var controlActiveState
+    var body: some View {
+        fill.clipShape(RoundedRectangle(cornerRadius: ReadableWidth.bandCornerRadius,
+                                        style: .continuous))
+    }
+
+    @ViewBuilder private var fill: some View {
+        if isSelected {
+            isEmphasized && controlActiveState != .inactive
+                ? Color.accentColor.opacity(0.28)
+                : Color.primary.opacity(0.10)
+        } else if isHovering {
+            Color.primary.opacity(0.05)
+        } else {
+            Color.clear
+        }
+    }
 }
 
 /// The project window two selectable lists. Whichever holds keyboard focus is the one arrow keys, ⌫, ⌘A and
@@ -1531,7 +1863,13 @@ private struct TitlebarClearance: ViewModifier {
             // `.title3` line, while the note takeover's is a two-line stack (project name over the
             // session's date). A fixed half-line centres whichever one it was written for and hangs the
             // other below the buttons — which is what the takeover's header was doing.
-            .padding(.top, max(8, state.titlebarButtonCenterY - contentHeight / 2))
+            // Floored at zero, not at 8. The floor used to be 8pt of guaranteed top margin, which
+            // quietly stopped being a floor and started being the answer: the note takeover's header is
+            // a two-line pill, tall enough that centring it on the buttons wants about 4pt of top
+            // padding, so the clamp held it ~4pt below the traffic lights it was supposed to be level
+            // with. A header taller than twice the button drop is *meant* to reach further up — that's
+            // what centring on a line means — and zero is the only floor that says so.
+            .padding(.top, max(0, state.titlebarButtonCenterY - contentHeight / 2))
             .padding(.bottom, bottom)
     }
 }
@@ -1549,15 +1887,148 @@ private struct TitlebarClearance: ViewModifier {
 /// edge while the pane kept going. Inside, each piece takes the cap where the cap belongs (the text)
 /// and the bar spans the pane.
 private struct ReadableWidth: ViewModifier {
+    /// How wide this content is allowed to get. Rows and the header that leads them take
+    /// `maxListWidth`; prose takes the narrower `maxContentWidth` it defaults to.
+    var cap: CGFloat = ProjectWindow.maxContentWidth
+
+    /// The column's width, measured once by `ProjectView` and handed down.
+    @Environment(\.pmColumnWidth) private var columnWidth
+
+    /// The margin at each end of the ramp. `minGutter` is what even the narrowest window gives up —
+    /// content is never flush against the pane's edges — and `maxGutter` is what a window with room to
+    /// spare opens out to.
+    ///
+    /// Between `snug` and `roomy` it ramps, so dragging a window wider opens the margins gradually
+    /// rather than snapping them open as it crosses one particular pixel; a step there is visible and
+    /// reads as a glitch.
+    private static let snug: CGFloat = 520
+    private static let roomy: CGFloat = 760
+    private static let minGutter: CGFloat = 6
+    private static let maxGutter: CGFloat = 20
+
+    /// The margin a column of this width carries. Static so the scroll view can ask for the same
+    /// number for its bottom inset without a second copy of the ramp.
+    static func gutter(for columnWidth: CGFloat) -> CGFloat {
+        guard columnWidth > snug else { return minGutter }
+        let t = min(1, (columnWidth - snug) / (roomy - snug))
+        return (minGutter + (maxGutter - minGutter) * t).rounded()
+    }
+
+    /// The corner radius a row's selection band takes.
+    ///
+    /// A constant, because the band is now always standing in a margin — there is no width at which it
+    /// runs flush to the pane's edges, so there is no width at which it should look like a stripe
+    /// rather than a shape. This used to track the gutter, back when a narrow window had none.
+    static let bandCornerRadius: CGFloat = 7
+
     func body(content: Content) -> some View {
         content
-            .frame(maxWidth: ProjectWindow.maxContentWidth, alignment: .leading)
+            .frame(maxWidth: cap, alignment: .leading)
+            // Outside the cap, not inside it: the gutter is margin the pane gives away, so a wide
+            // window spends it on breathing room at the edges and still gets the full readable width
+            // between them. Inside, it would have narrowed the text instead.
+            .padding(.horizontal, Self.gutter(for: columnWidth))
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// The material behind a header that stands in the window's titlebar strip, so the strip reads as a
-/// bar rather than as bare window background with text floating in it.
+/// The content column's width, published by `ProjectView` and read by every `ReadableWidth` under it.
+private struct ColumnWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct ColumnWidthEnvironmentKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// The width of the project window's content column. Zero until the first measurement, which
+    /// `ReadableWidth` reads as "no room to spare" — see `ReadableWidth.gutter(for:)`.
+    var pmColumnWidth: CGFloat {
+        get { self[ColumnWidthEnvironmentKey.self] }
+        set { self[ColumnWidthEnvironmentKey.self] = newValue }
+    }
+}
+
+/// The three states the project header's chrome moves through, and the one place that decides which
+/// is which.
+///
+/// Modelled on the Messages conversation header, where the toolbar is not a permanent fixture: it's
+/// absent in a background window, present once the window is active, and lit while the pointer is in
+/// it. Two inputs, three states — hover wins over the window's state, so reaching for a control in a
+/// window you haven't clicked into yet still shows you what you're reaching for.
+///
+/// One type rather than a pair of booleans read at each call site, because the pill and the capsule
+/// have to agree: two pieces of glass in the same strip disagreeing about whether they exist is worse
+/// than either choice made consistently.
+private enum HeaderChrome: Equatable {
+    /// Another window has the focus. No glass at all, and the content behind it recedes.
+    case dormant
+    /// This window is active, the pointer is elsewhere. Backed, at rest.
+    case resting
+    /// The pointer is in the header strip. Backed at full strength.
+    case engaged
+
+    init(active: ControlActiveState, hovering: Bool) {
+        if hovering {
+            self = .engaged
+        } else if active == .inactive {
+            self = .dormant
+        } else {
+            self = .resting
+        }
+    }
+
+    /// How strongly the backing renders, 0–1.
+    ///
+    /// Nothing here goes to zero. An earlier pass had the dormant state drop its backing entirely, on
+    /// the theory that a background window's chrome should get out of the way — but there's no bar
+    /// behind this header any more, so "nothing" meant the task rows scrolled up into the title and
+    /// made it unreadable. Receding is a job for less contrast, not for none, and the floor is set by
+    /// what stays legible rather than by how quiet it would be nice to be.
+    var backingStrength: Double {
+        switch self {
+        case .dormant: return 0.7
+        case .resting: return 0.85
+        case .engaged: return 1
+        }
+    }
+
+    /// How strongly the *content* renders. Dimmed in a background window, but only slightly: this is
+    /// the same legibility problem from the other side, and text at half strength over a half-strength
+    /// backing is no easier to read than text over nothing.
+    var contentOpacity: Double { self == .dormant ? 0.85 : 1 }
+}
+
+extension View {
+    /// Backs a piece of header chrome at the strength its state calls for. One modifier for all four
+    /// pieces (both headers' pills, the trailing capsule, the back button), so they can't drift apart.
+    ///
+    /// A plain material, not Liquid Glass, after trying both. `glassEffect` has no intensity control —
+    /// its two variants are `.regular` and `.clear`, and `.clear` is the *media* variant, brighter and
+    /// more present over a plain window rather than quieter. The only way to turn glass down is to
+    /// fade the layer, which means putting it in a background so the title above keeps its own
+    /// opacity — and glass in a background inside a `GlassEffectContainer` renders over its sibling
+    /// content, which hid the very titles it was supposed to be backing.
+    ///
+    /// A material has the dial built in and composites the ordinary way, which is the whole
+    /// requirement here: this chrome exists to hold a title legible over scrolling rows, at a weight
+    /// that changes with the window's state. Liquid Glass is still in the app where it earns its keep
+    /// — the focus panel, a floating HUD over other apps' windows (see `GlassBackground`).
+    fileprivate func headerBacking(_ chrome: HeaderChrome, in shape: some Shape) -> some View {
+        background {
+            shape.fill(.regularMaterial).opacity(chrome.backingStrength)
+        }
+    }
+}
+
+/// The material behind a full-width strip that stands in the window's titlebar band — the find bar and
+/// the delete confirmation in the task column, and the whole header of the session-note takeover — so
+/// the strip reads as a bar rather than as bare window background with text floating in it.
+///
+/// The task column's own header no longer wears this: it's floating glass (see `HeaderChrome`), and
+/// content passing beneath it is handled by the scroll view's soft top edge instead.
 ///
 /// `NSVisualEffectView` on the `.titlebar` material, not `NSGlassEffectView`: this is an edge-to-edge
 /// bar along the top of a pane, and the glass view is for free-floating elements — it rounds its own
@@ -1580,17 +2051,52 @@ private struct TitlebarMaterial: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-/// Applies the soft scroll-edge effect so scrolling content fades off the window's bottom edge rather
-/// than hard-clipping.
+/// A soft top edge for a scroll area that AppKit, not SwiftUI, owns.
 ///
-/// Bottom only. The top edge of this scroll view is the header strip, and that now carries a real
-/// material (`TitlebarMaterial`) — an edge effect there would draw a second blur inside the same band,
-/// stacking two treatments in one strip for a muddier version of either alone.
+/// The task column gets this from the system — `scrollEdgeEffectStyle(.soft, for: .top)` on a SwiftUI
+/// `ScrollView` (see `SoftScrollEdges`). The note takeover can't: its content is an `NSTextView` in an
+/// `NSScrollView`, and AppKit's form of the effect (`NSScrollEdgeEffectStyle`) is offered only to
+/// titlebar and split-view accessories, never to a scroll view you hold yourself.
+///
+/// So: the window's own background, faded out down the strip. Nothing more. This started as
+/// `TitlebarMaterial` under the same fade, which was wrong twice over — the material is *lighter* than
+/// the window background, so instead of disappearing it painted a pale band across the top of the
+/// takeover, and the pills standing on it put a second material inside the first. Window background is
+/// exactly what's behind the prose (the text view draws none of its own), so this is invisible at rest
+/// and does its only job — hiding text that scrolls up into the header — without announcing itself.
+///
+/// The far stop is the same colour at zero alpha rather than `.clear`, which in a gradient interpolates
+/// through transparent *black* and leaves a dark bloom halfway down.
+///
+/// Sized by the header, and so measured by it: the strip this fills is exactly `barHeight`, which is
+/// what the editor takes as its text-container inset. The fade happens inside that height rather than
+/// hanging below it, or the prose would start further down than the chrome actually reaches.
+private struct SoftHeaderScrim: View {
+    private var ground: Color { Color(nsColor: .windowBackgroundColor) }
+
+    var body: some View {
+        LinearGradient(
+            stops: [
+                .init(color: ground, location: 0),
+                .init(color: ground, location: 0.55),
+                .init(color: ground.opacity(0), location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom)
+    }
+}
+
+/// Applies the soft scroll-edge effect so scrolling content fades off the window's edges rather than
+/// hard-clipping.
+///
+/// Both edges now. The top used to be suppressed because the header carried a full-width material and
+/// two blurs stacked in one band read muddier than either alone. The header is floating glass now — a
+/// pill and a capsule with open window between them — so the top edge is the only thing standing
+/// between a task row and the traffic lights, and it's the treatment the system uses for exactly this.
 private struct SoftScrollEdges: ViewModifier {
     func body(content: Content) -> some View {
         content
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollEdgeEffectStyle(.soft, for: .bottom)
-            .scrollEdgeEffectHidden(true, for: .top)
     }
 }
 
@@ -1629,13 +2135,14 @@ private struct TaskRow: View {
     /// Commit the row's due editor. Routed through the parent so a date set on a row inside a
     /// multi-selection lands on the whole selection, like the context menu's version.
     var onSetDue: (String?) -> Void = { _ in }
+    /// Commit one task from this row's add editor. Routed through the parent because what happens
+    /// *after* a commit — advancing the anchor so the next task lands below this one — is a decision
+    /// about the whole list, not about this row. See `ProjectView.commitAdd`.
+    var onAddTask: (String, String?) -> Void = { _, _ in }
     @State private var hovering = false
-    /// Whether the row window is the key window — a selection in an inactive window is muted, as
-    /// in every native list.
-    @Environment(\.controlActiveState) private var controlActiveState
-    /// Which position a freshly-opened add editor should seed to (set by the plus button and the
-    /// context menu's Add actions before opening the editor).
-    @State private var pendingAddPosition: TaskInsertPosition = .child
+    /// Where a freshly-opened add editor will put its task (set by the plus button and the context
+    /// menu's Add actions before opening the editor). The window owns it — see `ProjectView`.
+    @Binding var addPosition: TaskInsertPosition
 
     private var key: String { PMStore.key(for: todo) }
     private var isAdding: Bool { activeEditor == EditorTarget(key: key, kind: .add) }
@@ -1658,7 +2165,7 @@ private struct TaskRow: View {
                     .reportEditorFrame()
                     .padding(.leading, indent(todo.depth))
             }
-            if isAdding && pendingAddPosition == .before {
+            if isAdding && addPosition == .before {
                 addEditor.padding(.leading, indent(todo.depth))
             }
 
@@ -1709,23 +2216,9 @@ private struct TaskRow: View {
                             return provider
                         }
                     }
-                    // Double-click activates (focuses) the task; a single click selects it. The
-                    // two-count gesture is declared first so SwiftUI can let it win the race.
-                    .onTapGesture(count: 2, perform: onActivate)
-                    .onTapGesture { onClick(NSEvent.modifierFlags) }
-                    .contextMenu {
-                        TaskMenu(todo: todo, targets: contextTargets(), store: store,
-                                 openEditor: openEditor, openAdd: openAdd, onDelete: onDelete)
-                    }
                     // Dim the dragged subtree in place under the floating ghost.
                     .opacity(dimmed ? 0.35 : 1)
                     .animation(.easeOut(duration: 0.15), value: dimmed)
-                    // Selection lives on the row, so the row has to report it: VoiceOver reads the
-                    // task with its state, and the gestures it can't perform (double-click to focus,
-                    // ⌫ to delete) are offered as named actions.
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .accessibilityAction(named: "Focus Task", onActivate)
-                    .accessibilityAction(named: "Delete Task") { onDelete(contextTargets()) }
             }
 
             // Forms whose row/edit lands BELOW this one: due edit, Add After (sibling), Add Subtask
@@ -1738,11 +2231,37 @@ private struct TaskRow: View {
                     .reportEditorFrame()
                     .padding(.leading, indent(todo.depth))
             }
-            if isAdding && (pendingAddPosition == .after || pendingAddPosition == .child) {
-                addEditor.padding(.leading, indent(todo.depth + (pendingAddPosition == .child ? 1 : 0)))
+            if isAdding && (addPosition == .after || addPosition == .child) {
+                addEditor.padding(.leading, indent(todo.depth + (addPosition == .child ? 1 : 0)))
             }
         }
         .padding(.horizontal, 12)
+        // The click target is the whole row band — the padding above included — and not the task line
+        // inside it. It has to be exactly what `selectionBand` paints and what `onHover` lights up: the
+        // window's blank space carries a double-click of its own (add a task), so a target that stopped
+        // at the line's edge handed every click in the row's own margins to the task list. Same rule as
+        // the details brief below, reached the same way.
+        //
+        // Only while this row has no editor open, because then the band is clear and the block holds a
+        // text field the container's gestures would fight. (`localEditorKind` nil means every editor
+        // branch above is false, so there is nothing in here but the task line.)
+        .ifCondition(localEditorKind == nil) { view in
+            view.contentShape(Rectangle())
+                // Double-click activates (focuses) the task; a single click selects it. The two-count
+                // gesture is declared first so SwiftUI can let it win the race.
+                .onTapGesture(count: 2, perform: onActivate)
+                .onTapGesture { onClick(NSEvent.modifierFlags) }
+                .contextMenu {
+                    TaskMenu(todo: todo, targets: contextTargets(), store: store,
+                             openEditor: openEditor, openAdd: openAdd, onDelete: onDelete)
+                }
+                // Selection lives on the row, so the row has to report it: VoiceOver reads the task
+                // with its state, and the gestures it can't perform (double-click to focus, ⌫ to
+                // delete) are offered as named actions.
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction(named: "Focus Task", onActivate)
+                .accessibilityAction(named: "Delete Task") { onDelete(contextTargets()) }
+        }
         // The selection band spans the full row width, outside the depth indent — a row's highlight
         // shouldn't step in as it nests, any more than a table row's does.
         .background(selectionBand)
@@ -1752,24 +2271,14 @@ private struct TaskRow: View {
         .animation(.snappy, value: ancestorWrapBoost)
     }
 
-    /// The row's fill: the selection band, or a whisper of one on hover.
-    ///
-    /// Three states, as in every native list — selected in the focused pane of the key window
-    /// (accent), selected but not (grey), and not selected. It's a tint rather than a solid accent
-    /// fill so the row's own colours — the orange due chip, the secondary strikethrough of a
-    /// completed task — stay themselves instead of needing a second, inverted palette.
-    /// Suppressed while this row has an editor open, where the form is the subject, not the row.
+    /// The row's fill. Suppressed while this row has an editor open, where the form is the subject,
+    /// not the row.
     @ViewBuilder private var selectionBand: some View {
         if localEditorKind != nil {
             Color.clear
-        } else if isSelected {
-            (isEmphasized && controlActiveState != .inactive
-                ? Color.accentColor.opacity(0.28)
-                : Color.primary.opacity(0.10))
-        } else if hovering && activeEditor == nil {
-            Color.primary.opacity(0.05)
         } else {
-            Color.clear
+            RowSelectionBand(isSelected: isSelected, isEmphasized: isEmphasized,
+                             isHovering: hovering && activeEditor == nil)
         }
     }
 
@@ -1801,18 +2310,26 @@ private struct TaskRow: View {
 
             // No tap handler of its own: clicking anywhere in the row selects it and double-clicking
             // focuses the task, both handled at the row level so the whole band is one target.
+            // No line limit. A task is a sentence someone wrote, and the two-line cap silently ate the
+            // end of the long ones — which are exactly the tasks whose ends matter, since that's where
+            // the qualifier usually is. Rows are variable-height already (editors open inside them),
+            // and `RowFrame` measures the frame rather than assuming a row height, so the drag/drop
+            // geometry follows a wrapped row without being told.
             Text(todo.text)
                 .font(.system(size: 13, weight: todo.isFocused ? .semibold : .regular))
                 .strikethrough(todo.checked, color: .secondary)
                 .foregroundStyle(todo.checked ? .secondary : .primary)
-                .lineLimit(2)
+                // Wrap rather than compress: in an `HStack` a `Text` will squeeze itself to one
+                // truncated line before it asks for a second one.
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 4)
 
-            DueChip(todo: todo, isEditing: isEditingDue, reveal: revealControls) { toggleEditor(.due) }
+            DueChip(todo: todo, isEditing: isEditingDue, reveal: revealControls,
+                    onPick: onSetDue, onPickCustom: { toggleEditor(.due) })
 
             Button {
-                pendingAddPosition = .child
+                addPosition = .child
                 toggleEditor(.add)
             } label: {
                 Image(systemName: "plus")
@@ -1825,13 +2342,12 @@ private struct TaskRow: View {
         }
     }
 
-    /// The positional add editor. Its slot and indent are chosen by the caller (above/below, depth)
-    /// from `pendingAddPosition`, so the form previews exactly where the new task will land.
+    /// The positional add editor. Its slot and indent are chosen by `addPosition`, so the form previews
+    /// exactly where the new task will land. Committing doesn't close it — the parent moves it down to
+    /// the next slot so a list can be typed straight through.
     private var addEditor: some View {
-        AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
-            store.addTodo(text: text, due: due, relativeTo: todo, position: pendingAddPosition)
-            activeEditor = nil
-        } onCancel: { activeEditor = nil }
+        AddEditor(leadingIcon: AnyView(TaskStatusIcon()), onAdd: onAddTask,
+                  onCancel: { activeEditor = nil })
             .reportEditorFrame()
     }
 
@@ -1853,7 +2369,7 @@ private struct TaskRow: View {
 
     /// Seed the add position, then open the add editor.
     private func openAdd(_ position: TaskInsertPosition) {
-        pendingAddPosition = position
+        addPosition = position
         openEditor(.add)
     }
 
@@ -1907,62 +2423,193 @@ private struct ListDropDelegate: DropDelegate {
 
 // MARK: Due chip + editor
 
+/// How loud a due badge is, by how late it is.
+///
+/// The scale the sidebar and menubar already keep (`DueState`), spent on more than colour. The row's
+/// badge used to be one orange for every own date, which meant "2w ago" and "in 3mo" arrived with
+/// identical weight — the text said *when* while the styling implied they mattered the same amount.
+/// Now overdue is filled and semibold, due-today-or-tomorrow is a tinted outline, and everything
+/// further out is a quiet grey one, so the list sorts itself by urgency before it's read.
+///
+/// The fill matters beyond taste: it's drawn as a shape with an explicit colour, so it survives
+/// whatever foreground style the enclosing menu control imposes on its label. Colour on text alone was
+/// the part that could be overridden.
+///
+/// An inherited date takes the dashed border it always had and the colour of its state, but never the
+/// fill. It's still someone else's date — worth noticing when the ancestor is overdue, not worth
+/// shouting on every descendant of it.
+private struct DueChipStyle {
+    var text: Color
+    var stroke: Color
+    var fill: Color
+    var weight: Font.Weight
+    var dashed: Bool
+
+    init(due: String, own: Bool) {
+        let state = DueState(due: due, own: own)
+        let tint: Color
+        switch state {
+        case .overdue: tint = Color(nsColor: .systemRed)
+        case .soon: tint = Color(nsColor: .systemOrange)
+        case .later, .inherited: tint = .secondary
+        }
+        text = tint
+        stroke = tint
+        dashed = !own
+        if own, state == .overdue {
+            fill = tint.opacity(0.16)
+            weight = .semibold
+        } else if own, state == .soon {
+            fill = tint.opacity(0.10)
+            weight = .medium
+        } else {
+            fill = .clear
+            weight = .regular
+        }
+    }
+
+    private init(text: Color, stroke: Color, fill: Color, weight: Font.Weight, dashed: Bool) {
+        self.text = text; self.stroke = stroke; self.fill = fill
+        self.weight = weight; self.dashed = dashed
+    }
+
+    /// The "＋date" affordance on a task with no date at all — a control, so it stays quiet.
+    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear,
+                                    weight: .regular, dashed: true)
+}
+
 private struct DueChip: View {
     let todo: Todo
     let isEditing: Bool
     /// Reveal the empty-state "＋date" affordance (true while hovering the row). A real own/inherited
     /// date is content, not a control, so it stays visible regardless.
     let reveal: Bool
-    let onTap: () -> Void
+    /// Apply a due date — nil clears it. Whatever the row's date commands apply to, this applies to.
+    let onPick: (String?) -> Void
+    /// Open the precise picker, for a date the presets haven't got.
+    let onPickCustom: () -> Void
 
-    private var hasDate: Bool { todo.dueDate != nil || todo.effectiveDueDate != nil }
+    /// The date this chip is showing, and whether the task owns it or inherited it from an ancestor.
+    private var shown: (raw: String, own: Bool)? {
+        if let own = todo.dueDate { return (own, true) }
+        if let inherited = todo.effectiveDueDate { return (inherited, false) }
+        return nil
+    }
+
+    private var hasDate: Bool { shown != nil }
+    private var showing: Bool { hasDate || reveal || isEditing }
 
     var body: some View {
         // Always laid out so hovering only toggles opacity, never the row's height. A real own/
         // inherited date is content (always visible); the empty-state "＋date" is a control that
         // fades in on hover/edit but keeps reserving its space.
-        Button(action: onTap) {
-            if let own = todo.dueDate {
-                chip(String(own.prefix(10)), color: .orange, dashed: false)
-            } else if let eff = todo.effectiveDueDate {
-                chip(String(eff.prefix(10)), color: .secondary, dashed: true)
+        Menu {
+            menuItems
+        } label: {
+            if let shown {
+                chip(RelativeDue.short(shown.raw), style: DueChipStyle(due: shown.raw, own: shown.own))
             } else {
-                chip("＋date", color: .secondary, dashed: true)
+                chip("＋date", style: .empty)
             }
         }
+        // `.button` + `.plain`, not `.borderlessButton`. The borderless style presents the label
+        // through a pop-up-button control, which paints it in the control's own label colour — so the
+        // chip's whole severity scale collapsed to plain text the moment it stopped being a `Button`.
+        // The button style routes the label through `PlainButtonStyle` instead, which renders it as
+        // written, exactly as the row's other plain buttons are rendered.
+        .menuStyle(.button)
         .buttonStyle(.plain)
-        .help(todo.dueDate != nil ? "Edit due date" :
-              (todo.effectiveDueDate != nil ? "Inherited due — click to set this task's own" : "Set due date"))
-        .opacity(hasDate || reveal || isEditing ? 1 : 0)
-        .allowsHitTesting(hasDate || reveal || isEditing)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(helpText)
+        .opacity(showing ? 1 : 0)
+        .allowsHitTesting(showing)
     }
 
-    private func chip(_ text: String, color: Color, dashed: Bool) -> some View {
+    /// The relative answers first, a calendar for anything else, and a way out.
+    ///
+    /// A menu, because that's what a chip is on this platform — you click the date pill in Reminders
+    /// and get choices, not a stepper. It also puts the editor in the same language as the badge that
+    /// opens it: the badge says "in 2w", so the menu says "Next Week", not 09/03/2026.
+    ///
+    /// Every item routes through `onPick`, which is the row's `onSetDue` — so a date chosen on a row
+    /// inside a multi-selection lands on the whole selection, exactly as the context menu's version
+    /// does. There's no separate single-row path to fall out of step.
+    @ViewBuilder private var menuItems: some View {
+        ForEach(DueSuggestion.options()) { option in
+            Button { onPick(DueFormat.string(option.date)) } label: {
+                Text(option.title) + Text("   \(option.hint)").foregroundStyle(.secondary)
+            }
+        }
+        Divider()
+        Button("Pick a Date…", action: onPickCustom)
+        if todo.dueDate != nil {
+            Divider()
+            Button("Clear Due Date") { onPick(nil) }
+        }
+    }
+
+    /// The tooltip: the exact date the badge is a summary of, plus what clicking does.
+    ///
+    /// The badge says "in 2w" now, which is faster to read and useless for deciding whether that
+    /// clears a deadline — so the date it stands for has to be one hover away. See `RelativeDue.full`.
+    private var helpText: String {
+        if let own = todo.dueDate {
+            return "Due \(RelativeDue.full(own))  ·  click to edit"
+        }
+        if let eff = todo.effectiveDueDate {
+            return "Inherited due \(RelativeDue.full(eff))  ·  click to set this task's own"
+        }
+        return "Set due date"
+    }
+
+    private func chip(_ text: String, style: DueChipStyle) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(.caption2.weight(style.weight))
+            // A relative badge rewrites itself as the days tick down, and "in 2d" → "in 3d" shouldn't
+            // shift the row's layout to do it.
+            .monospacedDigit()
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 4).fill(style.fill))
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3] : []))
+                    .strokeBorder(style.stroke,
+                                  style: StrokeStyle(lineWidth: 1, dash: style.dashed ? [3] : []))
             )
-            .foregroundStyle(color)
+            .foregroundStyle(style.text)
     }
 }
 
 // MARK: Session header + note editor
 
-/// A revealed session's first-class header: its date/label line (double-click or right-click to
-/// rename), its editable leading-prose note when it has one (double-click to edit; nothing is drawn
-/// when empty), and a context menu for renaming, adding a note/task, and deleting an empty session.
+/// A revealed session's first-class row: its date/label line, its leading-prose note when it has one,
+/// and a context menu for renaming, adding a note/task, and deleting an empty session. It selects and
+/// draws its highlight exactly as a task row does, so ⌘N, Return and the arrow keys can reach it.
+///
+/// **Double-click opens the note**, on the header line and the prose alike. It used to rename on the
+/// header line and edit the note on the prose — one gesture, two meanings, decided by which line of the
+/// block you happened to hit, and with no target at all until the note existed. The note is what a
+/// session is for; the label is optional decoration on a heading that's identified by its date, so it
+/// hands the big gesture over and is renamed from the menu or from inside the note editor.
+///
 /// Publishes no `RowFrame`, so it doesn't participate in the task drag-reorder geometry.
 private struct SessionHeader: View {
     let index: Int
     let session: Session
     @ObservedObject var store: PMStore
     @Binding var activeEditor: EditorTarget?
+    /// Whether this row is in the selection, and whether that selection is in the pane holding
+    /// keyboard focus — the same pair `TaskRow` takes, drawing the same three-state band.
+    var isSelected: Bool = false
+    var isEmphasized: Bool = false
+    /// A click on the row, with the modifiers that were down.
+    var onClick: (NSEvent.ModifierFlags) -> Void = { _ in }
+    /// Double-click: open this session's note.
+    var onActivate: () -> Void = {}
+    @State private var hovering = false
 
-    private var key: String { "sess:\(index)" }
+    private var key: String { ProjectView.sessionKey(index) }
     private var isRenaming: Bool { activeEditor == EditorTarget(key: key, kind: .sessionLabel) }
     /// The session's editable note — its leading prose (lines before the first task), trimmed.
     private var prose: String { leadingSessionProse(body: session.body) }
@@ -1986,21 +2633,44 @@ private struct SessionHeader: View {
                 headerLine
             }
 
-            // The note read view; opening it (double-click or "Edit Note…") takes over the whole column
-            // with the rich editor — see ProjectView.sessionNoteTakeover. The read view renders the note's
-            // markdown (formatting applied, markers removed). A session with no note shows nothing at all
-            // — no placeholder line — so an empty session costs one caption; the context menu still adds one.
+            // The note read view, rendering the note's markdown (formatting applied, markers removed).
+            // A session with no note draws nothing here — the header line above is the target either
+            // way, so there's no placeholder standing in for a note that isn't written yet.
             if !prose.isEmpty {
                 Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .labelColor))
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { openNote() }
             }
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 2)
+        // One target for the whole block — header line, note, and the padding around them — rather
+        // than a gesture per line inside it. The padding was dead space when the gestures sat on the
+        // content: the band lit up under the pointer and the double-click fell straight through to the
+        // scroll view's "add a task to today", which is a hit area smaller than its own highlight.
+        //
+        // Applied outside the padding and before the band, so what you can click and what lights up are
+        // the same rectangle by construction.
+        // Not while renaming: the block holds a text field then, and a container gesture over it would
+        // fight the clicks that place the caret.
+        .ifCondition(!isRenaming) { view in
+            view.contentShape(Rectangle())
+                // Declared before the single click so SwiftUI can let the two-count gesture win the
+                // race, exactly as a task row does it.
+                .onTapGesture(count: 2, perform: onActivate)
+                .onTapGesture { onClick(NSEvent.modifierFlags) }
+                .contextMenu { menu }
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction(named: "Open Session Note", onActivate)
+        }
+        // The band spans the whole session block — header line and note together, since they're one
+        // row. Suppressed while the rename editor is up, where the form is the subject.
+        .background(RowSelectionBand(isSelected: isSelected && !isRenaming,
+                                     isEmphasized: isEmphasized,
+                                     isHovering: hovering && activeEditor == nil))
+        .background(scrollMarker)
+        .onHover { hovering = $0 }
         .animation(.snappy, value: isRenaming)
     }
 
@@ -2011,20 +2681,39 @@ private struct SessionHeader: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 4)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) { activeEditor = EditorTarget(key: key, kind: .sessionLabel) }
-        .contextMenu { sessionMenu }
     }
 
-    @ViewBuilder private var sessionMenu: some View {
-        Button { activeEditor = EditorTarget(key: key, kind: .sessionLabel) } label: {
-            Label("Rename Session…", systemImage: "pencil")
-        }
-        Button { openNote() } label: {
-            Label(prose.isEmpty ? "Add Note…" : "Edit Note…", systemImage: "note.text")
+    private var menu: some View {
+        SessionMenu(index: index, hasNote: !prose.isEmpty, store: store, activeEditor: $activeEditor)
+    }
+
+    /// This row's key as a scroll id, so arrow-key navigation can reveal a header that's scrolled out
+    /// of view. In the background for the same reason `TaskRow`'s is.
+    private var scrollMarker: some View {
+        Color.clear.frame(width: 0, height: 0).id(key)
+    }
+}
+
+/// A session's context menu: rename, its note, add a task, and delete for a session with nothing in it.
+/// Shared by the revealed header and the compact list's caption, so a session offers the same things
+/// whichever view you're in — and so the things that lost their buttons keep a discoverable home.
+private struct SessionMenu: View {
+    let index: Int
+    let hasNote: Bool
+    @ObservedObject var store: PMStore
+    @Binding var activeEditor: EditorTarget?
+
+    private var key: String { ProjectView.sessionKey(index) }
+
+    var body: some View {
+        Button { activeEditor = EditorTarget(key: key, kind: .sessionNote) } label: {
+            Label(hasNote ? "Edit Note…" : "Add Note…", systemImage: "note.text")
         }
         Button { activeEditor = EditorTarget(key: key, kind: .sessionAddTask) } label: {
             Label("Add Task…", systemImage: "plus")
+        }
+        Button { activeEditor = EditorTarget(key: key, kind: .sessionLabel) } label: {
+            Label("Rename Session…", systemImage: "pencil")
         }
         // Deleting is offered only for a session with no tasks, so tasks are never removed with it.
         if !store.hasTasks(sessionIndex: index) {
@@ -2034,16 +2723,18 @@ private struct SessionHeader: View {
             }
         }
     }
-
-    private func openNote() { activeEditor = EditorTarget(key: key, kind: .sessionNote) }
 }
 
 /// The full-column, focused editor for a session's prose note. The column is taken over by a header
-/// (Back button + the project name over the session name) and a rich `MarkdownTextEditor` with live
-/// syntax highlighting and ⌘B/⌘I/⌘K shortcuts. There are no Save/Cancel buttons: the note **auto-saves**
-/// whenever you leave — Back, Escape, an outside click (all remove the view → `onDisappear`), or the
-/// the window losing key focus (`didResignKey`). `store.setSessionNote` is byte-idempotent, so a
-/// repeated commit with no changes is a free no-op and yields no extra undo entry.
+/// (Back button + the project name over the session's date and label) and a rich `MarkdownTextEditor`
+/// with live syntax highlighting and ⌘B/⌘I/⌘K shortcuts. There are no Save/Cancel buttons: the note
+/// **auto-saves** whenever you leave — Back, Escape, an outside click (all remove the view →
+/// `onDisappear`), or the window losing key focus (`didResignKey`). `store.setSessionNote` is
+/// byte-idempotent, so a repeated commit with no changes is a free no-op and yields no extra undo entry.
+///
+/// The label is edited here, in the header, rather than behind a gesture out in the list. This is where
+/// you already are when you're working on a session, it's the one place the label is shown next to the
+/// date it decorates, and it means the list doesn't need a second double-click meaning of its own.
 private struct SessionNoteTakeover: View {
     let index: Int
     let session: Session
@@ -2055,10 +2746,19 @@ private struct SessionNoteTakeover: View {
     let onBack: () -> Void
 
     @State private var text: String
+    /// The session's label, as typed. Committed on Return and on the way out, beside the prose.
+    @State private var label: String
+    /// Whether the pointer is over the label field, which is how a plain-looking line of header text
+    /// says it's editable.
+    @State private var labelHovering = false
     /// The window this takeover is in, so the save-on-blur only fires for *this* window losing key.
     @State private var hostWindow: NSWindow?
     /// The bar's measured height, fed to the editor as its text-container top inset.
     @State private var barHeight: CGFloat = 0
+    /// Whether the pointer is in the header strip, and whether this window is the active one — the two
+    /// inputs to `HeaderChrome`, exactly as in the task column's header.
+    @State private var headerHovering = false
+    @Environment(\.controlActiveState) private var controlActiveState
 
     init(index: Int, session: Session, projectName: String,
          store: PMStore, state: ProjectViewState, onBack: @escaping () -> Void) {
@@ -2069,23 +2769,20 @@ private struct SessionNoteTakeover: View {
         self.state = state
         self.onBack = onBack
         _text = State(initialValue: leadingSessionProse(body: session.body))
-    }
-
-    private var sessionName: String {
-        session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
+        _label = State(initialValue: session.label)
     }
 
     var body: some View {
-        // The bar stands over the editor rather than stacking above it, and the editor takes the bar's
+        // The header stands over the editor rather than stacking above it, and the editor takes its
         // height as a text-container inset. That's the same arrangement the task list gets from
         // `safeAreaInset`, reached differently because this content is an `NSTextView` in an
         // `NSScrollView` rather than a SwiftUI `ScrollView`. Stacked, the prose stopped at the divider
         // and the material had nothing but window background behind it — a bar in name only.
         //
-        // A `ZStack` and not `.overlay`, because the bar's measured height has to reach the editor and
-        // siblings in a stack propagate their preferences to the stack's parent beyond any doubt. Read
-        // off an overlay it never arrived, leaving `barHeight` at zero and the first lines of the note
-        // underneath the bar.
+        // A `ZStack` and not `.overlay`, because the header's measured height has to reach the editor
+        // and siblings in a stack propagate their preferences to the stack's parent beyond any doubt.
+        // Read off an overlay it never arrived, leaving `barHeight` at zero and the first lines of the
+        // note underneath the bar.
         ZStack(alignment: .top) {
             MarkdownTextEditor(text: $text, onSubmit: onBack, topInset: barHeight)  // ⌘↩ → auto-saves
                 .padding(.horizontal, 8)
@@ -2095,17 +2792,16 @@ private struct SessionNoteTakeover: View {
                 .modifier(ReadableWidth())
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            VStack(alignment: .leading, spacing: 0) {
-                // Same bar as the task list's header — this stands in the same titlebar strip, so it
-                // wears the same material. Cap inside the material, as there: the title stays with the
-                // prose it heads, the bar spans the pane.
-                header.modifier(ReadableWidth())
-                Divider()
-            }
-            .background(TitlebarMaterial())
-            .background(GeometryReader { geo in
-                Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
-            })
+            // Same chrome as the task list's header — this stands in the same titlebar strip, so it
+            // floats the same way: a back button and an identity pill in glass, over a scrim that
+            // fades out rather than a bar that ends in a rule. Cap inside the scrim, as there: the
+            // title stays at the width of the prose it heads, the scrim spans the pane.
+            header
+                .modifier(ReadableWidth())
+                .background(SoftHeaderScrim())
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
+                })
         }
         .onPreferenceChange(BarHeightKey.self) { barHeight = $0 }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2123,40 +2819,142 @@ private struct SessionNoteTakeover: View {
         }
     }
 
+    /// The takeover's header: a back button in its own glass circle, then the identity pill — the
+    /// project's name over the session it belongs to.
+    ///
+    /// This is the closest thing in the app to the Messages conversation header it's modelled on, and
+    /// it's where the two-line "name over detail" pill finally earns its second line: out in the task
+    /// column the project's name stands alone, but here the note needs saying *which* session it is,
+    /// and the date is the only thing that answers that.
     private var header: some View {
         HStack(spacing: 8) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Back to tasks")
-            VStack(alignment: .leading, spacing: 1) {
-                Text(projectName.isEmpty ? "Note" : projectName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(sessionName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
+            backButton
+            identityPill
+            Spacer(minLength: 12)
         }
+        .opacity(chrome.contentOpacity)
         .modifier(TitlebarClearance(state: state, bottom: 8))
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.18)) { headerHovering = hovering }
+        }
+        .animation(.easeOut(duration: 0.18), value: controlActiveState)
+    }
+
+    /// What this header's glass is doing right now — the same three states the task column uses.
+    private var chrome: HeaderChrome {
+        HeaderChrome(active: controlActiveState, hovering: headerHovering)
+    }
+
+    /// Back to the task list. Its own circle of glass at the leading edge, separate from the pill, the
+    /// way Messages keeps its leading button apart from the name it sits beside — this is an action,
+    /// and the pill is a label.
+    private var backButton: some View {
+        Button(action: onBack) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(4)
+        .headerBacking(chrome, in: Circle())
+        .background(WindowDragExcluder())
+        .help("Back to tasks")
+    }
+
+    /// The project's name over the session's date and label.
+    ///
+    /// No gesture of its own, because it holds a text field: the label is edited in place here. A
+    /// pill that responded to a press would be promising one to something whose actual job is to take
+    /// a caret.
+    private var identityPill: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(projectName.isEmpty ? "Note" : projectName)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            sessionLine
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .headerBacking(chrome, in: Capsule())
+        .background(WindowDragExcluder())
+    }
+
+    /// The session's identity line under the project name: its date, fixed, and its label, editable in
+    /// place. The field is plain until the pointer is over it — a bordered box in a titlebar strip would
+    /// read as a form where this is a title.
+    private var sessionLine: some View {
+        HStack(spacing: 4) {
+            Text(session.date)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            labelField
+        }
+    }
+
+    /// The label field, sized to its own text rather than to whatever width is going spare.
+    ///
+    /// A `TextField` takes every point it is offered. Inside a pill whose whole job is to hug its
+    /// contents that meant the pill stretched most of the way across the window — the field's old
+    /// `maxWidth: 240` was a cap on the damage, not a fix, because a flexible frame still claims the
+    /// width it's proposed. The hidden `Text` behind it is a width template instead: the label when
+    /// there is one, the placeholder when there isn't. The stack sizes to the template, which is
+    /// ordinary text and asks for exactly what it needs, and the field fills it — so the field is as
+    /// wide as what it's showing and grows a character at a time as you type.
+    ///
+    /// The trailing padding is caret room. Sized to the glyphs alone, the insertion point at the end
+    /// of the text sits on the field's last pixel.
+    ///
+    /// `.overlay`, not a `ZStack`. A stack sizes to its largest child and the field is still a child,
+    /// so it claimed the full proposal and took the stack with it — the template was along for the ride
+    /// rather than setting the width. Overlay content doesn't participate in layout at all: the hidden
+    /// `Text` alone decides the size, and the field is handed exactly that.
+    private var labelField: some View {
+        Text(label.isEmpty ? "Add a label" : label)
+            .font(.caption)
+            .lineLimit(1)
+            .hidden()
+            .overlay(alignment: .leading) {
+                TextField("Add a label", text: $label)
+                    .textFieldStyle(.plain)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .onSubmit { commitLabel() }
+            }
+        .padding(.leading, 4)
+        .padding(.trailing, 8)
+        .padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 4)
+            .fill(Color.primary.opacity(labelHovering ? 0.07 : 0)))
+        .onHover { labelHovering = $0 }
+        .help("Session label")
+        .background(WindowDragExcluder())
     }
 
     /// Write the current text back to the session's note. The store sanitizes it (headings clamp to
     /// within-session levels; typed checkboxes graduate into real tasks), so we adopt the same cleaned
     /// prose locally — that drops the graduated checkboxes from the editor and makes repeated commits
     /// (this fires from several exit paths) byte-idempotent instead of re-extracting the same tasks.
+    ///
+    /// The label rides along: it's edited in the same view and leaves by the same exits, and the store's
+    /// serial IO queue keeps the two writes in order — the heading rewrite preserves the body and the
+    /// body rewrite preserves the heading, so neither can land on top of the other.
     private func commit() {
+        commitLabel()
         let cleaned = sanitizeSessionNoteProse(text).prose
         store.setSessionNote(index, prose: text)
         if cleaned != text { text = cleaned }
+    }
+
+    /// Rename the session, if the label actually moved. Guarded rather than left to the store's
+    /// byte-idempotence, so simply opening and closing a note doesn't touch the file at all.
+    private func commitLabel() {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != session.label else { return }
+        store.renameSession(index, label: trimmed)
     }
 }
 

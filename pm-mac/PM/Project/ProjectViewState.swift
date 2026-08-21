@@ -20,7 +20,10 @@ enum ProjectPane: Hashable {
 final class ProjectViewState: ObservableObject {
     /// The selected projects in the sidebar. Shared because ⌘C and ⌘A act on whichever pane has
     /// keyboard focus, and those commands are answered from the window, not from inside the sidebar.
-    /// Selecting a project doesn't switch to it — that's the double-click (or Return).
+    ///
+    /// A single selection *is* the window's project: selecting one switches to it, and switching moves
+    /// this (see `ProjectSidebar.selectionChanged`). Only a multiple selection stands apart, as a batch
+    /// for ⌘C or the context menu to act on.
     @Published var projectSelection: Set<String> = []
 
     /// Which pane has keyboard focus, for routing ⌘C / ⌘A / Return.
@@ -81,8 +84,15 @@ final class ProjectViewState: ObservableObject {
 
     func requestFind() { findRequest &+= 1 }
 
-    /// Clear both panes' selections (Escape's last stop before it gives up).
-    func clearSelections() {
-        projectSelection = []
+    /// Bumped by File ▸ New Session, on the same counter pattern as `newTaskRequest`.
+    @Published var newSessionRequest = 0
+
+    func requestNewSession() { newSessionRequest &+= 1 }
+
+    /// Escape's last stop in the sidebar: drop a multiple selection back to the one project the window
+    /// is on. A source list is never left with nothing selected — that's what it means for the
+    /// selection to be the window's project — so this collapses rather than clears.
+    func collapseProjectSelection(to projectKey: String?) {
+        projectSelection = projectKey.map { [$0] } ?? []
     }
 }
