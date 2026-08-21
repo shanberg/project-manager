@@ -20,7 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings = PanelSettings.load()
 
     private var statusController: StatusItemController!
-    private var hotKey: HotKey?
     private var watcher: ConfigWatcher!
     private var notifier: NotificationManager!
     private let windows = WindowManager.shared
@@ -44,10 +43,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier = NotificationManager(store: store)
         notifier.requestAuthorization()
 
-        // Global summon shortcut (⌃⌥P): show/hide the focus panel. It used to summon the project
-        // window, which made it decide between hiding a window and hiding the whole app; a HUD's toggle
-        // is just show/hide, and opening a project window is now the Dock icon and ⌥⌘N.
-        hotKey = HotKey { FocusPanelController.shared.toggle() }
+        // Global shortcuts. Only the panel's (⌃⌥P) is bound out of the box — it used to summon the
+        // project window, which made it decide between hiding a window and hiding the whole app; a
+        // HUD's toggle is just show/hide, and opening a project window is now the Dock icon and ⌥⌘N.
+        // The rest are here so they *can* be bound in Settings ▸ Shortcuts, and stay empty until they
+        // are. Handlers are the same methods the menu bar targets, so a command can't behave one way
+        // from the menu and another from a shortcut.
+        HotKeyManager.shared.start(handlers: [
+            .toggleFocusPanel: { FocusPanelController.shared.toggle() },
+            .openProjectWindow: { [weak self] in self?.newWindow() },
+            .completeFocusedTask: { [weak self] in self?.completeFocused() },
+            .undoLastCompletion: { [weak self] in self?.undoLastCompletion() },
+            .diveIn: { [weak self] in self?.diveInCommand() },
+            .revealProjectInFinder: { [weak self] in self?.revealProject() },
+        ])
 
         // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
         watcher = ConfigWatcher { [weak self] in self?.handleExternalChange() }

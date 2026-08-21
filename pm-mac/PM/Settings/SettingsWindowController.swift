@@ -23,6 +23,8 @@ final class SettingsWindowController: NSWindowController {
                                      symbol: "macwindow", identifier: "windows"))
         tabs.addTabViewItem(Self.tab(ProjectsSettingsView(), title: "Projects",
                                      symbol: "folder", identifier: "projects"))
+        tabs.addTabViewItem(Self.tab(ShortcutsSettingsView(), title: "Shortcuts",
+                                     symbol: "keyboard", identifier: "shortcuts"))
         tabs.addTabViewItem(Self.tab(NotificationSettingsView(), title: "Notifications",
                                      symbol: "bell", identifier: "notifications"))
 

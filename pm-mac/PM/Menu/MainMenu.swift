@@ -163,8 +163,10 @@ enum MainMenu {
         menu.addItem(.separator())
         // The focus panel is a window, not a view mode — but this is where you'd look for it, next to
         // the list filters it replaced.
-        add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel), target: target,
-            key: "p", modifiers: [.control, .option])
+        // No key equivalent here: this item mirrors the *global* shortcut, which is rebindable, so
+        // `syncGlobalShortcuts()` fills it in and keeps it current.
+        focusPanelItem = add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel),
+                             target: target, key: "")
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
@@ -207,6 +209,27 @@ enum MainMenu {
             key: "r", modifiers: [.command, .shift])
         item.submenu = menu
         return item
+    }
+
+    // MARK: Global shortcuts
+
+    /// The View menu's focus-panel item, held so its key equivalent can follow the global binding.
+    private static weak var focusPanelItem: NSMenuItem?
+
+    /// Show whatever the focus panel is currently bound to next to its menu item.
+    ///
+    /// The global hotkey fires whether or not PM is in front, so while PM *is* in front the menu item
+    /// and the shortcut are the same gesture — and a menu that still advertised ⌃⌥P after you rebound
+    /// it would be telling you something untrue about your own keyboard.
+    static func syncGlobalShortcuts() {
+        guard let item = focusPanelItem else { return }
+        if let equivalent = HotKeyManager.shared.binding(for: .toggleFocusPanel)?.menuKeyEquivalent {
+            item.keyEquivalent = equivalent.key
+            item.keyEquivalentModifierMask = equivalent.modifiers
+        } else {
+            item.keyEquivalent = ""
+            item.keyEquivalentModifierMask = []
+        }
     }
 
     // MARK: Helper

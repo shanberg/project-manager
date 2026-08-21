@@ -32,7 +32,7 @@ struct GeneralSettingsView: View {
                     }
                 Toggle("Reopen windows from last session", isOn: $settings.restoreWindows)
             } footer: {
-                Text("PM keeps running in the menu bar after you close its last window, so notifications and the ⌃⌥P shortcut keep working.")
+                Text("PM keeps running in the menu bar after you close its last window, so notifications and \(FocusPanelShortcut.phrase) keep working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -67,7 +67,7 @@ struct WindowsSettingsView: View {
             } header: {
                 Text("Focus Panel")
             } footer: {
-                Text("The focus panel shows the task you're on and stays put while you work elsewhere — ⌃⌥P shows and hides it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
+                Text("The focus panel shows the task you're on and stays put while you work elsewhere — \(FocusPanelShortcut.showsAndHides) it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
