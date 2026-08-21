@@ -248,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: URL scheme
     // pmpanel://toggle | show | hide   → the focus panel
+    // pmpanel://capture | goto         → the quick bar, in one of its two modes
     // pmpanel://window | open?project= → a project window
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
 
@@ -264,6 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "toggle": FocusPanelController.shared.toggle()
         case "show": FocusPanelController.shared.show()
         case "hide": FocusPanelController.shared.hide()
+        // The quick bar's two modes, so a script or a launcher can reach them the same way the
+        // hotkeys do.
+        case "capture": QuickBarController.shared.toggle(mode: .capture)
+        case "goto": QuickBarController.shared.toggle(mode: .goToProject)
         case "window": windows.openFocusedProject()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks

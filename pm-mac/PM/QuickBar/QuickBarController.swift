@@ -16,6 +16,10 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private var panel: KeyablePanel?
     private var hosting: NSHostingController<QuickBarView>?
     private let model = QuickBarModel()
+    /// A hide waiting out a transient loss of key focus; cancelled if the keyboard comes back.
+    private var pendingHide: DispatchWorkItem?
+    /// The app that was in front when the bar was summoned, so dismissing it can put you back there.
+    private var previousApp: NSRunningApplication?
     /// Whether the full project list is currently retained for the bar (its scan is gated).
     private var holdsProjectIndex = false
 
@@ -36,20 +40,61 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     }
 
     func show(mode: QuickBarMode) {
+        // Recorded before anything happens: the bar is meant to take the keyboard *without* bringing
+        // PM forward, so whether the app was already active is the only way to tell a summon that
+        // behaved from one that activated the app behind your back.
+        let wasActive = NSApp.isActive
+        pendingHide?.cancel()
+        pendingHide = nil
+        // Remember where you came from before anything moves, so dismissing can hand focus back.
+        if !wasActive { previousApp = NSWorkspace.shared.frontmostApplication }
         seed(mode: mode)
         let panel = ensurePanel()
         rebuildContent()
         panel.contentView?.layoutSubtreeIfNeeded()
         position(panel)
+
         panel.orderFrontRegardless()
         // The bar is nothing but a text field; every path here is a request to type into it.
         panel.takeKey()
+        assertKeyOnceSettled(panel)
+        Log.write("quick bar shown: mode=\(mode) frame=\(panel.frame) key=\(panel.isKeyWindow) appActive=\(wasActive)->\(NSApp.isActive)")
     }
 
-    func hide() {
+    /// Dismiss the bar, handing the front back to whatever app it was taken from.
+    ///
+    /// `restoringFocus: false` is for the one command that means "go to PM" — opening a project window.
+    /// Everything else (a task captured, Escape, clicking away) is something you did *while* working
+    /// somewhere else, so the last step is putting you back in it.
+    /// Ask for the keyboard once more shortly after summoning, if it didn't stick.
+    ///
+    /// Belt and braces around a window-server handoff this code doesn't control: ordering a window in
+    /// and making it key are separate operations, and a panel that comes up without the keyboard is
+    /// useless rather than merely untidy. One retry, so a genuine refusal isn't turned into a loop.
+    private func assertKeyOnceSettled(_ panel: KeyablePanel) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, self.isVisible, !panel.isKeyWindow else { return }
+            Log.write("quick bar re-taking key")
+            self.pendingHide?.cancel()
+            self.pendingHide = nil
+            panel.takeKey()
+        }
+    }
+
+    func hide(restoringFocus: Bool = true) {
+        pendingHide?.cancel()
+        pendingHide = nil
+        let previous = previousApp
+        previousApp = nil
         guard let panel, panel.isVisible else { return }
+        Log.write("quick bar hidden")
         panel.orderOut(nil)
         releaseProjectIndex()
+        // Only when PM is still the active app: if you've already clicked into something else, that
+        // click is a more recent answer to "where should the focus be" than this is.
+        if restoringFocus, NSApp.isActive, let previous, !previous.isTerminated {
+            previous.activate()
+        }
     }
 
     /// Fill in what the rows are built from, fresh each summon: the focused project may have moved and
@@ -96,10 +141,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .project(let key, let name, _, _, _):
             PMStore.setGlobalFocus(key: key)
             Log.write("quick bar focused \(name)")
-            hide()
-            // ⌘⏎ points PM at the project without pulling you out of what you're doing; a plain ⏎ is a
-            // request to go there, so it brings the window forward.
-            if !modifiers.contains(.command) {
+            // ⌘⏎ points PM at the project without pulling you out of what you're doing, so it hands the
+            // front back; a plain ⏎ is a request to go there, and putting you back would undo it.
+            let opensWindow = !modifiers.contains(.command)
+            hide(restoringFocus: !opensWindow)
+            if opensWindow {
                 WindowManager.shared.open(projectKey: key)
             }
         }
@@ -122,8 +168,13 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // Above everything, and present on whichever Space you summon it from — a bar you can't reach
         // from a full-screen app is a bar you can't rely on.
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.animationBehavior = .utilityWindow
+        // Matching the focus panel, which holds key focus reliably under the same summon.
+        panel.collectionBehavior = [.ignoresCycle, .canJoinAllSpaces, .fullScreenAuxiliary]
+        // No animation. `orderFrontRegardless` on a window with an animation behavior fades it in
+        // asynchronously, and that animation finishes *after* the `takeKey` that follows it — dropping
+        // the key status it was just granted, intermittently, depending on how the two race. A bar you
+        // summon to type into should appear at once anyway.
+        panel.animationBehavior = .none
         self.panel = panel
         return panel
     }
@@ -137,21 +188,37 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             let hosting = NSHostingController(rootView: view)
             hosting.sizingOptions = []
             panel?.contentViewController = hosting
+            // Assigning a content view controller resizes the window to that controller's
+            // `fittingSize`, and SwiftUI hasn't laid out yet at this point, so it reports zero. The
+            // window is left 0×0 — visible, key, and drawing nothing. Put a real size back before
+            // anything measures or positions it.
+            panel?.setContentSize(NSSize(width: QuickBarMetrics.width, height: Self.minHeight))
             self.hosting = hosting
         }
     }
 
     /// Grow and shrink with the rows, keeping the field where it is rather than centring the whole
     /// panel again — a field that slides up the screen as you type is a field you have to chase.
+    ///
+    /// The width is stated, never inherited. The bar has exactly one width, and reading it back off the
+    /// window means any moment the window is the wrong size becomes permanent — which is what a
+    /// zero-width window left behind by the content install turned into.
     private func fit(to height: CGFloat) {
-        guard let panel, height > 1 else { return }
+        guard let panel else { return }
+        let target = max(ceil(height), Self.minHeight)
         var frame = panel.frame
+        guard abs(frame.height - target) > 1 || abs(frame.width - QuickBarMetrics.width) > 1 else { return }
         let top = frame.maxY
-        frame.size.height = height
-        frame.origin.y = top - height
-        guard frame.size != panel.frame.size else { return }
+        frame.size = NSSize(width: QuickBarMetrics.width, height: target)
+        frame.origin.y = top - target
         panel.setFrame(frame, display: true)
+        // A borderless window's shadow is cached from its rendered alpha, so a resize leaves the old
+        // outline behind until it's invalidated.
+        panel.invalidateShadow()
     }
+
+    /// The smallest the bar can be: the field row on its own, with no results under it.
+    private static let minHeight: CGFloat = 56
 
     /// Centred horizontally, high on the screen — where a summoned bar goes, and above the middle so
     /// its rows drop into empty space rather than over the thing you're reading.
@@ -173,8 +240,25 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Losing the keyboard means you've gone somewhere else, and a quick bar left behind on screen is
     /// clutter you have to dismiss by hand. Unlike the focus panel there's no pinned case: the bar has
     /// nothing to show once you're not typing into it.
+    ///
+    /// Deferred, though, rather than done on the spot. Summoning the bar produces a brief resign/regain
+    /// of key focus — the app coming forward hands key to its main window for a moment on the way — and
+    /// hiding synchronously turned that blip into a bar that flashed up and vanished, every first
+    /// press. The same grace period the focus panel uses, and the same re-check: if the keyboard came
+    /// back, this wasn't you leaving.
     func windowDidResignKey(_ notification: Notification) {
         panel?.acceptsKey = false
-        hide()
+        pendingHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let panel = self.panel else { return }
+            guard !panel.isKeyWindow else { return }
+            self.hide()
+        }
+        pendingHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.blurHideDelay, execute: work)
     }
+
+    /// Long enough to ride out the summon's own focus blip, short enough that clicking away from the
+    /// bar still feels like it closed when you clicked.
+    private static let blurHideDelay: TimeInterval = 0.2
 }
