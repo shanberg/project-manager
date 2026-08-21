@@ -22,7 +22,10 @@ enum QuickBarCommand: String, CaseIterable, Identifiable {
     case openWindow
     case openInFinder
     case openInObsidian
+    case editDetails
     case renameProject
+    case archiveProject
+    case unarchiveProject
     case newProject
     case settings
 
@@ -42,7 +45,10 @@ enum QuickBarCommand: String, CaseIterable, Identifiable {
         case .openWindow: return "Open Project Window"
         case .openInFinder: return "Open in Finder"
         case .openInObsidian: return "Open in Obsidian"
+        case .editDetails: return "Edit Project Details"
         case .renameProject: return "Rename Project"
+        case .archiveProject: return "Archive Project"
+        case .unarchiveProject: return "Unarchive Project"
         case .newProject: return "New Project"
         case .settings: return "Settings"
         }
@@ -62,7 +68,10 @@ enum QuickBarCommand: String, CaseIterable, Identifiable {
         case .openWindow: return "macwindow"
         case .openInFinder: return "folder"
         case .openInObsidian: return "book.closed"
+        case .editDetails: return "text.justify.left"
         case .renameProject: return "square.and.pencil"
+        case .archiveProject: return "archivebox"
+        case .unarchiveProject: return "arrow.up.bin"
         case .newProject: return "plus.square"
         case .settings: return "gearshape"
         }
@@ -107,7 +116,10 @@ enum QuickBarCommand: String, CaseIterable, Identifiable {
         case .openWindow: return ["show"]
         case .openInFinder: return ["reveal", "folder", "files"]
         case .openInObsidian: return ["notes", "markdown"]
+        case .editDetails: return ["summary", "problem", "goals", "approach", "learnings", "brief"]
         case .renameProject: return ["title"]
+        case .archiveProject: return ["archive", "shelve", "done"]
+        case .unarchiveProject: return ["unarchive", "restore", "reopen"]
         case .newProject: return ["create", "start"]
         case .settings: return ["preferences", "config", "shortcuts"]
         }

@@ -385,6 +385,7 @@ struct ProjectView: View {
         }
         // File ▸ New Session, on the same counter as New Task and for the same reason.
         .onChange(of: state.newSessionRequest) { _ in beginTodaySession() }
+        .onChange(of: state.editDetailsRequest) { _ in beginEditDetails() }
         // Arm the drag-end backstop for the life of a drag. See `DragEndWatcher` for why the two
         // existing end signals don't between them cover a real drag.
         .onChange(of: draggingKey) { key in
@@ -622,6 +623,15 @@ struct ProjectView: View {
         // reload the watcher fires on.
         if store.todaySessionIndex == nil { sessionCountChangeIsOurs = true }
         store.openTodaySession { index in openSessionNote(index) }
+    }
+
+    /// Open the project's details brief for editing, revealing it first if it was collapsed — the form
+    /// lives inside the brief, so asking to edit it while it's hidden would otherwise be a no-op.
+    private func beginEditDetails() {
+        guard store.projectName != nil else { return }
+        activeEditor = nil
+        setDetails(true)
+        editingDetails = true
     }
 
     /// Put keyboard focus on the task list: the real focus (so arrow keys land there and the selection

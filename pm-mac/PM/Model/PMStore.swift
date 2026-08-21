@@ -601,14 +601,17 @@ final class PMStore: ObservableObject {
         mutate { try editDetails(project: $0, transform) }
     }
 
-    func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil, position: TaskInsertPosition? = nil) {
+    /// Add a task. `then` runs once the document has been re-read, so a caller that needs to find the
+    /// task it just wrote has a list that contains it.
+    func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
+                 position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
         let placement: (kind: TaskInsertPosition, sessionIndex: Int, lineIndex: Int)?
         if let anchor, let position {
             placement = (position, anchor.sessionIndex, anchor.lineIndex)
         } else {
             placement = nil
         }
-        mutate { try PmLib.addTodo(project: $0, text: text, due: due, position: placement) }
+        mutate(then: then) { try PmLib.addTodo(project: $0, text: text, due: due, position: placement) }
     }
 
     // MARK: Session mutations (each flows through `mutate`, so ⌘Z undo/redo covers it)
@@ -668,7 +671,10 @@ final class PMStore: ObservableObject {
     /// Appending, not setting: `setSessionNote` replaces the session's whole leading-prose region, so a
     /// line typed into the quick bar would silently swallow whatever the day's note already said. The
     /// note is a running log, and a second entry joins the first.
-    func appendSessionNote(_ prose: String) {
-        mutate { _ = try PmLib.appendNoteToTodaySession(project: $0, prose: prose) }
+    /// `then` runs after the re-read, which matters when the caller means to open today's session
+    /// next: this may have just created it, and asking for it against a stale document would make a
+    /// second heading with the same date.
+    func appendSessionNote(_ prose: String, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { _ = try PmLib.appendNoteToTodaySession(project: $0, prose: prose) }
     }
 }

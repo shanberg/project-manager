@@ -176,18 +176,27 @@ final class QuickBarModel: ObservableObject {
     @Published var selection: Int = 0
 
     /// The focused project's display name, or nil when there isn't one — capture has nowhere to go.
-    @Published var focusedProjectName: String?
+    ///
+    /// This and the four values below are what the rows are derived from besides the query, and each
+    /// rebuilds on being set. The controller seeds them together and could just as well rebuild once at
+    /// the end, but then the order it happened to write them in would be load-bearing — and a row list
+    /// that silently reflects four of five inputs is the kind of wrong that looks right.
+    @Published var focusedProjectName: String? { didSet { rebuild() } }
 
     /// The task a captured line would be placed relative to, for the rows to name. Nil when the project
     /// has no open tasks, which is what takes the two anchored placements off the list.
-    @Published var focusedTaskText: String?
+    @Published var focusedTaskText: String? { didSet { rebuild() } }
 
     /// Whether there's a completion to take back — what puts Undo Last Complete on the `>` list.
-    @Published var canUndoCompletion = false
+    @Published var canUndoCompletion = false { didSet { rebuild() } }
 
     /// Whether diving in would land anywhere. A command that would quietly do nothing is worse than a
     /// command that isn't offered.
-    @Published var hasNextTask = false
+    @Published var hasNextTask = false { didSet { rebuild() } }
+
+    /// Which of Archive and Unarchive the focused project can be on the receiving end of. Only ever
+    /// one of the two, since it's already in one folder or the other.
+    @Published var focusedProjectIsArchived = false { didSet { rebuild() } }
 
     /// Whether ⌥ is held right now, published by the controller's flags monitor. Only the labels want
     /// it — running a row reads the modifiers off the keystroke that ran it.
@@ -270,6 +279,8 @@ final class QuickBarModel: ObservableObject {
         case .complete, .editTask, .setDue, .wrapTask: return focusedTaskText != nil
         case .undoLast: return canUndoCompletion
         case .diveIn: return hasNextTask
+        case .archiveProject: return focusedProjectName != nil && !focusedProjectIsArchived
+        case .unarchiveProject: return focusedProjectName != nil && focusedProjectIsArchived
         default: return focusedProjectName != nil
         }
     }

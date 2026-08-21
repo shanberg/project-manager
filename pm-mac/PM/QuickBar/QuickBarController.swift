@@ -135,6 +135,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.focusedTaskText = anchorTask?.text
         model.canUndoCompletion = focusedStore?.lastCompletedKey != nil
         model.hasNextTask = focusedStore?.nextTodo != nil
+        model.focusedProjectIsArchived = focusedProjectScope == .archive
         model.reset(mode: mode)
     }
 
@@ -176,34 +177,49 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         return store.focusedTodo ?? store.openTodos.first
     }
 
+    /// Which folder the focused project is in. Read off its key, which names the folder it was found
+    /// in, rather than by looking on disk.
+    private var focusedProjectScope: ProjectScope? {
+        guard let key = focusedStore?.projectKey, let paths = try? loadConfigAndPaths().1 else {
+            return nil
+        }
+        return key.hasPrefix("\(paths.archivePath):") ? .archive : .active
+    }
+
     // MARK: Running a row
 
+    /// Run a row.
+    ///
+    /// ⌘ means one thing on every row: *and show me*. A plain ⏎ does the thing and gives you back the
+    /// app you were in — which is what this bar is for, summoned over your work and gone again. ⌘⏎ does
+    /// the same thing and then puts PM in front of the result: the focus panel on the task, the window
+    /// on the session, the project you just switched to.
+    ///
+    /// Some commands have no version of themselves that stays out of your way — Settings, a rename
+    /// prompt — and those come forward either way. Nothing else does.
     private func run(_ row: QuickBarRow, modifiers: EventModifiers) {
+        let reveal = modifiers.contains(.command)
         switch row {
         case .capture(let placement, let text, let due, _):
             guard let store = focusedStore else { return }
-            apply(placement, text: text, due: due, in: store, modifiers: modifiers)
-            hide()
+            hide(restoringFocus: !reveal)
+            apply(placement, text: text, due: due, in: store, modifiers: modifiers, reveal: reveal)
 
         case .command(let command, let argument):
-            perform(command, argument: argument)
+            perform(command, argument: argument, reveal: reveal)
 
         case .project(let key, let name, _, _, _):
             PMStore.setGlobalFocus(key: key)
-            Log.write("quick bar focused \(name)")
-            // ⌘⏎ points PM at the project without pulling you out of what you're doing, so it hands the
-            // front back; a plain ⏎ is a request to go there, and putting you back would undo it.
-            let opensWindow = !modifiers.contains(.command)
-            hide(restoringFocus: !opensWindow)
-            if opensWindow {
-                WindowManager.shared.open(projectKey: key)
-            }
+            Log.write("quick bar focused \(name)\(reveal ? " and opened it" : "")")
+            hide(restoringFocus: !reveal)
+            if reveal { WindowManager.shared.open(projectKey: key) }
         }
     }
 
-    /// Write a captured line where the chosen row said it would go.
+    /// Write a captured line where the chosen row said it would go, and — with `reveal` — show it.
     private func apply(_ placement: CapturePlacement, text: String, due: String?,
-                       in store: PMStore, modifiers: EventModifiers) {
+                       in store: PMStore, modifiers: EventModifiers, reveal: Bool) {
+        Log.write("quick bar \(placement.rawValue)\(reveal ? " (reveal)" : ""): \(text)\(due.map { " due:\($0)" } ?? "")")
         switch placement {
         case .narrow, .after:
             // Resolved now rather than held from the summon. The anchor is a value snapshot carrying
@@ -214,15 +230,38 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             let position: TaskInsertPosition = placement == .narrow
                 ? .child
                 : (modifiers.contains(.option) ? .before : .after)
-            store.addTodo(text: text, due: due, relativeTo: anchor, position: position)
-            Log.write("quick bar \(placement.rawValue): \(text)\(due.map { " due:\($0)" } ?? "")")
+            store.addTodo(text: text, due: due, relativeTo: anchor, position: position) { [weak self] in
+                guard reveal else { return }
+                // A child insert moves the project's focus onto the new task by itself — that is what
+                // narrowing means — so the panel is already pointing at it. A sibling doesn't, so a
+                // request to be shown the new task has to move the focus there first.
+                if position != .child { self?.focusAdded(text: text, near: anchor, in: store) }
+                FocusPanelController.shared.show()
+            }
         case .sessionEnd:
-            store.addTodo(text: text, due: due)
-            Log.write("quick bar added task: \(text)\(due.map { " due:\($0)" } ?? "")")
+            // The unanchored add appends to today's session and takes focus, so the panel lands on it.
+            store.addTodo(text: text, due: due) {
+                if reveal { FocusPanelController.shared.show() }
+            }
         case .sessionNote:
-            store.appendSessionNote(text)
-            Log.write("quick bar added session note: \(text)")
+            store.appendSessionNote(text) {
+                if reveal { WindowManager.shared.openFocusedProject().newSession(nil) }
+            }
         }
+    }
+
+    /// Move the project's focus onto a task that was just written beside `anchor`.
+    ///
+    /// Found by its text within the anchor's session rather than by a line index, because the insert
+    /// has renumbered every line after it. Two open tasks with the same text in one session are
+    /// ambiguous; the one nearest the anchor is the one just written, and in the worst case the two
+    /// read identically anyway.
+    private func focusAdded(text: String, near anchor: Todo, in store: PMStore) {
+        let match = store.openTodos
+            .filter { $0.sessionIndex == anchor.sessionIndex && $0.text == text }
+            .min { abs($0.lineIndex - anchor.lineIndex) < abs($1.lineIndex - anchor.lineIndex) }
+        guard let match else { return }
+        store.focus(match)
     }
 
     // MARK: Running a command
@@ -236,18 +275,36 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// these commands were given a global shortcut for in the first place.
     private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
         switch command {
-        case .openWindow, .settings, .newProject, .renameProject, .addLink: return true
+        case .openWindow, .settings, .newProject, .renameProject, .addLink, .editDetails: return true
         // Given text it just writes the note; given none it opens the place that edits it.
         case .sessionNote: return argument.isEmpty
         default: return false
         }
     }
 
-    private func perform(_ command: QuickBarCommand, argument: String) {
+    /// Where ⌘⏎ takes you once this command has run.
+    ///
+    /// Nil for the ones whose own answer is already a window — ⌘ has nothing to add to Settings or to
+    /// a rename prompt, which come forward regardless.
+    private enum Reveal { case focusPanel, sessionEditor, window }
+
+    private func revealTarget(for command: QuickBarCommand) -> Reveal? {
+        switch command {
+        // Not editTask or wrapTask: opening the panel's editor is what those already do, so ⌘ has
+        // nothing left to add. setDue only opens one when it can't read the date it was given.
+        case .complete, .undoLast, .diveIn, .setDue: return .focusPanel
+        case .sessionNote, .startSession: return .sessionEditor
+        case .archiveProject, .unarchiveProject: return .window
+        default: return nil
+        }
+    }
+
+    private func perform(_ command: QuickBarCommand, argument: String, reveal: Bool) {
         let task = anchorTask
         let store = focusedStore
-        Log.write("quick bar command: \(command.rawValue)\(argument.isEmpty ? "" : " \(argument)")")
-        hide(restoringFocus: !staysInPM(command, argument: argument))
+        let target = reveal ? revealTarget(for: command) : nil
+        Log.write("quick bar command: \(command.rawValue)\(argument.isEmpty ? "" : " \(argument)")\(reveal ? " (reveal)" : "")")
+        hide(restoringFocus: !(staysInPM(command, argument: argument) || target != nil))
 
         switch command {
         case .complete:
@@ -265,11 +322,16 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .sessionNote:
             if argument.isEmpty {
                 WindowManager.shared.openFocusedProject().newSession(nil)
+                return   // already the reveal target; asking twice would open today's session twice
             } else {
-                store?.appendSessionNote(argument)
+                // Chained rather than fired alongside: this may have just created today's session, and
+                // asking for it against a document that hasn't been re-read would make a second one.
+                store?.appendSessionNote(argument) { self.reveal(target) }
+                return
             }
         case .startSession:
-            startTodaySession(labelled: argument, in: store)
+            startTodaySession(labelled: argument, in: store, reveal: target)
+            return
         case .addLink:
             if let store { ProjectPrompts.addLink(store: store) }
         case .openWindow:
@@ -280,12 +342,39 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             }
         case .openInObsidian:
             if let store { ObsidianLink.open(store: store) }
+        case .editDetails:
+            WindowManager.shared.openFocusedProject().editDetails()
         case .renameProject:
             renameFocusedProject(store)
+        case .archiveProject, .unarchiveProject:
+            moveFocusedProject(store, from: command == .archiveProject ? .active : .archive)
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
         case .settings:
             SettingsWindowController.shared.show()
+        }
+        self.reveal(target)
+    }
+
+    /// Bring PM's answer forward, for a ⌘⏎ that asked to see it.
+    private func reveal(_ target: Reveal?) {
+        switch target {
+        case .none: return
+        case .focusPanel: FocusPanelController.shared.show()
+        case .sessionEditor: WindowManager.shared.openFocusedProject().newSession(nil)
+        case .window: WindowManager.shared.openFocusedProject()
+        }
+    }
+
+    /// Archive or unarchive the focused project. The move re-points `focused.json` and any window on
+    /// it, so PM stays pointed at the same project in its new folder.
+    private func moveFocusedProject(_ store: PMStore?, from source: ProjectScope) {
+        guard let name = store?.projectName else { return }
+        do {
+            try ProjectLifecycle.move(projectNamed: name, from: source)
+        } catch {
+            ProjectLifecycle.present(error, doing: source == .active
+                                     ? "Couldn't archive “\(name)”" : "Couldn't unarchive “\(name)”")
         }
     }
 
@@ -303,11 +392,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
 
     /// `>session` opens today's, `>session standup` labels it. `openTodaySession` is idempotent — a
     /// session is identified by its date, so asking twice lands in the same one.
-    private func startTodaySession(labelled label: String, in store: PMStore?) {
+    private func startTodaySession(labelled label: String, in store: PMStore?, reveal target: Reveal?) {
         guard let store else { return }
-        store.openTodaySession { index in
-            guard !label.isEmpty else { return }
-            store.renameSession(index, label: label)
+        store.openTodaySession { [weak self] index in
+            if !label.isEmpty { store.renameSession(index, label: label) }
+            self?.reveal(target)
         }
     }
 

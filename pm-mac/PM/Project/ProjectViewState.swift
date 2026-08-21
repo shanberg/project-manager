@@ -110,6 +110,12 @@ final class ProjectViewState: ObservableObject {
 
     func requestNewSession() { newSessionRequest &+= 1 }
 
+    /// Bumped by the quick bar's Edit Project Details, same counter pattern again. The details form
+    /// only exists while the brief is showing, so the view reveals it on the way in.
+    @Published var editDetailsRequest = 0
+
+    func requestEditDetails() { editDetailsRequest &+= 1 }
+
     /// Escape's last stop in the sidebar: drop a multiple selection back to the one project the window
     /// is on. A source list is never left with nothing selected — that's what it means for the
     /// selection to be the window's project — so this collapses rather than clears.

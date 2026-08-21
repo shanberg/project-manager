@@ -115,33 +115,34 @@ struct QuickBarView: View {
                 return "No focused project — nowhere to add a task."
             }
             guard !model.rows.isEmpty else {
-                return "Type a task. End with due:tomorrow to set a date.  ⇥ go to project"
+                return "Type a task. End with due:tomorrow to set a date.  ⇥ switch"
             }
-            var parts = ["Adding to \(project)", "↩ run"]
+            var parts = ["Adding to \(project)", Self.revealHint]
             // Only while ⌥ is up: once it's held the row itself says "Add before", and a hint still
             // offering to do what's already been done reads as a second, different option.
             let hasSibling = model.rows.contains { if case .capture(.after, _, _, _) = $0 { return true } else { return false } }
-            if hasSibling, !model.optionDown { parts.append("⌥ add before") }
-            parts.append("⇥ go to project")
+            if hasSibling, !model.optionDown { parts.append("⌥ before") }
+            parts.append("⇥ switch")
             return parts.joined(separator: "  ·  ")
 
         case .goToProject:
+            // Spelled out rather than left to the ⌘ rule, because this is the row where the two halves
+            // are furthest apart: one switches PM in the background, the other puts a window in front.
             return model.rows.isEmpty && !model.argument.isEmpty
                 ? "No project matches “\(model.argument)”."
-                : "↩ open  ·  ⌘↩ focus without opening  ·  ⇥ commands"
+                : "↩ focus  ·  ⌘↩ and open it  ·  ⇥ switch"
 
         case .command:
             guard let project = model.focusedProjectName else {
                 return "No focused project — most commands have nothing to act on."
             }
             if model.rows.isEmpty { return "No command matches “\(model.argument)”." }
-            // The verbs are the part of this mode you can't see: a row you reached by filtering looks
-            // the same whether or not it would have taken text after it.
-            return model.argument.isEmpty
-                ? "\(project)  ·  ↩ run  ·  ⇥ add a task"
-                : "\(project)  ·  ↩ run"
+            return "\(project)  ·  \(Self.revealHint)  ·  ⇥ switch"
         }
     }
+
+    /// One sentence for the one thing ⌘ means, wherever it's offered.
+    private static let revealHint = "⌘↩ and show me"
 }
 
 /// One row: what it is on the left, what it costs you to know on the right.

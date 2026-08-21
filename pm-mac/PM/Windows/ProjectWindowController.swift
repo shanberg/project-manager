@@ -312,6 +312,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         state.requestNewSession()
     }
 
+    /// Open the project's details form — the summary, problem, goals, approach and learnings, which
+    /// were five separate Raycast forms and are one brief here. Same hand-off again.
+    ///
+    /// Deferred by a turn, unlike the two above, because the quick bar's `>details` may have opened
+    /// this window a moment ago: a counter bumped before the content's first body pass is a change
+    /// `onChange` never sees, and the request would be dropped. (The New Session hand-off can be
+    /// reached the same way from the menu bar and takes that chance today.)
+    func editDetails() {
+        afterCurrentUpdate { [weak self] in self?.state.requestEditDetails() }
+    }
+
     /// Edit ▸ Find ▸ Find…. Opens the window's find bar and puts the cursor in it.
     @objc func performFindPanelAction(_ sender: Any?) {
         state.requestFind()
