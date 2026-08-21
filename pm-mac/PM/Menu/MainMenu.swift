@@ -91,6 +91,8 @@ enum MainMenu {
         add(menu, "New Session", #selector(ProjectWindowController.newSession), target: nil, key: "n",
             modifiers: [.command, .shift])
         // ⌃⌘N: the third "new" in the File menu, after the task and the session it sits above in scale.
+        track(.quickCapture,
+              add(menu, "Quick Add Task…", #selector(AppDelegate.quickCapture), target: target, key: ""))
         add(menu, "New Project…", #selector(AppDelegate.newProject), target: target, key: "n",
             modifiers: [.command, .control])
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
@@ -102,6 +104,8 @@ enum MainMenu {
         let recentsItem = menu.addItem(withTitle: "Open Recent", action: nil, keyEquivalent: "")
         recentsItem.submenu = recents
         recents.delegate = target.recentProjectsMenuDelegate
+        track(.quickGoToProject,
+              add(menu, "Go to Project…", #selector(AppDelegate.quickGoToProject), target: target, key: ""))
         add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
         menu.addItem(.separator())
 
@@ -168,8 +172,9 @@ enum MainMenu {
         // the list filters it replaced.
         // No key equivalent here: this item mirrors the *global* shortcut, which is rebindable, so
         // `syncGlobalShortcuts()` fills it in and keeps it current.
-        focusPanelItem = add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel),
-                             target: target, key: "")
+        track(.toggleFocusPanel,
+              add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel),
+                  target: target, key: ""))
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
@@ -216,22 +221,36 @@ enum MainMenu {
 
     // MARK: Global shortcuts
 
-    /// The View menu's focus-panel item, held so its key equivalent can follow the global binding.
-    private static weak var focusPanelItem: NSMenuItem?
+    /// The menu items that mirror a global shortcut, held so their key equivalents can follow the
+    /// bindings. Weak: the menu owns them, and this outlives a rebuilt menu bar.
+    private static var mirroredItems: [HotKeyAction: WeakMenuItem] = [:]
 
-    /// Show whatever the focus panel is currently bound to next to its menu item.
+    private struct WeakMenuItem {
+        weak var item: NSMenuItem?
+    }
+
+    @discardableResult
+    private static func track(_ action: HotKeyAction, _ item: NSMenuItem) -> NSMenuItem {
+        mirroredItems[action] = WeakMenuItem(item: item)
+        return item
+    }
+
+    /// Show whatever each of these commands is currently bound to next to its menu item.
     ///
-    /// The global hotkey fires whether or not PM is in front, so while PM *is* in front the menu item
-    /// and the shortcut are the same gesture — and a menu that still advertised ⌃⌥P after you rebound
-    /// it would be telling you something untrue about your own keyboard.
+    /// A global hotkey fires whether or not PM is in front, so while PM *is* in front the menu item and
+    /// the shortcut are the same gesture — and a menu that still advertised ⌃⌥P after you rebound it
+    /// would be telling you something untrue about your own keyboard. An unbound command shows no
+    /// shortcut at all rather than a stale one.
     static func syncGlobalShortcuts() {
-        guard let item = focusPanelItem else { return }
-        if let equivalent = HotKeyManager.shared.binding(for: .toggleFocusPanel)?.menuKeyEquivalent {
-            item.keyEquivalent = equivalent.key
-            item.keyEquivalentModifierMask = equivalent.modifiers
-        } else {
-            item.keyEquivalent = ""
-            item.keyEquivalentModifierMask = []
+        for (action, box) in mirroredItems {
+            guard let item = box.item else { continue }
+            if let equivalent = HotKeyManager.shared.binding(for: action)?.menuKeyEquivalent {
+                item.keyEquivalent = equivalent.key
+                item.keyEquivalentModifierMask = equivalent.modifiers
+            } else {
+                item.keyEquivalent = ""
+                item.keyEquivalentModifierMask = []
+            }
         }
     }
 

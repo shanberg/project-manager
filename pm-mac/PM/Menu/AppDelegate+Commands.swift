@@ -32,6 +32,10 @@ extension AppDelegate: NSMenuItemValidation {
         ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
     }
 
+    @objc func quickCapture() { QuickBarController.shared.toggle(mode: .capture) }
+
+    @objc func quickGoToProject() { QuickBarController.shared.toggle(mode: .goToProject) }
+
     // MARK: View
 
     @objc func setTasksMode(_ sender: NSMenuItem) {

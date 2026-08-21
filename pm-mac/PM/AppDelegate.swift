@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // are. Handlers are the same methods the menu bar targets, so a command can't behave one way
         // from the menu and another from a shortcut.
         HotKeyManager.shared.start(handlers: [
+            .quickCapture: { QuickBarController.shared.toggle(mode: .capture) },
+            .quickGoToProject: { QuickBarController.shared.toggle(mode: .goToProject) },
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
             .openProjectWindow: { [weak self] in self?.newWindow() },
             .newProject: { [weak self] in self?.newProject() },

@@ -9,6 +9,8 @@ import Combine
 /// you'd want *without* switching to PM first. Anything you'd do with a project window in front of you
 /// already has a menu shortcut and doesn't belong here.
 enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
+    case quickCapture
+    case quickGoToProject
     case toggleFocusPanel
     case openProjectWindow
     case newProject
@@ -21,6 +23,8 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
+        case .quickCapture: return "Quick Add a Task"
+        case .quickGoToProject: return "Go to Project"
         case .toggleFocusPanel: return "Show or Hide Focus Panel"
         case .openProjectWindow: return "Open Focused Project"
         case .newProject: return "New Project…"
@@ -33,11 +37,19 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
 
     /// What the action is bound to out of the box.
     ///
-    /// Only the panel gets one. The rest ship unbound on purpose — claiming half a dozen system-wide
-    /// combinations on first launch would break shortcuts in apps that have nothing to do with PM, and
-    /// which keys are free is a question only the person at the keyboard can answer.
+    /// The three ways *in* to PM from another app get one: the two quick-bar modes and the focus
+    /// panel. The rest ship unbound on purpose — claiming half a dozen system-wide combinations on
+    /// first launch would break shortcuts in apps that have nothing to do with PM, and which keys are
+    /// free is a question only the person at the keyboard can answer.
     var defaultCombo: KeyCombo? {
         switch self {
+        // ⌃⌥Space and ⌃⌥O: the two ways into the quick bar, and the reason it exists — a shortcut you
+        // have to go and bind first is one you won't have when you need it. Both sit next to the
+        // panel's ⌃⌥P rather than near ⌘Space, which belongs to Spotlight.
+        case .quickCapture:
+            return KeyCombo(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(controlKey | optionKey))
+        case .quickGoToProject:
+            return KeyCombo(keyCode: UInt32(kVK_ANSI_O), carbonModifiers: UInt32(controlKey | optionKey))
         // ⌃⌥P, the panel's summon shortcut since the Tauri build.
         case .toggleFocusPanel:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_P), carbonModifiers: UInt32(controlKey | optionKey))
