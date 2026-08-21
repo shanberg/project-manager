@@ -1236,12 +1236,20 @@ struct ProjectView: View {
             Text(store.errorMessage ?? "No focused project")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Focus a project from Raycast or the menubar.")
+            Text(noFocusHint)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+    }
+
+    /// How to get somewhere from here, named by whatever the quick bar is actually bound to.
+    private var noFocusHint: String {
+        guard let keys = ShortcutHint.keys(.quickGoToProject) else {
+            return "Pick a project from the menu bar, or the sidebar."
+        }
+        return "Press \(keys) to go to a project, or pick one from the menu bar."
     }
 
     // MARK: Tasks

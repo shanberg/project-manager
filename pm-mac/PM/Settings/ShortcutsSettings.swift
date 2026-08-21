@@ -77,19 +77,22 @@ struct ShortcutsSettingsView: View {
     }
 }
 
-/// How to describe the focus panel's summon shortcut in prose, given it can be rebound (or cleared)
-/// in the Shortcuts pane. Two phrasings because the sentences around them differ.
+/// Naming a shortcut in prose, given every one of them can be rebound or cleared in the Shortcuts
+/// pane. Text that hardcodes ⌃⌥P is text that starts lying the moment someone changes it.
 @MainActor
-enum FocusPanelShortcut {
-    private static var combo: KeyCombo? { HotKeyManager.shared.binding(for: .toggleFocusPanel) }
+enum ShortcutHint {
+    /// The keys an action is bound to ("⌃⌥P"), or nil when it isn't bound to any.
+    static func keys(_ action: HotKeyAction) -> String? {
+        HotKeyManager.shared.binding(for: action)?.displayString
+    }
 
     /// "the ⌃⌥P shortcut" / "the focus panel shortcut"
-    static var phrase: String {
-        combo.map { "the \($0.displayString) shortcut" } ?? "the focus panel shortcut"
+    static var focusPanelPhrase: String {
+        keys(.toggleFocusPanel).map { "the \($0) shortcut" } ?? "the focus panel shortcut"
     }
 
     /// "⌃⌥P shows and hides" / "the menu bar item shows and hides"
-    static var showsAndHides: String {
-        combo.map { "\($0.displayString) shows and hides" } ?? "the menu bar item shows and hides"
+    static var focusPanelShowsAndHides: String {
+        keys(.toggleFocusPanel).map { "\($0) shows and hides" } ?? "the menu bar item shows and hides"
     }
 }

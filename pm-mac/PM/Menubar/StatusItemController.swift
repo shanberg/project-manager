@@ -6,8 +6,9 @@ import PmLib
 /// The single consolidated menubar item, replacing the two Raycast menu-bar commands
 /// (`focused-project` + `focused-project-status`). The button shows a drawn progress ring plus the
 /// project code and next task; the ring tints yellow/red when the focused task has been open a while
-/// (stale). The dropdown lists open tasks (click to focus), light in-process actions, and Raycast
-/// deep-links for heavier edits, with ⌥ alternates (Complete→Undo, Add After→Add Before).
+/// (stale). The dropdown lists open tasks (click to focus) and the project's own commands, with ⌥
+/// alternates (Complete→Undo, Add After→Add Before); the task editors summon the focus panel, which is
+/// where typing happens without pulling you out of the app you're in.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
     /// The store for whatever project is focused. Re-pointed (rather than reloaded) when the focus

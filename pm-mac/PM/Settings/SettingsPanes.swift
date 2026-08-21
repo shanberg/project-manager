@@ -32,7 +32,7 @@ struct GeneralSettingsView: View {
                     }
                 Toggle("Reopen windows from last session", isOn: $settings.restoreWindows)
             } footer: {
-                Text("PM keeps running in the menu bar after you close its last window, so notifications and \(FocusPanelShortcut.phrase) keep working.")
+                Text("PM keeps running in the menu bar after you close its last window, so notifications and \(ShortcutHint.focusPanelPhrase) keep working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -67,7 +67,7 @@ struct WindowsSettingsView: View {
             } header: {
                 Text("Focus Panel")
             } footer: {
-                Text("The focus panel shows the task you're on and stays put while you work elsewhere — \(FocusPanelShortcut.showsAndHides) it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
+                Text("The focus panel shows the task you're on and stays put while you work elsewhere — \(ShortcutHint.focusPanelShowsAndHides) it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -93,71 +93,6 @@ struct WindowsSettingsView: View {
     private func savePanelSettings() {
         panelSettings.save()
         FocusPanelController.shared.applyPanelSettings(panelSettings)
-    }
-}
-
-/// Projects: where PM reads from. The values themselves are the CLI's config, so this shows them and
-/// hands off to the place that edits them rather than offering a second, divergent editor.
-struct ProjectsSettingsView: View {
-    private var config: PmConfig? { (try? loadConfig()) ?? nil }
-    private var paths: ResolvedPaths? { (try? loadConfigAndPaths())?.1 }
-
-    var body: some View {
-        Form {
-            Section("Folders") {
-                folderRow("Active", path: paths?.activePath)
-                folderRow("Archive", path: paths?.archivePath)
-            }
-
-            Section("Domains") {
-                if let domains = config?.domains, !domains.isEmpty {
-                    ForEach(domains.sorted(by: { $0.key < $1.key }), id: \.key) { code, label in
-                        LabeledContent(code, value: label)
-                    }
-                } else {
-                    Text("No domains configured").foregroundStyle(.secondary)
-                }
-            }
-
-            Section {
-                LabeledContent("Open in Obsidian") {
-                    Text((config?.useObsidianCLI ?? false) ? "Via the Obsidian CLI" : "Via the file system")
-                        .foregroundStyle(.secondary)
-                }
-                Button("Configure…") {
-                    if let url = URL(string: "raycast://extensions/shanberg/project-manager/configure") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-            } footer: {
-                Text("These come from PM's config file, shared with the pm command line tool and the Raycast extension.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .scenePadding()
-    }
-
-    @ViewBuilder
-    private func folderRow(_ label: String, path: String?) -> some View {
-        LabeledContent(label) {
-            HStack(spacing: 6) {
-                Text(path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "Not set")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                if let path {
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                    } label: {
-                        Image(systemName: "arrow.up.forward.square")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Reveal in Finder")
-                }
-            }
-        }
     }
 }
 

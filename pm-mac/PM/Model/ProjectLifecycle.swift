@@ -75,6 +75,40 @@ enum ProjectLifecycle {
         return newKey
     }
 
+    // MARK: Moving the project folders themselves
+
+    /// Re-point open projects after the active/archive folders have been changed in Settings.
+    ///
+    /// Every key names the folder it was found in, so changing that setting invalidates all of them at
+    /// once. A project whose folder is also present under the new path is the same project and simply
+    /// moves across; one that isn't is gone as far as this app is concerned, and a focus pointing at it
+    /// is cleared rather than left naming a folder nobody can open.
+    static func rebase(from old: ResolvedPaths, to new: ResolvedPaths) {
+        let focused = PMFiles.focusedProjectKey()
+        var keys = Set(WindowManager.shared.controllers.compactMap(\.projectKey))
+        if let focused { keys.insert(focused) }
+
+        for key in keys {
+            guard let name = PMFiles.projectName(fromKey: key),
+                  let base = PMFiles.projectBase(fromKey: key) else { continue }
+            let rebased: String?
+            switch base {
+            case old.activePath: rebased = new.activePath
+            case old.archivePath: rebased = new.archivePath
+            default: rebased = nil
+            }
+            guard let rebased, rebased != base else { continue }
+            if FileManager.default.fileExists(atPath: (rebased as NSString).appendingPathComponent(name)) {
+                repairIdentity(oldKey: key, newKey: self.key(base: rebased, name: name))
+            } else if key == focused {
+                try? PMFiles.clearFocusedProject()
+                Log.write("focus cleared: \(name) isn't under the new project folders")
+                settle()
+            }
+        }
+        refresh()
+    }
+
     // MARK: Identity repair
 
     private static func key(base: String, name: String) -> String { "\(base):\(name)" }
@@ -93,11 +127,16 @@ enum ProjectLifecycle {
         for controller in WindowManager.shared.controllers where controller.projectKey == oldKey {
             WindowManager.shared.retarget(controller, to: newKey)
         }
-        // The menubar, the focus panel and the notifications all follow `focused.json`; this is the
-        // same re-point the config watcher would eventually make, done now so the change is immediate.
-        (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
+        settle()
         refresh()
         return newKey
+    }
+
+    /// Tell the app the focused project may have changed. The menubar, the focus panel and the
+    /// notifications all follow `focused.json`; this is the same re-point the config watcher would
+    /// eventually make, done now so the change is immediate.
+    private static func settle() {
+        (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
     }
 
     /// Both project lists are derived from a folder scan, so a change on disk only shows once they're

@@ -31,12 +31,28 @@ enum PMFiles {
         try data.write(to: focusedURL, options: .atomic)
     }
 
+    /// Forget the focused project. Written rather than deleted so the file stays the same shape for
+    /// the CLI and the extension; used when the folder it named is no longer there to focus.
+    static func clearFocusedProject() throws {
+        let data = try JSONEncoder().encode(FocusedFile(projectKey: nil))
+        try ensureConfigDir()
+        try data.write(to: focusedURL, options: .atomic)
+    }
+
     /// The folder name from a project key "basePath:name" (split on the first colon), or nil.
     /// Paths don't contain colons on macOS, so the first colon reliably separates base from name.
     static func projectName(fromKey key: String) -> String? {
         guard let idx = key.firstIndex(of: ":") else { return nil }
         let name = key[key.index(after: idx)...].trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? nil : name
+    }
+
+    /// The base folder from a project key "basePath:name" — the active or archive path it was found
+    /// in, which is what changes when those folders themselves move.
+    static func projectBase(fromKey key: String) -> String? {
+        guard let idx = key.firstIndex(of: ":") else { return nil }
+        let base = String(key[key.startIndex..<idx])
+        return base.isEmpty ? nil : base
     }
 
     /// The project folder's path from a project key "basePath:name" — the base and the folder name
