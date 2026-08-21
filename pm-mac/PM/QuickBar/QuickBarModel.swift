@@ -24,11 +24,27 @@ extension NSEvent.ModifierFlags {
 enum QuickBarMode: CaseIterable {
     case capture
     case goToProject
+    case command
+
+    /// The character that puts the bar in this mode when it's the line's first.
+    ///
+    /// Capture has none, so it's what an ordinary line is. The other two are earned by a keystroke you
+    /// meant — which is the whole point: the bar must never decide between "a task called complete the
+    /// audit" and "the Complete command" by reading the words, because that decision goes wrong by
+    /// writing a command into somebody's notes.
+    var sigil: Character? {
+        switch self {
+        case .capture: return nil
+        case .goToProject: return "@"
+        case .command: return ">"
+        }
+    }
 
     var placeholder: String {
         switch self {
         case .capture: return "Add a task…"
         case .goToProject: return "Go to project…"
+        case .command: return "Run a command…"
         }
     }
 
@@ -36,10 +52,24 @@ enum QuickBarMode: CaseIterable {
         switch self {
         case .capture: return "plus.circle"
         case .goToProject: return "magnifyingglass"
+        case .command: return "chevron.right"
         }
     }
 
-    var other: QuickBarMode { self == .capture ? .goToProject : .capture }
+    /// Where ⇥ goes next.
+    var next: QuickBarMode {
+        switch self {
+        case .capture: return .goToProject
+        case .goToProject: return .command
+        case .command: return .capture
+        }
+    }
+
+    /// The mode a line's first character asks for, if any.
+    static func sigilMode(of query: String) -> QuickBarMode? {
+        guard let first = query.first else { return nil }
+        return allCases.first { $0.sigil == first }
+    }
 }
 
 /// Where a line typed into the quick bar goes.
@@ -95,6 +125,9 @@ enum QuickBarRow: Identifiable, Equatable {
     /// before ⏎, and so is which task it would land under.
     case capture(placement: CapturePlacement, text: String, due: String?, anchor: String?)
     case project(key: String, name: String, shortName: String, domain: String, isArchived: Bool)
+    /// A verb from the `>` list, with the text typed after it — empty when it was given none, which is
+    /// the signal to open the full editor for it rather than to run it on nothing.
+    case command(QuickBarCommand, argument: String)
 
     /// Identity is what the row *is*, never what's been typed into it.
     ///
@@ -106,6 +139,7 @@ enum QuickBarRow: Identifiable, Equatable {
         switch self {
         case .capture(let placement, _, _, _): return "capture:\(placement.rawValue)"
         case .project(let key, _, _, _, _): return "project:\(key)"
+        case .command(let command, _): return "command:\(command.rawValue)"
         }
     }
 }
@@ -117,8 +151,26 @@ enum QuickBarRow: Identifiable, Equatable {
 /// to find out.
 @MainActor
 final class QuickBarModel: ObservableObject {
-    @Published var mode: QuickBarMode = .capture { didSet { rebuild() } }
+    /// What the hotkey asked for, and what ⇥ cycles through. A sigil at the head of the line overrides
+    /// it for as long as it's there.
+    @Published private(set) var baseMode: QuickBarMode = .capture { didSet { rebuild() } }
     @Published var query: String = "" { didSet { rebuild() } }
+
+    /// The mode in force.
+    ///
+    /// A sigil wins over the summoned mode, and deleting it hands the line back to whatever you
+    /// summoned — so a project search you started with `@` in the middle of a capture can't quietly
+    /// turn into task text as you delete, and one you summoned with ⌃⌥O never can at all.
+    var mode: QuickBarMode { QuickBarMode.sigilMode(of: query) ?? baseMode }
+
+    /// What the mode acts on: the line with its sigil taken off.
+    ///
+    /// The sigil has to be the very first character, which is also the escape hatch — a task that
+    /// genuinely begins "@Dana" is typed with a leading space, and the capture parser trims that back
+    /// off before the task is written.
+    var argument: String {
+        QuickBarMode.sigilMode(of: query) == nil ? query : String(query.dropFirst())
+    }
     @Published private(set) var rows: [QuickBarRow] = []
     /// Index into `rows`. Clamped on every rebuild, so it can't point past a shrinking list.
     @Published var selection: Int = 0
@@ -129,6 +181,13 @@ final class QuickBarModel: ObservableObject {
     /// The task a captured line would be placed relative to, for the rows to name. Nil when the project
     /// has no open tasks, which is what takes the two anchored placements off the list.
     @Published var focusedTaskText: String?
+
+    /// Whether there's a completion to take back — what puts Undo Last Complete on the `>` list.
+    @Published var canUndoCompletion = false
+
+    /// Whether diving in would land anywhere. A command that would quietly do nothing is worse than a
+    /// command that isn't offered.
+    @Published var hasNextTask = false
 
     /// Whether ⌥ is held right now, published by the controller's flags monitor. Only the labels want
     /// it — running a row reads the modifiers off the keystroke that ran it.
@@ -146,8 +205,8 @@ final class QuickBarModel: ObservableObject {
     // MARK: Rows
 
     func reset(mode: QuickBarMode) {
-        self.mode = mode
         query = ""
+        baseMode = mode
         selection = 0
         optionDown = false
         rebuild()
@@ -162,7 +221,7 @@ final class QuickBarModel: ObservableObject {
         switch mode {
         case .capture:
             guard focusedProjectName != nil else { return [] }
-            let parsed = QuickCaptureParser.parse(query)
+            let parsed = QuickCaptureParser.parse(argument)
             guard !parsed.text.isEmpty else { return [] }
             return CapturePlacement.allCases
                 .filter { placement in
@@ -174,14 +233,25 @@ final class QuickBarModel: ObservableObject {
                 }
                 .map { .capture(placement: $0, text: parsed.text, due: parsed.due, anchor: focusedTaskText) }
 
+        case .command:
+            let available = QuickBarCommand.allCases.filter(isAvailable)
+            // A verb with text after it is one command with one argument, not a list to choose from —
+            // you already named it.
+            if let parsed = QuickBarCommand.split(argument, in: available) {
+                return [.command(parsed.command, argument: parsed.argument)]
+            }
+            return QuickBarCommand.rank(available, query: argument)
+                .prefix(Self.rowLimit)
+                .map { .command($0, argument: "") }
+
         case .goToProject:
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if argument.trimmingCharacters(in: .whitespaces).isEmpty {
                 return recents.prefix(Self.rowLimit).map {
                     .project(key: $0.projectKey, name: $0.name,
                              shortName: shortName(of: $0.name), domain: "", isArchived: false)
                 }
             }
-            let matches = ProjectSearch.rank(allProjects, query: query) { entry in
+            let matches = ProjectSearch.rank(allProjects, query: argument) { entry in
                 ProjectSearch.Candidate(name: entry.name, shortName: entry.shortName,
                                         code: entry.code, isArchived: entry.isArchived)
             }
@@ -189,6 +259,18 @@ final class QuickBarModel: ObservableObject {
                 .project(key: $0.projectKey, name: $0.name, shortName: $0.shortName,
                          domain: $0.domain, isArchived: $0.isArchived)
             }
+        }
+    }
+
+    /// Whether a command has anything to act on right now. What isn't offered can't be run into a
+    /// no-op from a bar you can't see the consequences of.
+    private func isAvailable(_ command: QuickBarCommand) -> Bool {
+        switch command {
+        case .newProject, .settings: return true
+        case .complete, .editTask, .setDue, .wrapTask: return focusedTaskText != nil
+        case .undoLast: return canUndoCompletion
+        case .diveIn: return hasNextTask
+        default: return focusedProjectName != nil
         }
     }
 
@@ -225,7 +307,11 @@ final class QuickBarModel: ObservableObject {
     }
 
     func switchMode() {
-        mode = mode.other
+        let next = mode.next
+        // The line keeps its text but loses its sigil: a `>` left in place would contradict the mode ⇥
+        // just chose, and the sigil is what wins.
+        query = argument
+        baseMode = next
         selection = 0
     }
 

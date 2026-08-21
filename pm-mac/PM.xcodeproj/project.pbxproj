@@ -21,6 +21,7 @@
 		33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19EFCE48163B4933B104DA26 /* AppIcons.swift */; };
 		396821A7CF9BC94AE29C9E43 /* ProjectSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B473BD75913801C69C0B4E4 /* ProjectSplitViewController.swift */; };
 		3994652D43A118D738BDA647 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C0127A158FF1A3C19DE0375C /* AppIcon.icon */; };
+		3A4B1AAFE6A3DC06D3C081F0 /* QuickBarCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */; };
 		3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE496B1AB05F26705086349 /* TaskMenu.swift */; };
 		3EE93A5120493DF5500C2385 /* ProjectsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B61A6C245FCE56ACBFE8E9 /* ProjectsSettings.swift */; };
 		3F00BE019E038A6BB7F7A34D /* PMIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F714E00F765F5D12885D0F68 /* PMIntents.swift */; };
@@ -113,6 +114,7 @@
 		857714074D07452813367D28 /* HotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKey.swift; sourceTree = "<group>"; };
 		88484A02D67B9B9A7B5D57B7 /* ProjectSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSidebar.swift; sourceTree = "<group>"; };
 		8C50C1FFAB25C15C00B2353D /* PM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickBarCommands.swift; sourceTree = "<group>"; };
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelController.swift; sourceTree = "<group>"; };
 		960CBA413D74FFF7E3DCCEA3 /* ProjectViewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectViewState.swift; sourceTree = "<group>"; };
@@ -223,6 +225,7 @@
 			isa = PBXGroup;
 			children = (
 				BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */,
+				8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */,
 				A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */,
 				E74CA79CC5C0C4EB37ED23A6 /* QuickBarModel.swift */,
 				9BDD9B8754E40B208A0F9C01 /* QuickBarView.swift */,
@@ -460,6 +463,7 @@
 				E156B63F77BE44F4081ACA7A /* ProjectWindow.swift in Sources */,
 				B0E9BFFA635AC01C891756F3 /* ProjectWindowController.swift in Sources */,
 				3EE93A5120493DF5500C2385 /* ProjectsSettings.swift in Sources */,
+				3A4B1AAFE6A3DC06D3C081F0 /* QuickBarCommands.swift in Sources */,
 				CA4CB349CDB748A305F51EDD /* QuickBarController.swift in Sources */,
 				FF58487E92C6B650E24FFD65 /* QuickBarModel.swift in Sources */,
 				AAAF6507409F6CA721D56F2F /* QuickBarView.swift in Sources */,

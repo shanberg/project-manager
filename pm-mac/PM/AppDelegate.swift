@@ -265,10 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "toggle": FocusPanelController.shared.toggle()
         case "show": FocusPanelController.shared.show()
         case "hide": FocusPanelController.shared.hide()
-        // The quick bar's two modes, so a script or a launcher can reach them the same way the
-        // hotkeys do.
+        // The quick bar's modes, so a script or a launcher can reach them the same way the hotkeys do.
         case "capture": QuickBarController.shared.toggle(mode: .capture)
         case "goto": QuickBarController.shared.toggle(mode: .goToProject)
+        case "command": QuickBarController.shared.toggle(mode: .command)
         case "window": windows.openFocusedProject()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks

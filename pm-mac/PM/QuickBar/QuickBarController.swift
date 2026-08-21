@@ -62,7 +62,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         panel.takeKey()
         assertKeyOnceSettled(panel)
         installFlagsMonitor()
-        Log.write("quick bar shown: mode=\(mode) frame=\(panel.frame) key=\(panel.isKeyWindow) appActive=\(wasActive)->\(NSApp.isActive)")
+        Log.write("quick bar shown: mode=\(mode) anchor=\(model.focusedTaskText ?? "none") frame=\(panel.frame) key=\(panel.isKeyWindow) appActive=\(wasActive)->\(NSApp.isActive)")
     }
 
     /// Dismiss the bar, handing the front back to whatever app it was taken from.
@@ -133,6 +133,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.allProjects = index.allProjects
         model.focusedProjectName = PMFiles.focusedProjectKey().flatMap { PMFiles.projectName(fromKey: $0) }
         model.focusedTaskText = anchorTask?.text
+        model.canUndoCompletion = focusedStore?.lastCompletedKey != nil
+        model.hasNextTask = focusedStore?.nextTodo != nil
         model.reset(mode: mode)
     }
 
@@ -183,6 +185,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             apply(placement, text: text, due: due, in: store, modifiers: modifiers)
             hide()
 
+        case .command(let command, let argument):
+            perform(command, argument: argument)
+
         case .project(let key, let name, _, _, _):
             PMStore.setGlobalFocus(key: key)
             Log.write("quick bar focused \(name)")
@@ -218,6 +223,99 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             store.appendSessionNote(text)
             Log.write("quick bar added session note: \(text)")
         }
+    }
+
+    // MARK: Running a command
+
+    /// Whether this command's own answer is somewhere inside PM you'd want to be looking at. Those
+    /// dismiss the bar without handing the front back, because putting you where you were would undo
+    /// the thing you just asked for.
+    ///
+    /// The focus panel's editors are the exception worth stating: the panel is deliberately
+    /// non-activating, so opening one is not a request to leave the app you're in. That's the property
+    /// these commands were given a global shortcut for in the first place.
+    private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
+        switch command {
+        case .openWindow, .settings, .newProject, .renameProject, .addLink: return true
+        // Given text it just writes the note; given none it opens the place that edits it.
+        case .sessionNote: return argument.isEmpty
+        default: return false
+        }
+    }
+
+    private func perform(_ command: QuickBarCommand, argument: String) {
+        let task = anchorTask
+        let store = focusedStore
+        Log.write("quick bar command: \(command.rawValue)\(argument.isEmpty ? "" : " \(argument)")")
+        hide(restoringFocus: !staysInPM(command, argument: argument))
+
+        switch command {
+        case .complete:
+            if let store, let task { store.complete(task) }
+        case .diveIn:
+            store?.diveIn()
+        case .undoLast:
+            store?.undoLast()
+        case .editTask:
+            FocusPanelController.shared.show(editor: .edit)
+        case .wrapTask:
+            FocusPanelController.shared.show(editor: .wrap)
+        case .setDue:
+            setDue(argument, on: task, in: store)
+        case .sessionNote:
+            if argument.isEmpty {
+                WindowManager.shared.openFocusedProject().newSession(nil)
+            } else {
+                store?.appendSessionNote(argument)
+            }
+        case .startSession:
+            startTodaySession(labelled: argument, in: store)
+        case .addLink:
+            if let store { ProjectPrompts.addLink(store: store) }
+        case .openWindow:
+            WindowManager.shared.openFocusedProject()
+        case .openInFinder:
+            if let path = store?.projectPath {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+        case .openInObsidian:
+            if let store { ObsidianLink.open(store: store) }
+        case .renameProject:
+            renameFocusedProject(store)
+        case .newProject:
+            ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
+        case .settings:
+            SettingsWindowController.shared.show()
+        }
+    }
+
+    /// `>due friday`. A phrase the parser can't read falls through to the focus panel's own date
+    /// editor rather than being dropped — the bar has already gone by the time you'd find out, so
+    /// silence here reads as the command not working.
+    private func setDue(_ phrase: String, on task: Todo?, in store: PMStore?) {
+        guard let store, let task else { return }
+        guard !phrase.isEmpty, let date = QuickCaptureParser.date(from: phrase) else {
+            FocusPanelController.shared.show(editor: .due)
+            return
+        }
+        store.setDue(task, due: DueFormat.string(date))
+    }
+
+    /// `>session` opens today's, `>session standup` labels it. `openTodaySession` is idempotent — a
+    /// session is identified by its date, so asking twice lands in the same one.
+    private func startTodaySession(labelled label: String, in store: PMStore?) {
+        guard let store else { return }
+        store.openTodaySession { index in
+            guard !label.isEmpty else { return }
+            store.renameSession(index, label: label)
+        }
+    }
+
+    private func renameFocusedProject(_ store: PMStore?) {
+        guard let store, let name = store.projectName, let key = store.projectKey else { return }
+        // Archived or not is a question about where the folder lives, which the key already answers.
+        let isArchived = (try? loadConfigAndPaths()).map { key.hasPrefix("\($0.1.archivePath):") } ?? false
+        ProjectPrompts.rename(projectNamed: name, isArchived: isArchived)
     }
 
     // MARK: Window

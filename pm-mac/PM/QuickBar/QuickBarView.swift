@@ -124,10 +124,22 @@ struct QuickBarView: View {
             if hasSibling, !model.optionDown { parts.append("⌥ add before") }
             parts.append("⇥ go to project")
             return parts.joined(separator: "  ·  ")
+
         case .goToProject:
-            return model.rows.isEmpty && !model.query.isEmpty
-                ? "No project matches “\(model.query)”."
-                : "↩ open  ·  ⌘↩ focus without opening  ·  ⇥ add a task"
+            return model.rows.isEmpty && !model.argument.isEmpty
+                ? "No project matches “\(model.argument)”."
+                : "↩ open  ·  ⌘↩ focus without opening  ·  ⇥ commands"
+
+        case .command:
+            guard let project = model.focusedProjectName else {
+                return "No focused project — most commands have nothing to act on."
+            }
+            if model.rows.isEmpty { return "No command matches “\(model.argument)”." }
+            // The verbs are the part of this mode you can't see: a row you reached by filtering looks
+            // the same whether or not it would have taken text after it.
+            return model.argument.isEmpty
+                ? "\(project)  ·  ↩ run  ·  ⇥ add a task"
+                : "\(project)  ·  ↩ run"
         }
     }
 }
@@ -175,6 +187,7 @@ private struct QuickBarRowView: View {
         switch row {
         case .capture(let placement, _, _, _): return placement.symbol(optionDown: optionDown)
         case .project(_, _, _, _, let isArchived): return isArchived ? "archivebox" : "folder"
+        case .command(let command, _): return command.symbol
         }
     }
 
@@ -186,6 +199,7 @@ private struct QuickBarRowView: View {
         case .capture(let placement, _, _, let anchor):
             return placement.title(anchor: anchor, optionDown: optionDown)
         case .project(_, _, let shortName, _, _): return shortName
+        case .command(let command, _): return command.title
         }
     }
 
@@ -195,6 +209,14 @@ private struct QuickBarRowView: View {
         case .project(_, let name, _, let domain, _):
             let code = name.split(separator: " ").first.map(String.init) ?? name
             return domain.isEmpty ? code : "\(code)  ·  \(domain)"
+        // The text a verb was given, echoed back — or, for a command sitting in the list with none
+        // yet, the text it would take and the word that introduces it.
+        case .command(let command, let argument):
+            if !argument.isEmpty { return argument }
+            guard let verb = command.verb, let label = command.argumentLabel else { return nil }
+            // Written the way you'd type it, sigil and all, rather than described. The sigil is
+            // redundant once you're already in this mode, but it's the form that works from anywhere.
+            return ">\(verb) \(label)"
         }
     }
 
@@ -202,7 +224,7 @@ private struct QuickBarRowView: View {
     /// is shown once, up in the field, since every row shares it.
     private var trailing: String? {
         switch row {
-        case .capture: return nil
+        case .capture, .command: return nil
         case .project(_, _, _, _, let isArchived): return isArchived ? "Archived" : nil
         }
     }
