@@ -131,12 +131,34 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         index.warmAllProjects()
         model.recents = index.recents
         model.allProjects = index.allProjects
+        refreshContext()
+        model.reset(mode: mode)
+    }
+
+    /// Re-read everything about the focused project that the rows name.
+    ///
+    /// Called on every summon and again whenever the focused store changes while the bar is up. The
+    /// bar can sit open for as long as you leave it, and the focus can move under it — a window, the
+    /// menubar, a notification's Complete button, the CLI. Running a row already re-resolves the
+    /// anchor, deliberately, so without this a row could go on saying "Narrow under X" while ⏎ put the
+    /// task under Y. Naming the wrong task is worse than naming none.
+    func refreshContext() {
         model.focusedProjectName = PMFiles.focusedProjectKey().flatMap { PMFiles.projectName(fromKey: $0) }
         model.focusedTaskText = anchorTask?.text
         model.canUndoCompletion = focusedStore?.lastCompletedKey != nil
         model.hasNextTask = focusedStore?.nextTodo != nil
         model.focusedProjectIsArchived = focusedProjectScope == .archive
-        model.reset(mode: mode)
+    }
+
+    /// The focused project's store changed. Only of interest while the bar is on screen — the rest of
+    /// the time the next summon reads it fresh anyway.
+    ///
+    /// Driven from the delegate's own store subscription rather than from one of our own, because the
+    /// delegate re-points that subscription when the *focused project* changes. A subscription held
+    /// here would go on watching a store nothing is looking at any more.
+    func focusedStoreChanged() {
+        guard isVisible else { return }
+        refreshContext()
     }
 
     /// The full-project scan runs only while something wants it. The bar wants it while it's up, and

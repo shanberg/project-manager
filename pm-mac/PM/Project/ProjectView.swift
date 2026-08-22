@@ -127,6 +127,14 @@ struct ProjectView: View {
     static let rowContentInset: CGFloat = 12
     /// Horizontal pixels per nesting level (matches `TaskRow.indent`'s step).
     static let indentStep: CGFloat = 16
+    /// A session heading's own breathing room, the same above and below. It's inside the heading's
+    /// selection band, so an uneven pair would draw a highlight sitting off-centre on its own text —
+    /// which is what the separation between sessions used to be made of.
+    static let sessionHeadingPadding: CGFloat = 4
+    /// The separation between one session and the session before it. Applied *outside* the heading's
+    /// band, so it reads as a gap between two blocks rather than as padding belonging to one of them,
+    /// and the heading stays visibly closer to its own tasks than to the session above.
+    static let sessionGap: CGFloat = 8
     /// The unanchored add editor's identity. Its own kind, so its key can't collide with a task row's
     /// `"session:line"` or a session's `"sess:<index>"`.
     static let quickAddTarget = EditorTarget(key: "quick", kind: .quickAdd)
@@ -1409,7 +1417,9 @@ struct ProjectView: View {
         let draggedSubtree: Set<String> = draggingKey
             .flatMap { k in store.todos.first { PMStore.key(for: $0) == k } }
             .map { store.subtreeKeys(of: $0) } ?? []
-        return VStack(alignment: .leading, spacing: 4) {
+        // No spacing of its own: a uniform gap between every child would sit between a heading and its
+        // own tasks as readily as between two sessions. Each session brings its own `sessionGap`.
+        return VStack(alignment: .leading, spacing: 0) {
             if detailsExpanded {
                 revealedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             } else {
@@ -1476,21 +1486,23 @@ struct ProjectView: View {
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
                 .padding(.horizontal, 12)
-                .padding(.top, 6)
-                .padding(.bottom, 2)
+                .padding(.vertical, Self.sessionHeadingPadding)
+                .padding(.top, Self.sessionGap)
         } else {
             Text(context)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 12)
-                .padding(.top, 6)
-                .padding(.bottom, 2)
+                .padding(.vertical, Self.sessionHeadingPadding)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { openSessionNote(si) }
                 .contextMenu {
                     SessionMenu(index: si, hasNote: !sessionProse(si).isEmpty,
                                 store: store, activeEditor: $activeEditor)
                 }
+                // Outside the caption's hit area, so the gap between sessions stays blank space rather
+                // than becoming a taller target for the session below it.
+                .padding(.top, Self.sessionGap)
         }
     }
 
@@ -1570,6 +1582,9 @@ struct ProjectView: View {
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
                 .padding(.horizontal, 12)
+                // The list tiles its children with no spacing, so the editor asks for its own gap off
+                // the last task rather than sitting flush against it.
+                .padding(.top, ProjectView.sessionHeadingPadding)
         }
     }
 
@@ -2649,8 +2664,10 @@ private struct SessionHeader: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        // Even above and below: this padding is inside the band, so the highlight has to sit centred on
+        // the heading it belongs to. The separation from the session above is applied outside the band,
+        // at the end of this chain.
+        .padding(.vertical, ProjectView.sessionHeadingPadding)
         // One target for the whole block — header line, note, and the padding around them — rather
         // than a gesture per line inside it. The padding was dead space when the gestures sat on the
         // content: the band lit up under the pointer and the double-click fell straight through to the
@@ -2678,6 +2695,11 @@ private struct SessionHeader: View {
         .background(scrollMarker)
         .onHover { hovering = $0 }
         .animation(.snappy, value: isRenaming)
+        // The gap between this session and the one above it — outside the band and outside the hit
+        // shape, so it's blank space between two blocks rather than a lopsided cushion on top of this
+        // one. It's bigger than the heading's own padding, which is what keeps a heading reading as
+        // the start of the tasks below it.
+        .padding(.top, ProjectView.sessionGap)
     }
 
     private var headerLine: some View {

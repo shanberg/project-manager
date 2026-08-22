@@ -142,6 +142,63 @@ enum QuickBarRow: Identifiable, Equatable {
         case .command(let command, _): return "command:\(command.rawValue)"
         }
     }
+
+    /// What the row says it does. A capture row is titled by its action, not by what you typed — the
+    /// typed line is in the field directly above, and four rows repeating it back is noise where the
+    /// difference between them is the whole point.
+    ///
+    /// Here rather than in the view because the row has to describe itself twice: once on screen and
+    /// once to VoiceOver, which reads the selection without ever being able to see it.
+    func title(optionDown: Bool) -> String {
+        switch self {
+        case .capture(let placement, _, _, let anchor):
+            return placement.title(anchor: anchor, optionDown: optionDown)
+        case .project(_, _, let shortName, _, _): return shortName
+        case .command(let command, _): return command.title
+        }
+    }
+
+    var subtitle: String? {
+        switch self {
+        case .capture: return nil
+        case .project(_, let name, _, let domain, _):
+            let code = name.split(separator: " ").first.map(String.init) ?? name
+            return domain.isEmpty ? code : "\(code)  ·  \(domain)"
+        // The text a verb was given, echoed back — or, for a command sitting in the list with none
+        // yet, the text it would take and the word that introduces it.
+        case .command(let command, let argument):
+            if !argument.isEmpty { return argument }
+            guard let verb = command.verb, let label = command.argumentLabel else { return nil }
+            // Written the way you'd type it, sigil and all, rather than described. The sigil is
+            // redundant once you're already in this mode, but it's the form that works from anywhere.
+            return ">\(verb) \(label)"
+        }
+    }
+
+    func symbol(optionDown: Bool) -> String {
+        switch self {
+        case .capture(let placement, _, _, _): return placement.symbol(optionDown: optionDown)
+        case .project(_, _, _, _, let isArchived): return isArchived ? "archivebox" : "folder"
+        case .command(let command, _): return command.symbol
+        }
+    }
+
+    /// The right-hand column. Only a project row has anything to say here — a capture row's due date
+    /// is shown once, up in the field, since every row shares it.
+    var trailing: String? {
+        switch self {
+        case .capture, .command: return nil
+        case .project(_, _, _, _, let isArchived): return isArchived ? "Archived" : nil
+        }
+    }
+
+    /// One line for VoiceOver, which has no columns to read the parts out of — so the trailing column
+    /// joins the sentence rather than being dropped with the layout that carried it.
+    func spokenDescription(optionDown: Bool) -> String {
+        [title(optionDown: optionDown), subtitle, trailing]
+            .compactMap { $0 }
+            .joined(separator: ", ")
+    }
 }
 
 /// The quick bar's state and what its rows do.
@@ -154,7 +211,16 @@ final class QuickBarModel: ObservableObject {
     /// What the hotkey asked for, and what ⇥ cycles through. A sigil at the head of the line overrides
     /// it for as long as it's there.
     @Published private(set) var baseMode: QuickBarMode = .capture { didSet { rebuild() } }
-    @Published var query: String = "" { didSet { rebuild() } }
+    @Published var query: String = "" {
+        didSet {
+            guard query != oldValue else { return }
+            // A new query is a new list. Whatever was chosen under the old one is gone even when
+            // something still sits at its index, and leaving the index where it was is how ⏎ comes to
+            // run a row you glanced at three keystrokes ago.
+            selection = 0
+            rebuild()
+        }
+    }
 
     /// The mode in force.
     ///
@@ -181,22 +247,22 @@ final class QuickBarModel: ObservableObject {
     /// rebuilds on being set. The controller seeds them together and could just as well rebuild once at
     /// the end, but then the order it happened to write them in would be load-bearing — and a row list
     /// that silently reflects four of five inputs is the kind of wrong that looks right.
-    @Published var focusedProjectName: String? { didSet { rebuild() } }
+    @Published var focusedProjectName: String? { didSet { if focusedProjectName != oldValue { rebuild() } } }
 
     /// The task a captured line would be placed relative to, for the rows to name. Nil when the project
     /// has no open tasks, which is what takes the two anchored placements off the list.
-    @Published var focusedTaskText: String? { didSet { rebuild() } }
+    @Published var focusedTaskText: String? { didSet { if focusedTaskText != oldValue { rebuild() } } }
 
     /// Whether there's a completion to take back — what puts Undo Last Complete on the `>` list.
-    @Published var canUndoCompletion = false { didSet { rebuild() } }
+    @Published var canUndoCompletion = false { didSet { if canUndoCompletion != oldValue { rebuild() } } }
 
     /// Whether diving in would land anywhere. A command that would quietly do nothing is worse than a
     /// command that isn't offered.
-    @Published var hasNextTask = false { didSet { rebuild() } }
+    @Published var hasNextTask = false { didSet { if hasNextTask != oldValue { rebuild() } } }
 
     /// Which of Archive and Unarchive the focused project can be on the receiving end of. Only ever
     /// one of the two, since it's already in one folder or the other.
-    @Published var focusedProjectIsArchived = false { didSet { rebuild() } }
+    @Published var focusedProjectIsArchived = false { didSet { if focusedProjectIsArchived != oldValue { rebuild() } } }
 
     /// Whether ⌥ is held right now, published by the controller's flags monitor. Only the labels want
     /// it — running a row reads the modifiers off the keystroke that ran it.

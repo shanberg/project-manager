@@ -83,11 +83,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shown at most once per launch if the projects folder can't be read (a Full Disk Access issue).
     private var shownAccessHelp = false
 
+    /// Whether a store error is the projects folder being unreadable, which has its own alert and its
+    /// own fix. Anything else is a one-off failure to read or write a file.
+    private static func isAccessError(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("couldn't be opened") || lower.contains("cannot list directory")
+            || lower.contains("permission")
+    }
+
+    /// The last failure announced, so one that persists across republishes is said once.
+    private var lastReportedError: String?
+
+    /// Tell the user about a write that didn't land.
+    ///
+    /// Every surface that edits from outside a window — the quick bar, the menubar item, a
+    /// notification's Complete button — deliberately leaves PM in the background, and `errorMessage`
+    /// is only ever *rendered* in the project window's and the focus panel's empty states. So a failed
+    /// write from any of them was silent: you typed a task, the bar closed, and the task simply wasn't
+    /// there. A notification rather than an alert, because an alert would seize the keyboard back from
+    /// whatever you returned to.
+    private func reportStoreFailure() {
+        let message = store.errorMessage
+        defer { lastReportedError = message }
+        guard let message, message != lastReportedError,
+              !Self.isAccessError(message) else { return }
+        Log.write("store failure surfaced: \(message)")
+        notifier?.reportFailure(message)
+    }
+
     private func maybeShowAccessHelp() {
         guard !shownAccessHelp, let msg = store.errorMessage else { return }
-        let lower = msg.lowercased()
-        guard lower.contains("couldn't be opened") || lower.contains("cannot list directory")
-                || lower.contains("permission") else { return }
+        guard Self.isAccessError(msg) else { return }
         shownAccessHelp = true
         Log.write("access help shown for: \(msg)")
         NSApp.activate(ignoringOtherApps: true)
@@ -187,6 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After storeChanged() (which refreshes the focused task's seen-at), reschedule notifications.
         notifier?.sync()
         maybeShowAccessHelp()
+        reportStoreFailure()
+        // The quick bar names the focused task on its rows; if it's open, that name has just gone stale.
+        QuickBarController.shared.focusedStoreChanged()
         windows.refreshTitles()
         // Re-point the notes-file watches only when the set of open projects' notes paths actually
         // changes, using the paths the stores already resolved (no extra protected-directory scan here).

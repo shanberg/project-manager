@@ -16,6 +16,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var authorized = false
     private var lastSignature = ""
 
+    private static let failureCategory = "pm.failure"
     private static let staleCategory = "pm.stale"
     private static let dueCategory = "pm.due"
     private static let completeAction = "pm.action.complete"
@@ -54,7 +55,27 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                                    intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.dueCategory, actions: [complete, snooze],
                                    intentIdentifiers: [], options: []),
+            // No actions: there's nothing PM can do about a failed write on the user's behalf.
+            UNNotificationCategory(identifier: Self.failureCategory, actions: [],
+                                   intentIdentifiers: [], options: []),
         ])
+    }
+
+    /// Announce a change that didn't save. Delivered immediately rather than scheduled, and outside
+    /// `sync`'s signature check, because it reports something that already happened once rather than a
+    /// state to keep notifications in step with.
+    ///
+    /// Sent whether or not `authorized` is known yet — that flag only turns true once the permission
+    /// prompt has been answered this launch, and a failure is worth handing to the notification centre
+    /// to accept or drop. If notifications are denied outright the log line above is the only record,
+    /// which is the same deal every other background failure gets.
+    func reportFailure(_ message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "PM couldn't save that change"
+        content.body = message
+        content.categoryIdentifier = Self.failureCategory
+        center.add(UNNotificationRequest(identifier: "pm.failure.\(UUID().uuidString)",
+                                         content: content, trigger: nil))
     }
 
     // MARK: Scheduling

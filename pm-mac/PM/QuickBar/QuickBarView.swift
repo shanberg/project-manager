@@ -39,6 +39,7 @@ struct QuickBarView: View {
         .clipShape(RoundedRectangle(cornerRadius: ProjectWindow.cornerRadius, style: .continuous))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear { afterCurrentUpdate { fieldFocused = true } }
+        .onChange(of: model.selectedRow?.id) { _ in announceSelection() }
     }
 
     // MARK: Field
@@ -66,6 +67,8 @@ struct QuickBarView: View {
                 .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
                 .onKeyPress(.tab) { model.switchMode(); return .handled }
                 .onKeyPress(.escape) { model.onDismiss(); return .handled }
+                .accessibilityLabel(model.mode.placeholder)
+                .accessibilityHint("Up and down arrows choose what Return will do.")
             // The date the line parsed to, beside the line it came out of. It belongs to the text,
             // not to any one destination — repeated down a column of rows that all share it, it reads
             // as a difference between them when it's the one thing they have in common.
@@ -98,9 +101,29 @@ struct QuickBarView: View {
                     // Hovering moves the selection rather than drawing a second highlight: two
                     // different "this one" marks on one list is a question, not an answer.
                     .onHover { inside in if inside { model.selection = index } }
+                    // Combined into one element: on screen these are a glyph, a title and a subtitle
+                    // laid out in columns, but read aloud they are one thing you can do.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(row.spokenDescription(optionDown: model.optionDown))
+                    .accessibilityAddTraits(index == model.selection ? [.isButton, .isSelected]
+                                                                     : .isButton)
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Results")
+    }
+
+    /// Say what ⏎ would do now, for the reader who can't see which row is highlighted.
+    ///
+    /// Keyed on the selected row's identity rather than on the index, so it speaks when the row under
+    /// the selection *changes* — which covers arrowing down a list and having the list rearrange under
+    /// a stationary selection, and stays quiet while you type into a capture whose four destinations
+    /// don't move.
+    private func announceSelection() {
+        guard let row = model.selectedRow else { return }
+        AccessibilityNotification.Announcement(row.spokenDescription(optionDown: model.optionDown))
+            .post()
     }
 
     /// The line under the rows.
@@ -145,7 +168,8 @@ struct QuickBarView: View {
     private static let revealHint = "⌘↩ and show me"
 }
 
-/// One row: what it is on the left, what it costs you to know on the right.
+/// One row: what it is on the left, what it costs you to know on the right. What it says is the row's
+/// own business — see `QuickBarRow.title(optionDown:)` — because it has to say the same thing aloud.
 private struct QuickBarRowView: View {
     let row: QuickBarRow
     let isSelected: Bool
@@ -153,13 +177,13 @@ private struct QuickBarRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol)
+            Image(systemName: row.symbol(optionDown: optionDown))
                 .font(.system(size: 13))
                 .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).lineLimit(1)
-                if let subtitle {
+                Text(row.title(optionDown: optionDown)).lineLimit(1)
+                if let subtitle = row.subtitle {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -167,7 +191,7 @@ private struct QuickBarRowView: View {
                 }
             }
             Spacer(minLength: 8)
-            if let trailing {
+            if let trailing = row.trailing {
                 Text(trailing)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -181,52 +205,6 @@ private struct QuickBarRowView: View {
                     .fill(.selection)
                     .padding(.horizontal, 6)
             }
-        }
-    }
-
-    private var symbol: String {
-        switch row {
-        case .capture(let placement, _, _, _): return placement.symbol(optionDown: optionDown)
-        case .project(_, _, _, _, let isArchived): return isArchived ? "archivebox" : "folder"
-        case .command(let command, _): return command.symbol
-        }
-    }
-
-    /// A capture row is titled by what it *does*, not by what you typed — the typed line is in the
-    /// field directly above, and four rows repeating it back is noise where the difference between
-    /// them is the whole point.
-    private var title: String {
-        switch row {
-        case .capture(let placement, _, _, let anchor):
-            return placement.title(anchor: anchor, optionDown: optionDown)
-        case .project(_, _, let shortName, _, _): return shortName
-        case .command(let command, _): return command.title
-        }
-    }
-
-    private var subtitle: String? {
-        switch row {
-        case .capture: return nil
-        case .project(_, let name, _, let domain, _):
-            let code = name.split(separator: " ").first.map(String.init) ?? name
-            return domain.isEmpty ? code : "\(code)  ·  \(domain)"
-        // The text a verb was given, echoed back — or, for a command sitting in the list with none
-        // yet, the text it would take and the word that introduces it.
-        case .command(let command, let argument):
-            if !argument.isEmpty { return argument }
-            guard let verb = command.verb, let label = command.argumentLabel else { return nil }
-            // Written the way you'd type it, sigil and all, rather than described. The sigil is
-            // redundant once you're already in this mode, but it's the form that works from anywhere.
-            return ">\(verb) \(label)"
-        }
-    }
-
-    /// The right-hand column. Only a project row has anything to say here — a capture row's due date
-    /// is shown once, up in the field, since every row shares it.
-    private var trailing: String? {
-        switch row {
-        case .capture, .command: return nil
-        case .project(_, _, _, _, let isArchived): return isArchived ? "Archived" : nil
         }
     }
 }
