@@ -58,6 +58,10 @@ export interface Todo {
   dueDate?: string | null;
   /** Effective due for display: own dueDate if set, else earliest due among ancestors (nearest deadline). From notes show. */
   effectiveDueDate?: string | null;
+  /** Short hash of `text`, from notes show. Sent back on writes to prove this is still the task we read. */
+  digest?: string | null;
+  /** ISO date of this task's session — the half of its address that survives a session being started. */
+  sessionISODate?: string | null;
 }
 
 export interface NotesShowOutput {
@@ -231,10 +235,28 @@ export async function writeNotes(
 }
 
 /** Position of a todo as pm indexes them: session, then task line within that session. */
-function todoPosition(todo: Todo): { si: string; li: string } {
+/**
+ * How a task is named on the command line: `<session> <line>`, plus a `--digest` when we have one.
+ *
+ * The session is its ISO date wherever the CLI gave us one. Sessions are newest-first and a new one
+ * is spliced in at the top, so starting a session — which quick add does by itself, first thing each
+ * day — renumbers every session below it. A list rendered before that and clicked after it would
+ * otherwise act on whatever task had moved into the position.
+ *
+ * The digest is the text we believe the task has. Between rendering a list and clicking a row, a task
+ * can be inserted or deleted above it, and the CLI uses the digest to notice and to find the task
+ * where it has actually gone. Without one it acts on the position and hopes, which is what this
+ * extension did until now. See docs/task-identity.md.
+ */
+function todoAddress(todo: Todo): {
+  session: string;
+  line: string;
+  digestArgs: string[];
+} {
   return {
-    si: String(todo.sessionIndex ?? 0),
-    li: String(todo.lineIndex ?? 0),
+    session: todo.sessionISODate ?? String(todo.sessionIndex ?? 0),
+    line: String(todo.lineIndex ?? 0),
+    digestArgs: todo.digest ? ["--digest", todo.digest] : [],
   };
 }
 
@@ -262,8 +284,8 @@ async function completeTodoViaCli(
   todo: Todo,
   advanceFocus: boolean,
 ): Promise<void> {
-  const { si, li } = todoPosition(todo);
-  const args = [projectName, si, li];
+  const { session, line, digestArgs } = todoAddress(todo);
+  const args = [projectName, session, line, ...digestArgs];
   if (!advanceFocus) args.push("--no-advance");
   await runTodoCommand(prefs, "complete", args);
 }
@@ -283,10 +305,10 @@ async function insertTodoViaCli(
   position: "before" | "after" | "child",
   resultIndex: (anchorLineIndex: number) => number,
 ): Promise<{ notes: ProjectNotes; todo: Todo }> {
-  const { si, li } = todoPosition(anchor);
-  const args = [projectName, text];
+  const { session, line, digestArgs } = todoAddress(anchor);
+  const args = [projectName, text, ...digestArgs];
   if (dueDate) args.push("--due", dueDate);
-  args.push(`--${position}`, si, li);
+  args.push(`--${position}`, session, line);
   await runTodoCommand(prefs, "add", args);
 
   const data = await getNotes(prefs, projectName);
@@ -364,12 +386,13 @@ export async function updateDueDateInNotes(
   todo: Todo,
   dueDate: string | null,
 ): Promise<void> {
-  const { si, li } = todoPosition(todo);
+  const { session, line, digestArgs } = todoAddress(todo);
   await runTodoCommand(prefs, "due", [
     projectName,
-    si,
-    li,
+    session,
+    line,
     dueDate ?? "--clear",
+    ...digestArgs,
   ]);
 }
 
@@ -472,10 +495,10 @@ export async function addTodoAsChildInNotes(
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0) return;
-  const { si, li } = todoPosition(parentTodo);
-  const args = [projectName, trimmed];
+  const { session, line, digestArgs } = todoAddress(parentTodo);
+  const args = [projectName, trimmed, ...digestArgs];
   if (dueDate) args.push("--due", dueDate);
-  args.push("--child", si, li);
+  args.push("--child", session, line);
   await runTodoCommand(prefs, "add", args);
 }
 
@@ -489,8 +512,8 @@ export async function editTodoInNotes(
 ): Promise<void> {
   const trimmed = newText.trim();
   if (trimmed.length === 0) return;
-  const { si, li } = todoPosition(todo);
-  await runTodoCommand(prefs, "text", [projectName, si, li, trimmed]);
+  const { session, line, digestArgs } = todoAddress(todo);
+  await runTodoCommand(prefs, "text", [projectName, session, line, trimmed, ...digestArgs]);
 }
 
 /** Wrap the given todo (and its subtree) in a new parent task; focus stays on the wrapped task. Uses CLI. */
@@ -503,8 +526,8 @@ export async function wrapTodoInNotes(
 ): Promise<void> {
   const trimmed = newParentText.trim();
   if (trimmed.length === 0) return;
-  const { si, li } = todoPosition(todo);
-  await runTodoCommand(prefs, "wrap", [projectName, si, li, trimmed]);
+  const { session, line, digestArgs } = todoAddress(todo);
+  await runTodoCommand(prefs, "wrap", [projectName, session, line, trimmed, ...digestArgs]);
 }
 
 /** Move the single " @" focus marker to the given todo's line. Uses CLI. */
@@ -514,8 +537,8 @@ export async function setFocusToTodoInNotes(
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const { si, li } = todoPosition(todo);
-  await runTodoCommand(prefs, "focus", [projectName, si, li]);
+  const { session, line, digestArgs } = todoAddress(todo);
+  await runTodoCommand(prefs, "focus", [projectName, session, line, ...digestArgs]);
 }
 
 /** Complete the now task and its descendants, move focus to next open task. Uses CLI. See docs/task-focus-flow.md for how next focus is chosen. */
@@ -536,8 +559,8 @@ export async function undoCompleteInNotes(
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const { si, li } = todoPosition(todo);
-  await runTodoCommand(prefs, "undo", [projectName, si, li]);
+  const { session, line, digestArgs } = todoAddress(todo);
+  await runTodoCommand(prefs, "undo", [projectName, session, line, ...digestArgs]);
 }
 
 /** Update sections (summary, problem, goals, approach, links, learnings). */

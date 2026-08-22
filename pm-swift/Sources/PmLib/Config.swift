@@ -317,6 +317,8 @@ public enum PmError: Error, CustomStringConvertible {
     case emptyTodoText
     /// Session note text was empty or only whitespace.
     case emptySessionNote
+    /// A task reference no longer names the task it was read from — see docs/task-identity.md.
+    case staleReference(detail: String)
 
     public var description: String {
         switch self {
@@ -347,6 +349,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidTodoDue(let value): return "Invalid due value: \(value)"
         case .emptyTodoText: return "Task text is required."
         case .emptySessionNote: return "Session note text is required."
+        case .staleReference(let detail): return "That task has changed since you read it: \(detail). Read the project again and retry."
         }
     }
 }

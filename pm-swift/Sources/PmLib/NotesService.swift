@@ -83,55 +83,111 @@ public func editDetails(project: String, _ mutate: (ProjectNotes) throws -> Proj
     }
 }
 
-/// Complete a todo (and its descendants). By default advances focus per the now-style rule.
-public func completeTodo(project: String, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool = true) throws {
-    try editTodos(project: project) { notes in
-        try completeTodoWithDescendants(
-            notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
+/// `editTodos` for a caller that names its task with a `TaskRef` rather than a raw position.
+///
+/// The reference resolves against the *same* read the mutation is about to be spliced into, which is
+/// the whole point: resolving against an earlier read would leave a window in which the document
+/// moves between the check and the write, and that window is exactly what a reference exists to
+/// close. Returns where it landed, so a caller can tell that its position had drifted.
+@discardableResult
+public func editTodos(project: String, ref: TaskRef,
+                      _ mutate: @escaping (ProjectNotes, ResolvedTaskRef) throws -> ProjectNotes) throws -> ResolvedTaskRef {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    let resolved = try resolveTaskRef(ref, rawText: rawText)
+    let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
+        try mutate(normalizeFocusMarker(notes: notes), resolved)
     }
+    if let updated = updated {
+        try handle.io.writeContent(path: handle.notesPath, content: updated)
+    }
+    return resolved
+}
+
+/// Complete a todo (and its descendants). By default advances focus per the now-style rule.
+@discardableResult
+public func completeTodo(project: String, ref: TaskRef, advanceFocus: Bool = true) throws -> ResolvedTaskRef {
+    try editTodos(project: project, ref: ref) { notes, at in
+        try completeTodoWithDescendants(
+            notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex, advanceFocus: advanceFocus)
+    }
+}
+
+public func completeTodo(project: String, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool = true) throws {
+    try completeTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex),
+                     advanceFocus: advanceFocus)
 }
 
 /// Move the single ` @` focus marker onto the given todo line.
-public func focusTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
-    try editTodos(project: project) { notes in
-        applyFocusToTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+@discardableResult
+public func focusTodo(project: String, ref: TaskRef) throws -> ResolvedTaskRef {
+    try editTodos(project: project, ref: ref) { notes, at in
+        applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
     }
+}
+
+public func focusTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    try focusTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex))
 }
 
 /// Undo a completion: re-open the todo and move focus back onto it.
-public func undoTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
-    try editTodos(project: project) { notes in
-        try undoTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex)
+@discardableResult
+public func undoTodo(project: String, ref: TaskRef) throws -> ResolvedTaskRef {
+    try editTodos(project: project, ref: ref) { notes, at in
+        try undoTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
     }
 }
 
+public func undoTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    try undoTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex))
+}
+
 /// Replace a todo's text in place, preserving its checkbox, due, focus marker, and indent.
-public func setTodoText(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+///
+/// A rename is the one edit that invalidates a digest, so the reference is checked against the text
+/// *before* the rename — which is what stops two clients renaming the same line in sequence, each
+/// believing it was editing what it last read.
+@discardableResult
+public func setTodoText(project: String, ref: TaskRef, text: String) throws -> ResolvedTaskRef {
     guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
-    try editTodos(project: project) { notes in
-        setTextOnTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, text: text)
+    return try editTodos(project: project, ref: ref) { notes, at in
+        setTextOnTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex, text: text)
     }
+}
+
+public func setTodoText(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+    try setTodoText(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex), text: text)
 }
 
 /// Wrap a todo in a new parent task (insert a parent above at the task's indent, nest the task and
 /// its subtree under it). Focus stays on the wrapped task. Format-preserving.
-public func wrapTodo(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+@discardableResult
+public func wrapTodo(project: String, ref: TaskRef, text: String) throws -> ResolvedTaskRef {
     guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
+    let at = try resolveTaskRef(ref, rawText: rawText)
     guard let updated = wrapTaskPreservingFormat(
-        rawText: rawText, sessionIndex: sessionIndex, lineIndex: lineIndex, parentText: text) else {
+        rawText: rawText, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex, parentText: text) else {
         throw PmError.notesNotFound(handle.notesPath)
     }
     try handle.io.writeContent(path: handle.notesPath, content: updated)
+    return at
+}
+
+public func wrapTodo(project: String, sessionIndex: Int, lineIndex: Int, text: String) throws {
+    try wrapTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex), text: text)
 }
 
 /// Unwrap (dissolve) a parent todo: remove it and promote its children (with their subtrees) one
 /// level shallower, into the parent's position. If the dissolved parent held focus, focus moves to
 /// its first child so it isn't lost. Format-preserving. Inverse of `wrapTodo`.
-public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+@discardableResult
+public func unwrapTodo(project: String, ref: TaskRef) throws -> ResolvedTaskRef {
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
+    let at = try resolveTaskRef(ref, rawText: rawText)
+    let sessionIndex = at.sessionIndex, lineIndex = at.lineIndex
     // Was the dissolved parent the focused task? If so, focus should follow to its first child, which
     // takes over the parent's (sessionIndex, lineIndex) once the parent line is removed.
     let wasFocused = try parseTodos(notes: parseNotes(markdown: rawText)).contains {
@@ -153,6 +209,11 @@ public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throw
         }
     }
     try handle.io.writeContent(path: handle.notesPath, content: finalText)
+    return at
+}
+
+public func unwrapTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    try unwrapTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex))
 }
 
 /// The line indices, within `sessionIndex`, of the task at `lineIndex` and its descendants — the
@@ -175,9 +236,12 @@ private func subtreeLineIndices(todos: [Todo], sessionIndex: Int, lineIndex: Int
 /// If the removed block carried the ` @` focus marker, focus moves to the next open leaf of what
 /// remains (`nextDiveInLeaf` with nothing focused picks the first open leaf in document order), so a
 /// delete never leaves the project focus-less. A project with nothing open left simply has no marker.
-public func deleteTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+@discardableResult
+public func deleteTodo(project: String, ref: TaskRef) throws -> ResolvedTaskRef {
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
+    let at = try resolveTaskRef(ref, rawText: rawText)
+    let sessionIndex = at.sessionIndex, lineIndex = at.lineIndex
     let before = try parseTodos(notes: parseNotes(markdown: rawText))
     let removed = subtreeLineIndices(todos: before, sessionIndex: sessionIndex, lineIndex: lineIndex)
     let losesFocus = before.contains {
@@ -197,6 +261,11 @@ public func deleteTodo(project: String, sessionIndex: Int, lineIndex: Int) throw
         finalText = refocused
     }
     try handle.io.writeContent(path: handle.notesPath, content: finalText)
+    return at
+}
+
+public func deleteTodo(project: String, sessionIndex: Int, lineIndex: Int) throws {
+    try deleteTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex))
 }
 
 /// Move a todo (and its subtree) to a precise slot — after/before an anchor todo, with the root
@@ -228,11 +297,16 @@ public func moveSubtree(
 }
 
 /// Set (or clear, with `due == nil`) the inline `due:` value on a todo line.
-public func setDueOnTodo(project: String, sessionIndex: Int, lineIndex: Int, due: String?) throws {
+@discardableResult
+public func setDueOnTodo(project: String, ref: TaskRef, due: String?) throws -> ResolvedTaskRef {
     if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
-    try editTodos(project: project) { notes in
-        setDueOnTodoAt(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex, due: due)
+    return try editTodos(project: project, ref: ref) { notes, at in
+        setDueOnTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex, due: due)
     }
+}
+
+public func setDueOnTodo(project: String, sessionIndex: Int, lineIndex: Int, due: String?) throws {
+    try setDueOnTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex), due: due)
 }
 
 /// Validate a `due:` value: non-empty, single-line, and free of the reserved `due:` / `@` tokens.
@@ -247,7 +321,7 @@ public func addTodo(
     project: String,
     text: String,
     due: String? = nil,
-    position: (kind: TaskInsertPosition, sessionIndex: Int, lineIndex: Int)? = nil
+    position: (kind: TaskInsertPosition, anchor: TaskRef)? = nil
 ) throws {
     guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }
     if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
@@ -258,10 +332,13 @@ public func addTodo(
     let inserted: (rawText: String, sessionIndex: Int, lineIndex: Int)?
     let shouldFocus: Bool
     if let pos = position {
+        // The anchor is resolved against the text we just read and are about to splice, so an
+        // insert can't land beside a task that has since moved or become something else.
+        let at = try resolveTaskRef(pos.anchor, rawText: rawText)
         inserted = insertTaskRelative(
             rawText: rawText,
-            anchorSessionIndex: pos.sessionIndex,
-            anchorLineIndex: pos.lineIndex,
+            anchorSessionIndex: at.sessionIndex,
+            anchorLineIndex: at.lineIndex,
             text: text,
             due: due,
             position: pos.kind

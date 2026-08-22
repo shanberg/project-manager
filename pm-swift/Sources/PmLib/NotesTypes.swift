@@ -63,8 +63,12 @@ public struct Todo: Codable, Equatable {
     public var dueDate: String?
     /// Effective due date for display: own dueDate if set, else earliest due among ancestors (nearest deadline). Not stored in notes; computed when producing notes show output.
     public var effectiveDueDate: String?
+    /// `taskDigest` of `text` — what a caller sends back to prove it still means this task.
+    public var digest: String?
+    /// The ISO date of this task's session, the stable half of a `TaskRef` coordinate.
+    public var sessionISODate: String?
 
-    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil) {
+    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
         self.text = text
         self.checked = checked
         self.rawLine = rawLine
@@ -75,6 +79,8 @@ public struct Todo: Codable, Equatable {
         self.isFocused = isFocused
         self.dueDate = dueDate
         self.effectiveDueDate = effectiveDueDate
+        self.digest = digest
+        self.sessionISODate = sessionISODate
     }
 }
 

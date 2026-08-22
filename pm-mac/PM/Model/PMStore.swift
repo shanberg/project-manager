@@ -611,9 +611,9 @@ final class PMStore: ObservableObject {
     /// task it just wrote has a list that contains it.
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
                  position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
-        let placement: (kind: TaskInsertPosition, sessionIndex: Int, lineIndex: Int)?
+        let placement: (kind: TaskInsertPosition, anchor: PmLib.TaskRef)?
         if let anchor, let position {
-            placement = (position, anchor.sessionIndex, anchor.lineIndex)
+            placement = (position, PmLib.TaskRef(sessionIndex: anchor.sessionIndex, lineIndex: anchor.lineIndex))
         } else {
             placement = nil
         }

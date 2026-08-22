@@ -125,69 +125,117 @@ func runNotesSessionNote(args: [String]) {
     } catch { fail(error) }
 }
 
-func runNotesTodoComplete(args: [String]) {
-    let filtered = args.filter { $0 != "--no-advance" }
-    guard filtered.count >= 3,
-          let sessionIndex = Int(filtered[1]),
-          let lineIndex = Int(filtered[2]) else {
-        stderr("Usage: pm notes todo complete <project> <sessionIndex> <lineIndex> [--no-advance]")
+// MARK: - Addressing a task
+//
+// Every `pm notes todo` subcommand names its task the same way: `<project> <session> <line>`, where
+// `<session>` is either the session's index or its ISO date. The date form is the stable one —
+// sessions are newest-first, so starting one renumbers every index below it — and it is what a
+// caller that read the project earlier should be using.
+//
+// `--digest` carries the short hash of the text the caller believes that task has, from `notes show`.
+// It is optional because a human typing an index at a terminal is asserting nothing; a client that
+// read minutes ago is, and should send it. See docs/task-identity.md.
+
+private let refUsageSuffix = "[--digest HASH] [--session-ordinal N]\n" +
+    "  <session> is a session index or an ISO date (YYYY-MM-DD)."
+
+/// Pull the reference flags out of an argument list, leaving the positionals.
+private func takeRefFlags(_ args: [String]) -> (rest: [String], digest: String?, ordinal: Int) {
+    var rest: [String] = [], digest: String?, ordinal = 0
+    var i = 0
+    while i < args.count {
+        switch args[i] {
+        case "--digest":
+            guard i + 1 < args.count else { stderr("--digest requires a value"); exit(1) }
+            digest = args[i + 1]; i += 2
+        case "--session-ordinal":
+            guard i + 1 < args.count, let n = Int(args[i + 1]), n >= 0 else {
+                stderr("--session-ordinal requires a non-negative number"); exit(1)
+            }
+            ordinal = n; i += 2
+        default:
+            rest.append(args[i]); i += 1
+        }
+    }
+    return (rest, digest, ordinal)
+}
+
+/// `<project> <session> <line>` plus flags, or exit with `usage`. `<session>` is an index or an
+/// ISO date; anything else is a mistake worth naming rather than silently reading as index 0.
+private func parseTaskAddress(_ args: [String], usage: String) -> (project: String, ref: TaskRef) {
+    let (rest, digest, ordinal) = takeRefFlags(args)
+    guard rest.count >= 3, let lineIndex = Int(rest[2]) else { stderr(usage); exit(1) }
+    let session = rest[1]
+    if let sessionIndex = Int(session) {
+        return (rest[0], TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex, digest: digest))
+    }
+    guard (try? parseSessionDateArgument(session)) != nil else {
+        stderr("Session must be an index or an ISO date (YYYY-MM-DD), not: \(session)")
         exit(1)
     }
-    let project = filtered[0]
+    return (rest[0], TaskRef(sessionDate: session, sessionOrdinal: ordinal,
+                             lineIndex: lineIndex, digest: digest))
+}
+
+/// Say so when a reference had to move to find its task. The write already happened and was correct;
+/// this is so a client that has been holding stale positions finds out it is doing so.
+private func reportRelocation(_ resolved: ResolvedTaskRef) {
+    guard resolved.relocated else { return }
+    stderr("note: that task had moved; acted on it at session \(resolved.sessionIndex), line \(resolved.lineIndex)")
+}
+
+func runNotesTodoComplete(args: [String]) {
+    let usage = "Usage: pm notes todo complete <project> <session> <line> [--no-advance] \(refUsageSuffix)"
     let advanceFocus = !args.contains("--no-advance")
+    let (project, ref) = parseTaskAddress(args.filter { $0 != "--no-advance" }, usage: usage)
     do {
-        try completeTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex, advanceFocus: advanceFocus)
+        reportRelocation(try completeTodo(project: project, ref: ref, advanceFocus: advanceFocus))
     } catch { fail(error) }
 }
 
 func runNotesTodoFocus(args: [String]) {
-    guard args.count >= 3,
-          let sessionIndex = Int(args[1]),
-          let lineIndex = Int(args[2]) else {
-        stderr("Usage: pm notes todo focus <project> <sessionIndex> <lineIndex>")
-        exit(1)
-    }
-    let project = args[0]
-    do {
-        try focusTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex)
-    } catch { fail(error) }
+    let (project, ref) = parseTaskAddress(
+        args, usage: "Usage: pm notes todo focus <project> <session> <line> \(refUsageSuffix)")
+    do { reportRelocation(try focusTodo(project: project, ref: ref)) } catch { fail(error) }
 }
 
 func runNotesTodoUndo(args: [String]) {
-    guard args.count >= 3,
-          let sessionIndex = Int(args[1]),
-          let lineIndex = Int(args[2]) else {
-        stderr("Usage: pm notes todo undo <project> <sessionIndex> <lineIndex>")
-        exit(1)
-    }
-    let project = args[0]
-    do {
-        try undoTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex)
-    } catch { fail(error) }
+    let (project, ref) = parseTaskAddress(
+        args, usage: "Usage: pm notes todo undo <project> <session> <line> \(refUsageSuffix)")
+    do { reportRelocation(try undoTodo(project: project, ref: ref)) } catch { fail(error) }
 }
 
 func runNotesTodoAdd(args: [String]) {
-    let usage = "Usage: pm notes todo add <project> <text> [--due DATE] [--child|--before|--after <sessionIndex> <lineIndex>]"
-    guard let project = args.first else {
-        stderr(usage); exit(1)
-    }
-    let rest = Array(args.dropFirst())
+    let usage = "Usage: pm notes todo add <project> <text> [--due DATE] " +
+        "[--child|--before|--after <session> <line>] \(refUsageSuffix)"
+    let (rest, digest, ordinal) = takeRefFlags(args)
+    guard let project = rest.first else { stderr(usage); exit(1) }
+    let tail = Array(rest.dropFirst())
     var due: String?
-    var position: (kind: TaskInsertPosition, si: Int, li: Int)?
+    var position: (kind: TaskInsertPosition, anchor: TaskRef)?
     var text: String?
     var i = 0
-    while i < rest.count {
-        let a = rest[i]
+    while i < tail.count {
+        let a = tail[i]
         switch a {
         case "--due":
-            guard i + 1 < rest.count else { stderr("--due requires a value"); exit(1) }
-            due = rest[i + 1]; i += 2
+            guard i + 1 < tail.count else { stderr("--due requires a value"); exit(1) }
+            due = tail[i + 1]; i += 2
         case "--child", "--before", "--after":
-            guard i + 2 < rest.count, let si = Int(rest[i + 1]), let li = Int(rest[i + 2]) else {
-                stderr("\(a) requires <sessionIndex> <lineIndex>"); exit(1)
+            guard i + 2 < tail.count, let li = Int(tail[i + 2]) else {
+                stderr("\(a) requires <session> <line>"); exit(1)
+            }
+            let session = tail[i + 1]
+            let anchor: TaskRef
+            if let si = Int(session) {
+                anchor = TaskRef(sessionIndex: si, lineIndex: li, digest: digest)
+            } else if (try? parseSessionDateArgument(session)) != nil {
+                anchor = TaskRef(sessionDate: session, sessionOrdinal: ordinal, lineIndex: li, digest: digest)
+            } else {
+                stderr("Session must be an index or an ISO date (YYYY-MM-DD), not: \(session)"); exit(1)
             }
             let kind: TaskInsertPosition = a == "--child" ? .child : (a == "--before" ? .before : .after)
-            position = (kind, si, li); i += 3
+            position = (kind, anchor); i += 3
         default:
             if text == nil { text = a } else { stderr("Unexpected argument: \(a)"); exit(1) }
             i += 1
@@ -197,45 +245,38 @@ func runNotesTodoAdd(args: [String]) {
         stderr("Task text is required\n\(usage)"); exit(1)
     }
     if let d = due, !isValidTodoDue(d) { stderr("Invalid due value: \(d)"); exit(1) }
-    let servicePosition = position.map { (kind: $0.kind, sessionIndex: $0.si, lineIndex: $0.li) }
     do {
-        try addTodo(project: project, text: taskText, due: due, position: servicePosition)
+        try addTodo(project: project, text: taskText, due: due, position: position)
     } catch { fail(error) }
 }
 
 func runNotesTodoDue(args: [String]) {
-    guard args.count >= 4, let sessionIndex = Int(args[1]), let lineIndex = Int(args[2]) else {
-        stderr("Usage: pm notes todo due <project> <sessionIndex> <lineIndex> <DATE|--clear>")
-        exit(1)
-    }
-    let project = args[0]
-    let dueArg = args[3]
+    let usage = "Usage: pm notes todo due <project> <session> <line> <DATE|--clear> \(refUsageSuffix)"
+    let (rest, _, _) = takeRefFlags(args)
+    guard rest.count >= 4 else { stderr(usage); exit(1) }
+    let (project, ref) = parseTaskAddress(args, usage: usage)
+    let dueArg = rest[3]
     let due: String? = dueArg == "--clear" ? nil : dueArg
     if let d = due, !isValidTodoDue(d) { stderr("Invalid due value: \(d)"); exit(1) }
-    do {
-        try setDueOnTodo(project: project, sessionIndex: sessionIndex, lineIndex: lineIndex, due: due)
-    } catch { fail(error) }
+    do { reportRelocation(try setDueOnTodo(project: project, ref: ref, due: due)) } catch { fail(error) }
 }
 
 func runNotesTodoText(args: [String]) {
-    guard args.count >= 4, let sessionIndex = Int(args[1]), let lineIndex = Int(args[2]) else {
-        stderr("Usage: pm notes todo text <project> <sessionIndex> <lineIndex> <text>")
-        exit(1)
-    }
-    do {
-        try setTodoText(project: args[0], sessionIndex: sessionIndex, lineIndex: lineIndex, text: args[3])
-    } catch { fail(error) }
+    let usage = "Usage: pm notes todo text <project> <session> <line> <text> \(refUsageSuffix)"
+    let (rest, _, _) = takeRefFlags(args)
+    guard rest.count >= 4 else { stderr(usage); exit(1) }
+    let (project, ref) = parseTaskAddress(args, usage: usage)
+    do { reportRelocation(try setTodoText(project: project, ref: ref, text: rest[3])) } catch { fail(error) }
 }
 
 func runNotesTodoWrap(args: [String]) {
-    guard args.count >= 4, let sessionIndex = Int(args[1]), let lineIndex = Int(args[2]) else {
-        stderr("Usage: pm notes todo wrap <project> <sessionIndex> <lineIndex> <parentText>")
-        exit(1)
-    }
-    do {
-        try wrapTodo(project: args[0], sessionIndex: sessionIndex, lineIndex: lineIndex, text: args[3])
-    } catch { fail(error) }
+    let usage = "Usage: pm notes todo wrap <project> <session> <line> <parentText> \(refUsageSuffix)"
+    let (rest, _, _) = takeRefFlags(args)
+    guard rest.count >= 4 else { stderr(usage); exit(1) }
+    let (project, ref) = parseTaskAddress(args, usage: usage)
+    do { reportRelocation(try wrapTodo(project: project, ref: ref, text: rest[3])) } catch { fail(error) }
 }
+
 
 func runNotes(args: [String]) {
     guard let sub = args.first else {
@@ -255,7 +296,7 @@ func runNotes(args: [String]) {
         runNotesCurrentDay()
     case "todo":
         guard args.count >= 3 else {
-            stderr("Usage: pm notes todo <complete|focus|undo|add|due|text|wrap> <project> <sessionIndex> <lineIndex> [--no-advance for complete]")
+            stderr("Usage: pm notes todo <complete|focus|undo|add|due|text|wrap> <project> <session> <line> [--digest HASH] [--no-advance for complete]\n  <session> is a session index or an ISO date (YYYY-MM-DD).")
             exit(1)
         }
         let sub = args[1]

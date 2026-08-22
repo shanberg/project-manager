@@ -129,6 +129,9 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     var foundFocused = false
     for (sessionIndex, session) in notes.sessions.enumerated() {
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
+        // The stable half of a TaskRef coordinate, carried on every task so a reader never has to
+        // re-derive it from the heading. nil only for a session heading this parser didn't write.
+        let isoDate = sessionISODate(heading: session.date)
         let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var lineIndex = 0
         for line in lines {
@@ -154,7 +157,9 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                 sessionIndex: sessionIndex,
                 lineIndex: lineIndex,
                 isFocused: isFocused,
-                dueDate: dueDate
+                dueDate: dueDate,
+                digest: taskDigest(text),
+                sessionISODate: isoDate
             ))
             lineIndex += 1
         }
@@ -182,41 +187,26 @@ private func earliestAncestorDue(sessionTodos: [Todo], idx: Int) -> String? {
     return candidates.min(by: { dueDateSortKey($0) < dueDateSortKey($1) })
 }
 
-/// Returns todos with effectiveDueDate set: earliest due among own and all ancestors (nearest deadline). Use when producing notes show output.
+/// Returns todos with effectiveDueDate set: earliest due among own and all ancestors (nearest
+/// deadline). Use when producing notes show output.
+///
+/// Copies each todo and sets the one field, rather than rebuilding it from a list of the fields this
+/// function happens to know about. The rebuild silently dropped anything added to `Todo` later —
+/// which is how the first cut of task digests reached `notes show` as nulls.
 public func todosWithEffectiveDueDates(_ todos: [Todo]) -> [Todo] {
     let bySession = Dictionary(grouping: todos) { $0.sessionIndex }
     return todos.map { todo in
+        var out = todo
         let sessionTodos = (bySession[todo.sessionIndex] ?? []).sorted { $0.lineIndex < $1.lineIndex }
         guard let idx = sessionTodos.firstIndex(where: { $0.lineIndex == todo.lineIndex }) else {
-            return Todo(
-                text: todo.text,
-                checked: todo.checked,
-                rawLine: todo.rawLine,
-                context: todo.context,
-                depth: todo.depth,
-                sessionIndex: todo.sessionIndex,
-                lineIndex: todo.lineIndex,
-                isFocused: todo.isFocused,
-                dueDate: todo.dueDate,
-                effectiveDueDate: todo.dueDate
-            )
+            out.effectiveDueDate = todo.dueDate
+            return out
         }
         var candidates: [String] = []
         if let own = todo.dueDate { candidates.append(own) }
         if let ancestor = earliestAncestorDue(sessionTodos: sessionTodos, idx: idx) { candidates.append(ancestor) }
-        let effective = candidates.min(by: { dueDateSortKey($0) < dueDateSortKey($1) })
-        return Todo(
-            text: todo.text,
-            checked: todo.checked,
-            rawLine: todo.rawLine,
-            context: todo.context,
-            depth: todo.depth,
-            sessionIndex: todo.sessionIndex,
-            lineIndex: todo.lineIndex,
-            isFocused: todo.isFocused,
-            dueDate: todo.dueDate,
-            effectiveDueDate: effective
-        )
+        out.effectiveDueDate = candidates.min(by: { dueDateSortKey($0) < dueDateSortKey($1) })
+        return out
     }
 }
 

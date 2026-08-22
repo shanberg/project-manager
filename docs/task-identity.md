@@ -1,6 +1,6 @@
 # Task identity across surfaces
 
-**Status:** proposed, 2026-08-22. Nothing here is implemented yet. The session coordinate is settled (a date, not an index); two smaller questions remain open at the end. This settles how a task is addressed before the shared API contract (UI / Raycast / MCP) is built on top of it — see [api-contract.md](api-contract.md).
+**Status:** implemented in PmLib, the `pm` CLI, and the Raycast extension, 2026-08-22. `TaskRef.swift` is the implementation and `TaskRefTests.swift` the tests; this page is the reasoning behind them. The panel is unconverted on purpose — see below. This settles how a task is addressed before the shared API contract (UI / Raycast / MCP) is built on top of it — see [api-contract.md](api-contract.md).
 
 ## What identity is today
 
@@ -121,11 +121,15 @@ Almost nothing, because task references are barely persisted.
 - `PMStore.focusedKey`, `lastCompletedKey`, and the `"si:li"` strings in the quick bar are per-launch and in memory. They change where they cross the contract boundary and nowhere else.
 - `TaskEntity.id` is `"<sessionIndex>:<lineIndex>\u{1F}<projectKey>"`, handed to Siri and Shortcuts. Existing saved shortcuts holding an old id would resolve to a stale reference and refuse, which is the correct behaviour and the one place a user could notice the change.
 
-## Open questions
+## What is deliberately not converted
 
-**1. Silent healing, or visible relocation?** Recommendation: report it in the envelope and let each surface decide. The Mac app probably says nothing; MCP probably tells the model.
+- **The panel.** It links PmLib in-process and re-reads after every write, so its positions are never more than a runloop old. It goes on calling the positional overloads, which build a digest-less reference and behave exactly as before.
+- **`moveSubtree`.** Drag-reorder inside the panel, with no slow caller. It still takes raw positions.
+- **Bulk operations** (`toggleAll`, `setDueAll`, subtree deletes). A digest on one task doesn't attest that its children are unchanged; those want a document revision, which belongs with the contract work.
 
-**2. Land the digest independently of the contract work?** It converts today's silent wrong-write into a clean error on its own, without any of the rest.
+## Open question
+
+**Silent healing, or visible relocation?** Currently the CLI writes a `note:` line to stderr when a reference relocated, and the write proceeds. That's the cheapest thing that isn't silent. Whether a surface should show it — and whether relocation should instead be a field in a structured result — is a question for the contract's result envelope.
 
 ## Verification
 
