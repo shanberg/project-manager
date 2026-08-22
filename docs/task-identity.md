@@ -1,6 +1,6 @@
 # Task identity across surfaces
 
-**Status:** proposed, 2026-08-22. Nothing here is implemented yet. This settles how a task is addressed before the shared API contract (UI / Raycast / MCP) is built on top of it — see [api-contract.md](api-contract.md).
+**Status:** proposed, 2026-08-22. Nothing here is implemented yet. The session coordinate is settled (a date, not an index); two smaller questions remain open at the end. This settles how a task is addressed before the shared API contract (UI / Raycast / MCP) is built on top of it — see [api-contract.md](api-contract.md).
 
 ## What identity is today
 
@@ -44,10 +44,20 @@ Clicking the stale row completes **"Check the invoice"**. No error, no warning; 
 ### The reference
 
 ```
-TaskRef = { project, session, line, digest }
+TaskRef = { project, session, sessionOrdinal = 0, line, digest }
 ```
 
-Returned by every read, accepted by every write. `digest` is the first 8 hex characters of SHA-256 over the task's text, NFC-normalized.
+Returned by every read, accepted by every write. `session` is an ISO date, not an index. `digest` is the first 8 hex characters of SHA-256 over the task's text, NFC-normalized.
+
+### The session coordinate is a date
+
+`sessionIndex` is not part of the reference. Sessions are newest-first and a new one is spliced in at the top, so the index of every existing session changes whenever a session starts — which is the defect above. A session's *date* doesn't move.
+
+The reference carries an **ISO date** (`2026-08-22`). The heading on disk is a display format — `### Fri, Aug 22, 2026 planning`, written by `formatSessionDate` with the locale pinned to `en_US` and the timezone to UTC, so it is deterministic but not something a contract should be passing around. Both conversions already exist: `parseSessionDateArgument` reads ISO, `formatSessionDate` writes the heading form, and they round-trip.
+
+`sessionOrdinal` disambiguates two sessions sharing a date, and is 0 in every ordinary case. Duplicates are reachable: the app's `openTodaySession` checks `todaySessionIndex` before creating one, but `pm notes session add` calls `sessionAddPreservingFormat` unconditionally, so running it twice in a day produces two `### Fri, Aug 22, 2026` headings — as does hand-editing the file. The parser keeps both as separate sessions, so the reference has to be able to name either.
+
+**This changes the contract boundary only.** PmLib's transforms keep taking `sessionIndex`; resolution maps date and ordinal to an index at the edge and everything below is untouched. A session heading that doesn't match the parser's pattern is skipped rather than becoming a malformed session, so every session that exists has a well-formed date to key on.
 
 ### What gets hashed, and why it's the text
 
@@ -62,7 +72,7 @@ Hashing the text means the reference survives exactly the mutations that don't c
 | Set or clear a due date | holds |
 | Wrap, unwrap, move subtree | holds — depth is deliberately not hashed |
 | Tasks inserted or deleted above it | holds — position shifts, identity doesn't |
-| A session started above it | holds |
+| A session started above it | holds — and with a date coordinate the position no longer moves either |
 | **Rename** | **breaks — intended** |
 
 Rename is the one case where the thing the caller was looking at genuinely became something else. A client that read "Review the contract" and asks to complete it must not complete "Review the contract with legal" because a human retitled it in the meantime.
@@ -71,6 +81,7 @@ Rename is the one case where the thing the caller was looking at genuinely becam
 
 ```
 resolve(ref) →
+  date + ordinal -> sessionIndex, or refuse if no such session
   HIT        the task at (session, line) carries that digest        → act
   RELOCATED  the digest appears exactly once elsewhere              → act there, report the move
   STALE      not found, or found more than once                     → refuse
@@ -101,18 +112,23 @@ Around 200 tasks per project, SHA-256 over short strings; microseconds, and abou
 - **Dry run** resolves references too, so previewing a stale reference shows the staleness instead of a confident wrong diff.
 - **The mutation journal** gets before/after digests per entry at no extra cost, which is what would make cross-surface undo safe — undo can verify the world hasn't moved before reversing.
 
+## What has to migrate
+
+Almost nothing, because task references are barely persisted.
+
+- `focused.json` holds `{"projectKey": "<basePath>:<name>"}` — a *project*, not a task. Which task is focused lives in the markdown itself, as the single ` @` marker, and `focusedKey` is recomputed from it on every read. Nothing to migrate.
+- `task-timing.json` is the only file on disk carrying a task position: `{"task_key": "<notesPath>::0:2", …}`, the record of when the focused task was first seen. It drives the menubar's stale tint and the stale-task notification. A key it doesn't recognise resets the clock, which is what already happens whenever focus moves, so it can change format without a migration step.
+- `PMStore.focusedKey`, `lastCompletedKey`, and the `"si:li"` strings in the quick bar are per-launch and in memory. They change where they cross the contract boundary and nowhere else.
+- `TaskEntity.id` is `"<sessionIndex>:<lineIndex>\u{1F}<projectKey>"`, handed to Siri and Shortcuts. Existing saved shortcuts holding an old id would resolve to a stale reference and refuse, which is the correct behaviour and the one place a user could notice the change.
+
 ## Open questions
 
-**1. Should the session coordinate be the date rather than the index?**
+**1. Silent healing, or visible relocation?** Recommendation: report it in the envelope and let each surface decide. The Mac app probably says nothing; MCP probably tells the model.
 
-Sessions are already keyed by date in practice — `addTodo` finds today's with `sessions.firstIndex(where: { $0.date == today })`. Dates don't renumber when a session is prepended, so using the date removes the dominant instability class outright instead of detecting it afterwards; digests would then only have to absorb inserts and deletes *within* a session.
-
-Cost: it touches `focusedKey`, `TaskEntity.id`, `lastCompletedKey`, and the `"si:li"` strings threaded through the quick bar, and needs a migration for the `focused.json` already on disk. Wrinkle: two sessions can share a date (`### 2026-08-22 morning` / `### 2026-08-22 evening`); the code already resolves that by taking the first, so a date plus an ordinal-within-date — almost always 0 — matches existing behaviour.
-
-**2. Silent healing, or visible relocation?** Recommendation: report it in the envelope and let each surface decide. The Mac app probably says nothing; MCP probably tells the model.
-
-**3. Land the digest independently of the contract work?** It converts today's silent wrong-write into a clean error on its own, without any of the rest.
+**2. Land the digest independently of the contract work?** It converts today's silent wrong-write into a clean error on its own, without any of the rest.
 
 ## Verification
 
-The transcript above and the digest stability table were produced by running the real PmLib transforms — `sessionAddPreservingFormat`, `appendTaskToSession`, `completeTodoWithDescendants`, `applyFocusToTodoAt`, `setDueOnTodoAt`, `setTextOnTodoAt` — against a fixture and diffing. 12/12 checks passed. The harness is scratch, not in the repo; it should become a test in `pm-swift/Tests/pmTests` when this is implemented.
+Both the defect and the design were checked by running the real PmLib transforms — `sessionAddPreservingFormat`, `appendTaskToSession`, `insertTaskRelative`, `completeTodoWithDescendants`, `applyFocusToTodoAt`, `setDueOnTodoAt`, `setTextOnTodoAt` — against fixtures and diffing, with resolution implemented exactly as specified above. 13/13 checks passed, covering: the ISO/heading round trip; a date-based reference resolving as a clean `HIT` through the session shift that sends the index-based one to a different real task; an insert within the session forcing a `RELOCATED`; two sessions created on one date via the CLI path; and refusal on both a rename and a date with no session. Digest stability was confirmed separately across completion, focus moving, and due dates being set and cleared.
+
+The harness is scratch. It should become a test in `pm-swift/Tests/pmTests` when this is implemented.
