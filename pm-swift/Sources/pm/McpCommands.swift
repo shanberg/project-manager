@@ -19,6 +19,9 @@ private let supportedProtocolVersions = ["2025-06-18", "2025-03-26", "2024-11-05
 /// a model the ability to tick tasks off doesn't also grant it the ability to delete them.
 private let destructiveActions: Set<String> = [
     "task.delete", "session.delete", "project.archive", "config.set",
+    // Reversing a write undoes work somebody did. It is recoverable — the reversal is journaled too
+    // — but it isn't something a model should reach for without being told it may.
+    "journal.undo",
 ]
 
 // MARK: - Tool names
@@ -167,7 +170,7 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
     }
 
     do {
-        let outcome = try performApi(action, input, options: ApiOptions(dryRun: dryRun))
+        let outcome = try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "mcp"))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let envelope = (try? encoder.encode(JSONValue.encoding(outcome)))

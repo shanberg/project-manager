@@ -174,6 +174,16 @@ public enum ApiRegistry {
                       fields: [ApiField("key", .string, required: true, "Configuration key."),
                                ApiField("value", .any, required: true, "The new value.")]),
 
+        // MARK: Journal
+        ApiActionSpec(name: "journal.list", tier: .query,
+                      summary: "Recent writes made through the contract, newest first.",
+                      fields: [ApiField("project", .string, "Only this project's writes."),
+                               ApiField("limit", .integer, "How many entries. Default 50.")]),
+        ApiActionSpec(name: "journal.undo", tier: .mutation,
+                      summary: "Reverse a write, if the file is still exactly as that write left it.",
+                      fields: [ApiField("entry", .string, "Which entry, from journal.list. Default the most recent reversible one."),
+                               ApiField("project", .string, "Only consider this project's writes.")]),
+
         // MARK: Affordances — listed so the boundary is documented, refused by the headless adapters.
         ApiActionSpec(name: "app.openWindow", tier: .affordance,
                       summary: "Open the project's window in PM.", fields: [optionalProject]),

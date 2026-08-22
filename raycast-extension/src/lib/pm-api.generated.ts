@@ -46,6 +46,22 @@ export interface ConfigSetInput {
 /** The focused project and its focused task. */
 export type FocusGetInput = Record<string, never>;
 
+/** Recent writes made through the contract, newest first. */
+export interface JournalListInput {
+  /** How many entries. Default 50. */
+  limit?: number;
+  /** Only this project's writes. */
+  project?: string;
+}
+
+/** Reverse a write, if the file is still exactly as that write left it. */
+export interface JournalUndoInput {
+  /** Which entry, from journal.list. Default the most recent reversible one. */
+  entry?: string;
+  /** Only consider this project's writes. */
+  project?: string;
+}
+
 /** Add a link to the project's links section. */
 export interface NotesAddLinkInput {
   /** Link label. */
@@ -284,6 +300,8 @@ export interface ApiInputs {
   "config.get": ConfigGetInput;
   "config.set": ConfigSetInput;
   "focus.get": FocusGetInput;
+  "journal.list": JournalListInput;
+  "journal.undo": JournalUndoInput;
   "notes.addLink": NotesAddLinkInput;
   "notes.get": NotesGetInput;
   "notes.setDetail": NotesSetDetailInput;
@@ -328,6 +346,8 @@ export const API_TIERS: Record<
   "config.get": "query",
   "config.set": "mutation",
   "focus.get": "query",
+  "journal.list": "query",
+  "journal.undo": "mutation",
   "notes.addLink": "mutation",
   "notes.get": "query",
   "notes.setDetail": "mutation",

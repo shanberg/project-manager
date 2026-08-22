@@ -26,7 +26,7 @@ private func runApiDescribe(pretty: Bool) {
 }
 
 /// `pm api call <action> [json]` — JSON on argv or, with no argument, on stdin.
-private func runApiCall(args: [String], pretty: Bool, dryRun: Bool) {
+private func runApiCall(args: [String], pretty: Bool, dryRun: Bool, source: String) {
     guard let action = args.first else {
         stderr("Usage: pm api call <action> [json]  (input may also arrive on stdin)")
         exit(1)
@@ -54,7 +54,7 @@ private func runApiCall(args: [String], pretty: Bool, dryRun: Bool) {
         exit(1)
     }
     do {
-        let result = try performApi(action, input, options: ApiOptions(dryRun: dryRun))
+        let result = try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: source))
         emit(try JSONValue.encoding(result), pretty: pretty)
     } catch {
         let apiError = ApiError.from(error)
@@ -67,18 +67,29 @@ private func runApiCall(args: [String], pretty: Bool, dryRun: Bool) {
 func runApi(args: [String]) {
     let pretty = args.contains("--pretty")
     let dryRun = args.contains("--dry-run")
-    let rest = args.filter { $0 != "--pretty" && $0 != "--dry-run" }
+    // Who to credit in the journal. A client that shells out to `pm` is not the CLI, and "what did
+    // Raycast change?" is only answerable if it says so.
+    var source = "cli"
+    if let index = args.firstIndex(of: "--source"), index + 1 < args.count { source = args[index + 1] }
+    var rest: [String] = []
+    var skip = false
+    for argument in args {
+        if skip { skip = false; continue }
+        if argument == "--source" { skip = true; continue }
+        if argument == "--pretty" || argument == "--dry-run" { continue }
+        rest.append(argument)
+    }
     guard let sub = rest.first else {
-        stderr("Usage: pm api <describe|call> [--pretty] [--dry-run]")
+        stderr("Usage: pm api <describe|call> [--pretty] [--dry-run] [--source NAME]")
         exit(1)
     }
     switch sub {
     case "describe":
         runApiDescribe(pretty: pretty)
     case "call":
-        runApiCall(args: Array(rest.dropFirst()), pretty: pretty, dryRun: dryRun)
+        runApiCall(args: Array(rest.dropFirst()), pretty: pretty, dryRun: dryRun, source: source)
     default:
-        stderr("Usage: pm api <describe|call> [--pretty] [--dry-run]")
+        stderr("Usage: pm api <describe|call> [--pretty] [--dry-run] [--source NAME]")
         exit(1)
     }
 }

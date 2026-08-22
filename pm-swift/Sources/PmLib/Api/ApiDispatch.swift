@@ -257,25 +257,82 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
         let path = try createProject(config: config, paths: paths, domainCode: domain,
                                      title: input.title ?? "")
-        return ApiResult(action: spec.name, summary: "Created \((path as NSString).lastPathComponent).",
-                         data: .string(path))
+        let summary = "Created \((path as NSString).lastPathComponent)."
+        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
+        return ApiResult(action: spec.name, summary: summary, data: .string(path))
     case "project.rename":
         let path = try renameProjectTitle(nameOrPrefix: input.project ?? "", newTitle: input.title ?? "")
-        return ApiResult(action: spec.name, summary: "Renamed to \((path as NSString).lastPathComponent).",
-                         data: .string(path))
+        let summary = "Renamed to \((path as NSString).lastPathComponent)."
+        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
+        return ApiResult(action: spec.name, summary: summary, data: .string(path))
     case "project.archive", "project.unarchive":
         let archiving = spec.name == "project.archive"
         let (_, paths) = try loadConfigAndPaths()
         let folder = try folderName(of: input.project ?? "")
         let path = try moveProject(named: folder, from: archiving ? .active : .archive,
                                    to: archiving ? .archive : .active, paths: paths)
-        return ApiResult(action: spec.name,
-                         summary: "\(archiving ? "Archived" : "Restored") \(folder).", data: .string(path))
+        let summary = "\(archiving ? "Archived" : "Restored") \(folder)."
+        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
+        return ApiResult(action: spec.name, summary: summary, data: .string(path))
     case "project.focus":
         let folder = try folderName(of: input.project ?? "")
         let (_, paths) = try loadConfigAndPaths()
         try setFocusedProject(key: "\(paths.activePath):\(folder)")
         return ApiResult(action: spec.name, summary: "Focused \(folder).")
+
+    // MARK: Journal
+    case "journal.list":
+        let entries = ApiJournal.entries(limit: input.limit ?? 50,
+                                         project: try input.project.map(projectPath(of:)))
+        return ApiResult(action: spec.name,
+                         summary: entries.isEmpty ? "Nothing written yet." : "\(entries.count) write\(entries.count == 1 ? "" : "s").",
+                         data: try JSONValue.encoding(entries))
+
+    case "journal.undo":
+        let project = try input.project.map(projectPath(of:))
+        let candidate = input.entry.flatMap(ApiJournal.entry(id:))
+            ?? ApiJournal.nextToReverse(project: project)
+        guard let entry = candidate else {
+            throw ApiError(.staleReference, "There's no write on record to reverse.")
+        }
+        guard entry.undoable, let notesPath = entry.notesPath,
+              let restored = ApiJournal.snapshot(entry.revisionBefore) else {
+            throw ApiError(.unsupportedAction,
+                           "\(entry.action) can't be reversed — there's no document behind it.",
+                           detail: .string(entry.id))
+        }
+        let current = try String(contentsOfFile: notesPath, encoding: .utf8)
+        // The safety the journal exists to provide: reverse only what is still exactly as this write
+        // left it. Anything else and an undo would be discarding an edit made since, unseen.
+        guard revision(of: current) == entry.revisionAfter else {
+            throw ApiError(.conflict,
+                           "That file has changed since this write, so reversing it would discard the change.",
+                           detail: .string(entry.id))
+        }
+        let before = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: current)))
+        let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: restored)))
+        let undone = diffTodos(before: before, after: after)
+        // Resolved before the dry-run check, not inside it, so a preview fails exactly where the real
+        // reversal would. An entry names a notes file directly — it may belong to a project that has
+        // since been renamed or archived, which is precisely when you want the reversal to still work.
+        guard let config = try loadConfig() else { throw PmError.configNotFound }
+        let io = makeNotesIO(notesPath: notesPath, config: config)
+        if !options.dryRun {
+            try io.writeContent(path: notesPath, content: restored)
+            // The reversal is itself a write, and is journaled as one — so it can be reversed too,
+            // and so the record doesn't quietly omit the biggest changes anybody makes.
+            ApiJournal.record(action: spec.name, project: entry.project, notesPath: notesPath,
+                              summary: reversalSummary(of: entry), before: current, after: restored,
+                              changed: undone, source: options.source, reverses: entry.id)
+        }
+        return ApiResult(action: spec.name,
+                         summary: options.dryRun
+                             ? "Would reverse: \(strippedSummary(of: entry))."
+                             : reversalSummary(of: entry) + ".",
+                         revision: revision(of: restored), changed: undone,
+                         focus: after.first(where: \.isFocused).map(reference(to:)),
+                         dryRun: options.dryRun,
+                         data: try JSONValue.encoding(entry))
 
     // MARK: Queries
     case "project.list":
@@ -350,7 +407,11 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
     case "config.set":
         guard var config = try loadConfig() else { throw PmError.configNotFound }
         try setConfigValue(config: &config, key: input.key ?? "", value: try plain(input.value))
-        if !options.dryRun { try saveConfig(config) }
+        if !options.dryRun {
+            try saveConfig(config)
+            ApiJournal.recordMetadata(action: spec.name, project: nil,
+                                      summary: "Set \(input.key ?? "").", source: options.source)
+        }
         return ApiResult(action: spec.name, summary: "Set \(input.key ?? "").", dryRun: options.dryRun)
 
     default:
@@ -382,10 +443,15 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
+    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes)
     if !options.dryRun, outcome.rawText != rawText {
         try handle.io.writeContent(path: handle.notesPath, content: outcome.rawText)
+        // After the write, never before: a journal entry for a write that then failed would be a
+        // record of something that didn't happen, and an undo offered for it would do harm.
+        ApiJournal.record(action: spec.name, project: handle.projectPath, notesPath: handle.notesPath,
+                          summary: phrase.past, before: rawText, after: outcome.rawText,
+                          changed: changes, source: options.source)
     }
-    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes)
     return ApiResult(action: spec.name,
                      summary: phrase.sentence(dryRun: options.dryRun),
                      revision: revision(of: outcome.rawText),
@@ -424,6 +490,27 @@ private func resolvedProject(_ input: ApiInput) throws -> String {
                        detail: .string("project"))
     }
     return focused
+}
+
+/// What a reversal calls itself. An entry that is already a reversal carries "Reversed:" on the
+/// front, and stacking another would read "Reversed: Reversed: …" instead of saying what was put back.
+private func strippedSummary(of entry: JournalEntry) -> String {
+    var text = entry.summary
+    for prefix in ["Reversed: ", "Restored: "] where text.hasPrefix(prefix) {
+        text = String(text.dropFirst(prefix.count))
+    }
+    return text.hasSuffix(".") ? String(text.dropLast()) : text
+}
+
+private func reversalSummary(of entry: JournalEntry) -> String {
+    entry.reverses == nil ? "Reversed: \(strippedSummary(of: entry))"
+                          : "Restored: \(strippedSummary(of: entry))"
+}
+
+/// A project's path, which is how the journal names it — a caller may have said "W-1", the folder
+/// name, or a prefix, and all three should find the same entries.
+private func projectPath(of project: String) throws -> String {
+    try resolveProjectPath(nameOrPrefix: project)
 }
 
 private func folderName(of project: String) throws -> String {

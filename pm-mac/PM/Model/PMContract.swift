@@ -42,7 +42,7 @@ enum PMContract {
     /// happen on its IO queue.
     @discardableResult
     static func perform(_ action: String, _ input: ApiInput, dryRun: Bool = false) throws -> ApiResult {
-        try performApi(action, input, options: ApiOptions(dryRun: dryRun))
+        try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "app"))
     }
 
     /// What to put in front of a person when a write was refused.

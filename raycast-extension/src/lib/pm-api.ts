@@ -153,7 +153,16 @@ export async function callApi<Action extends ApiActionName, Data = JsonValue>(
   input: ApiInputs[Action],
   options: CallOptions = {},
 ): Promise<ApiResult<Data>> {
-  const args = ["api", "call", action, JSON.stringify(input ?? {})];
+  // Name ourselves for the journal: a client that shells out to `pm` isn't the CLI, and "what did
+  // Raycast change?" is only answerable if it says which.
+  const args = [
+    "api",
+    "call",
+    action,
+    JSON.stringify(input ?? {}),
+    "--source",
+    "raycast",
+  ];
   if (options.dryRun) args.push("--dry-run");
   const { stdout, stderr, code } = await runPmWithPrefs(
     prefs,

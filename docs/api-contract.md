@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** the dispatcher, the manifest, and all four adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. What remains is listed under *Still to build*. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** the dispatcher, the manifest, all four adapters, and the mutation journal are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. What remains is listed under *Still to build*. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -202,11 +202,26 @@ The boundary the second open question asked about. `PMStore` stays responsible f
 
 Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to today's), and `addTaskToSession` (appends to a named session rather than today's).
 
+### The mutation journal
+
+`~/.config/pm/journal.ndjson`, appended by the dispatcher after every successful write, with the content it replaced kept alongside in `~/.config/pm/journal/`. Two actions read it: `journal.list` and `journal.undo`.
+
+**Snapshots are named by the hash of their content**, so a document that passes through the same state twice is stored once — and an entry's `revisionBefore` is already the name of the file holding it. The journal keeps the last 200 entries and drops snapshots nothing points at.
+
+**Every adapter names itself.** `ApiOptions.source` is set by each — `cli`, `mcp`, `app`, `raycast` (via `pm api call --source`) — so "what did the model change?" is a question with an answer rather than an inference.
+
+**Reversing is guarded by the revision.** An entry records the revision it produced; `journal.undo` reverses it only if the file is still exactly that. Anything else returns `conflict`, because reversing then would silently discard whatever was written since — including a line typed into Obsidian a minute ago.
+
+**Undo walks back rather than oscillating.** A reversal is a write and is journaled as one, which is what makes it reversible in turn — but it is skipped when choosing what to undo next, as is anything already reversed. Undoing repeatedly therefore steps back through the history, across surfaces, and it works because reversing a write leaves the file at exactly the revision the write before it produced, so the next entry back is once again reversible.
+
+This closes the hole the panel's undo stack left: it is in memory and app-only, so nothing could reverse a write made by Raycast, by `pm`, by a model — or by the app itself after a relaunch.
+
+For MCP, `journal.undo` is grouped with the destructive actions. It is recoverable, since the reversal is itself journaled, but undoing somebody's work is not something a model should reach for unasked.
+
 ## Still to build
 
 - **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
-- **Bulk operations and the document revision.** `revision` is in the envelope and nothing consumes it yet; `toggleAll`, `setDueAll` and subtree deletes are the actions that need it.
-- **The mutation journal.**
+- **Bulk operations and the document revision.** `revision` is in the envelope, and the journal consumes it to guard a reversal — but no action takes one as *input* yet. `toggleAll`, `setDueAll` and subtree deletes are the ones that need it.
 
 ## Open questions
 
@@ -214,6 +229,6 @@ Three mutations stay on `NotesService`, each because the contract has no action 
 
 **2. How much of `PMStore` moves?** *Settled:* the document mutations moved; undo/redo, the focus-move classifier, the index, recents and the app's own phrasing stayed. Three mutations the contract has no action for stayed too, listed above.
 
-**3. Does the MCP get write access by default?** *Settled:* no. Queries are unrestricted, `--allow-write` permits mutations, `--allow-destructive` permits the four that lose something. Still unpaired with a mutation journal, so a model's writes can be seen in the envelope it returns but not reviewed afterwards.
+**3. Does the MCP get write access by default?** *Settled:* no. Queries are unrestricted, `--allow-write` permits mutations, `--allow-destructive` permits the four that lose something. Every call is journaled under the source `mcp`, so what a model did is reviewable with `journal.list` and reversible with `journal.undo` afterwards.
 
-**4. Where does the mutation journal live?** `~/.config/pm/journal.ndjson`, appended by the dispatcher, before/after digests per entry. It closes a real hole — undo is currently in-memory and app-only, so nothing can reverse a write made by Raycast, the CLI, or a model. Retrofitting it later means the journal starts with gaps.
+**4. Where does the mutation journal live?** *Settled:* `~/.config/pm/journal.ndjson`, with content-addressed snapshots beside it, described above.

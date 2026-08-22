@@ -123,6 +123,8 @@ public struct ApiInput: Codable, Equatable {
     public var includeCompleted: Bool?
     public var limit: Int?
     public var now: String?
+    /// A journal entry's id.
+    public var entry: String?
 
     public init() {}
 }
@@ -131,7 +133,13 @@ public struct ApiInput: Codable, Equatable {
 public struct ApiOptions: Equatable {
     /// Run the action and report what it would do, without writing.
     public var dryRun: Bool
-    public init(dryRun: Bool = false) { self.dryRun = dryRun }
+    /// Which adapter is calling — "cli", "mcp", "app", "raycast". Recorded in the journal, so that
+    /// "what did the model change?" is a question with an answer.
+    public var source: String
+    public init(dryRun: Bool = false, source: String = "api") {
+        self.dryRun = dryRun
+        self.source = source
+    }
 }
 
 // MARK: - Result
@@ -204,6 +212,9 @@ public struct ApiError: Error, Codable, Equatable {
         case invalidDue
         case emptyText
         case configNotFound
+        /// The document moved since the read this action was based on — used when reversing a write
+        /// that is no longer the newest thing to have happened to the file.
+        case conflict
         case writeFailed
     }
     public var code: Code
