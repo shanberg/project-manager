@@ -10,6 +10,7 @@ import Combine
 /// already has a menu shortcut and doesn't belong here.
 enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     case quickCapture
+    case quickFindTask
     case quickGoToProject
     case toggleFocusPanel
     case openProjectWindow
@@ -24,6 +25,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .quickCapture: return "Quick Add a Task"
+        case .quickFindTask: return "Find a Task"
         case .quickGoToProject: return "Go to Project"
         case .toggleFocusPanel: return "Show or Hide Focus Panel"
         case .openProjectWindow: return "Open Focused Project"

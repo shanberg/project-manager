@@ -106,6 +106,10 @@ enum MainMenu {
         recents.delegate = target.recentProjectsMenuDelegate
         track(.quickGoToProject,
               add(menu, "Go to Project…", #selector(AppDelegate.quickGoToProject), target: target, key: ""))
+        // Beside it, because it's the same errand at a finer grain: the two ways of going somewhere
+        // without knowing which window you'd have to open to get there.
+        track(.quickFindTask,
+              add(menu, "Find a Task…", #selector(AppDelegate.quickFindTask), target: target, key: ""))
         add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
         menu.addItem(.separator())
 

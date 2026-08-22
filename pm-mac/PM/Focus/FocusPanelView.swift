@@ -492,7 +492,7 @@ struct FocusPanelView: View {
             Button("Complete") { if let hero { store.complete(hero) } }
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(hero == nil || isEditing || !pendingDelete.isEmpty)
-            Button("Dive In", action: store.diveIn)
+            Button("Dive In") { store.diveIn() }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(store.nextTodo == nil || isEditing)
             // Both stand down while an editor is open, so ⌘Z in a field undoes the typing rather than

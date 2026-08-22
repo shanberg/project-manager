@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // from the menu and another from a shortcut.
         HotKeyManager.shared.start(handlers: [
             .quickCapture: { QuickBarController.shared.toggle(mode: .capture) },
+            .quickFindTask: { QuickBarController.shared.toggle(mode: .findTask) },
             .quickGoToProject: { QuickBarController.shared.toggle(mode: .goToProject) },
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
             .openProjectWindow: { [weak self] in self?.newWindow() },
@@ -296,6 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "hide": FocusPanelController.shared.hide()
         // The quick bar's modes, so a script or a launcher can reach them the same way the hotkeys do.
         case "capture": QuickBarController.shared.toggle(mode: .capture)
+        case "find": QuickBarController.shared.toggle(mode: .findTask)
         case "goto": QuickBarController.shared.toggle(mode: .goToProject)
         case "command": QuickBarController.shared.toggle(mode: .command)
         case "window": windows.openFocusedProject()

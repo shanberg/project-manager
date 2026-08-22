@@ -26,6 +26,14 @@ final class ProjectIndex: ObservableObject {
     /// `retain()` — nothing pays for it while every sidebar is hidden.
     @Published private(set) var allProjects: [ProjectEntry] = []
 
+    /// Every open task across every project, for the quick bar's task search.
+    ///
+    /// Falls out of the same pass that fills `allProjects`: that scan already reads each project's
+    /// notes to find its progress and hero task, so keeping the rest of the open tasks costs the read
+    /// nothing — only the memory to hold them. Gated on the same `retain()`, so nothing pays for it
+    /// while no sidebar and no quick bar wants it.
+    @Published private(set) var openTasks: [TaskEntry] = []
+
     // MARK: Types
 
     /// One row of the full project list: the project, its folder-name parts (the sidebar groups and
@@ -57,6 +65,29 @@ final class ProjectIndex: ObservableObject {
         let detailsLoaded: Bool
         var id: String { projectKey }
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    }
+
+    /// One open task, somewhere. What a cross-project search matches against, and enough to go to it.
+    ///
+    /// The line coordinates are a hint, not an address. They were true when the scan ran and the file
+    /// may have been edited since, so going to one of these re-reads the project and finds the task by
+    /// its text — see `QuickBarController.focus(_:)`. They're kept because they break the tie when two
+    /// open tasks read the same.
+    struct TaskEntry: Identifiable, Equatable {
+        let projectKey: String
+        let projectName: String
+        /// The project name without its "CODE-NNN " prefix, for the row's second line.
+        let projectShortName: String
+        let isArchived: Bool
+        let text: String
+        /// Own due date, else the nearest one inherited from an ancestor — the same value a task's own
+        /// badge shows.
+        let due: String?
+        /// Whether this is the project's focused task, which floats it up the ranking.
+        let isFocused: Bool
+        let sessionIndex: Int
+        let lineIndex: Int
+        var id: String { "\(projectKey)#\(sessionIndex):\(lineIndex)" }
     }
 
     /// A recent project plus its cached completion/due/summary. `fraction` is the ring fill.
@@ -115,6 +146,9 @@ final class ProjectIndex: ObservableObject {
     /// How many projects get their notes read for progress/hero text. Past this the list still shows
     /// every project, just without a ring — a guard against a pathological project folder.
     private static let maxDetailWarm = 100
+
+    /// How many open tasks one project contributes to the search list.
+    private static let maxTasksPerProject = 200
 
     /// One more than the eight rows a switcher shows, so a consumer can drop its own project and still
     /// have eight left.
@@ -186,19 +220,26 @@ final class ProjectIndex: ObservableObject {
         projectsQueue.async { [weak self] in
             guard let listing = Self.allProjectsByEdit() else { return }
             Task { @MainActor in self?.seedAllProjects(listing) }
-            let warmed: [ProjectEntry] = listing.enumerated().map { index, item in
+            var warmed: [ProjectEntry] = []
+            var tasks: [TaskEntry] = []
+            for (index, item) in listing.enumerated() {
                 guard index < Self.maxDetailWarm, let out = try? notesShow(project: item.name) else {
-                    return item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil, detailsLoaded: false)
+                    warmed.append(item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil,
+                                             detailsLoaded: false))
+                    continue
                 }
-                return item.entry(done: out.todos.filter { $0.checked }.count,
-                                  total: out.todos.count,
-                                  nextTask: Self.heroTaskText(out.todos),
-                                  nextDue: Self.earliestDue(out.todos),
-                                  detailsLoaded: true)
+                warmed.append(item.entry(done: out.todos.filter { $0.checked }.count,
+                                         total: out.todos.count,
+                                         nextTask: Self.heroTaskText(out.todos),
+                                         nextDue: Self.earliestDue(out.todos),
+                                         detailsLoaded: true))
+                tasks += Self.openTasks(of: out.todos, in: item)
             }
+            let collected = tasks
             Task { @MainActor in
-                guard let self, warmed != self.allProjects else { return }
-                self.allProjects = warmed
+                guard let self else { return }
+                if warmed != self.allProjects { self.allProjects = warmed }
+                if collected != self.openTasks { self.openTasks = collected }
             }
         }
     }
@@ -287,6 +328,24 @@ final class ProjectIndex: ObservableObject {
         let hero = todos.first { $0.isFocused } ?? todos.first { !$0.checked }
         let text = hero?.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return (text?.isEmpty ?? true) ? nil : text
+    }
+
+    /// The open tasks of one project, as search rows.
+    ///
+    /// Capped per project for the same reason `maxDetailWarm` caps the scan: one pathological notes
+    /// file shouldn't be able to make the search list unbounded. Past the cap the project's remaining
+    /// tasks aren't searchable, which is a much smaller failure than the alternative.
+    private nonisolated static func openTasks(of todos: [Todo], in item: ProjectListing) -> [TaskEntry] {
+        todos.lazy
+            .filter { !$0.checked && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            .prefix(maxTasksPerProject)
+            .map { todo in
+                TaskEntry(projectKey: item.projectKey, projectName: item.name,
+                          projectShortName: item.shortName, isArchived: item.isArchived,
+                          text: todo.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                          due: todo.dueDate ?? todo.effectiveDueDate, isFocused: todo.isFocused,
+                          sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
+            }
     }
 
     /// Earliest due (own or inherited) among open todos, for the recent-project "next due" hint.

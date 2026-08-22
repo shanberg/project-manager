@@ -348,19 +348,21 @@ final class PMStore: ObservableObject {
     /// Key of the most recently completed task this session, for the menubar's ⌥ Undo alternate.
     @Published private(set) var lastCompletedKey: String?
 
-    func complete(_ todo: Todo, advanceFocus: Bool = true) {
+    /// `then` runs once the document has been re-read, like `addTodo`'s — it's what lets a caller that
+    /// has already handed the keyboard back say whether the change actually landed.
+    func complete(_ todo: Todo, advanceFocus: Bool = true, then: (@MainActor () -> Void)? = nil) {
         lastCompletedKey = Self.key(for: todo)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        mutate { try completeTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, advanceFocus: advanceFocus) }
+        mutate(then: then) { try completeTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, advanceFocus: advanceFocus) }
     }
 
     /// Undo the most recent completion (re-open it and move focus back onto it).
-    func undoLast() {
+    func undoLast(then: (@MainActor () -> Void)? = nil) {
         guard let key = lastCompletedKey else { return }
         let parts = key.split(separator: ":").compactMap { Int($0) }
         guard parts.count == 2 else { return }
         lastCompletedKey = nil
-        mutate { try undoTodo(project: $0, sessionIndex: parts[0], lineIndex: parts[1]) }
+        mutate(then: then) { try undoTodo(project: $0, sessionIndex: parts[0], lineIndex: parts[1]) }
     }
 
     func toggle(_ todo: Todo) {
@@ -371,17 +373,17 @@ final class PMStore: ObservableObject {
         }
     }
 
-    func focus(_ todo: Todo) {
+    func focus(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
         // Focus is navigation, not a content edit, so keep it out of the undo history.
-        mutate(recordsUndo: false) { try focusTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+        mutate(recordsUndo: false, then: then) { try focusTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
     }
 
     func undo(_ todo: Todo) {
         mutate { try undoTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
     }
 
-    func setDue(_ todo: Todo, due: String?) {
-        mutate { try setDueOnTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, due: due) }
+    func setDue(_ todo: Todo, due: String?, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try setDueOnTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, due: due) }
     }
 
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
@@ -590,8 +592,12 @@ final class PMStore: ObservableObject {
     }
 
     /// "Dive in": move focus to the next open leaf. Mirrors the Raycast Dive In command.
-    func diveIn() {
-        if let next = nextTodo { focus(next) }
+    func diveIn(then: (@MainActor () -> Void)? = nil) {
+        guard let next = nextTodo else {
+            then?()
+            return
+        }
+        focus(next, then: then)
     }
 
     /// Persist an edit to the project's detail fields (summary, problem, goals, approach, learnings).
@@ -647,8 +653,8 @@ final class PMStore: ObservableObject {
     }
 
     /// Rename the session at `index` (its trailing label; the date is preserved).
-    func renameSession(_ index: Int, label: String) {
-        mutate { try PmLib.renameSession(project: $0, sessionIndex: index, label: label) }
+    func renameSession(_ index: Int, label: String, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try PmLib.renameSession(project: $0, sessionIndex: index, label: label) }
     }
 
     /// Set (or clear, with empty `prose`) the leading-prose note under the session at `index`.

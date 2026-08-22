@@ -15,6 +15,12 @@ enum QuickCaptureParser {
         var text: String
         /// Stored form, `YYYY-MM-DD`, or nil when no date was given.
         var due: String?
+        /// The `due:` phrase that was given and couldn't be read, when there was one.
+        ///
+        /// The phrase stays in `text` — dropping it silently is worse — but a line that kept its date
+        /// marker as prose looks exactly like a line that never had one, and the bar has closed by the
+        /// time you'd find out. This is what lets the field say so while you can still fix it.
+        var unreadableDue: String?
     }
 
     static func parse(_ input: String, now: Date = Date(), calendar: Calendar = .current) -> Result {
@@ -22,18 +28,44 @@ enum QuickCaptureParser {
         guard let marker = trimmed.range(of: "due:", options: [.caseInsensitive, .backwards]) else {
             return Result(text: trimmed, due: nil)
         }
-        // Only a `due:` that starts a word — "overdue:" isn't a date marker.
+        // Only a `due:` that starts a word — "overdue:" isn't a date marker, and neither is a line
+        // that merely contains the letters, so neither is worth warning about.
         if marker.lowerBound != trimmed.startIndex {
             let before = trimmed[trimmed.index(before: marker.lowerBound)]
             guard before == " " else { return Result(text: trimmed, due: nil) }
         }
         let phrase = trimmed[marker.upperBound...].trimmingCharacters(in: .whitespaces)
         guard let date = date(from: phrase, now: now, calendar: calendar) else {
-            return Result(text: trimmed, due: nil)
+            // An empty phrase is a line mid-typing — you have just pressed the colon — so it is not
+            // yet a mistake to report. Anything else is a date marker that won't become one.
+            return Result(text: trimmed, due: nil, unreadableDue: phrase.isEmpty ? nil : phrase)
         }
         let text = trimmed[trimmed.startIndex..<marker.lowerBound]
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Result(text: text, due: DueFormat.string(date))
+    }
+
+    /// Split a trailing `@…` off a capture line: the text to keep, and the project it names.
+    ///
+    /// The token runs to the end of the line rather than stopping at the next space, because project
+    /// names have spaces in them — `@maxwell carmody` is one query, not a query and a stray word. That
+    /// makes it a suffix by construction, which is also the rule to teach: the redirect goes last.
+    ///
+    /// Never the very first character. A leading `@` is the go-to-project sigil, and on the one line
+    /// where it isn't — a task typed with a leading space so it can genuinely begin "@Dana" — treating
+    /// it as a redirect would take the escape hatch away again.
+    ///
+    /// Whether the query names a real project isn't decided here. The caller resolves it against the
+    /// project list and leaves the line alone when it matches nothing, so "email @dana" stays a task
+    /// about Dana rather than becoming a task filed somewhere surprising.
+    static func splitTarget(_ input: String) -> (text: String, projectQuery: String)? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let at = trimmed.lastIndex(of: "@"), at != trimmed.startIndex,
+              trimmed[trimmed.index(before: at)] == " " else { return nil }
+        let query = trimmed[trimmed.index(after: at)...].trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return nil }
+        let text = trimmed[trimmed.startIndex..<at].trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text, query)
     }
 
     /// Resolve a due phrase to a day, or nil if it isn't one.
