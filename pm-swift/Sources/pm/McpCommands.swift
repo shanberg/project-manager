@@ -54,10 +54,16 @@ private func toolSchema(for spec: ApiActionSpec) -> JSONValue {
           var properties = schema["properties"]?.objectValue else { return spec.inputSchema }
 
     for (name, value) in properties {
-        guard var field = value.objectValue, field["type"]?.stringValue == "object",
-              field["properties"]?.objectValue?["digest"] != nil else { continue }
-        field["required"] = .array([.string("line"), .string("digest")])
-        properties[name] = .object(field)
+        guard var field = value.objectValue else { continue }
+        if field["type"]?.stringValue == "object", field["properties"]?.objectValue?["digest"] != nil {
+            field["required"] = .array([.string("line"), .string("digest")])
+            properties[name] = .object(field)
+        } else if field["type"]?.stringValue == "array", var item = field["items"]?.objectValue,
+                  item["properties"]?.objectValue?["digest"] != nil {
+            item["required"] = .array([.string("line"), .string("digest")])
+            field["items"] = .object(item)
+            properties[name] = .object(field)
+        }
     }
     if spec.tier == .mutation {
         properties["dryRun"] = .object([
@@ -163,10 +169,12 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
     // The schema says a reference must carry its digest; saying so and not checking would leave the
     // promise to whichever client happens to validate. A model that has read the list has the digest
     // in front of it, so asking for it costs nothing and is worth a great deal when it hasn't.
-    for (field, given) in [("task", input.task), ("anchor", input.anchor)] {
+    var unproven: [TaskRefInput?] = [input.task, input.anchor]
+    unproven.append(contentsOf: (input.tasks ?? []).map { Optional($0) })
+    for given in unproven {
         guard let given, given.digest?.isEmpty != false else { continue }
-        return toolFailure(id, "missingField: \(field) needs the task's digest. "
-                           + "Call task_list or notes_get and pass that task's session, line and digest back.")
+        return toolFailure(id, "missingField: every task needs its digest. "
+                           + "Call task_list or notes_get and pass each task's session, line and digest back.")
     }
 
     do {

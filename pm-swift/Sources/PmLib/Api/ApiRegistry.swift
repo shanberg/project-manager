@@ -20,7 +20,7 @@ public enum ApiTier: String, Codable, CaseIterable {
 
 public struct ApiField: Equatable {
     public enum Kind: String, Equatable {
-        case string, integer, boolean, taskRef, any
+        case string, integer, boolean, taskRef, taskRefList, any
     }
     public let name: String
     public let kind: Kind
@@ -43,7 +43,25 @@ public struct ApiActionSpec: Equatable {
     public let tier: ApiTier
     public let summary: String
     public let fields: [ApiField]
+    /// Fields of which exactly one must be given — `task` or `tasks`, for the actions that take
+    /// either. A plain `required` list can't say "one of these", and an action that quietly accepted
+    /// both would have to invent a rule about which wins.
+    public let oneOf: [String]
+
+    init(name: String, tier: ApiTier, summary: String, fields: [ApiField], oneOf: [String] = []) {
+        self.name = name
+        self.tier = tier
+        self.summary = summary
+        self.fields = fields
+        self.oneOf = oneOf
+    }
 }
+
+private let tasks = ApiField("tasks", .taskRefList,
+                             "Several tasks, acted on in one write. Give this or `task`, not both.")
+private let revision = ApiField("revision", .string,
+                                "The `revision` from the read this came from. When given, the write "
+                                + "happens only if the document is still that one.")
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
@@ -54,6 +72,7 @@ private let project = ApiField("project", .string, required: true,
 private let optionalProject = ApiField("project", .string,
                                        "Project name or prefix. Defaults to the focused project.")
 private let task = ApiField("task", .taskRef, required: true, "The task to act on.")
+private let optionalTask = ApiField("task", .taskRef, "The task to act on. Give this or `tasks`, not both.")
 
 public enum ApiRegistry {
     public static let actions: [ApiActionSpec] = [
@@ -67,12 +86,14 @@ public enum ApiRegistry {
                                ApiField("position", .string, "Where the new task goes relative to the anchor.",
                                         allowed: ["before", "after", "child"])]),
         ApiActionSpec(name: "task.complete", tier: .mutation,
-                      summary: "Complete a task and its subtree, advancing focus by default.",
-                      fields: [project, task,
-                               ApiField("advanceFocus", .boolean, "Move focus onward afterwards. Default true.")]),
+                      summary: "Complete a task, or several, along with their subtrees.",
+                      fields: [project, optionalTask, tasks, revision,
+                               ApiField("advanceFocus", .boolean, "Move focus onward afterwards. Default true.")],
+                      oneOf: ["task", "tasks"]),
         ApiActionSpec(name: "task.reopen", tier: .mutation,
-                      summary: "Re-open a completed task and put focus back on it.",
-                      fields: [project, task]),
+                      summary: "Re-open a completed task, or several, and put focus back.",
+                      fields: [project, optionalTask, tasks, revision],
+                      oneOf: ["task", "tasks"]),
         ApiActionSpec(name: "task.focus", tier: .mutation,
                       summary: "Make this the project's focused task.",
                       fields: [project, task]),
@@ -80,10 +101,11 @@ public enum ApiRegistry {
                       summary: "Move focus to the first open leaf under the focused task.",
                       fields: [project]),
         ApiActionSpec(name: "task.setDue", tier: .mutation,
-                      summary: "Set or clear a task's due date.",
-                      fields: [project, task,
+                      summary: "Set or clear the due date on a task, or on several.",
+                      fields: [project, optionalTask, tasks, revision,
                                ApiField("due", .string, "Due date, YYYY-MM-DD."),
-                               ApiField("clearDue", .boolean, "Remove the due date instead of setting one.")]),
+                               ApiField("clearDue", .boolean, "Remove the due date instead of setting one.")],
+                      oneOf: ["task", "tasks"]),
         ApiActionSpec(name: "task.setText", tier: .mutation,
                       summary: "Rename a task in place.",
                       fields: [project, task,
@@ -96,8 +118,9 @@ public enum ApiRegistry {
                       summary: "Dissolve a parent task, promoting its children.",
                       fields: [project, task]),
         ApiActionSpec(name: "task.delete", tier: .mutation,
-                      summary: "Delete a task and its subtree.",
-                      fields: [project, task]),
+                      summary: "Delete a task, or several, along with their subtrees.",
+                      fields: [project, optionalTask, tasks, revision],
+                      oneOf: ["task", "tasks"]),
 
         // MARK: Sessions
         ApiActionSpec(name: "session.start", tier: .mutation,
@@ -214,6 +237,9 @@ extension ApiField {
         case .integer: out["type"] = .string("integer")
         case .boolean: out["type"] = .string("boolean")
         case .any: break  // a string, a number, or an array of strings, depending on the key
+        case .taskRefList:
+            out["type"] = .string("array")
+            out["items"] = ApiField("item", .taskRef, description).schema
         case .taskRef:
             out["type"] = .string("object")
             out["required"] = .array([.string("line")])
@@ -251,6 +277,9 @@ extension ApiActionSpec {
         ]
         let required = fields.filter(\.required).map { JSONValue.string($0.name) }
         if !required.isEmpty { out["required"] = .array(required) }
+        if !oneOf.isEmpty {
+            out["oneOf"] = .array(oneOf.map { .object(["required": .array([.string($0)])]) })
+        }
         return .object(out)
     }
 

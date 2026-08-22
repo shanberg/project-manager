@@ -202,6 +202,16 @@ The boundary the second open question asked about. `PMStore` stays responsible f
 
 Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to today's), and `addTaskToSession` (appends to a named session rather than today's).
 
+### Batches, and the revision
+
+`task.complete`, `task.reopen`, `task.setDue` and `task.delete` take either a `task` or a list of `tasks` — exactly one, which a `required` list can't express, so the registry gained a small `oneOf` and the published schema says so. A batch is one read, one write, one journal entry, and one step to undo: a selection a person acted on in a single gesture comes back in a single gesture.
+
+Within a batch, references are resolved against the text **as it evolves**, and a reference that no longer names anything is skipped rather than failing the batch. That is what "act on this selection" has to mean: completing a parent completes its children, deleting one removes them, so a child that came along in the same selection has already been dealt with by the time its turn arrives.
+
+Skipping is also the reason `revision` exists, and why the two arrived together. A digest says *this task is still the task I saw*; it says nothing about the tasks around it. `revision` says *this is still the document I read*, and with it a skipped reference can only be the batch's own doing rather than an edit someone else made. It is checked once in the document pipeline rather than per action, because it is the same claim whatever the action — and **every read of a document now reports its revision**, since a guard a write can ask for is only worth having if the read tells you what to ask about.
+
+`revision` is optional. Without it a batch still works and still carries per-task digests; with it, the write happens only if nothing has moved. The panel doesn't send one yet — it re-reads after every write, so its window is small — which is the remaining gap, noted below.
+
 ### The mutation journal
 
 `~/.config/pm/journal.ndjson`, appended by the dispatcher after every successful write, with the content it replaced kept alongside in `~/.config/pm/journal/`. Two actions read it: `journal.list` and `journal.undo`.
@@ -221,7 +231,7 @@ For MCP, `journal.undo` is grouped with the destructive actions. It is recoverab
 ## Still to build
 
 - **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
-- **Bulk operations and the document revision.** `revision` is in the envelope, and the journal consumes it to guard a reversal — but no action takes one as *input* yet. `toggleAll`, `setDueAll` and subtree deletes are the ones that need it.
+- **The panel sending a revision.** Its reads go through `NotesService`, not the contract, so it has no revision to send with a batch. Routing its reads through `notes.get` would close that, at the cost of encoding and decoding a payload it currently gets as native types.
 
 ## Open questions
 

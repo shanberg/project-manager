@@ -509,10 +509,12 @@ final class PMStore: ObservableObject {
         let roots = outermost(todos)
         guard !roots.isEmpty else { return }
         let bottomUp = roots.sorted { ($0.sessionIndex, $0.lineIndex) > ($1.sessionIndex, $1.lineIndex) }
+        // One action for the selection, not one per task: a single write, a single journal entry,
+        // and a single step to undo — a batch a person made in one gesture should come back in one.
         mutate { project in
-            for todo in bottomUp {
-                try PMContract.perform("task.delete", PMContract.input(project: project, task: todo))
-            }
+            try PMContract.perform("task.delete", PMContract.input(project: project) {
+                $0.tasks = bottomUp.map(\.reference)
+            })
         }
     }
 
@@ -530,17 +532,13 @@ final class PMStore: ObservableObject {
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
         mutate { project in
-            for todo in targets {
-                if completing {
-                    // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
-                    // still moves focus if one of the completed tasks was holding it.
-                    try PMContract.perform("task.complete", PMContract.input(project: project, task: todo) {
-                        $0.advanceFocus = false
-                    })
-                } else {
-                    try PMContract.perform("task.reopen", PMContract.input(project: project, task: todo))
-                }
-            }
+            try PMContract.perform(completing ? "task.complete" : "task.reopen",
+                                   PMContract.input(project: project) {
+                $0.tasks = targets.map(\.reference)
+                // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
+                // still moves focus if one of the completed tasks was holding it.
+                if completing { $0.advanceFocus = false }
+            })
         }
     }
 
@@ -548,11 +546,10 @@ final class PMStore: ObservableObject {
     func setDueAll(_ todos: [Todo], due: String?) {
         guard !todos.isEmpty else { return }
         mutate { project in
-            for todo in todos {
-                try PMContract.perform("task.setDue", PMContract.input(project: project, task: todo) {
-                    if let due { $0.due = due } else { $0.clearDue = true }
-                })
-            }
+            try PMContract.perform("task.setDue", PMContract.input(project: project) {
+                $0.tasks = todos.map(\.reference)
+                if let due { $0.due = due } else { $0.clearDue = true }
+            })
         }
     }
 

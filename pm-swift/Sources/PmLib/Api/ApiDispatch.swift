@@ -46,11 +46,20 @@ private func validate(_ input: ApiInput, against spec: ApiActionSpec) throws {
             throw ApiError(.missingField, "\(spec.name) needs \(field.name): \(field.description)",
                            detail: .string(field.name))
         }
+        if field.name == "tasks", let list = input.tasks, list.isEmpty {
+            throw ApiError(.invalidField, "tasks was empty — there's nothing to act on.",
+                           detail: .string("tasks"))
+        }
         if let allowed = field.allowed, let given = value?.stringValue, !allowed.contains(given) {
             throw ApiError(.invalidField,
                            "\(field.name) must be one of \(allowed.joined(separator: ", ")), not \(given)",
                            detail: .string(field.name))
         }
+    }
+    guard spec.oneOf.isEmpty || spec.oneOf.filter({ values[$0] ?? nil != nil }).count == 1 else {
+        throw ApiError(.missingField,
+                       "\(spec.name) needs exactly one of: \(spec.oneOf.joined(separator: ", "))",
+                       detail: .array(spec.oneOf.map { .string($0) }))
     }
 }
 
@@ -59,6 +68,8 @@ private func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
     [
         "project": input.project.map(JSONValue.string),
         "task": input.task.map { _ in JSONValue.bool(true) },
+        "tasks": input.tasks.map { _ in JSONValue.bool(true) },
+        "revision": input.revision.map(JSONValue.string),
         "anchor": input.anchor.map { _ in JSONValue.bool(true) },
         "position": input.position.map(JSONValue.string),
         "session": input.session.map(JSONValue.string),
@@ -176,12 +187,18 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
     case "task.delete":
         return try document(spec, input, options) { rawText in
-            let at = try resolveTaskRef(try taskRef(input), rawText: rawText)
-            guard let out = deleteSubtreePreservingFormat(rawText: rawText, sessionIndex: at.sessionIndex,
-                                                          lineIndex: at.lineIndex) else {
-                throw ApiError(.writeFailed, "Couldn't delete that task.")
+            var text = rawText
+            var relocated = false
+            for reference in try references(input) {
+                guard let at = try resolve(reference, in: text, batch: input.tasks != nil) else { continue }
+                relocated = relocated || at.relocated
+                guard let out = deleteSubtreePreservingFormat(rawText: text, sessionIndex: at.sessionIndex,
+                                                              lineIndex: at.lineIndex) else {
+                    throw ApiError(.writeFailed, "Couldn't delete that task.")
+                }
+                text = out
             }
-            return Outcome(rawText: out, relocated: at.relocated)
+            return Outcome(rawText: text, relocated: relocated)
         }
 
     // MARK: Sessions
@@ -363,31 +380,33 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             "notesPath": (try resolveNotesPath(projectPath: path)).map(JSONValue.string) ?? .null,
         ]))
     case "notes.get":
-        let output = try notesShow(project: try resolvedProject(input))
-        return ApiResult(action: spec.name, summary: output.notes.title,
-                         data: try JSONValue.encoding(output))
+        let read = try readProject(input)
+        return ApiResult(action: spec.name, summary: read.output.notes.title,
+                         revision: read.revision, data: try JSONValue.encoding(read.output))
     case "task.list":
-        let output = try notesShow(project: try resolvedProject(input))
+        let read = try readProject(input)
+        let output = read.output
         var todos = output.todos
         if input.includeCompleted != true { todos = todos.filter { !$0.checked } }
         if let limit = input.limit { todos = Array(todos.prefix(limit)) }
         return ApiResult(action: spec.name,
                          summary: "\(todos.count) task\(todos.count == 1 ? "" : "s").",
-                         data: try JSONValue.encoding(todos))
+                         revision: read.revision, data: try JSONValue.encoding(todos))
     case "task.whatsDue":
-        let output = try notesShow(project: try resolvedProject(input))
-        var due = output.todos.filter { !$0.checked && $0.effectiveDueDate != nil }
+        let read = try readProject(input)
+        var due = read.output.todos.filter { !$0.checked && $0.effectiveDueDate != nil }
         due.sort { ($0.effectiveDueDate ?? "") < ($1.effectiveDueDate ?? "") }
         if let limit = input.limit { due = Array(due.prefix(limit)) }
         return ApiResult(action: spec.name,
                          summary: due.isEmpty ? "Nothing due." : "\(due.count) due.",
-                         data: try JSONValue.encoding(due))
+                         revision: read.revision, data: try JSONValue.encoding(due))
     case "task.progress":
-        let output = try notesShow(project: try resolvedProject(input))
-        let done = output.todos.filter(\.checked).count
-        return ApiResult(action: spec.name, summary: "\(done) of \(output.todos.count) done.",
+        let read = try readProject(input)
+        let done = read.output.todos.filter(\.checked).count
+        return ApiResult(action: spec.name, summary: "\(done) of \(read.output.todos.count) done.",
+                         revision: read.revision,
                          data: .object(["done": .number(Double(done)),
-                                        "total": .number(Double(output.todos.count))]))
+                                        "total": .number(Double(read.output.todos.count))]))
     case "focus.get":
         guard let folder = focusedProjectFolder() else {
             return ApiResult(action: spec.name, summary: "No focused project.", data: .null)
@@ -437,13 +456,22 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
                       _ apply: (String) throws -> Outcome) throws -> ApiResult {
     let handle = try resolveNotesHandle(project: try resolvedProject(input))
     let rawText = try handle.io.readContent(path: handle.notesPath)
+    // Checked here rather than per action, because it is the same claim whatever the action: "this is
+    // the document I was looking at". A digest says a task is still that task; only this says the
+    // tasks around it are too, which is what acting on a selection depends on.
+    if let expected = input.revision, expected != revision(of: rawText) {
+        throw ApiError(.conflict,
+                       "This project has changed since you read it, so nothing was written.",
+                       detail: .string(revision(of: rawText)))
+    }
     let before = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: rawText)))
 
     let outcome = try apply(rawText)
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
-    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes)
+    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes,
+                                           batch: (input.tasks?.count ?? 1) > 1)
     if !options.dryRun, outcome.rawText != rawText {
         try handle.io.writeContent(path: handle.notesPath, content: outcome.rawText)
         // After the write, never before: a journal entry for a write that then failed would be a
@@ -462,14 +490,52 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
 }
 
 /// The `document` pipeline for the actions that are a `ProjectNotes -> ProjectNotes` transform.
+///
+/// One reference or a list of them, applied in order against the text as it evolves — so a reference
+/// later in the batch is resolved against what the earlier ones left behind, not against the document
+/// as it was when the caller read it.
 private func editing(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
                      _ mutate: @escaping (ProjectNotes, ResolvedTaskRef) throws -> ProjectNotes) throws -> ApiResult {
     try document(spec, input, options) { rawText in
-        let at = try resolveTaskRef(try taskRef(input), rawText: rawText)
-        let updated = try editTodosPreservingFormat(rawText: rawText) { notes in
-            try mutate(normalizeFocusMarker(notes: notes), at)
+        var text = rawText
+        var relocated = false
+        for reference in try references(input) {
+            guard let at = try resolve(reference, in: text, batch: input.tasks != nil) else { continue }
+            relocated = relocated || at.relocated
+            if let updated = try editTodosPreservingFormat(rawText: text, mutate: { notes in
+                try mutate(normalizeFocusMarker(notes: notes), at)
+            }) {
+                text = updated
+            }
         }
-        return Outcome(rawText: updated ?? rawText, relocated: at.relocated)
+        return Outcome(rawText: text, relocated: relocated)
+    }
+}
+
+/// The tasks an action was asked to act on: one, or a list.
+private func references(_ input: ApiInput) throws -> [TaskRefInput] {
+    if let tasks = input.tasks { return tasks }
+    guard let task = input.task else {
+        throw ApiError(.missingField, "This action needs a task.", detail: .string("task"))
+    }
+    return [task]
+}
+
+/// Resolve one of a batch's references, or nil when it no longer names anything.
+///
+/// In a batch a missing task is expected rather than exceptional: completing a parent completes its
+/// children, deleting one removes them, so a reference to a child that came along in the same
+/// selection has already been dealt with by the time its turn arrives. Skipping is the behaviour that
+/// makes "act on this selection" mean what a person means by it.
+///
+/// That does mean a batch won't notice a task that vanished for some *other* reason — which is what
+/// `revision` is for, and why the two arrived together.
+private func resolve(_ reference: TaskRefInput, in text: String, batch: Bool) throws -> ResolvedTaskRef? {
+    do {
+        return try resolveTaskRef(reference.ref, rawText: text)
+    } catch let error as PmError {
+        if case .staleReference = error, batch { return nil }
+        throw error
     }
 }
 
@@ -490,6 +556,20 @@ private func resolvedProject(_ input: ApiInput) throws -> String {
                        detail: .string("project"))
     }
     return focused
+}
+
+/// A project's tasks, and the revision of the document they came from.
+///
+/// Every read of a document reports its revision, because the guard a write can ask for is only
+/// worth having if the read tells you what to ask about. One read of the file serves both.
+private func readProject(_ input: ApiInput) throws -> (output: NotesShowOutput, revision: String) {
+    let handle = try resolveNotesHandle(project: try resolvedProject(input))
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    var notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
+    let todos = todosWithEffectiveDueDates(try parseTodos(notes: notes))
+    let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
+    notes = normalizeFocusMarker(notes: notes)
+    return (NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey), revision(of: rawText))
 }
 
 /// What a reversal calls itself. An entry that is already a reversal carries "Reversed:" on the

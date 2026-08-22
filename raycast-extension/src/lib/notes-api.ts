@@ -311,17 +311,16 @@ export async function toggleAllTodosInNotes(
   _notes: ProjectNotes,
   todos: Todo[],
 ): Promise<void> {
-  // Completing a task completes its descendants, so a task an earlier parent already closed is a
-  // no-op — and each reference carries its digest, so the ones further down still resolve after the
-  // lines above them have changed.
-  for (const todo of todos) {
-    if (todo.checked) continue;
-    await callApi(prefs, "task.complete", {
-      project: projectName,
-      task: taskRef(todo),
-      advanceFocus: false,
-    });
-  }
+  // One call for the whole selection: one write, one journal entry, one step to undo. Completing a
+  // task completes its descendants, so a task an earlier parent already closed is skipped rather
+  // than failing the batch.
+  const open = todos.filter((t) => !t.checked);
+  if (open.length === 0) return;
+  await callApi(prefs, "task.complete", {
+    project: projectName,
+    tasks: open.map(taskRef),
+    advanceFocus: false,
+  });
 }
 
 /** Set or remove the inline due date on a task. */

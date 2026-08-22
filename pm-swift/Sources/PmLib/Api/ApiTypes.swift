@@ -105,6 +105,14 @@ public struct TaskRefInput: Codable, Equatable {
 public struct ApiInput: Codable, Equatable {
     public var project: String?
     public var task: TaskRefInput?
+    /// Several tasks, for the actions that can act on a selection in one write.
+    public var tasks: [TaskRefInput]?
+    /// The document the caller was looking at, from a read's `revision`.
+    ///
+    /// A digest says "this task is still the task I saw"; it says nothing about the tasks around it.
+    /// A batch needs the stronger claim, because acting on a selection assembled from an earlier read
+    /// only makes sense if the document is still that document.
+    public var revision: String?
     public var anchor: TaskRefInput?
     public var position: String?
     public var session: String?

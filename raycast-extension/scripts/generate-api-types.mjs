@@ -49,6 +49,8 @@ function typeOf(schema) {
     case "object":
       // The only object in the contract is a task reference, and it has a name here already.
       return schema.properties?.digest ? "TaskRef" : "Record<string, unknown>";
+    case "array":
+      return `${typeOf(schema.items ?? {})}[]`;
     default:
       // A field the schema deliberately leaves open — `value`, whose shape depends on the key.
       return "JsonValue";

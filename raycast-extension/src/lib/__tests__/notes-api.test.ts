@@ -403,7 +403,7 @@ describe("addTodoAsChildInNotes", () => {
 });
 
 describe("toggleAllTodosInNotes", () => {
-  it("completes each open todo without advancing focus", async () => {
+  it("completes the whole selection in one write", async () => {
     const one = makeTodo(0, "One");
     const three = makeTodo(2, "Three");
     await toggleAllTodosInNotes(prefs, "p", notes, [
@@ -411,16 +411,24 @@ describe("toggleAllTodosInNotes", () => {
       makeTodo(1, "Two", { checked: true }),
       three,
     ]);
+    // One action, not one per task — one write, one journal entry, one step to undo.
     expect(actions()).toEqual([
       {
         action: "task.complete",
-        input: { project: "p", task: refFor(one), advanceFocus: false },
-      },
-      {
-        action: "task.complete",
-        input: { project: "p", task: refFor(three), advanceFocus: false },
+        input: {
+          project: "p",
+          tasks: [refFor(one), refFor(three)],
+          advanceFocus: false,
+        },
       },
     ]);
+  });
+
+  it("does nothing when everything is already complete", async () => {
+    await toggleAllTodosInNotes(prefs, "p", notes, [
+      makeTodo(0, "One", { checked: true }),
+    ]);
+    expect(actions()).toEqual([]);
   });
 });
 

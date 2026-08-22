@@ -120,20 +120,27 @@ struct Phrase: Equatable {
     }
 }
 
-func summarize(action: String, changes: [ApiChange]) -> Phrase {
+/// `batch` when the caller named several tasks: "and 2 subtasks" is true of one task that took its
+/// children with it, and false of three tasks a person selected — the same count means a different
+/// thing, and saying the wrong one is worse than saying less.
+func summarize(action: String, changes: [ApiChange], batch: Bool = false) -> Phrase {
     func quoted(_ kind: ApiChange.Kind) -> String? {
         changes.first { $0.kind == kind }.flatMap { $0.now ?? $0.was }.map { "\u{201C}\($0)\u{201D}" }
     }
     func count(_ kind: ApiChange.Kind) -> Int { changes.filter { $0.kind == kind }.count }
     func extra(_ n: Int) -> String { n > 1 ? " and \(n - 1) subtask\(n == 2 ? "" : "s")" : "" }
+    /// What a batch calls its own subject: how many tasks, not one of them by name.
+    func many(_ n: Int, _ noun: String = "task") -> String? {
+        batch ? "\(n) \(noun)\(n == 1 ? "" : "s")" : nil
+    }
 
     var phrase: Phrase
     switch action {
     case "task.complete":
-        let what = "\(quoted(.completed) ?? "the task")\(extra(count(.completed)))"
+        let what = many(count(.completed)) ?? "\(quoted(.completed) ?? "the task")\(extra(count(.completed)))"
         phrase = Phrase(past: "Completed \(what)", future: "complete \(what)")
     case "task.reopen":
-        let what = quoted(.reopened) ?? "the task"
+        let what = many(count(.reopened)) ?? (quoted(.reopened) ?? "the task")
         phrase = Phrase(past: "Re-opened \(what)", future: "re-open \(what)")
     case "task.add":
         let what = quoted(.added) ?? "the task"
@@ -142,10 +149,15 @@ func summarize(action: String, changes: [ApiChange]) -> Phrase {
         let what = quoted(.renamed) ?? "the new text"
         phrase = Phrase(past: "Renamed to \(what)", future: "rename it to \(what)")
     case "task.setDue":
+        let subject = many(count(.retimed)).map { "\($0) due" } ?? "Due"
         if let when = changes.first(where: { $0.kind == .retimed })?.now {
-            phrase = Phrase(past: "Due \(when)", future: "set it due \(when)")
+            phrase = batch
+                ? Phrase(past: "\(subject) \(when)", future: "set \(subject.lowercased()) \(when)")
+                : Phrase(past: "Due \(when)", future: "set it due \(when)")
         } else {
-            phrase = Phrase(past: "Cleared the due date", future: "clear the due date")
+            let n = many(count(.retimed)) ?? "the"
+            phrase = Phrase(past: "Cleared \(batch ? n : "the") due date\(batch && count(.retimed) != 1 ? "s" : "")",
+                            future: "clear \(batch ? n : "the") due date\(batch && count(.retimed) != 1 ? "s" : "")")
         }
     case "task.wrap":
         let n = count(.moved)
@@ -155,7 +167,7 @@ func summarize(action: String, changes: [ApiChange]) -> Phrase {
         let what = quoted(.removed) ?? "the parent"
         phrase = Phrase(past: "Dissolved \(what)", future: "dissolve \(what)")
     case "task.delete":
-        let what = "\(quoted(.removed) ?? "the task")\(extra(count(.removed)))"
+        let what = many(count(.removed)) ?? "\(quoted(.removed) ?? "the task")\(extra(count(.removed)))"
         phrase = Phrase(past: "Deleted \(what)", future: "delete \(what)")
     case "task.focus", "task.diveIn":
         let what = quoted(.focused) ?? "nothing"

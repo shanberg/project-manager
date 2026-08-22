@@ -181,4 +181,67 @@ final class ApiTests: XCTestCase {
         let data = try JSONEncoder().encode(result)
         XCTAssertEqual(try JSONDecoder().decode(ApiResult.self, from: data), result)
     }
+
+    // MARK: Batches
+
+    /// An action that takes either needs exactly one of them — a `required` list can't say that, and
+    /// accepting both would force a rule about which wins.
+    func testTaskOrTasksButNotBoth() {
+        var neither = ApiInput()
+        neither.project = "anything"
+        XCTAssertThrowsError(try performApi("task.complete", neither)) { error in
+            XCTAssertEqual((error as? ApiError)?.code, .missingField)
+        }
+
+        var both = ApiInput()
+        both.project = "anything"
+        both.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+        both.tasks = [TaskRefInput(session: "0", line: 1, digest: "def")]
+        XCTAssertThrowsError(try performApi("task.complete", both)) { error in
+            XCTAssertEqual((error as? ApiError)?.code, .missingField)
+        }
+    }
+
+    func testAnEmptyBatchIsRefused() {
+        var input = ApiInput()
+        input.project = "anything"
+        input.tasks = []
+        XCTAssertThrowsError(try performApi("task.delete", input)) { error in
+            let api = error as? ApiError
+            XCTAssertEqual(api?.code, .invalidField)
+            XCTAssertEqual(api?.detail?.stringValue, "tasks")
+        }
+    }
+
+    /// The published schema has to say "one of these", or a client generated from it will believe
+    /// `task` is required and never send a batch.
+    func testTheSchemaPublishesTheChoice() throws {
+        for name in ["task.complete", "task.reopen", "task.setDue", "task.delete"] {
+            let spec = try XCTUnwrap(ApiRegistry.spec(name))
+            XCTAssertEqual(spec.oneOf, ["task", "tasks"], name)
+            let schema = spec.inputSchema.objectValue
+            let choices = schema?["oneOf"]?.arrayValue ?? []
+            XCTAssertEqual(choices.count, 2, name)
+            let required = Set((schema?["required"]?.arrayValue ?? []).compactMap(\.stringValue))
+            XCTAssertTrue(required.isDisjoint(with: ["task", "tasks"]),
+                          "\(name) shouldn't require either of the pair on its own")
+            XCTAssertTrue(required.contains("project"), "\(name) still needs a project")
+            let list = schema?["properties"]?.objectValue?["tasks"]?.objectValue
+            XCTAssertEqual(list?["type"]?.stringValue, "array", name)
+            XCTAssertNotNil(list?["items"]?.objectValue?["properties"]?.objectValue?["digest"], name)
+            XCTAssertNotNil(schema?["properties"]?.objectValue?["revision"], "\(name) should take a revision")
+        }
+    }
+
+    /// "and 2 subtasks" is true of one task that took its children with it and false of three a
+    /// person selected — the same count meaning two different things.
+    func testABatchIsCountedNotNamed() {
+        let changes = [ApiChange(kind: .completed, ref: nil, now: "Alpha"),
+                       ApiChange(kind: .completed, ref: nil, now: "Beta"),
+                       ApiChange(kind: .completed, ref: nil, now: "Gamma")]
+        XCTAssertEqual(summarize(action: "task.complete", changes: changes, batch: true).sentence(dryRun: false),
+                       "Completed 3 tasks.")
+        XCTAssertEqual(summarize(action: "task.complete", changes: changes, batch: false).sentence(dryRun: false),
+                       "Completed “Alpha” and 2 subtasks.")
+    }
 }

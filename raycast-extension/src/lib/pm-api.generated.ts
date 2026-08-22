@@ -186,22 +186,30 @@ export interface TaskAddInput {
   text: string;
 }
 
-/** Complete a task and its subtree, advancing focus by default. */
+/** Complete a task, or several, along with their subtrees. */
 export interface TaskCompleteInput {
   /** Move focus onward afterwards. Default true. */
   advanceFocus?: boolean;
   /** Project name or unambiguous prefix. */
   project: string;
-  /** The task to act on. */
-  task: TaskRef;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
-/** Delete a task and its subtree. */
+/** Delete a task, or several, along with their subtrees. */
 export interface TaskDeleteInput {
   /** Project name or unambiguous prefix. */
   project: string;
-  /** The task to act on. */
-  task: TaskRef;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
 /** Move focus to the first open leaf under the focused task. */
@@ -234,15 +242,19 @@ export interface TaskProgressInput {
   project?: string;
 }
 
-/** Re-open a completed task and put focus back on it. */
+/** Re-open a completed task, or several, and put focus back. */
 export interface TaskReopenInput {
   /** Project name or unambiguous prefix. */
   project: string;
-  /** The task to act on. */
-  task: TaskRef;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
-/** Set or clear a task's due date. */
+/** Set or clear the due date on a task, or on several. */
 export interface TaskSetDueInput {
   /** Remove the due date instead of setting one. */
   clearDue?: boolean;
@@ -250,8 +262,12 @@ export interface TaskSetDueInput {
   due?: string;
   /** Project name or unambiguous prefix. */
   project: string;
-  /** The task to act on. */
-  task: TaskRef;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
 /** Rename a task in place. */
