@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** the dispatcher, the manifest, and the argv, MCP and Raycast adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The in-process adapter — the one that would let the panel and App Intents stop calling `NotesService` directly — is not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** the dispatcher, the manifest, and all four adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. What remains is listed under *Still to build*. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -10,8 +10,8 @@ PM's domain is implemented once, in PmLib, and then spoken about in five differe
 |---|---|---|
 | `pm` CLI | argv → `NotesService` | JSON only from `notes show`; everything else is prose and an exit code |
 | Raycast | `pm api call`, types generated from the manifest | nothing — the re-implemented logic is gone |
-| Mac app | linking PmLib in-process | undo/redo, focus animation, project index, recents |
-| App Intents | linking PmLib in-process | entities with stable ids, disambiguation |
+| Mac app | `PMContract` → the dispatcher, in-process | undo/redo, focus animation, project index, recents |
+| App Intents | `PMContract` → the dispatcher, in-process | entities with stable ids, disambiguation |
 | MCP (`pm mcp`) | the dispatcher, directly | a stricter published schema |
 | `pm api` | the dispatcher, directly | nothing — transport only |
 
@@ -186,9 +186,24 @@ What actually went away:
 
 There are seven integration tests that run the client against the real binary rather than a mock of it, because the unit tests only prove the extension is consistent with what it believes the wire format to be.
 
+### The in-process adapter
+
+`PMContract` in the app. Native types, no JSON, no subprocess — the panel redraws at 60fps and can't afford a process spawn per keystroke, which is why the contract was built so it doesn't have to.
+
+It is the only adapter that can serve all three tiers. Mutations and queries go to `performApi` like everywhere else; affordances — `app.openWindow`, `app.openInFinder`, `app.openInObsidian`, `app.showPanel`, `app.settings` — are performed here, under the same names the manifest publishes and the headless adapters refuse.
+
+**The reason to route the app's own writes through it isn't tidiness.** `PMStore` holds the tasks from its last read, and the notes file is markdown the user also edits in Obsidian and by hand. A click acts on what was on screen, which may not be what's on disk any more — the same defect Raycast had, with a shorter window. Every write now carries the task's digest, so that case is caught rather than written through. A refusal is turned into "That task changed on disk, so nothing was written. Reloading." rather than surfacing a raw error, because a race isn't a bug and shouldn't read like one.
+
+App Intents carry the reference too. The digest is deliberately *not* folded into `TaskEntity.id`: Shortcuts persists the id and re-resolves through the query, so a digest baked in would make a saved shortcut fail to resolve rather than refuse clearly — and the current id format is one saved shortcuts already hold.
+
+### What the app keeps
+
+The boundary the second open question asked about. `PMStore` stays responsible for undo/redo, the focus-move classifier, the project index, recents, and its own phrasing — the quick bar's receipts are tuned to a narrow non-activating panel (truncated at 44 characters, withheld entirely for commands whose whole effect is a window opening), and the envelope's `summary` is written for a HUD with room. The contract supplies the sentence; a surface is still free to write its own.
+
+Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to today's), and `addTaskToSession` (appends to a named session rather than today's).
+
 ## Still to build
 
-- **The in-process adapter**, so the panel and App Intents call the dispatcher instead of `NotesService`. This is where the `PMStore` boundary question below gets answered.
 - **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
 - **Bulk operations and the document revision.** `revision` is in the envelope and nothing consumes it yet; `toggleAll`, `setDueAll` and subtree deletes are the actions that need it.
 - **The mutation journal.**
@@ -197,7 +212,7 @@ There are seven integration tests that run the client against the real binary ra
 
 **1. Display strings in the contract, or per-surface formatting?** Carrying them kills the `RelativeDue` / `format-relative-due` duplication, at the cost of a data contract that knows about words and needs `now` as an input. Recommendation: carry them. "in 2w" is domain vocabulary in this app — it is the same phrasing `QuickCaptureParser` reads *back*.
 
-**2. How much of `PMStore` moves?** The mutations clearly do. Undo/redo, the focus-move classifier and the project index are app concerns and should stay. The boundary needs drawing before any code moves.
+**2. How much of `PMStore` moves?** *Settled:* the document mutations moved; undo/redo, the focus-move classifier, the index, recents and the app's own phrasing stayed. Three mutations the contract has no action for stayed too, listed above.
 
 **3. Does the MCP get write access by default?** *Settled:* no. Queries are unrestricted, `--allow-write` permits mutations, `--allow-destructive` permits the four that lose something. Still unpaired with a mutation journal, so a model's writes can be seen in the envelope it returns but not reviewed afterwards.
 

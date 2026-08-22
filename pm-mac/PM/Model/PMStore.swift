@@ -279,7 +279,12 @@ final class PMStore: ObservableObject {
         if on { ProjectIndex.shared.retain() } else { ProjectIndex.shared.release() }
     }
 
-    // MARK: Mutations (each performs the NotesService call, then reloads)
+    // MARK: Mutations (each performs one contract action, then reloads)
+    //
+    // These go through `PMContract` rather than `NotesService` so the app writes the way every other
+    // surface does — and so each write carries the task's digest. The store holds the tasks from its
+    // last read, and the notes file is markdown the user also edits in Obsidian; a click acts on what
+    // was on screen, which may not be what's on disk any more. See docs/task-identity.md.
 
     /// Run a document mutation off-main, then reload. When `recordsUndo` (the default), the pre-edit
     /// document is banked for undo if the edit actually changed bytes. Navigation-only writes (focus)
@@ -293,7 +298,8 @@ final class PMStore: ObservableObject {
             do {
                 try work(name)
             } catch {
-                Task { @MainActor in self?.errorMessage = String(describing: error) }
+                let message = PMContract.message(for: error)
+                Task { @MainActor in self?.errorMessage = message }
             }
             // Only record when the edit actually changed the bytes (skips no-op mutations).
             if let before, let after = try? Self.snapshot(project: name), before.raw != after.raw {
@@ -348,21 +354,35 @@ final class PMStore: ObservableObject {
     /// Key of the most recently completed task this session, for the menubar's ⌥ Undo alternate.
     @Published private(set) var lastCompletedKey: String?
 
+    /// The same task as the contract names it. Completing doesn't change a task's text, so the digest
+    /// taken before the write still identifies it afterwards — which is what lets the undo find it
+    /// even if the document has moved on since.
+    private var lastCompletedRef: TaskRefInput?
+
     /// `then` runs once the document has been re-read, like `addTodo`'s — it's what lets a caller that
     /// has already handed the keyboard back say whether the change actually landed.
     func complete(_ todo: Todo, advanceFocus: Bool = true, then: (@MainActor () -> Void)? = nil) {
         lastCompletedKey = Self.key(for: todo)
+        lastCompletedRef = todo.reference
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        mutate(then: then) { try completeTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, advanceFocus: advanceFocus) }
+        mutate(then: then) { project in
+            try PMContract.perform("task.complete", PMContract.input(project: project, task: todo) {
+                $0.advanceFocus = advanceFocus
+            })
+        }
     }
 
     /// Undo the most recent completion (re-open it and move focus back onto it).
     func undoLast(then: (@MainActor () -> Void)? = nil) {
-        guard let key = lastCompletedKey else { return }
-        let parts = key.split(separator: ":").compactMap { Int($0) }
-        guard parts.count == 2 else { return }
+        guard let reference = lastCompletedRef else { return }
         lastCompletedKey = nil
-        mutate(then: then) { try undoTodo(project: $0, sessionIndex: parts[0], lineIndex: parts[1]) }
+        lastCompletedRef = nil
+        mutate(then: then) { project in
+            var input = ApiInput()
+            input.project = project
+            input.task = reference
+            try PMContract.perform("task.reopen", input)
+        }
     }
 
     func toggle(_ todo: Todo) {
@@ -375,34 +395,54 @@ final class PMStore: ObservableObject {
 
     func focus(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
         // Focus is navigation, not a content edit, so keep it out of the undo history.
-        mutate(recordsUndo: false, then: then) { try focusTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+        mutate(recordsUndo: false, then: then) {
+            try PMContract.perform("task.focus", PMContract.input(project: $0, task: todo))
+        }
     }
 
     func undo(_ todo: Todo) {
-        mutate { try undoTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+        mutate { try PMContract.perform("task.reopen", PMContract.input(project: $0, task: todo)) }
     }
 
     func setDue(_ todo: Todo, due: String?, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { try setDueOnTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, due: due) }
+        mutate(then: then) { project in
+            try PMContract.perform("task.setDue", PMContract.input(project: project, task: todo) {
+                if let due { $0.due = due } else { $0.clearDue = true }
+            })
+        }
     }
 
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
     func editText(_ todo: Todo, text: String) {
-        mutate { try setTodoText(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, text: text) }
+        mutate { project in
+            try PMContract.perform("task.setText", PMContract.input(project: project, task: todo) {
+                $0.text = text
+            })
+        }
     }
 
     /// Wrap a task in a new parent task, nesting the task (and its subtree) under it; focus stays put.
     func wrap(_ todo: Todo, parentText: String) {
-        mutate { try wrapTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex, text: parentText) }
+        mutate { project in
+            try PMContract.perform("task.wrap", PMContract.input(project: project, task: todo) {
+                $0.text = parentText
+            })
+        }
     }
 
     /// Dissolve a parent task: remove it and promote its children (with their subtrees) into its
     /// place. If the dissolved parent held focus, focus moves to its first child. Only meaningful for
     /// tasks with children — `hasChildren(_:)` gates the UI affordance. Inverse of `wrap`.
     func unwrap(_ todo: Todo) {
-        mutate { try unwrapTodo(project: $0, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex) }
+        mutate { try PMContract.perform("task.unwrap", PMContract.input(project: $0, task: todo)) }
     }
 
+    /// Drag-reorder, still a `NotesService` call: the contract has no action for it.
+    ///
+    /// It is the panel's own gesture — two references, a side and a depth, resolved from a drop's
+    /// coordinates — with no caller that reads early and acts late, which is what a contract action
+    /// would be protecting against. It stays here until something else needs it.
+    ///
     /// Move `todo` (and its whole subtree) to a precise slot — after/before the `anchor` todo's line,
     /// with the subtree's root re-indented to `depth`. Drives the drag-to-reorder: the drop's
     /// Y resolves the anchor + side, its X the depth. Illegal drops (anchor inside the moved subtree)
@@ -471,8 +511,7 @@ final class PMStore: ObservableObject {
         let bottomUp = roots.sorted { ($0.sessionIndex, $0.lineIndex) > ($1.sessionIndex, $1.lineIndex) }
         mutate { project in
             for todo in bottomUp {
-                try PmLib.deleteTodo(project: project,
-                                     sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
+                try PMContract.perform("task.delete", PMContract.input(project: project, task: todo))
             }
         }
     }
@@ -487,6 +526,7 @@ final class PMStore: ObservableObject {
         let completing = !open.isEmpty
         if completing {
             lastCompletedKey = targets.last.map(Self.key(for:))
+            lastCompletedRef = targets.last?.reference
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
         mutate { project in
@@ -494,10 +534,11 @@ final class PMStore: ObservableObject {
                 if completing {
                     // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
                     // still moves focus if one of the completed tasks was holding it.
-                    try completeTodo(project: project, sessionIndex: todo.sessionIndex,
-                                     lineIndex: todo.lineIndex, advanceFocus: false)
+                    try PMContract.perform("task.complete", PMContract.input(project: project, task: todo) {
+                        $0.advanceFocus = false
+                    })
                 } else {
-                    try undoTodo(project: project, sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
+                    try PMContract.perform("task.reopen", PMContract.input(project: project, task: todo))
                 }
             }
         }
@@ -508,8 +549,9 @@ final class PMStore: ObservableObject {
         guard !todos.isEmpty else { return }
         mutate { project in
             for todo in todos {
-                try setDueOnTodo(project: project, sessionIndex: todo.sessionIndex,
-                                 lineIndex: todo.lineIndex, due: due)
+                try PMContract.perform("task.setDue", PMContract.input(project: project, task: todo) {
+                    if let due { $0.due = due } else { $0.clearDue = true }
+                })
             }
         }
     }
@@ -611,13 +653,16 @@ final class PMStore: ObservableObject {
     /// task it just wrote has a list that contains it.
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
                  position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
-        let placement: (kind: TaskInsertPosition, anchor: PmLib.TaskRef)?
-        if let anchor, let position {
-            placement = (position, PmLib.TaskRef(sessionIndex: anchor.sessionIndex, lineIndex: anchor.lineIndex))
-        } else {
-            placement = nil
+        mutate(then: then) { project in
+            try PMContract.perform("task.add", PMContract.input(project: project) { input in
+                input.text = text
+                input.due = due
+                if let anchor, let position {
+                    input.anchor = anchor.reference
+                    input.position = position == .child ? "child" : (position == .before ? "before" : "after")
+                }
+            })
         }
-        mutate(then: then) { try PmLib.addTodo(project: $0, text: text, due: due, position: placement) }
     }
 
     // MARK: Session mutations (each flows through `mutate`, so ⌘Z undo/redo covers it)
@@ -649,12 +694,17 @@ final class PMStore: ObservableObject {
         mutate(then: { [weak self] in
             guard let self, let index = self.todaySessionIndex else { return }
             then(index)
-        }) { try PmLib.addSession(project: $0, label: "", date: Date()) }
+        }) { try PMContract.perform("session.start", PMContract.input(project: $0)) }
     }
 
     /// Rename the session at `index` (its trailing label; the date is preserved).
     func renameSession(_ index: Int, label: String, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { try PmLib.renameSession(project: $0, sessionIndex: index, label: label) }
+        mutate(then: then) { project in
+            try PMContract.perform("session.rename", PMContract.input(project: project) {
+                $0.session = String(index)
+                $0.label = label
+            })
+        }
     }
 
     /// Set (or clear, with empty `prose`) the leading-prose note under the session at `index`.
@@ -664,7 +714,11 @@ final class PMStore: ObservableObject {
 
     /// Delete the session at `index`. The app only offers this for sessions with no tasks.
     func deleteSession(_ index: Int) {
-        mutate { try PmLib.deleteSession(project: $0, sessionIndex: index) }
+        mutate { project in
+            try PMContract.perform("session.delete", PMContract.input(project: project) {
+                $0.session = String(index)
+            })
+        }
     }
 
     /// Append a task to the session at `index` (used to populate an otherwise-empty session).
@@ -681,6 +735,8 @@ final class PMStore: ObservableObject {
     /// next: this may have just created it, and asking for it against a stale document would make a
     /// second heading with the same date.
     func appendSessionNote(_ prose: String, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { _ = try PmLib.appendNoteToTodaySession(project: $0, prose: prose) }
+        mutate(then: then) { project in
+            try PMContract.perform("session.note", PMContract.input(project: project) { $0.prose = prose })
+        }
     }
 }

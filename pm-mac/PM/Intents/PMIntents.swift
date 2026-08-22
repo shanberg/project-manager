@@ -176,7 +176,10 @@ struct CompleteTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let t = try resolveTask(task)
-        try completeTodo(project: t.projectFolder, sessionIndex: t.sessionIndex, lineIndex: t.lineIndex, advanceFocus: true)
+        try PMContract.perform("task.complete", PMContract.input(project: t.projectFolder) {
+            $0.task = t.reference
+            $0.advanceFocus = true
+        })
         PMSpotlight.reindex()
         return .result(dialog: IntentDialog(stringLiteral: "Completed “\(t.text)”."))
     }
@@ -192,7 +195,9 @@ struct ReopenTaskIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Reopen \(\.$task)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        try undoTodo(project: task.projectFolder, sessionIndex: task.sessionIndex, lineIndex: task.lineIndex)
+        try PMContract.perform("task.reopen", PMContract.input(project: task.projectFolder) {
+            $0.task = task.reference
+        })
         PMSpotlight.reindex()
         return .result(dialog: IntentDialog(stringLiteral: "Reopened “\(task.text)”."))
     }
@@ -211,7 +216,10 @@ struct AddTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (_, folder) = try resolveProject(project)
-        try addTodo(project: folder, text: text, due: due.map(dueString(from:)), position: nil)
+        try PMContract.perform("task.add", PMContract.input(project: folder) {
+            $0.text = text
+            $0.due = due.map(dueString(from:))
+        })
         PMSpotlight.reindex()
         return .result(dialog: IntentDialog(stringLiteral: "Added “\(text)”."))
     }
@@ -228,7 +236,10 @@ struct RenameTaskIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Rename \(\.$task) to \(\.$text)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        try setTodoText(project: task.projectFolder, sessionIndex: task.sessionIndex, lineIndex: task.lineIndex, text: text)
+        try PMContract.perform("task.setText", PMContract.input(project: task.projectFolder) {
+            $0.task = task.reference
+            $0.text = text
+        })
         PMSpotlight.reindex()
         return .result(dialog: IntentDialog(stringLiteral: "Renamed to “\(text)”."))
     }
@@ -247,7 +258,10 @@ struct SetDueDateIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let t = try resolveTask(task)
         let value = dueString(from: due)
-        try setDueOnTodo(project: t.projectFolder, sessionIndex: t.sessionIndex, lineIndex: t.lineIndex, due: value)
+        try PMContract.perform("task.setDue", PMContract.input(project: t.projectFolder) {
+            $0.task = t.reference
+            $0.due = value
+        })
         PMSpotlight.reindex()
         return .result(dialog: IntentDialog(stringLiteral: "Set due \(value) on “\(t.text)”."))
     }
@@ -265,7 +279,9 @@ struct FocusTaskIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<TaskEntity> & ProvidesDialog {
         try PMFiles.setFocusedProjectKey(task.projectKey)
         PMFiles.recordRecent(projectKey: task.projectKey, name: task.projectFolder)
-        try focusTodo(project: task.projectFolder, sessionIndex: task.sessionIndex, lineIndex: task.lineIndex)
+        try PMContract.perform("task.focus", PMContract.input(project: task.projectFolder) {
+            $0.task = task.reference
+        })
         return .result(value: task, dialog: IntentDialog(stringLiteral: "Focused “\(task.text)”."))
     }
 }
@@ -287,7 +303,9 @@ struct DiveInIntent: AppIntent {
         guard let target = nextDiveInLeaf(todos: list) else {
             return .result(value: nil, dialog: "No open leaf task to dive into.")
         }
-        try focusTodo(project: folder, sessionIndex: target.sessionIndex, lineIndex: target.lineIndex)
+        try PMContract.perform("task.focus", PMContract.input(project: folder) {
+            $0.task = target.reference
+        })
         let entity = TaskEntity.make(projectKey: key, folder: folder, todo: target)
         return .result(value: entity, dialog: IntentDialog(stringLiteral: "Focused on “\(target.text)”."))
     }

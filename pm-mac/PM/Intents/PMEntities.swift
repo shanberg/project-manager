@@ -105,6 +105,14 @@ struct TaskEntity: AppEntity {
     var sessionIndex: Int
     var lineIndex: Int
     var due: String?
+    /// The ISO date of the task's session and the digest of its text — how the contract names a task.
+    ///
+    /// Not part of `id`, deliberately. Shortcuts persists the id and re-resolves through the query,
+    /// so a digest baked into it would make a saved shortcut fail to resolve at all rather than
+    /// refuse clearly — and the id format is one saved shortcuts already hold. Carried alongside, it
+    /// still catches a task changing between an intent resolving it and acting on it.
+    var sessionDate: String?
+    var digest: String?
 
     var displayRepresentation: DisplayRepresentation {
         var subtitle = projectTitle(fromFolderName: projectFolder)
@@ -114,6 +122,11 @@ struct TaskEntity: AppEntity {
 }
 
 extension TaskEntity {
+    /// This task as the contract names it.
+    var reference: TaskRefInput {
+        TaskRefInput(session: sessionDate ?? String(sessionIndex), line: lineIndex, digest: digest)
+    }
+
     /// Separator between the task's in-project coordinate and its project key. A control character
     /// (ASCII unit separator) that cannot occur in a filesystem path or task text.
     static let idSeparator = "\u{1F}"
@@ -126,7 +139,9 @@ extension TaskEntity {
                    projectFolder: folder,
                    sessionIndex: todo.sessionIndex,
                    lineIndex: todo.lineIndex,
-                   due: todo.dueDate ?? todo.effectiveDueDate)
+                   due: todo.dueDate ?? todo.effectiveDueDate,
+                   sessionDate: todo.sessionISODate,
+                   digest: todo.digest)
     }
 
     /// Decode an id back into (project key, sessionIndex, lineIndex).

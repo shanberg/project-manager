@@ -948,14 +948,14 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             return
         case .addLink:
             if let store { ProjectPrompts.addLink(store: store) }
+        // The contract's third tier. Only an adapter running inside the app can perform these, so
+        // they go through the same names the manifest publishes rather than a second vocabulary.
         case .openWindow:
-            WindowManager.shared.openFocusedProject()
+            PMContract.performAffordance("app.openWindow", store: store)
         case .openInFinder:
-            if let path = store?.projectPath {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-            }
+            PMContract.performAffordance("app.openInFinder", store: store)
         case .openInObsidian:
-            if let store { ObsidianLink.open(store: store) }
+            PMContract.performAffordance("app.openInObsidian", store: store)
         case .editDetails:
             WindowManager.shared.openFocusedProject().editDetails()
         case .renameProject:
@@ -970,7 +970,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
         case .settings:
-            SettingsWindowController.shared.show()
+            PMContract.performAffordance("app.settings", store: store)
         }
         // Everything that fell through here either had no receipt to give or found nothing to act on.
         hide(restoringFocus: !(stays || target != nil))
