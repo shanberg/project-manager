@@ -133,6 +133,8 @@ public struct ApiInput: Codable, Equatable {
     public var now: String?
     /// A journal entry's id.
     public var entry: String?
+    /// What a search is looking for.
+    public var query: String?
 
     public init() {}
 }

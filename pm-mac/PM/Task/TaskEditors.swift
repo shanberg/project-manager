@@ -1,3 +1,4 @@
+import PmLib
 import SwiftUI
 
 /// The inline editors a task is created and modified through, plus the status glyph that keeps a task
@@ -29,25 +30,16 @@ struct TaskStatusIcon: View {
 
 // MARK: Due date
 
-/// `due:` values are stored/displayed as `YYYY-MM-DD`.
-enum DueFormat {
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-    static func parse(_ s: String) -> Date? { formatter.date(from: String(s.prefix(10))) }
-    static func string(_ d: Date) -> String { formatter.string(from: d) }
-}
-
 /// The relative answers a due-date menu offers before it offers a calendar.
 ///
 /// Badges read "tomorrow" and "in 2w" (see `RelativeDue`), so an editor that demanded 08/25/2026 left
 /// the user converting in both directions: the list says how far away, the editor asked which day.
 /// These are the same language pointed the other way — the dates people actually pick, named the way
 /// they'd say them, each carrying the day it resolves to so the name is never a guess.
+///
+/// The names and the days are `PmLib.duePresets`, shared with the parser that reads them back out of
+/// a typed line. What's here is what a menu needs and a contract doesn't: an identity for the row and
+/// the date spelled out beside the name.
 enum DueSuggestion {
     struct Option: Identifiable {
         let id: String
@@ -65,37 +57,12 @@ enum DueSuggestion {
     }
 
     /// The menu's presets, in the order they're offered.
-    ///
-    /// Deduplicated by the day they land on, which is what keeps the list honest as the week turns:
-    /// on a Friday "This Weekend" *is* tomorrow, and on a Saturday it's today, and offering the same
-    /// date twice under two names invites the reader to believe the second one means something else.
     static func options(now: Date = Date(), calendar: Calendar = .current) -> [Option] {
-        let today = calendar.startOfDay(for: now)
-        let weekday = calendar.component(.weekday, from: today)
-        let isWeekend = weekday == 7 || weekday == 1
-
-        var raw: [(String, Date?)] = [
-            ("Today", today),
-            ("Tomorrow", calendar.date(byAdding: .day, value: 1, to: today)),
-            // Saturday, unless it already is the weekend — then the weekend in question is this one.
-            ("This Weekend", isWeekend ? today
-                : calendar.nextDate(after: today, matching: DateComponents(weekday: 7),
-                                    matchingPolicy: .nextTime)),
-            ("Next Week", calendar.nextDate(after: today, matching: DateComponents(weekday: 2),
-                                            matchingPolicy: .nextTime)),
-            ("In Two Weeks", calendar.date(byAdding: .day, value: 14, to: today)),
-        ]
-        // Anything the calendar couldn't resolve simply isn't offered.
-        raw = raw.filter { $0.1 != nil }
-
-        var seen = Set<String>()
-        return raw.compactMap { title, date in
-            guard let date else { return nil }
-            let key = DueFormat.string(date)
-            guard seen.insert(key).inserted else { return nil }
-            return Option(id: key, title: title, date: date)
+        duePresets(now: now, calendar: calendar).map {
+            Option(id: $0.title, title: $0.title, date: $0.date)
         }
     }
+
 }
 
 /// The precise date picker — the "Pick a Date…" branch of the due menu, for an answer the presets

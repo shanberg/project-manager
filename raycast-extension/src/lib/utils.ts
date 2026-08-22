@@ -1,9 +1,8 @@
 import path from "path";
 import os from "os";
 import { existsSync } from "fs";
-import { formatSessionDate } from "./notes-api";
 import type { ProjectNotes } from "./notes-api";
-import { runPmWithPrefs } from "./pm";
+import { callApi } from "./pm-api";
 import type { PreferenceValues } from "./types";
 
 /** Paths to apps for use with Raycast FileIcon (real app icons). */
@@ -72,11 +71,14 @@ export async function ensureTodaySession(
   notes: ProjectNotes | null,
   prefs: PreferenceValues,
 ): Promise<{ date: string; label: string }> {
-  const today = formatSessionDate(new Date());
-  const existing = notes?.sessions.find((s) => s.date === today);
-  if (existing) return existing;
-  await runPmWithPrefs(prefs, ["notes", "session", "add", projectName, ""]);
-  return { date: today, label: "" };
+  // `session.start` is idempotent and reports the session either way, so this doesn't have to
+  // format today's date to look for it — which is what the extension used to do, in its own copy of
+  // pm's session-date format.
+  const result = await callApi<
+    "session.start",
+    { date?: string; label?: string }
+  >(prefs, "session.start", { project: projectName });
+  return { date: result.data?.date ?? "", label: result.data?.label ?? "" };
 }
 
 export function parseListAllOutput(stdout: string): {

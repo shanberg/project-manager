@@ -87,6 +87,9 @@ private func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
+        "query": input.query.map(JSONValue.string),
+        "entry": input.entry.map(JSONValue.string),
+        "now": input.now.map(JSONValue.string),
     ]
 }
 
@@ -206,14 +209,29 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return try document(spec, input, options) { rawText in
             let today = formatSessionDate()
             let notes = try parseNotes(markdown: rawText)
+            // Reported either way, so a caller can ask for today's session and use the answer without
+            // knowing whether it had to be made — and without formatting today's date to find it.
+            func describe(_ markdown: String) throws -> JSONValue {
+                let sessions = try parseNotes(markdown: markdown).sessions
+                guard let index = sessions.firstIndex(where: { $0.date == today }) else { return .null }
+                return .object([
+                    "date": .string(sessions[index].date),
+                    "isoDate": sessionISODate(heading: sessions[index].date).map(JSONValue.string) ?? .null,
+                    "label": .string(sessions[index].label),
+                    "index": .number(Double(index)),
+                ])
+            }
             if notes.sessions.contains(where: { $0.date == today }) {
-                return Outcome(rawText: rawText, note: .statement("Today's session was already there"))
+                return Outcome(rawText: rawText, note: .statement("Today's session was already there"),
+                               data: try describe(rawText))
             }
             guard let out = sessionAddPreservingFormat(rawText: rawText, label: input.label ?? "",
                                                        date: Date()) else {
                 throw PmError.notesNotFound("## Sessions")
             }
-            return Outcome(rawText: out, note: Phrase(past: "Started today's session", future: "start today's session"))
+            return Outcome(rawText: out,
+                           note: Phrase(past: "Started today's session", future: "start today's session"),
+                           data: try describe(out))
         }
     case "session.note":
         return try document(spec, input, options) { rawText in
@@ -296,6 +314,37 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let (_, paths) = try loadConfigAndPaths()
         try setFocusedProject(key: "\(paths.activePath):\(folder)")
         return ApiResult(action: spec.name, summary: "Focused \(folder).")
+
+    case "task.search":
+        let scope = input.scope ?? "all"
+        let hits = try searchableTasks(includeArchived: scope != "active",
+                                       includeActive: scope != "archive")
+        // The bias toward the project you're in is the focused one unless a caller says otherwise —
+        // the same tie-break the quick bar has always applied, now available to everything.
+        let focused = try input.project.map(projectKey(of:)) ?? focusedProjectKey()
+        let ranked = TaskSearch.rank(hits, query: input.query ?? "", focusedProjectKey: focused)
+            .prefix(input.limit ?? 20)
+        return ApiResult(action: spec.name,
+                         summary: ranked.isEmpty
+                             ? "Nothing matches “\(input.query ?? "")”."
+                             : "\(ranked.count) match\(ranked.count == 1 ? "" : "es").",
+                         data: try JSONValue.encoding(Array(ranked)))
+
+    case "capture.parse":
+        let line = input.text ?? ""
+        let now = try input.now.map(parseSessionDateArgument) ?? Date()
+        // The trailing `@project` comes off first, exactly as the quick bar does it, so a line that
+        // names a project doesn't leave the name inside the task's text.
+        let split = QuickCaptureParser.splitTarget(line)
+        let parsed = QuickCaptureParser.parse(split?.text ?? line, now: now)
+        return ApiResult(action: spec.name,
+                         summary: parsed.text.isEmpty ? "Nothing to capture." : parsed.text,
+                         data: .object([
+                            "text": .string(parsed.text),
+                            "due": parsed.due.map(JSONValue.string) ?? .null,
+                            "unreadableDue": parsed.unreadableDue.map(JSONValue.string) ?? .null,
+                            "projectQuery": (split?.projectQuery).map(JSONValue.string) ?? .null,
+                         ]))
 
     // MARK: Journal
     case "journal.list":
@@ -446,6 +495,8 @@ struct Outcome {
     var relocated: Bool = false
     /// A phrase for actions the task diff can't describe — a session renamed, a note appended.
     var note: Phrase?
+    /// Anything the action knows that a diff of tasks can't show — which session it just opened.
+    var data: JSONValue?
 }
 
 /// Read once, transform, diff, and write unless this is a dry run.
@@ -486,7 +537,8 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
                      changed: changes,
                      focus: after.first(where: \.isFocused).map(reference(to:)),
                      relocated: outcome.relocated,
-                     dryRun: options.dryRun)
+                     dryRun: options.dryRun,
+                     data: outcome.data)
 }
 
 /// The `document` pipeline for the actions that are a `ProjectNotes -> ProjectNotes` transform.
@@ -585,6 +637,20 @@ private func strippedSummary(of entry: JournalEntry) -> String {
 private func reversalSummary(of entry: JournalEntry) -> String {
     entry.reverses == nil ? "Reversed: \(strippedSummary(of: entry))"
                           : "Restored: \(strippedSummary(of: entry))"
+}
+
+/// A project's key — `<basePath>:<folder>` — the spelling `focused.json` and the search's tie-break
+/// both use.
+private func projectKey(of project: String) throws -> String {
+    let path = try resolveProjectPath(nameOrPrefix: project)
+    return "\((path as NSString).deletingLastPathComponent):\((path as NSString).lastPathComponent)"
+}
+
+/// The focused project's key, or nil when nothing is focused.
+private func focusedProjectKey() -> String? {
+    guard let folder = focusedProjectFolder(),
+          let path = try? resolveProjectPath(nameOrPrefix: folder) else { return nil }
+    return "\((path as NSString).deletingLastPathComponent):\((path as NSString).lastPathComponent)"
 }
 
 /// A project's path, which is how the journal names it — a caller may have said "W-1", the folder

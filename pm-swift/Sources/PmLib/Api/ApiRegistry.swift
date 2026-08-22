@@ -197,6 +197,19 @@ public enum ApiRegistry {
                       fields: [ApiField("key", .string, required: true, "Configuration key."),
                                ApiField("value", .any, required: true, "The new value.")]),
 
+        ApiActionSpec(name: "task.search", tier: .query,
+                      summary: "Find open tasks across every project by the words in them.",
+                      fields: [ApiField("query", .string, required: true, "Words to look for, in any order."),
+                               ApiField("project", .string, "Break ties toward this project. Defaults to the focused one."),
+                               ApiField("scope", .string, "Which projects to search. Default all.",
+                                        allowed: ["active", "archive", "all"]),
+                               ApiField("limit", .integer, "How many to return. Default 20.")]),
+        ApiActionSpec(name: "capture.parse", tier: .query,
+                      summary: "Read a typed capture line: its text, its due date, and the project it names.",
+                      fields: [ApiField("text", .string, required: true,
+                                        "A line as somebody would type it, e.g. \"Email Dana due:friday @redesign\"."),
+                               ApiField("now", .string, "Today's date, YYYY-MM-DD. Defaults to today.")]),
+
         // MARK: Journal
         ApiActionSpec(name: "journal.list", tier: .query,
                       summary: "Recent writes made through the contract, newest first.",

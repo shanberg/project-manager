@@ -73,7 +73,7 @@ final class ProjectIndex: ObservableObject {
     /// may have been edited since, so going to one of these re-reads the project and finds the task by
     /// its text — see `QuickBarController.focus(_:)`. They're kept because they break the tie when two
     /// open tasks read the same.
-    struct TaskEntry: Identifiable, Equatable {
+    struct TaskEntry: Identifiable, Equatable, SearchableTask {
         let projectKey: String
         let projectName: String
         /// The project name without its "CODE-NNN " prefix, for the row's second line.

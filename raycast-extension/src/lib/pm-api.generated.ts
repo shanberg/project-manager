@@ -32,6 +32,14 @@ export type AppSettingsInput = Record<string, never>;
 /** Show PM's focus panel. */
 export type AppShowPanelInput = Record<string, never>;
 
+/** Read a typed capture line: its text, its due date, and the project it names. */
+export interface CaptureParseInput {
+  /** Today's date, YYYY-MM-DD. Defaults to today. */
+  now?: string;
+  /** A line as somebody would type it, e.g. "Email Dana due:friday @redesign". */
+  text: string;
+}
+
 /** The pm configuration. */
 export type ConfigGetInput = Record<string, never>;
 
@@ -254,6 +262,18 @@ export interface TaskReopenInput {
   tasks?: TaskRef[];
 }
 
+/** Find open tasks across every project by the words in them. */
+export interface TaskSearchInput {
+  /** How many to return. Default 20. */
+  limit?: number;
+  /** Break ties toward this project. Defaults to the focused one. */
+  project?: string;
+  /** Words to look for, in any order. */
+  query: string;
+  /** Which projects to search. Default all. */
+  scope?: "active" | "archive" | "all";
+}
+
 /** Set or clear the due date on a task, or on several. */
 export interface TaskSetDueInput {
   /** Remove the due date instead of setting one. */
@@ -313,6 +333,7 @@ export interface ApiInputs {
   "app.openWindow": AppOpenWindowInput;
   "app.settings": AppSettingsInput;
   "app.showPanel": AppShowPanelInput;
+  "capture.parse": CaptureParseInput;
   "config.get": ConfigGetInput;
   "config.set": ConfigSetInput;
   "focus.get": FocusGetInput;
@@ -340,6 +361,7 @@ export interface ApiInputs {
   "task.list": TaskListInput;
   "task.progress": TaskProgressInput;
   "task.reopen": TaskReopenInput;
+  "task.search": TaskSearchInput;
   "task.setDue": TaskSetDueInput;
   "task.setText": TaskSetTextInput;
   "task.unwrap": TaskUnwrapInput;
@@ -359,6 +381,7 @@ export const API_TIERS: Record<
   "app.openWindow": "affordance",
   "app.settings": "affordance",
   "app.showPanel": "affordance",
+  "capture.parse": "query",
   "config.get": "query",
   "config.set": "mutation",
   "focus.get": "query",
@@ -386,6 +409,7 @@ export const API_TIERS: Record<
   "task.list": "query",
   "task.progress": "query",
   "task.reopen": "mutation",
+  "task.search": "query",
   "task.setDue": "mutation",
   "task.setText": "mutation",
   "task.unwrap": "mutation",

@@ -1,5 +1,61 @@
 import Foundation
 
+// MARK: - Due dates as people write them
+//
+// Moved here from the macOS app so every surface reads a typed line the same way. The quick bar, a
+// Raycast form and a model all accept "due:friday"; three implementations of what Friday means is
+// three chances for them to disagree about it.
+
+/// `due:` values are stored and displayed as `YYYY-MM-DD`.
+public enum DueFormat {
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    public static func parse(_ s: String) -> Date? { formatter.date(from: String(s.prefix(10))) }
+    public static func string(_ d: Date) -> String { formatter.string(from: d) }
+}
+
+/// One of the relative answers a due-date menu offers before it offers a calendar.
+public struct DuePreset: Equatable {
+    public let title: String
+    public let date: Date
+}
+
+/// The presets, in the order they're offered.
+///
+/// Deduplicated by the day they land on, which is what keeps the list honest as the week turns: on a
+/// Friday "This Weekend" *is* tomorrow, and on a Saturday it's today, and offering the same date
+/// twice under two names invites the reader to believe the second one means something else.
+///
+/// They are also the words `QuickCaptureParser` reads back, so the list a menu offers and the list a
+/// typed line is matched against cannot drift apart.
+public func duePresets(now: Date = Date(), calendar: Calendar = .current) -> [DuePreset] {
+    let today = calendar.startOfDay(for: now)
+    let weekday = calendar.component(.weekday, from: today)
+    let isWeekend = weekday == 7 || weekday == 1
+
+    let raw: [(String, Date?)] = [
+        ("Today", today),
+        ("Tomorrow", calendar.date(byAdding: .day, value: 1, to: today)),
+        // Saturday, unless it already is the weekend — then the weekend in question is this one.
+        ("This Weekend", isWeekend ? today
+            : calendar.nextDate(after: today, matching: DateComponents(weekday: 7),
+                                matchingPolicy: .nextTime)),
+        ("Next Week", calendar.nextDate(after: today, matching: DateComponents(weekday: 2),
+                                        matchingPolicy: .nextTime)),
+        ("In Two Weeks", calendar.date(byAdding: .day, value: 14, to: today)),
+    ]
+    var seen = Set<Date>()
+    return raw.compactMap { title, date -> DuePreset? in
+        guard let date, seen.insert(date).inserted else { return nil }
+        return DuePreset(title: title, date: date)
+    }
+}
+
 /// Splits a line typed into the quick bar into task text and an optional due date.
 ///
 /// The marker is `due:`, which is the notes format's own — a task line already reads
@@ -10,20 +66,26 @@ import Foundation
 /// and "in 2w", and `DueSuggestion` names "Next Week", so those read back in. A date the parser
 /// can't make sense of is left in the text rather than dropped — silently losing "due:thurdsay" to a
 /// typo is worse than a task whose title has a typo in it.
-enum QuickCaptureParser {
-    struct Result: Equatable {
-        var text: String
+public enum QuickCaptureParser {
+    public struct Result: Equatable {
+        public var text: String
         /// Stored form, `YYYY-MM-DD`, or nil when no date was given.
-        var due: String?
+        public var due: String?
         /// The `due:` phrase that was given and couldn't be read, when there was one.
         ///
         /// The phrase stays in `text` — dropping it silently is worse — but a line that kept its date
         /// marker as prose looks exactly like a line that never had one, and the bar has closed by the
         /// time you'd find out. This is what lets the field say so while you can still fix it.
-        var unreadableDue: String?
+        public var unreadableDue: String?
+
+        public init(text: String, due: String? = nil, unreadableDue: String? = nil) {
+            self.text = text
+            self.due = due
+            self.unreadableDue = unreadableDue
+        }
     }
 
-    static func parse(_ input: String, now: Date = Date(), calendar: Calendar = .current) -> Result {
+    public static func parse(_ input: String, now: Date = Date(), calendar: Calendar = .current) -> Result {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let marker = trimmed.range(of: "due:", options: [.caseInsensitive, .backwards]) else {
             return Result(text: trimmed, due: nil)
@@ -58,7 +120,7 @@ enum QuickCaptureParser {
     /// Whether the query names a real project isn't decided here. The caller resolves it against the
     /// project list and leaves the line alone when it matches nothing, so "email @dana" stays a task
     /// about Dana rather than becoming a task filed somewhere surprising.
-    static func splitTarget(_ input: String) -> (text: String, projectQuery: String)? {
+    public static func splitTarget(_ input: String) -> (text: String, projectQuery: String)? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let at = trimmed.lastIndex(of: "@"), at != trimmed.startIndex,
               trimmed[trimmed.index(before: at)] == " " else { return nil }
@@ -69,7 +131,7 @@ enum QuickCaptureParser {
     }
 
     /// Resolve a due phrase to a day, or nil if it isn't one.
-    static func date(from phrase: String, now: Date = Date(), calendar: Calendar = .current) -> Date? {
+    public static func date(from phrase: String, now: Date = Date(), calendar: Calendar = .current) -> Date? {
         let cleaned = phrase.trimmingCharacters(in: .whitespaces).lowercased()
         guard !cleaned.isEmpty else { return nil }
         let today = calendar.startOfDay(for: now)
@@ -78,9 +140,9 @@ enum QuickCaptureParser {
         if let exact = DueFormat.parse(cleaned), cleaned.count >= 10 { return exact }
 
         // The presets the due menu offers, matched on their own names ("this weekend", "next week").
-        if let option = DueSuggestion.options(now: now, calendar: calendar)
+        if let preset = duePresets(now: now, calendar: calendar)
             .first(where: { $0.title.lowercased() == cleaned }) {
-            return option.date
+            return preset.date
         }
         if cleaned == "yesterday" { return calendar.date(byAdding: .day, value: -1, to: today) }
 

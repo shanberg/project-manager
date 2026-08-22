@@ -100,23 +100,6 @@ export function getNextDueForProject(todos: Todo[]): string | null {
   );
 }
 
-/** A trailing inline `due: <date>`, optionally followed by the focus marker. */
-const INLINE_DUE_SUFFIX =
-  /\s+due:\s*(?:\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?:\s*@)?$/;
-
-/**
- * Display helper: drop a trailing inline `due:` (and focus marker) from task text. `pm notes show`
- * already returns text with both stripped — this is for raw lines and for text carrying the tokens
- * in either order, so a legacy `<text> @ due: <date>` line still renders as just its text.
- */
-export function stripInlineDueFromText(text: string): string {
-  return text
-    .replace(INLINE_DUE_SUFFIX, "")
-    .replace(/\s+@$/, "")
-    .replace(INLINE_DUE_SUFFIX, "")
-    .trimEnd();
-}
-
 export async function fetchNotes(
   projectName: string,
   prefs: PreferenceValues,
@@ -555,16 +538,6 @@ export async function addLinkToNotes(
     project: projectName,
     text: url,
     ...(link.label?.trim() ? { label: link.label.trim() } : {}),
-  });
-}
-
-/** Session date format matching pm notes current-day (en-US short). */
-export function formatSessionDate(date: Date = new Date()): string {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
   });
 }
 

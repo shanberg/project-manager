@@ -77,7 +77,9 @@ task.search    task.whatsDue   task.progress  focus.get
 capture.parse  config.get
 ```
 
-`capture.parse` exposes `QuickCaptureParser` — the `due:` and trailing `@project` shorthand — as a pure function, so a model can use the same phrasing the quick bar accepts instead of inventing its own.
+`capture.parse` and `task.search` moved out of the macOS app into PmLib to be published. `capture.parse` reads a line the way the quick bar does — `due:friday`, `due:in 2w`, a trailing `@project` — so every surface accepts the same phrasing. `task.search` ranks on whole words rather than the subsequence matching that finds projects, because you remember a task as some of the words in it.
+
+Both brought their vocabulary with them. The due-date presets — "Today", "This Weekend", "Next Week" — are now `PmLib.duePresets`, read by the parser *and* offered by the app's due menu, so the words a menu shows and the words a typed line is matched against cannot drift apart. `TaskSearch` ranks anything conforming to `SearchableTask`, so the app's warmed index and a fresh scan share one ranking; the app keeps its index, and the CLI and MCP pay one scan rather than maintaining one.
 
 **Tier 3 — affordances.** Requests to a running app, not domain operations: `openWindow`, `openInFinder`, `openInObsidian`, `showPanel`, `settings`. Published only to the in-process and URL adapters. MCP does not get them.
 
@@ -133,7 +135,7 @@ The notes file is markdown that the user also edits in Obsidian and by hand. No 
 
 ## What has to give
 
-- **Raycast's re-derived domain logic gets deleted.** *Done* for `getEffectiveDue`, which now reads the field the contract computes. `getNextDueForProject` is a fold over it and stays; `stripInlineDueFromText` and `formatSessionDate` remain, and want `capture.parse` and a formatted session date on the payload before they can go.
+- **Raycast's re-derived domain logic gets deleted.** *Done.* `getEffectiveDue` reads the field the contract computes. `formatSessionDate` is gone: `session.start` is idempotent and reports the session it found or made, so nothing has to format today's date to look for it. `stripInlineDueFromText` is gone too — every call site passed it `todo.text`, which the parser has already stripped, so it was doing nothing. `getNextDueForProject` remains, a fold over `getEffectiveDue` rather than a second derivation.
 - **Display strings move into the contract.** Payloads carry both `due: "2026-09-01"` and `dueDisplay: "in 2w"`, computed with a caller-supplied `now`. This is the one place the design deliberately mixes data and presentation, and it's the trade recorded below.
 - **The config-dir files get schema'd** and read through the contract (`focus.get`, `project.list`) rather than by three separate JSON parsers.
 - **`pm notes write`'s whole-document path** stays internal. It falls back to a full re-serialize that drops frontmatter, so it should never be a published action.
@@ -230,7 +232,6 @@ For MCP, `journal.undo` is grouped with the destructive actions. It is recoverab
 
 ## Still to build
 
-- **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
 - **The panel sending a revision.** Its reads go through `NotesService`, not the contract, so it has no revision to send with a batch. Routing its reads through `notes.get` would close that, at the cost of encoding and decoding a payload it currently gets as native types.
 
 ## Open questions

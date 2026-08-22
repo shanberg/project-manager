@@ -244,4 +244,37 @@ final class ApiTests: XCTestCase {
         XCTAssertEqual(summarize(action: "task.complete", changes: changes, batch: false).sentence(dryRun: false),
                        "Completed “Alpha” and 2 subtasks.")
     }
+
+    /// Validation reads a bag of the input's fields by name. A field can be in the registry and on
+    /// `ApiInput` and still be missing from that bag — in which case a required field is silently
+    /// never checked, and an optional one is reported missing when it was given. Both have happened.
+    func testEveryPublishedFieldIsVisibleToValidation() throws {
+        var input = ApiInput()
+        input.project = "p"
+        input.text = "t"
+        input.title = "t"
+        input.domain = "W"
+        input.prose = "n"
+        input.label = "l"
+        input.session = "0"
+        input.key = "summary"
+        input.value = .string("v")
+        input.query = "q"
+        input.entry = "e"
+        input.now = "2026-08-22"
+        input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+
+        for spec in ApiRegistry.actions where spec.tier != .affordance {
+            // Given every field a value, nothing should be reported missing. What fails here is a
+            // field the validator can't see, not a field the caller didn't send.
+            do {
+                _ = try performApi(spec.name, input)
+            } catch let error as ApiError where error.code == .missingField {
+                XCTFail("\(spec.name): \(error.message)")
+            } catch {
+                // Anything else means validation passed and the action tried to run, which is all
+                // this is checking — there's no project on disk here.
+            }
+        }
+    }
 }

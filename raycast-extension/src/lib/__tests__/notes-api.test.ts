@@ -9,7 +9,6 @@ import {
   updateDueDateInNotes,
   wrapTodoInNotes,
   toggleAllTodosInNotes,
-  stripInlineDueFromText,
   getEffectiveDue,
   type NotesShowOutput,
   type ProjectNotes,
@@ -448,21 +447,5 @@ describe("getEffectiveDue", () => {
 
   it("is null when nothing is due", () => {
     expect(getEffectiveDue([], makeTodo(0, "Task"))).toBeNull();
-  });
-});
-
-describe("stripInlineDueFromText", () => {
-  it("strips a canonical due and focus marker", () => {
-    expect(stripInlineDueFromText("Task due: 2026-03-15 09:00 @")).toBe("Task");
-  });
-
-  it("strips a legacy due written after the focus marker", () => {
-    expect(stripInlineDueFromText("Task @ due: 2026-03-15 09:00")).toBe("Task");
-  });
-
-  it("leaves plain text alone", () => {
-    expect(stripInlineDueFromText("Email bob@example.com")).toBe(
-      "Email bob@example.com",
-    );
   });
 });

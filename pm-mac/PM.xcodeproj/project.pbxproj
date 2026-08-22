@@ -15,7 +15,6 @@
 		18D0FFC79E7293686F9F11D2 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61C73A122FF07CC3880248E3 /* SettingsWindowController.swift */; };
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		293A88CB3E2076E821D917BE /* ProjectSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */; };
-		A1D4F0C7B2E14A0396E7C551 /* TaskSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D4F0C7B2E14A0396E7C552 /* TaskSearch.swift */; };
 		2AB4A19C5F60D4154DC72182 /* ShortcutsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B4BF4DE91D07970011CE07 /* ShortcutsSettings.swift */; };
 		314FCBF0BFD206D388188B5D /* TaskViewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968289B8E6C1C7232AF29218 /* TaskViewHelpers.swift */; };
 		31B72FCE78586F60AD879D4B /* ProjectViewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960CBA413D74FFF7E3DCCEA3 /* ProjectViewState.swift */; };
@@ -53,7 +52,6 @@
 		BF85FC31F04BE19EA84467C4 /* FocusPanelChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62961DC25E3A42B6B0C38D7A /* FocusPanelChrome.swift */; };
 		C1920D4ABB2E832B9F975126 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A8DE07C53FA9ECB9C061BC /* Log.swift */; };
 		C4A9E3D04122D318D057D921 /* ProjectPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 572129A651DA79D128E42804 /* ProjectPrompts.swift */; };
-		C626452B7ABE8EB3189C3B3D /* QuickCaptureParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCA11260CAF9B4F62B79FD8 /* QuickCaptureParser.swift */; };
 		C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
 		CA4CB349CDB748A305F51EDD /* QuickBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */; };
@@ -129,7 +127,6 @@
 		B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigWatcher.swift; sourceTree = "<group>"; };
 		B358A62B026F88C33AA9FF42 /* MenubarRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarRing.swift; sourceTree = "<group>"; };
 		BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSearch.swift; sourceTree = "<group>"; };
-		A1D4F0C7B2E14A0396E7C552 /* TaskSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSearch.swift; sourceTree = "<group>"; };
 		BC6D8010322E380C3D032444 /* TaskTransitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTransitions.swift; sourceTree = "<group>"; };
 		BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindow.swift; sourceTree = "<group>"; };
 		BE12AF236B77E3727D0F3C5F /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
@@ -137,7 +134,6 @@
 		C30BC0AE688FEC42E1605AD5 /* KeyablePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyablePanel.swift; sourceTree = "<group>"; };
 		C5C091CF8691F406FDF304F2 /* TaskEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditors.swift; sourceTree = "<group>"; };
 		CF1B5393B4FF9F362814CC03 /* SearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchField.swift; sourceTree = "<group>"; };
-		CFCA11260CAF9B4F62B79FD8 /* QuickCaptureParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureParser.swift; sourceTree = "<group>"; };
 		D1C48657562CC9C603C6F6D3 /* MainMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
 		D58237340FEDA8330FA07488 /* ProjectLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLifecycle.swift; sourceTree = "<group>"; };
 		D69731046CF949BED6A9B753 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
@@ -229,12 +225,10 @@
 			isa = PBXGroup;
 			children = (
 				BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */,
-				A1D4F0C7B2E14A0396E7C552 /* TaskSearch.swift */,
 				8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */,
 				A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */,
 				E74CA79CC5C0C4EB37ED23A6 /* QuickBarModel.swift */,
 				9BDD9B8754E40B208A0F9C01 /* QuickBarView.swift */,
-				CFCA11260CAF9B4F62B79FD8 /* QuickCaptureParser.swift */,
 			);
 			path = QuickBar;
 			sourceTree = "<group>";
@@ -462,7 +456,6 @@
 				9563B3FC2439B4B4F7EE402F /* ProjectLifecycle.swift in Sources */,
 				C4A9E3D04122D318D057D921 /* ProjectPrompts.swift in Sources */,
 				293A88CB3E2076E821D917BE /* ProjectSearch.swift in Sources */,
-				A1D4F0C7B2E14A0396E7C551 /* TaskSearch.swift in Sources */,
 				D8BE24F0CFAEE72661EA688E /* ProjectSidebar.swift in Sources */,
 				396821A7CF9BC94AE29C9E43 /* ProjectSplitViewController.swift in Sources */,
 				86788960127F77B65F99A9FE /* ProjectView.swift in Sources */,
@@ -474,7 +467,6 @@
 				CA4CB349CDB748A305F51EDD /* QuickBarController.swift in Sources */,
 				FF58487E92C6B650E24FFD65 /* QuickBarModel.swift in Sources */,
 				AAAF6507409F6CA721D56F2F /* QuickBarView.swift in Sources */,
-				C626452B7ABE8EB3189C3B3D /* QuickCaptureParser.swift in Sources */,
 				1702ADEBF7B5049CEA3DC46B /* RelativeDue.swift in Sources */,
 				7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */,
 				C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */,

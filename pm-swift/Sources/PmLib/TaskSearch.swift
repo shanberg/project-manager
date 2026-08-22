@@ -1,5 +1,19 @@
 import Foundation
 
+/// What ranking needs to know about a task, so the same ranking serves a live scan and a cached one.
+///
+/// The macOS app keeps a warmed index of every project's open tasks and doesn't want it re-read to
+/// search it; the CLI and a model have no index and want the answer now. Both conform.
+public protocol SearchableTask {
+    var text: String { get }
+    /// Whether this is its project's focused task, which floats it up the ranking.
+    var isFocused: Bool { get }
+    var isArchived: Bool { get }
+    /// The project this task belongs to, for the tie-break toward the one you're already in.
+    var projectKey: String { get }
+}
+
+
 /// Ranks open tasks against what's been typed into the quick bar's `/` mode.
 ///
 /// Separate from `ProjectSearch` because the two are matching different kinds of string. A project is
@@ -7,17 +21,17 @@ import Foundation
 /// Maxwell Carmody". A task is a sentence somebody wrote, and what you remember of it is words:
 /// "audit dana", not "audna". So this splits the query on spaces and asks every word to appear
 /// somewhere, in any order, which is how you actually recall a line you wrote three weeks ago.
-enum TaskSearch {
+public enum TaskSearch {
     /// Matches for `query`, best first. An empty query matches nothing — the caller shows the focused
     /// project's own tasks instead, which is a different list with a different order.
-    static func rank(_ tasks: [ProjectIndex.TaskEntry], query: String,
-                     focusedProjectKey: String?) -> [ProjectIndex.TaskEntry] {
+    public static func rank<Task: SearchableTask>(_ tasks: [Task], query: String,
+                                                 focusedProjectKey: String?) -> [Task] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return [] }
         let words = needle.split(separator: " ").map(String.init)
         guard !words.isEmpty else { return [] }
         return tasks
-            .compactMap { task -> (task: ProjectIndex.TaskEntry, score: Int)? in
+            .compactMap { task -> (task: Task, score: Int)? in
                 guard let score = score(task, needle: needle, words: words,
                                        focusedProjectKey: focusedProjectKey) else { return nil }
                 return (task, score)
@@ -32,8 +46,8 @@ enum TaskSearch {
     /// mean, and letting it through is how a list of one right answer becomes a list of nine wrong
     /// ones. The words are then averaged rather than summed, so a two-word query and a five-word one
     /// produce scores in the same range and the bonuses below mean the same thing in both.
-    static func score(_ task: ProjectIndex.TaskEntry, needle: String, words: [String],
-                      focusedProjectKey: String?) -> Int? {
+    public static func score(_ task: some SearchableTask, needle: String, words: [String],
+                             focusedProjectKey: String?) -> Int? {
         let text = task.text.lowercased()
         var total = 0
         for word in words {
@@ -99,4 +113,59 @@ enum TaskSearch {
         }
         return remaining.isEmpty
     }
+}
+
+/// A task found by a search, with everything needed to act on it next.
+///
+/// The contract's search result. It carries the reference — session date, line, digest — because a
+/// search that made you look the task up again before doing anything with it would be half an answer.
+public struct TaskSearchHit: Codable, Equatable, SearchableTask {
+    public let projectFolder: String
+    public let projectName: String
+    public let projectKey: String
+    public let isArchived: Bool
+    public let text: String
+    public let due: String?
+    public let isFocused: Bool
+    public let session: String?
+    public let line: Int
+    public let digest: String?
+}
+
+/// Every open task in every project, for a search with no index behind it.
+///
+/// The macOS app keeps a warmed index and doesn't call this; the CLI and a model have nothing warmed
+/// and would rather pay one scan than maintain one. A project whose notes can't be read is skipped
+/// rather than failing the search — one unreadable file shouldn't hide every other project's work.
+public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = true) throws -> [TaskSearchHit] {
+    let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
+    let codes = Array(config.domains.keys)
+    var bases: [(String, Bool)] = []
+    if includeActive { bases.append((paths.activePath, false)) }
+    if includeArchived { bases.append((paths.archivePath, true)) }
+
+    var hits: [TaskSearchHit] = []
+    for (base, archived) in bases {
+        for folder in (try? getProjectFolders(basePath: base, domainCodes: codes)) ?? [] {
+            let projectPath = (base as NSString).appendingPathComponent(folder)
+            guard let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil,
+                  let rawText = try? String(contentsOfFile: notesPath, encoding: .utf8),
+                  let notes = try? parseNotes(markdown: rawText),
+                  let todos = try? parseTodos(notes: normalizeFocusMarker(notes: notes)) else { continue }
+            for todo in todosWithEffectiveDueDates(todos) where !todo.checked {
+                hits.append(TaskSearchHit(
+                    projectFolder: folder,
+                    projectName: projectTitle(fromFolderName: folder),
+                    projectKey: "\(base):\(folder)",
+                    isArchived: archived,
+                    text: todo.text,
+                    due: todo.effectiveDueDate ?? todo.dueDate,
+                    isFocused: todo.isFocused,
+                    session: todo.sessionISODate,
+                    line: todo.lineIndex,
+                    digest: todo.digest))
+            }
+        }
+    }
+    return hits
 }
