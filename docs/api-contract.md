@@ -1,0 +1,148 @@
+# A shared contract for PM's surfaces
+
+**Status:** proposed, 2026-08-22. Nothing here is implemented. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+
+## The problem
+
+PM's domain is implemented once, in PmLib, and then spoken about in five different dialects.
+
+| Surface | Reaches the domain by | Adds |
+|---|---|---|
+| `pm` CLI | argv → `NotesService` | JSON only from `notes show`; everything else is prose and an exit code |
+| Raycast | spawning `pm`, parsing stdout | **re-implements domain logic in TypeScript** |
+| Mac app | linking PmLib in-process | undo/redo, focus animation, project index, recents |
+| App Intents | linking PmLib in-process | entities with stable ids, disambiguation |
+| MCP | — | doesn't exist yet |
+
+Alongside them, `~/.config/pm/` holds `focused.json`, `recent-projects.json`, `task-timing.json` and `panel-settings.json` — an unversioned bus that three of the five read and write directly, with no shared definition of what's in it.
+
+### The drift is already measurable
+
+- `pm-mac/PM/Model/RelativeDue.swift` states in its own header that it was "ported from the Raycast extension's `format-relative-due.ts` so both surfaces read identically". Two implementations of one function, kept in agreement by hand.
+- `raycast-extension/src/lib/notes-api.ts` hand-mirrors `Todo`, `ProjectNotes` and `NotesShowOutput` as TypeScript interfaces, then re-derives `getEffectiveDue` — which is `todosWithEffectiveDueDates` in Swift, already written and already tested. Forgetting to apply that exact function is what produced spurious retiming marks in the quick bar preview last week.
+- `formatSessionDate` and `stripInlineDueFromText` exist on both sides; the latter duplicates `TaskContent.split`, the file that exists precisely so nothing re-derives task-line structure itself.
+- `TaskTiming.swift` says it "shares its schema with the Raycast extension's `task-timing`". It doesn't: the Raycast module writes to Raycast's `LocalStorage` rather than the config dir, keys on `notesPath::rawLine` where Swift keys on `notesPath::sessionIndex:lineIndex`, and has no callers anywhere in `src/`. A sharing claim in a comment is not a contract.
+
+There are also four spellings of two identities in circulation: `basePath:name` for a project, `sessionIndex:lineIndex` for a task, `sessionIndex:lineIndex\u{1F}projectKey` inside `TaskEntity.id`, and `notesPath::…` for timing.
+
+None of this is carelessness. It's what happens when the only shared artifact is a binary whose output format is documented by reading its source.
+
+## Shape: one dispatcher, four adapters
+
+A single entry point in PmLib:
+
+```
+perform(action, input, options) -> Result
+```
+
+Everything else is an adapter over it.
+
+- **In-process** — the Mac app and App Intents call the dispatcher with native Swift types. No JSON, no subprocess. The app keeps calling PmLib directly, which is what lets it animate; the contract must not turn a function call into a process spawn.
+- **argv / JSON** — `pm api call task.complete '{…}'`, used by Raycast, plus the existing human-facing subcommands kept as aliases.
+- **stdio JSON-RPC** — `pm api serve`. The MCP server is this process, or a thin wrapper spawning it.
+- **URL scheme** — `pmpanel://`, for the tier-3 affordances below.
+
+`PMStore` becomes a cache, an undo stack and a focus-move classifier layered over the dispatcher, rather than a second implementation of the same operations.
+
+## The binary describes itself
+
+`pm api describe` returns a manifest: every entity, every action, and a JSON Schema for each action's input and result.
+
+The MCP tool list is **generated** from that manifest at startup. So are the CLI's flags, and Raycast's typed client. An MCP tool cannot drift from the CLI, because one is derived from the other rather than maintained beside it. This is the mechanism that makes "the same contract everywhere" a property of the system instead of a discipline — and discipline is exactly what the four bullets above show doesn't hold.
+
+The manifest carries a contract version. Clients assert a minimum and fail with "update pm" in one place, replacing the silent-fallback pattern in `getPmConfig`, which currently degrades to reading `config.json` when the CLI is too old and tells nobody.
+
+## Actions, in three tiers
+
+Only tiers 1 and 2 are published to every adapter.
+
+**Tier 1 — mutations.** Pure domain, work headless, mean the same thing everywhere.
+
+```
+task.add          task.complete    task.reopen      task.focus
+task.diveIn       task.setDue      task.setText     task.wrap
+task.unwrap       task.move        task.delete
+session.start     session.note     session.rename   session.delete   session.prune
+notes.setDetails  notes.addLink
+project.create    project.rename   project.archive  project.unarchive  project.focus
+config.set
+```
+
+**Tier 2 — queries.** No side effects.
+
+```
+project.list   project.get     notes.get      task.list
+task.search    task.whatsDue   task.progress  focus.get
+capture.parse  config.get
+```
+
+`capture.parse` exposes `QuickCaptureParser` — the `due:` and trailing `@project` shorthand — as a pure function, so a model can use the same phrasing the quick bar accepts instead of inventing its own.
+
+**Tier 3 — affordances.** Requests to a running app, not domain operations: `openWindow`, `openInFinder`, `openInObsidian`, `showPanel`, `settings`. Published only to the in-process and URL adapters. MCP does not get them.
+
+This means `pm api describe` will list fewer things than the quick bar's `>` menu shows, which is correct: that menu deliberately mixes doing with going.
+
+## Every mutation returns the same envelope
+
+```
+{
+  revision,                        // mtime + content hash of the notes file
+  summary,                         // one human sentence
+  changed: [ { ref, was, now } ],  // structured diff
+  focus,                           // where focus ended up, if it moved
+  relocated                        // a TaskRef healed against drift; see task-identity.md
+}
+```
+
+`summary` is the Mac app's receipt line, Raycast's HUD, and the sentence a model reads back. `changed` is what a UI draws.
+
+**And `dryRun: true` on any mutation returns that same envelope without writing.** The quick bar preview already does this by hand — it runs the real transform against a copy and diffs — which is why the preview can't disagree with the write. Promoting it into the contract makes that property available to every surface: Raycast can show a change before committing it, and a model can check its own reference before acting.
+
+## Errors are typed
+
+Today: `PmError`, exit 1, prose on stderr. Published instead as a code, a message, and structured data:
+
+```
+projectNotFound    ambiguousProject (with candidates)   notesNotFound
+staleReference     conflict                             invalidDue
+emptyText          configNotFound                       unsupportedAction
+```
+
+`ambiguousProject` carrying its candidates is what lets a model disambiguate in one round trip instead of failing. `staleReference` is defined in [task-identity.md](task-identity.md).
+
+## Vocabulary collisions to settle first
+
+These are tolerable in a menu, where context disambiguates. They are a real failure mode when they become tool names a model picks between.
+
+| Word | Means | Proposed |
+|---|---|---|
+| `undo` | reopen a completed task (`undoTodo`) | `task.reopen` |
+| `undo` | the app's document undo stack (`PMStore.undo`) | `history.undo` |
+| `focus` | which project is current | `project.focus` |
+| `focus` | which task is "now" | `task.focus` |
+| `add` / `narrow` / `dive in` | three verbs, overlapping meanings | keep all three, define each in the manifest description |
+
+The App Intents names are already user-facing English and mostly right; where the CLI and the quick bar disagree with them, the Intents spelling wins and the others become aliases.
+
+## Transport, and why not a daemon
+
+Stateless, one process per call, no long-lived server.
+
+The notes file is markdown that the user also edits in Obsidian and by hand. No process can claim ownership of it, so a serving daemon would be asserting something untrue about the world. Statelessness plus per-task digests is the honest model. If streaming is ever wanted, it's `pm api watch` emitting NDJSON — not a daemon holding state.
+
+## What has to give
+
+- **Raycast's re-derived domain logic gets deleted** — `getEffectiveDue`, `getNextDueForProject`, `stripInlineDueFromText`, `formatSessionDate`. These become fields on the contract's payloads.
+- **Display strings move into the contract.** Payloads carry both `due: "2026-09-01"` and `dueDisplay: "in 2w"`, computed with a caller-supplied `now`. This is the one place the design deliberately mixes data and presentation, and it's the trade recorded below.
+- **The config-dir files get schema'd** and read through the contract (`focus.get`, `project.list`) rather than by three separate JSON parsers.
+- **`pm notes write`'s whole-document path** stays internal. It falls back to a full re-serialize that drops frontmatter, so it should never be a published action.
+
+## Open questions
+
+**1. Display strings in the contract, or per-surface formatting?** Carrying them kills the `RelativeDue` / `format-relative-due` duplication, at the cost of a data contract that knows about words and needs `now` as an input. Recommendation: carry them. "in 2w" is domain vocabulary in this app — it is the same phrasing `QuickCaptureParser` reads *back*.
+
+**2. How much of `PMStore` moves?** The mutations clearly do. Undo/redo, the focus-move classifier and the project index are app concerns and should stay. The boundary needs drawing before any code moves.
+
+**3. Does the MCP get write access by default?** Proposal: reads unrestricted, writes behind a scope, and destructive actions (`task.delete`, `session.delete`, `project.archive`) behind a second one. Paired with the mutation journal so anything a model did can be reviewed and reversed.
+
+**4. Where does the mutation journal live?** `~/.config/pm/journal.ndjson`, appended by the dispatcher, before/after digests per entry. It closes a real hole — undo is currently in-memory and app-only, so nothing can reverse a write made by Raycast, the CLI, or a model. Retrofitting it later means the journal starts with gaps.

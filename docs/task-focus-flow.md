@@ -7,6 +7,8 @@ This doc describes how the **focused task** (the single “now” task per proje
 - **In notes:** One task line in the project notes file ends with ` @` (space + `@`). No other task line has this suffix. The parser treats the first such line (by session order, then line order) as focused; any others are normalized away.
 - **In code:** The focused task is the one with `isFocused: true` (parsed from that line). The CLI’s `notes show` output includes `focusedKey` (e.g. `"sessionIndex:lineIndex"`).
 
+That `sessionIndex:lineIndex` pair is positional, and it is not stable across writes from another surface — see [task-identity.md](task-identity.md).
+
 ### Line format
 
 A task line is `<indent>- [ ] <text> due: <date> @` — the inline `due:` comes **before** the focus marker, and the marker is always last. `TaskContent` (`pm-swift/Sources/PmLib/NotesTodos.swift`) is the single place that reads and writes this; it also accepts the reverse order (`<text> @ due: <date>`) so a line written by an older client still parses, and re-emits it canonically, repairing the line the next time the notes are edited.
