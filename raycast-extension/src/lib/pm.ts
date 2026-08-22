@@ -394,7 +394,7 @@ export async function runPmWithPrefs(
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   if (
-    args[0] === "notes" &&
+    (args[0] === "notes" || args[0] === "api") &&
     ("useObsidianCLI" in prefs ||
       "obsidianVault" in prefs ||
       "obsidianVaultRoot" in prefs)

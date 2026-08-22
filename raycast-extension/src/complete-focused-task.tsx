@@ -34,14 +34,16 @@ export default async function Command() {
       return;
     }
     await saveUndoState(notesPath, parsed.name, nextTodo);
-    await completeAndAdvanceInNotes(
+    // The contract's own sentence — it knows about the subtree that went with it and where focus
+    // landed, which "Done: <task>" couldn't say without working it out a second time here.
+    const summary = await completeAndAdvanceInNotes(
       prefs,
       parsed.name,
       out.notes,
       out.todos,
       nextTodo,
     );
-    await showHUD(`Done: ${nextTodo.text.slice(0, 40)}`);
+    await showHUD(summary);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await showHUD(`Error: ${msg}`);

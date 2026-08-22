@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** the dispatcher, the manifest, and the argv and MCP adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The remaining adapters — the Raycast client and the in-process one — are not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** the dispatcher, the manifest, and the argv, MCP and Raycast adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The in-process adapter — the one that would let the panel and App Intents stop calling `NotesService` directly — is not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -9,7 +9,7 @@ PM's domain is implemented once, in PmLib, and then spoken about in five differe
 | Surface | Reaches the domain by | Adds |
 |---|---|---|
 | `pm` CLI | argv → `NotesService` | JSON only from `notes show`; everything else is prose and an exit code |
-| Raycast | spawning `pm`, parsing stdout | **re-implements domain logic in TypeScript** |
+| Raycast | `pm api call`, types generated from the manifest | nothing — the re-implemented logic is gone |
 | Mac app | linking PmLib in-process | undo/redo, focus animation, project index, recents |
 | App Intents | linking PmLib in-process | entities with stable ids, disambiguation |
 | MCP (`pm mcp`) | the dispatcher, directly | a stricter published schema |
@@ -133,7 +133,7 @@ The notes file is markdown that the user also edits in Obsidian and by hand. No 
 
 ## What has to give
 
-- **Raycast's re-derived domain logic gets deleted** — `getEffectiveDue`, `getNextDueForProject`, `stripInlineDueFromText`, `formatSessionDate`. These become fields on the contract's payloads.
+- **Raycast's re-derived domain logic gets deleted.** *Done* for `getEffectiveDue`, which now reads the field the contract computes. `getNextDueForProject` is a fold over it and stays; `stripInlineDueFromText` and `formatSessionDate` remain, and want `capture.parse` and a formatted session date on the payload before they can go.
 - **Display strings move into the contract.** Payloads carry both `due: "2026-09-01"` and `dueDisplay: "in 2w"`, computed with a caller-supplied `now`. This is the one place the design deliberately mixes data and presentation, and it's the trade recorded below.
 - **The config-dir files get schema'd** and read through the contract (`focus.get`, `project.list`) rather than by three separate JSON parsers.
 - **`pm notes write`'s whole-document path** stays internal. It falls back to a full re-serialize that drops frontmatter, so it should never be a published action.
@@ -170,10 +170,25 @@ Scopes answer the third open question below: queries are always available, `--al
 
 Failures come back as content with `isError` rather than a JSON-RPC error, since the call reached the tool and the tool refused — something the model should act on, not a transport fault. The message leads with the error code, because `staleReference` means read again and retry, which is a different move from a project that doesn't exist.
 
+### The Raycast client
+
+Two files and a generator. `scripts/generate-api-types.mjs` reads `pm api describe` and writes `src/lib/pm-api.generated.ts` — an input type per action, a `Record` of tiers, and the contract version. `src/lib/pm-api.ts` is the transport and the envelope. `notes-api.ts` keeps its exported shape, so no command file changed, but every function in it is now one action name instead of a composition of `pm notes todo …` flags.
+
+The generated file is committed, because `ray build` doesn't run codegen. What keeps it honest is a test that regenerates from whatever `pm` is installed and compares — so an action added to the contract and not regenerated here fails on the next test run rather than when something finally calls it. It skips when `pm` isn't on PATH, so the extension's tests still run without it.
+
+What actually went away:
+
+- **`getEffectiveDue`** walked the ancestor chain in TypeScript. It reads `effectiveDueDate` now — the field `todosWithEffectiveDueDates` already computes.
+- **`todoAddress`** composed session/line/digest into CLI flags. Tasks are named by a `TaskRef` object.
+- **The insert arithmetic.** `insertTodoViaCli` predicted where a new task would land (`anchorLine + 1`, with a comment explaining that `before` inserts into the anchor's own slot). The envelope reports the added task's reference, so the task is *found* by digest rather than calculated.
+- **The whole-document write.** `writeNotes` sent the entire `ProjectNotes` to `pm notes write`, which falls back to a full re-serialize when it can't splice, dropping frontmatter. It diffs against what's on disk and sends one `notes.setDetail` per changed section; a change to something the contract can't set raises rather than silently not saving.
+- **`Done: <task>`** as a HUD string. Completion shows the envelope's `summary`, which knows about the subtree that went with it and where focus landed.
+
+There are seven integration tests that run the client against the real binary rather than a mock of it, because the unit tests only prove the extension is consistent with what it believes the wire format to be.
+
 ## Still to build
 
 - **The in-process adapter**, so the panel and App Intents call the dispatcher instead of `NotesService`. This is where the `PMStore` boundary question below gets answered.
-- **The Raycast client**, generated or hand-written against the manifest, replacing its own spawn-and-parse.
 - **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
 - **Bulk operations and the document revision.** `revision` is in the envelope and nothing consumes it yet; `toggleAll`, `setDueAll` and subtree deletes are the actions that need it.
 - **The mutation journal.**

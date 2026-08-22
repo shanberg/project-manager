@@ -108,7 +108,13 @@ export default function Command() {
       return;
     }
     try {
-      await editTodoInNotes(prefs, data!.projectName, data!.notes, nowTask, text);
+      await editTodoInNotes(
+        prefs,
+        data!.projectName,
+        data!.notes,
+        nowTask,
+        text,
+      );
       if (values.dueDate != null) {
         await updateDueDateInNotes(
           prefs,

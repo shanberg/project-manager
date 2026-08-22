@@ -322,7 +322,8 @@
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate-api": "node scripts/generate-api-types.mjs"
   },
   "platforms": [
     "macOS"

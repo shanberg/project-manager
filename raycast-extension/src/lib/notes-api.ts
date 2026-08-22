@@ -1,21 +1,15 @@
 /**
- * Notes API via pm CLI (pm notes show / pm notes write).
- * Types match Swift PmLib JSON output.
+ * A project's notes, through pm's contract.
  *
- * Task-line edits (add / due / text / wrap / complete / undo / focus) all go through
- * `pm notes todo …`, which owns the on-disk task format: the canonical `<text> due: <date> @`
- * ordering, the single focus marker, and format-preserving line splicing. Doing that surgery here
- * instead would mean a second implementation of the format — and a full-document rewrite via
- * `pm notes write`, which drops frontmatter and any section the model doesn't capture. `writeNotes`
- * is therefore only for the detail sections (summary/problem/goals/approach/links/learnings).
+ * Every read and write here is one action name and one result shape — `pm api call <action>`. This
+ * file used to compose `pm notes todo …` flags itself and re-derive parts of the domain in
+ * TypeScript (effective due dates, the task-line format); both are gone. The inputs are generated
+ * from `pm api describe` into `pm-api.generated.ts`, so what this believes an action takes comes
+ * from the binary rather than being maintained alongside it. See docs/api-contract.md.
  */
 
-import {
-  buildEnv,
-  runPmWithPrefs,
-  runPmWithStdin,
-  syncObsidianPrefsToPmConfig,
-} from "./pm";
+import { callApi } from "./pm-api";
+import type { ApiResult, TaskRef } from "./pm-api";
 import type { PreferenceValues } from "./types";
 
 export interface LinkEntry {
@@ -79,37 +73,14 @@ function dueDateSortKey(s: string): string {
 }
 
 /**
- * Effective due for a todo: earliest due among own and all ancestors (nearest deadline).
- * Use when CLI does not provide effectiveDueDate (e.g. older pm) or to double-check.
+ * Effective due for a todo: its own, or the nearest deadline inherited from an ancestor.
+ *
+ * Read from the field pm computes rather than derived again here. This used to walk the ancestors
+ * itself, which is `todosWithEffectiveDueDates` in Swift written a second time in a second language —
+ * exactly the duplication the contract exists to remove.
  */
-export function getEffectiveDue(todos: Todo[], todo: Todo): string | null {
-  const sessionIndex = todo.sessionIndex ?? 0;
-  const sessionTodos = todos
-    .filter((t) => (t.sessionIndex ?? 0) === sessionIndex)
-    .sort((a, b) => (a.lineIndex ?? 0) - (b.lineIndex ?? 0));
-  const idx = sessionTodos.findIndex(
-    (t) =>
-      t.lineIndex === todo.lineIndex && t.sessionIndex === todo.sessionIndex,
-  );
-  const candidates: string[] = [];
-  if (todo.dueDate) candidates.push(todo.dueDate);
-  if (idx >= 0) {
-    let currentDepth = todo.depth ?? 0;
-    let i = idx - 1;
-    while (i >= 0) {
-      const d = sessionTodos[i].depth ?? 0;
-      if (d < currentDepth) {
-        const due = sessionTodos[i].dueDate;
-        if (due) candidates.push(due);
-        currentDepth = d;
-      }
-      i--;
-    }
-  }
-  if (candidates.length === 0) return null;
-  return candidates.reduce((a, b) =>
-    dueDateSortKey(a) < dueDateSortKey(b) ? a : b,
-  );
+export function getEffectiveDue(_todos: Todo[], todo: Todo): string | null {
+  return todo.effectiveDueDate ?? todo.dueDate ?? null;
 }
 
 /**
@@ -151,13 +122,14 @@ export async function fetchNotes(
   prefs: PreferenceValues,
 ): Promise<NotesShowOutput | null> {
   try {
-    const { stdout } = await runPmWithPrefs(prefs, [
-      "notes",
-      "show",
-      projectName,
-    ]);
-    if (!stdout.trim()) return null;
-    return JSON.parse(stdout.trim()) as NotesShowOutput;
+    const result = await callApi<"notes.get", NotesShowOutput>(
+      prefs,
+      "notes.get",
+      {
+        project: projectName,
+      },
+    );
+    return result.data ?? null;
   } catch {
     return null;
   }
@@ -194,13 +166,14 @@ export async function getNotes(
   projectName: string,
   signal?: AbortSignal,
 ): Promise<NotesShowOutput> {
-  const { stdout, stderr } = await runPmWithPrefs(
+  const result = await callApi<"notes.get", NotesShowOutput>(
     prefs,
-    ["notes", "show", projectName],
-    signal,
+    "notes.get",
+    { project: projectName },
+    { signal },
   );
-  const parsed = JSON.parse(stdout.trim()) as NotesShowOutput;
-  if (!parsed?.notes) throw new Error(stderr || "Invalid notes response");
+  const parsed = result.data;
+  if (!parsed?.notes) throw new Error("Invalid notes response");
 
   const firstLeaf = firstOpenLeaf(parsed.todos ?? []);
   if (
@@ -218,137 +191,99 @@ export async function getNotes(
   return parsed;
 }
 
-/** Write notes back via pm notes write (stdin JSON). */
+/**
+ * Write changed detail sections back, one action each.
+ *
+ * This used to send the whole document to `pm notes write`, which falls back to a full re-serialize
+ * when it can't splice — dropping frontmatter and anything the model doesn't capture. The contract
+ * has no whole-document action for exactly that reason, so this diffs against what's on disk and
+ * sends only what changed. A change to something the contract can't set is an error rather than a
+ * silent no-op, because a form that says it saved and didn't is the worse failure.
+ */
 export async function writeNotes(
   prefs: PreferenceValues,
   projectName: string,
   notes: ProjectNotes,
 ): Promise<void> {
-  await syncObsidianPrefsToPmConfig(prefs);
-  const { stderr, code } = await runPmWithStdin(
-    ["notes", "write", projectName],
-    buildEnv(prefs),
-    prefs.pmCliPath,
-    JSON.stringify(notes),
-  );
-  if (code !== 0) throw new Error(stderr || "pm notes write failed");
-}
+  const current = await getNotes(prefs, projectName);
+  const text = ["title", "summary", "problem", "approach"] as const;
+  const lists = ["goals", "learnings"] as const;
 
-/** Position of a todo as pm indexes them: session, then task line within that session. */
-/**
- * How a task is named on the command line: `<session> <line>`, plus a `--digest` when we have one.
- *
- * The session is its ISO date wherever the CLI gave us one. Sessions are newest-first and a new one
- * is spliced in at the top, so starting a session — which quick add does by itself, first thing each
- * day — renumbers every session below it. A list rendered before that and clicked after it would
- * otherwise act on whatever task had moved into the position.
- *
- * The digest is the text we believe the task has. Between rendering a list and clicking a row, a task
- * can be inserted or deleted above it, and the CLI uses the digest to notice and to find the task
- * where it has actually gone. Without one it acts on the position and hopes, which is what this
- * extension did until now. See docs/task-identity.md.
- */
-function todoAddress(todo: Todo): {
-  session: string;
-  line: string;
-  digestArgs: string[];
-} {
-  return {
-    session: todo.sessionISODate ?? String(todo.sessionIndex ?? 0),
-    line: String(todo.lineIndex ?? 0),
-    digestArgs: todo.digest ? ["--digest", todo.digest] : [],
-  };
-}
-
-/** Run a `pm notes todo <sub> …` command. Throws with the CLI's own message on failure. */
-async function runTodoCommand(
-  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
-  sub: string,
-  args: string[],
-): Promise<void> {
-  const { stderr, code } = await runPmWithPrefs(prefs, [
-    "notes",
-    "todo",
-    sub,
-    ...args,
-  ]);
-  if (code !== 0) {
-    throw new Error(stderr.trim() || `pm notes todo ${sub} failed`);
+  for (const key of text) {
+    if (notes[key] !== current.notes[key]) {
+      await callApi(prefs, "notes.setDetail", {
+        project: projectName,
+        key,
+        value: notes[key],
+      });
+    }
+  }
+  for (const key of lists) {
+    if (JSON.stringify(notes[key]) !== JSON.stringify(current.notes[key])) {
+      await callApi(prefs, "notes.setDetail", {
+        project: projectName,
+        key,
+        value: notes[key],
+      });
+    }
+  }
+  if (JSON.stringify(notes.links) !== JSON.stringify(current.notes.links)) {
+    throw new Error(
+      "Links are changed with addLinkToNotes, not by writing the whole document.",
+    );
   }
 }
 
-/** Complete a todo and its descendants via pm notes todo complete. */
-async function completeTodoViaCli(
-  prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
-  projectName: string,
-  todo: Todo,
-  advanceFocus: boolean,
-): Promise<void> {
-  const { session, line, digestArgs } = todoAddress(todo);
-  const args = [projectName, session, line, ...digestArgs];
-  if (!advanceFocus) args.push("--no-advance");
-  await runTodoCommand(prefs, "complete", args);
-}
-
-/**
- * Insert a task via `pm notes todo add` and return the notes as they are on disk afterwards, plus
- * the todo now sitting at `resultIndex` — the caller's next anchor. pm inserts a `before` task into
- * the anchor's own slot (pushing the anchor down one) and an `after`/`child` task into the slot right
- * below it, so the caller can name which of the two it wants back.
- */
-async function insertTodoViaCli(
-  prefs: PreferenceValues,
-  projectName: string,
-  anchor: Todo,
-  text: string,
-  dueDate: string | null | undefined,
-  position: "before" | "after" | "child",
-  resultIndex: (anchorLineIndex: number) => number,
-): Promise<{ notes: ProjectNotes; todo: Todo }> {
-  const { session, line, digestArgs } = todoAddress(anchor);
-  const args = [projectName, text, ...digestArgs];
-  if (dueDate) args.push("--due", dueDate);
-  args.push(`--${position}`, session, line);
-  await runTodoCommand(prefs, "add", args);
-
-  const data = await getNotes(prefs, projectName);
-  const wantedSession = anchor.sessionIndex ?? 0;
-  const wantedLine = resultIndex(anchor.lineIndex ?? 0);
-  const found = data.todos.find(
-    (t) =>
-      (t.sessionIndex ?? 0) === wantedSession &&
-      (t.lineIndex ?? 0) === wantedLine,
-  );
-  return {
-    notes: data.notes,
-    todo: found ?? {
-      ...anchor,
-      sessionIndex: wantedSession,
-      lineIndex: wantedLine,
-    },
-  };
-}
-
-/** Get notes file path via pm notes path. */
+/** The project's notes file on disk, or null if it hasn't got one. */
 export async function resolveNotesPath(
   prefs: PreferenceValues,
   projectName: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
   try {
-    const { stdout } = await runPmWithPrefs(
+    const result = await callApi<"project.get", { notesPath?: string | null }>(
       prefs,
-      ["notes", "path", projectName],
-      signal,
+      "project.get",
+      { project: projectName },
+      { signal },
     );
-    const p = stdout.trim();
-    return p || null;
+    return result.data?.notesPath ?? null;
   } catch {
     return null;
   }
 }
 
-/** Toggle one todo in notes (flip [ ] <-> [x]). Check uses CLI complete; uncheck uses CLI undo. */
+/**
+ * How a task is named to the contract: its session's ISO date, its line, and its digest.
+ *
+ * All three come from the read and go back unchanged. The digest is what lets pm notice that the
+ * document moved between the two — a session started, a task inserted above — and act on the task we
+ * meant rather than whatever now sits at that position. See docs/task-identity.md.
+ */
+function taskRef(todo: Todo): TaskRef {
+  return {
+    session: todo.sessionISODate ?? String(todo.sessionIndex ?? 0),
+    line: todo.lineIndex ?? 0,
+    digest: todo.digest ?? undefined,
+  };
+}
+
+/** The task an action reports adding, found in the notes afterwards by the digest pm gave back. */
+async function addedTodo(
+  prefs: PreferenceValues,
+  projectName: string,
+  result: ApiResult,
+  fallback: Todo,
+): Promise<{ notes: ProjectNotes; todo: Todo }> {
+  const digest = result.changed.find((c) => c.kind === "added")?.ref?.digest;
+  const data = await getNotes(prefs, projectName);
+  const found = digest
+    ? data.todos.find((t) => t.digest === digest)
+    : undefined;
+  return { notes: data.notes, todo: found ?? fallback };
+}
+
+/** Toggle one todo (flip [ ] <-> [x]). */
 export async function toggleTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -356,29 +291,40 @@ export async function toggleTodoInNotes(
   todo: Todo,
 ): Promise<void> {
   if (todo.checked) {
-    await undoCompleteInNotes(prefs, projectName, _notes, todo);
+    await callApi(prefs, "task.reopen", {
+      project: projectName,
+      task: taskRef(todo),
+    });
   } else {
-    await completeTodoViaCli(prefs, projectName, todo, false);
+    await callApi(prefs, "task.complete", {
+      project: projectName,
+      task: taskRef(todo),
+      advanceFocus: false,
+    });
   }
 }
 
-/** Complete every open todo in the list, leaving focus where it is. Uses CLI. */
+/** Complete every open todo in the list, leaving focus where it is. */
 export async function toggleAllTodosInNotes(
   prefs: PreferenceValues,
   projectName: string,
   _notes: ProjectNotes,
   todos: Todo[],
 ): Promise<void> {
-  // Completing a task also completes its descendants, and checking a line never shifts any line
-  // index — so the positions captured before the loop stay valid, and a task already completed by an
-  // earlier parent is simply a no-op.
+  // Completing a task completes its descendants, so a task an earlier parent already closed is a
+  // no-op — and each reference carries its digest, so the ones further down still resolve after the
+  // lines above them have changed.
   for (const todo of todos) {
     if (todo.checked) continue;
-    await completeTodoViaCli(prefs, projectName, todo, false);
+    await callApi(prefs, "task.complete", {
+      project: projectName,
+      task: taskRef(todo),
+      advanceFocus: false,
+    });
   }
 }
 
-/** Set or remove the inline due date on a task. Uses CLI. */
+/** Set or remove the inline due date on a task. */
 export async function updateDueDateInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -386,17 +332,14 @@ export async function updateDueDateInNotes(
   todo: Todo,
   dueDate: string | null,
 ): Promise<void> {
-  const { session, line, digestArgs } = todoAddress(todo);
-  await runTodoCommand(prefs, "due", [
-    projectName,
-    session,
-    line,
-    dueDate ?? "--clear",
-    ...digestArgs,
-  ]);
+  await callApi(prefs, "task.setDue", {
+    project: projectName,
+    task: taskRef(todo),
+    ...(dueDate ? { due: dueDate } : { clearDue: true }),
+  });
 }
 
-/** Add a todo to today's session (creating it if missing) and focus it. Uses CLI. */
+/** Add a task to today's session, creating the session if there isn't one. */
 export async function addTodoToTodaySession(
   prefs: PreferenceValues,
   projectName: string,
@@ -405,12 +348,14 @@ export async function addTodoToTodaySession(
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0) return;
-  const args = [projectName, trimmed];
-  if (dueDate) args.push("--due", dueDate);
-  await runTodoCommand(prefs, "add", args);
+  await callApi(prefs, "task.add", {
+    project: projectName,
+    text: trimmed,
+    ...(dueDate ? { due: dueDate } : {}),
+  });
 }
 
-/** Append a note to today's session (creating the session if missing). Uses CLI. */
+/** Append a note to today's session (creating the session if missing). */
 export async function appendNoteToTodaySession(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   projectName: string,
@@ -418,20 +363,14 @@ export async function appendNoteToTodaySession(
 ): Promise<void> {
   const trimmed = note.trim();
   if (trimmed.length === 0) return;
-  const { stderr, code } = await runPmWithPrefs(prefs, [
-    "notes",
-    "session",
-    "note",
-    projectName,
-    trimmed,
-  ]);
-  if (code !== 0) {
-    throw new Error(stderr.trim() || "pm notes session note failed");
-  }
+  await callApi(prefs, "session.note", {
+    project: projectName,
+    prose: trimmed,
+  });
 }
 
-/** Add a todo before the given todo, at the same hierarchy level. Uses CLI. Returns the notes as
- * written and the anchor at its new position (for chaining "Add Another"). */
+/** Add a todo before the given todo, at the same hierarchy level. Returns the notes as written and
+ * the anchor at its new position (for chaining "Add Another"). */
 export async function addTodoBeforeInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -445,20 +384,24 @@ export async function addTodoBeforeInNotes(
     const data = await getNotes(prefs, projectName);
     return { notes: data.notes, nextBeforeTodo: beforeTodo };
   }
-  const { notes, todo } = await insertTodoViaCli(
-    prefs,
-    projectName,
-    beforeTodo,
-    trimmed,
-    dueDate,
-    "before",
-    (anchorLine) => anchorLine + 1,
-  );
-  return { notes, nextBeforeTodo: todo };
+  const result = await callApi(prefs, "task.add", {
+    project: projectName,
+    text: trimmed,
+    anchor: taskRef(beforeTodo),
+    position: "before",
+    ...(dueDate ? { due: dueDate } : {}),
+  });
+  // The anchor is what you keep adding before, and it has moved down a line — but its digest hasn't
+  // changed, so it's found rather than calculated.
+  const data = await getNotes(prefs, projectName);
+  const anchor =
+    data.todos.find((t) => t.digest === beforeTodo.digest) ?? beforeTodo;
+  void result;
+  return { notes: data.notes, nextBeforeTodo: anchor };
 }
 
-/** Add a todo after the given todo, at the same hierarchy level. Uses CLI. Returns the notes as
- * written and the inserted todo (for chaining "Add Another"). */
+/** Add a todo after the given todo, at the same hierarchy level. Returns the notes as written and
+ * the inserted todo (for chaining "Add Another"). */
 export async function addTodoAfterInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -472,19 +415,23 @@ export async function addTodoAfterInNotes(
     const data = await getNotes(prefs, projectName);
     return { notes: data.notes, insertedTodo: afterTodo };
   }
-  const { notes, todo } = await insertTodoViaCli(
+  const result = await callApi(prefs, "task.add", {
+    project: projectName,
+    text: trimmed,
+    anchor: taskRef(afterTodo),
+    position: "after",
+    ...(dueDate ? { due: dueDate } : {}),
+  });
+  const { notes, todo } = await addedTodo(
     prefs,
     projectName,
+    result,
     afterTodo,
-    trimmed,
-    dueDate,
-    "after",
-    (anchorLine) => anchorLine + 1,
   );
   return { notes, insertedTodo: todo };
 }
 
-/** Add a todo as a child of the given parent (one indent level deeper) and focus it. Uses CLI. */
+/** Add a todo as a child of the given parent (one indent level deeper) and focus it. */
 export async function addTodoAsChildInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -495,14 +442,16 @@ export async function addTodoAsChildInNotes(
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0) return;
-  const { session, line, digestArgs } = todoAddress(parentTodo);
-  const args = [projectName, trimmed, ...digestArgs];
-  if (dueDate) args.push("--due", dueDate);
-  args.push("--child", session, line);
-  await runTodoCommand(prefs, "add", args);
+  await callApi(prefs, "task.add", {
+    project: projectName,
+    text: trimmed,
+    anchor: taskRef(parentTodo),
+    position: "child",
+    ...(dueDate ? { due: dueDate } : {}),
+  });
 }
 
-/** Edit a todo's text in place; indent, checkbox state, due, and focus marker are preserved. Uses CLI. */
+/** Edit a todo's text in place; indent, checkbox state, due, and focus marker are preserved. */
 export async function editTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -512,11 +461,14 @@ export async function editTodoInNotes(
 ): Promise<void> {
   const trimmed = newText.trim();
   if (trimmed.length === 0) return;
-  const { session, line, digestArgs } = todoAddress(todo);
-  await runTodoCommand(prefs, "text", [projectName, session, line, trimmed, ...digestArgs]);
+  await callApi(prefs, "task.setText", {
+    project: projectName,
+    task: taskRef(todo),
+    text: trimmed,
+  });
 }
 
-/** Wrap the given todo (and its subtree) in a new parent task; focus stays on the wrapped task. Uses CLI. */
+/** Wrap the given todo (and its subtree) in a new parent task; focus stays on the wrapped task. */
 export async function wrapTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
@@ -526,41 +478,56 @@ export async function wrapTodoInNotes(
 ): Promise<void> {
   const trimmed = newParentText.trim();
   if (trimmed.length === 0) return;
-  const { session, line, digestArgs } = todoAddress(todo);
-  await runTodoCommand(prefs, "wrap", [projectName, session, line, trimmed, ...digestArgs]);
+  await callApi(prefs, "task.wrap", {
+    project: projectName,
+    task: taskRef(todo),
+    text: trimmed,
+  });
 }
 
-/** Move the single " @" focus marker to the given todo's line. Uses CLI. */
+/** Move the single " @" focus marker to the given todo's line. */
 export async function setFocusToTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const { session, line, digestArgs } = todoAddress(todo);
-  await runTodoCommand(prefs, "focus", [projectName, session, line, ...digestArgs]);
+  await callApi(prefs, "task.focus", {
+    project: projectName,
+    task: taskRef(todo),
+  });
 }
 
-/** Complete the now task and its descendants, move focus to next open task. Uses CLI. See docs/task-focus-flow.md for how next focus is chosen. */
+/** Complete the now task and its descendants, moving focus to the next open task.
+ * See docs/task-focus-flow.md for how the next one is chosen. */
 export async function completeAndAdvanceInNotes(
   prefs: PreferenceValues,
   projectName: string,
   _notes: ProjectNotes,
   _todos: Todo[],
   nowTodo: Todo,
-): Promise<void> {
-  await completeTodoViaCli(prefs, projectName, nowTodo, true);
+): Promise<string> {
+  const result = await callApi(prefs, "task.complete", {
+    project: projectName,
+    task: taskRef(nowTodo),
+    advanceFocus: true,
+  });
+  // The domain's own sentence — "Completed X and 2 subtasks. Focus moves to Y." — so the HUD says
+  // what the panel's receipt says rather than a second phrasing of the same event.
+  return result.summary;
 }
 
-/** Undo: toggle the task back to unchecked and move focus (@) back to it. Uses CLI. */
+/** Undo: toggle the task back to unchecked and move focus (@) back to it. */
 export async function undoCompleteInNotes(
   prefs: PreferenceValues,
   projectName: string,
   _notes: ProjectNotes,
   todo: Todo,
 ): Promise<void> {
-  const { session, line, digestArgs } = todoAddress(todo);
-  await runTodoCommand(prefs, "undo", [projectName, session, line, ...digestArgs]);
+  await callApi(prefs, "task.reopen", {
+    project: projectName,
+    task: taskRef(todo),
+  });
 }
 
 /** Update sections (summary, problem, goals, approach, links, learnings). */
@@ -580,21 +547,16 @@ export function updateNotesSection(
 export async function addLinkToNotes(
   prefs: PreferenceValues,
   projectName: string,
-  notes: ProjectNotes,
+  _notes: ProjectNotes,
   link: { label?: string; url?: string },
 ): Promise<void> {
-  const links = [...notes.links];
-  const emptyIdx = links.findIndex((l) => !l.label && !l.url);
-  const newEntry = link.url
-    ? { label: link.label?.trim() || undefined, url: link.url.trim() }
-    : null;
-  if (!newEntry) return;
-  if (emptyIdx >= 0) {
-    links[emptyIdx] = newEntry;
-  } else {
-    links.push(newEntry);
-  }
-  await writeNotes(prefs, projectName, { ...notes, links });
+  const url = link.url?.trim();
+  if (!url) return;
+  await callApi(prefs, "notes.addLink", {
+    project: projectName,
+    text: url,
+    ...(link.label?.trim() ? { label: link.label.trim() } : {}),
+  });
 }
 
 /** Session date format matching pm notes current-day (en-US short). */
