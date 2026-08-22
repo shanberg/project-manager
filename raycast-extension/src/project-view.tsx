@@ -65,12 +65,29 @@ function fetchProjectNotes(
     const signal = abortRef?.current?.signal;
     const notesPath = await resolveNotesPath(prefs, projName, signal);
     if (!notesPath)
-      return { notes: null, todos: [] as Todo[], notesPath: null };
+      return {
+        notes: null,
+        todos: [] as Todo[],
+        notesPath: null,
+        revision: undefined,
+      };
     try {
       const out = await getNotes(prefs, projName, signal);
-      return { notes: out.notes, todos: out.todos, notesPath };
+      // The revision travels with the tasks it describes: a selection-wide write sends it back to say
+      // which document the selection was made against.
+      return {
+        notes: out.notes,
+        todos: out.todos,
+        notesPath,
+        revision: out.revision,
+      };
     } catch {
-      return { notes: null, todos: [] as Todo[], notesPath };
+      return {
+        notes: null,
+        todos: [] as Todo[],
+        notesPath,
+        revision: undefined,
+      };
     }
   };
 }
@@ -109,10 +126,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
     await mutate();
   }
 
-  const { notes, todos, notesPath } = data ?? {
+  const { notes, todos, notesPath, revision } = data ?? {
     notes: null,
     todos: [],
     notesPath: null,
+    revision: undefined,
   };
 
   const sessionOrder: string[] = [];
@@ -188,7 +206,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
     const unchecked = sessionTodos.filter((t) => !t.checked);
     if (unchecked.length === 0) return;
     try {
-      await toggleAllTodosInNotes(prefs, projectName, notes, unchecked);
+      await toggleAllTodosInNotes(prefs, projectName, revision, unchecked);
       await mutate();
       await showToast({
         style: Toast.Style.Success,

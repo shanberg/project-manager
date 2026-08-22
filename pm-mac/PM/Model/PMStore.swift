@@ -18,6 +18,20 @@ enum FocusMove: Equatable {
     case right   // focus dove into a deeper / narrower task → down-right
 }
 
+/// The last revision the store saw, held where the IO queue can reach it.
+///
+/// A box rather than a stored property because the value has to be readable and writable off the main
+/// actor: every read and write of the notes file happens on the store's IO queue, and the revision is
+/// a fact about that file, updated by whichever of them ran last.
+private final class RevisionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String?
+    var value: String? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); defer { lock.unlock() }; stored = newValue }
+    }
+}
+
 /// Single source of truth for the focused project, shared by the menubar item, the focus panel and the project windows.
 ///
 /// Calls `PmLib` directly (no `pm` subprocess, no Rust bridge). All notes IO runs on a serial
@@ -36,7 +50,21 @@ final class PMStore: ObservableObject {
     @Published private(set) var notes: ProjectNotes?
     @Published private(set) var todos: [Todo] = []
     @Published private(set) var focusedKey: String?
+    /// Why this project can't be read, if it can't. A read failure only — writes report themselves
+    /// through `writeFailure` below.
     @Published private(set) var errorMessage: String?
+
+    /// A write that didn't happen, and why.
+    ///
+    /// Separate from `errorMessage` because the two have different shapes. `errorMessage` is state:
+    /// something is wrong with the project, and a successful read clears it. A refused write is an
+    /// event: the project is fine, and the reload that follows the refusal succeeds — which would wipe
+    /// the sentence before anyone read it. So it carries a token instead, which surfaces watch to put
+    /// the sentence up, and the quick bar compares to tell "the write I just made failed" from "a
+    /// reload happened to fail while I was writing".
+    struct WriteFailure: Equatable { let message: String; let token: Int }
+    @Published private(set) var writeFailure: WriteFailure?
+    private var writeFailures = 0
     /// True once the first successful load has painted; used to keep the last-good render across
     /// transient (cloud-sync) read failures instead of flashing to empty.
     @Published private(set) var hasLoaded = false
@@ -86,6 +114,16 @@ final class PMStore: ObservableObject {
 
     /// Serial queue for all `PmLib` notes IO (reads and writes) — prevents interleaved writes.
     private let io = DispatchQueue(label: "com.stuarthanberg.pm.notes-io")
+
+    /// The revision of the last document this store read or wrote — what a batch sends back to say
+    /// "this is the document the selection was made against". See `deleteTasks` for why batches need it
+    /// and single-task writes don't.
+    ///
+    /// It deliberately doesn't live in published state. The moment to read it is *inside* the IO queue,
+    /// when the write is about to happen and everything queued ahead of it has landed. Read on the main
+    /// actor when the click arrives, it would still be the value from before the store's own last write,
+    /// and the second of two quick batches would be refused for a change the app itself made.
+    private let seenRevision = RevisionBox()
 
     /// Whether this store is currently holding the shared full-project scan open (see
     /// `setWantsAllProjects`). Tracked per store so each one contributes at most one retain.
@@ -170,6 +208,7 @@ final class PMStore: ObservableObject {
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
             undoStack = []; redoStack = []   // history belongs to a project
+            seenRevision.value = nil         // and so does the revision of its document
             errorMessage = key == nil ? nil : "Invalid project."
             hasLoaded = true
             ProjectIndex.shared.warmRecents()
@@ -196,6 +235,9 @@ final class PMStore: ObservableObject {
                 }
                 let output = try notesShow(handle: handle)
                 Log.write("notesShow ok: todos=\(output.todos.count)")
+                // Set here, on the IO queue, rather than beside the published state: a batch reads it
+                // from the same queue, so it always sees the newest read that has actually finished.
+                self?.seenRevision.value = output.revision
                 return (output, handle.notesPath, handle.projectPath)
             }
             if case .failure(let error) = result {
@@ -299,10 +341,17 @@ final class PMStore: ObservableObject {
                 try work(name)
             } catch {
                 let message = PMContract.message(for: error)
-                Task { @MainActor in self?.errorMessage = message }
+                Task { @MainActor in self?.noteWriteFailure(message) }
             }
-            // Only record when the edit actually changed the bytes (skips no-op mutations).
-            if let before, let after = try? Self.snapshot(project: name), before.raw != after.raw {
+            // Re-read the document once, for two things at once. Undo banks the pre-edit bytes only
+            // when the bytes actually moved, so a no-op mutation costs no ⌘Z step. And the revision has
+            // to catch up here rather than when the reload lands: a second batch fired before that
+            // would otherwise be refused for a change this write made, which is the app arguing with
+            // itself. Every write passes through here — including `moveSubtree`, which doesn't go
+            // through the contract and so has no result to report a revision back in.
+            let after = try? Self.snapshot(project: name)
+            if let after { self?.seenRevision.value = revision(of: after.raw) }
+            if let before, let after, before.raw != after.raw {
                 Task { @MainActor in self?.recordUndo(before) }
             }
             Task { @MainActor in self?.reload(then: then) }
@@ -313,6 +362,13 @@ final class PMStore: ObservableObject {
     private nonisolated static func snapshot(project: String) throws -> DocSnapshot {
         let handle = try resolveNotesHandle(project: project)
         return DocSnapshot(notesPath: handle.notesPath, raw: try handle.io.readContent(path: handle.notesPath))
+    }
+
+    /// Record a write that didn't happen. The token advances every time, so two identical refusals in
+    /// a row still read as two — a banner that only watched the text would sit there looking stale.
+    private func noteWriteFailure(_ message: String) {
+        writeFailures += 1
+        writeFailure = WriteFailure(message: message, token: writeFailures)
     }
 
     /// Push a pre-edit snapshot onto the undo stack (capped), invalidating any pending redo.
@@ -338,8 +394,10 @@ final class PMStore: ObservableObject {
             do {
                 let handle = try resolveNotesHandle(project: name)
                 try handle.io.writeContent(path: handle.notesPath, content: target.raw)
+                self?.seenRevision.value = revision(of: target.raw)
             } catch {
-                Task { @MainActor in self?.errorMessage = String(describing: error) }
+                let message = String(describing: error)
+                Task { @MainActor in self?.noteWriteFailure(message) }
                 return
             }
             Task { @MainActor in
@@ -461,6 +519,18 @@ final class PMStore: ObservableObject {
     // The task list supports multi-selection, so these take a set of tasks and perform the
     // whole batch inside ONE `mutate` — a single pre-edit snapshot is banked, so ⌘Z reverses the
     // entire action rather than unwinding it task by task.
+    //
+    // Each also sends the revision of the document the selection was made against, which single-task
+    // writes deliberately don't. A digest says "this is still that task"; only a revision says "the
+    // tasks around it are still the ones you were looking at". A batch needs the second because a
+    // reference it can't resolve is *skipped* rather than refused — completing a parent completes its
+    // children, so a child that came along in the same selection is expected to be gone by the time its
+    // turn arrives. That tolerance is what makes "act on this selection" mean what a person means by
+    // it, and it's also what would let a task edited in Obsidian a second ago drop out of the batch
+    // without a word. The revision is the line between the two: same document, skip freely; different
+    // document, do nothing and say so. A single-task write needs none of it — its digest already
+    // identifies its one task, and guarding it on the whole document would refuse it because a line
+    // elsewhere in the file changed.
 
     /// The outermost tasks among `todos`, in document order: any task that already sits inside
     /// another's subtree is dropped, since an operation on the ancestor covers it. Keeps a batch from
@@ -511,9 +581,11 @@ final class PMStore: ObservableObject {
         let bottomUp = roots.sorted { ($0.sessionIndex, $0.lineIndex) > ($1.sessionIndex, $1.lineIndex) }
         // One action for the selection, not one per task: a single write, a single journal entry,
         // and a single step to undo — a batch a person made in one gesture should come back in one.
+        let seen = seenRevision
         mutate { project in
             try PMContract.perform("task.delete", PMContract.input(project: project) {
                 $0.tasks = bottomUp.map(\.reference)
+                $0.revision = seen.value
             })
         }
     }
@@ -531,10 +603,12 @@ final class PMStore: ObservableObject {
             lastCompletedRef = targets.last?.reference
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
+        let seen = seenRevision
         mutate { project in
             try PMContract.perform(completing ? "task.complete" : "task.reopen",
                                    PMContract.input(project: project) {
                 $0.tasks = targets.map(\.reference)
+                $0.revision = seen.value
                 // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
                 // still moves focus if one of the completed tasks was holding it.
                 if completing { $0.advanceFocus = false }
@@ -545,9 +619,11 @@ final class PMStore: ObservableObject {
     /// Set (or clear, with `due == nil`) the due date on every task in `todos` as one edit.
     func setDueAll(_ todos: [Todo], due: String?) {
         guard !todos.isEmpty else { return }
+        let seen = seenRevision
         mutate { project in
             try PMContract.perform("task.setDue", PMContract.input(project: project) {
                 $0.tasks = todos.map(\.reference)
+                $0.revision = seen.value
                 if let due { $0.due = due } else { $0.clearDue = true }
             })
         }

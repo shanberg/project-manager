@@ -90,10 +90,17 @@ public struct NotesShowOutput: Codable {
     public var todos: [Todo]
     /// Key of the focused todo, if any: "sessionIndex:lineIndex" for stable identity.
     public var focusedKey: String?
+    /// The revision of the exact bytes these tasks were parsed from — the token a write sends back to
+    /// say "this is the document I was looking at". It rides *in* the payload rather than beside it so
+    /// a caller that holds onto a read holds onto the revision too; a revision kept in a separate
+    /// variable from the tasks it describes is a pair that can drift, and the whole point of it is
+    /// that it can't. See docs/api-contract.md.
+    public var revision: String
 
-    public init(notes: ProjectNotes, todos: [Todo], focusedKey: String? = nil) {
+    public init(notes: ProjectNotes, todos: [Todo], focusedKey: String? = nil, revision: String) {
         self.notes = notes
         self.todos = todos
         self.focusedKey = focusedKey
+        self.revision = revision
     }
 }

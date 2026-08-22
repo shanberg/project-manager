@@ -866,6 +866,9 @@ struct ProjectView: View {
                 findBar.modifier(Self.listWidth)
                 if findVisible { Divider() }
                 deleteConfirmation.modifier(Self.listWidth)
+                // Above the list rather than over it: a refused batch is about the selection, and the
+                // selection is in the rows right below this line.
+                WriteFailureBanner(failure: store.writeFailure).modifier(Self.listWidth)
             }
             .background(TitlebarMaterial())
         }

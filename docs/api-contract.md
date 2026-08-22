@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** the dispatcher, the manifest, all four adapters, and the mutation journal are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. What remains is listed under *Still to build*. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** built, 2026-08-22 — the dispatcher, the manifest, all four adapters, the mutation journal, and the revision guard on every batch. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` and `RevisionTests.swift` the tests. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -89,7 +89,7 @@ This means `pm api describe` will list fewer things than the quick bar's `>` men
 
 ```
 {
-  revision,                        // mtime + content hash of the notes file
+  revision,                        // content hash of the notes file
   summary,                         // one human sentence
   changed: [ { ref, was, now } ],  // structured diff
   focus,                           // where focus ended up, if it moved
@@ -196,6 +196,8 @@ It is the only adapter that can serve all three tiers. Mutations and queries go 
 
 **The reason to route the app's own writes through it isn't tidiness.** `PMStore` holds the tasks from its last read, and the notes file is markdown the user also edits in Obsidian and by hand. A click acts on what was on screen, which may not be what's on disk any more — the same defect Raycast had, with a shorter window. Every write now carries the task's digest, so that case is caught rather than written through. A refusal is turned into "That task changed on disk, so nothing was written. Reloading." rather than surfacing a raw error, because a race isn't a bug and shouldn't read like one.
 
+**A refusal says so in words.** A write that didn't happen is the one thing these surfaces can't show by redrawing: the list looks the way it looked, which reads as "nothing happened" rather than "nothing was allowed to happen". So the store keeps a refused write as an event with a token rather than as a message, and the project window and the panel put the sentence up for six seconds and take it down again — a reload follows every write, so by the time it's on screen the rows under it are already current. The token also replaced what the quick bar used to compare, which was `errorMessage`: that moves when an unrelated reload fails, so a cloud-sync hiccup during a write that worked fine reported the write as failed.
+
 App Intents carry the reference too. The digest is deliberately *not* folded into `TaskEntity.id`: Shortcuts persists the id and re-resolves through the query, so a digest baked in would make a saved shortcut fail to resolve rather than refuse clearly — and the current id format is one saved shortcuts already hold.
 
 ### What the app keeps
@@ -212,7 +214,13 @@ Within a batch, references are resolved against the text **as it evolves**, and 
 
 Skipping is also the reason `revision` exists, and why the two arrived together. A digest says *this task is still the task I saw*; it says nothing about the tasks around it. `revision` says *this is still the document I read*, and with it a skipped reference can only be the batch's own doing rather than an edit someone else made. It is checked once in the document pipeline rather than per action, because it is the same claim whatever the action — and **every read of a document now reports its revision**, since a guard a write can ask for is only worth having if the read tells you what to ask about.
 
-`revision` is optional. Without it a batch still works and still carries per-task digests; with it, the write happens only if nothing has moved. The panel doesn't send one yet — it re-reads after every write, so its window is small — which is the remaining gap, noted below.
+`revision` is optional. Without it a batch still works and still carries per-task digests; with it, the write happens only if nothing has moved. **Every batch on every surface now sends one** — the app's three selection-wide operations and Raycast's complete-the-session — so the tolerance a batch needs is never also a way for someone else's edit to disappear.
+
+Getting it there meant one read rather than two. The revision used to be computed inside the dispatcher, beside `notesShow` parsing the same document in its own way; the two agreeing was a thing to maintain. Now `notesShow(rawText:)` is the read every surface lands on and it reports the revision of the bytes it parsed — so `pm notes show`, `notes.get`, `task.list`, and the app's reload all carry it without any of them computing it. It rides *in* the payload as well as in the envelope, because a caller that holds onto a read then holds onto the revision with it; kept in a separate variable, the two can drift, and not drifting is the entire point.
+
+The app reads it back on the IO queue rather than from published state. The moment that matters is when the write is about to happen, with everything queued ahead of it already landed — read at click time instead, a batch fired straight after another would carry a revision the app's own previous write had already invalidated, and the guard would refuse it. `PMStore` therefore updates the revision after every write it makes, including `moveSubtree`, which doesn't go through the contract and so has no result to report one back in.
+
+A single-task write still sends nothing. Its digest already names its one task, and guarding it on the whole document would refuse it because a line elsewhere in the file changed.
 
 ### The mutation journal
 
@@ -229,10 +237,6 @@ Skipping is also the reason `revision` exists, and why the two arrived together.
 This closes the hole the panel's undo stack left: it is in memory and app-only, so nothing could reverse a write made by Raycast, by `pm`, by a model — or by the app itself after a relaunch.
 
 For MCP, `journal.undo` is grouped with the destructive actions. It is recoverable, since the reversal is itself journaled, but undoing somebody's work is not something a model should reach for unasked.
-
-## Still to build
-
-- **The panel sending a revision.** Its reads go through `NotesService`, not the contract, so it has no revision to send with a batch. Routing its reads through `notes.get` would close that, at the cost of encoding and decoding a payload it currently gets as native types.
 
 ## Open questions
 

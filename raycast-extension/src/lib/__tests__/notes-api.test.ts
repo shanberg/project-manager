@@ -405,18 +405,21 @@ describe("toggleAllTodosInNotes", () => {
   it("completes the whole selection in one write", async () => {
     const one = makeTodo(0, "One");
     const three = makeTodo(2, "Three");
-    await toggleAllTodosInNotes(prefs, "p", notes, [
+    await toggleAllTodosInNotes(prefs, "p", "abc123", [
       one,
       makeTodo(1, "Two", { checked: true }),
       three,
     ]);
-    // One action, not one per task — one write, one journal entry, one step to undo.
+    // One action, not one per task — one write, one journal entry, one step to undo. The revision
+    // rides along: the batch skips a task it can't resolve, and this is what says the skipping is
+    // allowed because the document is still the one that was read.
     expect(actions()).toEqual([
       {
         action: "task.complete",
         input: {
           project: "p",
           tasks: [refFor(one), refFor(three)],
+          revision: "abc123",
           advanceFocus: false,
         },
       },
@@ -424,7 +427,7 @@ describe("toggleAllTodosInNotes", () => {
   });
 
   it("does nothing when everything is already complete", async () => {
-    await toggleAllTodosInNotes(prefs, "p", notes, [
+    await toggleAllTodosInNotes(prefs, "p", "abc123", [
       makeTodo(0, "One", { checked: true }),
     ]);
     expect(actions()).toEqual([]);

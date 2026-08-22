@@ -47,24 +47,24 @@ enum PMContract {
 
     /// What to put in front of a person when a write was refused.
     ///
-    /// A stale reference isn't a failure so much as a race: the file changed under the read this
-    /// click was based on. Saying "that task changed on disk" and reloading is the true and useful
-    /// answer; the raw refusal reads like a bug in PM.
+    /// Neither refusal is a failure so much as a race: the file changed under the read this click was
+    /// based on. Saying so plainly is the true and useful answer; the raw refusal reads like a bug in
+    /// PM. There's no "should I reload?" to ask alongside it — every write the store makes reloads
+    /// afterwards regardless, so by the time the sentence is on screen the list under it is current.
     static func message(for error: Error) -> String {
         guard let api = error as? ApiError else { return String(describing: error) }
         switch api.code {
         case .staleReference:
             return "That task changed on disk, so nothing was written. Reloading."
+        case .conflict:
+            // Only a batch can raise this, and only because it sent a revision. Say what a person can
+            // act on: the selection is the thing that went out of date, and it's in front of them.
+            return "This project changed on disk, so the selection was left alone. Try again."
         case .ambiguousProject:
             return "More than one project matches that name."
         default:
             return api.message
         }
-    }
-
-    /// True when the right response is to re-read rather than to report a failure and stop.
-    static func wantsReload(after error: Error) -> Bool {
-        (error as? ApiError)?.code == .staleReference
     }
 
     // MARK: Affordances

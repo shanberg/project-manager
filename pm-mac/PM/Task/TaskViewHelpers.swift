@@ -49,3 +49,55 @@ extension String {
     /// panel's Next line) that can't wrap.
     func truncated(_ n: Int) -> String { count <= n ? self : String(prefix(n - 1)) + "…" }
 }
+
+/// The sentence a refused write leaves behind.
+///
+/// A write that didn't happen is the one thing these surfaces can't show by redrawing. The list simply
+/// looks the way it looked, which reads as "nothing happened" rather than "nothing was allowed to
+/// happen" — and the reload that follows a refusal makes it worse, because the rows twitch as the
+/// current document lands under an unchanged selection. So the refusal says so in words.
+///
+/// It takes itself down. This describes a moment, not a state: the document has already moved on, and a
+/// message still sitting there a minute later would be about a situation that no longer exists.
+///
+/// No chrome of its own — the surfaces that show it back their own strips (the project window's sticky
+/// header, the panel's foot), the same way the find bar and the delete confirmation are backed rather
+/// than backing themselves.
+struct WriteFailureBanner: View {
+    let failure: PMStore.WriteFailure?
+
+    /// Long enough to read twice, short enough to be gone before you look back.
+    private static let dwell = Duration.seconds(6)
+
+    @State private var showing: PMStore.WriteFailure?
+
+    var body: some View {
+        Group {
+            if let showing {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(showing.message)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: showing)
+        .onChange(of: failure) { _, new in
+            showing = new
+            guard let new else { return }
+            // Keyed on the token rather than on a single shared timer: a second refusal arriving while
+            // this one is up replaces the sentence and gets its own six seconds, and the older timer,
+            // finding someone else's message in place, leaves it alone.
+            Task {
+                try? await Task.sleep(for: Self.dwell)
+                if showing?.token == new.token { showing = nil }
+            }
+        }
+    }
+}

@@ -94,16 +94,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The last failure announced, so one that persists across republishes is said once.
     private var lastReportedError: String?
+    /// The last refused write announced, tracked by token rather than by text: the same refusal twice
+    /// is two refusals, and saying it once would be describing only the first.
+    private var lastReportedFailure: Int?
 
     /// Tell the user about a write that didn't land.
     ///
     /// Every surface that edits from outside a window — the quick bar, the menubar item, a
-    /// notification's Complete button — deliberately leaves PM in the background, and `errorMessage`
-    /// is only ever *rendered* in the project window's and the focus panel's empty states. So a failed
+    /// notification's Complete button — deliberately leaves PM in the background, and neither the
+    /// refusal banner nor `errorMessage` is rendered anywhere they can be seen from there. So a failed
     /// write from any of them was silent: you typed a task, the bar closed, and the task simply wasn't
     /// there. A notification rather than an alert, because an alert would seize the keyboard back from
     /// whatever you returned to.
+    ///
+    /// Only while PM is in the background, for exactly that reason. In the foreground the window and
+    /// the panel say it themselves, and a banner plus a notification is one refusal reported twice.
     private func reportStoreFailure() {
+        if let failure = store.writeFailure, failure.token != lastReportedFailure {
+            lastReportedFailure = failure.token
+            Log.write("write refused: \(failure.message)")
+            if !NSApp.isActive { notifier?.reportFailure(failure.message) }
+        }
         let message = store.errorMessage
         defer { lastReportedError = message }
         guard let message, message != lastReportedError,

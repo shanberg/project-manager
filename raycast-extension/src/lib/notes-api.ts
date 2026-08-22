@@ -63,6 +63,13 @@ export interface NotesShowOutput {
   todos: Todo[];
   /** Key of the focused todo if any: "sessionIndex:lineIndex". */
   focusedKey?: string | null;
+  /**
+   * The revision of the document these tasks were parsed from. Sent back on a batch to say "this is
+   * the document I was looking at" — a batch skips a reference it can't resolve, which is right when
+   * the batch itself removed it and wrong when someone else did, and this is what tells the two apart.
+   * Single-task writes don't send it: their digest already names their one task.
+   */
+  revision?: string;
 }
 
 /** Sort key for due date comparison (earliest first). Uses YYYY-MM-DD prefix when present. */
@@ -291,17 +298,20 @@ export async function toggleTodoInNotes(
 export async function toggleAllTodosInNotes(
   prefs: PreferenceValues,
   projectName: string,
-  _notes: ProjectNotes,
+  revision: string | undefined,
   todos: Todo[],
 ): Promise<void> {
   // One call for the whole selection: one write, one journal entry, one step to undo. Completing a
   // task completes its descendants, so a task an earlier parent already closed is skipped rather
-  // than failing the batch.
+  // than failing the batch — and `revision` is what keeps that tolerance from also swallowing a task
+  // someone edited in Obsidian while this list sat on screen. This used to take the `ProjectNotes` it
+  // never looked at; it takes the revision of that same read instead.
   const open = todos.filter((t) => !t.checked);
   if (open.length === 0) return;
   await callApi(prefs, "task.complete", {
     project: projectName,
     tasks: open.map(taskRef),
+    revision,
     advanceFocus: false,
   });
 }

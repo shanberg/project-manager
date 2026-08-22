@@ -430,12 +430,11 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         ]))
     case "notes.get":
         let read = try readProject(input)
-        return ApiResult(action: spec.name, summary: read.output.notes.title,
-                         revision: read.revision, data: try JSONValue.encoding(read.output))
+        return ApiResult(action: spec.name, summary: read.notes.title,
+                         revision: read.revision, data: try JSONValue.encoding(read))
     case "task.list":
         let read = try readProject(input)
-        let output = read.output
-        var todos = output.todos
+        var todos = read.todos
         if input.includeCompleted != true { todos = todos.filter { !$0.checked } }
         if let limit = input.limit { todos = Array(todos.prefix(limit)) }
         return ApiResult(action: spec.name,
@@ -443,7 +442,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: read.revision, data: try JSONValue.encoding(todos))
     case "task.whatsDue":
         let read = try readProject(input)
-        var due = read.output.todos.filter { !$0.checked && $0.effectiveDueDate != nil }
+        var due = read.todos.filter { !$0.checked && $0.effectiveDueDate != nil }
         due.sort { ($0.effectiveDueDate ?? "") < ($1.effectiveDueDate ?? "") }
         if let limit = input.limit { due = Array(due.prefix(limit)) }
         return ApiResult(action: spec.name,
@@ -451,11 +450,11 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: read.revision, data: try JSONValue.encoding(due))
     case "task.progress":
         let read = try readProject(input)
-        let done = read.output.todos.filter(\.checked).count
-        return ApiResult(action: spec.name, summary: "\(done) of \(read.output.todos.count) done.",
+        let done = read.todos.filter(\.checked).count
+        return ApiResult(action: spec.name, summary: "\(done) of \(read.todos.count) done.",
                          revision: read.revision,
                          data: .object(["done": .number(Double(done)),
-                                        "total": .number(Double(read.output.todos.count))]))
+                                        "total": .number(Double(read.todos.count))]))
     case "focus.get":
         guard let folder = focusedProjectFolder() else {
             return ApiResult(action: spec.name, summary: "No focused project.", data: .null)
@@ -614,14 +613,12 @@ private func resolvedProject(_ input: ApiInput) throws -> String {
 ///
 /// Every read of a document reports its revision, because the guard a write can ask for is only
 /// worth having if the read tells you what to ask about. One read of the file serves both.
-private func readProject(_ input: ApiInput) throws -> (output: NotesShowOutput, revision: String) {
-    let handle = try resolveNotesHandle(project: try resolvedProject(input))
-    let rawText = try handle.io.readContent(path: handle.notesPath)
-    var notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
-    let todos = todosWithEffectiveDueDates(try parseTodos(notes: notes))
-    let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
-    notes = normalizeFocusMarker(notes: notes)
-    return (NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey), revision(of: rawText))
+///
+/// This used to parse the document here, alongside `notesShow` parsing it there — two implementations
+/// of one read, one of which knew about revisions. Now there is one, and the revision comes back from
+/// it whoever asked.
+private func readProject(_ input: ApiInput) throws -> NotesShowOutput {
+    try notesShow(handle: try resolveNotesHandle(project: try resolvedProject(input)))
 }
 
 /// What a reversal calls itself. An entry that is already a reversal carries "Reversed:" on the
@@ -743,7 +740,7 @@ private func plain(_ value: JSONValue?) throws -> Any {
 /// Content hash of the notes file — what a caller sends back on a bulk operation to say which
 /// version of the document it was looking at. Content rather than mtime, because mtime says when the
 /// file was touched and this needs to say what it holds.
-func revision(of content: String) -> String {
+public func revision(of content: String) -> String {
     SHA256.hash(data: Data(content.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
 }
 

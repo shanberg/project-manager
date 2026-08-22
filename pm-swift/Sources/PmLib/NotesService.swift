@@ -45,11 +45,21 @@ public func notesShow(project: String) throws -> NotesShowOutput {
 /// `notesShow` for a pre-resolved handle — lets callers resolve once and reuse the notes path
 /// (e.g. to set up a file watch) without a second project-directory scan.
 public func notesShow(handle: NotesHandle) throws -> NotesShowOutput {
-    var notes = try readNotesFile(notesPath: handle.notesPath, notesIO: handle.io)
-    notes = normalizeFocusMarker(notes: notes)
+    try notesShow(rawText: try handle.io.readContent(path: handle.notesPath))
+}
+
+/// The read itself, with the document already in hand.
+///
+/// Every surface's read lands here — `pm notes show`, the contract's queries, the Mac app's reload —
+/// which is what lets the revision be reported by all of them without any of them computing it. It
+/// takes the raw text rather than a `ProjectNotes` because the revision is of *bytes*: parse first
+/// and the bytes are gone, so the tasks and the revision would come from two different reads of a
+/// file a person also edits in Obsidian.
+public func notesShow(rawText: String) throws -> NotesShowOutput {
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
     let todos = todosWithEffectiveDueDates(try parseTodos(notes: notes))
     let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
-    return NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey)
+    return NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey, revision: revision(of: rawText))
 }
 
 /// Apply a format-preserving todo mutation and write it back. The transform receives freshly-parsed

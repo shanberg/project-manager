@@ -67,6 +67,11 @@ struct FocusPanelView: View {
                 nothingFocused
             }
             deleteConfirmation
+            // In the stack rather than over it, so the panel grows to make room — an overlay would sit
+            // on the card, and the panel sizes itself from what this stack measures.
+            WriteFailureBanner(failure: store.writeFailure)
+                .background(Color.primary.opacity(0.06))
+                .background(WindowDragExcluder())
         }
         .frame(width: ProjectWindow.focusPanelWidth, alignment: .leading)
         .background(GeometryReader { geo in
