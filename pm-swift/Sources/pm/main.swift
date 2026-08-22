@@ -24,6 +24,8 @@ private func dispatch(cmd: String, args: [String]) {
         runNotes(args: args)
     case "api":
         runApi(args: args)
+    case "mcp":
+        runMcp(args: args)
     default:
         stderr("Unknown command: \(cmd)")
         exit(1)

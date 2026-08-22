@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** the dispatcher, the manifest and the argv adapter are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The remaining adapters — MCP, the Raycast client, the in-process one — are not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** the dispatcher, the manifest, and the argv and MCP adapters are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The remaining adapters — the Raycast client and the in-process one — are not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -12,7 +12,7 @@ PM's domain is implemented once, in PmLib, and then spoken about in five differe
 | Raycast | spawning `pm`, parsing stdout | **re-implements domain logic in TypeScript** |
 | Mac app | linking PmLib in-process | undo/redo, focus animation, project index, recents |
 | App Intents | linking PmLib in-process | entities with stable ids, disambiguation |
-| MCP | — | doesn't exist yet |
+| MCP (`pm mcp`) | the dispatcher, directly | a stricter published schema |
 | `pm api` | the dispatcher, directly | nothing — transport only |
 
 Alongside them, `~/.config/pm/` holds `focused.json`, `recent-projects.json`, `task-timing.json` and `panel-settings.json` — an unversioned bus that three of the five read and write directly, with no shared definition of what's in it.
@@ -150,9 +150,28 @@ Three decisions worth recording, because they are what makes the rest hold toget
 
 **The summary is derived from the diff.** No action describes its own effects, so completing a task reports the subtree it took with it and where focus went, because that is what the before/after comparison shows. Summaries carry both tenses: a dry run has to say what *would* happen, and English won't let you derive "Would complete" from "Completed" by lowercasing it. An action with nothing to do returns a statement instead, which has no future tense to take.
 
+### The MCP adapter
+
+`pm mcp` speaks JSON-RPC over stdio. It lives in the `pm` binary rather than an npm package, so wiring it up is one line against a command the user already has, with no second runtime to install and nothing to keep at the same version as the first:
+
+```json
+{ "command": "pm", "args": ["mcp", "--allow-write"] }
+```
+
+Its tool list is generated from `ApiRegistry` at startup, so a tool cannot describe itself differently from the action it calls — there is only one description. Three things it adds on the way out:
+
+**Tool names replace dots with underscores.** `task.complete` becomes `task_complete`. MCP tool names are conventionally `[a-zA-Z0-9_-]` and clients reject what falls outside it. The mapping is total in both directions because an action name is dotted lowercase and never contains an underscore of its own.
+
+**A task reference must carry its digest.** The contract leaves it optional — a human typing indices at a terminal is asserting nothing — but a model is exactly the caller that reads a list, thinks, and acts later. The generated schema marks it required *and* the adapter enforces it, because publishing a requirement and not checking it leaves the promise to whichever client happens to validate.
+
+**Every mutation gains `dryRun`.** The envelope it returns is identical to the write's, so a model can see what it is about to do and then decide.
+
+Scopes answer the third open question below: queries are always available, `--allow-write` adds the actions that change a project, and `--allow-destructive` adds the ones that lose something — `task.delete`, `session.delete`, `project.archive`, `config.set`. A tool that is withheld says so when called, rather than pretending not to exist, so a model can tell "you may not" from "no such thing" and report the difference to the user.
+
+Failures come back as content with `isError` rather than a JSON-RPC error, since the call reached the tool and the tool refused — something the model should act on, not a transport fault. The message leads with the error code, because `staleReference` means read again and retry, which is a different move from a project that doesn't exist.
+
 ## Still to build
 
-- **The MCP adapter**, generated from `pm api describe` — the point of the manifest.
 - **The in-process adapter**, so the panel and App Intents call the dispatcher instead of `NotesService`. This is where the `PMStore` boundary question below gets answered.
 - **The Raycast client**, generated or hand-written against the manifest, replacing its own spawn-and-parse.
 - **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
@@ -165,6 +184,6 @@ Three decisions worth recording, because they are what makes the rest hold toget
 
 **2. How much of `PMStore` moves?** The mutations clearly do. Undo/redo, the focus-move classifier and the project index are app concerns and should stay. The boundary needs drawing before any code moves.
 
-**3. Does the MCP get write access by default?** Proposal: reads unrestricted, writes behind a scope, and destructive actions (`task.delete`, `session.delete`, `project.archive`) behind a second one. Paired with the mutation journal so anything a model did can be reviewed and reversed.
+**3. Does the MCP get write access by default?** *Settled:* no. Queries are unrestricted, `--allow-write` permits mutations, `--allow-destructive` permits the four that lose something. Still unpaired with a mutation journal, so a model's writes can be seen in the envelope it returns but not reviewed afterwards.
 
 **4. Where does the mutation journal live?** `~/.config/pm/journal.ndjson`, appended by the dispatcher, before/after digests per entry. It closes a real hole — undo is currently in-memory and app-only, so nothing can reverse a write made by Raycast, the CLI, or a model. Retrofitting it later means the journal starts with gaps.

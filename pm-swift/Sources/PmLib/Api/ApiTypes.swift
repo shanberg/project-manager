@@ -69,6 +69,23 @@ public struct TaskRefInput: Codable, Equatable {
         self.digest = digest
     }
 
+    /// `session` is documented as a string, and is one either way — but a caller that reads
+    /// "session index" and sends the number 0 has said something unambiguous, and refusing it on a
+    /// type would be pedantry rather than safety.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let text = try? c.decode(String.self, forKey: .session) {
+            session = text
+        } else if let number = try? c.decode(Int.self, forKey: .session) {
+            session = String(number)
+        } else {
+            session = nil
+        }
+        sessionOrdinal = try c.decodeIfPresent(Int.self, forKey: .sessionOrdinal)
+        line = try c.decode(Int.self, forKey: .line)
+        digest = try c.decodeIfPresent(String.self, forKey: .digest)
+    }
+
     /// `session` is an ISO date or a session index, the same either-or the CLI accepts.
     public var ref: TaskRef {
         if let session, Int(session) == nil {
