@@ -1,6 +1,6 @@
 # A shared contract for PM's surfaces
 
-**Status:** proposed, 2026-08-22. Nothing here is implemented. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
+**Status:** the dispatcher, the manifest and the argv adapter are built, 2026-08-22. `Sources/PmLib/Api/` is the implementation, `pm api describe` and `pm api call` the surface, `ApiTests.swift` the tests. The remaining adapters — MCP, the Raycast client, the in-process one — are not. Task identity is settled separately in [task-identity.md](task-identity.md), which this depends on.
 
 ## The problem
 
@@ -13,6 +13,7 @@ PM's domain is implemented once, in PmLib, and then spoken about in five differe
 | Mac app | linking PmLib in-process | undo/redo, focus animation, project index, recents |
 | App Intents | linking PmLib in-process | entities with stable ids, disambiguation |
 | MCP | — | doesn't exist yet |
+| `pm api` | the dispatcher, directly | nothing — transport only |
 
 Alongside them, `~/.config/pm/` holds `focused.json`, `recent-projects.json`, `task-timing.json` and `panel-settings.json` — an unversioned bus that three of the five read and write directly, with no shared definition of what's in it.
 
@@ -136,6 +137,27 @@ The notes file is markdown that the user also edits in Obsidian and by hand. No 
 - **Display strings move into the contract.** Payloads carry both `due: "2026-09-01"` and `dueDisplay: "in 2w"`, computed with a caller-supplied `now`. This is the one place the design deliberately mixes data and presentation, and it's the trade recorded below.
 - **The config-dir files get schema'd** and read through the contract (`focus.get`, `project.list`) rather than by three separate JSON parsers.
 - **`pm notes write`'s whole-document path** stays internal. It falls back to a full re-serialize that drops frontmatter, so it should never be a published action.
+
+## What is built
+
+`performApi(action, input, options)` in `Sources/PmLib/Api/`, with `pm api describe` and `pm api call <action> <json> [--dry-run]` over it. 35 actions: 22 mutations, 8 queries, 5 affordances that are listed and refused.
+
+Three decisions worth recording, because they are what makes the rest hold together.
+
+**The document pipeline composes the pure transforms, not the service layer.** `NotesService` reads, mutates and writes in one step, which is right for a caller that wants the write. The dispatcher needs the middle of that sandwich alone, so it reads once, applies a `String -> String` transform from `NotesRawEdit`/`NotesTodos`, diffs, and writes unless `dryRun`. That is why a dry run is the same code path minus its last step rather than a prediction of it — the property the panel's preview already relies on, now available to every surface.
+
+**Validation reads the same table the schema is published from.** `ApiRegistry.actions` describes each action's fields once; `inputSchema` renders it as JSON Schema and `validate` checks against it. A test asserts the two agree for every action — that the published `required` list is exactly what a call with empty input complains about. A schema maintained beside the check it describes is a schema that eventually disagrees with it.
+
+**The summary is derived from the diff.** No action describes its own effects, so completing a task reports the subtree it took with it and where focus went, because that is what the before/after comparison shows. Summaries carry both tenses: a dry run has to say what *would* happen, and English won't let you derive "Would complete" from "Completed" by lowercasing it. An action with nothing to do returns a statement instead, which has no future tense to take.
+
+## Still to build
+
+- **The MCP adapter**, generated from `pm api describe` — the point of the manifest.
+- **The in-process adapter**, so the panel and App Intents call the dispatcher instead of `NotesService`. This is where the `PMStore` boundary question below gets answered.
+- **The Raycast client**, generated or hand-written against the manifest, replacing its own spawn-and-parse.
+- **`capture.parse` and `task.search`**, which live in the app (`QuickCaptureParser`, `TaskSearch`) and would have to move into PmLib to be published.
+- **Bulk operations and the document revision.** `revision` is in the envelope and nothing consumes it yet; `toggleAll`, `setDueAll` and subtree deletes are the actions that need it.
+- **The mutation journal.**
 
 ## Open questions
 
