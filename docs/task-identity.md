@@ -129,7 +129,7 @@ Almost nothing, because task references are barely persisted.
 
 ## Open question
 
-**Silent healing, or visible relocation?** Currently the CLI writes a `note:` line to stderr when a reference relocated, and the write proceeds. That's the cheapest thing that isn't silent. Whether a surface should show it — and whether relocation should instead be a field in a structured result — is a question for the contract's result envelope.
+**Silent healing, or visible relocation?** *Half settled.* It is a field: every result the contract returns carries `relocated`, alongside the CLI's `note:` line on stderr. What no surface does yet is *show* it — neither the app nor Raycast reads the field, so a reference that healed still heals quietly everywhere a person is looking. That's the open half, and it's a question about phrasing rather than about the contract: "that task had moved" is worth saying once, and worth saying nowhere near as loudly as a refusal.
 
 ## Verification
 
