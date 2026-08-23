@@ -16,7 +16,7 @@ settings:
     # Kept in sync with package.json by scripts/release.sh, and overridden on the command line by
     # scripts/build-app-dist.sh. The Info.plist reads it through $(MARKETING_VERSION) below — without
     # that indirection XcodeGen writes its own default and the bundle version drifts from the release.
-    MARKETING_VERSION: "0.16.0"
+    MARKETING_VERSION: "0.17.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: 9626CTDMM9
