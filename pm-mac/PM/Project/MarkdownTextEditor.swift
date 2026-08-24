@@ -22,6 +22,48 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Called on ⌘↩ — the takeover uses it to save and close.
     var onSubmit: (() -> Void)? = nil
 
+    /// Called on Escape. Nil leaves Escape to the text view, which is what a takeover wants — there the
+    /// key is the window's to interpret, and the editor saves on the way out however it leaves. The
+    /// quick bar's note surface wants it: Escape there means "out of the writing surface", and nothing
+    /// else in a borderless panel is listening for it.
+    var onCancel: (() -> Void)? = nil
+
+    /// Reports the height the text actually lays out to, so a host that sizes itself to its content can
+    /// follow it. Nil for a host that gives the editor a frame and lets it scroll inside — which is the
+    /// takeover, filling a window column that was never the text's to decide.
+    ///
+    /// The measurement is the used rect plus both container insets: what the scroll view would need to
+    /// show the whole note without scrolling. The caller is expected to clamp it — see the quick bar's
+    /// `noteMinHeight`/`noteMaxHeight`, which is where "grows with the prose, then scrolls" is decided.
+    var onContentHeight: ((CGFloat) -> Void)? = nil
+
+    /// Bumped to ask for the caret. Any change puts first responder back on the text view.
+    ///
+    /// It used to be a `didFocus` flag on the coordinator — focus once, on the way in — which is right
+    /// for a takeover that is created when it opens and destroyed when it closes. The quick bar's note
+    /// surface comes and goes inside a view that stays mounted, and SwiftUI is entitled to keep the
+    /// coordinator across that: reopened, the editor found its own flag already set and left the caret
+    /// wherever the field it replaced had dropped it, which is nowhere. A value the host owns can't be
+    /// stale in that way. Left at its default it focuses exactly once, which is the takeover's case.
+    var focusRequest: Int = 0
+
+    /// The face the prose is set in, and the size every markdown style is derived from.
+    ///
+    /// A parameter rather than the static it used to read directly, because the two hosts want
+    /// different sizes for the same reason: a takeover fills a window column, where 14pt is a page of
+    /// prose; the quick bar's note surface *replaces a text field* that is set at 18pt, and a first
+    /// line that changes size the instant ⇧⏎ turns one into the other is the seam this is meant not
+    /// to have. `markdownAttributes` already sizes everything relative to whatever it's given.
+    var baseFont: NSFont = MarkdownTextEditor.baseFont
+
+    /// Where the text starts, inside the editor's own bounds.
+    ///
+    /// The width is the whole horizontal offset: the text container's line-fragment padding is zeroed
+    /// so this number means what it says, and the default of 9 is the 4 the inset used to be plus the
+    /// 5 that padding contributed — the takeover is laid out exactly as it was. The quick bar passes
+    /// 0, so the first character of a note sits where the first character of a task did.
+    var textInset: NSSize = NSSize(width: 9, height: 8)
+
     /// Where the note being edited lives on disk, when it's known. Two things need it: a dropped file
     /// is linked relative to it when the two are near each other, and ⌘-click resolves a relative link
     /// against it. Nil just means those fall back to absolute paths.
@@ -33,7 +75,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Zero (the default) is an editor that owns its whole frame.
     var topInset: CGFloat = 0
 
-    /// The editor's base reading face — the system font at a comfortable editing size.
+    /// The editor's default reading face — the system font at a comfortable editing size, and what a
+    /// host that doesn't care gets. See `baseFont` for the one that does.
     static let baseFont = NSFont.systemFont(ofSize: 14)
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -50,6 +93,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
+        // Folded into `textInset.width` instead, so one number owns where the text starts.
+        container.lineFragmentPadding = 0
         let layoutManager = NSLayoutManager()
         layoutManager.addTextContainer(container)
         let storage = NSTextStorage()
@@ -74,13 +119,20 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = false
         // Dropped files become markdown links rather than nothing at all.
         textView.registerForDraggedTypes([.fileURL])
-        textView.font = Self.baseFont
-        textView.textContainerInset = NSSize(width: 4, height: 8)
+        textView.font = baseFont
+        textView.textContainerInset = textInset
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
+        textView.onCancel = onCancel
         textView.noteURL = noteURL
         textView.string = text
         context.coordinator.highlight(textView)
+        // After this turn: the text view has no width until it's in the scroll view and laid out, and a
+        // height measured before that is the height of text wrapped to nothing.
+        afterCurrentUpdate { [weak textView] in
+            guard let textView else { return }
+            context.coordinator.reportHeight(textView)
+        }
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
@@ -91,6 +143,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         if let shortcuts = context.coordinator.textView as? ShortcutTextView {
             shortcuts.onSubmit = onSubmit
+            shortcuts.onCancel = onCancel
             shortcuts.noteURL = noteURL
         }
         guard let textView = context.coordinator.textView else { return }
@@ -107,7 +160,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // `textContainerInset`'s height applies to top and bottom alike, so the note also gains that
         // much room past its last line. In an editor that's welcome rather than a cost: it's the room
         // that lets you scroll the line you're typing up off the bottom edge.
-        let wantedInset = NSSize(width: 4, height: 8 + topInset)
+        let wantedInset = NSSize(width: textInset.width, height: textInset.height + topInset)
         if textView.textContainerInset != wantedInset {
             textView.textContainerInset = wantedInset
             // The scroller still spans the whole height, so start its track below the bar.
@@ -116,12 +169,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
             context.coordinator.highlight(textView)
+            // Text put in from outside — a draft restored, or the editor emptied after a note was
+            // written — changes the height without a keystroke to notice it.
+            afterCurrentUpdate { context.coordinator.reportHeight(textView) }
         }
-        // Take focus once, after the view is in a window — this is a focused takeover, so the caret
-        // should be ready without a click.
-        if !context.coordinator.didFocus {
-            context.coordinator.didFocus = true
-            afterCurrentUpdate { textView.window?.makeFirstResponder(textView) }
+        // Take focus after the view is in a window: an editor you have to click into is one the host
+        // opened for you and then didn't hand over.
+        if context.coordinator.focusedRequest != focusRequest {
+            context.coordinator.focusedRequest = focusRequest
+            context.coordinator.claimFocus(textView)
         }
 
     }
@@ -129,7 +185,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextEditor
         weak var textView: NSTextView?
-        var didFocus = false
+        /// The last `focusRequest` acted on. Nil until the first update, so a fresh editor focuses.
+        var focusedRequest: Int?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
@@ -137,6 +194,54 @@ struct MarkdownTextEditor: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
             highlight(textView)
+            reportHeight(textView)
+        }
+
+        /// Take first responder, and check a moment later that it stuck.
+        ///
+        /// Belt and braces around a handoff this code doesn't control, and the same one the quick bar's
+        /// panel does for key status. When this editor replaces a SwiftUI `TextField`, that field's
+        /// `@FocusState` is torn down on SwiftUI's own schedule — which can land *after* the responder
+        /// change here and put the window back to having no first responder at all. One retry, so a
+        /// genuine refusal isn't turned into a loop.
+        func claimFocus(_ textView: NSTextView) {
+            for delay in Self.focusAttempts {
+                // `DispatchQueue.main` rather than `afterCurrentUpdate`, which is the same hop with a
+                // `@MainActor` annotation this coordinator isn't in a position to satisfy.
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak textView] in
+                    guard let textView, let window = textView.window, !Self.holdsFocus(window, textView)
+                    else { return }
+                    window.makeFirstResponder(textView)
+                }
+            }
+        }
+
+        /// When to try. Three attempts inside a sixth of a second, and then it gives up rather than
+        /// spinning: SwiftUI writes the window's first responder on its own schedule while it tears the
+        /// field down, and which of the two writes lands last varies with how the mode was entered —
+        /// a summon and a ⇧⏎ promotion produced opposite answers from a single attempt.
+        private static let focusAttempts: [TimeInterval] = [0, 0.06, 0.16]
+
+        /// Whether the caret is already in this text view. A focused `NSTextView` may be answered for
+        /// by the window's field editor, which is a *different* object delegating to the same place.
+        private static func holdsFocus(_ window: NSWindow, _ textView: NSTextView) -> Bool {
+            if window.firstResponder === textView { return true }
+            guard let editor = window.firstResponder as? NSTextView else { return false }
+            return editor.delegate === textView.delegate
+        }
+
+        /// Measure the laid-out text and hand the height to whoever asked for it.
+        ///
+        /// `usedRect` rather than the text view's frame: an `isVerticallyResizable` text view is at
+        /// least as tall as its clip view, so its own frame answers "how much room did you give me"
+        /// rather than "how much do you need". Layout is forced first — the used rect of a container
+        /// that hasn't laid out is whatever it was before the edit.
+        func reportHeight(_ textView: NSTextView) {
+            guard let report = parent.onContentHeight,
+                  let container = textView.textContainer,
+                  let layout = textView.layoutManager else { return }
+            layout.ensureLayout(for: container)
+            report(layout.usedRect(for: container).height + textView.textContainerInset.height * 2)
         }
 
         /// Re-style the whole (short) note: reset to the base attributes, then layer each span's style.
@@ -147,11 +252,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let text = textView.string
             let full = NSRange(location: 0, length: storage.length)
             storage.beginEditing()
-            storage.setAttributes([.font: MarkdownTextEditor.baseFont, .foregroundColor: NSColor.labelColor],
+            storage.setAttributes([.font: parent.baseFont, .foregroundColor: NSColor.labelColor],
                                   range: full)
             for span in markdownSpans(in: text) {
                 let ns = NSRange(span.range, in: text)
-                storage.addAttributes(markdownAttributes(for: span.kind, base: MarkdownTextEditor.baseFont), range: ns)
+                storage.addAttributes(markdownAttributes(for: span.kind, base: parent.baseFont), range: ns)
             }
             storage.endEditing()
         }
@@ -284,6 +389,8 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 private final class ShortcutTextView: NSTextView {
     /// Invoked on ⌘↩ to commit and close the editor.
     var onSubmit: (() -> Void)?
+    /// Invoked on Escape, when the host has something for it to mean. See `MarkdownTextEditor.onCancel`.
+    var onCancel: (() -> Void)?
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
 
@@ -308,6 +415,16 @@ private final class ShortcutTextView: NSTextView {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// Escape. Handed to the host when it wants it, and otherwise left to the text view — where it
+    /// dismisses an open completion list, which is a use worth not stealing.
+    override func cancelOperation(_ sender: Any?) {
+        guard let onCancel else {
+            super.cancelOperation(sender)
+            return
+        }
+        onCancel()
     }
 
     override func keyDown(with event: NSEvent) {

@@ -1,3 +1,4 @@
+import AppKit
 import PmLib
 import SwiftUI
 
@@ -10,13 +11,25 @@ struct QuickBarView: View {
     @ObservedObject var model: QuickBarModel
     @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
     @FocusState private var fieldFocused: Bool
+    /// The note editor's laid-out height, as it reports it. Clamped by `clampedNoteHeight`, which is
+    /// what the editor is actually given — so the panel grows with the prose and then stops.
+    @State private var noteHeight: CGFloat = 0
     /// Measured content height, for the panel's auto-fit.
     var onContentHeight: (CGFloat) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            field
-            if !model.rows.isEmpty {
+            // The one thing at the top of the bar, whichever it is this time. Both are anchored here
+            // and grow downward, which is the only property the rest of the layout depends on.
+            if model.mode == .note {
+                noteEditor
+            } else {
+                field
+            }
+            // Never in note mode: there is one destination and one key that goes to it, and a list of
+            // one you can't arrow within is a control pretending to be a choice. What ⌘↩ will do is
+            // said in the hint line instead. The row itself still exists — see `QuickBarModel.buildRows`.
+            if !model.rows.isEmpty, model.mode != .note {
                 Divider()
                 rowList
             }
@@ -26,6 +39,14 @@ struct QuickBarView: View {
             if let preview = model.preview {
                 Divider()
                 previewBox(preview)
+            }
+            // What the note is being added to, in its own words. The prose equivalent of the ghost
+            // line: there it's your task drawn into a real session, here it's your paragraph following
+            // the real ones. Absent when today has no note yet, which is its own answer — you're
+            // starting one.
+            if !model.noteTail.isEmpty {
+                Divider()
+                noteTailBlock
             }
             // The receipt takes the hint's place rather than the whole bar's.
             //
@@ -69,6 +90,22 @@ struct QuickBarView: View {
         // screen you are aiming at while you type.
         .frame(maxHeight: .infinity, alignment: .top)
         .onAppear { afterCurrentUpdate { fieldFocused = true } }
+        // Leaving the note surface puts the field back, and a field that appears without the caret is
+        // a bar you have to click into. `onAppear` above can't do it: the field is a branch inside a
+        // body that never re-appears, so nothing fires when the branch swaps.
+        .onChange(of: model.mode) { mode in
+            // Dropped explicitly on the way into the note surface. Left set, SwiftUI tears the field's
+            // focus down on its own schedule, and that teardown can arrive after the editor has taken
+            // first responder — leaving the window with none and the caret nowhere.
+            guard mode != .note else {
+                fieldFocused = false
+                // Start from the floor. Left at the last note's height the surface would open at
+                // whatever size it closed, and then snap — the opposite of the growth this animates.
+                noteHeight = 0
+                return
+            }
+            afterCurrentUpdate { fieldFocused = true }
+        }
         .onChange(of: model.selectedRow?.id) { _ in announceSelection() }
         .onChange(of: model.receipt) { announce($0?.spoken) }
     }
@@ -78,7 +115,10 @@ struct QuickBarView: View {
     /// moving.
     private var heightSignature: some Equatable {
         [String(model.rows.count), String(model.overflow > 0), model.receipt?.spoken ?? "",
-         String(model.preview?.lines.count ?? 0), hint.map(spoken) ?? ""]
+         String(model.preview?.lines.count ?? 0), hint.map(spoken) ?? "",
+         // The editor's height is content, not chrome: it changes as you type, and the panel has to
+         // follow it on the same curve as everything else here.
+         String(Int(clampedNoteHeight)), String(model.noteTail.count)]
     }
 
     /// What moves the ghost, and nothing else.
@@ -113,6 +153,14 @@ struct QuickBarView: View {
                 // of the command — ⌘↩ means something different from ↩ — and a text field's submit
                 // action reports the keystroke without them.
                 .onKeyPress(keys: [.return]) { press in
+                    // ⇧⏎ is "newline", everywhere that has ever had one. A field that can't hold a
+                    // newline should hand you something that can rather than swallow the keystroke —
+                    // so in capture it turns the bar into the note editor, carrying the line across.
+                    // See `QuickBarModel.promoteToNote`.
+                    if press.modifiers.contains(.shift), model.mode == .capture {
+                        model.promoteToNote()
+                        return .handled
+                    }
                     model.runSelection(modifiers: press.modifiers)
                     return .handled
                 }
@@ -171,6 +219,93 @@ struct QuickBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    // MARK: The note surface
+
+    /// The field's place, taken by the app's own markdown editor.
+    ///
+    /// The same `MarkdownTextEditor` the window's session-note takeover uses, and deliberately the very
+    /// same one rather than something simpler: list continuation, ⌘B/⌘I/⌘K, a pasted URL becoming a
+    /// link, a dropped file linking itself, spell-check without autocorrect. All of it already written
+    /// and already what editing a note means everywhere else in the app. A second, lesser editor in the
+    /// panel would be a second set of habits for the same file.
+    ///
+    /// The glyph stays where the field's is, and swaps into it. That's what makes ⇧⏎ read as this bar
+    /// becoming something else rather than as a different window arriving.
+    private var noteEditor: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: model.mode.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                // Centred on the *first line*, not on the block. Top-aligned with a paragraph eight
+                // lines tall it would sit two pixels above where the field's glyph was and drift
+                // further with every line typed; boxed to one line's height it doesn't move at all.
+                .frame(width: 18, height: QuickBarMetrics.noteLineHeight)
+                .padding(.top, QuickBarMetrics.noteTextInset)
+                .contentTransition(.symbolEffect(.replace))
+                .animation(.easeOut(duration: 0.18), value: model.mode.symbol)
+            ZStack(alignment: .topLeading) {
+                // A placeholder of its own: an `NSTextView` has none, and an editor that opens empty
+                // and unlabelled is the one moment this surface doesn't say what it's for. Set where
+                // the editor's own first line starts, in the editor's own face.
+                if model.noteText.isEmpty {
+                    Text(QuickBarMode.note.placeholder)
+                        .font(.system(size: QuickBarMetrics.noteFont.pointSize))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, QuickBarMetrics.noteTextInset)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                MarkdownTextEditor(text: $model.noteText,
+                                   onSubmit: { model.runSelection() },
+                                   onCancel: { model.leaveNote() },
+                                   onContentHeight: { noteHeight = $0 },
+                                   focusRequest: model.noteFocusToken,
+                                   baseFont: QuickBarMetrics.noteFont,
+                                   textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset))
+                    .frame(height: clampedNoteHeight)
+                    .accessibilityLabel(QuickBarMode.note.placeholder)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, QuickBarMetrics.noteBlockInset)
+    }
+
+    /// How tall the editor is allowed to be: the prose's own height, floored and capped.
+    ///
+    /// The floor is about three lines, so a surface you've just opened looks like somewhere to write
+    /// rather than a field that grew a scrollbar. The ceiling is about fourteen, past which it scrolls
+    /// — which keeps the whole panel inside the same size family as the capture list it replaced, and
+    /// keeps this a bar. A note longer than fourteen lines is one you should be writing in the window,
+    /// and the window is one ⌘↩ and a click away.
+    private var clampedNoteHeight: CGFloat {
+        min(max(noteHeight, QuickBarMetrics.noteMinHeight), QuickBarMetrics.noteMaxHeight)
+    }
+
+    /// The tail of today's note, dimmed, under the thing being written.
+    private var noteTailBlock: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Earlier today")
+                .font(.caption2)
+                .textCase(.uppercase)
+                .foregroundStyle(.tertiary)
+            ForEach(Array(model.noteTail.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    // Two lines each, so a long paragraph can't push the writing surface off the
+                    // screen. It's context, and context that grows without limit stops being context.
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Earlier today: " + model.noteTail.joined(separator: ". "))
     }
 
     /// One of the field's badges. Tinted ones are saying something happened to the line — it's going
@@ -502,7 +637,26 @@ struct QuickBarView: View {
             return [[.text(QuickBarModel.display(project))],
                     Self.revealHint,
                     Self.switchHint(model.mode)]
+
+        case .note:
+            // This line is doing the row list's job as well as its own. With no rows on screen it is
+            // the only thing that names where the note is going, and the only thing that says which
+            // key commits it — in a surface where ⏎ is a newline, that is not guessable.
+            guard let destination = noteDestination else {
+                return [[.text("No focused project — ⌃⌥O finds one, then write the note.")]]
+            }
+            var parts = [[HintPart.text("Adding to \(destination) · today")]]
+            if !model.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append(Self.hint([.command, .return], "save"))
+            }
+            parts.append(Self.hint([.escape], "back"))
+            return parts
         }
+    }
+
+    /// Where the note lands, named: the project the writing was aimed at, or the focused one.
+    private var noteDestination: String? {
+        model.noteTarget?.displayName ?? model.focusedProjectName.map { QuickBarModel.display($0) }
     }
 
     /// The line for a search that found nothing. Names what was searched for and leaves ⇥ on the end,
@@ -692,6 +846,40 @@ enum QuickBarMetrics {
     /// How long the bar takes to grow or shrink a row. Long enough to read as movement, short enough
     /// that a row you were about to press ⏎ on has stopped moving before you get there.
     static let resizeDuration: TimeInterval = 0.12
+
+    /// The face the note surface writes in: the field's own size, because it replaces the field.
+    ///
+    /// The seam this avoids is the one you'd see rather than reason about. ⇧⏎ is meant to read as the
+    /// line you were typing carrying on somewhere roomier — and a line that changes size at the moment
+    /// it changes container is a different line arriving, not the same one continuing.
+    static let noteFont = NSFont.systemFont(ofSize: 18)
+
+    /// One laid-out line of it. Asked of the layout manager rather than guessed from the point size,
+    /// because everything below is aligned against the field to the pixel and a guess is a seam.
+    static let noteLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: noteFont)
+
+    /// The text's own inset inside the editor, and the space either side of the block around it.
+    ///
+    /// Split this way so the first line of a note lands exactly where the field's text does. The field
+    /// pads 12 above its line; the editor pads 4 and the text container adds 8, and 4 + 8 is 12. The
+    /// same sum runs underneath, so an empty note is the height the field was — which is the whole
+    /// trick: the surface opens at the size of the thing it replaced and grows from there.
+    static let noteTextInset: CGFloat = 8
+    static let noteBlockInset: CGFloat = 4
+
+    /// The editor's floor and ceiling.
+    ///
+    /// The floor is one line. It used to be three, on the theory that a writing surface should look
+    /// like one on arrival — but three lines of nothing under the caret is a gap you notice, and it
+    /// made the promotion out of a capture line a jump rather than a continuation. What says "write
+    /// here" is the glyph, the placeholder and a hint line that names the note's destination; none of
+    /// them need the room.
+    ///
+    /// The ceiling is about twelve lines, past which it scrolls, which keeps the whole panel inside
+    /// the size family of the capture list it replaced. A note longer than that is one to write in the
+    /// window, and the window is a ⌘⏎ and a click away.
+    static var noteMinHeight: CGFloat { ceil(noteLineHeight) + noteTextInset * 2 }
+    static let noteMaxHeight: CGFloat = 272
 }
 
 private struct QuickBarHeightKey: PreferenceKey {

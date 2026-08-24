@@ -51,6 +51,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.onRun = { [weak self] row, modifiers in self?.run(row, modifiers: modifiers) }
         model.onDismiss = { [weak self] in self?.hide() }
         model.dryRun = { [weak self] command, argument in self?.dryRun(command, argument: argument) }
+        model.onNoteChanged = { [weak self] text in self?.saveNoteDraft(text) }
+        model.onEnterNote = { [weak self] target in self?.beganNote(target: target) }
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -183,6 +185,55 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         stashedAt = Date()
     }
 
+    // MARK: Note drafts
+
+    /// Where a note being written is kept between summons, keyed by the project it's going to.
+    ///
+    /// The stash above is the capture line's equivalent, and the difference between them is the whole
+    /// reason this exists. A task line is short, is one line, and is cheap to type again — so it's
+    /// caught on the way out and offered back for two minutes. Half a page of thinking is none of
+    /// those things. It's written down on every keystroke, it doesn't expire, it survives the app
+    /// quitting, and it comes back in the editor rather than as a row you have to accept — because
+    /// the prose is its own offer, and nothing about it needs deciding before you carry on.
+    private static let noteDraftsKey = "PMQuickBarNoteDrafts"
+
+    /// Which draft the open note is. The project it's going to, decided when the surface opened.
+    private var noteDraftKey: String?
+
+    private var noteDrafts: [String: String] {
+        UserDefaults.standard.dictionary(forKey: Self.noteDraftsKey) as? [String: String] ?? [:]
+    }
+
+    /// The writing surface opened. Work out which draft this is, and put it back if there is one.
+    private func beganNote(target: CaptureTarget?) {
+        noteDraftKey = target?.key ?? focusedStore?.projectKey
+        // Only into an empty editor. A promotion out of a capture line arrives with that line already
+        // in it, and the line you just typed is a more recent answer than a draft from yesterday — so
+        // the draft waits rather than being pushed in front of it or, worse, appended to it.
+        guard model.noteText.isEmpty, let key = noteDraftKey,
+              let draft = noteDrafts[key], !draft.isEmpty else { return }
+        model.noteText = draft
+        Log.write("quick bar restored a note draft for \(key) (\(draft.count) characters)")
+    }
+
+    /// Write the note down as it's typed. Cheap enough to do per keystroke, and the alternative is
+    /// choosing a moment at which prose becomes worth keeping.
+    private func saveNoteDraft(_ text: String) {
+        guard let key = noteDraftKey else { return }
+        var drafts = noteDrafts
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            drafts.removeValue(forKey: key)
+        } else {
+            drafts[key] = text
+        }
+        UserDefaults.standard.set(drafts, forKey: Self.noteDraftsKey)
+    }
+
+    /// Whether the bar is holding prose nobody has written down anywhere but here.
+    private var holdsUnsavedNote: Bool {
+        model.mode == .note && !model.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Say what just happened, hand the field back, and stay.
     ///
     /// This is the hinge the bar turns on. It used to give the front back to the app you came from and
@@ -294,6 +345,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.restorable = mode == .capture && Date().timeIntervalSince(stashedAt) < Self.stashLifetime
             ? stashedLine : nil
         model.reset(mode: mode)
+        // After the reset, which empties the editor: the draft is the one thing about a note summon
+        // that isn't fresh, and it goes in last so nothing above can clear it again.
+        if mode == .note { beganNote(target: nil) }
     }
 
     /// Every open task the `/` mode can search.
@@ -916,6 +970,16 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     }
 
     private func perform(_ command: QuickBarCommand, argument: String, reveal: Bool) {
+        // `>note` with nothing after it was never a command to run — it's a request for somewhere to
+        // write, and it used to answer by opening a window and activating the app, which is the one
+        // thing this bar exists not to do. The surface it wanted is now in the panel. ⌘⏎ still means
+        // "and show me", and for a note that's still the window's takeover, where the whole note can
+        // be restructured rather than added to.
+        if command == .sessionNote, argument.isEmpty, !reveal {
+            Log.write("quick bar command: note (opening the writing surface)")
+            model.enterNote(text: "", target: nil)
+            return
+        }
         let task = anchorTask
         let store = focusedStore
         let target = reveal ? revealTarget(for: command) : nil
@@ -972,6 +1036,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             FocusPanelController.shared.show(editor: .wrap)
         case .sessionNote:
             if argument.isEmpty {
+                // Only ⌘⏎ reaches this now; the plain form opened the panel's editor and returned.
                 WindowManager.shared.openFocusedProject().newSession(nil)
                 return   // already the reveal target; asking twice would open today's session twice
             }
@@ -1189,6 +1254,15 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// press. The same grace period the focus panel uses, and the same re-check: if the keyboard came
     /// back, this wasn't you leaving.
     func windowDidResignKey(_ notification: Notification) {
+        // Unsaved prose keeps the bar on screen. The one case that earns the focus panel's pinning,
+        // and it earns it twice over: writing about the thing you're looking at means looking at the
+        // thing you're writing about, so clicking into it must not cost you the surface — and half a
+        // page is not something to take away on a click that might have been a scroll. `acceptsKey`
+        // stays set as well as the hide being skipped, which is what lets a click back into the panel
+        // pick the keyboard up again; cleared, the bar would sit there refusing to be typed into.
+        //
+        // The draft is written down regardless. This is about not interrupting you, not about safety.
+        guard !holdsUnsavedNote else { return }
         panel?.acceptsKey = false
         // A receipt used to be exempt from this, because putting the receipt up meant handing the
         // front back — the resign was the bar doing as it was told. It doesn't hand anything back now,

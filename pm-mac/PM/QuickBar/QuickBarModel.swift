@@ -26,6 +26,15 @@ enum QuickBarMode: CaseIterable {
     case findTask
     case goToProject
     case command
+    /// Prose for today's session, written in an editor rather than typed into a field.
+    ///
+    /// The odd one out on purpose. The other four read a line: three of them as a query to throw away,
+    /// one as text to keep, all of them one line long because a task *is* one line. A session note is
+    /// not — the file joins paragraphs with a blank line between them and always could — so this mode
+    /// swaps the field for the app's own markdown editor and the row list for the one thing ⌘↩ does.
+    /// It was the fourth `CapturePlacement` for a long time, wearing the clothes of three siblings it
+    /// has nothing in common with, and that is the whole reason its input was a single line.
+    case note
 
     /// The character that puts the bar in this mode when it's the line's first.
     ///
@@ -39,6 +48,12 @@ enum QuickBarMode: CaseIterable {
         case .findTask: return "/"
         case .goToProject: return "@"
         case .command: return ">"
+        // None, and not for want of a spare character. A sigil is a first keystroke you spend to say
+        // what the *rest* of the line is for, which works when the rest of the line is a query. Prose
+        // has no character it can't legitimately begin with, and a note that silently lost its first
+        // one to a mode switch would be the field editing you. Reached by ⌃⌥N, by ⇧⏎ out of a capture
+        // line, and by `>note` — three deliberate keystrokes, none of them a character you might type.
+        case .note: return nil
         }
     }
 
@@ -48,6 +63,7 @@ enum QuickBarMode: CaseIterable {
         case .findTask: return "Find a task…"
         case .goToProject: return "Go to project…"
         case .command: return "Run a command…"
+        case .note: return "Write a note for today…"
         }
     }
 
@@ -63,6 +79,7 @@ enum QuickBarMode: CaseIterable {
         case .findTask: return "Find a task"
         case .goToProject: return "Go to project"
         case .command: return "Run a command"
+        case .note: return "Write a note"
         }
     }
 
@@ -72,6 +89,7 @@ enum QuickBarMode: CaseIterable {
         case .findTask: return "text.magnifyingglass"
         case .goToProject: return "magnifyingglass"
         case .command: return "chevron.right"
+        case .note: return "note.text"
         }
     }
 
@@ -80,12 +98,18 @@ enum QuickBarMode: CaseIterable {
     /// Ordered as the four things you might have meant, from writing to acting: put a line somewhere,
     /// find a line, find a project, do something to one. A mode you reached by pressing ⇥ once too
     /// many times is three more presses from home, which is the whole reason the cycle is short.
+    ///
+    /// Note is deliberately *not* in the cycle. Two reasons, and either would do: ⇥ inside the editor
+    /// already means indent-this-list-item, which is worth more there than a mode switch; and turning
+    /// a launcher into a writing surface is too large a change to be one press away from a key people
+    /// hit by accident. Its own value here is what Escape falls back to.
     var next: QuickBarMode {
         switch self {
         case .capture: return .findTask
         case .findTask: return .goToProject
         case .goToProject: return .command
         case .command: return .capture
+        case .note: return .capture
         }
     }
 
@@ -545,6 +569,33 @@ final class QuickBarModel: ObservableObject {
     /// turn into task text as you delete, and one you summoned with ⌃⌥O never can at all.
     var mode: QuickBarMode { QuickBarMode.sigilMode(of: query) ?? baseMode }
 
+    /// The note being written, in note mode. Empty otherwise.
+    ///
+    /// Held apart from `query` rather than reusing it, and the separation is load-bearing. `query` is
+    /// read for a leading sigil, a trailing `@project`, and a `due:` phrase — three things that must
+    /// never be read out of prose. "@dana pushed back" would silently file the note in someone else's
+    /// project; "due: end of week" would be eaten out of the middle of a sentence. So the note body
+    /// goes somewhere nothing parses it, and the one thing a note does need from that vocabulary — a
+    /// project other than the focused one — is decided before the writing starts, in `noteTarget`.
+    @Published var noteText: String = "" {
+        didSet {
+            guard noteText != oldValue else { return }
+            receipt = nil
+            rebuild()
+            onNoteChanged(noteText)
+        }
+    }
+
+    /// Where the note goes, when that isn't the focused project.
+    ///
+    /// Set on the way in — carried over from the `@…` of the capture line that was promoted — and then
+    /// fixed for as long as the note is being written. See `noteText` for why it can't be re-read.
+    @Published var noteTarget: CaptureTarget? { didSet { if noteTarget != oldValue { rebuild() } } }
+
+    /// Bumped every time the writing surface opens, so the editor knows to take the caret even when
+    /// SwiftUI has kept the one from last time. See `MarkdownTextEditor.focusRequest`.
+    @Published private(set) var noteFocusToken = 0
+
     /// What the mode acts on: the line with its sigil taken off.
     ///
     /// The sigil has to be the very first character, which is also the escape hatch — a task that
@@ -681,6 +732,13 @@ final class QuickBarModel: ObservableObject {
     /// Runs a chosen row. Set by the controller, which owns what "go to a project" means.
     var onRun: (QuickBarRow, _ modifiers: EventModifiers) -> Void = { _, _ in }
     var onDismiss: () -> Void = {}
+    /// Every edit to the note body, for the controller to keep a draft of. Prose is worth more than a
+    /// task line and there is more of it, so it is written down as it's typed rather than caught on the
+    /// way out — see `QuickBarController.saveNoteDraft`.
+    var onNoteChanged: (String) -> Void = { _ in }
+    /// The writing surface opening, however it was asked for. The controller answers with the draft
+    /// belonging to wherever the note is going.
+    var onEnterNote: (CaptureTarget?) -> Void = { _ in }
 
     // MARK: Rows
 
@@ -691,9 +749,61 @@ final class QuickBarModel: ObservableObject {
         selection = 0
         receipt = nil
         query = ""
+        // Emptied here and filled by the controller straight afterwards when there's a draft to put
+        // back — a summon must never inherit the last one's prose by accident, only on purpose.
+        noteText = ""
+        noteTarget = nil
         baseMode = mode
         optionDown = false
+        // A summon into the writing surface is as much a request for the caret as a promotion into it
+        // is; the editor may be the very one the last summon left mounted.
+        if mode == .note { noteFocusToken += 1 }
         rebuild()
+    }
+
+    /// Turn the bar into the writing surface, with `text` already in it.
+    ///
+    /// `target` is spent on the way in and then frozen: it comes from the `@…` of the capture line this
+    /// was promoted out of, which is the last moment anything is entitled to read a project name out of
+    /// what you typed. See `noteText`.
+    func enterNote(text: String, target: CaptureTarget?) {
+        receipt = nil
+        selection = 0
+        optionDown = false
+        query = ""
+        noteTarget = target
+        noteText = text
+        baseMode = .note
+        noteFocusToken += 1
+        rebuild()
+        onEnterNote(target)
+    }
+
+    /// What ⇧⏎ does to a capture line: keeps the words, drops the field.
+    ///
+    /// The one inference the bar allows itself, and it isn't one — a newline is a keystroke you meant,
+    /// exactly as `>` is, and the rule this bar keeps is that it never decides between a task and a
+    /// note by *reading the words*. What it takes across is the line as capture had already parsed it:
+    /// the text without its `@…` suffix, and the project that suffix named.
+    ///
+    /// The trailing newline is the keystroke itself, honoured. You asked for a new line; here it is,
+    /// with the caret on it.
+    func promoteToNote() {
+        guard mode == .capture else { return }
+        let seed = reading.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        enterNote(text: seed.isEmpty ? "" : seed + "\n", target: reading.target)
+    }
+
+    /// What Escape does in note mode: back to the launcher, empty-handed.
+    ///
+    /// Not a dismiss. Escape in a writing surface means "out of the writing surface", and the bar has
+    /// somewhere to be that isn't gone — so it lands on capture, where a second press closes it if that
+    /// is what was wanted. Nothing is lost on the way: the controller has been writing the draft down
+    /// since the first keystroke, and puts it back on the next summon.
+    func leaveNote() {
+        noteText = ""
+        noteTarget = nil
+        switchTo(.capture, text: "")
     }
 
     /// Ready the line for the next thing, a row having just run — without touching the receipt for it.
@@ -709,7 +819,10 @@ final class QuickBarModel: ObservableObject {
     /// it failed to write it.
     func resume(clearingText: Bool) {
         optionDown = false
-        if clearingText { query = "" }
+        if clearingText {
+            query = ""
+            noteText = ""
+        }
         rebuild()
         // After the rebuild, not before: `rebuild` carries the selection over by identity, and what's
         // wanted here is the top of the list. The row you arrowed to was an answer to the line you
@@ -752,7 +865,7 @@ final class QuickBarModel: ObservableObject {
         // this is where a project name is most tedious to type, because it's the tail of a sentence
         // you're already most of the way through.
         case .capture: typed = QuickCaptureParser.splitTarget(argument)?.projectQuery ?? ""
-        case .findTask, .command: return nil
+        case .findTask, .command, .note: return nil
         }
         let needle = typed.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else { return nil }
@@ -816,6 +929,18 @@ final class QuickBarModel: ObservableObject {
 
     private func buildRows() -> RowSet {
         switch mode {
+        // One row, never drawn.
+        //
+        // The note surface has no list to choose from — there is one destination and ⌘↩ goes to it —
+        // and the view knows not to render one. But the row is what the controller runs: `isRunnable`
+        // gates an empty note, `spokenDescription` is what VoiceOver reads, and `apply(.sessionNote…)`
+        // is reached the same way it is from the capture list. A second path to the same write would
+        // be a second place for it to go wrong.
+        case .note:
+            let text = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return RowSet(rows: [.capture(placement: .sessionNote, text: text, due: nil,
+                                          anchor: nil, target: noteTarget)])
+
         case .capture:
             // Somewhere to put it: the project you're in, or the one the line named. With neither,
             // the only useful thing the bar can offer is a way to get one.
@@ -1027,7 +1152,27 @@ final class QuickBarModel: ObservableObject {
         case .capture: return capturePreview()
         case .command: return commandPreview()
         case .findTask, .goToProject: return nil
+        // The note surface has `noteTail` instead. A five-line diagram of a session is the right answer
+        // to "where would this line go" and the wrong one to "what am I adding to": once the thing
+        // being written is ten lines of prose, the useful context is the prose it joins, in its own
+        // words, not a picture of the tasks underneath it.
+        case .note: return nil
         }
+    }
+
+    /// The tail of today's note, for the editor to be writing at the end of.
+    ///
+    /// The last two paragraphs, which is what `notePreview` showed as ghost-lines and is the right
+    /// amount for the same reason: you are continuing a train of thought, and the thought you are
+    /// continuing is the last one. The whole note is a scroll away in the window; this is the part that
+    /// changes what you're about to write.
+    var noteTail: [String] {
+        guard mode == .note, noteTarget == nil else { return [] }
+        guard let existing = todayNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !existing.isEmpty else { return [] }
+        return existing.split(separator: "\n").map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .suffix(2)
     }
 
     private func capturePreview() -> SessionPreview? {
