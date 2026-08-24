@@ -15,8 +15,18 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT = path.join(here, "..", "src", "lib", "pm-api.generated.ts");
 
+/**
+ * Which `pm` to describe: the one asked for, else the one built from this repo, else whatever is
+ * installed.
+ *
+ * The repo build comes before `PATH` because the drift check is about *this tree* — comparing the
+ * checked-in types against a stale globally-installed binary reports a difference that says nothing
+ * about the change in front of you, and hides one that does.
+ */
 export function pmBinary() {
-  return process.env.PM_CLI_PATH || "pm";
+  if (process.env.PM_CLI_PATH) return process.env.PM_CLI_PATH;
+  const built = path.join(here, "..", "..", "pm-swift", ".build", "debug", "pm");
+  return existsSync(built) ? built : "pm";
 }
 
 export function describe(binary = pmBinary()) {

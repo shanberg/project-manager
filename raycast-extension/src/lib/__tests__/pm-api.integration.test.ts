@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -22,7 +22,23 @@ import type { PreferenceValues } from "../types";
  * The unit tests prove this extension is consistent with what it believes the wire format to be;
  * only this proves that belief is right. Skipped when `pm` isn't installed.
  */
-const binary = process.env.PM_CLI_PATH || "pm";
+/**
+ * The repo's own build before whatever is installed, for the same reason the generator prefers it:
+ * this suite is checking the client against the contract *in this tree*, and a stale global `pm`
+ * would have it pass or fail for reasons unrelated to the change being made.
+ */
+const built = path.join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "pm-swift",
+  ".build",
+  "debug",
+  "pm",
+);
+const binary = process.env.PM_CLI_PATH || (existsSync(built) ? built : "pm");
 
 /**
  * Set up at module scope, not in `beforeAll` — `describe.skipIf` is evaluated when the suite is

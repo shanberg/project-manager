@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.0.0";
+export const API_CONTRACT_VERSION = "1.1.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
