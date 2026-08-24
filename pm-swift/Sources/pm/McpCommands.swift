@@ -148,9 +148,20 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
     }
     let action = actionName(for: name)
     guard allowed.contains(where: { $0.name == action }) else {
-        let reason = ApiRegistry.spec(action) == nil
-            ? "No such tool: \(name)."
-            : "\(name) isn't available in this session. It was started without the flag that permits it."
+        // Three different answers, because they ask for three different things back. "No such thing"
+        // means stop; "not with these flags" means ask the user to restart the server differently;
+        // "not from here at all" means no flag will ever help, so ask them to do it in the app. The
+        // middle one used to cover all three, and sent a model looking for a flag that doesn't exist.
+        let reason: String
+        switch ApiRegistry.spec(action)?.tier {
+        case nil:
+            reason = "No such tool: \(name)."
+        case .affordance:
+            reason = "\(name) is a request to the running PM app, which this server can't make. "
+                + "No flag enables it — the person you're helping can do it in PM."
+        default:
+            reason = "\(name) isn't available in this session. It was started without the flag that permits it."
+        }
         return toolFailure(id, reason)
     }
 

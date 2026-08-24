@@ -262,4 +262,45 @@ final class McpTests: XCTestCase {
         XCTAssertTrue(outcome.isError)
         XCTAssertTrue(outcome.text.hasPrefix("staleReference"), outcome.text)
     }
+
+    /// An affordance is refused for a different reason than a flag-gated tool, and has to say so.
+    ///
+    /// Both used to answer "It was started without the flag that permits it." For `app_openWindow`
+    /// that isn't true — no flag enables it, because the server has no app to ask — so a model was
+    /// sent looking for a restart that would never help.
+    func testAnAffordanceSaysNoFlagWillHelp() throws {
+        try XCTSkipUnless(haveBinary)
+        let affordance = call("app_openWindow", [:], flags: ["--allow-write", "--allow-destructive"])
+        XCTAssertTrue(affordance.isError)
+        XCTAssertFalse(affordance.text.contains("flag that permits"), affordance.text)
+        XCTAssertTrue(affordance.text.contains("running PM app"), affordance.text)
+
+        // And the flag-gated case still says the thing that is true of it.
+        let gated = call("task_delete", [:], flags: [])
+        XCTAssertTrue(gated.isError)
+        XCTAssertTrue(gated.text.contains("flag that permits"), gated.text)
+    }
+
+    /// A bad argument refuses one call. It used to kill the process.
+    ///
+    /// `limit: -1` reached `prefix(-1)`, which traps — and a trap in a stdio server is not one failed
+    /// tool call, it is the end of the session: every request after it goes unanswered, including ones
+    /// already in flight. So this checks the refusal *and* that the server is still there behind it.
+    func testAnOutOfRangeArgumentDoesntTakeTheServerDown() throws {
+        try XCTSkipUnless(haveBinary)
+        _ = try seedProject()
+        let replies = mcp([
+            ["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": ["name": "task_list", "arguments": ["project": "W-1", "limit": -1]]],
+            ["jsonrpc": "2.0", "id": 2, "method": "ping"],
+        ])
+        let refusal = replies.first { $0["id"] as? Int == 1 }
+        let result = try XCTUnwrap(refusal?["result"] as? [String: Any])
+        XCTAssertEqual(result["isError"] as? Bool, true)
+        let text = ((result["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
+        XCTAssertTrue(text.hasPrefix("invalidField"), text)
+
+        XCTAssertNotNil(replies.first { $0["id"] as? Int == 2 },
+                        "the server didn't survive to answer the next request")
+    }
 }
