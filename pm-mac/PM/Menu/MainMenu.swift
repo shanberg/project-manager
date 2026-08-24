@@ -93,6 +93,10 @@ enum MainMenu {
         // ⌃⌘N: the third "new" in the File menu, after the task and the session it sits above in scale.
         track(.quickCapture,
               add(menu, "Quick Add Task…", #selector(AppDelegate.quickCapture), target: target, key: ""))
+        // Under it, because it's the same summon with the other kind of thing to say: one files a line,
+        // one opens somewhere to write.
+        track(.quickNote,
+              add(menu, "Write a Session Note…", #selector(AppDelegate.quickNote), target: target, key: ""))
         add(menu, "New Project…", #selector(AppDelegate.newProject), target: target, key: "n",
             modifiers: [.command, .control])
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",

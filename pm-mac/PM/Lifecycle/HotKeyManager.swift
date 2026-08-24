@@ -12,6 +12,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     case quickCapture
     case quickFindTask
     case quickGoToProject
+    case quickNote
     case toggleFocusPanel
     case openProjectWindow
     case newProject
@@ -27,6 +28,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         case .quickCapture: return "Quick Add a Task"
         case .quickFindTask: return "Find a Task"
         case .quickGoToProject: return "Go to Project"
+        case .quickNote: return "Write a Session Note"
         case .toggleFocusPanel: return "Show or Hide Focus Panel"
         case .openProjectWindow: return "Open Focused Project"
         case .newProject: return "New Project…"
@@ -39,10 +41,10 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
 
     /// What the action is bound to out of the box.
     ///
-    /// The three ways *in* to PM from another app get one: the two quick-bar modes and the focus
-    /// panel. The rest ship unbound on purpose — claiming half a dozen system-wide combinations on
-    /// first launch would break shortcuts in apps that have nothing to do with PM, and which keys are
-    /// free is a question only the person at the keyboard can answer.
+    /// The four ways *in* to PM from another app get one: three quick-bar modes and the focus panel.
+    /// The rest ship unbound on purpose — claiming half a dozen system-wide combinations on first
+    /// launch would break shortcuts in apps that have nothing to do with PM, and which keys are free
+    /// is a question only the person at the keyboard can answer.
     var defaultCombo: KeyCombo? {
         switch self {
         // ⌃⌥Space and ⌃⌥O: the two ways into the quick bar, and the reason it exists — a shortcut you
@@ -52,6 +54,11 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
             return KeyCombo(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(controlKey | optionKey))
         case .quickGoToProject:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_O), carbonModifiers: UInt32(controlKey | optionKey))
+        // ⌃⌥N, beside the other three. Bound out of the box for the same reason they are: writing down
+        // what just happened is worth nothing if it waits on you going and binding a key first, and the
+        // whole point of a note surface in a panel is that it's available from inside the meeting.
+        case .quickNote:
+            return KeyCombo(keyCode: UInt32(kVK_ANSI_N), carbonModifiers: UInt32(controlKey | optionKey))
         // ⌃⌥P, the panel's summon shortcut since the Tauri build.
         case .toggleFocusPanel:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_P), carbonModifiers: UInt32(controlKey | optionKey))

@@ -34,6 +34,8 @@ extension AppDelegate: NSMenuItemValidation {
 
     @objc func quickCapture() { QuickBarController.shared.toggle(mode: .capture) }
 
+    @objc func quickNote() { QuickBarController.shared.toggle(mode: .note) }
+
     @objc func quickGoToProject() { QuickBarController.shared.toggle(mode: .goToProject) }
 
     @objc func quickFindTask() { QuickBarController.shared.toggle(mode: .findTask) }

@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .quickCapture: { QuickBarController.shared.toggle(mode: .capture) },
             .quickFindTask: { QuickBarController.shared.toggle(mode: .findTask) },
             .quickGoToProject: { QuickBarController.shared.toggle(mode: .goToProject) },
+            .quickNote: { QuickBarController.shared.toggle(mode: .note) },
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
             .openProjectWindow: { [weak self] in self?.newWindow() },
             .newProject: { [weak self] in self?.newProject() },
@@ -311,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "find": QuickBarController.shared.toggle(mode: .findTask)
         case "goto": QuickBarController.shared.toggle(mode: .goToProject)
         case "command": QuickBarController.shared.toggle(mode: .command)
+        case "note": QuickBarController.shared.toggle(mode: .note)
         case "window": windows.openFocusedProject()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks
