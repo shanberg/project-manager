@@ -530,6 +530,10 @@ final class QuickBarModel: ObservableObject {
     @Published var query: String = "" {
         didSet {
             guard query != oldValue else { return }
+            // A receipt is about the line before this one. The moment there's a new line being typed
+            // it's history, and leaving it up would have the footer reporting one thing while the
+            // field is plainly busy with another.
+            receipt = nil
             rebuild()
         }
     }
@@ -557,13 +561,15 @@ final class QuickBarModel: ObservableObject {
     /// as a query rather than as something to keep.
     @Published private(set) var reading = CaptureReading()
 
-    /// What the bar says once a row has run and the change has landed or didn't — the whole panel, in
-    /// place of the field and the rows, for as long as it takes to read. Nil while the bar is being
+    /// What the bar says once a row has run and the change has landed or didn't — one line in the
+    /// footer, where the hint usually is, for as long as it takes to read. Nil while the bar is being
     /// typed into.
     ///
-    /// The bar's job is to get out of the way, and it does: the front goes back to the app you were in
-    /// before this is ever set. What's left behind is a receipt, not a dialog — nothing to dismiss and
-    /// nothing that takes the keyboard, which is why it can afford to stay long enough to be read.
+    /// Deliberately not the whole panel and deliberately not a dialog. The bar stays up after a row
+    /// runs so the next one can be typed straight away, which means the receipt has to share the
+    /// screen with a field that still has the keyboard: it takes nothing away, it's cleared by the
+    /// first keystroke of the next line, and until then it's the only evidence that the last one
+    /// landed somewhere you can't see.
     @Published var receipt: QuickBarReceipt?
 
     /// The focused project's display name, or nil when there isn't one — capture has nowhere to go
@@ -688,6 +694,27 @@ final class QuickBarModel: ObservableObject {
         baseMode = mode
         optionDown = false
         rebuild()
+    }
+
+    /// Ready the line for the next thing, a row having just run — without touching the receipt for it.
+    ///
+    /// The near-twin of `reset`, and the difference is the whole point of both. `reset` is a summon:
+    /// a mode arrives with it and nothing on screen survives. This is the bar carrying on — same
+    /// summon, same mode, same panel, one more line to type. It drops the sigil with the text, so a
+    /// `>` command you just ran hands the field back to the mode you actually summoned rather than
+    /// leaving you queued up to run another one.
+    ///
+    /// `clearingText: false` is for a row that didn't land. The line in the field is then the only
+    /// copy of what you typed, and emptying it would be the bar throwing away a sentence *because*
+    /// it failed to write it.
+    func resume(clearingText: Bool) {
+        optionDown = false
+        if clearingText { query = "" }
+        rebuild()
+        // After the rebuild, not before: `rebuild` carries the selection over by identity, and what's
+        // wanted here is the top of the list. The row you arrowed to was an answer to the line you
+        // just spent, not to the empty one replacing it.
+        selection = 0
     }
 
     /// Rebuild the rows, keeping the selection on the row it was on.

@@ -8,7 +8,13 @@ import SwiftUI
 /// whatever app you were in without activating PM, so dismissing it leaves you back in that app with
 /// your insertion point where you left it. Everything else is the opposite of the focus panel's
 /// chrome: no snapping, no remembered position, no pinning. A bar you summon appears where you're
-/// looking and leaves the moment you're done, so it's centred on the active screen every time.
+/// looking, so it's centred on the active screen every time.
+///
+/// What it doesn't do any more is leave on its own. A row that runs and keeps you where you are hands
+/// the field straight back instead — see `confirm` — because the things you do with this bar come in
+/// runs, and a summon per thing is a toll on all but the first of them. So the ways out are the ways
+/// you'd expect and no others: Escape, the hotkey again, a click anywhere else, or a row whose whole
+/// answer is somewhere in PM.
 @MainActor
 final class QuickBarController: NSObject, NSWindowDelegate {
     static let shared = QuickBarController()
@@ -18,10 +24,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private let model = QuickBarModel()
     /// A hide waiting out a transient loss of key focus; cancelled if the keyboard comes back.
     private var pendingHide: DispatchWorkItem?
-    /// A receipt on screen, waiting out its dwell before the bar fades. Cancelled by a new summon.
+    /// A receipt on screen, waiting out its dwell before the footer goes back to hinting. Cancelled by
+    /// a new summon, by the next row to run, and by the first keystroke of the next line.
     private var pendingDismiss: DispatchWorkItem?
-    /// Whether a row is mid-flight: run, but not yet landed. A second ⏎ in that window would write the
-    /// line twice, and the field still has the keyboard until the receipt replaces it.
+    /// Whether a row is mid-flight: run, but not yet landed. The field keeps the keyboard throughout,
+    /// so without this a second ⏎ in that window would write the line twice.
     private var isRunning = false
     /// The app that was in front when the bar was summoned, so dismissing it can put you back there.
     private var previousApp: NSRunningApplication?
@@ -92,8 +99,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Dismiss the bar, handing the front back to whatever app it was taken from.
     ///
     /// `restoringFocus: false` is for the one command that means "go to PM" — opening a project window.
-    /// Everything else (a task captured, Escape, clicking away) is something you did *while* working
-    /// somewhere else, so the last step is putting you back in it.
+    /// Everything else (Escape, the hotkey again, clicking away) is you finishing a run of things done
+    /// *while* working somewhere else, so the last step is putting you back in it.
     /// Ask for the keyboard once more shortly after summoning, if it didn't stick.
     ///
     /// Belt and braces around a window-server handoff this code doesn't control: ordering a window in
@@ -160,70 +167,71 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Keep a capture line the bar is about to close on, so the next summon can offer it back.
     ///
     /// Only a line that nothing was done with. A row mid-flight (`isRunning`) is about to write this
-    /// text somewhere, and a receipt on screen means it already has — offering either back would be
-    /// the bar proposing to write the same task twice.
+    /// text somewhere, and offering that back would be the bar proposing to write the same task twice.
+    ///
+    /// A receipt on screen used to disqualify a line too, for the same reason — a receipt meant the
+    /// field's contents had just been written. It doesn't now: a receipt leaves an *emptied* field
+    /// behind it, so anything still in there is either a line that failed to write or the next one
+    /// being typed over the top of the last one's receipt. Both are unsent, and both are worth keeping.
     private func stashUnsentLine() {
         // `isVisible` as well as the rest: `hide()` is idempotent and gets called more than once on
-        // some paths, and the second call arrives after a receipt has been cleared but before the next
-        // summon has emptied the field — which is a line that was already written, offered back.
-        guard isVisible, model.receipt == nil, !isRunning, model.mode == .capture else { return }
+        // some paths.
+        guard isVisible, !isRunning, model.mode == .capture else { return }
         let line = model.reading.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return }
         stashedLine = model.query
         stashedAt = Date()
     }
 
-    /// Hand the front back to the app the bar was summoned over, leaving the bar itself on screen.
+    /// Say what just happened, hand the field back, and stay.
     ///
-    /// Split out of `hide` for the receipt. The point of giving focus back is that you carry on typing
-    /// where you were, and making that wait on a line of text being read would spend the very thing
-    /// the bar exists to protect. So the front goes back first, and what's left on screen is a receipt
-    /// rather than anything you have to deal with.
-    private func yieldFocus() {
-        let previous = previousApp
-        previousApp = nil
-        // Only when PM is still the active app: if you've already clicked into something else, that
-        // click is a more recent answer to "where should the focus be" than this is.
-        guard NSApp.isActive, let previous, !previous.isTerminated else { return }
-        previous.activate()
-    }
-
-    /// Say what just happened, then take the bar off screen on its own.
+    /// This is the hinge the bar turns on. It used to give the front back to the app you came from and
+    /// then take itself off screen, on the grounds that one summon is one thing done — which is true
+    /// of the first thing and wrong about every one after it. Filing a task, narrowing under it,
+    /// setting its date and moving on is four thoughts in one breath, and a bar that closes between
+    /// them charges a hotkey and a re-read of the whole screen for each. So the panel stays, the field
+    /// keeps the keyboard and empties itself, the rows are rebuilt against what the write just did,
+    /// and what happened is said in the footer rather than in place of all of it.
     ///
-    /// The bar's promise is that you can type a thing into it and go straight back to what you were
-    /// doing. It kept the second half and dropped the first: the panel vanished and left no evidence
-    /// the task existed, which is a promise you end up checking by hand. This is the evidence. It's
-    /// deliberately not a dialog — the keyboard has already gone back, nothing is waiting on you, and
-    /// it can therefore afford to stay up long enough to actually be read.
+    /// What that costs is the one thing the bar no longer does by itself: leave. Escape does it, the
+    /// hotkey does it, clicking anywhere else does it — and the receipt names the first of those while
+    /// it's up, because a panel that stays is a panel somebody has to be told how to close.
     private func confirm(_ receipt: QuickBarReceipt) {
-        // Cleared first: a bar that has already gone still has to stop counting the row as in flight,
-        // or the next summon inherits a field that won't run anything.
+        // Cleared first: until it is, the guard in `run` counts the row that just landed as still in
+        // flight and the next ⏎ does nothing.
         isRunning = false
         guard let panel, panel.isVisible else { return }
-        pendingHide?.cancel()
-        pendingHide = nil
-        removeFlagsMonitor()
-        yieldFocus()
-        panel.acceptsKey = false
+        pendingDismiss?.cancel()
+        // Nothing on a confirming path activates a window — except archiving, which re-points an open
+        // one and can take key on the way past. Reclaim it, so the bar you're still looking at is
+        // still the bar you're typing into. Only while PM is in front: if you've clicked into another
+        // app that's a more recent answer than this, and the blur hide is already on its way.
+        if panel.isKeyWindow || NSApp.isActive {
+            pendingHide?.cancel()
+            pendingHide = nil
+            if !panel.isKeyWindow { panel.takeKey() }
+        }
+        // Re-read before the field is handed back, so the next line is offered against what the last
+        // one did rather than against what was true when the bar was summoned. This is what makes
+        // narrowing twice narrow twice: the child insert moved the project's focus onto the task just
+        // written, and the anchor every row names is read from that focus.
+        refreshContext()
+        model.allTasks = searchableTasks(from: ProjectIndex.shared)
+        // A line that landed is spent. One that didn't is still the only copy of what you typed, and
+        // the bar is no longer going anywhere — so it stays in the field to be fixed and sent again,
+        // which is a better answer than the stash it used to be posted to on the way out.
+        model.resume(clearingText: !receipt.isFailure)
         model.receipt = receipt
         Log.write("quick bar receipt\(receipt.isFailure ? " (failed)" : ""): \(receipt.spoken)")
-        let work = DispatchWorkItem { [weak self] in self?.fadeOut() }
+        let work = DispatchWorkItem { [weak self] in self?.clearReceipt() }
         pendingDismiss = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.dwell(for: receipt), execute: work)
     }
 
-    /// Fade the receipt out rather than cutting it. The summon is instant on purpose — see
-    /// `animationBehavior` below — but nothing is racing for the keyboard on the way out.
-    private func fadeOut() {
-        guard let panel, panel.isVisible else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.receiptFade
-            panel.animator().alphaValue = 0
-        } completionHandler: { [weak self] in
-            // The front went back when the receipt went up, so there's nothing left to restore.
-            self?.hide(restoringFocus: false)
-            self?.panel?.alphaValue = 1
-        }
+    /// Take the receipt down and give the footer back to the hint. The bar itself stays.
+    private func clearReceipt() {
+        pendingDismiss = nil
+        model.receipt = nil
     }
 
     /// Show a receipt for a write that landed — and none for one that didn't.
@@ -250,6 +258,10 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// A failure gets its own, longer floor. It says something you didn't expect, it carries the
     /// store's complaint underneath it, and unlike a success there is something you'll want to do
     /// about it — so it has to survive being noticed before it can be read.
+    ///
+    /// A ceiling either way, and a low one, because this no longer decides how long the bar lives —
+    /// only how long the footer says something instead of hinting something. The first keystroke of
+    /// the next line clears it regardless.
     private static func dwell(for receipt: QuickBarReceipt) -> TimeInterval {
         let reading = Double(receipt.spoken.count) * perCharacterDwell
         return receipt.isFailure
@@ -264,9 +276,6 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private static let minFailureDwell: TimeInterval = 2.0
     private static let maxFailureDwell: TimeInterval = 4.5
     private static let perCharacterDwell: TimeInterval = 0.028
-
-    /// How long a receipt takes to go.
-    private static let receiptFade: TimeInterval = 0.18
 
     /// Fill in what the rows are built from, fresh each summon: the focused project may have moved and
     /// the project lists may have been rescanned since last time.
@@ -350,6 +359,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     func focusedStoreChanged() {
         guard isVisible else { return }
         refreshContext()
+        // The searchable set too, now the bar outlives the writes made from it. A task filed a moment
+        // ago is the one you are most likely to go looking for with `/`, and the index behind that
+        // search is warmed on a TTL — so without this the bar would spend its whole open life unable
+        // to find anything it had just written.
+        model.allTasks = searchableTasks(from: ProjectIndex.shared)
     }
 
     /// The full-project scan runs only while something wants it. The bar wants it while it's up, and
@@ -420,10 +434,15 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Some commands have no version of themselves that stays out of your way — Settings, a rename
     /// prompt — and those come forward either way. Nothing else does.
     private func run(_ row: QuickBarRow, modifiers: EventModifiers) {
-        // Nothing runs while a receipt is up, or while the row before it is still landing: the field
-        // keeps the keyboard right until the receipt replaces it, and a second ⏎ in that gap is how one
-        // typed line becomes two tasks.
-        guard model.receipt == nil, !isRunning else { return }
+        // Nothing runs while the row before it is still landing: the field keeps the keyboard the
+        // whole time, and a second ⏎ in that gap is how one typed line becomes two tasks.
+        //
+        // A receipt on screen used to bar this too, back when it was the whole panel and the field
+        // underneath it was a field you couldn't see. It isn't any more, and it mustn't be a gate:
+        // the receipt for the task you just filed is still up while you're typing the next one, and
+        // that gap — a second or so after every single row — is precisely where firing off a run of
+        // them would have gone to die.
+        guard !isRunning else { return }
         let reveal = modifiers.contains(.command)
         switch row {
         case .capture(let placement, let text, let due, _, let target):
@@ -448,11 +467,20 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .command(let command, let argument):
             perform(command, argument: argument, reveal: reveal)
 
-        case .project(let key, let name, _, _, _):
+        case .project(let key, let name, let shortName, _, _):
             PMStore.setGlobalFocus(key: key)
             Log.write("quick bar focused \(name)\(reveal ? " and opened it" : "")")
-            hide(restoringFocus: !reveal)
-            if reveal { WindowManager.shared.open(projectKey: key) }
+            guard !reveal else {
+                hide(restoringFocus: false)
+                WindowManager.shared.open(projectKey: key)
+                return
+            }
+            // Switching projects is the one row that is almost never the thing you came to do — it's
+            // the setup for the next row, which is why it earns a receipt it never used to get and why
+            // the bar stays open behind it. The store the delegate follows re-points asynchronously,
+            // so the rows this rebuilds may still name the project you just left; `focusedStoreChanged`
+            // arrives with the real one a moment later and rebuilds them again.
+            confirm(.done("Focused \(QuickBarModel.display(name, short: shortName))"))
 
         case .task(let entry):
             goTo(entry, reveal: reveal)
@@ -476,9 +504,13 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             model.switchTo(.goToProject, text: "")
         case .captureHere(let text), .restore(let text):
             // Spent on the way past. The line is in the field now, so if it's abandoned again it will
-            // be stashed again — but a line that was picked up and *written* must never come back on
-            // the next summon offering to write itself a second time.
+            // be stashed again — but a line that was picked up and *written* must never come back
+            // offering to write itself a second time. Both copies go: the one the next summon would
+            // read, and the one this bar is still holding — which matters now that running a row
+            // empties the field rather than closing the bar, so the offer would be back on screen
+            // seconds after it was taken up.
             stashedLine = nil
+            model.restorable = nil
             model.switchTo(.capture, text: text)
         case .newProject:
             hide(restoringFocus: false)
@@ -1154,9 +1186,10 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// back, this wasn't you leaving.
     func windowDidResignKey(_ notification: Notification) {
         panel?.acceptsKey = false
-        // A receipt is *meant* to be read after the front has gone back where it came from, and going
-        // back is itself a resign. It has its own timer; this one would cut it short every time.
-        guard model.receipt == nil else { return }
+        // A receipt used to be exempt from this, because putting the receipt up meant handing the
+        // front back — the resign was the bar doing as it was told. It doesn't hand anything back now,
+        // so a resign while a receipt is up is what it looks like: you've gone somewhere else, and the
+        // bar should go with you.
         pendingHide?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, let panel = self.panel else { return }

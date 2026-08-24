@@ -15,25 +15,31 @@ struct QuickBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            field
+            if !model.rows.isEmpty {
+                Divider()
+                rowList
+            }
+            // Under the rows, never above them. The rows are what you aim at with ↑/↓ and press ⏎
+            // on, and this box changes shape as that selection moves — putting it above would make
+            // the list you're aiming at move every time you moved within it.
+            if let preview = model.preview {
+                Divider()
+                previewBox(preview)
+            }
+            // The receipt takes the hint's place rather than the whole bar's.
+            //
+            // It used to be the whole bar, because the bar was on its way out and the receipt was the
+            // last thing it had to say. Now the bar stays and the field keeps the keyboard, so the
+            // receipt has to be something you read *while* typing the next line — which means it can
+            // move nothing the eye is using. The footer is the one place that's true: it's below
+            // everything you aim at, and it's already the line that says what the bar is doing.
             if let receipt = model.receipt {
+                Divider()
                 receiptLine(receipt)
-            } else {
-                field
-                if !model.rows.isEmpty {
-                    Divider()
-                    rowList
-                }
-                // Under the rows, never above them. The rows are what you aim at with ↑/↓ and press ⏎
-                // on, and this box changes shape as that selection moves — putting it above would make
-                // the list you're aiming at move every time you moved within it.
-                if let preview = model.preview {
-                    Divider()
-                    previewBox(preview)
-                }
-                if let hint {
-                    Divider()
-                    hintLine(hint)
-                }
+            } else if let hint {
+                Divider()
+                hintLine(hint)
             }
         }
         .frame(width: QuickBarMetrics.width, alignment: .leading)
@@ -196,22 +202,22 @@ struct QuickBarView: View {
 
     // MARK: Receipt
 
-    /// What's left on screen once a row has run: one line saying what happened.
+    /// What a row that has run left behind: one line saying what happened.
     ///
-    /// The front has already gone back to the app you were in by the time this is drawn, so this isn't
-    /// in your way and isn't waiting for anything — it fades on its own. It exists because the bar's
-    /// whole promise is that you can type into it and go back to what you were doing, and a promise
-    /// with no evidence behind it is one you end up checking by hand.
+    /// Nothing is waiting on it. The field above still has the keyboard and has already emptied itself
+    /// for the next line, so this is read out of the corner of the eye and goes on its own. It exists
+    /// because the change it reports is usually somewhere you aren't looking — a project's file, or a
+    /// focus two windows away — and a bar that says nothing is one you end up checking by hand.
     private func receiptLine(_ receipt: QuickBarReceipt) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: receipt.isFailure ? "exclamationmark.triangle.fill"
                                                 : "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(receipt.isFailure ? AnyShapeStyle(.orange) : AnyShapeStyle(.tint))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(receipt.message)
-                    .font(.system(size: 15))
+                    .font(.caption)
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
                 // Only a failure has one: what the store itself complained about, under the sentence
                 // naming what you were trying to do. The two answer different questions — which of
@@ -223,11 +229,20 @@ struct QuickBarView: View {
                         .lineLimit(3)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            // The way out, named at the one moment it's news.
+            //
+            // The bar used to take itself off screen after saying this, so there was nothing to leave.
+            // Now it stays — that's the point — and a panel that stays is a panel somebody has to be
+            // told how to close. This is where they're already looking.
+            Self.render([Self.hint([.escape], "done")])
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(receipt.spoken)
     }
 
     // MARK: Rows
