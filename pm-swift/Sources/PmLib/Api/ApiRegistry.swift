@@ -27,14 +27,19 @@ public struct ApiField: Equatable {
     public let required: Bool
     public let description: String
     public let allowed: [String]?
+    /// The smallest value an integer field accepts. Published *and* enforced, like `allowed` and
+    /// `required` — an unchecked integer reaches `prefix`/`suffix` and traps the process, which for
+    /// `pm mcp` means the server dies mid-session rather than refusing one call.
+    public let minimum: Int?
 
     init(_ name: String, _ kind: Kind, required: Bool = false, _ description: String,
-         allowed: [String]? = nil) {
+         allowed: [String]? = nil, minimum: Int? = nil) {
         self.name = name
         self.kind = kind
         self.required = required
         self.description = description
         self.allowed = allowed
+        self.minimum = minimum
     }
 }
 
@@ -43,12 +48,14 @@ public struct ApiActionSpec: Equatable {
     public let tier: ApiTier
     public let summary: String
     public let fields: [ApiField]
-    /// Fields of which exactly one must be given — `task` or `tasks`, for the actions that take
-    /// either. A plain `required` list can't say "one of these", and an action that quietly accepted
-    /// both would have to invent a rule about which wins.
-    public let oneOf: [String]
+    /// Groups of fields, of each of which exactly one must be given — `task` or `tasks` for the
+    /// actions that take either, `due` or `clearDue` for the one that both sets and clears. A plain
+    /// `required` list can't say "one of these", and an action that quietly accepted both would have
+    /// to invent a rule about which wins. More than one group because `task.setDue` needs two, and an
+    /// action that could only express one would have had to leave the second unchecked.
+    public let oneOf: [[String]]
 
-    init(name: String, tier: ApiTier, summary: String, fields: [ApiField], oneOf: [String] = []) {
+    init(name: String, tier: ApiTier, summary: String, fields: [ApiField], oneOf: [[String]] = []) {
         self.name = name
         self.tier = tier
         self.summary = summary
@@ -65,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.0.0"
+public let apiContractVersion = "1.1.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -89,11 +96,11 @@ public enum ApiRegistry {
                       summary: "Complete a task, or several, along with their subtrees.",
                       fields: [project, optionalTask, tasks, revision,
                                ApiField("advanceFocus", .boolean, "Move focus onward afterwards. Default true.")],
-                      oneOf: ["task", "tasks"]),
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.reopen", tier: .mutation,
                       summary: "Re-open a completed task, or several, and put focus back.",
                       fields: [project, optionalTask, tasks, revision],
-                      oneOf: ["task", "tasks"]),
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.focus", tier: .mutation,
                       summary: "Make this the project's focused task.",
                       fields: [project, task]),
@@ -105,7 +112,9 @@ public enum ApiRegistry {
                       fields: [project, optionalTask, tasks, revision,
                                ApiField("due", .string, "Due date, YYYY-MM-DD."),
                                ApiField("clearDue", .boolean, "Remove the due date instead of setting one.")],
-                      oneOf: ["task", "tasks"]),
+                      // Both pairs, because omitting `due` used to mean "clear it" — so a caller that
+                      // meant to set a date and left the field out silently lost the one already there.
+                      oneOf: [["task", "tasks"], ["due", "clearDue"]]),
         ApiActionSpec(name: "task.setText", tier: .mutation,
                       summary: "Rename a task in place.",
                       fields: [project, task,
@@ -120,7 +129,7 @@ public enum ApiRegistry {
         ApiActionSpec(name: "task.delete", tier: .mutation,
                       summary: "Delete a task, or several, along with their subtrees.",
                       fields: [project, optionalTask, tasks, revision],
-                      oneOf: ["task", "tasks"]),
+                      oneOf: [["task", "tasks"]]),
 
         // MARK: Sessions
         ApiActionSpec(name: "session.start", tier: .mutation,
@@ -133,13 +142,13 @@ public enum ApiRegistry {
                       summary: "Change a session's label. Its date is preserved.",
                       fields: [project,
                                ApiField("session", .string, required: true, "Session ISO date or index."),
-                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0."),
+                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
                                ApiField("label", .string, required: true, "The new label.")]),
         ApiActionSpec(name: "session.delete", tier: .mutation,
                       summary: "Delete a session that has no tasks in it.",
                       fields: [project,
                                ApiField("session", .string, required: true, "Session ISO date or index."),
-                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.")]),
+                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0)]),
 
         // MARK: Notes
         ApiActionSpec(name: "notes.setDetail", tier: .mutation,
@@ -183,10 +192,10 @@ public enum ApiRegistry {
                       summary: "A project's tasks, each with the reference needed to act on it.",
                       fields: [optionalProject,
                                ApiField("includeCompleted", .boolean, "Include completed tasks. Default false."),
-                               ApiField("limit", .integer, "Cap the number returned.")]),
+                               ApiField("limit", .integer, "Cap the number returned.", minimum: 0)]),
         ApiActionSpec(name: "task.whatsDue", tier: .query,
                       summary: "Open tasks with a due date, soonest first.",
-                      fields: [optionalProject, ApiField("limit", .integer, "Cap the number returned.")]),
+                      fields: [optionalProject, ApiField("limit", .integer, "Cap the number returned.", minimum: 0)]),
         ApiActionSpec(name: "task.progress", tier: .query,
                       summary: "How many of a project's tasks are done.", fields: [optionalProject]),
         ApiActionSpec(name: "focus.get", tier: .query,
@@ -203,7 +212,7 @@ public enum ApiRegistry {
                                ApiField("project", .string, "Break ties toward this project. Defaults to the focused one."),
                                ApiField("scope", .string, "Which projects to search. Default all.",
                                         allowed: ["active", "archive", "all"]),
-                               ApiField("limit", .integer, "How many to return. Default 20.")]),
+                               ApiField("limit", .integer, "How many to return. Default 20.", minimum: 0)]),
         ApiActionSpec(name: "capture.parse", tier: .query,
                       summary: "Read a typed capture line: its text, its due date, and the project it names.",
                       fields: [ApiField("text", .string, required: true,
@@ -214,7 +223,7 @@ public enum ApiRegistry {
         ApiActionSpec(name: "journal.list", tier: .query,
                       summary: "Recent writes made through the contract, newest first.",
                       fields: [ApiField("project", .string, "Only this project's writes."),
-                               ApiField("limit", .integer, "How many entries. Default 50.")]),
+                               ApiField("limit", .integer, "How many entries. Default 50.", minimum: 0)]),
         ApiActionSpec(name: "journal.undo", tier: .mutation,
                       summary: "Reverse a write, if the file is still exactly as that write left it.",
                       fields: [ApiField("entry", .string, "Which entry, from journal.list. Default the most recent reversible one."),
@@ -263,10 +272,12 @@ extension ApiField {
                 ]),
                 "sessionOrdinal": .object([
                     "type": .string("integer"),
+                    "minimum": .number(0),
                     "description": .string("Which session of that date, when a project has more than one. Default 0."),
                 ]),
                 "line": .object([
                     "type": .string("integer"),
+                    "minimum": .number(0),
                     "description": .string("The task's ordinal among the task lines of its session."),
                 ]),
                 "digest": .object([
@@ -276,6 +287,7 @@ extension ApiField {
             ])
         }
         if let allowed { out["enum"] = .array(allowed.map { .string($0) }) }
+        if let minimum { out["minimum"] = .number(Double(minimum)) }
         return .object(out)
     }
 }
@@ -291,7 +303,9 @@ extension ApiActionSpec {
         let required = fields.filter(\.required).map { JSONValue.string($0.name) }
         if !required.isEmpty { out["required"] = .array(required) }
         if !oneOf.isEmpty {
-            out["oneOf"] = .array(oneOf.map { .object(["required": .array([.string($0)])]) })
+            out["allOf"] = .array(oneOf.map { group in
+                .object(["oneOf": .array(group.map { .object(["required": .array([.string($0)])]) })])
+            })
         }
         return .object(out)
     }

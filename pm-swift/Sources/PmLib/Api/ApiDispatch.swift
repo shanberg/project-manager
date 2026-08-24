@@ -55,11 +55,19 @@ private func validate(_ input: ApiInput, against spec: ApiActionSpec) throws {
                            "\(field.name) must be one of \(allowed.joined(separator: ", ")), not \(given)",
                            detail: .string(field.name))
         }
+        // Range, from the same table the schema publishes it from. Unchecked, a negative `limit`
+        // reaches `prefix`/`suffix` and traps — which for `pm mcp` takes the server down mid-session
+        // rather than refusing the one call, and a trap is not something an adapter can catch.
+        if let minimum = field.minimum, let given = value?.intValue, given < minimum {
+            throw ApiError(.invalidField,
+                           "\(field.name) can't be less than \(minimum), and was \(given).",
+                           detail: .string(field.name))
+        }
     }
-    guard spec.oneOf.isEmpty || spec.oneOf.filter({ values[$0] ?? nil != nil }).count == 1 else {
+    for group in spec.oneOf where group.filter({ values[$0] ?? nil != nil }).count != 1 {
         throw ApiError(.missingField,
-                       "\(spec.name) needs exactly one of: \(spec.oneOf.joined(separator: ", "))",
-                       detail: .array(spec.oneOf.map { .string($0) }))
+                       "\(spec.name) needs exactly one of: \(group.joined(separator: ", "))",
+                       detail: .array(group.map { .string($0) }))
     }
 }
 
@@ -291,29 +299,34 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             throw ApiError(.invalidField, "Unknown domain: \(input.domain ?? "")", detail: .string("domain"))
         }
         let path = try createProject(config: config, paths: paths, domainCode: domain,
-                                     title: input.title ?? "")
-        let summary = "Created \((path as NSString).lastPathComponent)."
-        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
-        return ApiResult(action: spec.name, summary: summary, data: .string(path))
+                                     title: input.title ?? "", dryRun: options.dryRun)
+        let name = (path as NSString).lastPathComponent
+        return metadata(spec, options, path: path,
+                        Phrase(past: "Created \(name)", future: "create \(name)"))
     case "project.rename":
-        let path = try renameProjectTitle(nameOrPrefix: input.project ?? "", newTitle: input.title ?? "")
-        let summary = "Renamed to \((path as NSString).lastPathComponent)."
-        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
-        return ApiResult(action: spec.name, summary: summary, data: .string(path))
+        let path = try renameProjectTitle(nameOrPrefix: input.project ?? "", newTitle: input.title ?? "",
+                                          dryRun: options.dryRun)
+        let name = (path as NSString).lastPathComponent
+        return metadata(spec, options, path: path,
+                        Phrase(past: "Renamed to \(name)", future: "rename it to \(name)"))
     case "project.archive", "project.unarchive":
         let archiving = spec.name == "project.archive"
         let (_, paths) = try loadConfigAndPaths()
         let folder = try folderName(of: input.project ?? "")
         let path = try moveProject(named: folder, from: archiving ? .active : .archive,
-                                   to: archiving ? .archive : .active, paths: paths)
-        let summary = "\(archiving ? "Archived" : "Restored") \(folder)."
-        ApiJournal.recordMetadata(action: spec.name, project: path, summary: summary, source: options.source)
-        return ApiResult(action: spec.name, summary: summary, data: .string(path))
+                                   to: archiving ? .archive : .active, paths: paths,
+                                   dryRun: options.dryRun)
+        return metadata(spec, options, path: path,
+                        archiving ? Phrase(past: "Archived \(folder)", future: "archive \(folder)")
+                                  : Phrase(past: "Restored \(folder)", future: "restore \(folder)"))
     case "project.focus":
         let folder = try folderName(of: input.project ?? "")
         let (_, paths) = try loadConfigAndPaths()
-        try setFocusedProject(key: "\(paths.activePath):\(folder)")
-        return ApiResult(action: spec.name, summary: "Focused \(folder).")
+        if !options.dryRun { try setFocusedProject(key: "\(paths.activePath):\(folder)") }
+        return ApiResult(action: spec.name,
+                         summary: Phrase(past: "Focused \(folder)",
+                                         future: "focus \(folder)").sentence(dryRun: options.dryRun),
+                         dryRun: options.dryRun)
 
     case "task.search":
         let scope = input.scope ?? "all"
@@ -473,17 +486,36 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          data: try JSONValue.encoding(config))
     case "config.set":
         guard var config = try loadConfig() else { throw PmError.configNotFound }
-        try setConfigValue(config: &config, key: input.key ?? "", value: try plain(input.value))
+        let key = input.key ?? ""
+        try setConfigValue(config: &config, key: key, value: try plain(input.value))
+        let phrase = Phrase(past: "Set \(key)", future: "set \(key)")
         if !options.dryRun {
             try saveConfig(config)
-            ApiJournal.recordMetadata(action: spec.name, project: nil,
-                                      summary: "Set \(input.key ?? "").", source: options.source)
+            ApiJournal.recordMetadata(action: spec.name, project: nil, summary: phrase.past + ".",
+                                      source: options.source)
         }
-        return ApiResult(action: spec.name, summary: "Set \(input.key ?? "").", dryRun: options.dryRun)
+        return ApiResult(action: spec.name, summary: phrase.sentence(dryRun: options.dryRun),
+                         dryRun: options.dryRun)
 
     default:
         throw ApiError(.unsupportedAction, "\(spec.name) isn't implemented yet.")
     }
+}
+
+/// The envelope for a mutation with no document behind it — a project created, renamed or moved.
+///
+/// These sit outside `document()`, which is what let them ignore `dryRun` and write anyway while
+/// reporting `dryRun: false` and a past-tense sentence. One place to end them means the flag can't be
+/// dropped by the next action that joins them: it decides the tense, the `dryRun` field, and whether
+/// anything is journaled, together.
+private func metadata(_ spec: ApiActionSpec, _ options: ApiOptions, path: String,
+                      _ phrase: Phrase) -> ApiResult {
+    if !options.dryRun {
+        ApiJournal.recordMetadata(action: spec.name, project: path, summary: phrase.past + ".",
+                                  source: options.source)
+    }
+    return ApiResult(action: spec.name, summary: phrase.sentence(dryRun: options.dryRun),
+                     dryRun: options.dryRun, data: .string(path))
 }
 
 // MARK: - The document pipeline
@@ -695,10 +727,11 @@ private func sessionIndex(_ input: ApiInput, in notes: ProjectNotes) throws -> I
     }
     let heading = try sessionHeadingDate(iso: session)
     let matching = notes.sessions.enumerated().filter { $0.element.date == heading }.map(\.offset)
-    guard (input.sessionOrdinal ?? 0) < matching.count else {
+    let ordinal = input.sessionOrdinal ?? 0
+    guard ordinal >= 0, ordinal < matching.count else {
         throw ApiError(.staleReference, "This project has no session dated \(session).")
     }
-    return matching[input.sessionOrdinal ?? 0]
+    return matching[ordinal]
 }
 
 private func setDetail(_ notes: inout ProjectNotes, key: String, value: JSONValue?) throws {

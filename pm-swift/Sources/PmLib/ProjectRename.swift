@@ -22,7 +22,9 @@ public func parseProjectPrefixAndTitle(folderName: String, domainCodes: [String]
 }
 
 /// Rename a project folder by changing only the title segment after `Domain-<digits>`. Updates notes `#` title and renames the notes file when needed.
-public func renameProjectTitle(nameOrPrefix: String, newTitle: String) throws -> String {
+/// - Parameter dryRun: check everything and work out the new folder name, then stop before the move.
+public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
+                               dryRun: Bool = false) throws -> String {
     let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty { throw PmError.emptyRenameTitle }
     if trimmed.unicodeScalars.contains(where: { invalidRenameTitleCharacters.contains($0) }) {
@@ -40,6 +42,7 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String) throws ->
     if FileManager.default.fileExists(atPath: dest) {
         throw PmError.renameTargetExists(dest)
     }
+    if dryRun { return newBasename }
     try FileManager.default.moveItem(atPath: projectPath, toPath: dest)
     if let resolved = try resolveNotesPath(projectPath: dest),
        FileManager.default.fileExists(atPath: resolved) {

@@ -20,9 +20,12 @@ public enum ProjectScope: String, Codable, Sendable {
 /// `folderName` is an exact folder name, not a query: callers that take a typed name (the CLI) match
 /// it themselves so they can report ambiguity in their own terms, and callers that already have a
 /// project in hand (the app) have nothing to match.
+/// - Parameter dryRun: make both existence checks and work out the destination, then stop before the
+///   move — so a preview refuses exactly where the real call would.
 @discardableResult
 public func moveProject(named folderName: String, from source: ProjectScope,
-                        to destination: ProjectScope, paths: ResolvedPaths) throws -> String {
+                        to destination: ProjectScope, paths: ResolvedPaths,
+                        dryRun: Bool = false) throws -> String {
     let sourcePath = (source.path(in: paths) as NSString).appendingPathComponent(folderName)
     let destinationPath = (destination.path(in: paths) as NSString).appendingPathComponent(folderName)
 
@@ -37,6 +40,7 @@ public func moveProject(named folderName: String, from source: ProjectScope,
     guard !FileManager.default.fileExists(atPath: destinationPath) else {
         throw PmError.moveTargetExists(destinationPath)
     }
+    if dryRun { return destinationPath }
     try FileManager.default.moveItem(atPath: sourcePath, toPath: destinationPath)
     return destinationPath
 }

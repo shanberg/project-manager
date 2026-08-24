@@ -215,13 +215,22 @@ final class ApiTests: XCTestCase {
 
     /// The published schema has to say "one of these", or a client generated from it will believe
     /// `task` is required and never send a batch.
+    ///
+    /// Published as `allOf` of `oneOf`s rather than a bare `oneOf`, because an action can need more
+    /// than one such choice — `task.setDue` needs two — and a schema can't carry two `oneOf` keys.
     func testTheSchemaPublishesTheChoice() throws {
         for name in ["task.complete", "task.reopen", "task.setDue", "task.delete"] {
             let spec = try XCTUnwrap(ApiRegistry.spec(name))
-            XCTAssertEqual(spec.oneOf, ["task", "tasks"], name)
+            XCTAssertTrue(spec.oneOf.contains(["task", "tasks"]), name)
             let schema = spec.inputSchema.objectValue
-            let choices = schema?["oneOf"]?.arrayValue ?? []
-            XCTAssertEqual(choices.count, 2, name)
+            let groups = schema?["allOf"]?.arrayValue ?? []
+            XCTAssertEqual(groups.count, spec.oneOf.count, name)
+            for (group, published) in zip(spec.oneOf, groups) {
+                let choices = published.objectValue?["oneOf"]?.arrayValue ?? []
+                XCTAssertEqual(choices.compactMap {
+                    $0.objectValue?["required"]?.arrayValue?.first?.stringValue
+                }, group, name)
+            }
             let required = Set((schema?["required"]?.arrayValue ?? []).compactMap(\.stringValue))
             XCTAssertTrue(required.isDisjoint(with: ["task", "tasks"]),
                           "\(name) shouldn't require either of the pair on its own")
@@ -262,6 +271,7 @@ final class ApiTests: XCTestCase {
         input.query = "q"
         input.entry = "e"
         input.now = "2026-08-22"
+        input.due = "2026-09-01"
         input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
 
         for spec in ApiRegistry.actions where spec.tier != .affordance {
@@ -276,5 +286,101 @@ final class ApiTests: XCTestCase {
                 // this is checking — there's no project on disk here.
             }
         }
+    }
+
+    // MARK: Choices and ranges
+
+    /// Set one of the fields a `oneOf` group names, by name.
+    ///
+    /// Deliberately a closed switch: a group naming a field this doesn't know fails loudly rather
+    /// than passing vacuously, which is what a silent default would do.
+    private func give(_ field: String, to input: inout ApiInput, file: StaticString = #filePath,
+                      line: UInt = #line) {
+        switch field {
+        case "task": input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+        case "tasks": input.tasks = [TaskRefInput(session: "0", line: 1, digest: "def")]
+        case "due": input.due = "2026-12-01"
+        case "clearDue": input.clearDue = true
+        case "limit": input.limit = 1
+        case "sessionOrdinal": input.sessionOrdinal = 0
+        default: XCTFail("no test value for \(field)", file: file, line: line)
+        }
+    }
+
+    /// Every group, for every action: neither is refused and both are refused.
+    ///
+    /// Driven off the registry rather than a list of actions, because the bug this replaces was one
+    /// group being checked while a second went unwritten — `task.setDue` took `due` and `clearDue`
+    /// and, given neither, quietly read that as "clear it" and destroyed the date already there.
+    func testEveryChoiceIsCheckedAndNotJustPublished() throws {
+        for spec in ApiRegistry.actions where !spec.oneOf.isEmpty {
+            for group in spec.oneOf {
+                var neither = ApiInput()
+                neither.project = "anything"
+                for other in spec.oneOf where other != group { give(other[0], to: &neither) }
+                XCTAssertThrowsError(try performApi(spec.name, neither),
+                                     "\(spec.name) accepted none of \(group)") { error in
+                    XCTAssertEqual((error as? ApiError)?.code, .missingField, spec.name)
+                }
+
+                var all = neither
+                for field in group { give(field, to: &all) }
+                XCTAssertThrowsError(try performApi(spec.name, all),
+                                     "\(spec.name) accepted all of \(group)") { error in
+                    XCTAssertEqual((error as? ApiError)?.code, .missingField, spec.name)
+                }
+            }
+        }
+    }
+
+    /// The specific loss the pair above prevents: `task.setDue` used to treat a missing `due` as an
+    /// instruction to clear, so a caller that meant to set a date and left the field out silently lost
+    /// the one that was there.
+    func testSettingADueDateWithoutSayingWhichWayIsRefused() {
+        var input = ApiInput()
+        input.project = "anything"
+        input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+        XCTAssertThrowsError(try performApi("task.setDue", input)) { error in
+            let api = error as? ApiError
+            XCTAssertEqual(api?.code, .missingField)
+            XCTAssertEqual(api?.detail?.arrayValue?.compactMap(\.stringValue), ["due", "clearDue"])
+        }
+    }
+
+    /// A published `minimum` is a checked one.
+    ///
+    /// Unchecked, these reach `prefix`/`suffix` or an array subscript and *trap* — which an adapter
+    /// can't catch, so `pm mcp` died mid-session on `limit: -1` rather than refusing the one call.
+    func testAPublishedRangeIsAnEnforcedRange() throws {
+        var checked = 0
+        for spec in ApiRegistry.actions {
+            for field in spec.fields where field.minimum != nil {
+                let minimum = field.minimum!
+                let published = spec.inputSchema.objectValue?["properties"]?.objectValue?[field.name]?
+                    .objectValue?["minimum"]?.intValue
+                XCTAssertEqual(published, minimum, "\(spec.name).\(field.name) doesn't publish its range")
+
+                var input = ApiInput()
+                input.project = "anything"
+                input.query = "anything"
+                input.session = "0"
+                input.label = "anything"
+                for group in spec.oneOf { give(group[0], to: &input) }
+                give(field.name, to: &input)
+                switch field.name {
+                case "limit": input.limit = minimum - 1
+                case "sessionOrdinal": input.sessionOrdinal = minimum - 1
+                default: XCTFail("no out-of-range value for \(field.name)")
+                }
+                XCTAssertThrowsError(try performApi(spec.name, input),
+                                     "\(spec.name) accepted \(field.name) below \(minimum)") { error in
+                    let api = error as? ApiError
+                    XCTAssertEqual(api?.code, .invalidField, spec.name)
+                    XCTAssertEqual(api?.detail?.stringValue, field.name, spec.name)
+                }
+                checked += 1
+            }
+        }
+        XCTAssertGreaterThan(checked, 0, "no ranged fields found — the test would pass on an empty sweep")
     }
 }

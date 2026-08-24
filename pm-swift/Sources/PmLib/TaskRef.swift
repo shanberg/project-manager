@@ -178,7 +178,7 @@ private func sessionIndex(for ref: TaskRef, notes: ProjectNotes) throws -> Int {
     }
     let heading = try sessionHeadingDate(iso: iso)
     let matching = notes.sessions.enumerated().filter { $0.element.date == heading }.map(\.offset)
-    guard ref.sessionOrdinal < matching.count else {
+    guard ref.sessionOrdinal >= 0, ref.sessionOrdinal < matching.count else {
         throw PmError.staleReference(
             detail: matching.isEmpty
                 ? "this project has no session dated \(iso)"
