@@ -45,6 +45,40 @@ final class CaptureParseTests: XCTestCase {
                        "2026-08-28")
     }
 
+    /// A trailing time stacks onto any date phrase, and a bare time on its own means today.
+    func testATrailingTimeStacksOntoTheDate() {
+        for (phrase, expected) in [("tomorrow 3pm", "2026-08-23 15:00"),
+                                    ("tomorrow at 3pm", "2026-08-23 15:00"),
+                                    ("friday 5:30pm", "2026-08-28 17:30"),
+                                    ("friday at 5 pm", "2026-08-28 17:00"),
+                                    ("next friday 3pm", "2026-08-28 15:00"),
+                                    ("in 2d 9am", "2026-08-24 09:00"),
+                                    ("2026-09-01 9:30", "2026-09-01 09:30"),
+                                    ("3pm", "2026-08-22 15:00"),
+                                    ("at noon", "2026-08-22 12:00"),
+                                    ("today at midnight", "2026-08-22 00:00"),
+                                    ("12am", "2026-08-22 00:00"),
+                                    ("12pm", "2026-08-22 12:00")] {
+            XCTAssertEqual(QuickCaptureParser.parse("X due:\(phrase)", now: now, calendar: calendar).due,
+                           expected, phrase)
+        }
+    }
+
+    /// A date with no time still writes the bare `YYYY-MM-DD` form, so `RelativeDue`'s noon default
+    /// keeps applying to it rather than the parser inventing a "12:00" nobody typed.
+    func testADateWithNoTimeStaysBare() {
+        XCTAssertEqual(QuickCaptureParser.parse("X due:tomorrow", now: now, calendar: calendar).due,
+                       "2026-08-23")
+    }
+
+    /// "friday 5" is ambiguous — no am/pm, no minutes — so it's rejected rather than guessed at, the
+    /// same as any other unreadable due phrase.
+    func testAnAmbiguousBareHourIsUnreadable() {
+        let result = QuickCaptureParser.parse("X due:friday 5", now: now, calendar: calendar)
+        XCTAssertNil(result.due)
+        XCTAssertEqual(result.unreadableDue, "friday 5")
+    }
+
     /// Losing "due:thurdsay" to a typo is worse than a task whose title has a typo in it.
     func testAnUnreadableDateStaysInTheText() {
         let result = QuickCaptureParser.parse("Fix it due:thurdsay", now: now, calendar: calendar)

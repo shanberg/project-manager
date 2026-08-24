@@ -56,16 +56,18 @@ public func duePresets(now: Date = Date(), calendar: Calendar = .current) -> [Du
     }
 }
 
-/// Splits a line typed into the quick bar into task text and an optional due date.
+/// Splits a line typed into the quick bar into task text and an optional due date/time.
 ///
 /// The marker is `due:`, which is the notes format's own — a task line already reads
 /// `- [ ] Ship it due:2026-09-01`, so the thing you type to set a date is the thing that ends up in
 /// the file. Nothing else is invented syntax to learn.
 ///
 /// What follows it is the language the badges already speak: `RelativeDue.short` writes "tomorrow"
-/// and "in 2w", and `DueSuggestion` names "Next Week", so those read back in. A date the parser
-/// can't make sense of is left in the text rather than dropped — silently losing "due:thurdsay" to a
-/// typo is worse than a task whose title has a typo in it.
+/// and "in 2w", and `DueSuggestion` names "Next Week", so those read back in. A trailing time — "3pm",
+/// "at 5:30pm", "9:30", "noon" — stacks on top of any of that ("due:friday 3pm", "due:3pm" on its own
+/// meaning today) and is written into the stored `HH:mm` suffix `RelativeDue` already reads. A date
+/// the parser can't make sense of is left in the text rather than dropped — silently losing
+/// "due:thurdsay" to a typo is worse than a task whose title has a typo in it.
 public enum QuickCaptureParser {
     public struct Result: Equatable {
         public var text: String
@@ -97,14 +99,14 @@ public enum QuickCaptureParser {
             guard before == " " else { return Result(text: trimmed, due: nil) }
         }
         let phrase = trimmed[marker.upperBound...].trimmingCharacters(in: .whitespaces)
-        guard let date = date(from: phrase, now: now, calendar: calendar) else {
+        guard let resolved = resolvedDue(from: phrase, now: now, calendar: calendar) else {
             // An empty phrase is a line mid-typing — you have just pressed the colon — so it is not
             // yet a mistake to report. Anything else is a date marker that won't become one.
             return Result(text: trimmed, due: nil, unreadableDue: phrase.isEmpty ? nil : phrase)
         }
         let text = trimmed[trimmed.startIndex..<marker.lowerBound]
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Result(text: text, due: DueFormat.string(date))
+        return Result(text: text, due: storedString(resolved, calendar: calendar))
     }
 
     /// Split a trailing `@…` off a capture line: the text to keep, and the project it names.
@@ -130,34 +132,75 @@ public enum QuickCaptureParser {
         return (text, query)
     }
 
-    /// Resolve a due phrase to a day, or nil if it isn't one.
+    /// Resolve a due phrase to a moment — a day, or a day with a time-of-day pinned to it — or nil if
+    /// it isn't one.
     public static func date(from phrase: String, now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        resolvedDue(from: phrase, now: now, calendar: calendar)?.date
+    }
+
+    /// The canonical stored form a due phrase resolves to — `YYYY-MM-DD`, or `YYYY-MM-DD HH:mm` when
+    /// the phrase named a time — or nil when the phrase isn't one. What `parse(_:)` writes into a task
+    /// line's `due:` marker, exposed for callers that resolve a due phrase on its own (the `/due`
+    /// command) rather than as part of a whole typed line.
+    public static func dueString(from phrase: String, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        resolvedDue(from: phrase, now: now, calendar: calendar).map { storedString($0, calendar: calendar) }
+    }
+
+    // MARK: Pieces
+
+    /// A phrase resolved to a moment, and whether it named a specific time or just a day.
+    ///
+    /// The distinction only matters to the caller writing the stored string: a bare day is written as
+    /// `YYYY-MM-DD` so `RelativeDue`'s noon default still applies to it, while a phrase that actually
+    /// named a time gets that time appended. Baking a time into every resolution would make
+    /// "due:tomorrow" silently claim a precision ("tomorrow at 12:00") nobody typed.
+    private struct Resolved {
+        let date: Date
+        let hasTime: Bool
+    }
+
+    private static func resolvedDue(from phrase: String, now: Date, calendar: Calendar) -> Resolved? {
         let cleaned = phrase.trimmingCharacters(in: .whitespaces).lowercased()
         guard !cleaned.isEmpty else { return nil }
         let today = calendar.startOfDay(for: now)
 
+        let (datePhrase, time) = splitTime(cleaned) ?? (cleaned, nil)
+        guard let day = day(from: datePhrase, today: today, calendar: calendar) else { return nil }
+        guard let time else { return Resolved(date: day, hasTime: false) }
+        let moment = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: day) ?? day
+        return Resolved(date: moment, hasTime: true)
+    }
+
+    /// Resolve everything `date(from:)` used to handle on its own, minus a time-of-day: an exact date,
+    /// a due-menu preset name, "yesterday", a weekday (optionally "next <weekday>"), or "in <n><unit>".
+    ///
+    /// An empty phrase means the time-of-day parser ate the whole thing — "due:3pm" has no day left to
+    /// name, so it means today, the same as every other bare time means.
+    private static func day(from phrase: String, today: Date, calendar: Calendar) -> Date? {
+        guard !phrase.isEmpty else { return today }
+
         // A written-out date, the stored form.
-        if let exact = DueFormat.parse(cleaned), cleaned.count >= 10 { return exact }
+        if let exact = DueFormat.parse(phrase), phrase.count >= 10 { return exact }
 
         // The presets the due menu offers, matched on their own names ("this weekend", "next week").
-        if let preset = duePresets(now: now, calendar: calendar)
-            .first(where: { $0.title.lowercased() == cleaned }) {
+        if let preset = duePresets(now: today, calendar: calendar)
+            .first(where: { $0.title.lowercased() == phrase }) {
             return preset.date
         }
-        if cleaned == "yesterday" { return calendar.date(byAdding: .day, value: -1, to: today) }
+        if phrase == "yesterday" { return calendar.date(byAdding: .day, value: -1, to: today) }
 
-        // A weekday name means the next one of those — "friday" on a Friday is a week away, not today,
-        // since a task due today would have been typed as "today".
-        if let weekday = weekdayNumber(cleaned) {
+        // A weekday name — bare, or written out as "next <weekday>" — means the next one of those:
+        // "friday" on a Friday is a week away, not today, since a task due today would have been typed
+        // as "today".
+        let weekdayPhrase = phrase.hasPrefix("next ") ? String(phrase.dropFirst(5)) : phrase
+        if let weekday = weekdayNumber(weekdayPhrase) {
             return calendar.nextDate(after: today, matching: DateComponents(weekday: weekday),
                                      matchingPolicy: .nextTime)
         }
 
         // "in 3d" / "in 2w" / "in 4mo" — the badge's own shorthand, read back.
-        return offsetDate(cleaned, from: today, calendar: calendar)
+        return offsetDate(phrase, from: today, calendar: calendar)
     }
-
-    // MARK: Pieces
 
     private static func weekdayNumber(_ name: String) -> Int? {
         let formatter = DateFormatter()
@@ -183,5 +226,74 @@ public enum QuickCaptureParser {
         case "y", "year", "years": return calendar.date(byAdding: .year, value: amount, to: today)
         default: return nil
         }
+    }
+
+    /// Splits a trailing time-of-day off a phrase: "3pm", "3 pm", "3:30pm", "9:30" (24-hour, no
+    /// am/pm), "noon", "midnight" — optionally introduced by "at ". Returns the phrase with the time
+    /// removed (which can come back empty, for a bare time like "due:3pm") and the time itself, or nil
+    /// when the phrase doesn't end in one.
+    private static func splitTime(_ phrase: String) -> (String, (hour: Int, minute: Int))? {
+        var words = phrase.split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return nil }
+
+        // "3pm" is one word; "3 pm" is two — try the last two joined before falling back to the last
+        // word alone, so both spellings resolve to the same time.
+        if words.count >= 2, let time = parseTimeToken(words[words.count - 2] + words[words.count - 1]) {
+            words.removeLast(2)
+            if words.last == "at" { words.removeLast() }
+            return (words.joined(separator: " "), time)
+        }
+        guard let time = parseTimeToken(words[words.count - 1]) else { return nil }
+        words.removeLast()
+        if words.last == "at" { words.removeLast() }
+        return (words.joined(separator: " "), time)
+    }
+
+    /// A single time-of-day token: "3pm", "3:30pm", "15:00", "noon", "midnight". A bare hour with no
+    /// minutes and no am/pm ("3", "15") is rejected rather than guessed at — it's as likely to be part
+    /// of something else (the digits of "in 3d", a stray number) as it is a time.
+    private static func parseTimeToken(_ token: String) -> (hour: Int, minute: Int)? {
+        if token == "noon" { return (12, 0) }
+        if token == "midnight" { return (0, 0) }
+
+        var rest = token
+        var meridiem: String?
+        if rest.hasSuffix("am") { meridiem = "am"; rest.removeLast(2) }
+        else if rest.hasSuffix("pm") { meridiem = "pm"; rest.removeLast(2) }
+
+        let hourPart: Substring
+        let minutePart: Substring?
+        if let colon = rest.firstIndex(of: ":") {
+            hourPart = rest[rest.startIndex..<colon]
+            minutePart = rest[rest.index(after: colon)...]
+        } else {
+            hourPart = rest[...]
+            minutePart = nil
+        }
+        guard let hour = Int(hourPart) else { return nil }
+
+        let minute: Int
+        if let minutePart {
+            guard minutePart.count == 2, let m = Int(minutePart), m < 60 else { return nil }
+            minute = m
+        } else {
+            minute = 0
+        }
+
+        if let meridiem {
+            guard (1...12).contains(hour) else { return nil }
+            if meridiem == "pm" { return (hour == 12 ? 12 : hour + 12, minute) }
+            return (hour == 12 ? 0 : hour, minute)
+        }
+        // No am/pm: only a 24-hour reading with minutes given counts, e.g. "9:30" or "21:30" — a bare
+        // "9" is too ambiguous with everything else that's just a number in a due phrase.
+        guard minutePart != nil, (0...23).contains(hour) else { return nil }
+        return (hour, minute)
+    }
+
+    private static func storedString(_ resolved: Resolved, calendar: Calendar) -> String {
+        guard resolved.hasTime else { return DueFormat.string(resolved.date) }
+        let comps = calendar.dateComponents([.hour, .minute], from: resolved.date)
+        return DueFormat.string(resolved.date) + String(format: " %02d:%02d", comps.hour ?? 0, comps.minute ?? 0)
     }
 }
