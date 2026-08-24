@@ -90,9 +90,10 @@ enum RelativeDue {
     }
 
     /// Whether a stored value pins a time of day, rather than being a bare date that `parse` defaults
-    /// to noon. Only the tooltip cares — showing "12:00 PM" on every dateless date would be inventing
-    /// a precision the user never set.
-    private static func carriesTime(_ raw: String) -> Bool {
+    /// to noon. Not just the tooltip's concern — the quick bar's preview and confirmation lines use it
+    /// too, to say the time back rather than showing "12:00 PM" on every dateless date, which would be
+    /// inventing a precision the user never set.
+    static func carriesTime(_ raw: String) -> Bool {
         let cleaned = raw
             .trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "due:", with: "", options: [.caseInsensitive, .anchored])
@@ -100,5 +101,14 @@ enum RelativeDue {
         guard cleaned.count >= 10 else { return false }
         let rest = cleaned.dropFirst(10).trimmingCharacters(in: .whitespaces)
         return rest.count >= 4 && rest.contains(":")
+    }
+
+    /// A time of day on its own, in the locale's short style: "3:00 PM". Paired with `carriesTime` so
+    /// a caller only says it when the stored value actually pinned one.
+    static func timeLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }

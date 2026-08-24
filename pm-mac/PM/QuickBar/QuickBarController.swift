@@ -771,9 +771,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             // Only a phrase that reads as a date. One that doesn't opens the panel's date editor
             // instead, and there is nothing about that to draw in the session.
             guard let task, !argument.isEmpty,
-                  let date = QuickCaptureParser.date(from: argument) else { return nil }
+                  let due = QuickCaptureParser.dueString(from: argument) else { return nil }
             return outcome(setDueOnTodoAt(notes: notes, sessionIndex: task.sessionIndex,
-                                          lineIndex: task.lineIndex, due: DueFormat.string(date)))
+                                          lineIndex: task.lineIndex, due: due))
 
         case .wrapTask:
             guard let task else { return nil }
@@ -875,8 +875,12 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             // Only when the phrase read as a date. One that didn't opens the panel's date editor
             // instead, which is a window on screen and needs nothing said about it.
             guard let task, !argument.isEmpty,
-                  let date = QuickCaptureParser.date(from: argument) else { return nil }
-            return "“\(QuickBarModel.truncate(task.text, 30))” is due \(QuickBarModel.dueLabel(date))"
+                  let due = QuickCaptureParser.dueString(from: argument),
+                  let date = RelativeDue.parse(due) else { return nil }
+            let when = RelativeDue.carriesTime(due)
+                ? "\(QuickBarModel.dueLabel(date)) \(RelativeDue.timeLabel(date))"
+                : QuickBarModel.dueLabel(date)
+            return "“\(QuickBarModel.truncate(task.text, 30))” is due \(when)"
         case .sessionNote:
             return argument.isEmpty ? nil : "Added to today's note"
         case .startSession:
@@ -1045,12 +1049,12 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             then()
             return
         }
-        guard !phrase.isEmpty, let date = QuickCaptureParser.date(from: phrase) else {
+        guard !phrase.isEmpty, let due = QuickCaptureParser.dueString(from: phrase) else {
             FocusPanelController.shared.show(editor: .due)
             then()
             return
         }
-        store.setDue(task, due: DueFormat.string(date), then: then)
+        store.setDue(task, due: due, then: then)
     }
 
     /// `>session` opens today's, `>session standup` labels it. `openTodaySession` is idempotent — a

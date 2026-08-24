@@ -1352,13 +1352,14 @@ final class QuickBarModel: ObservableObject {
         rows.indices.contains(selection) ? rows[selection] : nil
     }
 
-    /// The due date the typed line parsed to, spelled out — "Sat, Aug 22" — or nil when it carries no
-    /// date. Written in full where a task's own badge would say "in 1w": a badge on an existing task
-    /// tells you how much time is left, while this confirms that the "friday" you just typed landed on
-    /// the day you meant.
+    /// The due date the typed line parsed to, spelled out — "Sat, Aug 22", or "Sat, Aug 22 3:00 PM"
+    /// when a time was typed too — or nil when it carries no date. Written in full where a task's own
+    /// badge would say "in 1w": a badge on an existing task tells you how much time is left, while this
+    /// confirms that the "friday 3pm" you just typed landed on the day and time you meant.
     var parsedDueLabel: String? {
-        guard let due = reading.due else { return nil }
-        return RelativeDue.parse(due).map { Self.dueLabel($0) }
+        guard let due = reading.due, let date = RelativeDue.parse(due) else { return nil }
+        let day = Self.dueLabel(date)
+        return RelativeDue.carriesTime(due) ? "\(day) \(RelativeDue.timeLabel(date))" : day
     }
 
     /// What to say about a `due:` the parser couldn't read.
