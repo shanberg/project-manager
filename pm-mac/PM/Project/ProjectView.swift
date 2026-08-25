@@ -1107,13 +1107,16 @@ struct ProjectView: View {
             .help(detailsExpanded ? "Hide notes" : "Show notes")
     }
 
-    /// The header's controls, gathered into one glass capsule at the trailing edge: progress, view
-    /// options, and the two "open this elsewhere" buttons.
+    /// The header's controls, gathered into one glass capsule at the trailing edge: progress, the two
+    /// ways of adding to the project, view options, and the "open this elsewhere" button.
     ///
-    /// One capsule rather than three separate pieces of glass — they're a single group of window
+    /// One capsule rather than several separate pieces of glass — they're a single group of window
     /// controls and read as one, the way the Messages header's trailing button does. With no bar behind
     /// the strip any more, the capsule is also what keeps the progress count legible over whatever has
     /// scrolled underneath it.
+    ///
+    /// Reading order is what you're doing, then how you're looking at it, then where else it lives:
+    /// count, add, add, view options, open.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
             HStack(spacing: 2) {
@@ -1125,7 +1128,11 @@ struct ProjectView: View {
                         .monospacedDigit()
                         .padding(.horizontal, 4)
                 }
-                if store.projectName != nil { viewOptionsMenu }
+                if store.projectName != nil {
+                    addTaskButton
+                    addNoteButton
+                    viewOptionsMenu
+                }
                 if store.projectPath != nil { openButton }
             }
             .padding(.horizontal, 6)
@@ -1133,6 +1140,45 @@ struct ProjectView: View {
             .headerBacking(headerChrome, in: Capsule())
             .background(WindowDragExcluder())
         }
+    }
+
+    /// The two add buttons: a task, and a note about the session you're in.
+    ///
+    /// Both summon the quick bar over the window rather than opening an editor inside it, which is the
+    /// point of them — the bar is where capture lives, it already knows how to read a due date out of
+    /// the line and how to place the result, and its note mode is a real markdown editor. A second,
+    /// lesser version of either sitting in the header would be a third place for the same write to go
+    /// wrong. The in-window editors are still there and still unchanged: ⌘N opens the inline add row,
+    /// and double-clicking a session opens its note in the column.
+    ///
+    /// The glyphs are the modes' own, taken from `QuickBarMode` rather than restated here, so the
+    /// button and the surface it opens can never come to disagree about what they mean.
+    private var addTaskButton: some View {
+        headerButton(symbol: QuickBarMode.capture.symbol, help: "Add a task") {
+            state.openQuickBar(.capture)
+        }
+    }
+
+    private var addNoteButton: some View {
+        headerButton(symbol: QuickBarMode.note.symbol, help: "Write a session note") {
+            state.openQuickBar(.note)
+        }
+    }
+
+    /// One control in the trailing capsule: a symbol at the size and weight the others use, in a hit
+    /// area big enough to click without aiming. Shared so the buttons can't drift apart.
+    private func headerButton(symbol: String, help: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(Text(help))
     }
 
     /// Whether the trailing capsule has anything to hold. With no project focused it doesn't, and an
