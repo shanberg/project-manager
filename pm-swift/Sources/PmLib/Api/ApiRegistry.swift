@@ -85,11 +85,11 @@ public enum ApiRegistry {
     public static let actions: [ApiActionSpec] = [
         // MARK: Tasks
         ApiActionSpec(name: "task.add", tier: .mutation,
-                      summary: "Add a task, to today's session or beside an existing task.",
+                      summary: "Add a task, to the current session or beside an existing task.",
                       fields: [project,
                                ApiField("text", .string, required: true, "The task's text."),
                                ApiField("due", .string, "Due date, YYYY-MM-DD."),
-                               ApiField("anchor", .taskRef, "Insert relative to this task instead of appending to today."),
+                               ApiField("anchor", .taskRef, "Insert relative to this task instead of appending to the current session."),
                                ApiField("position", .string, "Where the new task goes relative to the anchor.",
                                         allowed: ["before", "after", "child"])]),
         ApiActionSpec(name: "task.complete", tier: .mutation,
@@ -133,10 +133,10 @@ public enum ApiRegistry {
 
         // MARK: Sessions
         ApiActionSpec(name: "session.start", tier: .mutation,
-                      summary: "Start today's session, if there isn't one.",
+                      summary: "Start a session, unless the current one is still open.",
                       fields: [project, ApiField("label", .string, "Optional label for the session.")]),
         ApiActionSpec(name: "session.note", tier: .mutation,
-                      summary: "Append a note to today's session, creating it if needed.",
+                      summary: "Append a note to the current session, starting one if needed.",
                       fields: [project, ApiField("prose", .string, required: true, "The note.")]),
         ApiActionSpec(name: "session.rename", tier: .mutation,
                       summary: "Change a session's label. Its date is preserved.",

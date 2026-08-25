@@ -79,7 +79,7 @@ struct ProjectView: View {
     /// Tasks awaiting the inline delete confirmation. Empty when no delete is pending.
     @State private var pendingDelete: [Todo] = []
     /// Set while this window is adding a session on purpose, so the session-count watcher doesn't read
-    /// its own change as a reason to close the editor it's opening. See `beginTodaySession`.
+    /// its own change as a reason to close the editor it's opening. See `beginCurrentSession`.
     @State private var sessionCountChangeIsOurs = false
     /// A row the keyboard just moved onto, for the scroll view to reveal. Cleared once acted on.
     @State private var scrollTarget: ScrollRequest?
@@ -293,9 +293,9 @@ struct ProjectView: View {
                             // can clear the window's bottom edge rather than ending flush against it.
                             .padding(.bottom, ReadableWidth.gutter(for: columnWidth))
                     }
-                    // Double-clicking blank space adds a task to today's session (creating today's
-                    // session when there isn't one) — a Finder window's "act on the container, not on
-                    // an item" double-click.
+                    // Double-clicking blank space adds a task to the current session (starting one
+                    // when there isn't one to continue) — a Finder window's "act on the container, not
+                    // on an item" double-click.
                     //
                     // Attached to the scroll view itself rather than to a filler view stretched over
                     // the leftover space, which would have to be sized from the viewport height minus
@@ -383,7 +383,7 @@ struct ProjectView: View {
         }
         // Adding/deleting a session shifts session indices, so close any open session editor when the
         // count changes (a keyed editor would otherwise point at the wrong session) — unless this
-        // window is the one that added it and is on its way into it. See `beginTodaySession`.
+        // window is the one that added it and is on its way into it. See `beginCurrentSession`.
         .onChange(of: store.notes?.sessions.count) { _ in
             if sessionCountChangeIsOurs {
                 sessionCountChangeIsOurs = false
@@ -392,7 +392,7 @@ struct ProjectView: View {
             }
         }
         // File ▸ New Session, on the same counter as New Task and for the same reason.
-        .onChange(of: state.newSessionRequest) { _ in beginTodaySession() }
+        .onChange(of: state.newSessionRequest) { _ in beginCurrentSession() }
         .onChange(of: state.editDetailsRequest) { _ in beginEditDetails() }
         // Arm the drag-end backstop for the life of a drag. See `DragEndWatcher` for why the two
         // existing end signals don't between them cover a real drag.
@@ -572,8 +572,8 @@ struct ProjectView: View {
         }
     }
 
-    /// Open the unanchored add editor: the new task goes to today's session, which `PMStore.addTodo`
-    /// creates when the project hasn't got one yet. This is what a double-click in the window's blank
+    /// Open the unanchored add editor: the new task goes to the current session, which `PMStore.addTodo`
+    /// starts when there isn't one to continue. This is what a double-click in the window's blank
     /// space opens, and where ⌘N lands when there's no row to add after.
     ///
     /// When the empty-project CTA is on screen it carries an add editor of its own, so this reveals
@@ -618,19 +618,28 @@ struct ProjectView: View {
 
     /// File ▸ New Session (⇧⌘N), and what the old "New session" button becomes.
     ///
-    /// It means *today's* session: the project's existing one if it has it, a new one if not — see
-    /// `PMStore.openTodaySession` for why a second heading with the same date is a data problem rather
-    /// than a second session. Either way it lands in the note editor with the caret ready, because a
-    /// session you just asked for is one you're about to write in; dropping an empty heading into the
-    /// list and leaving you to find your way into it was the long way round to the same place.
-    private func beginTodaySession() {
+    /// It means the *current* session: the one the project is already in, or a new one when it hasn't
+    /// got one for today or has been left alone long enough that this is a new sitting — see
+    /// `PMStore.openCurrentSession`. Either way it lands in the note editor with the caret ready,
+    /// because a session you just asked for is one you're about to write in; dropping an empty heading
+    /// into the list and leaving you to find your way into it was the long way round to the same place.
+    private func beginCurrentSession() {
         guard store.projectName != nil, !editingDetails else { return }
         // Adding a session shifts every session index, which normally closes an open session editor
         // (see the `sessions.count` watcher below). This is the one change that's *opening* one, so
         // it's exempt — claimed here, before the write, so it doesn't matter which side of the
         // reload the watcher fires on.
-        if store.todaySessionIndex == nil { sessionCountChangeIsOurs = true }
-        store.openTodaySession { index in openSessionNote(index) }
+        //
+        // Claimed on a prediction, and the prediction can be wrong: the idle window is measured
+        // against the file's date, which the contract re-reads for itself a moment later. So the claim
+        // is taken back below if no session turned up after all, rather than left armed to swallow
+        // somebody else's change later on.
+        let before = store.notes?.sessions.count
+        if store.willStartNewSession { sessionCountChangeIsOurs = true }
+        store.openCurrentSession { index in
+            if store.notes?.sessions.count == before { sessionCountChangeIsOurs = false }
+            openSessionNote(index)
+        }
     }
 
     /// Open the project's details brief for editing, revealing it first if it was collapsed — the form
@@ -963,7 +972,7 @@ struct ProjectView: View {
     }
 
     /// The unanchored add editor, at the foot of the list. Open only while `beginQuickAdd` has it
-    /// targeted; `store.addTodo` with no anchor appends to today's session and focuses the new task.
+    /// targeted; `store.addTodo` with no anchor appends to the current session and focuses the new task.
     ///
     /// Stays open after each task, like the anchored editor — and unlike it, needs no help to do so.
     /// This one appends, so tasks come out in the order they were typed with the editor sitting still

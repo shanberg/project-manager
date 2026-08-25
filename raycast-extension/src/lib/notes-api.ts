@@ -331,7 +331,7 @@ export async function updateDueDateInNotes(
   });
 }
 
-/** Add a task to today's session, creating the session if there isn't one. */
+/** Add a task to the current session, starting one if there isn't one to continue. */
 export async function addTodoToTodaySession(
   prefs: PreferenceValues,
   projectName: string,
@@ -347,7 +347,7 @@ export async function addTodoToTodaySession(
   });
 }
 
-/** Append a note to today's session (creating the session if missing). */
+/** Append a note to the current session (starting one when there isn't one to continue). */
 export async function appendNoteToTodaySession(
   prefs: Pick<PreferenceValues, "configPath" | "pmCliPath">,
   projectName: string,

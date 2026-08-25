@@ -167,7 +167,7 @@ enum CapturePlacement: String, CaseIterable {
         switch self {
         case .narrow: return "Narrow under \(quoted(anchor))"
         case .after: return optionDown ? "Add before \(quoted(anchor))" : "Add after \(quoted(anchor))"
-        case .sessionEnd: return "Add to end of today's session"
+        case .sessionEnd: return "Add to end of the current session"
         case .sessionNote: return "New session note"
         }
     }
@@ -178,8 +178,8 @@ enum CapturePlacement: String, CaseIterable {
         switch self {
         case .narrow: return "Added under \(quoted(anchor))"
         case .after: return optionDown ? "Added before \(quoted(anchor))" : "Added after \(quoted(anchor))"
-        case .sessionEnd: return "Added to today's session"
-        case .sessionNote: return "Added to today's note"
+        case .sessionEnd: return "Added to the current session"
+        case .sessionNote: return "Added to the session note"
         }
     }
 
@@ -194,7 +194,7 @@ enum CapturePlacement: String, CaseIterable {
         switch self {
         case .narrow: return "Narrow under it"
         case .after: return optionDown ? "Add before it" : "Add after it"
-        case .sessionEnd: return "Add to end of today's session"
+        case .sessionEnd: return "Add to end of the current session"
         case .sessionNote: return "New session note"
         }
     }
@@ -208,8 +208,8 @@ enum CapturePlacement: String, CaseIterable {
         case .after:
             return optionDown ? "Couldn't add before \(quoted(anchor))"
                               : "Couldn't add after \(quoted(anchor))"
-        case .sessionEnd: return "Couldn't add to today's session"
-        case .sessionNote: return "Couldn't add to today's note"
+        case .sessionEnd: return "Couldn't add to the current session"
+        case .sessionNote: return "Couldn't add to the session note"
         }
     }
 
@@ -659,10 +659,16 @@ final class QuickBarModel: ObservableObject {
     @Published var sessions: [PreviewSession] = []
 
     /// Which session is today's, or nil when the project hasn't got one yet — which is worth drawing,
-    /// because "Add to end of today's session" silently creating one is the bar's quietest side effect.
+    /// because a placement silently creating a session is the bar's quietest side effect.
     @Published var todaySession: Int?
 
-    /// Today's session note as it stands, for the note placement to append its ghost to.
+    /// Whether the next thing written into the focused project opens a session of its own — because
+    /// the project has none for today, or has been left alone past `PmLib.sessionIdleWindow`. The
+    /// preview draws the new heading either way, so the side effect is on screen before you commit to
+    /// it rather than discovered in the file afterwards.
+    @Published var startsNewSession = false
+
+    /// The current session's note as it stands, for the note placement to append its ghost to.
     @Published var todayNote: String?
 
     /// Whether there's a completion to take back — what puts Undo Last Complete on the `>` list.
@@ -1399,9 +1405,9 @@ final class QuickBarModel: ObservableObject {
         return windowed(lines, around: index, session: anchor.sessionIndex, depth: depth)
     }
 
-    /// The unanchored add: the end of today's session, or the session it's about to create.
+    /// The unanchored add: the end of the current session, or the session it's about to create.
     private func endPreview() -> SessionPreview? {
-        guard let today = todaySession else {
+        guard let today = todaySession, !startsNewSession else {
             return SessionPreview(heading: Self.todayHeading, detail: "new session",
                                   lines: padded([ghostLine(depth: 0)]), ghostIndex: 0, ghostDepth: 0)
         }
@@ -1411,10 +1417,10 @@ final class QuickBarModel: ObservableObject {
     }
 
     /// A note is prose at the head of the session, not a task in it — so the ghost goes above the
-    /// tasks rather than among them, which is where `appendNoteToTodaySession` puts it.
+    /// tasks rather than among them, which is where `appendNoteToCurrentSession` puts it.
     private func notePreview(text: String? = nil) -> SessionPreview? {
         let ghost = ghostLine(depth: 0, kind: .note, text: text)
-        guard let today = todaySession else {
+        guard let today = todaySession, !startsNewSession else {
             return SessionPreview(heading: Self.todayHeading, detail: "new session",
                                   lines: padded([ghost]), ghostIndex: 0, ghostDepth: 0)
         }

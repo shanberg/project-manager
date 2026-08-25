@@ -680,34 +680,30 @@ public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, p
     return lines.joined(separator: "\n")
 }
 
-/// Append `prose` to the note of the session dated `date`, creating that session at the top of the
-/// Sessions list when the file hasn't got one yet. Returns the updated text, or nil if the session
-/// can't be located (and couldn't be added — no `## Sessions` heading to splice into).
+/// Append `prose` to the note of the current session, starting one when the project hasn't got one
+/// for `date` — or has been left alone past `sessionIdleWindow`, which makes this note the beginning
+/// of a new sitting rather than a late addition to the last one (see `SessionWindow.swift`). Returns
+/// the updated text, or nil if the session can't be located and couldn't be added (no `## Sessions`
+/// heading to splice into).
 ///
-/// "The session dated `date`" is the *first* one carrying that date: sessions are added at the top of
-/// the list, so that's the most recent, and the same one the quick add appends its tasks to.
-///
-/// The note is appended rather than replaced — a day's note is a running log, so a second entry joins
-/// the first under a blank line. The prose goes through the same sanitizing as any other session note
-/// (see `commitSessionNotePreservingFormat`), so pasted headings and checkboxes can't break the
+/// The note is appended rather than replaced — a session's note is a running log, so a second entry
+/// joins the first under a blank line. The prose goes through the same sanitizing as any other session
+/// note (see `commitSessionNotePreservingFormat`), so pasted headings and checkboxes can't break the
 /// document.
-public func appendSessionNotePreservingFormat(rawText: String, prose: String, date: Date = Date()) throws -> String? {
+public func appendSessionNotePreservingFormat(rawText: String, prose: String, lastEdited: Date? = nil,
+                                              date: Date = Date()) throws -> String? {
     let addition = prose.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !addition.isEmpty else { return rawText }
 
-    let target = formatSessionDate(date)
-    var text = rawText
-    var notes = try parseNotes(markdown: text)
-    if !notes.sessions.contains(where: { $0.date == target }) {
-        guard let withSession = sessionAddPreservingFormat(rawText: text, label: "", date: date) else { return nil }
-        text = withSession
-        notes = try parseNotes(markdown: text)
-    }
-    guard let index = notes.sessions.firstIndex(where: { $0.date == target }) else { return nil }
+    guard let current = try currentSessionPreservingFormat(rawText: rawText, lastEdited: lastEdited,
+                                                           now: date) else { return nil }
+    let notes = try parseNotes(markdown: current.rawText)
+    guard current.sessionIndex < notes.sessions.count else { return nil }
 
-    let existing = leadingSessionProse(body: notes.sessions[index].body)
+    let existing = leadingSessionProse(body: notes.sessions[current.sessionIndex].body)
     let combined = existing.isEmpty ? addition : existing + "\n\n" + addition
-    return commitSessionNotePreservingFormat(rawText: text, sessionIndex: index, prose: combined)
+    return commitSessionNotePreservingFormat(rawText: current.rawText,
+                                             sessionIndex: current.sessionIndex, prose: combined)
 }
 
 /// Rename a session's label (the trailing text after the date), preserving format. The heading line

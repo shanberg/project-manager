@@ -50,6 +50,10 @@ final class PMStore: ObservableObject {
     @Published private(set) var notes: ProjectNotes?
     @Published private(set) var todos: [Todo] = []
     @Published private(set) var focusedKey: String?
+    /// When this project's notes file was last written, read at each reload. It's what tells a
+    /// command whether it's continuing the current session or starting a new one — see
+    /// `willStartNewSession` and `PmLib.sessionIdleWindow`.
+    @Published private(set) var lastEditedAt: Date?
     /// Why this project can't be read, if it can't. A read failure only — writes report themselves
     /// through `writeFailure` below.
     @Published private(set) var errorMessage: String?
@@ -205,6 +209,7 @@ final class PMStore: ObservableObject {
             notesPath = nil
             notes = nil
             todos = []
+            lastEditedAt = nil
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
             undoStack = []; redoStack = []   // history belongs to a project
@@ -222,7 +227,7 @@ final class PMStore: ObservableObject {
             // Resolve the project directory once (this is the protected-folder access), then reuse
             // the handle for both the notes read and the cached notes path.
             Log.write("reload start: name=\(name)")
-            let result = Result { () -> (NotesShowOutput, String, String) in
+            let result = Result { () -> (NotesShowOutput, String, String, Date?) in
                 let cfg = try? loadConfig()
                 Log.write("config: useObsidianCLI=\(cfg?.useObsidianCLI ?? false)")
                 let handle = try resolveNotesHandle(project: name)
@@ -238,7 +243,9 @@ final class PMStore: ObservableObject {
                 // Set here, on the IO queue, rather than beside the published state: a batch reads it
                 // from the same queue, so it always sees the newest read that has actually finished.
                 self?.seenRevision.value = output.revision
-                return (output, handle.notesPath, handle.projectPath)
+                // After the prune above, which is a write of our own — read before it, the file's
+                // date would be the moment *this* load touched it rather than the last real edit.
+                return (output, handle.notesPath, handle.projectPath, notesLastEdited(path: handle.notesPath))
             }
             if case .failure(let error) = result {
                 let ns = error as NSError
@@ -247,7 +254,7 @@ final class PMStore: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 switch result {
-                case .success(let (output, path, projectPath)):
+                case .success(let (output, path, projectPath, lastEdited)):
                     // Classify how the hero task moved since the last load, but never animate across a
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
@@ -258,6 +265,7 @@ final class PMStore: ObservableObject {
                     self.projectPath = projectPath
                     self.notes = output.notes
                     self.todos = output.todos
+                    self.lastEditedAt = lastEdited
                     self.focusedKey = output.focusedKey
                     self.errorMessage = nil
                     self.hasLoaded = true
@@ -752,15 +760,34 @@ final class PMStore: ObservableObject {
         return notes?.sessions.firstIndex { $0.date == today }
     }
 
-    /// Open today's session for writing, creating it only if the project hasn't got one, and hand its
-    /// index back once the document has been re-read.
+    /// Whether the next thing written into this project opens a new session rather than joining the
+    /// one it already has.
     ///
-    /// "New session" means *today's* session, not another one. A session is identified by its date —
-    /// `addTodo` and the menubar's note both find today's by matching that string — so a second
-    /// heading with the same date leaves every one of those with two candidates and no way to choose.
-    /// This makes the command idempotent: ask for today twice and you land in the same place.
-    func openTodaySession(then: @escaping @MainActor (Int) -> Void) {
-        if let index = todaySessionIndex {
+    /// The same question `PmLib.currentSessionPreservingFormat` answers on the way into a write, asked
+    /// here so a command can tell whether it has to go through the contract at all. The rule itself
+    /// isn't restated — the window and the "has it gone cold" test are the library's, and only the
+    /// document this store already has in memory is read locally.
+    var willStartNewSession: Bool {
+        guard let sessions = notes?.sessions, let index = todaySessionIndex,
+              sessions.indices.contains(index) else {
+            return true   // no session for today yet
+        }
+        let session = sessions[index]
+        // A heading with nothing under it is a sitting that never started, so writing into it starts
+        // it — however long ago it was made.
+        guard !session.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return sessionHasGoneCold(lastEdited: lastEditedAt)
+    }
+
+    /// Open the current session for writing, starting one when there isn't one to continue, and hand
+    /// its index back once the document has been re-read.
+    ///
+    /// The current session is today's — unless the project has been left alone past
+    /// `PmLib.sessionIdleWindow`, in which case coming back to it is a new sitting and gets a heading
+    /// of its own, labelled with the time so two dated the same day can be told apart. Within the
+    /// window this stays idempotent: ask twice in a row and you land in the same session both times.
+    func openCurrentSession(then: @escaping @MainActor (Int) -> Void) {
+        if let index = todaySessionIndex, !willStartNewSession {
             then(index)
             return
         }
@@ -799,14 +826,15 @@ final class PMStore: ObservableObject {
         mutate { try PmLib.appendTaskToSession(project: $0, sessionIndex: index, text: text, due: due) }
     }
 
-    /// Add prose to today's session note, creating today's session when the project hasn't got one.
+    /// Add prose to the current session's note, starting a session when there isn't one to continue —
+    /// no session for today, or the project left alone past `PmLib.sessionIdleWindow`.
     ///
     /// Appending, not setting: `setSessionNote` replaces the session's whole leading-prose region, so a
-    /// line typed into the quick bar would silently swallow whatever the day's note already said. The
-    /// note is a running log, and a second entry joins the first.
-    /// `then` runs after the re-read, which matters when the caller means to open today's session
-    /// next: this may have just created it, and asking for it against a stale document would make a
-    /// second heading with the same date.
+    /// line typed into the quick bar would silently swallow whatever the session's note already said.
+    /// The note is a running log, and a second entry joins the first.
+    /// `then` runs after the re-read, which matters when the caller means to open the session next:
+    /// this may have just started it, and asking for it against a stale document would make a second
+    /// heading.
     func appendSessionNote(_ prose: String, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
             try PMContract.perform("session.note", PMContract.input(project: project) { $0.prose = prose })

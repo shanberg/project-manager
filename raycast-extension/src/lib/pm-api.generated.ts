@@ -152,7 +152,7 @@ export interface SessionDeleteInput {
   sessionOrdinal?: number;
 }
 
-/** Append a note to today's session, creating it if needed. */
+/** Append a note to the current session, starting one if needed. */
 export interface SessionNoteInput {
   /** Project name or unambiguous prefix. */
   project: string;
@@ -172,7 +172,7 @@ export interface SessionRenameInput {
   sessionOrdinal?: number;
 }
 
-/** Start today's session, if there isn't one. */
+/** Start a session, unless the current one is still open. */
 export interface SessionStartInput {
   /** Optional label for the session. */
   label?: string;
@@ -180,9 +180,9 @@ export interface SessionStartInput {
   project: string;
 }
 
-/** Add a task, to today's session or beside an existing task. */
+/** Add a task, to the current session or beside an existing task. */
 export interface TaskAddInput {
-  /** Insert relative to this task instead of appending to today. */
+  /** Insert relative to this task instead of appending to the current session. */
   anchor?: TaskRef;
   /** Due date, YYYY-MM-DD. */
   due?: string;

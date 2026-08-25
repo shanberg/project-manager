@@ -107,7 +107,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
     switch spec.name {
     // MARK: Task mutations
     case "task.add":
-        return try document(spec, input, options) { rawText in
+        return try document(spec, input, options) { rawText, lastEdited in
             guard let text = input.text else { throw PmError.emptyTodoText }
             if let d = input.due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
             if let anchor = input.anchor {
@@ -129,10 +129,10 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                     : out.rawText
                 return Outcome(rawText: focused, relocated: at.relocated)
             }
-            let (withSession, sessionIndex) = try todaySession(in: rawText)
-            guard let out = appendTaskToSession(rawText: withSession, sessionIndex: sessionIndex,
+            let session = try currentSession(in: rawText, lastEdited: lastEdited)
+            guard let out = appendTaskToSession(rawText: session.rawText, sessionIndex: session.sessionIndex,
                                                 text: text, due: input.due) else {
-                throw ApiError(.writeFailed, "Couldn't add to today's session.")
+                throw ApiError(.writeFailed, "Couldn't add to the current session.")
             }
             return Outcome(rawText: try focusing(out.rawText, sessionIndex: out.sessionIndex,
                                                  lineIndex: out.lineIndex))
@@ -214,42 +214,45 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
 
     // MARK: Sessions
     case "session.start":
-        return try document(spec, input, options) { rawText in
-            let today = formatSessionDate()
-            let notes = try parseNotes(markdown: rawText)
-            // Reported either way, so a caller can ask for today's session and use the answer without
-            // knowing whether it had to be made — and without formatting today's date to find it.
-            func describe(_ markdown: String) throws -> JSONValue {
-                let sessions = try parseNotes(markdown: markdown).sessions
-                guard let index = sessions.firstIndex(where: { $0.date == today }) else { return .null }
-                return .object([
-                    "date": .string(sessions[index].date),
-                    "isoDate": sessionISODate(heading: sessions[index].date).map(JSONValue.string) ?? .null,
-                    "label": .string(sessions[index].label),
-                    "index": .number(Double(index)),
-                ])
+        return try document(spec, input, options) { rawText, lastEdited in
+            // "The current session" rather than "today's": the first sitting of a day starts one, and
+            // so does coming back to the project after `sessionIdleWindow` — see `SessionWindow.swift`.
+            let hadToday = try parseNotes(markdown: rawText).sessions
+                .contains { $0.date == formatSessionDate() }
+            let session = try currentSession(in: rawText, lastEdited: lastEdited, label: input.label)
+            // Reported either way, so a caller can ask for the current session and use the answer
+            // without knowing whether it had to be made — and without formatting a date to find it.
+            let sessions = try parseNotes(markdown: session.rawText).sessions
+            let data: JSONValue = session.sessionIndex < sessions.count
+                ? .object([
+                    "date": .string(sessions[session.sessionIndex].date),
+                    "isoDate": sessionISODate(heading: sessions[session.sessionIndex].date)
+                        .map(JSONValue.string) ?? .null,
+                    "label": .string(sessions[session.sessionIndex].label),
+                    "index": .number(Double(session.sessionIndex)),
+                  ])
+                : .null
+            guard session.started else {
+                return Outcome(rawText: session.rawText,
+                               note: .statement("The current session was already there"), data: data)
             }
-            if notes.sessions.contains(where: { $0.date == today }) {
-                return Outcome(rawText: rawText, note: .statement("Today's session was already there"),
-                               data: try describe(rawText))
-            }
-            guard let out = sessionAddPreservingFormat(rawText: rawText, label: input.label ?? "",
-                                                       date: Date()) else {
-                throw PmError.notesNotFound("## Sessions")
-            }
-            return Outcome(rawText: out,
-                           note: Phrase(past: "Started today's session", future: "start today's session"),
-                           data: try describe(out))
+            return Outcome(rawText: session.rawText,
+                           note: hadToday
+                               ? Phrase(past: "Started a new session", future: "start a new session")
+                               : Phrase(past: "Started today's session", future: "start today's session"),
+                           data: data)
         }
     case "session.note":
-        return try document(spec, input, options) { rawText in
+        return try document(spec, input, options) { rawText, lastEdited in
             guard let prose = input.prose, !prose.trimmingCharacters(in: .whitespaces).isEmpty else {
                 throw PmError.emptySessionNote
             }
-            guard let out = try appendSessionNotePreservingFormat(rawText: rawText, prose: prose) else {
+            guard let out = try appendSessionNotePreservingFormat(rawText: rawText, prose: prose,
+                                                                  lastEdited: lastEdited) else {
                 throw PmError.notesNotFound("## Sessions")
             }
-            return Outcome(rawText: out, note: Phrase(past: "Added a note to today's session", future: "add a note to today's session"))
+            return Outcome(rawText: out, note: Phrase(past: "Added a note to the current session",
+                                                      future: "add a note to the current session"))
         }
     case "session.rename":
         return try document(spec, input, options) { rawText in
@@ -536,7 +539,20 @@ struct Outcome {
 /// path minus its last step rather than a second implementation that predicts what the first would do.
 private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
                       _ apply: (String) throws -> Outcome) throws -> ApiResult {
+    try document(spec, input, options) { rawText, _ in try apply(rawText) }
+}
+
+/// `document`, for the three actions that also need to know when the project was last edited — the
+/// ones that resolve "the current session", which is a question about how long ago that was. See
+/// `SessionWindow.swift`.
+///
+/// A separate entry point rather than a second parameter on every closure: nine of the twelve actions
+/// have no use for it, and the date is read here rather than by each of them because this is where the
+/// notes file is already resolved.
+private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
+                      _ apply: (String, Date?) throws -> Outcome) throws -> ApiResult {
     let handle = try resolveNotesHandle(project: try resolvedProject(input))
+    let lastEdited = notesLastEdited(path: handle.notesPath)
     let rawText = try handle.io.readContent(path: handle.notesPath)
     // Checked here rather than per action, because it is the same claim whatever the action: "this is
     // the document I was looking at". A digest says a task is still that task; only this says the
@@ -548,7 +564,7 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
     }
     let before = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: rawText)))
 
-    let outcome = try apply(rawText)
+    let outcome = try apply(rawText, lastEdited)
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
@@ -692,19 +708,15 @@ private func folderName(of project: String) throws -> String {
     (try resolveProjectPath(nameOrPrefix: project) as NSString).lastPathComponent
 }
 
-/// Today's session, creating it in the markdown if the project hasn't got one yet.
-private func todaySession(in rawText: String) throws -> (rawText: String, sessionIndex: Int) {
-    let today = formatSessionDate()
-    var notes = try parseNotes(markdown: rawText)
-    if let index = notes.sessions.firstIndex(where: { $0.date == today }) { return (rawText, index) }
-    guard let withSession = sessionAddPreservingFormat(rawText: rawText, label: "", date: Date()) else {
+/// The session a write lands in, creating it in the markdown when the project hasn't got one for
+/// today or has been left alone long enough that this is a new sitting. See `SessionWindow.swift`.
+private func currentSession(in rawText: String, lastEdited: Date?,
+                            label: String? = nil) throws -> CurrentSession {
+    guard let session = try currentSessionPreservingFormat(rawText: rawText, lastEdited: lastEdited,
+                                                           label: label) else {
         throw PmError.notesNotFound("## Sessions")
     }
-    notes = try parseNotes(markdown: withSession)
-    guard let index = notes.sessions.firstIndex(where: { $0.date == today }) else {
-        throw PmError.notesNotFound("## Sessions")
-    }
-    return (withSession, index)
+    return session
 }
 
 private func focusing(_ rawText: String, sessionIndex: Int, lineIndex: Int) throws -> String {

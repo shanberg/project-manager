@@ -555,7 +555,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ProjectPrompts.rename(projectNamed: name, isArchived: isArchived)
     }
 
-    /// Start (or jump to) today's session in the project window — the note goes in the notes, so this
+    /// Start (or jump to) the current session in the project window — the note goes in the notes, so this
     /// opens the place that edits them rather than offering a second, smaller editor for the same text.
     @objc private func addSessionNote() {
         WindowManager.shared.openFocusedProject().newSession(nil)

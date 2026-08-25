@@ -396,6 +396,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             PreviewSession(date: $0.date, label: $0.label)
         } ?? []
         model.todaySession = focusedStore?.todaySessionIndex
+        model.startsNewSession = focusedStore?.willStartNewSession ?? true
         model.todayNote = focusedStore?.todaySessionIndex.flatMap { index in
             focusedStore?.notes?.sessions[index].body
         }.map { leadingSessionProse(body: $0) }
@@ -936,9 +937,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 : QuickBarModel.dueLabel(date)
             return "“\(QuickBarModel.truncate(task.text, 30))” is due \(when)"
         case .sessionNote:
-            return argument.isEmpty ? nil : "Added to today's note"
+            return argument.isEmpty ? nil : "Added to the session note"
         case .startSession:
-            return argument.isEmpty ? "Opened today's session" : "Today's session: “\(argument)”"
+            return argument.isEmpty ? "Opened the current session" : "This session: “\(argument)”"
         case .archiveProject:
             return focusedStore?.projectName.map { "Archived \(QuickBarModel.display($0))" }
         case .unarchiveProject:
@@ -961,8 +962,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .undoLast: return "Couldn't put the last completed task back"
         case .diveIn: return "Couldn't move the focus"
         case .setDue: return "Couldn't set the due date"
-        case .sessionNote: return "Couldn't add to today's note"
-        case .startSession: return "Couldn't open today's session"
+        case .sessionNote: return "Couldn't add to the session note"
+        case .startSession: return "Couldn't open the current session"
         case .archiveProject: return "Couldn't archive the project"
         case .unarchiveProject: return "Couldn't unarchive the project"
         default: return "That didn't work"
@@ -1038,15 +1039,15 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             if argument.isEmpty {
                 // Only ⌘⏎ reaches this now; the plain form opened the panel's editor and returned.
                 WindowManager.shared.openFocusedProject().newSession(nil)
-                return   // already the reveal target; asking twice would open today's session twice
+                return   // already the reveal target; asking twice would open the session twice
             }
             guard let store else { break }
-            // Chained rather than fired alongside: this may have just created today's session, and
-            // asking for it against a document that hasn't been re-read would make a second one.
+            // Chained rather than fired alongside: this may have just started a session, and asking
+            // for it against a document that hasn't been re-read would make a second one.
             store.appendSessionNote(argument, then: landed)
             return
         case .startSession:
-            startTodaySession(labelled: argument, in: store, then: landed)
+            startCurrentSession(labelled: argument, in: store, then: landed)
             return
         case .addLink:
             if let store { ProjectPrompts.addLink(store: store) }
@@ -1122,15 +1123,16 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         store.setDue(task, due: due, then: then)
     }
 
-    /// `>session` opens today's, `>session standup` labels it. `openTodaySession` is idempotent — a
-    /// session is identified by its date, so asking twice lands in the same one.
-    private func startTodaySession(labelled label: String, in store: PMStore?,
+    /// `>session` opens the current one, `>session standup` labels it. `openCurrentSession` is
+    /// idempotent within the idle window — asking twice in a row lands in the same session both times,
+    /// and only a project left alone past it gets a second heading.
+    private func startCurrentSession(labelled label: String, in store: PMStore?,
                                    then: @escaping @MainActor () -> Void) {
         guard let store else {
             then()
             return
         }
-        store.openTodaySession { index in
+        store.openCurrentSession { index in
             guard !label.isEmpty else {
                 then()
                 return

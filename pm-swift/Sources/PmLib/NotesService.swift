@@ -325,7 +325,7 @@ public func isValidTodoDue(_ s: String) -> Bool {
 }
 
 /// Add a todo. With `position`, insert relative to an anchor task (child/before/after); a child
-/// insert takes focus. Without `position`, quick-add to today's session (creating it if needed) and
+/// insert takes focus. Without `position`, quick-add to the current session (creating one if needed) and
 /// take focus. Mirrors `pm notes todo add`.
 public func addTodo(
     project: String,
@@ -337,6 +337,7 @@ public func addTodo(
     if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
 
     let handle = try resolveNotesHandle(project: project)
+    let lastEdited = notesLastEdited(path: handle.notesPath)
     var rawText = try handle.io.readContent(path: handle.notesPath)
 
     let inserted: (rawText: String, sessionIndex: Int, lineIndex: Int)?
@@ -355,20 +356,15 @@ public func addTodo(
         )
         shouldFocus = pos.kind == .child
     } else {
-        // Quick add: append to today's session (creating it if needed) and take focus.
-        let today = formatSessionDate(Date())
-        var notes = try parseNotes(markdown: rawText)
-        var todayIdx = notes.sessions.firstIndex(where: { $0.date == today })
-        if todayIdx == nil {
-            guard let withSession = sessionAddPreservingFormat(rawText: rawText, label: "", date: Date()) else {
-                throw PmError.notesNotFound(handle.notesPath)
-            }
-            rawText = withSession
-            notes = try parseNotes(markdown: rawText)
-            todayIdx = notes.sessions.firstIndex(where: { $0.date == today })
+        // Quick add: append to the current session — today's, or a new one when the project has been
+        // left alone past `sessionIdleWindow` (see `SessionWindow.swift`) — and take focus.
+        guard let session = try currentSessionPreservingFormat(rawText: rawText,
+                                                               lastEdited: lastEdited) else {
+            throw PmError.notesNotFound(handle.notesPath)
         }
-        guard let si = todayIdx else { throw PmError.notesNotFound(handle.notesPath) }
-        inserted = appendTaskToSession(rawText: rawText, sessionIndex: si, text: text, due: due)
+        rawText = session.rawText
+        inserted = appendTaskToSession(rawText: rawText, sessionIndex: session.sessionIndex,
+                                       text: text, due: due)
         shouldFocus = true
     }
 
@@ -424,19 +420,23 @@ public func setSessionNote(project: String, sessionIndex: Int, prose: String) th
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
-/// Append `prose` to today's session note, creating today's session when the project hasn't got one
-/// yet. Returns the session's date string, so a caller can say which session it landed in.
+/// Append `prose` to the current session's note, starting a session when the project hasn't got one
+/// for today — or has been left alone past `sessionIdleWindow`, which makes the note the start of a
+/// new sitting (see `SessionWindow.swift`). Returns the session's date string, so a caller can say
+/// which session it landed in.
 ///
-/// Appending, not replacing: the note is a running log of the day, so a second note joins the first
+/// Appending, not replacing: a session's note is a running log, so a second note joins the first
 /// under a blank line rather than overwriting it. Empty prose is rejected.
 @discardableResult
-public func appendNoteToTodaySession(project: String, prose: String) throws -> String {
+public func appendNoteToCurrentSession(project: String, prose: String) throws -> String {
     guard !prose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw PmError.emptySessionNote
     }
     let handle = try resolveNotesHandle(project: project)
+    let lastEdited = notesLastEdited(path: handle.notesPath)
     let rawText = try handle.io.readContent(path: handle.notesPath)
-    guard let updated = try appendSessionNotePreservingFormat(rawText: rawText, prose: prose) else {
+    guard let updated = try appendSessionNotePreservingFormat(rawText: rawText, prose: prose,
+                                                              lastEdited: lastEdited) else {
         throw PmError.notesNotFound(handle.notesPath)
     }
     try handle.io.writeContent(path: handle.notesPath, content: updated)
@@ -462,11 +462,21 @@ public func pruneEmptySessions(project: String) throws -> Int {
 }
 
 /// `pruneEmptySessions(project:)` for a caller that already resolved the notes handle.
+///
+/// The file's modification date is put back afterwards, because this is housekeeping rather than an
+/// edit and the date is now load-bearing: `sessionIdleWindow` measures "when did you last work on
+/// this project" by it, so a sweep on open would otherwise report opening the project as working on
+/// it — and the note you write an hour later would join a session you'd finished with.
 @discardableResult
 public func pruneEmptySessions(handle: NotesHandle) throws -> Int {
     let rawText = try handle.io.readContent(path: handle.notesPath)
     guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText) else { return 0 }
+    let wasEdited = notesLastEdited(path: handle.notesPath)
     try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
+    if let wasEdited {
+        try? FileManager.default.setAttributes([.modificationDate: wasEdited],
+                                               ofItemAtPath: handle.notesPath)
+    }
     return result.removed
 }
 

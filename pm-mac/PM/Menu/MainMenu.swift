@@ -86,7 +86,8 @@ enum MainMenu {
         // ⌘N makes the app's primary content, ⌥⌘N makes a window — Mail's split, and the one that keeps
         // ⌘T free for the standard New Tab.
         add(menu, "New Task", #selector(ProjectWindowController.newTask), target: nil, key: "n")
-        // ⇧⌘N starts today's session and opens its note — the sibling of New Task one level up, and
+        // ⇧⌘N opens the current session's note, starting a session first when there isn't one to
+        // continue — the sibling of New Task one level up, and
         // what replaced the "New session" button that used to sit in the list.
         add(menu, "New Session", #selector(ProjectWindowController.newSession), target: nil, key: "n",
             modifiers: [.command, .shift])

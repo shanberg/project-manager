@@ -112,15 +112,15 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
     } catch { fail(error) }
 }
 
-/// `pm notes session note <project> <text>` — append a note to today's session, creating today's
-/// session if the project hasn't got one yet.
+/// `pm notes session note <project> <text>` — append a note to the current session, starting one if
+/// the project hasn't got one for today or has been left alone past `sessionIdleWindow`.
 func runNotesSessionNote(args: [String]) {
     guard args.count >= 2 else {
         stderr("Usage: pm notes session note <project> <text>")
         exit(1)
     }
     do {
-        let date = try appendNoteToTodaySession(project: args[0], prose: args[1])
+        let date = try appendNoteToCurrentSession(project: args[0], prose: args[1])
         print("Added note to session: \(date)")
     } catch { fail(error) }
 }

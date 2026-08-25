@@ -135,7 +135,7 @@ The notes file is markdown that the user also edits in Obsidian and by hand. No 
 
 ## What has to give
 
-- **Raycast's re-derived domain logic gets deleted.** *Done.* `getEffectiveDue` reads the field the contract computes. `formatSessionDate` is gone: `session.start` is idempotent and reports the session it found or made, so nothing has to format today's date to look for it. `stripInlineDueFromText` is gone too — every call site passed it `todo.text`, which the parser has already stripped, so it was doing nothing. `getNextDueForProject` remains, a fold over `getEffectiveDue` rather than a second derivation.
+- **Raycast's re-derived domain logic gets deleted.** *Done.* `getEffectiveDue` reads the field the contract computes. `formatSessionDate` is gone: `session.start` reports the session it found or made — the current one, or a new one when the project has been left alone past the idle window — so nothing has to format today's date to look for it. `stripInlineDueFromText` is gone too — every call site passed it `todo.text`, which the parser has already stripped, so it was doing nothing. `getNextDueForProject` remains, a fold over `getEffectiveDue` rather than a second derivation.
 - **Display strings move into the contract.** Payloads carry both `due: "2026-09-01"` and `dueDisplay: "in 2w"`, computed with a caller-supplied `now`. This is the one place the design deliberately mixes data and presentation, and it's the trade recorded below.
 - **The config-dir files get schema'd** and read through the contract (`focus.get`, `project.list`) rather than by three separate JSON parsers.
 - **`pm notes write`'s whole-document path** stays internal. It falls back to a full re-serialize that drops frontmatter, so it should never be a published action.
@@ -204,7 +204,7 @@ App Intents carry the reference too. The digest is deliberately *not* folded int
 
 The boundary the second open question asked about. `PMStore` stays responsible for undo/redo, the focus-move classifier, the project index, recents, and its own phrasing — the quick bar's receipts are tuned to a narrow non-activating panel (truncated at 44 characters, withheld entirely for commands whose whole effect is a window opening), and the envelope's `summary` is written for a HUD with room. The contract supplies the sentence; a surface is still free to write its own.
 
-Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to today's), and `addTaskToSession` (appends to a named session rather than today's).
+Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to the current one), and `addTaskToSession` (appends to a named session rather than today's).
 
 ### Batches, and the revision
 
