@@ -293,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://capture | goto         → the quick bar, in one of its two modes
     // pmpanel://window | open?project= → a project window
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
+    // pmpanel://settings               → the Settings window
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "pmpanel" {
@@ -314,6 +315,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "command": QuickBarController.shared.toggle(mode: .command)
         case "note": QuickBarController.shared.toggle(mode: .note)
         case "window": windows.openFocusedProject()
+        // Every other PM surface is reachable from here; Settings was the one that wasn't, which made
+        // it the one thing a script could change the config for but never show anybody.
+        case "settings": SettingsWindowController.shared.show()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks
             // like a bug and can't be told from the empty state.
