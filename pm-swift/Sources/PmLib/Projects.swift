@@ -33,6 +33,37 @@ public func getProjectFolders(basePath: String, domainCodes: [String]) throws ->
         .sorted()
 }
 
+/// The Areas in a folder, newest first by nothing — sorted by name, as `getProjectFolders` sorts.
+///
+/// Two questions, in the order that costs least. An Area's name carries no `CODE-NNN` prefix, which
+/// is a string test and rules out every project; and it is a directory PM has written notes into,
+/// which is the same question `pm notes path` asks and costs a `stat`.
+///
+/// Both are needed, and the archive is why. `areas/` holds only Areas, so the name test looks
+/// redundant there — but archived Areas and archived projects share one `archive/`, and asking this
+/// function for the Areas in it has to leave `W-4 Old Thing` alone. The notes test is what keeps a
+/// folder someone dropped into `areas/` for their own reasons from showing up as an empty Area.
+///
+/// A missing directory is not an error. Areas arrived after the other two roots and `areasPath` is
+/// resolved rather than required, so "no `areas/` folder" is the ordinary state of every vault that
+/// hasn't made one yet, and the honest answer to "which Areas are there" is none.
+public func getAreaFolders(basePath: String) throws -> [String] {
+    let url = URL(fileURLWithPath: basePath)
+    let entries: [URL]
+    do {
+        entries = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+    } catch {
+        if isFileNotFoundError(error) { return [] }
+        throw PmError.cannotListDirectory(path: basePath, message: (error as NSError).localizedDescription)
+    }
+    return entries
+        .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        .filter { ProjectKind.of(folderName: $0.lastPathComponent) == .area }
+        .filter { ((try? resolveNotesPath(projectPath: $0.path)) ?? nil) != nil }
+        .map { $0.lastPathComponent }
+        .sorted()
+}
+
 /// Result of matching a project query against folder names. Single source of truth for resolve logic.
 public enum ProjectMatch {
     case matched(String)

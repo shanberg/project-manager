@@ -4,8 +4,13 @@ public struct PmConfig: Codable, Equatable {
     public var paraPath: String?
     public var activePath: String
     public var archivePath: String
+    /// Where Areas live. Nil means "work it out" — see `resolvePaths`. Areas arrived after the other
+    /// two roots, so every existing config has this unset and has to keep working.
+    public var areasPath: String?
     public var domains: [String: String]
     public var subfolders: [String]
+    /// The scaffold a new Area is created with. Nil means `defaultAreaSubfolders`.
+    public var areaSubfolders: [String]?
     /// Optional path to a custom notes template file (supports ~). If set, the file must exist.
     public var notesTemplatePath: String?
     /// When true and obsidianVault/obsidianVaultPath are set, notes read/write may use the Obsidian CLI. Nil (missing in JSON) is treated as false.
@@ -15,12 +20,14 @@ public struct PmConfig: Codable, Equatable {
     /// Absolute path to vault root (supports ~). Used to compute relative path for CLI. Required when useObsidianCLI is true.
     public var obsidianVaultPath: String?
 
-    public init(paraPath: String? = nil, activePath: String, archivePath: String, domains: [String: String], subfolders: [String], notesTemplatePath: String? = nil, useObsidianCLI: Bool? = nil, obsidianVault: String? = nil, obsidianVaultPath: String? = nil) {
+    public init(paraPath: String? = nil, activePath: String, archivePath: String, areasPath: String? = nil, domains: [String: String], subfolders: [String], areaSubfolders: [String]? = nil, notesTemplatePath: String? = nil, useObsidianCLI: Bool? = nil, obsidianVault: String? = nil, obsidianVaultPath: String? = nil) {
         self.paraPath = paraPath
         self.activePath = activePath
         self.archivePath = archivePath
+        self.areasPath = areasPath
         self.domains = domains
         self.subfolders = subfolders
+        self.areaSubfolders = areaSubfolders
         self.notesTemplatePath = notesTemplatePath
         self.useObsidianCLI = useObsidianCLI
         self.obsidianVault = obsidianVault
@@ -33,6 +40,13 @@ public let defaultDomains: [String: String] = [
     "P": "Personal",
     "L": "Learning",
     "O": "Other",
+]
+
+/// An Area has notes and reference material. It doesn't ship, so it gets no `deliverables/`,
+/// `previews/` or `working files/` — those are project vocabulary.
+public let defaultAreaSubfolders = [
+    "docs",
+    "resources",
 ]
 
 public let defaultSubfolders = [
@@ -102,30 +116,67 @@ public func createDefaultConfig(activePath: String, archivePath: String) -> PmCo
 public struct ResolvedPaths {
     public let activePath: String
     public let archivePath: String
+    /// Always resolved, never optional — an unconfigured `areas/` that doesn't exist on disk is a
+    /// vault with no Areas in it, which every scan already handles as "nothing here". Making it
+    /// optional would put a `guard` in front of each of those for no additional truth.
+    public let areasPath: String
 
-    public init(activePath: String, archivePath: String) {
+    /// `areasPath` defaults to the same guess `resolvePaths` makes when nothing configures one, so a
+    /// caller assembling paths by hand — the tests, and the app repointing folders from Settings —
+    /// gets the same answer as a caller that went through config.
+    public init(activePath: String, archivePath: String, areasPath: String? = nil) {
         self.activePath = activePath
         self.archivePath = archivePath
+        self.areasPath = areasPath ?? defaultAreasPath(besideActive: activePath)
     }
+}
+
+/// Where Areas go when nothing says otherwise: beside the active folder.
+///
+/// A guess, and a cheap one to be wrong about. Scanning a directory that isn't there yields no Areas,
+/// which is the correct answer for a vault that has none; the only way the guess becomes visible is
+/// when the first Area is created and the folder appears next to `active/`. Setting `areasPath` or
+/// `paraPath` overrides it.
+func defaultAreasPath(besideActive activePath: String) -> String {
+    ((activePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("areas")
 }
 
 /// Resolve active/archive paths from config (and optional env). Pass nil for env to use process environment.
 internal func resolvePaths(config: PmConfig, environment: [String: String]?) throws -> ResolvedPaths {
     let env = environment ?? ProcessInfo.processInfo.environment
+
+    /// Areas are resolved the same way whichever branch below settles active and archive: an explicit
+    /// value wins, then `paraPath`, then beside the active folder.
+    func areas(activePath: String) -> String {
+        if let a = env["PM_AREAS_PATH"], !a.isEmpty { return (a as NSString).expandingTildeInPath }
+        if let a = config.areasPath, !a.isEmpty { return (a as NSString).expandingTildeInPath }
+        if let para = config.paraPath, !para.isEmpty {
+            return ((para as NSString).expandingTildeInPath as NSString).appendingPathComponent("areas")
+        }
+        return defaultAreasPath(besideActive: activePath)
+    }
+
     if let a = env["PM_ACTIVE_PATH"], let b = env["PM_ARCHIVE_PATH"], !a.isEmpty, !b.isEmpty {
-        return ResolvedPaths(activePath: (a as NSString).expandingTildeInPath, archivePath: (b as NSString).expandingTildeInPath)
+        let active = (a as NSString).expandingTildeInPath
+        return ResolvedPaths(activePath: active,
+                             archivePath: (b as NSString).expandingTildeInPath,
+                             areasPath: areas(activePath: active))
     }
     if !config.activePath.isEmpty, !config.archivePath.isEmpty {
+        let active = (config.activePath as NSString).expandingTildeInPath
         return ResolvedPaths(
-            activePath: (config.activePath as NSString).expandingTildeInPath,
-            archivePath: (config.archivePath as NSString).expandingTildeInPath
+            activePath: active,
+            archivePath: (config.archivePath as NSString).expandingTildeInPath,
+            areasPath: areas(activePath: active)
         )
     }
     if let para = config.paraPath, !para.isEmpty {
         let base = (para as NSString).expandingTildeInPath
+        let active = (base as NSString).appendingPathComponent("active")
         return ResolvedPaths(
-            activePath: (base as NSString).appendingPathComponent("active"),
-            archivePath: (base as NSString).appendingPathComponent("archive")
+            activePath: active,
+            archivePath: (base as NSString).appendingPathComponent("archive"),
+            areasPath: areas(activePath: active)
         )
     }
     throw PmError.configMissingPaths
@@ -159,7 +210,7 @@ public func loadConfigAndPaths(skipPathValidation: Bool = false) throws -> (PmCo
 }
 
 public enum PmConfigKey: String, CaseIterable {
-    case activePath, archivePath, paraPath, domains, subfolders, notesTemplatePath
+    case activePath, archivePath, areasPath, paraPath, domains, subfolders, areaSubfolders, notesTemplatePath
     case useObsidianCLI, obsidianVault, obsidianVaultPath
 }
 
@@ -182,6 +233,7 @@ public func getConfigValue(config: PmConfig, key: PmConfigKey) -> PmConfigValue 
     switch key {
     case .activePath: return .string(config.activePath)
     case .archivePath: return .string(config.archivePath)
+    case .areasPath: return .string(config.areasPath)
     case .paraPath: return .string(config.paraPath)
     case .notesTemplatePath: return .string(config.notesTemplatePath)
     case .useObsidianCLI: return .bool(config.useObsidianCLI ?? false)
@@ -189,6 +241,7 @@ public func getConfigValue(config: PmConfig, key: PmConfigKey) -> PmConfigValue 
     case .obsidianVaultPath: return .string(config.obsidianVaultPath)
     case .domains: return .stringDictionary(config.domains)
     case .subfolders: return .stringArray(config.subfolders)
+    case .areaSubfolders: return .stringArray(config.areaSubfolders ?? defaultAreaSubfolders)
     }
 }
 
@@ -207,6 +260,8 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
     case (.archivePath, .string(let v)):
         guard let v = v else { throw PmError.invalidConfigValue(key: key.rawValue, expectedType: "String") }
         config.archivePath = v
+    case (.areasPath, .string(let v)):
+        config.areasPath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.paraPath, .string(let v)):
         config.paraPath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.notesTemplatePath, .string(let v)):
@@ -221,6 +276,8 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
         config.domains = v
     case (.subfolders, .stringArray(let v)):
         config.subfolders = v
+    case (.areaSubfolders, .stringArray(let v)):
+        config.areaSubfolders = v.isEmpty ? nil : v
     default:
         throw PmError.invalidConfigValue(key: key.rawValue, expectedType: typeName(for: key))
     }
@@ -228,10 +285,10 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
 
 private func typeName(for key: PmConfigKey) -> String {
     switch key {
-    case .activePath, .archivePath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
+    case .activePath, .archivePath, .areasPath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
     case .useObsidianCLI: return "Boolean"
     case .domains: return "object (key-value pairs)"
-    case .subfolders: return "array of strings"
+    case .subfolders, .areaSubfolders: return "array of strings"
     }
 }
 
@@ -251,7 +308,7 @@ public func setConfigValue(config: inout PmConfig, key: String, value: Any) thro
     case .activePath, .archivePath:
         guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
         typed = .string(v)
-    case .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath:
+    case .areasPath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath:
         typed = .string(value as? String)
     case .useObsidianCLI:
         if let v = value as? Bool {
@@ -267,7 +324,7 @@ public func setConfigValue(config: inout PmConfig, key: String, value: Any) thro
     case .domains:
         guard let v = value as? [String: String] else { throw PmError.invalidConfigValue(key: key, expectedType: "object (key-value pairs)") }
         typed = .stringDictionary(v)
-    case .subfolders:
+    case .subfolders, .areaSubfolders:
         guard let v = value as? [String] else { throw PmError.invalidConfigValue(key: key, expectedType: "array of strings") }
         typed = .stringArray(v)
     }

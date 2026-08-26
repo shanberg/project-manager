@@ -13,14 +13,17 @@ import PmLib
 enum ProjectLifecycle {
     // MARK: Archiving
 
-    /// Move a project to the other folder: archive an active one, unarchive an archived one.
-    /// Returns its new project key.
+    /// Put a project or area away, or bring it back. Returns its new project key.
+    ///
+    /// Everything goes into the one archive; what comes back out goes to whichever root its kind
+    /// lives in, read off the folder's own name rather than remembered — so a folder that has been in
+    /// the archive for a year still knows where it belongs.
     @discardableResult
     static func move(projectNamed name: String, from source: ProjectScope) throws -> String {
         let (_, paths) = try loadConfigAndPaths()
-        let destination = source.opposite
+        let destination: ProjectScope = source.isArchived ? ProjectKind.of(folderName: name).homeScope : .archive
         try moveProject(named: name, from: source, to: destination, paths: paths)
-        Log.write("project \(source == .active ? "archived" : "unarchived"): \(name)")
+        Log.write("project \(source.isArchived ? "unarchived" : "archived"): \(name)")
         return repairIdentity(oldKey: key(base: source.path(in: paths), name: name),
                               newKey: key(base: destination.path(in: paths), name: name))
     }

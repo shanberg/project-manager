@@ -1,17 +1,29 @@
 import Foundation
 
-/// Which of the two project folders a project lives in.
+/// Which of the PARA roots a folder lives in.
 ///
 /// Archiving and unarchiving are the same operation in opposite directions — a folder move between
-/// these two — so they're one function with a direction rather than two near-identical ones.
-public enum ProjectScope: String, Codable, Sendable {
+/// two of these — so they're one function with a direction rather than two near-identical ones.
+///
+/// There used to be an `opposite`, which worked while there were two scopes and stopped working the
+/// moment there were three: everything archives *into* `archive`, but what comes back out goes to
+/// `active` or to `areas` depending on what it is. That question is answered by the folder's own
+/// name — see `ProjectKind.homeScope` — so it stays answerable for a folder that has been sitting in
+/// the archive for a year.
+public enum ProjectScope: String, Codable, Sendable, CaseIterable {
     case active
+    case areas
     case archive
 
-    public var opposite: ProjectScope { self == .active ? .archive : .active }
+    /// Whether things here are put away rather than in hand.
+    public var isArchived: Bool { self == .archive }
 
     public func path(in paths: ResolvedPaths) -> String {
-        self == .active ? paths.activePath : paths.archivePath
+        switch self {
+        case .active: return paths.activePath
+        case .areas: return paths.areasPath
+        case .archive: return paths.archivePath
+        }
     }
 }
 

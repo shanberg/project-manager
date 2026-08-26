@@ -28,6 +28,61 @@ public enum ProjectKind: String, Codable, Sendable, CaseIterable {
     case area
 }
 
+/// The shape of a numbered project folder name: a domain code, a hyphen, a number, a space.
+///
+/// Deliberately not built from the configured domain codes. It is consulted by `projectTitle`, which
+/// has a path and nothing else — no config, and no way to get one without turning a string transform
+/// into an I/O call. The grammar identifies the prefix, not the particular letters.
+let numberedProjectPrefix = try? NSRegularExpression(pattern: #"^[A-Za-z]+-\d+\s+"#)
+
+/// The range of the `CODE-NNN ` prefix in a folder name, or nil when it doesn't carry one.
+func numberedPrefixRange(in folderName: String) -> Range<String.Index>? {
+    guard let regex = numberedProjectPrefix,
+          let match = regex.firstMatch(in: folderName, range: NSRange(folderName.startIndex..., in: folderName))
+    else { return nil }
+    return Range(match.range, in: folderName)
+}
+
+public extension ProjectKind {
+    /// Which kind a folder is, read off its name.
+    ///
+    /// The kind is **derived, never stored.** A numbered name is a project and an unnumbered one is an
+    /// area, wherever the folder happens to sit — which is what makes the archive work without a
+    /// marker file: both kinds go into the same `archive/`, and an archived folder still says which it
+    /// is, because `W-12 Website Refresh` and `Team 1:1s` are not the same shape.
+    ///
+    /// A stored field would have to survive being moved in Finder, renamed in Obsidian, and restored
+    /// from a backup, and would be wrong — silently — the first time it didn't. Folder names are
+    /// already how PM identifies a project; this asks them one more question.
+    ///
+    /// The cost is that renaming a project's folder to drop its prefix turns it into an area. That is
+    /// the same bargain every other name-derived fact here makes, and it is at least visible.
+    static func of(folderName: String) -> ProjectKind {
+        numberedPrefixRange(in: folderName) == nil ? .area : .project
+    }
+
+    /// Where a folder of this kind lives when it isn't archived — the scope unarchiving returns it to.
+    var homeScope: ProjectScope {
+        switch self {
+        case .project: return .active
+        case .area: return .areas
+        }
+    }
+
+    /// The root directory its folders live under, unarchived.
+    func root(in paths: ResolvedPaths) -> String {
+        homeScope.path(in: paths)
+    }
+
+    /// The scaffold a new one is created with.
+    func subfolders(in config: PmConfig) -> [String] {
+        switch self {
+        case .project: return config.subfolders
+        case .area: return config.areaSubfolders ?? defaultAreaSubfolders
+        }
+    }
+}
+
 public extension ProjectKind {
     /// The header sections a document of this kind is written with, in document order.
     ///

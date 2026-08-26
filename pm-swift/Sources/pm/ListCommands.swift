@@ -154,7 +154,12 @@ private func runMoveProject(fromActive: Bool, name: String) {
         guard let matched = matchProject(folders: folders, query: name) else {
             emitMatchErrorAndExit(folders: folders, query: name, notFoundMessage: notFoundMsg, listLabel: listLabel)
         }
-        try moveProject(named: matched, from: source, to: source.opposite, paths: paths)
+        // Everything archives into the one archive; what comes back out goes wherever its kind lives,
+        // read off the folder's own name. This list only ever matches numbered project folders today,
+        // so the destination is `active` either way — written this way so it stays right when the CLI
+        // learns to archive Areas too.
+        let destination: ProjectScope = fromActive ? .archive : ProjectKind.of(folderName: matched).homeScope
+        try moveProject(named: matched, from: source, to: destination, paths: paths)
         print("\(doneVerb): \(matched)")
     } catch { fail(error) }
 }

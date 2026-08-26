@@ -91,12 +91,13 @@ final class ProjectMoveTests: XCTestCase {
             atPath: (paths.activePath as NSString).appendingPathComponent("W-1 Website Refresh")))
     }
 
-    func testScopePathsAndOpposite() throws {
+    /// `opposite` is gone — it only worked while there were two roots. Where a folder comes back to is
+    /// now a question about the folder, answered in AreasScopeTests.
+    func testScopePaths() throws {
         let (paths, root) = try makeFixture()
         defer { try? FileManager.default.removeItem(atPath: root) }
         XCTAssertEqual(ProjectScope.active.path(in: paths), paths.activePath)
         XCTAssertEqual(ProjectScope.archive.path(in: paths), paths.archivePath)
-        XCTAssertEqual(ProjectScope.active.opposite, .archive)
-        XCTAssertEqual(ProjectScope.archive.opposite, .active)
+        XCTAssertEqual(ProjectScope.areas.path(in: paths), paths.areasPath)
     }
 }
