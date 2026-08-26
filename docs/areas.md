@@ -202,9 +202,22 @@ It's deferred anyway, because the better version of the idea is calendar-shaped 
 
 Until then Areas have one time signal, free: `modified`, the notes-file mtime the index already reads, shown as last-touched and sortable by recency. Not a nag. Enough to see which Area has been ignored.
 
-## Still missing, on purpose
+## Taking on a folder you already keep
 
-**Adopting a folder you already have.** An Area is a directory PM has written notes into — which is what stops it hijacking the folders you keep for Obsidian, and also what stops a PARA vault full of real Areas from being brought in. `pm new --area Home` over an existing `areas/Home` is refused as a collision, correctly, and there is nothing else to reach for. This is the largest remaining gap between the feature and a vault that already has Areas in it.
+An Area is "a directory PM has written notes into". That rule is what stops PM claiming every folder it can see — and it is also what leaves a PARA vault's existing Areas unreachable, because they were there long before PM knew the word. Adopting is the door the rule needs.
+
+```
+pm adopt              # what could become an area
+pm adopt "Work"       # take it on
+```
+
+**It writes one file and creates the one directory to put it in.** No `resources/`, no scaffold, no tidying. A folder you already keep is already organized the way you organize things, and a command that rearranged it in passing would be a worse deal than one that left it alone. `createProject` builds a folder and so decides its shape; this one is a guest.
+
+`getAdoptableFolders` is the exact complement of `getAreaFolders` over the same set — area-shaped directories, split by whether they carry notes. Every such folder is in one list or the other, never both and never neither, and there's a test that says so. That's what makes the picker in the app and the list in Raycast trustworthy: what they offer is precisely what isn't already an Area.
+
+Only Areas. Adopting a folder as a *project* would mean renaming it to `CODE-NNN Title` — taking a number and changing what the folder is called on disk — which is a different act with a different blast radius, and nobody has asked for it.
+
+## Still missing, on purpose
 
 **Case.** The fallback derives `areas`; a vault laid out as `Projects` / `Archive` / `Areas` has the capitalized form. On case-insensitive APFS they are the same directory, which is why it works — on a case-sensitive volume PM would make a second one beside it. Preferring an existing case variant when the parent has one is a small fix nobody has needed yet.
 

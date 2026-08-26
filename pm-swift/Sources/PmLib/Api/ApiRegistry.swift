@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.2.0"
+public let apiContractVersion = "1.3.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -171,6 +171,10 @@ public enum ApiRegistry {
                                ApiField("kind", .string, "What to make. Default project.",
                                         allowed: ProjectKind.allCases.map(\.rawValue)),
                                ApiField("domain", .string, "Domain code, e.g. W. Required for a project, refused for an area.")]),
+        ApiActionSpec(name: "project.adopt", tier: .mutation,
+                      summary: "Take an existing folder in the areas root on as an area, by writing notes into it.",
+                      fields: [ApiField("folder", .string, required: true,
+                                        "The folder's name, as `project.adoptable` lists it.")]),
         ApiActionSpec(name: "project.rename", tier: .mutation,
                       summary: "Rename a project, keeping its domain and number.",
                       fields: [project, ApiField("title", .string, required: true, "The new title.")]),
@@ -189,6 +193,9 @@ public enum ApiRegistry {
                                         allowed: ["active", "areas", "archive", "all"]),
                                ApiField("kind", .string, "Only this kind. Default both.",
                                         allowed: ProjectKind.allCases.map(\.rawValue))]),
+        ApiActionSpec(name: "project.adoptable", tier: .query,
+                      summary: "Folders in the areas root that could become areas but haven't yet.",
+                      fields: []),
         ApiActionSpec(name: "project.get", tier: .query,
                       summary: "One project's paths and domain.", fields: [project]),
         ApiActionSpec(name: "notes.get", tier: .query,

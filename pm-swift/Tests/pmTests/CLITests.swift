@@ -566,4 +566,36 @@ final class CLITests: XCTestCase {
             XCTAssertEqual(single, dumped, "\(key.rawValue) reads differently in the two forms")
         }
     }
+
+    /// `pm adopt` with no name answers the question somebody actually has when they type it.
+    func testAdoptWithNoNameListsWhatCouldBecomeAreas() throws {
+        try skipIfNoBinary()
+        let areasPath = ((activePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent("areas")
+        for name in ["Work", "Kids"] {
+            try FileManager.default.createDirectory(atPath: (areasPath as NSString).appendingPathComponent(name),
+                                                    withIntermediateDirectories: true)
+        }
+        let listed = runPm(["adopt"])
+        XCTAssertEqual(listed.exitCode, 0, listed.stderr)
+        XCTAssertTrue(listed.stdout.contains("Work"), listed.stdout)
+        XCTAssertTrue(listed.stdout.contains("Kids"), listed.stdout)
+    }
+
+    func testAdoptTurnsAFolderIntoAnAreaFromTheCli() throws {
+        try skipIfNoBinary()
+        let areasPath = ((activePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent("areas")
+        try FileManager.default.createDirectory(atPath: (areasPath as NSString).appendingPathComponent("Work"),
+                                                withIntermediateDirectories: true)
+
+        let adopted = runPm(["adopt", "Work"])
+        XCTAssertEqual(adopted.exitCode, 0, adopted.stderr)
+
+        XCTAssertTrue(runPm(["list", "--areas"]).stdout.contains("Work"))
+        // And it behaves like any other area from there.
+        let added = runPm(["api", "call", "task.add", #"{"project":"Work","text":"hiring loop"}"#])
+        XCTAssertEqual(added.exitCode, 0, added.stderr)
+        XCTAssertFalse(runPm(["adopt"]).stdout.contains(" Work"), "it shouldn't still be offered")
+    }
 }

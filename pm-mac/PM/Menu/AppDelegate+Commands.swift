@@ -37,6 +37,11 @@ extension AppDelegate: NSMenuItemValidation {
         ProjectPrompts.newArea { key in WindowManager.shared.open(projectKey: key) }
     }
 
+    /// For the areas you already had before PM knew the word.
+    @objc func adoptArea() {
+        ProjectPrompts.adoptArea { key in WindowManager.shared.open(projectKey: key) }
+    }
+
     @objc func quickCapture() { QuickBarController.shared.toggle(mode: .capture) }
 
     @objc func quickNote() { QuickBarController.shared.toggle(mode: .note) }

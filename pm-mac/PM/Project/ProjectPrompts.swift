@@ -84,6 +84,61 @@ enum ProjectPrompts {
         }
     }
 
+    // MARK: Adopting a folder
+
+    /// Take on a folder that's already in the areas root.
+    ///
+    /// A picker rather than a text field: the answer is always one of a known, usually short list, and
+    /// typing a folder name you can't see is how you find out it was spelled differently. Nothing to
+    /// take on is a message, not an empty menu — an empty picker reads as a broken command.
+    static func adoptArea(then open: @escaping (String) -> Void) {
+        let candidates: [String]
+        let areasPath: String
+        do {
+            let (_, paths) = try loadConfigAndPaths()
+            areasPath = paths.areasPath
+            candidates = try getAdoptableFolders(basePath: areasPath)
+        } catch {
+            ProjectLifecycle.present(error, doing: "Can't look for folders to take on")
+            return
+        }
+
+        guard !candidates.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "Nothing to Take On"
+            alert.informativeText = "Every folder in \(areasPath) is already an area. "
+                + "A folder there with no notes in it is one PM could adopt."
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+
+        let picker = NSPopUpButton(frame: .zero, pullsDown: false)
+        for folder in candidates {
+            picker.addItem(withTitle: folder)
+            picker.lastItem?.representedObject = folder
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Take On a Folder as an Area"
+        alert.informativeText = "PM writes a notes file into the folder and changes nothing else — "
+            + "what's already in it stays where it is."
+        alert.addButton(withTitle: "Take On")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = stack([picker])
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let folder = picker.selectedItem?.representedObject as? String else { return }
+
+        do {
+            open(try ProjectLifecycle.adopt(folderNamed: folder))
+        } catch {
+            ProjectLifecycle.present(error, doing: "Couldn't take on “\(folder)”")
+        }
+    }
+
     // MARK: Rename
 
     /// Takes the folder name rather than a sidebar row, so the menu bar item — which only ever has a

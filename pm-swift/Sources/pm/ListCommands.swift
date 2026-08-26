@@ -210,3 +210,32 @@ func runUnarchive(args: [String]) {
     }
     runMoveProject(fromActive: false, name: name)
 }
+
+/// `pm adopt` — with a name, take that folder on as an area; without one, list what could be.
+///
+/// The bare form isn't a usage error on purpose. "Which of my folders could become areas" is the
+/// question somebody actually has when they type this, and answering it is more use than a usage line.
+func runAdopt(args: [String]) {
+    do {
+        let (config, paths) = try loadConfigAndPaths()
+        let name = args.first(where: { !$0.hasPrefix("-") })?.trimmingCharacters(in: .whitespaces)
+
+        guard let name, !name.isEmpty else {
+            let candidates = try getAdoptableFolders(basePath: paths.areasPath)
+            guard !candidates.isEmpty else {
+                print("Nothing to take on in \(paths.areasPath).")
+                print("(a folder there with no notes in it is one PM could adopt)")
+                return
+            }
+            print("Folders in \(paths.areasPath) that could become areas:")
+            candidates.forEach { print(" \($0)") }
+            print("")
+            print("Take one on with: pm adopt \"\(candidates[0])\"")
+            return
+        }
+
+        let notesPath = try adoptArea(config: config, paths: paths, folderName: name)
+        print("Adopted: \(name)")
+        print("Notes: \(notesPath)")
+    } catch { fail(error) }
+}

@@ -23,6 +23,36 @@ final class ApiTests: XCTestCase {
         }
     }
 
+    /// Every field the manifest publishes has to reach the validator, or its `required`, `allowed` and
+    /// `minimum` are published promises nothing keeps.
+    ///
+    /// `fieldValues` is a hand-written mirror of `ApiInput`; adding a field to the contract without
+    /// adding it there compiles, ships, and silently stops validating. That is how `kind` came to be
+    /// published with two allowed values and checked against neither.
+    func testEveryPublishedFieldIsValidated() {
+        let seen = Set(fieldValues(ApiInput()).keys)
+        for spec in ApiRegistry.actions {
+            for field in spec.fields {
+                XCTAssertTrue(seen.contains(field.name),
+                              "\(spec.name).\(field.name) is published but never validated — add it to fieldValues")
+            }
+        }
+    }
+
+    /// The other half of it, from the outside: a value outside `allowed` is refused rather than
+    /// falling back to a default.
+    func testAValueOutsideAllowedIsRefused() {
+        var input = ApiInput()
+        input.title = "Bogus"
+        input.kind = "nonsense"
+        XCTAssertThrowsError(try performApi("project.create", input)) { error in
+            guard let api = error as? ApiError else { return XCTFail("\(error)") }
+            XCTAssertEqual(api.code, .invalidField)
+            XCTAssertEqual(api.detail?.stringValue, "kind",
+                           "the refusal should name the field that was wrong")
+        }
+    }
+
     func testActionNamesAreUniqueAndNamespaced() {
         let names = ApiRegistry.actions.map(\.name)
         XCTAssertEqual(Set(names).count, names.count, "duplicate action name")
@@ -273,7 +303,14 @@ final class ApiTests: XCTestCase {
         input.now = "2026-08-22"
         input.due = "2026-09-01"
         input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+        input.folder = "f"
+        input.kind = "project"
 
+        // Note what this can and can't catch. A *required* field the validator can't see shows up
+        // here immediately, because nothing supplies it and the action reports it missing. An
+        // *optional* one passes vacuously — an unset optional never trips `missingField` — which is
+        // how `kind` came to be published with two allowed values and validated against neither.
+        // `testEveryPublishedFieldIsValidated` is the half that catches those.
         for spec in ApiRegistry.actions where spec.tier != .affordance {
             // Given every field a value, nothing should be reported missing. What fails here is a
             // field the validator can't see, not a field the caller didn't send.

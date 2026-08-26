@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.2.0";
+export const API_CONTRACT_VERSION = "1.3.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -95,6 +95,15 @@ export interface NotesSetDetailInput {
   /** A string, or an array of strings for goals and learnings. */
   value: JsonValue;
 }
+
+/** Take an existing folder in the areas root on as an area, by writing notes into it. */
+export interface ProjectAdoptInput {
+  /** The folder's name, as `project.adoptable` lists it. */
+  folder: string;
+}
+
+/** Folders in the areas root that could become areas but haven't yet. */
+export type ProjectAdoptableInput = Record<string, never>;
 
 /** Move a project or area to the archive. */
 export interface ProjectArchiveInput {
@@ -346,6 +355,8 @@ export interface ApiInputs {
   "notes.addLink": NotesAddLinkInput;
   "notes.get": NotesGetInput;
   "notes.setDetail": NotesSetDetailInput;
+  "project.adopt": ProjectAdoptInput;
+  "project.adoptable": ProjectAdoptableInput;
   "project.archive": ProjectArchiveInput;
   "project.create": ProjectCreateInput;
   "project.focus": ProjectFocusInput;
@@ -394,6 +405,8 @@ export const API_TIERS: Record<
   "notes.addLink": "mutation",
   "notes.get": "query",
   "notes.setDetail": "mutation",
+  "project.adopt": "mutation",
+  "project.adoptable": "query",
   "project.archive": "mutation",
   "project.create": "mutation",
   "project.focus": "mutation",

@@ -79,6 +79,21 @@ enum ProjectLifecycle {
         return newKey
     }
 
+    /// Take a folder in the areas root on as an area, focus it, and hand back its key.
+    ///
+    /// Unlike `create` this makes no folder — the folder is the whole reason it exists — so there is
+    /// nothing to clean up if the notes write fails, and the failure is the caller's to report.
+    static func adopt(folderNamed folder: String) throws -> String {
+        let (config, paths) = try loadConfigAndPaths()
+        _ = try adoptArea(config: config, paths: paths, folderName: folder)
+        Log.write("area adopted: \(folder)")
+        let newKey = key(base: paths.areasPath, name: folder)
+        try? PMFiles.setFocusedProjectKey(newKey)
+        PMFiles.recordRecent(projectKey: newKey, name: folder)
+        refresh()
+        return newKey
+    }
+
     // MARK: Moving the project folders themselves
 
     /// Re-point open projects after the active/archive folders have been changed in Settings.

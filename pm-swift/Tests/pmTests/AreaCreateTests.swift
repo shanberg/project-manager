@@ -176,4 +176,93 @@ final class AreaCreateTests: XCTestCase {
         XCTAssertEqual(try renameProjectTitle(nameOrPrefix: "W-1", newTitle: "Website Refresh"),
                        "W-1 Website Refresh")
     }
+
+    // MARK: Taking on a folder you already keep
+
+    /// Adopting writes the notes file and nothing else. The folder is already organized the way its
+    /// owner organizes things; a command that tidied it in passing would be a worse deal than one that
+    /// left it alone.
+    func testAdoptingWritesNotesAndTouchesNothingElse() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let folder = (paths.areasPath as NSString).appendingPathComponent("Work")
+        try FileManager.default.createDirectory(atPath: (folder as NSString).appendingPathComponent("standups"),
+                                                withIntermediateDirectories: true)
+        let existing = (folder as NSString).appendingPathComponent("standups/2026.md")
+        try "a file I already keep\n".write(toFile: existing, atomically: true, encoding: .utf8)
+
+        let notesPath = try adoptArea(config: config, paths: paths, folderName: "Work")
+
+        XCTAssertEqual(notesPath, getNotesPath(projectPath: folder))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: notesPath))
+        XCTAssertEqual(try String(contentsOfFile: existing, encoding: .utf8), "a file I already keep\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (folder as NSString).appendingPathComponent("resources")),
+                       "adopting must not impose the scaffold on a folder that already has a shape")
+        XCTAssertEqual(try getAreaFolders(basePath: paths.areasPath), ["Work"])
+        XCTAssertEqual(try getAdoptableFolders(basePath: paths.areasPath), [])
+    }
+
+    /// The notes it writes are an area's, not a project's.
+    func testAnAdoptedFolderGetsTheAreaHeader() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: (paths.areasPath as NSString).appendingPathComponent("Team 1:1s"),
+                                                withIntermediateDirectories: true)
+        let notesPath = try adoptArea(config: config, paths: paths, folderName: "Team 1:1s")
+        let notes = try String(contentsOfFile: notesPath, encoding: .utf8)
+        XCTAssertTrue(notes.contains("# Team 1:1s"))
+        XCTAssertTrue(notes.contains("> [!info] Goals"))
+        XCTAssertFalse(notes.contains("Problem"))
+    }
+
+    /// `getAdoptableFolders` is the exact complement of `getAreaFolders` over the same set — every
+    /// area-shaped folder is in one list or the other, never both, never neither.
+    func testAdoptableAndAdoptedPartitionTheFolder() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        for name in ["Work", "Kids", "Marriage"] {
+            try FileManager.default.createDirectory(atPath: (paths.areasPath as NSString).appendingPathComponent(name),
+                                                    withIntermediateDirectories: true)
+        }
+        _ = try adoptArea(config: config, paths: paths, folderName: "Kids")
+
+        let adopted = try getAreaFolders(basePath: paths.areasPath)
+        let adoptable = try getAdoptableFolders(basePath: paths.areasPath)
+        XCTAssertEqual(adopted, ["Kids"])
+        XCTAssertEqual(adoptable, ["Marriage", "Work"])
+        XCTAssertTrue(Set(adopted).isDisjoint(with: adoptable))
+        XCTAssertEqual(Set(adopted).union(adoptable), ["Work", "Kids", "Marriage"])
+    }
+
+    func testAdoptingRefusesWhatItShould() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: (paths.areasPath as NSString).appendingPathComponent("Work"),
+                                                withIntermediateDirectories: true)
+
+        // Nothing there by that name.
+        XCTAssertThrowsError(try adoptArea(config: config, paths: paths, folderName: "Nope"))
+        // A numbered name is a project's, and this doesn't make projects.
+        XCTAssertThrowsError(try adoptArea(config: config, paths: paths, folderName: "W-1 Website"))
+        // Already an area — adopting twice would overwrite the notes it made the first time.
+        _ = try adoptArea(config: config, paths: paths, folderName: "Work")
+        try "written since\n".write(toFile: getNotesPath(projectPath: (paths.areasPath as NSString).appendingPathComponent("Work")),
+                                    atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try adoptArea(config: config, paths: paths, folderName: "Work"))
+        XCTAssertEqual(try String(contentsOfFile: getNotesPath(projectPath: (paths.areasPath as NSString).appendingPathComponent("Work")),
+                                  encoding: .utf8), "written since\n",
+                       "the refusal is the point — a second adopt would have overwritten this")
+    }
+
+    func testAdoptDryRunCreatesNothing() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let folder = (paths.areasPath as NSString).appendingPathComponent("Work")
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+
+        let notesPath = try adoptArea(config: config, paths: paths, folderName: "Work", dryRun: true)
+        XCTAssertEqual(notesPath, getNotesPath(projectPath: folder))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: notesPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (folder as NSString).appendingPathComponent("docs")))
+    }
 }

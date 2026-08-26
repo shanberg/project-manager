@@ -128,6 +128,8 @@ public struct ApiInput: Codable, Equatable {
     /// "project" or "area". Absent means project, which is what every caller written before Areas
     /// existed means by saying nothing.
     public var kind: String?
+    /// A folder's name, for the one action that names something PM doesn't manage yet.
+    public var folder: String?
     public var scope: String?
     public var key: String?
     public var value: JSONValue?

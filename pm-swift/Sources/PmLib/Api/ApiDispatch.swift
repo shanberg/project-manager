@@ -72,9 +72,18 @@ private func validate(_ input: ApiInput, against spec: ApiActionSpec) throws {
 }
 
 /// The input as a bag of values, so validation reads it the same way the schema describes it.
-private func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
+/// Every field a caller can send, as the validator sees it.
+///
+/// This is a hand-written mirror of `ApiInput`, and the only thing keeping it honest is
+/// `ApiTests.testEveryPublishedFieldIsValidated`: a field published in the manifest and missing here
+/// is a field whose `required`, `allowed` and `minimum` are never checked. `kind` was exactly that —
+/// published with two allowed values and validated against neither, so `kind: "nonsense"` quietly
+/// became a project and the caller got told off about a domain they hadn't mentioned.
+internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
     [
         "project": input.project.map(JSONValue.string),
+        "folder": input.folder.map(JSONValue.string),
+        "kind": input.kind.map(JSONValue.string),
         "task": input.task.map { _ in JSONValue.bool(true) },
         "tasks": input.tasks.map { _ in JSONValue.bool(true) },
         "revision": input.revision.map(JSONValue.string),
@@ -325,6 +334,13 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let name = (path as NSString).lastPathComponent
         return metadata(spec, options, path: path,
                         Phrase(past: "Created \(name)", future: "create \(name)"))
+    case "project.adopt":
+        let (config, paths) = try loadConfigAndPaths()
+        let folder = input.folder ?? ""
+        let notesPath = try adoptArea(config: config, paths: paths, folderName: folder,
+                                      dryRun: options.dryRun)
+        return metadata(spec, options, path: notesPath,
+                        Phrase(past: "Took on \(folder)", future: "take on \(folder)"))
     case "project.rename":
         let path = try renameProjectTitle(nameOrPrefix: input.project ?? "", newTitle: input.title ?? "",
                                           dryRun: options.dryRun)
@@ -466,6 +482,18 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
         return ApiResult(action: spec.name, summary: "\(entries.count) result\(entries.count == 1 ? "" : "s").",
                          data: .array(entries))
+    case "project.adoptable":
+        let (_, paths) = try loadConfigAndPaths(skipPathValidation: true)
+        let folders = (try? getAdoptableFolders(basePath: paths.areasPath)) ?? []
+        return ApiResult(action: spec.name,
+                         summary: folders.isEmpty
+                             ? "Nothing to take on."
+                             : folders.count == 1 ? "1 folder could become an area."
+                                                  : "\(folders.count) folders could become areas.",
+                         data: .array(folders.map { folder in
+                             .object(["folder": .string(folder),
+                                      "path": .string((paths.areasPath as NSString).appendingPathComponent(folder))])
+                         }))
     case "project.get":
         let folder = try folderName(of: input.project ?? "")
         let path = try resolveProjectPath(nameOrPrefix: input.project ?? "")

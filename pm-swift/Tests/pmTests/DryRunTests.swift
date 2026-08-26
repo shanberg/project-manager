@@ -28,6 +28,9 @@ final class DryRunTests: XCTestCase {
     private var env: [String: String] = [:]
     private var root = ""
     private var configDir = ""
+    /// The areas root, which resolves beside the active folder and so lives inside `root` — meaning
+    /// `world()` sees it and `restore` puts it back like everything else.
+    private var areasPath = ""
 
     override func setUp() {
         super.setUp()
@@ -37,7 +40,8 @@ final class DryRunTests: XCTestCase {
         configDir = (root as NSString).appendingPathComponent("config")
         let active = (root as NSString).appendingPathComponent("active")
         let archive = (root as NSString).appendingPathComponent("archive")
-        for path in [configDir, active, archive] {
+        areasPath = (root as NSString).appendingPathComponent("areas")
+        for path in [configDir, active, archive, areasPath] {
             try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
         }
         let config: [String: Any] = ["activePath": active, "archivePath": archive,
@@ -87,6 +91,11 @@ final class DryRunTests: XCTestCase {
         call("task.complete", ["project": "W-1", "task": reference("Send the invoice")])
         call("notes.addLink", ["project": "W-1", "text": "https://example.com", "label": "Brief"])
         call("project.focus", ["project": "W-1"])
+        // A folder in the areas root with nothing in it — what `project.adopt` acts on. Made directly
+        // rather than through an action, because "a folder PM didn't create" is the whole premise.
+        try? FileManager.default.createDirectory(
+            atPath: (areasPath as NSString).appendingPathComponent("Hiring"),
+            withIntermediateDirectories: true)
     }
 
     private func reference(_ text: String) -> [String: Any] {
@@ -139,6 +148,7 @@ final class DryRunTests: XCTestCase {
             "notes.setDetail": ["project": "W-1", "key": "summary", "value": "A new summary."],
             "notes.addLink": ["project": "W-1", "text": "https://example.org"],
             "project.create": ["title": "Something New", "domain": "W"],
+            "project.adopt": ["folder": "Hiring"],
             "project.rename": ["project": "W-1", "title": "Rebuild"],
             "project.archive": ["project": "W-1"],
             "project.unarchive": ["project": "W-2"],

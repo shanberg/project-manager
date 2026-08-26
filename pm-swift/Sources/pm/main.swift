@@ -13,6 +13,8 @@ private func dispatch(cmd: String, args: [String]) {
         else if args.contains("--archive") || args.contains("-a") { scope = "archive" }
         else if args.contains("--areas") { scope = "areas" }
         runList(scope: scope)
+    case "adopt":
+        runAdopt(args: args)
     case "archive":
         runArchive(args: args)
     case "unarchive":

@@ -51,6 +51,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 - **Configure Project Manager** – View paths (from pm config), domains, structure
 - **New Project** – Create a project (domain + title)
 - **New Area** – Create an area (name only)
+- **Take On a Folder as an Area** – Turn a folder you already keep into an area
 - **List Projects** – Browse active/archive, open in Finder, add session notes
 - **Archive Project** – Move a project to archive
 - **Unarchive Project** – Move a project from archive back to active
@@ -60,6 +61,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 ```bash
 pm new <domain> <title>
 pm new --area <title>
+pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
@@ -76,6 +78,9 @@ pm new W "Website Refresh"
 
 pm new --area "Team 1:1s"
 # Creates: areas/Team 1:1s/ — no number, and it never takes one
+
+pm adopt             # Which folders in areas/ could become areas
+pm adopt "Work"      # Take one on — writes a notes file into it, changes nothing else
 
 pm list              # List active projects
 pm list --areas      # List areas

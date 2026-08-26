@@ -35,19 +35,15 @@ public func getProjectFolders(basePath: String, domainCodes: [String]) throws ->
 
 /// The Areas in a folder, newest first by nothing — sorted by name, as `getProjectFolders` sorts.
 ///
-/// Two questions, in the order that costs least. An Area's name carries no `CODE-NNN` prefix, which
-/// is a string test and rules out every project; and it is a directory PM has written notes into,
-/// which is the same question `pm notes path` asks and costs a `stat`.
+/// Directories under `basePath` whose names are area-shaped — no `CODE-NNN` prefix.
 ///
-/// Both are needed, and the archive is why. `areas/` holds only Areas, so the name test looks
-/// redundant there — but archived Areas and archived projects share one `archive/`, and asking this
-/// function for the Areas in it has to leave `W-4 Old Thing` alone. The notes test is what keeps a
-/// folder someone dropped into `areas/` for their own reasons from showing up as an empty Area.
+/// The name test rules out every project with a string comparison and no I/O, which matters because
+/// the archive holds both kinds: asking for the areas in it has to leave `W-4 Old Thing` alone.
 ///
 /// A missing directory is not an error. Areas arrived after the other two roots and `areasPath` is
 /// resolved rather than required, so "no `areas/` folder" is the ordinary state of every vault that
-/// hasn't made one yet, and the honest answer to "which Areas are there" is none.
-public func getAreaFolders(basePath: String) throws -> [String] {
+/// hasn't made one yet.
+private func areaShapedDirectories(basePath: String) throws -> [URL] {
     let url = URL(fileURLWithPath: basePath)
     let entries: [URL]
     do {
@@ -58,8 +54,36 @@ public func getAreaFolders(basePath: String) throws -> [String] {
     }
     return entries
         .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-        .filter { ProjectKind.of(folderName: $0.lastPathComponent) == .area }
-        .filter { ((try? resolveNotesPath(projectPath: $0.path)) ?? nil) != nil }
+        .filter { !ProjectKind.of(folderName: $0.lastPathComponent).isNumbered }
+}
+
+/// Whether PM has written notes into a folder — what makes one of these an Area rather than a folder
+/// that happens to live in `areas/`. The same question `pm notes path` asks.
+private func hasNotes(_ folder: URL) -> Bool {
+    ((try? resolveNotesPath(projectPath: folder.path)) ?? nil) != nil
+}
+
+/// The Areas in a folder, sorted by name.
+///
+/// Area-shaped *and* carrying notes. The second half is what keeps a folder someone dropped into
+/// `areas/` for their own reasons — a pile of receipts, a vault of clippings — from showing up as an
+/// empty Area they never made.
+public func getAreaFolders(basePath: String) throws -> [String] {
+    try areaShapedDirectories(basePath: basePath)
+        .filter(hasNotes)
+        .map { $0.lastPathComponent }
+        .sorted()
+}
+
+/// Folders that could become Areas but aren't yet: area-shaped, and with no notes in them.
+///
+/// The exact complement of `getAreaFolders` over the same set, which is the point. A PARA vault
+/// already has Areas in it — the folders were there long before PM knew the word — and the rule that
+/// keeps PM from claiming them is also the rule that leaves them unreachable. This is the list of
+/// what you could hand it.
+public func getAdoptableFolders(basePath: String) throws -> [String] {
+    try areaShapedDirectories(basePath: basePath)
+        .filter { !hasNotes($0) }
         .map { $0.lastPathComponent }
         .sorted()
 }

@@ -69,6 +69,19 @@
       ]
     },
     {
+      "name": "adopt-area",
+      "title": "Take On a Folder as an Area",
+      "description": "Turn a folder you already keep into a PM area",
+      "mode": "view",
+      "keywords": [
+        "adopt",
+        "area",
+        "existing",
+        "folder",
+        "pm"
+      ]
+    },
+    {
       "name": "list-projects",
       "title": "List Projects",
       "description": "Browse active and archived projects",

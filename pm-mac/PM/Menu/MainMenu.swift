@@ -103,6 +103,9 @@ enum MainMenu {
         // Directly under New Project, and without a shortcut of its own: it's the same errand for the
         // other kind of thing, and it's reached far less often than the project it sits beneath.
         add(menu, "New Area…", #selector(AppDelegate.newArea), target: target, key: "")
+        // Under New Area because it makes the same thing by the other route: one starts a folder, the
+        // other takes on a folder you already keep.
+        add(menu, "Take On a Folder…", #selector(AppDelegate.adoptArea), target: target, key: "")
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
             modifiers: [.command, .option])
         add(menu, "New Tab", #selector(ProjectWindowController.newWindowForTab(_:)), target: nil, key: "t")
