@@ -130,7 +130,7 @@ final class NotesRawEditTests: XCTestCase {
 
     /// Session add into a file with no existing sessions (empty Sessions section).
     func testSessionAddWithNoExistingSessions() throws {
-        let template = notesTemplate.replacingOccurrences(of: "{{title}}", with: "Fresh")
+        let template = notesTemplate(for: .project).replacingOccurrences(of: "{{title}}", with: "Fresh")
         let date = try parseSessionDateArgument("2025-03-10")
         let result = try XCTUnwrap(sessionAddPreservingFormat(rawText: template, label: "", date: date))
         XCTAssertTrue(result.contains("## Sessions\n\n### Mon, Mar 10, 2025"))

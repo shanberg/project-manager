@@ -92,8 +92,8 @@ public func writeNotesFile(notesPath: String, notes: ProjectNotes, notesIO: Note
     try io.writeContent(path: notesPath, content: content)
 }
 
-/// Resolve notes template content: if template path is set, file must exist and is used (with {{title}} replaced); otherwise use embedded default.
-public func getNotesTemplateContent(templatePath: String?, title: String) throws -> String {
+/// Resolve notes template content: if template path is set, file must exist and is used (with {{title}} replaced); otherwise use the built-in template for the kind.
+public func getNotesTemplateContent(templatePath: String?, title: String, kind: ProjectKind = .project) throws -> String {
     if let path = templatePath, !path.isEmpty {
         let expanded = (path as NSString).expandingTildeInPath
         guard FileManager.default.fileExists(atPath: expanded) else {
@@ -102,42 +102,35 @@ public func getNotesTemplateContent(templatePath: String?, title: String) throws
         let content = try String(contentsOfFile: expanded, encoding: .utf8)
         return content.replacingOccurrences(of: "{{title}}", with: title)
     }
-    let content = notesTemplate.replacingOccurrences(of: "{{title}}", with: title)
+    let content = notesTemplate(for: kind).replacingOccurrences(of: "{{title}}", with: title)
     return content.hasPrefix("\n") ? String(content.dropFirst()) : content
 }
 
-/// Embedded default notes template (same as templates/notes.md with {{title}} placeholder).
-public let notesTemplate = """
-# {{title}}
+/// The starting document for a new project or area.
+///
+/// Built from the kind's sections rather than written out, so the vocabulary is stated once — in
+/// `HeaderSection` — instead of three times over: here, in the serializer, and in the parser. An Area's
+/// template is a project's minus Problem and Approach, because that is what its `headerSections` says.
+///
+/// The blank-line rhythm is the one `templates/notes.md` has always had, which is *not* what
+/// `serializeNotes` emits; the template is a document a person is about to write in, and the
+/// serializer's output is a document being rewritten. `NotesTemplateTests` holds the old literal and
+/// asserts a project still gets exactly it.
+public func notesTemplate(for kind: ProjectKind) -> String {
+    var out = "# {{title}}\n\n"
+    for section in HeaderSection.allCases where kind.headerSections.contains(section) {
+        out += "> [!\(section.calloutType)] \(section.label)\n"
+        switch section.shape {
+        case .prose: out += "> \n"
+        case .numberedList: out += "> 1.  \n> 2.  \n> 3.  \n"
+        }
+        out += "\n\n"
+    }
+    out += "## Links\n\n- \n\n## Learnings\n\n- \n\n## Sessions\n"
+    return out
+}
 
-> [!summary] Summary
-> 
 
-
-> [!question] Problem
-> 
-
-
-> [!info] Goals
-> 1.  
-> 2.  
-> 3.  
-
-
-> [!info] Approach
-> 
-
-
-## Links
-
-- 
-
-## Learnings
-
-- 
-
-## Sessions
-"""
 
 /// Create a notes file from the configured template. Requires a valid config and existing active/archive paths
 /// (uses `loadConfigAndPaths()` to resolve the template path). Throws if the notes file already exists.

@@ -92,6 +92,17 @@ public extension ProjectKind {
         case .area: return config.areaSubfolders ?? defaultAreaSubfolders
         }
     }
+
+    /// The custom template a new one starts from, if one is configured. Nil means the built-in.
+    ///
+    /// Two keys rather than one because a project template has a Problem and an Approach in it, so
+    /// pointing Areas at it would hand every Area the two sections the kind exists to leave out.
+    func notesTemplatePath(in config: PmConfig) -> String? {
+        switch self {
+        case .project: return config.notesTemplatePath
+        case .area: return config.areaNotesTemplatePath
+        }
+    }
 }
 
 public extension ProjectKind {

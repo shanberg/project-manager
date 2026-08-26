@@ -56,6 +56,7 @@
 		C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
 		CA4CB349CDB748A305F51EDD /* QuickBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */; };
+		CBC61A251C3ED45EEEEEC6AE /* TaskDropResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224912707F104CD2739DBD7B /* TaskDropResolver.swift */; };
 		CDF5596DC7619D26CF857B0D /* PanelSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */; };
 		D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEAC5A29157104A97390627 /* StoreRegistry.swift */; };
 		D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 670C6E6568761BF6AA2FF6AB /* FocusPanelView.swift */; };
@@ -85,6 +86,7 @@
 		17912D894364C3FC66AC8134 /* ObsidianLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianLink.swift; sourceTree = "<group>"; };
 		17FA0B4FC52FB9DC24629BF6 /* ProjectIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectIndex.swift; sourceTree = "<group>"; };
 		19EFCE48163B4933B104DA26 /* AppIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIcons.swift; sourceTree = "<group>"; };
+		224912707F104CD2739DBD7B /* TaskDropResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDropResolver.swift; sourceTree = "<group>"; };
 		2935F4093EF10B1AB99E0563 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2B473BD75913801C69C0B4E4 /* ProjectSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSplitViewController.swift; sourceTree = "<group>"; };
 		2D7BC1A474E416FCA301CB2C /* NotesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesSettings.swift; sourceTree = "<group>"; };
@@ -217,6 +219,7 @@
 				579B29914CA5A13A9C21CCC8 /* ProjectView.swift */,
 				960CBA413D74FFF7E3DCCEA3 /* ProjectViewState.swift */,
 				CF1B5393B4FF9F362814CC03 /* SearchField.swift */,
+				224912707F104CD2739DBD7B /* TaskDropResolver.swift */,
 			);
 			path = Project;
 			sourceTree = "<group>";
@@ -476,6 +479,7 @@
 				2AB4A19C5F60D4154DC72182 /* ShortcutsSettings.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */,
+				CBC61A251C3ED45EEEEEC6AE /* TaskDropResolver.swift in Sources */,
 				92006127F2FED5B39114B8C2 /* TaskEditors.swift in Sources */,
 				3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */,
 				DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */,

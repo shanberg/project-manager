@@ -158,7 +158,7 @@ final class NotesIOTests: XCTestCase {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         let path = tmp.path
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let templateContent = notesTemplate.replacingOccurrences(of: "{{title}}", with: "Direct")
+        let templateContent = notesTemplate(for: .project).replacingOccurrences(of: "{{title}}", with: "Direct")
         try templateContent.write(toFile: path, atomically: true, encoding: .utf8)
 
         let notes = try readNotesFile(notesPath: path, notesIO: nil)

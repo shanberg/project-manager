@@ -66,7 +66,7 @@ final class NotesRoundTripTests: XCTestCase {
 
     /// Empty template parses to expected shape (sections present, empty content); round-trip preserves it.
     func testEmptyTemplateRoundTrip() throws {
-        let template = notesTemplate.replacingOccurrences(of: "{{title}}", with: "Test")
+        let template = notesTemplate(for: .project).replacingOccurrences(of: "{{title}}", with: "Test")
         let parsed = try parseNotes(markdown: template)
         XCTAssertEqual(parsed.title, "Test")
         // Assert empty template produces expected structure (not just title).

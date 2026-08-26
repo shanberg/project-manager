@@ -13,6 +13,10 @@ public struct PmConfig: Codable, Equatable {
     public var areaSubfolders: [String]?
     /// Optional path to a custom notes template file (supports ~). If set, the file must exist.
     public var notesTemplatePath: String?
+    /// The same, for Areas. Separate from `notesTemplatePath` because a project template has a Problem
+    /// and an Approach in it, and pointing Areas at it would hand every Area the two sections the kind
+    /// exists to leave out.
+    public var areaNotesTemplatePath: String?
     /// When true and obsidianVault/obsidianVaultPath are set, notes read/write may use the Obsidian CLI. Nil (missing in JSON) is treated as false.
     public var useObsidianCLI: Bool?
     /// Vault name for the Obsidian CLI (e.g. "MyVault"). Required when useObsidianCLI is true.
@@ -20,7 +24,7 @@ public struct PmConfig: Codable, Equatable {
     /// Absolute path to vault root (supports ~). Used to compute relative path for CLI. Required when useObsidianCLI is true.
     public var obsidianVaultPath: String?
 
-    public init(paraPath: String? = nil, activePath: String, archivePath: String, areasPath: String? = nil, domains: [String: String], subfolders: [String], areaSubfolders: [String]? = nil, notesTemplatePath: String? = nil, useObsidianCLI: Bool? = nil, obsidianVault: String? = nil, obsidianVaultPath: String? = nil) {
+    public init(paraPath: String? = nil, activePath: String, archivePath: String, areasPath: String? = nil, domains: [String: String], subfolders: [String], areaSubfolders: [String]? = nil, notesTemplatePath: String? = nil, areaNotesTemplatePath: String? = nil, useObsidianCLI: Bool? = nil, obsidianVault: String? = nil, obsidianVaultPath: String? = nil) {
         self.paraPath = paraPath
         self.activePath = activePath
         self.archivePath = archivePath
@@ -29,6 +33,7 @@ public struct PmConfig: Codable, Equatable {
         self.subfolders = subfolders
         self.areaSubfolders = areaSubfolders
         self.notesTemplatePath = notesTemplatePath
+        self.areaNotesTemplatePath = areaNotesTemplatePath
         self.useObsidianCLI = useObsidianCLI
         self.obsidianVault = obsidianVault
         self.obsidianVaultPath = obsidianVaultPath
@@ -210,7 +215,7 @@ public func loadConfigAndPaths(skipPathValidation: Bool = false) throws -> (PmCo
 }
 
 public enum PmConfigKey: String, CaseIterable {
-    case activePath, archivePath, areasPath, paraPath, domains, subfolders, areaSubfolders, notesTemplatePath
+    case activePath, archivePath, areasPath, paraPath, domains, subfolders, areaSubfolders, notesTemplatePath, areaNotesTemplatePath
     case useObsidianCLI, obsidianVault, obsidianVaultPath
 }
 
@@ -236,6 +241,7 @@ public func getConfigValue(config: PmConfig, key: PmConfigKey) -> PmConfigValue 
     case .areasPath: return .string(config.areasPath)
     case .paraPath: return .string(config.paraPath)
     case .notesTemplatePath: return .string(config.notesTemplatePath)
+    case .areaNotesTemplatePath: return .string(config.areaNotesTemplatePath)
     case .useObsidianCLI: return .bool(config.useObsidianCLI ?? false)
     case .obsidianVault: return .string(config.obsidianVault)
     case .obsidianVaultPath: return .string(config.obsidianVaultPath)
@@ -266,6 +272,8 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
         config.paraPath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.notesTemplatePath, .string(let v)):
         config.notesTemplatePath = v.flatMap { $0.isEmpty ? nil : $0 }
+    case (.areaNotesTemplatePath, .string(let v)):
+        config.areaNotesTemplatePath = v.flatMap { $0.isEmpty ? nil : $0 }
     case (.useObsidianCLI, .bool(let v)):
         config.useObsidianCLI = v
     case (.obsidianVault, .string(let v)):
@@ -285,7 +293,7 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
 
 private func typeName(for key: PmConfigKey) -> String {
     switch key {
-    case .activePath, .archivePath, .areasPath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
+    case .activePath, .archivePath, .areasPath, .paraPath, .notesTemplatePath, .areaNotesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
     case .useObsidianCLI: return "Boolean"
     case .domains: return "object (key-value pairs)"
     case .subfolders, .areaSubfolders: return "array of strings"
@@ -308,7 +316,7 @@ public func setConfigValue(config: inout PmConfig, key: String, value: Any) thro
     case .activePath, .archivePath:
         guard let v = value as? String else { throw PmError.invalidConfigValue(key: key, expectedType: "String") }
         typed = .string(v)
-    case .areasPath, .paraPath, .notesTemplatePath, .obsidianVault, .obsidianVaultPath:
+    case .areasPath, .paraPath, .notesTemplatePath, .areaNotesTemplatePath, .obsidianVault, .obsidianVaultPath:
         typed = .string(value as? String)
     case .useObsidianCLI:
         if let v = value as? Bool {
@@ -356,6 +364,11 @@ public enum PmError: Error, CustomStringConvertible {
     case invalidProjectTitle(title: String)
     /// A domain code that isn't in the configured domains.
     case unknownDomain(String)
+    /// A domain was given for something that isn't numbered, or withheld from something that is.
+    case domainNotApplicable(kind: String)
+    /// An Area of that name already exists. Projects can't collide — their numbers are unique — but
+    /// Areas are named by hand, and creating a second "Hiring" would write over the first one's notes.
+    case areaAlreadyExists(String)
     /// Obsidian CLI read failed (path, message from CLI or process).
     case obsidianCLIReadFailed(path: String, message: String)
     /// Obsidian CLI write/create failed (path, message from CLI or process).
@@ -397,6 +410,8 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidSessionDate(let value): return "Invalid date for session: \(value). Use YYYY-MM-DD."
         case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
         case .unknownDomain(let code): return "Unknown domain: \(code)"
+        case .domainNotApplicable(let kind): return "A \(kind) doesn't take a domain code"
+        case .areaAlreadyExists(let path): return "An area already exists at: \(path)"
         case .obsidianCLIReadFailed(let path, let message): return "Obsidian CLI read failed for \(path): \(message)"
         case .obsidianCLIWriteFailed(let path, let message): return "Obsidian CLI write failed for \(path): \(message)"
         case .projectFolderMalformed(let name): return "Project folder name is not valid for configured domains: \(name)"

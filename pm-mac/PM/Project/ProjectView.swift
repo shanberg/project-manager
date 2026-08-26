@@ -57,14 +57,15 @@ struct ProjectView: View {
     @State private var findVisible = false
     @State private var findFocusToken = 0
     /// The key of the task subtree currently being dragged, set when a row's drag begins. Nil when no
-    /// drag is in flight. A subtree can't land on itself or its own descendants.
+    /// drag is in flight. The subtree is lifted out of the list before a drop is resolved against it —
+    /// see `TaskDropResolver`.
     @State private var draggingKey: String?
     /// Frames (Y-extent + depth) of every visible task row in the task-list coordinate space, collected
     /// via a preference. The single list-level drop delegate reads these to resolve the pointer into a
     /// gap + depth.
     @State private var rowFrames: [RowFrame] = []
-    /// The single resolved drop indicator for the in-flight drag — the gap Y, the chosen depth, and
-    /// whether it's a legal target. Nil when nothing is being dragged over the list.
+    /// The single resolved insertion slot for the in-flight drag — where to paint the indicator and
+    /// which document slot the drop will use. Nil when nothing is being dragged over the list.
     @State private var dropTarget: DropTarget?
     /// The selected task rows, by `PMStore.key`. Ephemeral (never persisted): the keys are document
     /// positions, so they only mean anything against the currently-loaded todos.
@@ -1492,7 +1493,7 @@ struct ProjectView: View {
         // Foreign drags are turned away regardless — `isActive` is false unless one of our own rows
         // started the drag.
         .onDrop(of: [TaskPasteboard.taskKeysType, .text], delegate: ListDropDelegate(
-            isActive: draggingKey != nil,
+            isActive: { draggingKey != nil },
             onCompute: { computeDropTarget(at: $0) },
             onUpdate: { dropTarget = $0 },
             onPerform: { performListDrop($0) }
@@ -1646,10 +1647,11 @@ struct ProjectView: View {
         }
     }
 
-    /// The single insertion indicator: a caret dot + rule drawn at the resolved gap's Y and the chosen
-    /// depth's indent. Only shown for a legal target; an illegal one shows the "no drop" cursor instead.
+    /// The single insertion indicator: a caret dot + rule drawn at the resolved slot's Y and the chosen
+    /// depth's indent. Shown whenever a slot resolved at all; when none does — which only happens when
+    /// the whole list is in the air — there's nothing to point at and the "no drop" cursor says so.
     @ViewBuilder private var dropIndicator: some View {
-        if let t = dropTarget, t.valid {
+        if let t = dropTarget {
             HStack(spacing: 0) {
                 Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                 Capsule().fill(Color.accentColor).frame(height: 2)
@@ -1662,55 +1664,22 @@ struct ProjectView: View {
         }
     }
 
-    /// Resolve a pointer location (in `taskListSpace`) into a drop target: which gap (by Y), which depth
-    /// (by X, clamped to the legal `[rowBelow.depth ... rowAbove.depth+1]` range at that gap), and the
-    /// anchor row + side that names the exact document slot. Nil when nothing is being dragged or there
-    /// are no rows.
+    /// Resolve a pointer location (in `taskListSpace`) into an insertion slot. The geometry lives in
+    /// `TaskDropResolver`; this only supplies what the view knows — the visible rows, and which of them
+    /// are riding along in the drag.
     private func computeDropTarget(at p: CGPoint) -> DropTarget? {
         guard let dk = draggingKey,
               let dragged = store.todos.first(where: { PMStore.key(for: $0) == dk }) else { return nil }
-        let subtree = store.subtreeKeys(of: dragged)
-        let rows = rowFrames.sorted { $0.minY < $1.minY }
-        guard !rows.isEmpty else { return nil }
-
-        // Gap index = how many rows sit (by midpoint) at or above the pointer → 0 = above the first row,
-        // rows.count = below the last (the trailing gap).
-        let gapIndex = rows.filter { ($0.minY + $0.maxY) / 2 <= p.y }.count
-        let rowAbove: RowFrame? = gapIndex > 0 ? rows[gapIndex - 1] : nil
-        let rowBelow: RowFrame? = gapIndex < rows.count ? rows[gapIndex] : nil
-
-        // Legal depth range at this gap: no shallower than the row below (else you'd re-parent it), no
-        // deeper than one under the row above (its deepest legal child).
-        let minDepth = rowBelow?.depth ?? 0
-        let maxDepth = max(minDepth, rowAbove.map { $0.depth + 1 } ?? 0)
-        let rawDepth = Int(((p.x - Self.rowContentInset) / Self.indentStep).rounded())
-        let depth = min(max(rawDepth, minDepth), maxDepth)
-
-        // Resolve the document slot. Nesting deeper than the row below anchors on the row above (which
-        // supplies the parent chain); otherwise anchor the row below and insert before it — this keeps a
-        // cross-session boundary landing in the right session, and a plain sibling insert precise.
-        let anchor: RowFrame
-        let insertAfter: Bool
-        if rowBelow == nil {
-            anchor = rowAbove!; insertAfter = true
-        } else if rowAbove == nil {
-            anchor = rowBelow!; insertAfter = false
-        } else if depth > rowBelow!.depth {
-            anchor = rowAbove!; insertAfter = true
-        } else {
-            anchor = rowBelow!; insertAfter = false
-        }
-
-        let gapY = rowAbove?.maxY ?? rowBelow?.minY ?? 0
-        let valid = !subtree.contains(anchor.key)
-        return DropTarget(gapY: gapY, depth: depth, valid: valid,
-                          anchorSession: anchor.session, anchorLine: anchor.line, insertAfter: insertAfter)
+        return TaskDropResolver.resolve(pointer: p,
+                                        rows: rowFrames,
+                                        draggedSubtree: store.subtreeKeys(of: dragged),
+                                        contentInset: Self.rowContentInset,
+                                        indentStep: Self.indentStep)
     }
 
     /// Commit a resolved drop: move the dragged subtree to the target's slot + depth, then clear state.
     private func performListDrop(_ t: DropTarget) -> Bool {
-        guard t.valid,
-              let dk = draggingKey,
+        guard let dk = draggingKey,
               let source = store.todos.first(where: { PMStore.key(for: $0) == dk }),
               let anchor = store.todos.first(where: {
                   $0.sessionIndex == t.anchorSession && $0.lineIndex == t.anchorLine
@@ -1792,38 +1761,6 @@ enum AppColorMode: String {
         case .dark:   return .dark
         }
     }
-}
-
-/// A visible task row's vertical extent and depth in the task-list coordinate space, published via
-/// preference so the single list-level drop delegate can resolve the pointer into a gap + depth without
-/// per-row drop targets. Carries the row's document identity (session/line) to name the move anchor.
-struct RowFrame: Equatable {
-    let key: String
-    let session: Int
-    let line: Int
-    let depth: Int
-    let minY: CGFloat
-    let maxY: CGFloat
-}
-
-/// Collects every visible row's frame into one array for the drop delegate.
-struct RowFramesKey: PreferenceKey {
-    static var defaultValue: [RowFrame] = []
-    static func reduce(value: inout [RowFrame], nextValue: () -> [RowFrame]) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
-/// The single resolved drop indicator for an in-flight drag: the gap's Y (a row boundary), the chosen
-/// nesting depth, whether it's a legal target, and the document slot (anchor row + side) the move will
-/// use. Produced from the pointer by `computeDropTarget`.
-struct DropTarget: Equatable {
-    let gapY: CGFloat
-    let depth: Int
-    let valid: Bool
-    let anchorSession: Int
-    let anchorLine: Int
-    let insertAfter: Bool
 }
 
 /// The content column's leading edge in window space, so the header can tell how much of the window's
@@ -2464,38 +2401,6 @@ private final class DragEndSentinel {
     deinit {
         let onEnd = self.onEnd
         DispatchQueue.main.async(execute: onEnd)
-    }
-}
-
-// MARK: Drag-to-reorder drop delegate
-
-/// The single list-level drop target. Resolves the pointer (in the task-list coordinate space) into a
-/// gap + depth via the parent's `onCompute`, reports it so the list can paint the one insertion line,
-/// and commits the move on drop. All row/store access lives in the parent-supplied closures, so this
-/// stays a plain value type.
-private struct ListDropDelegate: DropDelegate {
-    /// Whether a drag is in flight (nothing to resolve otherwise).
-    let isActive: Bool
-    /// Resolve a pointer location into the drop target (nil when illegal / no rows).
-    let onCompute: (CGPoint) -> DropTarget?
-    /// Publish the current target (nil clears the indicator).
-    let onUpdate: (DropTarget?) -> Void
-    /// Commit the resolved move; returns whether it was accepted.
-    let onPerform: (DropTarget) -> Bool
-
-    func validateDrop(info: DropInfo) -> Bool { isActive }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        let target = onCompute(info.location)
-        onUpdate(target)
-        return DropProposal(operation: (target?.valid ?? false) ? .move : .forbidden)
-    }
-
-    func dropExited(info: DropInfo) { onUpdate(nil) }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let target = onCompute(info.location), target.valid else { onUpdate(nil); return false }
-        return onPerform(target)
     }
 }
 
