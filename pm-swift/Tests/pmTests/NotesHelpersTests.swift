@@ -13,6 +13,39 @@ final class NotesHelpersTests: XCTestCase {
         XCTAssertEqual(formatted, "Tue, Feb 25, 2025", "Session date format must match Raycast (en-US short); change only with extension update")
     }
 
+    // MARK: projectTitle
+
+    /// A numbered project folder keeps behaving exactly as it did: the code prefix comes off.
+    func testProjectTitleStripsNumberedPrefix() {
+        XCTAssertEqual(projectTitle(fromFolderName: "W-12 Website Refresh"), "Website Refresh")
+        XCTAssertEqual(projectTitle(fromFolderName: "H-004 Maxwell Carmody"), "Maxwell Carmody")
+        XCTAssertEqual(projectTitle(fromFolderName: "W-1 Website"), "Website")
+    }
+
+    /// The Areas case. An unprefixed folder is its own title — splitting on the first space turned
+    /// "Team 1:1s" into "1:1s", which sent getNotesPath at "docs/Notes - 1:1s.md".
+    func testProjectTitleKeepsUnprefixedNameWhole() {
+        XCTAssertEqual(projectTitle(fromFolderName: "Team 1:1s"), "Team 1:1s")
+        XCTAssertEqual(projectTitle(fromFolderName: "Home maintenance"), "Home maintenance")
+        XCTAssertEqual(projectTitle(fromFolderName: "Hiring"), "Hiring")
+    }
+
+    /// Near misses on the prefix grammar are names, not prefixes: no number, no separating space,
+    /// or a hyphenated word rather than a code.
+    func testProjectTitleIgnoresNonPrefixes() {
+        XCTAssertEqual(projectTitle(fromFolderName: "W- Website Refresh"), "W- Website Refresh")
+        XCTAssertEqual(projectTitle(fromFolderName: "W-12"), "W-12")
+        XCTAssertEqual(projectTitle(fromFolderName: "On-call rotation"), "On-call rotation")
+    }
+
+    /// The whole point of the fix, at the level it actually broke: where the notes file goes.
+    func testNotesPathForUnprefixedFolder() {
+        XCTAssertEqual(getNotesPath(projectPath: "/PARA/areas/Team 1:1s"),
+                       "/PARA/areas/Team 1:1s/docs/Notes - Team 1:1s.md")
+        XCTAssertEqual(getNotesPath(projectPath: "/PARA/active/W-12 Website Refresh"),
+                       "/PARA/active/W-12 Website Refresh/docs/Notes - Website Refresh.md")
+    }
+
     func testParseSessionDateArgumentValid() throws {
         let date = try parseSessionDateArgument("2025-02-25")
         let formatted = formatSessionDate(date)

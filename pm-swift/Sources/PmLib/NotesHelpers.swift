@@ -33,10 +33,31 @@ public func addSession(notes: ProjectNotes, label: String, date: Date? = nil) ->
     return out
 }
 
-/// Project title derived from folder name (part after first space in "D-1 Title"). Falls back to full folder name if no space.
+/// The shape of a numbered project folder name: a domain code, a hyphen, a number, a space.
+///
+/// Deliberately not built from the configured domain codes. This runs in `getNotesPath`, which has a
+/// path and nothing else — no config, and no way to get one without turning a string transform into
+/// an I/O call. The grammar is what identifies the prefix, not the particular letters.
+private let numberedProjectPrefix = try? NSRegularExpression(pattern: #"^[A-Za-z]+-\d+\s+"#)
+
+/// Project title derived from its folder name: `"W-12 Website Refresh"` is `"Website Refresh"`.
+///
+/// Only a name that actually carries a `CODE-NNN ` prefix is stripped. Splitting on the first space
+/// unconditionally — what this did until Areas existed — is right for every project and wrong for
+/// every folder without a prefix: `"Team 1:1s"` became `"1:1s"`, so `getNotesPath` wrote
+/// `docs/Notes - 1:1s.md`. `resolveNotesPath` hides that on reads by falling back to any
+/// `Notes - *.md` in `docs/`, which is exactly why the write side had to be fixed rather than left
+/// to it — the fallback would keep finding the right file while every write minted the wrong one.
+///
+/// A folder whose own name happens to have the prefix's grammar (`"Q4-2026 planning"`) is still read
+/// as prefixed. The cost is a notes file named after the tail of its folder, and the alternative is
+/// passing configuration into a pure string transform.
 public func projectTitle(fromFolderName folderName: String) -> String {
-    let spaceIdx = folderName.firstIndex(of: " ")
-    return spaceIdx.map { String(folderName[folderName.index(after: $0)...]) } ?? folderName
+    guard let regex = numberedProjectPrefix,
+          let match = regex.firstMatch(in: folderName, range: NSRange(folderName.startIndex..., in: folderName)),
+          let range = Range(match.range, in: folderName)
+    else { return folderName }
+    return String(folderName[range.upperBound...])
 }
 
 public func getNotesPath(projectPath: String) -> String {
