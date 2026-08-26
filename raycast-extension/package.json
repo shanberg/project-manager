@@ -56,6 +56,19 @@
       ]
     },
     {
+      "name": "new-area",
+      "title": "New Area",
+      "description": "Create a new area \u2014 something ongoing that doesn't finish",
+      "mode": "view",
+      "keywords": [
+        "create",
+        "new",
+        "area",
+        "ongoing",
+        "pm"
+      ]
+    },
+    {
       "name": "list-projects",
       "title": "List Projects",
       "description": "Browse active and archived projects",

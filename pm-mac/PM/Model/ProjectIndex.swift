@@ -51,8 +51,11 @@ final class ProjectIndex: ObservableObject {
         let number: Int
         /// The name without its "CODE-NNN " prefix, for name sorting and the row's label.
         let shortName: String
-        /// The code's configured domain label ("Home"), falling back to the bare code.
+        /// The code's configured domain label ("Home"), falling back to the bare code. An area has no
+        /// domain and gets "Areas", so a domain-grouped list has somewhere to put it.
         let domain: String
+        /// Project or area. Read off the folder name, never stored.
+        let kind: ProjectKind
         let isArchived: Bool
         /// Notes-file mtime (folder mtime as a fallback), for recency sorting.
         let modified: Date
@@ -65,6 +68,9 @@ final class ProjectIndex: ObservableObject {
         let detailsLoaded: Bool
         var id: String { projectKey }
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+        /// Whether a completion ring means anything here. An area has no denominator — it isn't
+        /// heading anywhere — so the row shows what's open and when it was last touched instead.
+        var showsProgress: Bool { kind == .project }
     }
 
     /// One open task, somewhere. What a cross-project search matches against, and enough to go to it.
@@ -113,6 +119,7 @@ final class ProjectIndex: ObservableObject {
         let number: Int
         let shortName: String
         let domain: String
+        let kind: ProjectKind
         let isArchived: Bool
         let modified: Date
 
@@ -120,9 +127,9 @@ final class ProjectIndex: ObservableObject {
         /// until one lands).
         func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool) -> ProjectEntry {
             ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
-                         shortName: shortName, domain: domain, isArchived: isArchived, modified: modified,
-                         done: done, total: total, nextTask: nextTask, nextDue: nextDue,
-                         detailsLoaded: detailsLoaded)
+                         shortName: shortName, domain: domain, kind: kind, isArchived: isArchived,
+                         modified: modified, done: done, total: total, nextTask: nextTask,
+                         nextDue: nextDue, detailsLoaded: detailsLoaded)
         }
     }
 
@@ -265,9 +272,9 @@ final class ProjectIndex: ObservableObject {
         guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
         let codes = Array(config.domains.keys)
         var result: [ProjectListing] = []
-        for base in [paths.activePath, paths.archivePath] {
-            let isArchived = base == paths.archivePath
-            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
+        for scope in ProjectScope.allCases {
+            let base = scope.path(in: paths)
+            guard let folders = try? getFolders(basePath: base, scope: scope, domainCodes: codes) else { continue }
             result += folders.map { name in
                 let projectPath = (base as NSString).appendingPathComponent(name)
                 let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil
@@ -275,7 +282,8 @@ final class ProjectIndex: ObservableObject {
                 let parts = nameParts(name, domains: config.domains)
                 return ProjectListing(projectKey: "\(base):\(name)", name: name,
                                       code: parts.code, number: parts.number, shortName: parts.shortName,
-                                      domain: parts.domain, isArchived: isArchived,
+                                      domain: parts.domain, kind: ProjectKind.of(folderName: name),
+                                      isArchived: scope.isArchived,
                                       modified: (attrs?[.modificationDate] as? Date) ?? .distantPast)
             }
         }
@@ -289,6 +297,11 @@ final class ProjectIndex: ObservableObject {
     private nonisolated static func nameParts(
         _ name: String, domains: [String: String]
     ) -> (code: String, number: Int, shortName: String, domain: String) {
+        // An area's name has no parts: no code, no number, and the whole thing is what it's called.
+        // It groups under "Areas" so a domain-grouped list has somewhere to put it, though the sidebar
+        // gives them a section of their own and never asks.
+        let kind = ProjectKind.of(folderName: name)
+        guard kind.isNumbered else { return ("", 0, name, kind.pluralDisplayName) }
         guard let dash = name.firstIndex(of: "-"),
               let space = name[dash...].firstIndex(of: " ") else {
             return ("", 0, name, "Other")
@@ -307,8 +320,9 @@ final class ProjectIndex: ObservableObject {
         guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
         let codes = Array(config.domains.keys)
         var entries: [(project: PMFiles.RecentProject, mtime: Date)] = []
-        for base in [paths.activePath, paths.archivePath] {
-            guard let folders = try? getProjectFolders(basePath: base, domainCodes: codes) else { continue }
+        for scope in ProjectScope.allCases {
+            let base = scope.path(in: paths)
+            guard let folders = try? getFolders(basePath: base, scope: scope, domainCodes: codes) else { continue }
             for name in folders {
                 let key = "\(base):\(name)"
                 let projectPath = (base as NSString).appendingPathComponent(name)

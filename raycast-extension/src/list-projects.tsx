@@ -44,6 +44,7 @@ import ProjectView from "./project-view";
 
 import {
   parseListAllOutput,
+  isAreaFolder,
   getObsidianUri,
   hasSrcDir,
   buildObsidianOptions,
@@ -133,7 +134,7 @@ function fetchProjectsWithMeta(
       getConfigDomains(prefs),
       runPmWithPrefs(prefs, ["list", "--all"], signal),
     ]);
-    const { activePath, archivePath } = paths;
+    const { activePath, areasPath, archivePath } = paths;
     const domainCodes = Object.keys(domains);
 
     async function enrich(
@@ -168,14 +169,18 @@ function fetchProjectsWithMeta(
       });
     }
 
-    const { active: activeNames, archive: archiveNames } =
-      parseListAllOutput(stdout);
-    const [active, archive] = await Promise.all([
+    const {
+      active: activeNames,
+      areas: areaNames,
+      archive: archiveNames,
+    } = parseListAllOutput(stdout);
+    const [active, areas, archive] = await Promise.all([
       enrich(activeNames, activePath),
+      enrich(areaNames, areasPath),
       enrich(archiveNames, archivePath),
     ]);
 
-    return { active, archive, activePath, archivePath };
+    return { active, areas, archive, activePath, areasPath, archivePath };
   };
 }
 
@@ -209,7 +214,9 @@ function filterAndSort(
 }
 
 export default function Command() {
-  const [scope, setScope] = useState<"active" | "archive" | "all">("active");
+  const [scope, setScope] = useState<"active" | "areas" | "archive" | "all">(
+    "active",
+  );
   const [searchText, setSearchText] = useState("");
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
   const prefs = getPreferenceValues<PreferenceValues>();
@@ -236,6 +243,7 @@ export default function Command() {
   }, []);
 
   const active = data?.active ?? [];
+  const areas = data?.areas ?? [];
   const archive = data?.archive ?? [];
 
   const { domain: domainFilter, query } = parseSearchToken(
@@ -247,6 +255,10 @@ export default function Command() {
     () => filterAndSort(active, domainFilter, query, recentKeys),
     [active, domainFilter, query, recentKeys],
   );
+  const displayAreas = useMemo(
+    () => filterAndSort(areas, domainFilter, query, recentKeys),
+    [areas, domainFilter, query, recentKeys],
+  );
   const displayArchive = useMemo(
     () => filterAndSort(archive, domainFilter, query, recentKeys),
     [archive, domainFilter, query, recentKeys],
@@ -255,6 +267,45 @@ export default function Command() {
   async function onOpenProject(basePath: string, name: string) {
     await recordRecentProject(projectKey(basePath, name));
     setRecentKeys(await getRecentProjectKeys());
+  }
+
+  /**
+   * One row, however many sections there are. The three copies this replaced had to be kept in step by
+   * hand, and adding Areas would have made it four.
+   *
+   * An area gets a dotted circle where a project gets its completion ring: `done/total` on something
+   * that never finishes is a fraction of a number that keeps growing, so a ring there would sit at
+   * some arbitrary fill forever and mean nothing by it.
+   */
+  function renderRow(p: ProjectWithMeta, keyPrefix: string) {
+    const isArea = isAreaFolder(p.name);
+    return (
+      <List.Item
+        key={`${keyPrefix}${p.name}`}
+        icon={
+          isArea
+            ? Icon.CircleProgress100
+            : progressRingIcon(p.total ? p.done / p.total : 1)
+        }
+        title={projectRowTitle(p.name, p.nextDue)}
+        keywords={[
+          getDomainFromCodes(p.name, domainCodes) ?? "",
+          getProjectCode(p.name),
+        ]}
+        detail={renderDetail(p.notes)}
+        actions={
+          <ProjectActions
+            name={p.name}
+            basePath={p.basePath}
+            hasSrc={p.hasSrc}
+            hasNotes={!!p.notes}
+            notesPath={p.notesPath}
+            notes={p.notes}
+            activePath={data?.activePath ?? ""}
+          />
+        }
+      />
+    );
   }
 
   function renderDetail(notes: ProjectNotes | null) {
@@ -459,6 +510,7 @@ export default function Command() {
           onChange={(v) => setScope(v as typeof scope)}
         >
           <List.Dropdown.Item value="active" title="Active" />
+          <List.Dropdown.Item value="areas" title="Areas" />
           <List.Dropdown.Item value="archive" title="Archive" />
           <List.Dropdown.Item value="all" title="All" />
         </List.Dropdown>
@@ -491,113 +543,23 @@ export default function Command() {
       {scope === "all" ? (
         <>
           <List.Section title="Active">
-            {displayActive.map(
-              ({
-                name,
-                basePath,
-                notes,
-                notesPath,
-                hasSrc,
-                done,
-                total,
-                nextDue,
-              }) => (
-                <List.Item
-                  key={`active:${name}`}
-                  icon={progressRingIcon(total ? done / total : 1)}
-                  title={projectRowTitle(name, nextDue)}
-                  keywords={[
-                    getDomainFromCodes(name, domainCodes) ?? "",
-                    getProjectCode(name),
-                  ]}
-                  detail={renderDetail(notes)}
-                  actions={
-                    <ProjectActions
-                      name={name}
-                      basePath={basePath}
-                      hasSrc={hasSrc}
-                      hasNotes={!!notes}
-                      notesPath={notesPath}
-                      notes={notes}
-                      activePath={data?.activePath ?? ""}
-                    />
-                  }
-                />
-              ),
-            )}
+            {displayActive.map((p) => renderRow(p, "active:"))}
+          </List.Section>
+          {/* Below the projects: they're the changing foreground, areas the standing context. */}
+          <List.Section title="Areas">
+            {displayAreas.map((p) => renderRow(p, "areas:"))}
           </List.Section>
           <List.Section title="Archive">
-            {displayArchive.map(
-              ({
-                name,
-                basePath,
-                notes,
-                notesPath,
-                hasSrc,
-                done,
-                total,
-                nextDue,
-              }) => (
-                <List.Item
-                  key={`archive:${name}`}
-                  icon={progressRingIcon(total ? done / total : 1)}
-                  title={projectRowTitle(name, nextDue)}
-                  keywords={[
-                    getDomainFromCodes(name, domainCodes) ?? "",
-                    getProjectCode(name),
-                  ]}
-                  detail={renderDetail(notes)}
-                  actions={
-                    <ProjectActions
-                      name={name}
-                      basePath={basePath}
-                      hasSrc={hasSrc}
-                      hasNotes={!!notes}
-                      notesPath={notesPath}
-                      notes={notes}
-                      activePath={data?.activePath ?? ""}
-                    />
-                  }
-                />
-              ),
-            )}
+            {displayArchive.map((p) => renderRow(p, "archive:"))}
           </List.Section>
         </>
       ) : (
-        (scope === "active" ? displayActive : displayArchive).map(
-          ({
-            name,
-            basePath,
-            notes,
-            notesPath,
-            hasSrc,
-            done,
-            total,
-            nextDue,
-          }) => (
-            <List.Item
-              key={name}
-              icon={progressRingIcon(total ? done / total : 1)}
-              title={projectRowTitle(name, nextDue)}
-              keywords={[
-                getDomainFromCodes(name, domainCodes) ?? "",
-                getProjectCode(name),
-              ]}
-              detail={renderDetail(notes)}
-              actions={
-                <ProjectActions
-                  name={name}
-                  basePath={basePath}
-                  hasSrc={hasSrc}
-                  hasNotes={!!notes}
-                  notesPath={notesPath}
-                  notes={notes}
-                  activePath={data?.activePath ?? ""}
-                />
-              }
-            />
-          ),
-        )
+        (scope === "active"
+          ? displayActive
+          : scope === "areas"
+            ? displayAreas
+            : displayArchive
+        ).map((p) => renderRow(p, ""))
       )}
     </List>
   );

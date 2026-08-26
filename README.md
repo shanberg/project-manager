@@ -4,6 +4,8 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 **Assumptions:** You use Obsidian and Raycast, follow the PARA model for file management, and have mid-size projects that benefit from some structure but aren’t epics (e.g. no full project-management tooling).
 
+PM tracks two kinds of thing. A **project** is numbered, lives in `active/`, and ends. An **area** is the ongoing sort — a standing responsibility, a recurring meeting — is named rather than numbered, lives in `areas/`, and doesn’t. They share everything else: the same notes file, tasks, sessions, focus and capture. See [docs/areas.md](docs/areas.md).
+
 ## Install
 
 Requires Apple Silicon (arm64 only). The `pm` CLI runs on **macOS 13 or later**; the `PM.app` menubar app requires **macOS 26 or later**.
@@ -48,6 +50,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 
 - **Configure Project Manager** – View paths (from pm config), domains, structure
 - **New Project** – Create a project (domain + title)
+- **New Area** – Create an area (name only)
 - **List Projects** – Browse active/archive, open in Finder, add session notes
 - **Archive Project** – Move a project to archive
 - **Unarchive Project** – Move a project from archive back to active
@@ -56,7 +59,8 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 
 ```bash
 pm new <domain> <title>
-pm list [-a|--archive] [--all]
+pm new --area <title>
+pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes session note <project> <text>   # Appends to today's session, creating it if needed
@@ -70,9 +74,13 @@ pm notes path <project>   # Exits 0 only if the notes file exists; 1 otherwise (
 pm new W "Website Refresh"
 # Creates: active/W-1 Website Refresh/ (or W-01, W-001 depending on existing convention)
 
+pm new --area "Team 1:1s"
+# Creates: areas/Team 1:1s/ — no number, and it never takes one
+
 pm list              # List active projects
-pm list --archive    # List archived projects
-pm list --all        # List both
+pm list --areas      # List areas
+pm list --archive    # List the archive (both kinds share it)
+pm list --all        # List all three
 
 pm archive "W-1 Website Refresh"   # By full name
 pm archive W-1                     # By prefix (unambiguous)
@@ -88,6 +96,8 @@ pm unarchive W-1                   # Move from archive back to active
 - `pm config set activePath /path/to/active` - Update active path
 - `pm config set archivePath /path/to/archive` - Update archive path
 - `pm config set notesTemplatePath /path/to/template.md` - Custom notes template (use `{{title}}` in the file). Set to empty for built-in template: `pm config set notesTemplatePath ""`
+- `pm config set areasPath /path/to/areas` - Where areas live. Unset resolves to `{paraPath}/areas`, or `areas/` beside the active folder.
+- `pm config set areaNotesTemplatePath /path/to/template.md` - Custom template for areas. Separate from `notesTemplatePath` because a project template carries a Problem and an Approach, which areas don't have.
 
 **Optional – Obsidian CLI:** If you use Obsidian (1.12+) with the built-in CLI enabled, you can route notes read/write through it so edits are indexed by Obsidian. No hard dependency: if the CLI is off or unavailable, pm uses direct file I/O. Set `useObsidianCLI` to `true`, then set `obsidianVault` (vault name) and `obsidianVaultPath` (absolute path to vault root, e.g. `~/Documents/ObsidianVault`). Example: `pm config set useObsidianCLI true`, `pm config set obsidianVault "MyVault"`, `pm config set obsidianVaultPath ~/Documents/MyVault`.
 

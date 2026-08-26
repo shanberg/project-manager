@@ -47,15 +47,19 @@ struct ProjectEntity: AppEntity {
 }
 
 extension ProjectEntity {
-    /// All active projects as entities (same enumeration the CLI/Raycast use).
+    /// Everything in hand as entities — projects and areas both, since either can be spoken to.
+    /// (Same enumeration the CLI and Raycast use; the archive stays out, as it always has.)
     static func all() throws -> [ProjectEntity] {
         let (config, paths) = try loadConfigAndPaths()
-        let folders = try getProjectFolders(basePath: paths.activePath, domainCodes: Array(config.domains.keys))
-        return folders.map { folder in
-            ProjectEntity(id: "\(paths.activePath):\(folder)",
-                          folder: folder,
-                          name: projectTitle(fromFolderName: folder),
-                          domainDisplayName: domainName(ofFolder: folder, config: config))
+        let codes = Array(config.domains.keys)
+        return try [ProjectScope.active, .areas].flatMap { scope -> [ProjectEntity] in
+            let base = scope.path(in: paths)
+            return try getFolders(basePath: base, scope: scope, domainCodes: codes).map { folder in
+                ProjectEntity(id: "\(base):\(folder)",
+                              folder: folder,
+                              name: projectTitle(fromFolderName: folder),
+                              domainDisplayName: domainName(ofFolder: folder, config: config))
+            }
         }
     }
 

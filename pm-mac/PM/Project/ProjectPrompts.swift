@@ -54,6 +54,36 @@ enum ProjectPrompts {
         }
     }
 
+    // MARK: New area
+
+    /// An area has no domain and no number, so the prompt is one field. Kept beside `newProject`
+    /// rather than folded into it with a kind picker: the two prompts don't ask the same questions,
+    /// and a picker that empties the row beneath it whenever you change it is a worse dialog than two.
+    static func newArea(then open: @escaping (String) -> Void) {
+        let titleField = NSTextField(string: "")
+        titleField.placeholderString = "Area name"
+
+        let alert = NSAlert()
+        alert.messageText = "New Area"
+        alert.informativeText = "Something ongoing — a responsibility you hold, a meeting that recurs. "
+            + "It isn't numbered and it doesn't finish."
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = stack([titleField])
+        alert.window.initialFirstResponder = titleField
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        do {
+            open(try ProjectLifecycle.create(kind: .area, title: title))
+        } catch {
+            ProjectLifecycle.present(error, doing: "Couldn't create “\(title)”")
+        }
+    }
+
     // MARK: Rename
 
     /// Takes the folder name rather than a sidebar row, so the menu bar item — which only ever has a

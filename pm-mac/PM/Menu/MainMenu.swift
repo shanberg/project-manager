@@ -100,6 +100,9 @@ enum MainMenu {
               add(menu, "Write a Session Note…", #selector(AppDelegate.quickNote), target: target, key: ""))
         add(menu, "New Project…", #selector(AppDelegate.newProject), target: target, key: "n",
             modifiers: [.command, .control])
+        // Directly under New Project, and without a shortcut of its own: it's the same errand for the
+        // other kind of thing, and it's reached far less often than the project it sits beneath.
+        add(menu, "New Area…", #selector(AppDelegate.newArea), target: target, key: "")
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
             modifiers: [.command, .option])
         add(menu, "New Tab", #selector(ProjectWindowController.newWindowForTab(_:)), target: nil, key: "t")

@@ -1,6 +1,6 @@
 # Areas
 
-**Status:** part-built, 2026-08-26. Steps 1–4 in the order of work below are committed: `ProjectKind`, the third root, the Area scan, and kind-aware serialization, all headless and tested. Creation, the API surface, the app and Raycast are unbuilt — there is no way to make an Area yet.
+**Status:** built, 2026-08-26. Every step in the order of work below is committed, across PmLib, the CLI, the contract, the Mac app and the Raycast extension. Cadence is deliberately absent — see the section on it.
 
 This settles what an Area *is* before any of it is written, because most of the answer turns out to be "relax four assumptions", not "add a second document type" — and because the interesting question is where the difference between the two kinds is allowed to live.
 
@@ -174,7 +174,7 @@ It now strips only a name matching `^[A-Za-z]+-\d+\s+`. Tests in `NotesHelpersTe
 
 **New Area.** Title only. No domain picker, no number, no dry-run preview of the folder name, because the folder name is the title.
 
-**Header editor.** The form at [ProjectView.swift:3294](../pm-mac/PM/Project/ProjectView.swift:3294) is four hardcoded fields. It becomes one form that renders `kind.headerSections` — the same change that would make it correct for a third kind, and the reason not to write two forms.
+**Header editor.** The form was four hardcoded fields; it renders `kind.headerSections` instead. This is the one place in the app where the kind has to be consulted rather than merely displayed: the *read* view already hides a blank section and so needs no kind, but offering a field is what puts content in it, and the serializer keeps an omitted section precisely when it isn't empty. An Area given a Problem box would get a Problem, and it would stick.
 
 ## The API surface
 
@@ -184,9 +184,13 @@ Three things change:
 
 - `project.create` takes `kind`, and rejects `domain` when the kind is `area` rather than ignoring it.
 - `project.list` takes a `kind` filter, and every project result carries its kind.
-- `notes.setDetails` refuses a Problem or Approach on an Area — the same rule the serializer follows, enforced where the caller can be told about it instead of discovering that a field it sent didn't stick.
+- `notes.setDetail` refuses a Problem or Approach on an Area — the same rule the serializer follows, enforced where the caller can be told about it instead of discovering that a field it sent didn't stick.
 
-The manifest publishes `kind` and its `headerSections`, so Raycast derives its form from the same list the app does. The contract version bumps; clients asserting a minimum get the failure they're designed for.
+The contract went to **1.2.0**, and Raycast's generated client was regenerated from it.
+
+One thing this didn't need, which is the point: **`resolveProjectPath` is where Areas actually became usable.** It's the single place every surface turns a name into a thing, so teaching it the third root is what made `task.add`, `session.note`, `notes.get`, `task.focus` and the rest work on an Area without one of them changing.
+
+`project.focus` did need fixing on the way past — it built its key from `activePath`, which was the same string for every project and is wrong the moment something outside `active/` can be focused.
 
 ## What this deliberately doesn't do: cadence
 

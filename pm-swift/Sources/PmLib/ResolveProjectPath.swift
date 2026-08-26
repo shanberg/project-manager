@@ -17,15 +17,11 @@ public func resolveProjectPath(nameOrPrefix: String) throws -> String {
 ///
 /// This is the one place every surface turns a name into a thing, so teaching it about Areas is what
 /// makes `task.add`, `session.note`, `notes.get` and focus work on one without any of them changing.
-/// The archive is asked twice on purpose: it holds both kinds, and each scan only finds its own.
 internal func resolveProjectPath(config: PmConfig, paths: ResolvedPaths, nameOrPrefix: String) throws -> String {
     let domainCodes = Array(config.domains.keys)
-    let roots: [(base: String, folders: [String])] = [
-        (paths.activePath, try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)),
-        (paths.areasPath, try getAreaFolders(basePath: paths.areasPath)),
-        (paths.archivePath, (try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes))
-                          + (try getAreaFolders(basePath: paths.archivePath))),
-    ]
+    let roots: [(base: String, folders: [String])] = try ProjectScope.allCases.map {
+        ($0.path(in: paths), try getFolders(basePath: $0.path(in: paths), scope: $0, domainCodes: domainCodes))
+    }
     switch matchProjectResult(folders: roots.flatMap(\.folders), query: nameOrPrefix) {
     case .matched(let folderName):
         guard let root = roots.first(where: { $0.folders.contains(folderName) }) else {

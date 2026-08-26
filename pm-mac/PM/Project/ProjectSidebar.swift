@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import PmLib
 
 /// Which projects the sidebar lists, persisted across sessions.
 enum ProjectStatusFilter: String {
@@ -14,7 +15,24 @@ enum ProjectStatusFilter: String {
     }
 }
 
+/// Which kinds the sidebar shows. A separate axis from the status filter, because "archived" and
+/// "area" answer different questions — an area can be either.
+enum ProjectKindFilter: String, CaseIterable {
+    case projects, areas, all
+
+    func includes(_ entry: PMStore.ProjectEntry) -> Bool {
+        switch self {
+        case .projects: return entry.kind == .project
+        case .areas: return entry.kind == .area
+        case .all: return true
+        }
+    }
+}
+
 /// How the sidebar's rows are gathered into sections.
+///
+/// Areas take part in neither: they have no domain and no due date. They get a section of their own
+/// below whatever the grouping produced — see `arranged`.
 enum ProjectGrouping: String { case due, domain }
 
 /// How far ahead the Up Next band looks, and whether it appears at all.
@@ -136,6 +154,7 @@ struct ProjectSidebar: View {
     @FocusState private var listFocused: Bool
 
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
+    @AppStorage("PMSidebarKind") private var kindFilter: ProjectKindFilter = .all
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
     /// Whether rows keep the folder name's "CODE-NNN " prefix. Off, a row reads as the bare project
@@ -430,29 +449,45 @@ struct ProjectSidebar: View {
 
     /// The filtered projects, sorted, then gathered into sections.
     private var groups: [ProjectGroup] {
-        Self.arranged(store.allProjects, status: status, grouping: grouping, sort: sortOrder)
+        Self.arranged(store.allProjects, status: status, kinds: kindFilter,
+                      grouping: grouping, sort: sortOrder)
     }
 
     /// Filter, sort, then gather into sections. `Dictionary(grouping:)` preserves the order of the
     /// values it's handed, so sorting once up front orders every section.
     private static func arranged(_ projects: [PMStore.ProjectEntry],
                                  status: ProjectStatusFilter,
+                                 kinds: ProjectKindFilter,
                                  grouping: ProjectGrouping,
                                  sort: ProjectSortOrder) -> [ProjectGroup] {
         let sorted = projects
-            .filter { status.includes($0) }
+            .filter { status.includes($0) && kinds.includes($0) }
             .sorted { sort.precedes($0, $1) }
+
+        // Areas are held out of the grouping and appended in one section at the bottom. Neither
+        // grouping has anything to say about them — an area has no domain and no due date, so by Domain
+        // they'd file under a heading that isn't one and by Due they'd all land together in "No date" —
+        // and the list reads better with the changing foreground on top and the standing things beneath
+        // it. Sorting happened before the split, so both halves are already in order.
+        let areas = sorted.filter { $0.kind == .area }
+        let rest = sorted.filter { $0.kind != .area }
+
+        var groups: [ProjectGroup]
         switch grouping {
         case .domain:
-            let byDomain = Dictionary(grouping: sorted, by: \.domain)
-            return byDomain.keys.sorted().map { ProjectGroup(title: $0, entries: byDomain[$0] ?? []) }
+            let byDomain = Dictionary(grouping: rest, by: \.domain)
+            groups = byDomain.keys.sorted().map { ProjectGroup(title: $0, entries: byDomain[$0] ?? []) }
         case .due:
-            let byBucket = Dictionary(grouping: sorted, by: DueBucket.of)
-            return DueBucket.allCases.compactMap { bucket in
+            let byBucket = Dictionary(grouping: rest, by: DueBucket.of)
+            groups = DueBucket.allCases.compactMap { bucket in
                 guard let entries = byBucket[bucket] else { return nil }
                 return ProjectGroup(title: bucket.title, entries: entries)
             }
         }
+        if !areas.isEmpty {
+            groups.append(ProjectGroup(title: ProjectKind.area.pluralDisplayName, entries: areas))
+        }
+        return groups
     }
 }
 
@@ -468,6 +503,7 @@ struct ProjectSidebar: View {
 /// keys and `@AppStorage` republishes to every reader, so the list re-arranges as the menu is used.
 struct SidebarBottomBar: View {
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
+    @AppStorage("PMSidebarKind") private var kindFilter: ProjectKindFilter = .all
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
     /// See `ProjectSidebar.showsCode` — same key, read here so the menu can toggle it.
@@ -500,6 +536,15 @@ struct SidebarBottomBar: View {
                     Label("Active", systemImage: "circle").tag(ProjectStatusFilter.active)
                     Label("Archived", systemImage: "archivebox").tag(ProjectStatusFilter.archived)
                     Label("All", systemImage: "square.stack").tag(ProjectStatusFilter.all)
+                }
+                .pickerStyle(.inline)
+                // Two pickers in one submenu, because both answer "which rows". Status and kind are
+                // independent — an area can be archived — so they can't be one list.
+                Divider()
+                Picker("Kind", selection: $kindFilter) {
+                    Label("Projects", systemImage: "shippingbox").tag(ProjectKindFilter.projects)
+                    Label("Areas", systemImage: "circle.dotted").tag(ProjectKindFilter.areas)
+                    Label("Everything", systemImage: "square.stack.3d.up").tag(ProjectKindFilter.all)
                 }
                 .pickerStyle(.inline)
             } label: {
@@ -589,13 +634,45 @@ private struct ProjectSidebarRow: View {
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     private var title: String { showsCode ? entry.name : entry.shortName }
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 7) {
+    /// The mark at the head of the row: a completion ring for a project, and for an area a dotted
+    /// circle that reads as the same thing with no end to fill toward.
+    ///
+    /// Drawing a ring on an area would be the one piece of the design that lies. `done/total` there is
+    /// a fraction of a number that keeps growing, so it would sit near some arbitrary percentage
+    /// forever and mean nothing by it.
+    @ViewBuilder private var mark: some View {
+        if entry.showsProgress {
             // The ring is a template image, so it takes the row's foreground color, the same way the
             // menubar recolors it.
             Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
                 .renderingMode(.template)
                 .opacity(entry.detailsLoaded ? 1 : 0.35)
+        } else {
+            Image(systemName: "circle.dotted")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                // Matched to the ring image's box so both kinds of row line their text up.
+                .frame(width: 16, height: 16)
+        }
+    }
+
+    /// How long ago an area was last written to, in the shortest form that still reads: "today",
+    /// "3d", "5w". Deliberately coarse — this is a glance at whether something has been left alone,
+    /// not a timestamp.
+    static func lastTouched(_ date: Date, now: Date = Date()) -> String {
+        let days = Calendar.current.dateComponents([.day], from: date, to: now).day ?? 0
+        switch days {
+        case ..<1: return "today"
+        case 1: return "1d"
+        case 2...13: return "\(days)d"
+        case 14...364: return "\(days / 7)w"
+        default: return "\(days / 365)y"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            mark
             VStack(alignment: .leading, spacing: 1) {
                 // The due date rides the name line rather than the task line: `nextDue` is the
                 // earliest due across the project's open tasks, which needn't be the next task's own.
@@ -609,6 +686,14 @@ private struct ProjectSidebarRow: View {
                     Spacer(minLength: 0)
                     if let due = entry.nextDue {
                         SidebarDueLabel(due: due, isSelected: isSelected)
+                    } else if entry.kind == .area, entry.detailsLoaded {
+                        // An area has no due date, so the slot the date rides in carries the one time
+                        // signal an area does have: when it was last written to. It also explains the
+                        // order the list is in when sorting by recency, which is the default.
+                        Text(Self.lastTouched(entry.modified))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                 }
                 if let task = entry.nextTask {
@@ -869,7 +954,7 @@ private struct ProjectMenu: View {
         if let only = targets.first, !isMulti {
             Divider()
             Button { onRename(only) } label: {
-                Label("Rename Project…", systemImage: "pencil")
+                Label("Rename \(only.kind.displayName)…", systemImage: "pencil")
             }
         }
         if let isArchived = archiveDirection {
@@ -881,9 +966,24 @@ private struct ProjectMenu: View {
         }
     }
 
+    /// The one kind in the selection, or nil when it holds both — which is when the menu falls back to
+    /// the neutral wording rather than picking one of the two and being wrong about half the rows.
+    private var singleKind: ProjectKind? {
+        guard let first = targets.first else { return nil }
+        return targets.allSatisfy { $0.kind == first.kind } ? first.kind : nil
+    }
+
+    /// A project is archived; an area is put down. Same move, and not the same act — one is finished,
+    /// the other is handed on or let go — so the menu says which.
     private func archiveTitle(isArchived: Bool) -> String {
-        if isMulti { return isArchived ? "Unarchive \(targets.count) Projects" : "Archive \(targets.count) Projects" }
-        return isArchived ? "Unarchive Project" : "Archive Project"
+        let kind = singleKind
+        if isMulti {
+            let noun = kind?.pluralDisplayName ?? "Items"
+            return isArchived ? "Restore \(targets.count) \(noun)"
+                              : "\(kind?.retireVerb ?? "Archive") \(targets.count) \(noun)"
+        }
+        let noun = kind?.displayName ?? "Item"
+        return isArchived ? "Restore \(noun)" : "\(kind?.retireVerb ?? "Archive") \(noun)"
     }
 
     /// One Finder window with every selected project's folder highlighted.

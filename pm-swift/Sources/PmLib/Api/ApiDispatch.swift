@@ -445,13 +445,9 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let scope = input.scope ?? "active"
         let wanted = input.kind.flatMap(ProjectKind.init(rawValue:))
         var entries: [JSONValue] = []
-        // The archive is listed for both kinds because it holds both; `active` and `areas` each hold
-        // one, and asking the other scan for it costs a directory read that finds nothing.
         for scopeCase in ProjectScope.allCases where scope == "all" || scope == scopeCase.rawValue {
             let base = scopeCase.path(in: paths)
-            let folders = ((try? getProjectFolders(basePath: base, domainCodes: codes)) ?? [])
-                        + ((try? getAreaFolders(basePath: base)) ?? [])
-            for folder in folders.sorted() {
+            for folder in (try? getFolders(basePath: base, scope: scopeCase, domainCodes: codes)) ?? [] {
                 let kind = ProjectKind.of(folderName: folder)
                 guard wanted == nil || wanted == kind else { continue }
                 entries.append(.object([

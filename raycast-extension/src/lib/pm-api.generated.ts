@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.1.0";
+export const API_CONTRACT_VERSION = "1.2.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -96,17 +96,19 @@ export interface NotesSetDetailInput {
   value: JsonValue;
 }
 
-/** Move a project to the archive. */
+/** Move a project or area to the archive. */
 export interface ProjectArchiveInput {
   /** Project name or unambiguous prefix. */
   project: string;
 }
 
-/** Create a project, numbered within its domain. */
+/** Create a project, numbered within its domain, or an unnumbered area. */
 export interface ProjectCreateInput {
-  /** Domain code, e.g. W. */
-  domain: string;
-  /** Project title. */
+  /** Domain code, e.g. W. Required for a project, refused for an area. */
+  domain?: string;
+  /** What to make. Default project. */
+  kind?: "project" | "area";
+  /** Project or area title. */
   title: string;
 }
 
@@ -122,10 +124,12 @@ export interface ProjectGetInput {
   project: string;
 }
 
-/** Every project, with its domain. */
+/** Every project and area, each with its kind. */
 export interface ProjectListInput {
+  /** Only this kind. Default both. */
+  kind?: "project" | "area";
   /** Which folder to list. Default active. */
-  scope?: "active" | "archive" | "all";
+  scope?: "active" | "areas" | "archive" | "all";
 }
 
 /** Rename a project, keeping its domain and number. */
@@ -136,7 +140,7 @@ export interface ProjectRenameInput {
   title: string;
 }
 
-/** Move a project back to active. */
+/** Move a project or area back out of the archive, to wherever its kind lives. */
 export interface ProjectUnarchiveInput {
   /** Project name or unambiguous prefix. */
   project: string;

@@ -54,11 +54,15 @@ export async function getRecentProjectsByEdit(
     getPmPaths(prefs, signal),
     runPmWithPrefs(prefs, ["list", "--all"], signal),
   ]);
-  const { active: activeNames, archive: archiveNames } =
-    parseListAllOutput(stdout);
+  const {
+    active: activeNames,
+    areas: areaNames,
+    archive: archiveNames,
+  } = parseListAllOutput(stdout);
 
   const all: { name: string; basePath: string }[] = [
     ...activeNames.map((name) => ({ name, basePath: paths.activePath })),
+    ...areaNames.map((name) => ({ name, basePath: paths.areasPath })),
     ...archiveNames.map((name) => ({ name, basePath: paths.archivePath })),
   ];
 

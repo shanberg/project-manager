@@ -77,6 +77,7 @@ beforeEach(() => {
   vi.mocked(getNotes).mockClear();
   vi.mocked(getPmPaths).mockResolvedValue({
     activePath: "/active",
+    areasPath: "/areas",
     archivePath: "/archive",
   });
   vi.mocked(runPmWithPrefs).mockImplementation(async (_, args) => {

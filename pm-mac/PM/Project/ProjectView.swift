@@ -1339,8 +1339,10 @@ struct ProjectView: View {
     /// can be dragged into — a session used to disappear the moment its last task was hidden, which
     /// left ⇧⌘N's brand new session with nothing on screen to show for it. A session whose tasks are
     /// merely *filtered* out — all complete in Incomplete mode, none matching the find bar — stays
-    /// hidden, because a bare caption there would claim the session is empty when it isn't, and a
-    /// search would answer with a wall of headings standing over its two matches.
+    /// hidden, because a bare caption there would claim the session is empty when it isn't.
+    ///
+    /// A search hides the genuinely empty ones too. They match nothing, and a result of two tasks
+    /// shouldn't arrive padded with headings that are only there because they hold nothing to reject.
     private var sessionOrder: [Int] {
         let withVisibleTasks = Set(visibleTodos.map(\.sessionIndex))
         let withAnyTasks = Set(store.todos.map(\.sessionIndex))
@@ -1348,7 +1350,8 @@ struct ProjectView: View {
         // Union rather than the declared range alone: a todo whose session index outruns the parsed
         // session list still has to be drawn somewhere rather than silently dropped.
         return declared.union(withVisibleTasks)
-            .filter { withVisibleTasks.contains($0) || !withAnyTasks.contains($0) }
+            .filter { withVisibleTasks.contains($0)
+                      || (!isFiltering && !withAnyTasks.contains($0)) }
             .sorted()
     }
 
@@ -2992,7 +2995,7 @@ private struct ProjectDetailsView: View {
         if let n = notes {
             Group {
                 if isEditing {
-                    DetailsEditor(notes: n) { edited in
+                    DetailsEditor(notes: n, kind: store.kind) { edited in
                         // Merge the edited detail fields (including links) onto freshly-parsed notes,
                         // leaving title and sessions untouched.
                         store.saveDetails { fresh in
@@ -3185,6 +3188,11 @@ private struct EditableLink: Identifiable {
 /// Goals×3, Approach, Links, Learnings) regardless of whether it currently has content. Seeded from
 /// the notes on appear; local `@State` so Cancel is a no-op.
 private struct DetailsEditor: View {
+    /// Which header fields to offer. The read view already hides a blank section, so it needs no kind;
+    /// the editor does, because offering a field is what puts content in it. An Area given a Problem
+    /// box would get a Problem — the serializer keeps a section the kind omits precisely when it isn't
+    /// empty, so the value would stick, and the one place it could have been refused is here.
+    let kind: ProjectKind
     let onSave: (EditedDetails) -> Void
     let onCancel: () -> Void
 
@@ -3198,7 +3206,9 @@ private struct DetailsEditor: View {
     /// they're held aside verbatim and re-appended on save — the editor never destroys them.
     private let preservedGroups: [LinkEntry]
 
-    init(notes: ProjectNotes, onSave: @escaping (EditedDetails) -> Void, onCancel: @escaping () -> Void) {
+    init(notes: ProjectNotes, kind: ProjectKind,
+         onSave: @escaping (EditedDetails) -> Void, onCancel: @escaping () -> Void) {
+        self.kind = kind
         self.onSave = onSave
         self.onCancel = onCancel
         // Split the stored links: grouped entries are set aside; flat entries seed the editable rows
@@ -3223,16 +3233,11 @@ private struct DetailsEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            field("Summary") { TextField("", text: $summary, axis: .vertical).lineLimit(1...5) }
-            field("Problem") { TextField("", text: $problem, axis: .vertical).lineLimit(1...5) }
-            field("Goals") {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(0..<3, id: \.self) { i in
-                        TextField("Goal \(i + 1)", text: $goals[i])
-                    }
-                }
+            // Walked rather than listed, so the form and the document agree by construction: what an
+            // area is written with is exactly what it can be edited with.
+            ForEach(kind.headerSections, id: \.self) { section in
+                field(section.label) { headerField(section) }
             }
-            field("Approach") { TextField("", text: $approach, axis: .vertical).lineLimit(1...5) }
             field("Links") { linksEditor }
             field("Learnings") {
                 TextField("One per line", text: $learningsText, axis: .vertical).lineLimit(2...8)
@@ -3246,6 +3251,20 @@ private struct DetailsEditor: View {
         .textFieldStyle(.roundedBorder)
         .controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func headerField(_ section: HeaderSection) -> some View {
+        switch section {
+        case .summary: TextField("", text: $summary, axis: .vertical).lineLimit(1...5)
+        case .problem: TextField("", text: $problem, axis: .vertical).lineLimit(1...5)
+        case .approach: TextField("", text: $approach, axis: .vertical).lineLimit(1...5)
+        case .goals:
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(0..<3, id: \.self) { i in
+                    TextField("\(section.label.dropLast()) \(i + 1)", text: $goals[i])
+                }
+            }
+        }
     }
 
     /// The link rows plus an "Add link" affordance. A short Label field leads a wider URL field, with a

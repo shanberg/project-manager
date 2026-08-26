@@ -57,21 +57,22 @@ enum ProjectLifecycle {
 
     // MARK: Creating
 
-    /// Create a project, focus it, and hand back its key. The caller decides what to open.
-    static func create(domainCode: String, title: String) throws -> String {
+    /// Create a project or an area, focus it, and hand back its key. The caller decides what to open.
+    static func create(kind: ProjectKind = .project, domainCode: String? = nil, title: String) throws -> String {
         let (config, paths) = try loadConfigAndPaths()
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else { throw PmError.invalidProjectTitle(title: title) }
-        let code = domainCode.uppercased()
-        guard config.domains[code] != nil else { throw PmError.unknownDomain(code) }
+        let code = domainCode?.uppercased()
+        if let code { guard config.domains[code] != nil else { throw PmError.unknownDomain(code) } }
 
         // `createProject` isn't atomic — a failed template read or notes write leaves the folder and
         // its subfolders behind — and it doesn't report which folder it got to, so there's nothing to
         // clean up by. Logged rather than swallowed: the leftover takes a number with it.
-        let path = try createProject(config: config, paths: paths, domainCode: code, title: trimmedTitle)
+        let path = try createProject(config: config, paths: paths, kind: kind,
+                                     domainCode: code, title: trimmedTitle)
         let name = (path as NSString).lastPathComponent
-        Log.write("project created: \(name)")
-        let newKey = key(base: paths.activePath, name: name)
+        Log.write("\(kind.rawValue) created: \(name)")
+        let newKey = key(base: kind.root(in: paths), name: name)
         try? PMFiles.setFocusedProjectKey(newKey)
         PMFiles.recordRecent(projectKey: newKey, name: name)
         refresh()

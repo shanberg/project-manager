@@ -61,9 +61,7 @@ func runList(scope: String) {
         if bench { stderr(String(format: "getProjectFolders(active): %.2f ms (%d projects)", (now() - t1) * 1000, active.count)) }
 
         let t2 = now()
-        // The archive holds both kinds, so it takes both scans; `active` and `areas` each hold one.
-        let archive = ((try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes))
-                     + (try getAreaFolders(basePath: paths.archivePath))).sorted()
+        let archive = try getFolders(basePath: paths.archivePath, scope: .archive, domainCodes: domainCodes)
         if bench { stderr(String(format: "getProjectFolders(archive): %.2f ms (%d projects)", (now() - t2) * 1000, archive.count)) }
 
         let t3 = now()

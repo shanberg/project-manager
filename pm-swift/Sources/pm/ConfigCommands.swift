@@ -81,7 +81,13 @@ func runConfigGet(key: String?) {
                 "subfolders": config.subfolders,
             ]
             obj["paraPath"] = config.paraPath ?? NSNull()
+            // Resolved rather than raw. `areasPath` is unset in every config written before Areas
+            // existed, and a reader handed null would have to re-derive the fallback itself — which is
+            // the same rule stated twice, in another language, in the surface most likely to drift.
+            obj["areasPath"] = (try? resolvePaths(config: config).areasPath) ?? config.areasPath ?? NSNull()
+            obj["areaSubfolders"] = config.areaSubfolders ?? defaultAreaSubfolders
             obj["notesTemplatePath"] = config.notesTemplatePath ?? NSNull()
+            obj["areaNotesTemplatePath"] = config.areaNotesTemplatePath ?? NSNull()
             obj["useObsidianCLI"] = config.useObsidianCLI ?? false
             obj["obsidianVault"] = config.obsidianVault ?? NSNull()
             obj["obsidianVaultPath"] = config.obsidianVaultPath ?? NSNull()

@@ -44,6 +44,13 @@ final class PMStore: ObservableObject {
     @Published private(set) var projectName: String?
     /// Resolved project folder path, captured during reload (for Open in Finder etc.).
     @Published private(set) var projectPath: String?
+
+    /// Whether the thing this store is bound to is a project or an area.
+    ///
+    /// Derived from the folder name, like everywhere else, so it can't disagree with what the file on
+    /// disk is. A store with nothing loaded reads as a project — that's what the app was before Areas
+    /// existed, and `ProjectKind.of` would call an empty name an area.
+    var kind: ProjectKind { projectName.map(ProjectKind.of(folderName:)) ?? .project }
     /// Resolved path to the focused project's notes file, captured during reload so the app can watch
     /// it without re-scanning the (protected) project directory on every UI update.
     @Published private(set) var notesPath: String?

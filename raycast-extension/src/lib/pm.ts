@@ -22,7 +22,17 @@ export const DEFAULT_SUBFOLDERS = [
 
 export interface PmPaths {
   activePath: string;
+  areasPath: string;
   archivePath: string;
+}
+
+/**
+ * Where Areas live when an older pm didn't publish it: beside the active folder, the same guess
+ * `resolvePaths` makes. A vault with no areas/ directory has no Areas, which is the right answer, so
+ * nothing here has to handle its absence.
+ */
+function areasBesideActive(activePath: string): string {
+  return path.join(path.dirname(activePath), "areas");
 }
 
 /** Full pm config shape (matches pm CLI config.json). */
@@ -152,6 +162,7 @@ export async function getPmPaths(
   );
   const config = JSON.parse(stdout.trim()) as {
     activePath?: string;
+    areasPath?: string;
     archivePath?: string;
   };
   const activePath = config.activePath ?? "";
@@ -159,8 +170,13 @@ export async function getPmPaths(
   if (!activePath || !archivePath) {
     throw new Error("pm config missing paths. Run: pm config init");
   }
+  const normalizedActive = path.normalize(expandPath(activePath));
   return {
-    activePath: path.normalize(expandPath(activePath)),
+    activePath: normalizedActive,
+    // `pm config get` publishes this already resolved; the fallback is for a pm older than Areas.
+    areasPath: config.areasPath
+      ? path.normalize(expandPath(config.areasPath))
+      : areasBesideActive(normalizedActive),
     archivePath: path.normalize(expandPath(archivePath)),
   };
 }
@@ -176,13 +192,18 @@ export async function getPmPathsIfPresent(
       const data = await readFile(configPath, "utf-8");
       const config = JSON.parse(data) as {
         activePath?: string;
+        areasPath?: string;
         archivePath?: string;
       };
       const activePath = (config.activePath ?? "").trim();
       const archivePath = (config.archivePath ?? "").trim();
       if (!activePath || !archivePath) return null;
+      const normalizedActive = path.normalize(expandPath(activePath));
       return {
-        activePath: path.normalize(expandPath(activePath)),
+        activePath: normalizedActive,
+        areasPath: (config.areasPath ?? "").trim()
+          ? path.normalize(expandPath((config.areasPath ?? "").trim()))
+          : areasBesideActive(normalizedActive),
         archivePath: path.normalize(expandPath(archivePath)),
       };
     } catch {
@@ -200,13 +221,18 @@ export async function getPmPathsIfPresent(
     if (code !== 0) return fromConfigJson();
     const config = JSON.parse(stdout.trim()) as {
       activePath?: string;
+      areasPath?: string;
       archivePath?: string;
     };
     const activePath = (config.activePath ?? "").trim();
     const archivePath = (config.archivePath ?? "").trim();
     if (!activePath || !archivePath) return null;
+    const normalizedActive = path.normalize(expandPath(activePath));
     return {
-      activePath: path.normalize(expandPath(activePath)),
+      activePath: normalizedActive,
+      areasPath: (config.areasPath ?? "").trim()
+        ? path.normalize(expandPath((config.areasPath ?? "").trim()))
+        : areasBesideActive(normalizedActive),
       archivePath: path.normalize(expandPath(archivePath)),
     };
   } catch {

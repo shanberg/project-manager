@@ -83,37 +83,58 @@ export async function ensureTodaySession(
 
 export function parseListAllOutput(stdout: string): {
   active: string[];
+  areas: string[];
   archive: string[];
 } {
-  const lines = stdout.split("\n");
-  const activeList: string[] = [];
-  const archiveList: string[] = [];
-  let inArchive = false;
+  const headings: Record<string, "active" | "areas" | "archive"> = {
+    "Active:": "active",
+    "Areas:": "areas",
+    "Archive:": "archive",
+  };
+  const out = {
+    active: [] as string[],
+    areas: [] as string[],
+    archive: [] as string[],
+  };
+  let section: "active" | "areas" | "archive" = "active";
 
-  for (const line of lines) {
+  for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed === "Archive:") {
-      inArchive = true;
+    const heading = headings[trimmed];
+    if (heading) {
+      section = heading;
       continue;
     }
-    if (trimmed === "Active:") continue;
     if (trimmed === "(none)") continue;
-    if (line.startsWith(" ") && trimmed) {
-      if (inArchive) archiveList.push(trimmed);
-      else activeList.push(trimmed);
-    }
+    if (line.startsWith(" ") && trimmed) out[section].push(trimmed);
   }
-  return { active: activeList, archive: archiveList };
+  return out;
+}
+
+/**
+ * Whether a folder name is an area rather than a project: a project carries a `CODE-NNN ` prefix and
+ * an area doesn't. Mirrors `ProjectKind.of(folderName:)` in PmLib — the kind is derived from the name
+ * everywhere, never stored, so both kinds can share one archive.
+ */
+const NUMBERED_PROJECT_PREFIX = /^[A-Za-z]+-\d+\s+/;
+
+export function isAreaFolder(folderName: string): boolean {
+  return !NUMBERED_PROJECT_PREFIX.test(folderName);
 }
 
 export function hasSrcDir(projectPath: string): boolean {
   return existsSync(path.join(projectPath, "src"));
 }
 
-/** Expected notes file path from project folder path (for display when file does not exist yet). */
+/**
+ * Expected notes file path from project folder path (for display when file does not exist yet).
+ *
+ * Only a real `CODE-NNN ` prefix comes off. Splitting on the first space — what this did until Areas
+ * existed, matching the same bug in PmLib's `projectTitle` — turned the area "Team 1:1s" into "1:1s"
+ * and pointed this at `docs/Notes - 1:1s.md`.
+ */
 export function getNotesPath(projectPath: string): string {
   const folderName = path.basename(projectPath);
-  const spaceIdx = folderName.indexOf(" ");
-  const title = spaceIdx >= 0 ? folderName.slice(spaceIdx + 1) : folderName;
+  const title = folderName.replace(NUMBERED_PROJECT_PREFIX, "");
   return path.join(projectPath, "docs", `Notes - ${title}.md`);
 }

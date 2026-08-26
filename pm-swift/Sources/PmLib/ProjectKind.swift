@@ -151,6 +151,32 @@ public extension ProjectKind {
     }
 }
 
+public extension ProjectScope {
+    /// Which kinds live in this root.
+    ///
+    /// The archive holds both — one archive, as PARA has it — and `active` and `areas` hold one each.
+    /// Expressed as the inverse of `homeScope` rather than as its own table, so the two can't disagree.
+    var kinds: [ProjectKind] {
+        ProjectKind.allCases.filter { self == .archive || $0.homeScope == self }
+    }
+}
+
+/// Every folder in a root that PM knows about, whichever kinds live there, sorted by name.
+///
+/// The alternative is each caller writing "the projects, plus the areas, and mind that the archive has
+/// both" — which is three or four statements of one fact, each of which can be the one that forgets
+/// the archive holds two kinds.
+public func getFolders(basePath: String, scope: ProjectScope, domainCodes: [String]) throws -> [String] {
+    var names: [String] = []
+    for kind in scope.kinds {
+        switch kind {
+        case .project: names += try getProjectFolders(basePath: basePath, domainCodes: domainCodes)
+        case .area: names += try getAreaFolders(basePath: basePath)
+        }
+    }
+    return names.sorted()
+}
+
 // MARK: - Header sections
 
 /// How a section's content is shaped, and therefore how it is written and edited.
