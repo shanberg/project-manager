@@ -355,4 +355,90 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(stdoutShow.contains("Jan 15, 2025"), "notes show should include session date from --date 2025-01-15")
         XCTAssertTrue(stdoutShow.contains("Sprint 1"), "notes show should include session label")
     }
+
+    // MARK: Areas
+
+    /// The end-to-end shape of an Area: made without a domain, in its own root, listed on its own, and
+    /// carrying the header its kind calls for rather than a project's.
+    func testNewAreaCreatesAnUnnumberedFolderWithTheAreaHeader() throws {
+        try skipIfNoBinary()
+        let made = runPm(["new", "--area", "Team 1:1s"])
+        XCTAssertEqual(made.exitCode, 0, made.stderr)
+
+        let areasPath = ((activePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent("areas")
+        let folder = (areasPath as NSString).appendingPathComponent("Team 1:1s")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder), "expected an area at \(folder)")
+
+        // The notes file lands at the full title, which is the projectTitle fix doing its job.
+        let notesPath = (folder as NSString).appendingPathComponent("docs/Notes - Team 1:1s.md")
+        let notes = try String(contentsOfFile: notesPath, encoding: .utf8)
+        XCTAssertTrue(notes.contains("# Team 1:1s"))
+        XCTAssertTrue(notes.contains("> [!info] Goals"))
+        XCTAssertFalse(notes.contains("Problem"), "an area's template has no Problem")
+        XCTAssertFalse(notes.contains("Approach"), "an area's template has no Approach")
+
+        let listed = runPm(["list", "--areas"])
+        XCTAssertTrue(listed.stdout.contains("Team 1:1s"), listed.stdout + listed.stderr)
+
+        // And it stays out of the project list, where a number would have put it.
+        let projects = runPm(["list"])
+        XCTAssertFalse(projects.stdout.contains("Team 1:1s"), projects.stdout)
+    }
+
+    func testNewAreaTakesNoDomain() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "W", "First"])
+        _ = runPm(["new", "--area", "Hiring"])
+        let second = runPm(["new", "W", "Second"])
+        XCTAssertTrue(second.stdout.contains("W-2 Second"),
+                      "an area must not take a number: \(second.stdout)")
+    }
+
+    /// Both kinds share one archive, and an Area still knows to come back to areas/ rather than active/.
+    func testArchivingAnAreaAndBringingItBack() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let areasPath = ((activePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent("areas")
+
+        let archived = runPm(["api", "call", "project.archive", #"{"project":"Team 1:1s"}"#])
+        XCTAssertEqual(archived.exitCode, 0, archived.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: (archivePath as NSString).appendingPathComponent("Team 1:1s")))
+
+        let restored = runPm(["api", "call", "project.unarchive", #"{"project":"Team 1:1s"}"#])
+        XCTAssertEqual(restored.exitCode, 0, restored.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: (areasPath as NSString).appendingPathComponent("Team 1:1s")),
+            "an unarchived area belongs in areas/, not active/")
+    }
+
+    /// Capture works on an Area with nothing added for it — one resolver serves both kinds.
+    func testTasksAndNotesGoIntoAnAreaLikeAnyOtherProject() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let added = runPm(["api", "call", "task.add",
+                           #"{"project":"Team 1:1s","text":"send Dana the levelling doc"}"#])
+        XCTAssertEqual(added.exitCode, 0, added.stderr)
+
+        let read = runPm(["api", "call", "notes.get", #"{"project":"Team 1:1s"}"#])
+        XCTAssertTrue(read.stdout.contains("send Dana the levelling doc"), read.stdout)
+    }
+
+    /// A section the kind leaves out is refused where the caller can be told, rather than written and
+    /// then dropped by the next thing that rewrites the document.
+    func testSettingAProblemOnAnAreaIsRefused() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let refused = runPm(["api", "call", "notes.setDetail",
+                             #"{"project":"Team 1:1s","key":"problem","value":"nope"}"#])
+        XCTAssertNotEqual(refused.exitCode, 0)
+        XCTAssertTrue((refused.stdout + refused.stderr).contains("no Problem section"),
+                      refused.stdout + refused.stderr)
+
+        let allowed = runPm(["api", "call", "notes.setDetail",
+                             #"{"project":"Team 1:1s","key":"summary","value":"Weekly."}"#])
+        XCTAssertEqual(allowed.exitCode, 0, allowed.stderr)
+    }
 }

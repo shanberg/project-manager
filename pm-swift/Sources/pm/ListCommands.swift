@@ -61,8 +61,14 @@ func runList(scope: String) {
         if bench { stderr(String(format: "getProjectFolders(active): %.2f ms (%d projects)", (now() - t1) * 1000, active.count)) }
 
         let t2 = now()
-        let archive = try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
+        // The archive holds both kinds, so it takes both scans; `active` and `areas` each hold one.
+        let archive = ((try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes))
+                     + (try getAreaFolders(basePath: paths.archivePath))).sorted()
         if bench { stderr(String(format: "getProjectFolders(archive): %.2f ms (%d projects)", (now() - t2) * 1000, archive.count)) }
+
+        let t3 = now()
+        let areas = try getAreaFolders(basePath: paths.areasPath)
+        if bench { stderr(String(format: "getAreaFolders: %.2f ms (%d areas)", (now() - t3) * 1000, areas.count)) }
 
         if bench { stderr(String(format: "total (in runList): %.2f ms", (now() - tStart) * 1000)) }
 
@@ -81,6 +87,21 @@ func runList(scope: String) {
                         "(project folders must match: <domain>-<number> <title>, e.g. W-1 My Project)",
                         "(if Raycast shows projects, run List Projects there once to sync paths to this config)"
                     ]
+                )
+            }
+        }
+        if scope == "areas" || scope == "all" {
+            if scope == "all" { print("\nAreas:") }
+            for name in areas {
+                print(scope == "all" ? " \(name)" : name)
+            }
+            if scope == "all" && areas.isEmpty { print("  (none)") }
+            if areas.isEmpty && scope == "areas" {
+                printEmptyListHints(
+                    path: paths.areasPath,
+                    pathLabel: "Areas path",
+                    noProjectsMessage: "(no areas in: \(paths.areasPath))",
+                    extraStderrLines: ["(make one with: pm new --area 'Team 1:1s')"]
                 )
             }
         }
@@ -103,26 +124,34 @@ func runList(scope: String) {
 }
 
 func runNew(args: [String]) {
-    guard args.count >= 2 else {
-        stderr("Usage: pm new <domain> <title>")
-        stderr("Example: pm new W 'Website Refresh'")
+    // An area takes no domain, so `pm new --area <title>` has one argument where `pm new` has two.
+    let makingArea = args.contains("--area")
+    let rest = args.filter { $0 != "--area" }
+    let needed = makingArea ? 1 : 2
+    guard rest.count >= needed else {
+        stderr(makingArea ? "Usage: pm new --area <title>" : "Usage: pm new <domain> <title>")
+        stderr(makingArea ? "Example: pm new --area 'Team 1:1s'" : "Example: pm new W 'Website Refresh'")
         exit(1)
     }
-    let domainCode = args[0].uppercased()
-    let title = args[1].trimmingCharacters(in: .whitespaces)
+    let domainCode = makingArea ? nil : rest[0].uppercased()
+    let title = rest[makingArea ? 0 : 1].trimmingCharacters(in: .whitespaces)
     do {
         let (config, paths) = try loadConfigAndPaths()
-        if domainCode.isEmpty || title.isEmpty {
-            stderr("Domain and title are required.")
-            stderr("Domains: \(config.domains.keys.sorted().joined(separator: ", "))")
+        guard !title.isEmpty else {
+            stderr(makingArea ? "A title is required." : "Domain and title are required.")
+            if !makingArea { stderr("Domains: \(config.domains.keys.sorted().joined(separator: ", "))") }
             exit(1)
         }
-        guard config.domains[domainCode] != nil else {
-            stderr("Unknown domain: \(domainCode)")
-            stderr("Known domains: \(config.domains.keys.sorted().joined(separator: ", "))")
-            exit(1)
+        if let domainCode {
+            guard config.domains[domainCode] != nil else {
+                stderr("Unknown domain: \(domainCode)")
+                stderr("Known domains: \(config.domains.keys.sorted().joined(separator: ", "))")
+                exit(1)
+            }
         }
-        let projectPath = try createProject(config: config, paths: paths, domainCode: domainCode, title: title)
+        let projectPath = try createProject(config: config, paths: paths,
+                                            kind: makingArea ? .area : .project,
+                                            domainCode: domainCode, title: title)
         print("Created: \(projectPath)")
     } catch { fail(error) }
 }

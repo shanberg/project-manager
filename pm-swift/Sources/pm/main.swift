@@ -11,6 +11,7 @@ private func dispatch(cmd: String, args: [String]) {
         var scope = "active"
         if args.contains("--all") { scope = "all" }
         else if args.contains("--archive") || args.contains("-a") { scope = "archive" }
+        else if args.contains("--areas") { scope = "areas" }
         runList(scope: scope)
     case "archive":
         runArchive(args: args)

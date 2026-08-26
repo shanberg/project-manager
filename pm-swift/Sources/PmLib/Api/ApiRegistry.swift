@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.1.0"
+public let apiContractVersion = "1.2.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -166,24 +166,29 @@ public enum ApiRegistry {
 
         // MARK: Projects
         ApiActionSpec(name: "project.create", tier: .mutation,
-                      summary: "Create a project, numbered within its domain.",
-                      fields: [ApiField("title", .string, required: true, "Project title."),
-                               ApiField("domain", .string, required: true, "Domain code, e.g. W.")]),
+                      summary: "Create a project, numbered within its domain, or an unnumbered area.",
+                      fields: [ApiField("title", .string, required: true, "Project or area title."),
+                               ApiField("kind", .string, "What to make. Default project.",
+                                        allowed: ProjectKind.allCases.map(\.rawValue)),
+                               ApiField("domain", .string, "Domain code, e.g. W. Required for a project, refused for an area.")]),
         ApiActionSpec(name: "project.rename", tier: .mutation,
                       summary: "Rename a project, keeping its domain and number.",
                       fields: [project, ApiField("title", .string, required: true, "The new title.")]),
         ApiActionSpec(name: "project.archive", tier: .mutation,
-                      summary: "Move a project to the archive.", fields: [project]),
+                      summary: "Move a project or area to the archive.", fields: [project]),
         ApiActionSpec(name: "project.unarchive", tier: .mutation,
-                      summary: "Move a project back to active.", fields: [project]),
+                      summary: "Move a project or area back out of the archive, to wherever its kind lives.",
+                      fields: [project]),
         ApiActionSpec(name: "project.focus", tier: .mutation,
                       summary: "Make this the focused project.", fields: [project]),
 
         // MARK: Queries
         ApiActionSpec(name: "project.list", tier: .query,
-                      summary: "Every project, with its domain.",
+                      summary: "Every project and area, each with its kind.",
                       fields: [ApiField("scope", .string, "Which folder to list. Default active.",
-                                        allowed: ["active", "archive", "all"])]),
+                                        allowed: ["active", "areas", "archive", "all"]),
+                               ApiField("kind", .string, "Only this kind. Default both.",
+                                        allowed: ProjectKind.allCases.map(\.rawValue))]),
         ApiActionSpec(name: "project.get", tier: .query,
                       summary: "One project's paths and domain.", fields: [project]),
         ApiActionSpec(name: "notes.get", tier: .query,

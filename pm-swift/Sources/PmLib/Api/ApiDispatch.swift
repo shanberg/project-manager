@@ -276,6 +276,14 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
 
     // MARK: Notes
     case "notes.setDetail":
+        // Refused here rather than written and dropped. The serializer keeps a section the kind omits
+        // only when it isn't empty, so setting one on an area would appear to work and then vanish the
+        // next time anything rewrote the document.
+        let detailKind = ProjectKind.of(folderName: try folderName(of: input.project ?? ""))
+        if let section = HeaderSection(rawValue: input.key ?? ""), !detailKind.headerSections.contains(section) {
+            throw ApiError(.invalidField, "An \(detailKind.rawValue) has no \(section.label) section.",
+                           detail: .string("key"))
+        }
         return try document(spec, input, options) { rawText in
             var notes = try parseNotes(markdown: rawText)
             try setDetail(&notes, key: input.key ?? "", value: input.value)
@@ -298,10 +306,16 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
     // MARK: Projects
     case "project.create":
         let (config, paths) = try loadConfigAndPaths()
-        guard let domain = input.domain, config.domains[domain] != nil else {
+        // Absent means project: that's what every caller written before Areas existed meant by saying
+        // nothing, and the field is validated against `allowed` before it gets here.
+        let kind = ProjectKind(rawValue: input.kind ?? ProjectKind.project.rawValue) ?? .project
+        if kind.isNumbered, input.domain == nil || config.domains[input.domain ?? ""] == nil {
             throw ApiError(.invalidField, "Unknown domain: \(input.domain ?? "")", detail: .string("domain"))
         }
-        let path = try createProject(config: config, paths: paths, domainCode: domain,
+        if !kind.isNumbered, input.domain != nil {
+            throw ApiError(.invalidField, "An \(kind.rawValue) doesn't take a domain code.", detail: .string("domain"))
+        }
+        let path = try createProject(config: config, paths: paths, kind: kind, domainCode: input.domain,
                                      title: input.title ?? "", dryRun: options.dryRun)
         let name = (path as NSString).lastPathComponent
         return metadata(spec, options, path: path,
@@ -316,16 +330,24 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let archiving = spec.name == "project.archive"
         let (_, paths) = try loadConfigAndPaths()
         let folder = try folderName(of: input.project ?? "")
-        let path = try moveProject(named: folder, from: archiving ? .active : .archive,
-                                   to: archiving ? .archive : .active, paths: paths,
+        // Everything archives into the one archive; what comes back out goes wherever its kind lives,
+        // which its name still says however long it has been in there.
+        let home = ProjectKind.of(folderName: folder).homeScope
+        let path = try moveProject(named: folder, from: archiving ? home : .archive,
+                                   to: archiving ? .archive : home, paths: paths,
                                    dryRun: options.dryRun)
         return metadata(spec, options, path: path,
                         archiving ? Phrase(past: "Archived \(folder)", future: "archive \(folder)")
                                   : Phrase(past: "Restored \(folder)", future: "restore \(folder)"))
     case "project.focus":
-        let folder = try folderName(of: input.project ?? "")
-        let (_, paths) = try loadConfigAndPaths()
-        if !options.dryRun { try setFocusedProject(key: "\(paths.activePath):\(folder)") }
+        // The key is built from where the thing actually is, not from `activePath`. That was the same
+        // string for every project and stops being so the moment an area — or anything archived — can
+        // be focused.
+        let path = try resolveProjectPath(nameOrPrefix: input.project ?? "")
+        let folder = (path as NSString).lastPathComponent
+        if !options.dryRun {
+            try setFocusedProject(key: "\((path as NSString).deletingLastPathComponent):\(folder)")
+        }
         return ApiResult(action: spec.name,
                          summary: Phrase(past: "Focused \(folder)",
                                          future: "focus \(folder)").sentence(dryRun: options.dryRun),
@@ -421,19 +443,27 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
         let codes = Array(config.domains.keys)
         let scope = input.scope ?? "active"
+        let wanted = input.kind.flatMap(ProjectKind.init(rawValue:))
         var entries: [JSONValue] = []
-        for (name, base) in [("active", paths.activePath), ("archive", paths.archivePath)]
-        where scope == "all" || scope == name {
-            for folder in (try? getProjectFolders(basePath: base, domainCodes: codes)) ?? [] {
+        // The archive is listed for both kinds because it holds both; `active` and `areas` each hold
+        // one, and asking the other scan for it costs a directory read that finds nothing.
+        for scopeCase in ProjectScope.allCases where scope == "all" || scope == scopeCase.rawValue {
+            let base = scopeCase.path(in: paths)
+            let folders = ((try? getProjectFolders(basePath: base, domainCodes: codes)) ?? [])
+                        + ((try? getAreaFolders(basePath: base)) ?? [])
+            for folder in folders.sorted() {
+                let kind = ProjectKind.of(folderName: folder)
+                guard wanted == nil || wanted == kind else { continue }
                 entries.append(.object([
                     "folder": .string(folder),
                     "name": .string(projectTitle(fromFolderName: folder)),
-                    "scope": .string(name),
+                    "kind": .string(kind.rawValue),
+                    "scope": .string(scopeCase.rawValue),
                     "path": .string((base as NSString).appendingPathComponent(folder)),
                 ]))
             }
         }
-        return ApiResult(action: spec.name, summary: "\(entries.count) project\(entries.count == 1 ? "" : "s").",
+        return ApiResult(action: spec.name, summary: "\(entries.count) result\(entries.count == 1 ? "" : "s").",
                          data: .array(entries))
     case "project.get":
         let folder = try folderName(of: input.project ?? "")
@@ -441,6 +471,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return ApiResult(action: spec.name, summary: folder, data: .object([
             "folder": .string(folder),
             "name": .string(projectTitle(fromFolderName: folder)),
+            "kind": .string(ProjectKind.of(folderName: folder).rawValue),
             "path": .string(path),
             "notesPath": (try resolveNotesPath(projectPath: path)).map(JSONValue.string) ?? .null,
         ]))

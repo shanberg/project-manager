@@ -344,7 +344,7 @@ public func moveSubtreePreservingFormat(
     insertAfterAnchor: Bool,
     depth: Int
 ) -> String? {
-    var lines = rawText.components(separatedBy: "\n")
+    let lines = rawText.components(separatedBy: "\n")
     guard let sourceStart = rawTaskLineNumber(lines, sessionIndex: sourceSessionIndex, taskIndex: sourceLineIndex),
           let anchorLine = rawTaskLineNumber(lines, sessionIndex: anchorSessionIndex, taskIndex: anchorLineIndex)
     else { return nil }
@@ -354,7 +354,39 @@ public func moveSubtreePreservingFormat(
     if sourceRange.contains(anchorLine) { return nil }
 
     let insertAt = insertAfterAnchor ? anchorLine + 1 : anchorLine
-    let sourceIndent = leadingSpaces(lines[sourceStart])
+    return splicedSubtree(lines, sourceRange: sourceRange, insertAt: insertAt, depth: depth)
+        .joined(separator: "\n")
+}
+
+/// Move the subtree at (sourceSessionIndex, sourceLineIndex) to the end of a session's task list,
+/// re-rooted at depth 0. This is the destination a drop into a session with no tasks names: there is
+/// no anchor task there to sit beside, only the session itself.
+///
+/// Where it lands inside the session is the rule a newly added task already follows — after the last
+/// task if there is one, else after the session's leading prose so the note isn't stranded below the
+/// list, else right under the heading. A session that reads as empty on screen isn't always empty in
+/// the file (the task being dragged is still in it until the splice), which is why this appends rather
+/// than assuming the session is bare.
+public func moveSubtreeToSessionPreservingFormat(
+    rawText: String,
+    sourceSessionIndex: Int,
+    sourceLineIndex: Int,
+    targetSessionIndex: Int
+) -> String? {
+    let lines = rawText.components(separatedBy: "\n")
+    guard let sourceStart = rawTaskLineNumber(lines, sessionIndex: sourceSessionIndex, taskIndex: sourceLineIndex),
+          let slot = rawSessionAppendSlot(lines, sessionIndex: targetSessionIndex)
+    else { return nil }
+    return splicedSubtree(lines, sourceRange: rawSubtreeRange(lines, start: sourceStart),
+                          insertAt: slot.line, depth: 0)
+        .joined(separator: "\n")
+}
+
+/// Lift the block at `sourceRange` out of `lines` and re-insert it at `insertAt`, re-indented so its
+/// root sits at `depth` and the nesting inside it is preserved.
+private func splicedSubtree(_ lines: [String], sourceRange: Range<Int>, insertAt: Int, depth: Int) -> [String] {
+    var lines = lines
+    let sourceIndent = leadingSpaces(lines[sourceRange.lowerBound])
     let newRootIndent = max(0, depth) * 2
 
     // Re-indent every block line by the same delta so relative nesting is preserved. A negative delta
@@ -365,12 +397,12 @@ public func moveSubtreePreservingFormat(
         delta >= 0 ? String(repeating: " ", count: delta) + line : String(line.dropFirst(-delta))
     }
 
-    // Splice: drop the source block, then insert the re-indented copy. Insertion points at or after the
+    // Drop the source block, then insert the re-indented copy. Insertion points at or after the
     // removed block shift left by its length; points before it are unaffected.
     let adjustedInsert = insertAt >= sourceRange.upperBound ? insertAt - block.count : insertAt
     lines.removeSubrange(sourceRange)
     lines.insert(contentsOf: reindented, at: adjustedInsert)
-    return lines.joined(separator: "\n")
+    return lines
 }
 
 /// Delete the subtree rooted at the task at (sessionIndex, lineIndex): its own line plus the
@@ -402,6 +434,28 @@ public func appendTaskToSession(
     due: String?
 ) -> (rawText: String, sessionIndex: Int, lineIndex: Int)? {
     var lines = rawText.components(separatedBy: "\n")
+    guard let slot = rawSessionAppendSlot(lines, sessionIndex: targetSession) else { return nil }
+    // Tasks inherit the session's indent level (root); reuse the last task's prefix when present.
+    lines.insert(newTaskLine(prefix: slot.prefix, text: text, due: due), at: slot.line)
+    return (lines.joined(separator: "\n"), targetSession, slot.taskIndex)
+}
+
+/// Where a task appended to a session goes, and what it should look like when it gets there. Shared
+/// by "add a task to this session" and by a drag dropped on the session itself, so the two can't
+/// drift on the one question they both have to answer.
+private struct SessionAppendSlot {
+    /// The line the appended task is inserted at.
+    let line: Int
+    /// Its `lineIndex` within the session once inserted.
+    let taskIndex: Int
+    /// The list prefix to match — the last task's, or `"- "` in a session with none.
+    let prefix: String
+}
+
+/// Resolve `sessionIndex`'s append slot: after its last task if it has one, otherwise after its
+/// leading prose (its note), so the note isn't stranded below the list, otherwise right after the
+/// heading. Nil when the session can't be located.
+private func rawSessionAppendSlot(_ lines: [String], sessionIndex targetSession: Int) -> SessionAppendSlot? {
     var inSessions = false
     var sessionIndex = -1
     var taskIndex = 0
@@ -446,13 +500,9 @@ public func appendTaskToSession(
     }
 
     guard let heading = headingLine else { return nil }
-    // Tasks inherit the session's indent level (root); reuse the last task's prefix when present.
-    let inserted = newTaskLine(prefix: lastTaskLine != nil ? prefix : "- ", text: text, due: due)
-    // After the last task if there is one; otherwise after the session's leading prose (its note), so
-    // the note isn't stranded below the task; otherwise right after the heading.
-    let insertAt = (lastTaskLine ?? lastProseLine ?? heading) + 1
-    lines.insert(inserted, at: insertAt)
-    return (lines.joined(separator: "\n"), targetSession, taskIndex)
+    return SessionAppendSlot(line: (lastTaskLine ?? lastProseLine ?? heading) + 1,
+                             taskIndex: taskIndex,
+                             prefix: lastTaskLine != nil ? prefix : "- ")
 }
 
 // MARK: - Section-level splicing for `notes write`

@@ -125,6 +125,9 @@ public struct ApiInput: Codable, Equatable {
     public var prose: String?
     public var title: String?
     public var domain: String?
+    /// "project" or "area". Absent means project, which is what every caller written before Areas
+    /// existed means by saying nothing.
+    public var kind: String?
     public var scope: String?
     public var key: String?
     public var value: JSONValue?

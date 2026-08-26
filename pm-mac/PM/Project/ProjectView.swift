@@ -64,6 +64,9 @@ struct ProjectView: View {
     /// via a preference. The single list-level drop delegate reads these to resolve the pointer into a
     /// gap + depth.
     @State private var rowFrames: [RowFrame] = []
+    /// Frames of every rendered session heading, in the same space and collected the same way. A
+    /// session with no task rows to name a slot is a drop target in its own right — see `SessionFrame`.
+    @State private var sessionFrames: [SessionFrame] = []
     /// The single resolved insertion slot for the in-flight drag — where to paint the indicator and
     /// which document slot the drop will use. Nil when nothing is being dragged over the list.
     @State private var dropTarget: DropTarget?
@@ -120,10 +123,7 @@ struct ProjectView: View {
     /// them in different places in a wide window.
     private static var listWidth: ReadableWidth { ReadableWidth(cap: ProjectWindow.maxListWidth) }
 
-    /// Named coordinate space the task rows publish their frames in, and the drop delegate resolves the
-    /// pointer against. Shared with `TaskRow`, so it lives on the type.
-    static let taskListSpace = "pmTaskList"
-    /// The x (in `taskListSpace`) where a depth-0 row's content begins — matches the rows' leading
+    /// The x (in `TaskDropResolver.coordinateSpace`) where a depth-0 row's content begins — matches the rows' leading
     /// padding. The insertion indicator and the pointer→depth mapping both key off it.
     static let rowContentInset: CGFloat = 12
     /// Horizontal pixels per nesting level (matches `TaskRow.indent`'s step).
@@ -1331,14 +1331,25 @@ struct ProjectView: View {
 
     // MARK: Tasks
 
-    /// Session indices in first-appearance order among the visible todos.
+    /// The sessions the compact list draws, in document order: every session with a visible task, plus
+    /// every session with no tasks in it at all.
+    ///
+    /// The second half is the distinction worth stating. A session with nothing in it is drawn, because
+    /// it's a real session someone started and it should be visible, addressable, and something a task
+    /// can be dragged into — a session used to disappear the moment its last task was hidden, which
+    /// left ⇧⌘N's brand new session with nothing on screen to show for it. A session whose tasks are
+    /// merely *filtered* out — all complete in Incomplete mode, none matching the find bar — stays
+    /// hidden, because a bare caption there would claim the session is empty when it isn't, and a
+    /// search would answer with a wall of headings standing over its two matches.
     private var sessionOrder: [Int] {
-        var seen = Set<Int>()
-        var order: [Int] = []
-        for t in visibleTodos where !seen.contains(t.sessionIndex) {
-            seen.insert(t.sessionIndex); order.append(t.sessionIndex)
-        }
-        return order
+        let withVisibleTasks = Set(visibleTodos.map(\.sessionIndex))
+        let withAnyTasks = Set(store.todos.map(\.sessionIndex))
+        let declared = Set(0..<(store.notes?.sessions.count ?? 0))
+        // Union rather than the declared range alone: a todo whose session index outruns the parsed
+        // session list still has to be drawn somewhere rather than silently dropped.
+        return declared.union(withVisibleTasks)
+            .filter { withVisibleTasks.contains($0) || !withAnyTasks.contains($0) }
+            .sorted()
     }
 
     /// A session's bare label (no date), for seeding the rename editor. Empty when the index no
@@ -1485,8 +1496,9 @@ struct ProjectView: View {
                 groupedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             }
         }
-        .coordinateSpace(name: Self.taskListSpace)
+        .coordinateSpace(name: TaskDropResolver.coordinateSpace)
         .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+        .onPreferenceChange(SessionFramesKey.self) { sessionFrames = $0 }
         .overlay(alignment: .topLeading) { dropIndicator }
         // The app's own task type leads, so a reorder is matched by identity rather than by "some
         // text arrived"; `.text` stays in the list only because the same drag also carries markdown.
@@ -1518,8 +1530,10 @@ struct ProjectView: View {
                                            markdown: store.markdown(for: dragged))
     }
 
-    /// Default rendering: only sessions that have visible tasks, each introduced by a quiet caption.
-    /// Empty sessions stay hidden. This is the default when session notes aren't revealed.
+    /// Default rendering: each session `sessionOrder` picks, introduced by a quiet caption. A session
+    /// with no tasks draws its caption and nothing under it — that caption is the whole of it, and it's
+    /// what makes the session visible, right-clickable, and a place a task can be dragged into. This is
+    /// the default when session notes aren't revealed.
     @ViewBuilder private func groupedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
         ForEach(sessionOrder, id: \.self) { si in
             let context = sessionContext(si)
@@ -1562,8 +1576,10 @@ struct ProjectView: View {
                 // Outside the caption's hit area, so the gap between sessions stays blank space rather
                 // than becoming a taller target for the session below it.
                 .padding(.top, Self.sessionGap)
+                .background(SessionFrameReporter(index: si))
         }
     }
+
 
     /// Revealed rendering: every session (including empty ones) as a first-class row — its header, its
     /// editable prose note, and its tasks. Nothing else: adding a task or a session is a command
@@ -1664,7 +1680,7 @@ struct ProjectView: View {
         }
     }
 
-    /// Resolve a pointer location (in `taskListSpace`) into an insertion slot. The geometry lives in
+    /// Resolve a pointer location (in `TaskDropResolver.coordinateSpace`) into an insertion slot. The geometry lives in
     /// `TaskDropResolver`; this only supplies what the view knows — the visible rows, and which of them
     /// are riding along in the drag.
     private func computeDropTarget(at p: CGPoint) -> DropTarget? {
@@ -1672,20 +1688,28 @@ struct ProjectView: View {
               let dragged = store.todos.first(where: { PMStore.key(for: $0) == dk }) else { return nil }
         return TaskDropResolver.resolve(pointer: p,
                                         rows: rowFrames,
+                                        sessionFrames: sessionFrames,
                                         draggedSubtree: store.subtreeKeys(of: dragged),
                                         contentInset: Self.rowContentInset,
                                         indentStep: Self.indentStep)
     }
 
-    /// Commit a resolved drop: move the dragged subtree to the target's slot + depth, then clear state.
+    /// Commit a resolved drop: move the dragged subtree to the target's destination, then clear state.
     private func performListDrop(_ t: DropTarget) -> Bool {
         guard let dk = draggingKey,
-              let source = store.todos.first(where: { PMStore.key(for: $0) == dk }),
-              let anchor = store.todos.first(where: {
-                  $0.sessionIndex == t.anchorSession && $0.lineIndex == t.anchorLine
-              })
+              let source = store.todos.first(where: { PMStore.key(for: $0) == dk })
         else { return false }
-        store.moveSubtree(source, anchor: anchor, insertAfter: t.insertAfter, depth: t.depth)
+
+        switch t.destination {
+        case let .beside(session, line, after):
+            guard let anchor = store.todos.first(where: {
+                $0.sessionIndex == session && $0.lineIndex == line
+            }) else { return false }
+            store.moveSubtree(source, anchor: anchor, insertAfter: after, depth: t.depth)
+        case let .endOfSession(index):
+            store.moveSubtree(source, toSession: index)
+        }
+
         draggingKey = nil
         dropTarget = nil
         return true
@@ -2201,7 +2225,7 @@ private struct TaskRow: View {
                     // edge-to-edge and the gaps the drop delegate computes abut with no dead bands.
                     .padding(.vertical, 3)
                     .background(GeometryReader { g in
-                        let f = g.frame(in: .named(ProjectView.taskListSpace))
+                        let f = g.frame(in: .named(TaskDropResolver.coordinateSpace))
                         Color.clear.preference(key: RowFramesKey.self, value: [RowFrame(
                             key: key, session: todo.sessionIndex, line: todo.lineIndex,
                             depth: todo.depth, minY: f.minY, maxY: f.maxY)])
@@ -2663,6 +2687,10 @@ private struct SessionHeader: View {
         // one. It's bigger than the heading's own padding, which is what keeps a heading reading as
         // the start of the tasks below it.
         .padding(.top, ProjectView.sessionGap)
+        // Measured with the gap inside it, unlike the band: a drop on a session with no tasks has this
+        // block as its whole target, and a bare heading is a thin one to hit. The blank strip above a
+        // heading belongs to the session it introduces anyway.
+        .background(SessionFrameReporter(index: index))
     }
 
     private var headerLine: some View {

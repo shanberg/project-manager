@@ -306,6 +306,27 @@ public func moveSubtree(
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
+/// Move a todo (and its subtree) to the end of a session's task list, re-rooted at depth 0 —
+/// preserving format, as `moveSubtree` does. The destination a drag dropped on a session with no
+/// tasks names: there's no anchor task there to sit beside, only the session.
+public func moveSubtree(
+    project: String,
+    sourceSessionIndex: Int,
+    sourceLineIndex: Int,
+    toSessionIndex: Int
+) throws {
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    guard let updated = moveSubtreeToSessionPreservingFormat(
+        rawText: rawText,
+        sourceSessionIndex: sourceSessionIndex,
+        sourceLineIndex: sourceLineIndex,
+        targetSessionIndex: toSessionIndex) else {
+        throw PmError.notesNotFound(handle.notesPath)
+    }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}
+
 /// Set (or clear, with `due == nil`) the inline `due:` value on a todo line.
 @discardableResult
 public func setDueOnTodo(project: String, ref: TaskRef, due: String?) throws -> ResolvedTaskRef {

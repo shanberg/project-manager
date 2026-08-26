@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: Drag-to-reorder geometry
 //
 // The task list has one drop target for the whole list, not one per row. Everything that turns a
-// pointer position into "this task goes here" lives in this file: the row frames the rows publish,
-// the resolved slot, the pure resolver that maps between them, and the delegate that drives it.
+// pointer position into "this task goes here" lives in this file: the frames the rows and session
+// headings publish, the resolved slot, the pure resolver that maps between them, and the delegate
+// that drives it.
 //
 // Keeping the resolver a free function over plain values — no store, no view, no `@State` — is what
 // makes the geometry checkable on its own, which the ad-hoc version inside `ProjectView` was not.
@@ -33,24 +34,74 @@ struct RowFramesKey: PreferenceKey {
     }
 }
 
+/// A rendered session heading's vertical extent — the header line, its note, and the padding around
+/// them: the block a session occupies when it has no task rows of its own.
+///
+/// Published so a session with nothing in it is still a place you can drop on. Without it an empty
+/// session was a hole in the list: the only slots on offer were the ones named by task rows, so the
+/// one destination with no task rows to name it couldn't be reached at all — you had to drop the task
+/// in a neighbouring session and drag it again once there was something there to aim at.
+struct SessionFrame: Equatable {
+    let index: Int
+    let minY: CGFloat
+    let maxY: CGFloat
+}
+
+/// Collects every rendered session heading's frame for the drop delegate.
+struct SessionFramesKey: PreferenceKey {
+    static var defaultValue: [SessionFrame] = []
+    static func reduce(value: inout [SessionFrame], nextValue: () -> [SessionFrame]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// Publishes a session heading's block as a drop target. Goes in the heading's `.background`, the way
+/// a task row publishes its own frame.
+///
+/// Every rendered heading reports, empty or not — the resolver decides which ones are targets, since
+/// "empty" means "no rows left once the dragged subtree is lifted out", which a heading can't know
+/// about itself. Both headings wear it: the notes view's `SessionHeader` and the compact list's
+/// caption. What each list chooses to draw is what's reachable, so a session hidden because a filter
+/// emptied it isn't a target in either — see `ProjectView.sessionOrder`.
+struct SessionFrameReporter: View {
+    let index: Int
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .named(TaskDropResolver.coordinateSpace))
+            Color.clear.preference(key: SessionFramesKey.self,
+                                   value: [SessionFrame(index: index, minY: f.minY, maxY: f.maxY)])
+        }
+    }
+}
+
 /// The resolved insertion slot for an in-flight drag: where to paint the one indicator (the gap's Y
-/// and the chosen nesting depth) and the document slot the move will use (anchor row + which side).
+/// and the chosen nesting depth) and the destination the move will use.
 ///
 /// There is no "invalid" case. A slot either exists or it doesn't: the resolver lifts the dragged
 /// subtree out of the list before it looks for one, so every slot it can name is a slot the move can
 /// actually reach. Nil means there is nowhere to land — which happens only when the dragged subtree
-/// is the entire list.
+/// is the entire list and no session heading is on screen to take it.
 struct DropTarget: Equatable {
     let gapY: CGFloat
     let depth: Int
-    let anchorSession: Int
-    let anchorLine: Int
-    let insertAfter: Bool
+    let destination: Destination
+
+    /// Where the move lands. Almost every drop names a task to sit beside, which fixes both the
+    /// session and the position within it; a drop on a session with no tasks has only the session.
+    enum Destination: Equatable {
+        case beside(session: Int, line: Int, after: Bool)
+        case endOfSession(Int)
+    }
 }
 
 /// Turns a pointer position into exactly one insertion slot.
 enum TaskDropResolver {
-    /// Resolve `pointer` (in the task-list coordinate space) against the visible rows.
+    /// The named coordinate space every published frame — task row and session heading — is measured
+    /// in, and the one the drop delegate resolves the pointer against. It lives here rather than on
+    /// the view so there's a single name the measurers and the reader can't disagree about.
+    static let coordinateSpace = "pmTaskList"
+
+    /// Resolve `pointer` (in `coordinateSpace`) against the visible rows and session headings.
     ///
     /// The dragged subtree is lifted out of `rows` first, so the list is read as it will be *after*
     /// the move rather than as it looks during it. That one step is what makes the gestures people
@@ -60,16 +111,34 @@ enum TaskDropResolver {
     /// cursor. It also means the answer is never illegal, so there is no invalid state to paint.
     ///
     /// - Parameters:
+    ///   - sessionFrames: every rendered session heading, so a session with no rows left to name a
+    ///     slot can still be dropped on.
     ///   - draggedSubtree: `PMStore` keys of the dragged task and its descendants.
     ///   - contentInset: x of a depth-0 row's content — the origin the pointer's depth is measured from.
     ///   - indentStep: horizontal pixels per nesting level.
     static func resolve(pointer: CGPoint,
                         rows: [RowFrame],
+                        sessionFrames: [SessionFrame],
                         draggedSubtree: Set<String>,
                         contentInset: CGFloat,
                         indentStep: CGFloat) -> DropTarget? {
         let ordered = rows.sorted { $0.minY < $1.minY }
         let candidates = ordered.filter { !draggedSubtree.contains($0.key) }
+
+        // A session heading with no task rows under it *is* the session, so the whole of its block is
+        // the target — there's no gap to aim into. Checked before the gaps below, since a heading
+        // standing between two sessions' tasks otherwise reads as part of the boundary between them.
+        //
+        // "No task rows" counts what's left after the lift, so a session whose only task is the one
+        // being dragged becomes a destination for the duration of the drag. That's what lets you put
+        // a task back where it came from instead of stranding it in the session next door.
+        let occupied = Set(candidates.map(\.session))
+        if let session = sessionFrames.first(where: {
+            !occupied.contains($0.index) && pointer.y >= $0.minY && pointer.y < $0.maxY
+        }) {
+            return DropTarget(gapY: session.maxY, depth: 0, destination: .endOfSession(session.index))
+        }
+
         guard !candidates.isEmpty else { return nil }
 
         // Gap index = how many rows sit (by midpoint) at or above the pointer → 0 = above the first
@@ -127,9 +196,7 @@ enum TaskDropResolver {
     private static func slot(anchor: RowFrame, insertAfter: Bool, depth: Int) -> DropTarget {
         DropTarget(gapY: insertAfter ? anchor.maxY : anchor.minY,
                    depth: depth,
-                   anchorSession: anchor.session,
-                   anchorLine: anchor.line,
-                   insertAfter: insertAfter)
+                   destination: .beside(session: anchor.session, line: anchor.line, after: insertAfter))
     }
 
     private static func clamp(_ value: Int, _ low: Int, _ high: Int) -> Int {

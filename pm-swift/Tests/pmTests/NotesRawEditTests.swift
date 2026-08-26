@@ -465,6 +465,120 @@ final class NotesRawEditTests: XCTestCase {
                       "Checkbox, focus marker, and due travel with the moved line")
     }
 
+    // MARK: Moving onto a session rather than beside a task
+    //
+    // A session with no tasks has nothing to anchor a drop on, so the drag names the session itself
+    // and the task is appended to it. These pin the "where in the session" rule, which is the same one
+    // `appendTaskToSession` follows — they share it now, and these tests are what keeps them sharing it.
+
+    /// A session with no tasks at all: the moved subtree lands directly under its heading, re-rooted
+    /// at depth 0 however deep it was where it came from.
+    func testMoveSubtreeIntoEmptySession() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Parent
+          - [ ] Mover
+            - [ ] Child
+
+        ### Thu, Feb 26, 2025
+        """
+        let updated = try XCTUnwrap(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 1, targetSessionIndex: 1))
+        XCTAssertTrue(updated.contains("### Thu, Feb 26, 2025\n- [ ] Mover\n  - [ ] Child"),
+                      "Subtree appended under the empty session's heading, re-rooted at depth 0")
+        XCTAssertTrue(updated.contains("- [ ] Parent\n\n### Thu"),
+                      "and lifted out of the session it came from, leaving Parent childless")
+    }
+
+    /// An empty session that carries a note keeps the note above its task list — the same rule a
+    /// newly added first task follows, so a drop can't strand the note below the tasks.
+    func testMoveSubtreeIntoEmptySessionLandsBelowItsNote() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Mover
+
+        ### Thu, Feb 26, 2025
+
+        Picking up where yesterday left off.
+        """
+        let updated = try XCTUnwrap(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0, targetSessionIndex: 1))
+        XCTAssertTrue(updated.contains("Picking up where yesterday left off.\n- [ ] Mover"),
+                      "Task appended after the session's note, not above it")
+    }
+
+    /// A session that still has tasks appends after the last of them, at top level.
+    func testMoveSubtreeOntoSessionAppendsAfterItsLastTask() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Mover
+
+        ### Thu, Feb 26, 2025
+
+        - [ ] First
+          - [ ] Nested
+        """
+        let updated = try XCTUnwrap(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0, targetSessionIndex: 1))
+        XCTAssertTrue(updated.contains("- [ ] First\n  - [ ] Nested\n- [ ] Mover"),
+                      "Appended below the whole last subtree, at depth 0 rather than nested in it")
+    }
+
+    /// Dropping a session's only task back onto that same session puts it back — the session reads as
+    /// empty on screen while its one task is in the air, and the file still holds it until the splice.
+    func testMoveSubtreeOntoItsOwnSessionIsANoOp() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Only
+          - [ ] Child
+        """
+        let updated = try XCTUnwrap(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0, targetSessionIndex: 0))
+        XCTAssertEqual(updated, raw, "Round-trips unchanged")
+    }
+
+    /// The moved line travels verbatim here too — checkbox, due, and focus marker ride along.
+    func testMoveSubtreeOntoSessionPreservesLineContent() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [x] Done @ due: 2025-03-01
+
+        ### Thu, Feb 26, 2025
+        """
+        let updated = try XCTUnwrap(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0, targetSessionIndex: 1))
+        XCTAssertTrue(updated.contains("### Thu, Feb 26, 2025\n- [x] Done @ due: 2025-03-01"),
+                      "Checkbox, focus marker, and due travel with the moved line")
+    }
+
+    /// A session that isn't there names nothing, so the move is refused rather than guessed at.
+    func testMoveSubtreeOntoMissingSessionReturnsNil() throws {
+        let raw = """
+        ## Sessions
+
+        ### Wed, Feb 25, 2025
+
+        - [ ] Mover
+        """
+        XCTAssertNil(moveSubtreeToSessionPreservingFormat(
+            rawText: raw, sourceSessionIndex: 0, sourceLineIndex: 0, targetSessionIndex: 4))
+    }
+
     /// Dropping relative to a row inside the moved subtree is illegal and returns nil.
     func testMoveSubtreeAnchorInsideSelfReturnsNil() throws {
         let raw = """

@@ -522,6 +522,16 @@ final class PMStore: ObservableObject {
         }
     }
 
+    /// Move a task (and its subtree) to the end of a session, at top level. What a drop on a session
+    /// with no tasks means: there's no task there to sit beside, so the session is the whole address.
+    func moveSubtree(_ todo: Todo, toSession index: Int) {
+        mutate {
+            try PmLib.moveSubtree(project: $0,
+                                  sourceSessionIndex: todo.sessionIndex, sourceLineIndex: todo.lineIndex,
+                                  toSessionIndex: index)
+        }
+    }
+
     // MARK: Selection-wide operations
     //
     // The task list supports multi-selection, so these take a set of tasks and perform the

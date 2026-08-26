@@ -10,17 +10,28 @@ public func resolveProjectPath(nameOrPrefix: String) throws -> String {
 }
 
 /// Internal overload for testing with injected config and paths (avoids loading from disk).
-/// When the same folder name exists in both active and archive, the active path is returned.
+///
+/// Three roots, searched in the order a name should be understood: what's in hand first, then what's
+/// standing, then what's been put away. A name present in more than one resolves to the earliest —
+/// which is how `active` has always won over `archive`, now with `areas` between them.
+///
+/// This is the one place every surface turns a name into a thing, so teaching it about Areas is what
+/// makes `task.add`, `session.note`, `notes.get` and focus work on one without any of them changing.
+/// The archive is asked twice on purpose: it holds both kinds, and each scan only finds its own.
 internal func resolveProjectPath(config: PmConfig, paths: ResolvedPaths, nameOrPrefix: String) throws -> String {
     let domainCodes = Array(config.domains.keys)
-    let active = try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)
-    let archive = try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes)
-    let all = active + archive
-    switch matchProjectResult(folders: all, query: nameOrPrefix) {
+    let roots: [(base: String, folders: [String])] = [
+        (paths.activePath, try getProjectFolders(basePath: paths.activePath, domainCodes: domainCodes)),
+        (paths.areasPath, try getAreaFolders(basePath: paths.areasPath)),
+        (paths.archivePath, (try getProjectFolders(basePath: paths.archivePath, domainCodes: domainCodes))
+                          + (try getAreaFolders(basePath: paths.archivePath))),
+    ]
+    switch matchProjectResult(folders: roots.flatMap(\.folders), query: nameOrPrefix) {
     case .matched(let folderName):
-        // Prefer active when the same folder name exists in both (active.contains checked first).
-        let basePath = active.contains(folderName) ? paths.activePath : paths.archivePath
-        return (basePath as NSString).appendingPathComponent(folderName)
+        guard let root = roots.first(where: { $0.folders.contains(folderName) }) else {
+            throw PmError.projectNotFound(nameOrPrefix)
+        }
+        return (root.base as NSString).appendingPathComponent(folderName)
     case .ambiguous:
         throw PmError.ambiguousProject(nameOrPrefix)
     case .notFound:
