@@ -28,14 +28,25 @@ struct NotesSettingsView: View {
     @ViewBuilder
     private func template(_ config: PmConfig) -> some View {
         Section {
-            PathRow(label: "Template", path: config.notesTemplatePath,
+            PathRow(label: "Projects", path: config.notesTemplatePath,
                     placeholder: "Built-in", chooseFiles: true,
+                    chooseMessage: "Choose the Markdown file new project notes start from.",
                     onChoose: { path in store.update { $0.notesTemplatePath = path } },
-                    onClear: { store.update { $0.notesTemplatePath = nil } })
+                    onClear: { store.update { $0.notesTemplatePath = nil } },
+                    clearHelp: "Use the built-in template")
+            PathRow(label: "Areas", path: config.areaNotesTemplatePath,
+                    placeholder: "Built-in", chooseFiles: true,
+                    chooseMessage: "Choose the Markdown file new area notes start from.",
+                    onChoose: { path in store.update { $0.areaNotesTemplatePath = path } },
+                    onClear: { store.update { $0.areaNotesTemplatePath = nil } },
+                    clearHelp: "Use the built-in template")
         } header: {
-            Text("New Project Notes")
+            Text("New Notes")
         } footer: {
-            Text("A Markdown file used for every new project's notes. Write {{title}} where the project's title should go. Cleared, PM uses its built-in template.")
+            // Two rows rather than one, because a project template has a Problem and an Approach in
+            // it, and handing that to an Area would give every Area the two sections the kind exists
+            // to leave out.
+            Text("The Markdown a new project or area's notes start from. Write {{title}} where the title should go. Cleared, PM uses its built-in template — which for an Area is a Summary and Goals, and nothing else.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -54,8 +65,10 @@ struct NotesSettingsView: View {
                 }
             }
             PathRow(label: "Vault folder", path: vaultPath,
+                    chooseMessage: "Choose your Obsidian vault's folder.",
                     onChoose: { path in store.update { $0.obsidianVaultPath = path } },
-                    onClear: { store.update { $0.obsidianVaultPath = nil } })
+                    onClear: { store.update { $0.obsidianVaultPath = nil } },
+                    clearHelp: "Forget the vault folder")
             Toggle("Read and write notes through the Obsidian CLI",
                    isOn: Binding(get: { config.useObsidianCLI ?? false },
                                  set: { on in store.update { $0.useObsidianCLI = on } }))

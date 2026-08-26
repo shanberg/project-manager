@@ -43,10 +43,16 @@ struct PathRow: View {
     var placeholder: String = "Not set"
     var chooseFiles = false
     var chooseTitle = "Choose…"
+    /// The sentence in the open panel. Defaulted from the label, which reads well enough for a row
+    /// whose label is a noun phrase and badly for one that isn't ("Choose the areas.").
+    var chooseMessage: String?
     let onChoose: (String) -> Void
     /// Offered only when there's something sensible to fall back to — a template can be cleared to the
     /// built-in one; a projects folder can't be cleared to anything.
     var onClear: (() -> Void)?
+    /// What clearing falls back to, said plainly — the button is an icon, so this is the only place
+    /// it gets explained.
+    var clearHelp = "Clear"
 
     var body: some View {
         LabeledContent(label) {
@@ -56,7 +62,14 @@ struct PathRow: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                     .help(path ?? placeholder)
-                if let path {
+                    // Yield to the buttons. Without this a path long enough to crowd them makes
+                    // LabeledContent give up on one line and stack the row, so a single deep folder
+                    // reshapes the pane instead of quietly truncating.
+                    .layoutPriority(-1)
+                // Only for something that's actually there. A path can be derived rather than chosen
+                // — the areas folder is, until the first Area is made — and revealing one that doesn't
+                // exist opens a Finder window on nothing.
+                if let path, FileManager.default.fileExists(atPath: path) {
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                     } label: {
@@ -66,8 +79,15 @@ struct PathRow: View {
                     .help("Reveal in Finder")
                 }
                 Button(chooseTitle) { choose() }
+                // An icon, matching the reveal button beside it: "Clear" as a word is wide enough to
+                // be the thing that costs the row its single line.
                 if let onClear, path != nil {
-                    Button("Clear", action: onClear)
+                    Button(action: onClear) {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help(clearHelp)
                 }
             }
         }
@@ -80,30 +100,49 @@ struct PathRow: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = !chooseFiles
         panel.prompt = "Choose"
-        panel.message = "Choose the \(label.lowercased())."
+        panel.message = chooseMessage ?? "Choose the \(label.lowercased())."
         if let path { panel.directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent() }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         onChoose(url.path)
     }
 }
 
-/// The rows-plus-add-button shape both the domain table and the folder list use.
-struct EditableList<Row: View>: View {
-    let items: Range<Int>
-    var addTitle: String
-    let onAdd: () -> Void
-    let onRemove: (Int) -> Void
+/// The removable-rows shape the domain table and both folder lists use. The add sits in the
+/// section header — see `ListSectionHeader`.
+///
+/// `Item` is whatever identifies a row, and each list gives the answer that's true for it. A domain
+/// is identified by its code: unique and never blank, because adding one picks a free letter and
+/// renaming refuses a collision. A subfolder is identified by its position, because its text is the
+/// thing being edited and two blank rows are a legal state you can reach by pressing Add twice.
+/// Neither answer is right for both lists, so neither is baked in here.
+struct EditableList<Item: Hashable, Row: View>: View {
+    /// Which list this is.
+    ///
+    /// SwiftUI treats equal ids as the same row wherever it meets them, and these lists share one
+    /// Form. Both folder lists identify rows by position, so between them the ids are `0, 1, 2…`
+    /// twice over — and `docs` is in both lists by name too, so switching everything to content
+    /// wouldn't settle it either. Unnamespaced, SwiftUI merges them: the area list renders the
+    /// project list's rows. That isn't hypothetical, it's what it did.
+    let namespace: String
+    let items: [Item]
+    let onRemove: (Item) -> Void
     /// True when removing would empty the list. Both lists PM keeps have to have something in them:
     /// a project can't be created without a domain, and a structure with no folders isn't one.
     var canRemove: Bool
-    @ViewBuilder let row: (Int) -> Row
+    @ViewBuilder let row: (Item) -> Row
+
+    /// A row's identity: what it is, and which list it's in.
+    private struct RowID: Hashable {
+        let namespace: String
+        let item: Item
+    }
 
     var body: some View {
-        ForEach(items, id: \.self) { index in
+        ForEach(items.map { RowID(namespace: namespace, item: $0) }, id: \.self) { rowID in
             HStack(spacing: 6) {
-                row(index)
+                row(rowID.item)
                 Button {
-                    onRemove(index)
+                    onRemove(rowID.item)
                 } label: {
                     Image(systemName: "minus.circle.fill")
                 }
@@ -113,11 +152,32 @@ struct EditableList<Row: View>: View {
                 .help(canRemove ? "Remove" : "At least one is required")
             }
         }
-        // An icon, so the add reads as an action of the same kind as the ⊖ on each row rather than as
-        // a stray line of grey text under the list.
-        Button(action: onAdd) {
-            Label(addTitle, systemImage: "plus.circle.fill")
+    }
+}
+
+/// A section title with the list's add button on the same line.
+///
+/// The add used to be the last thing in the section's content, which made it a row that isn't one:
+/// it has no ⊖, it isn't part of the list, and a grouped Form draws its section container with an
+/// off-by-one that lands on whichever trailing item it likes — so the button was sometimes inside
+/// the rows' background and sometimes below it, and worse, sometimes took a real row out with it.
+/// In the header it isn't a row at all, and the container is exactly the rows.
+struct ListSectionHeader: View {
+    let title: String
+    let addTitle: String
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+            Spacer()
+            Button(action: onAdd) {
+                Image(systemName: "plus.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help(addTitle)
+            .accessibilityLabel(addTitle)
         }
-        .buttonStyle(.borderless)
     }
 }

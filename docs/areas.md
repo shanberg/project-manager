@@ -176,6 +176,10 @@ It now strips only a name matching `^[A-Za-z]+-\d+\s+`. Tests in `NotesHelpersTe
 
 **New Area.** Title only. No domain picker, no number, no dry-run preview of the folder name, because the folder name is the title.
 
+**Settings.** Three folder rows where there were two, and a second scaffold list beside the project one — because the two kinds are created differently and a single list would have to lie about one of them. The areas row is the only one that can show a path nobody chose, so it says where the path came from and offers Clear only once there's an explicit value to clear; clearing writes `nil` rather than the resolved path, or clearing would be the one action that permanently pinned the guess.
+
+The row also carries the sentence that answers the question the whole design provokes: an Area is a folder PM has written notes into, so a folder that's already there stays invisible until it's taken on. Someone looking at an empty Areas section has no way to tell that from a broken scan, and the folder row is where they'll go looking. `rebase` learned the third root at the same time — an unset `areasPath` is derived from the other two, which means the areas folder can move without anybody touching it.
+
 **Header editor.** The form was four hardcoded fields; it renders `kind.headerSections` instead. This is the one place in the app where the kind has to be consulted rather than merely displayed: the *read* view already hides a blank section and so needs no kind, but offering a field is what puts content in it, and the serializer keeps an omitted section precisely when it isn't empty. An Area given a Problem box would get a Problem, and it would stick.
 
 ## The API surface
@@ -234,5 +238,6 @@ An explicitly configured `areasPath` is used verbatim, like `activePath` and `ar
 5. Creating one: an Area template, and a `createArea` beside `createProject` that draws no number. `project.create` / `project.list` / `notes.setDetails` take kind; manifest bump.
 6. App: index, sidebar section and kind filter, New Area, the section-list header form.
 7. Raycast: New Area, and the kind filter in List Projects.
+8. Settings: the areas folder, the area scaffold, and the area notes template.
 
 Steps 2–5 are headless and testable. Nothing in 6 or 7 needs a decision they don't already settle.

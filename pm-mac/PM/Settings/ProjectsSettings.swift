@@ -30,19 +30,40 @@ struct ProjectsSettingsView: View {
     @ViewBuilder
     private func folders(_ config: PmConfig) -> some View {
         Section {
-            PathRow(label: "Active", path: resolved?.activePath) { chosen in
+            PathRow(label: "Active", path: resolved?.activePath,
+                    chooseMessage: "Choose the folder your active projects live in.") { chosen in
                 setPaths(active: chosen, archive: nil)
             }
-            PathRow(label: "Archive", path: resolved?.archivePath) { chosen in
+            PathRow(label: "Archive", path: resolved?.archivePath,
+                    chooseMessage: "Choose the folder archived projects move to.") { chosen in
                 setPaths(active: nil, archive: chosen)
             }
+            PathRow(label: "Areas", path: resolved?.areasPath,
+                    chooseMessage: "Choose the folder your areas live in.",
+                    onChoose: { setAreas($0) },
+                    // Offered only when there's an explicit value to clear. Clearing goes back to the
+                    // derived location, and the row is already showing what that would be.
+                    onClear: config.areasPath == nil ? nil : { setAreas(nil) },
+                    clearHelp: "Go back to the location PM works out for itself")
         } header: {
             Text("Folders")
         } footer: {
-            Text("Numbers are unique across both, so a project keeps its number when it's archived.")
+            Text("Numbers are unique across Active and Archive, so a project keeps its number when it's archived. Areas aren't numbered.\n\n\(areasNote(config))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Areas are the one root PM will invent a location for, so the row has to say where the location
+    /// it's showing came from. And they're the one root a folder doesn't join by being in it: an Area
+    /// is a folder PM has written notes into, which means a folder already on disk stays invisible
+    /// until it's taken on — worth saying here, because the alternative is reading an empty list as a
+    /// broken one.
+    private func areasNote(_ config: PmConfig) -> String {
+        let origin = config.areasPath == nil
+            ? "Areas isn't set, so PM is using this — inside your PARA folder, or beside Active. Choose one to pin it."
+            : "Clear Areas to go back to the location PM works out for itself."
+        return "\(origin) A folder that's already there becomes an Area once you take it on: File ▸ Take On a Folder…"
     }
 
     /// Change one of the project folders, then bring the app's idea of what's open with it.
@@ -67,6 +88,20 @@ struct ProjectsSettingsView: View {
         ProjectLifecycle.rebase(from: before, to: after)
     }
 
+    /// Areas are the one root that's allowed to be unset, so clearing writes `nil` rather than the
+    /// path currently resolved. Writing that back would pin the derived location, which would make
+    /// "clear" the one action that permanently commits to it.
+    ///
+    /// The rebase is here for the same reason it's in `setPaths`: a project key names the folder its
+    /// project was found in, so moving the areas root invalidates the key of every open or focused
+    /// Area.
+    private func setAreas(_ path: String?) {
+        guard let before = resolved else { return }
+        guard store.update({ $0.areasPath = path }) else { return }
+        guard let after = resolved else { return }
+        ProjectLifecycle.rebase(from: before, to: after)
+    }
+
     private var resolved: ResolvedPaths? {
         store.config.flatMap { try? resolvePaths(config: $0) }
     }
@@ -77,10 +112,8 @@ struct ProjectsSettingsView: View {
     private func domains(_ config: PmConfig) -> some View {
         let codes = config.domains.keys.sorted()
         Section {
-            EditableList(items: codes.indices, addTitle: "Add Domain",
-                         onAdd: addDomain, onRemove: { removeDomain(codes[$0]) },
-                         canRemove: codes.count > 1) { index in
-                let code = codes[index]
+            EditableList(namespace: "domain", items: codes, onRemove: removeDomain,
+                         canRemove: codes.count > 1) { code in
                 CommittingTextField(value: code, prompt: "Code") { renameDomain(code, to: $0) }
                     .frame(width: 70)
                     .textCase(.uppercase)
@@ -89,7 +122,7 @@ struct ProjectsSettingsView: View {
                 }
             }
         } header: {
-            Text("Domains")
+            ListSectionHeader(title: "Domains", addTitle: "Add Domain", onAdd: addDomain)
         } footer: {
             Text("The code leads a project's name — W-012 Website Refresh. Renaming a code here doesn't rename existing projects, which keep the code they were created with.")
                 .font(.caption)
@@ -129,14 +162,21 @@ struct ProjectsSettingsView: View {
         }
     }
 
-    // MARK: Project structure
+    // MARK: Structure
 
+    /// Two lists, because the two kinds are scaffolded differently and always were — an Area has no
+    /// `deliverables/` or `previews/`, because an Area doesn't ship. Showing one list and applying it
+    /// to both would be a smaller pane that lies about what gets created.
     @ViewBuilder
     private func structure(_ config: PmConfig) -> some View {
         Section {
-            EditableList(items: config.subfolders.indices, addTitle: "Add Folder",
-                         onAdd: { store.update { $0.subfolders.append("") } },
-                         onRemove: { index in store.update { $0.subfolders.remove(at: index) } },
+            EditableList(namespace: "project-folder", items: Array(config.subfolders.indices),
+                         onRemove: { index in
+                             store.update { config in
+                                 guard config.subfolders.indices.contains(index) else { return }
+                                 config.subfolders.remove(at: index)
+                             }
+                         },
                          canRemove: config.subfolders.count > 1) { index in
                 CommittingTextField(value: config.subfolders[index], prompt: "Folder name") { name in
                     let trimmed = name.trimmingCharacters(in: .whitespaces)
@@ -148,11 +188,55 @@ struct ProjectsSettingsView: View {
                 }
             }
         } header: {
-            Text("Project Structure")
+            ListSectionHeader(title: "Project Structure", addTitle: "Add Folder",
+                              onAdd: { store.update { $0.subfolders.append("") } })
         } footer: {
             Text("Created inside each new project. Existing projects are left alone.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        Section {
+            let folders = areaSubfolders(config)
+            EditableList(namespace: "area-folder", items: Array(folders.indices),
+                         onRemove: { index in
+                             updateAreaSubfolders { folders in
+                                 guard folders.indices.contains(index) else { return }
+                                 folders.remove(at: index)
+                             }
+                         },
+                         canRemove: folders.count > 1) { index in
+                CommittingTextField(value: folders[index], prompt: "Folder name") { name in
+                    let trimmed = name.trimmingCharacters(in: .whitespaces)
+                    updateAreaSubfolders { folders in
+                        guard folders.indices.contains(index) else { return }
+                        if trimmed.isEmpty { folders.remove(at: index) }
+                        else { folders[index] = trimmed }
+                    }
+                }
+            }
+        } header: {
+            ListSectionHeader(title: "Area Structure", addTitle: "Add Folder",
+                              onAdd: { updateAreaSubfolders { $0.append("") } })
+        } footer: {
+            Text("Created inside each new area. A folder you take on keeps the shape it already has — it only gains the docs folder its notes go in.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// What an Area is actually created with. `areaSubfolders` is optional and unset in every config
+    /// written before Areas existed, so the pane shows the built-in list rather than an empty one —
+    /// and the first edit writes it out, which is why every mutation goes through `update` below.
+    private func areaSubfolders(_ config: PmConfig) -> [String] {
+        config.areaSubfolders ?? defaultAreaSubfolders
+    }
+
+    private func updateAreaSubfolders(_ change: (inout [String]) -> Void) {
+        store.update { config in
+            var folders = config.areaSubfolders ?? defaultAreaSubfolders
+            change(&folders)
+            config.areaSubfolders = folders
         }
     }
 
