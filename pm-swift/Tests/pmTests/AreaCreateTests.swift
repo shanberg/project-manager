@@ -138,4 +138,42 @@ final class AreaCreateTests: XCTestCase {
         XCTAssertEqual((path as NSString).lastPathComponent, "Hiring")
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
     }
+
+    // MARK: Renaming an area
+
+    /// An area's name *is* its title, so a rename is just the folder moving — there's no prefix to keep.
+    /// This used to throw `projectFolderMalformed`, while the app cheerfully offered the command.
+    func testRenamingAnAreaMovesTheWholeName() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        setenv("PM_CONFIG_HOME", root, 1)
+        defer { unsetenv("PM_CONFIG_HOME") }
+        try saveConfig(PmConfig(activePath: paths.activePath, archivePath: paths.archivePath,
+                                areasPath: paths.areasPath, domains: config.domains,
+                                subfolders: config.subfolders))
+
+        _ = try createProject(config: config, paths: paths, kind: .area, title: "Team 1:1s")
+        let newName = try renameProjectTitle(nameOrPrefix: "Team 1:1s", newTitle: "Team One-on-Ones")
+
+        XCTAssertEqual(newName, "Team One-on-Ones", "an area's new folder name is just its new title")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: (paths.areasPath as NSString).appendingPathComponent("Team One-on-Ones")))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: (paths.areasPath as NSString).appendingPathComponent("Team 1:1s")))
+    }
+
+    /// A project still keeps its number: renaming is not renumbering.
+    func testRenamingAProjectStillKeepsItsPrefix() throws {
+        let (config, paths, root) = try makeVault()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        setenv("PM_CONFIG_HOME", root, 1)
+        defer { unsetenv("PM_CONFIG_HOME") }
+        try saveConfig(PmConfig(activePath: paths.activePath, archivePath: paths.archivePath,
+                                areasPath: paths.areasPath, domains: config.domains,
+                                subfolders: config.subfolders))
+
+        _ = try createProject(config: config, paths: paths, domainCode: "W", title: "Website")
+        XCTAssertEqual(try renameProjectTitle(nameOrPrefix: "W-1", newTitle: "Website Refresh"),
+                       "W-1 Website Refresh")
+    }
 }

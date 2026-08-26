@@ -13,21 +13,29 @@ enum MenubarRing {
     private struct RingKey: Hashable {
         let percent: Int
         let hasProject: Bool
+        let showsProgress: Bool
         let tint: String?
     }
     private static var cache: [RingKey: NSImage] = [:]
 
-    static func image(fraction: Double, hasProject: Bool, tint: NSColor?) -> NSImage {
+    /// - Parameter showsProgress: false for something with no denominator to fill toward — an area.
+    ///   The ring is drawn dashed and carries no arc, which is the menubar's spelling of the dotted
+    ///   circle the sidebar uses. A solid ring at some arbitrary fill would be the one mark in the app
+    ///   that means nothing.
+    static func image(fraction: Double, hasProject: Bool, showsProgress: Bool = true,
+                      tint: NSColor?) -> NSImage {
         let key = RingKey(percent: Int((min(max(fraction, 0), 1) * 100).rounded()),
                           hasProject: hasProject,
+                          showsProgress: showsProgress,
                           tint: tint?.description)
         if let cached = cache[key] { return cached }
-        let drawn = draw(fraction: fraction, hasProject: hasProject, tint: tint)
+        let drawn = draw(fraction: fraction, hasProject: hasProject, showsProgress: showsProgress, tint: tint)
         cache[key] = drawn
         return drawn
     }
 
-    private static func draw(fraction: Double, hasProject: Bool, tint: NSColor?) -> NSImage {
+    private static func draw(fraction: Double, hasProject: Bool, showsProgress: Bool,
+                             tint: NSColor?) -> NSImage {
         let size = NSSize(width: 15, height: 15)
         let img = NSImage(size: size, flipped: false) { rect in
             let lineWidth: CGFloat = 1.6
@@ -40,12 +48,17 @@ enum MenubarRing {
             let track = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
                                                     width: radius * 2, height: radius * 2))
             track.lineWidth = lineWidth
-            color.withAlphaComponent(0.35).setStroke()
+            if !showsProgress {
+                // Dashes rather than a lighter solid ring: an unfilled solid ring is what a project at
+                // 0% looks like, and the two must not read the same.
+                track.setLineDash([1.4, 1.9], count: 2, phase: 0)
+            }
+            color.withAlphaComponent(showsProgress ? 0.35 : 0.75).setStroke()
             track.stroke()
 
             // Progress arc (clockwise from 12 o'clock).
             let clamped = min(max(fraction, 0), 1)
-            if hasProject && clamped > 0 {
+            if showsProgress && hasProject && clamped > 0 {
                 let arc = NSBezierPath()
                 arc.appendArc(withCenter: center, radius: radius,
                               startAngle: 90, endAngle: 90 - 360 * clamped, clockwise: true)

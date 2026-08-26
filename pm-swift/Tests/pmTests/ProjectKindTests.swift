@@ -198,4 +198,77 @@ final class KindAwareSerializationTests: XCTestCase {
         XCTAssertEqual(ProjectKind.of(notesPath: "/PARA/archive/Team 1:1s/docs/Notes - Team 1:1s.md"), .area,
                        "an archived area is still an area")
     }
+
+    // MARK: The write guard
+
+    /// The omission rule has to hold on the *write* path too, not just when serializing from scratch.
+    /// `notes.setDetail` refused a Problem on an area; `pm notes write` went straight past that and the
+    /// value stuck, because the serializer keeps a non-empty omitted section on purpose.
+    func testAWriteCannotIntroduceASectionTheKindLacks() throws {
+        let raw = notesTemplate(for: .area).replacingOccurrences(of: "{{title}}", with: "Team 1:1s")
+        var incoming = try parseNotes(markdown: raw)
+        incoming.problem = "snuck in"
+
+        XCTAssertThrowsError(try writeNotesPreservingFormat(rawText: raw, incoming: incoming, kind: .area)) { err in
+            guard case PmError.sectionNotApplicable(_, let section) = err else {
+                return XCTFail("expected sectionNotApplicable, got \(err)")
+            }
+            XCTAssertEqual(section, "Problem")
+        }
+    }
+
+    /// It throws rather than returning nil, and that distinction is the whole fix: nil means "fall back
+    /// to the full serializer", which would then write the section for exactly the reason the rule
+    /// exists to allow. A refusal expressed as nil is a refusal that writes the thing anyway.
+    func testTheRefusalIsNotASpliceFailure() throws {
+        let raw = notesTemplate(for: .area).replacingOccurrences(of: "{{title}}", with: "Team 1:1s")
+        var incoming = try parseNotes(markdown: raw)
+        incoming.approach = "snuck in"
+        do {
+            _ = try writeNotesPreservingFormat(rawText: raw, incoming: incoming, kind: .area)
+            XCTFail("expected a throw, not a nil")
+        } catch is PmError {
+            // as intended
+        }
+    }
+
+    /// The other side of it: a section somebody typed into an area by hand is editable, because it's
+    /// already there. Introducing is what's refused, not touching.
+    func testAnAlreadyWrittenSectionStaysEditable() throws {
+        let raw = """
+        # Team 1:1s
+
+        > [!summary] Summary
+        > weekly
+
+        > [!question] Problem
+        > typed in Obsidian by hand
+
+        > [!info] Goals
+        > 1.  
+        > 2.  
+        > 3.  
+
+        ## Links
+
+        ## Learnings
+
+        ## Sessions
+
+        """
+        var incoming = try parseNotes(markdown: raw)
+        incoming.problem = "edited, not introduced"
+        let out = try writeNotesPreservingFormat(rawText: raw, incoming: incoming, kind: .area)
+        XCTAssertNotNil(out)
+        XCTAssertEqual(try parseNotes(markdown: XCTUnwrap(out)).problem, "edited, not introduced")
+    }
+
+    /// And a project is unaffected by any of it.
+    func testAProjectCanStillBeGivenAProblem() throws {
+        let raw = notesTemplate(for: .project).replacingOccurrences(of: "{{title}}", with: "Website")
+        var incoming = try parseNotes(markdown: raw)
+        incoming.problem = "the site is slow"
+        let out = try XCTUnwrap(try writeNotesPreservingFormat(rawText: raw, incoming: incoming, kind: .project))
+        XCTAssertEqual(try parseNotes(markdown: out).problem, "the site is slow")
+    }
 }

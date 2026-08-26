@@ -441,4 +441,72 @@ final class CLITests: XCTestCase {
                              #"{"project":"Team 1:1s","key":"summary","value":"Weekly."}"#])
         XCTAssertEqual(allowed.exitCode, 0, allowed.stderr)
     }
+
+    /// Cross-project task search has to see Areas. It used to scan only the two numbered roots, so an
+    /// area's tasks were findable in the Mac app (its own index) and nowhere else — the worst version
+    /// of a gap, since the same query gave two different answers depending on where you asked.
+    func testTaskSearchFindsTasksInAreas() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "W", "Website"])
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        _ = runPm(["api", "call", "task.add", #"{"project":"W-1","text":"levelling the nav"}"#])
+        _ = runPm(["api", "call", "task.add", #"{"project":"Team 1:1s","text":"levelling doc for Dana"}"#])
+
+        let found = runPm(["api", "call", "task.search", #"{"query":"levelling"}"#])
+        XCTAssertEqual(found.exitCode, 0, found.stderr)
+        XCTAssertTrue(found.stdout.contains("Team 1:1s"), "the area's task is missing: \(found.stdout)")
+        XCTAssertTrue(found.stdout.contains("W-1 Website"), "the project's task is missing: \(found.stdout)")
+    }
+
+    /// `pm archive` matched only numbered folders, so an area couldn't be put away from the CLI even
+    /// though the API could do it.
+    func testArchivingAnAreaFromTheCli() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let areasPath = ((activePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent("areas")
+
+        let archived = runPm(["archive", "Team 1:1s"])
+        XCTAssertEqual(archived.exitCode, 0, archived.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: (archivePath as NSString).appendingPathComponent("Team 1:1s")))
+
+        let restored = runPm(["unarchive", "Team 1:1s"])
+        XCTAssertEqual(restored.exitCode, 0, restored.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: (areasPath as NSString).appendingPathComponent("Team 1:1s")),
+            "an unarchived area belongs in areas/, not active/")
+    }
+
+    /// `pm rename` on an area moves the whole name, since an area has no prefix to preserve.
+    func testRenamingAnAreaFromTheCli() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let renamed = runPm(["rename", "Team 1:1s", "Team One-on-Ones"])
+        XCTAssertEqual(renamed.exitCode, 0, renamed.stderr)
+        XCTAssertTrue(renamed.stdout.contains("Team One-on-Ones"), renamed.stdout)
+
+        let listed = runPm(["list", "--areas"])
+        XCTAssertTrue(listed.stdout.contains("Team One-on-Ones"), listed.stdout)
+        XCTAssertFalse(listed.stdout.contains("Team 1:1s"), listed.stdout)
+    }
+
+    /// The whole-document write path refuses to introduce an omitted section, and says so with a
+    /// non-zero exit rather than reporting success.
+    func testWholeDocumentWriteCannotAddAProblemToAnArea() throws {
+        try skipIfNoBinary()
+        _ = runPm(["new", "--area", "Team 1:1s"])
+        let read = runPm(["api", "call", "notes.get", #"{"project":"Team 1:1s"}"#])
+        let notes = try XCTUnwrap(
+            (try JSONSerialization.jsonObject(with: Data(read.stdout.utf8)) as? [String: Any])?["data"]
+                as? [String: Any])
+        var doc = try XCTUnwrap(notes["notes"] as? [String: Any])
+        doc["problem"] = "snuck in"
+        let payload = String(decoding: try JSONSerialization.data(withJSONObject: doc), as: UTF8.self)
+
+        let written = runPm(["notes", "write", "Team 1:1s"], stdin: payload)
+        XCTAssertNotEqual(written.exitCode, 0, "a refused write must not report success")
+        XCTAssertTrue((written.stdout + written.stderr).contains("no Problem section"),
+                      written.stdout + written.stderr)
+    }
 }

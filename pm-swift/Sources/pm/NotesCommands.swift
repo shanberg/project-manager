@@ -72,7 +72,8 @@ func runNotesWrite(args: [String]) {
         // Splice only the sections that changed, preserving all other formatting. Fall back to the
         // full serializer if the existing file can't be read or a changed section can't be spliced.
         let rawText = try? io.readContent(path: notesPath)
-        if let rawText = rawText, let updated = try writeNotesPreservingFormat(rawText: rawText, incoming: notes) {
+        if let rawText = rawText, let updated = try writeNotesPreservingFormat(rawText: rawText, incoming: notes,
+                                                                    kind: ProjectKind.of(notesPath: notesPath)) {
             try io.writeContent(path: notesPath, content: updated)
         } else {
             try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)

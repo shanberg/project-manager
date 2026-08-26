@@ -170,21 +170,25 @@ private func emitMatchErrorAndExit(folders: [String], query: String, notFoundMes
 private func runMoveProject(fromActive: Bool, name: String) {
     do {
         let (config, paths) = try loadConfigAndPaths()
-        let source: ProjectScope = fromActive ? .active : .archive
+        let codes = Array(config.domains.keys)
+        // Putting something away can start from either of the two roots things are held in; bringing
+        // one back always starts in the archive, which holds both kinds.
+        let sources: [ProjectScope] = fromActive ? [.active, .areas] : [.archive]
         let (notFoundMsg, listLabel, doneVerb) = fromActive
-            ? ("No project found matching: \(name)", "Active projects", "Archived")
-            : ("No archived project found matching: \(name)", "Archived projects", "Unarchived")
+            ? ("Nothing found matching: \(name)", "Active projects and areas", "Archived")
+            : ("Nothing archived matching: \(name)", "Archived", "Unarchived")
         // Matching stays here rather than in the move itself: the CLI is the caller that gets a typed
         // query, and it can name the candidates when one is ambiguous.
-        let folders = try getProjectFolders(basePath: source.path(in: paths),
-                                            domainCodes: Array(config.domains.keys))
-        guard let matched = matchProject(folders: folders, query: name) else {
+        let candidates: [(scope: ProjectScope, folders: [String])] = try sources.map {
+            ($0, try getFolders(basePath: $0.path(in: paths), scope: $0, domainCodes: codes))
+        }
+        let folders = candidates.flatMap(\.folders)
+        guard let matched = matchProject(folders: folders, query: name),
+              let source = candidates.first(where: { $0.folders.contains(matched) })?.scope else {
             emitMatchErrorAndExit(folders: folders, query: name, notFoundMessage: notFoundMsg, listLabel: listLabel)
         }
         // Everything archives into the one archive; what comes back out goes wherever its kind lives,
-        // read off the folder's own name. This list only ever matches numbered project folders today,
-        // so the destination is `active` either way — written this way so it stays right when the CLI
-        // learns to archive Areas too.
+        // read off the folder's own name.
         let destination: ProjectScope = fromActive ? .archive : ProjectKind.of(folderName: matched).homeScope
         try moveProject(named: matched, from: source, to: destination, paths: paths)
         print("\(doneVerb): \(matched)")

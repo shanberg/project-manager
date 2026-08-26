@@ -634,28 +634,6 @@ private struct ProjectSidebarRow: View {
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     private var title: String { showsCode ? entry.name : entry.shortName }
 
-    /// The mark at the head of the row: a completion ring for a project, and for an area a dotted
-    /// circle that reads as the same thing with no end to fill toward.
-    ///
-    /// Drawing a ring on an area would be the one piece of the design that lies. `done/total` there is
-    /// a fraction of a number that keeps growing, so it would sit near some arbitrary percentage
-    /// forever and mean nothing by it.
-    @ViewBuilder private var mark: some View {
-        if entry.showsProgress {
-            // The ring is a template image, so it takes the row's foreground color, the same way the
-            // menubar recolors it.
-            Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
-                .renderingMode(.template)
-                .opacity(entry.detailsLoaded ? 1 : 0.35)
-        } else {
-            Image(systemName: "circle.dotted")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                // Matched to the ring image's box so both kinds of row line their text up.
-                .frame(width: 16, height: 16)
-        }
-    }
-
     /// How long ago an area was last written to, in the shortest form that still reads: "today",
     /// "3d", "5w". Deliberately coarse — this is a glance at whether something has been left alone,
     /// not a timestamp.
@@ -672,7 +650,7 @@ private struct ProjectSidebarRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
-            mark
+            KindMark(entry: entry, fraction: fraction, total: total)
             VStack(alignment: .leading, spacing: 1) {
                 // The due date rides the name line rather than the task line: `nextDue` is the
                 // earliest due across the project's open tasks, which needn't be the next task's own.
@@ -820,9 +798,8 @@ private struct UpNextCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
-            Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
-                .renderingMode(.template)
-                .opacity(entry.detailsLoaded ? 1 : 0.35)
+            // An area reaches this card whenever a task inside it has a date, so it needs the mark too.
+            KindMark(entry: entry, fraction: fraction, total: total)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // Semibold is what marks the promotion. The rows below stay regular, so a carded
@@ -1001,6 +978,38 @@ private struct ProjectMenu: View {
         guard !names.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(names, forType: .string)
+    }
+}
+
+/// The mark at the head of a sidebar row: a completion ring for a project, and for an area a dotted
+/// circle — the same shape with no end to fill toward.
+///
+/// Drawing a ring on an area would be the one mark in the app that lies. `done/total` there is a
+/// fraction of a number that keeps growing, so it would sit near some arbitrary percentage forever and
+/// mean nothing by it. The menubar and the switcher say the same thing with a dashed ring, which is as
+/// close to `circle.dotted` as a 15pt drawn glyph gets.
+///
+/// One view rather than two copies, because the row and the Up Next card both draw it and an area can
+/// appear in either — a card whenever one of its tasks carries a date.
+private struct KindMark: View {
+    let entry: PMStore.ProjectEntry
+    let fraction: Double
+    let total: Int
+
+    var body: some View {
+        if entry.showsProgress {
+            // The ring is a template image, so it takes the row's foreground color, the same way the
+            // menubar recolors it.
+            Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
+                .renderingMode(.template)
+                .opacity(entry.detailsLoaded ? 1 : 0.35)
+        } else {
+            Image(systemName: "circle.dotted")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                // Matched to the ring image's box so both kinds of row line their text up.
+                .frame(width: 16, height: 16)
+        }
     }
 }
 

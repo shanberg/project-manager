@@ -22,3 +22,15 @@ function progressIconSource(progress: number): Icon {
 export function progressRingIcon(progress: number): Image.ImageLike {
   return { source: progressIconSource(progress), tintColor: Color.PrimaryText };
 }
+
+/**
+ * The mark for an area, where a project gets a progress ring.
+ *
+ * `Icon.Circle` is taken — it's what a project at 0% draws — so an area can't borrow it without the
+ * two reading the same. `CircleEllipsis` is the same circular family, says "continuing" rather than a
+ * fraction, and can't be mistaken for a ring at any fill. The Mac app spells the same idea with a
+ * dotted circle.
+ */
+export function areaMarkIcon(): Image.ImageLike {
+  return { source: Icon.CircleEllipsis, tintColor: Color.PrimaryText };
+}

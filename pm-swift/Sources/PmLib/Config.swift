@@ -366,6 +366,8 @@ public enum PmError: Error, CustomStringConvertible {
     case unknownDomain(String)
     /// A domain was given for something that isn't numbered, or withheld from something that is.
     case domainNotApplicable(kind: String)
+    /// A write tried to introduce a header section the kind doesn't have.
+    case sectionNotApplicable(kind: String, section: String)
     /// An Area of that name already exists. Projects can't collide — their numbers are unique — but
     /// Areas are named by hand, and creating a second "Hiring" would write over the first one's notes.
     case areaAlreadyExists(String)
@@ -411,6 +413,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .invalidProjectTitle(let title): return "Project title cannot contain path separators (/ or \\): \(title)"
         case .unknownDomain(let code): return "Unknown domain: \(code)"
         case .domainNotApplicable(let kind): return "A \(kind) doesn't take a domain code"
+        case .sectionNotApplicable(let kind, let section): return "An \(kind) has no \(section) section"
         case .areaAlreadyExists(let path): return "An area already exists at: \(path)"
         case .obsidianCLIReadFailed(let path, let message): return "Obsidian CLI read failed for \(path): \(message)"
         case .obsidianCLIWriteFailed(let path, let message): return "Obsidian CLI write failed for \(path): \(message)"

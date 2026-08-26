@@ -86,7 +86,8 @@ public func editDetails(project: String, _ mutate: (ProjectNotes) throws -> Proj
     let current = try parseNotes(markdown: rawText)
     let updated = try mutate(current)
     guard updated != current else { return }
-    if let spliced = try writeNotesPreservingFormat(rawText: rawText, incoming: updated) {
+    if let spliced = try writeNotesPreservingFormat(rawText: rawText, incoming: updated,
+                                          kind: ProjectKind.of(notesPath: handle.notesPath)) {
         try handle.io.writeContent(path: handle.notesPath, content: spliced)
     } else {
         try writeNotesFile(notesPath: handle.notesPath, notes: updated, notesIO: handle.io)

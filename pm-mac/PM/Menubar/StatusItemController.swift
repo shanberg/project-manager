@@ -58,7 +58,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let p = store.progress
         let fraction = p.total > 0 ? Double(p.done) / Double(p.total) : 0
-        let ring = MenubarRing.image(fraction: fraction, hasProject: store.projectName != nil, tint: staleTint())
+        let ring = MenubarRing.image(fraction: fraction, hasProject: store.projectName != nil,
+                                     showsProgress: store.kind.showsProgress, tint: staleTint())
         let content = MenubarTitleContent(
             ring: ring,
             task: currentTaskGlyph(),
@@ -321,7 +322,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         for recent in recents {
             let r = actionItem(truncate(recent.name, 40), #selector(switchProject(_:)))
             if recent.total > 0 {
-                r.image = MenubarRing.image(fraction: recent.fraction, hasProject: true, tint: nil)
+                r.image = MenubarRing.image(fraction: recent.fraction, hasProject: true,
+                                            showsProgress: recent.kind.showsProgress, tint: nil)
             } else {
                 r.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
             }

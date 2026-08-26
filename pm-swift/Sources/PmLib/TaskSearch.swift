@@ -140,13 +140,17 @@ public struct TaskSearchHit: Codable, Equatable, SearchableTask {
 public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = true) throws -> [TaskSearchHit] {
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
-    var bases: [(String, Bool)] = []
-    if includeActive { bases.append((paths.activePath, false)) }
-    if includeArchived { bases.append((paths.archivePath, true)) }
+    // "Active" means everything in hand, which is both the projects and the areas — an area's tasks are
+    // no less findable for the thing they belong to not having an end.
+    var scopes: [ProjectScope] = []
+    if includeActive { scopes.append(contentsOf: [.active, .areas]) }
+    if includeArchived { scopes.append(.archive) }
 
     var hits: [TaskSearchHit] = []
-    for (base, archived) in bases {
-        for folder in (try? getProjectFolders(basePath: base, domainCodes: codes)) ?? [] {
+    for scope in scopes {
+        let base = scope.path(in: paths)
+        let archived = scope.isArchived
+        for folder in (try? getFolders(basePath: base, scope: scope, domainCodes: codes)) ?? [] {
             let projectPath = (base as NSString).appendingPathComponent(folder)
             guard let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil,
                   let rawText = try? String(contentsOfFile: notesPath, encoding: .utf8),

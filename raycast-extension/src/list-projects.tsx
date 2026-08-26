@@ -14,7 +14,7 @@ import {
   Toast,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
-import { progressRingIcon } from "./lib/progress-icon";
+import { areaMarkIcon, progressRingIcon } from "./lib/progress-icon";
 import {
   getNotes,
   getNextDueForProject,
@@ -284,7 +284,7 @@ export default function Command() {
         key={`${keyPrefix}${p.name}`}
         icon={
           isArea
-            ? Icon.CircleProgress100
+            ? areaMarkIcon()
             : progressRingIcon(p.total ? p.done / p.total : 1)
         }
         title={projectRowTitle(p.name, p.nextDue)}

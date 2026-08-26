@@ -150,7 +150,7 @@ final class NotesRawEditTests: XCTestCase {
     func testWriteSplicesOnlyChangedSection() throws {
         var notes = try parseNotes(markdown: Self.messyMarkdown)
         notes.learnings = ["Brand new learning", "And another"]
-        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes))
+        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes, kind: .project))
 
         // Changed section reflects the new content.
         XCTAssertTrue(result.contains("## Learnings\n\n- Brand new learning\n- And another\n"))
@@ -168,7 +168,7 @@ final class NotesRawEditTests: XCTestCase {
     func testWriteSplicesCalloutBodyOnly() throws {
         var notes = try parseNotes(markdown: Self.messyMarkdown)
         notes.summary = "Replaced summary text."
-        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes))
+        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes, kind: .project))
 
         XCTAssertTrue(result.contains("> [!summary] Summary\n> Replaced summary text.\n"))
         XCTAssertFalse(result.contains("> One line summary."), "Old summary body replaced")
@@ -180,7 +180,7 @@ final class NotesRawEditTests: XCTestCase {
     /// No changes → returns the document unchanged (every byte identical).
     func testWriteNoChangeIsByteIdentical() throws {
         let notes = try parseNotes(markdown: Self.messyMarkdown)
-        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes))
+        let result = try XCTUnwrap(writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes, kind: .project))
         XCTAssertEqual(result, Self.messyMarkdown, "No field changed → identical output")
     }
 
@@ -188,7 +188,7 @@ final class NotesRawEditTests: XCTestCase {
     func testWriteFallsBackWhenSessionsChange() throws {
         var notes = try parseNotes(markdown: Self.messyMarkdown)
         notes.sessions.insert(Session(date: "Mon, Mar 10, 2025", label: "", body: ""), at: 0)
-        XCTAssertNil(try writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes))
+        XCTAssertNil(try writeNotesPreservingFormat(rawText: Self.messyMarkdown, incoming: notes, kind: .project))
     }
 
     // MARK: - Edit text
@@ -947,7 +947,7 @@ final class NotesRawEditTests: XCTestCase {
         var incoming = try parseNotes(markdown: template)
         incoming.problem = "The problem"
         incoming.goals = ["First goal", "", ""]
-        let spliced = try XCTUnwrap(writeNotesPreservingFormat(rawText: template, incoming: incoming))
+        let spliced = try XCTUnwrap(writeNotesPreservingFormat(rawText: template, incoming: incoming, kind: .project))
         let reparsed = try parseNotes(markdown: spliced)
         XCTAssertEqual(reparsed.problem, "The problem")
         XCTAssertEqual(reparsed.goals.first, "First goal")

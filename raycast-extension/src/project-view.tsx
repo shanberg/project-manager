@@ -40,6 +40,7 @@ import {
   buildObsidianOptions,
   ensureTodaySession,
   getNotesPath,
+  isAreaFolder,
   FINDER_APP_PATH,
   OBSIDIAN_APP_PATH,
 } from "./lib/utils";
@@ -113,6 +114,10 @@ export default function ProjectView({ projectName, basePath }: Props) {
     focusedKey != null && focusedKey === projectKey(basePath, projectName);
   const isActive = basePath === (paths?.activePath ?? "");
   const projectPath = path.join(basePath, projectName);
+  // An area has no Problem and no Approach, so it isn't offered them. Offering a field is what puts
+  // content in it, and the write would be refused by pm anyway — a row that always errors is worse
+  // than no row.
+  const isArea = isAreaFolder(projectName);
   const [viewMode, setViewMode] = useState<TodoViewMode>("next");
   const [todoFilter] = useState<TodoFilter>("all");
 
@@ -497,30 +502,32 @@ export default function ProjectView({ projectName, basePath }: Props) {
               </ActionPanel>
             }
           />
-          <List.Item
-            title="Edit Problem"
-            icon={Icon.QuestionMarkCircle}
-            subtitle={truncateSubtitle(notes.problem)}
-            detail={sectionDetail(notes.problem, "No problem statement yet.")}
-            actions={
-              <ActionPanel>
-                <Action.Push
-                  title="Edit Problem"
-                  target={
-                    <EditNotesSectionForm
-                      projectName={projectName}
-                      notes={notes}
-                      initialValue={notes.problem}
-                      field="problem"
-                      label="Problem"
-                      submitTitle="Save Problem"
-                      onSuccess={onNotesSuccess}
-                    />
-                  }
-                />
-              </ActionPanel>
-            }
-          />
+          {!isArea && (
+            <List.Item
+              title="Edit Problem"
+              icon={Icon.QuestionMarkCircle}
+              subtitle={truncateSubtitle(notes.problem)}
+              detail={sectionDetail(notes.problem, "No problem statement yet.")}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title="Edit Problem"
+                    target={
+                      <EditNotesSectionForm
+                        projectName={projectName}
+                        notes={notes}
+                        initialValue={notes.problem}
+                        field="problem"
+                        label="Problem"
+                        submitTitle="Save Problem"
+                        onSuccess={onNotesSuccess}
+                      />
+                    }
+                  />
+                </ActionPanel>
+              }
+            />
+          )}
           <List.Item
             title="Edit Goals"
             icon={Icon.Flag}
@@ -548,30 +555,32 @@ export default function ProjectView({ projectName, basePath }: Props) {
               </ActionPanel>
             }
           />
-          <List.Item
-            title="Edit Approach"
-            icon={Icon.List}
-            subtitle={truncateSubtitle(notes.approach)}
-            detail={sectionDetail(notes.approach, "No approach yet.")}
-            actions={
-              <ActionPanel>
-                <Action.Push
-                  title="Edit Approach"
-                  target={
-                    <EditNotesSectionForm
-                      projectName={projectName}
-                      notes={notes}
-                      initialValue={notes.approach}
-                      field="approach"
-                      label="Approach"
-                      submitTitle="Save Approach"
-                      onSuccess={onNotesSuccess}
-                    />
-                  }
-                />
-              </ActionPanel>
-            }
-          />
+          {!isArea && (
+            <List.Item
+              title="Edit Approach"
+              icon={Icon.List}
+              subtitle={truncateSubtitle(notes.approach)}
+              detail={sectionDetail(notes.approach, "No approach yet.")}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title="Edit Approach"
+                    target={
+                      <EditNotesSectionForm
+                        projectName={projectName}
+                        notes={notes}
+                        initialValue={notes.approach}
+                        field="approach"
+                        label="Approach"
+                        submitTitle="Save Approach"
+                        onSuccess={onNotesSuccess}
+                      />
+                    }
+                  />
+                </ActionPanel>
+              }
+            />
+          )}
           <List.Item
             title="Add Link"
             icon={Icon.Link}

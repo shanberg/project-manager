@@ -137,7 +137,8 @@ struct FocusPanelView: View {
         HStack(spacing: 6) {
             let p = store.progress
             Image(nsImage: MenubarRing.image(fraction: p.total > 0 ? Double(p.done) / Double(p.total) : 0,
-                                             hasProject: p.total > 0, tint: nil))
+                                             hasProject: p.total > 0,
+                                             showsProgress: store.kind.showsProgress, tint: nil))
                 .renderingMode(.template)
                 .foregroundStyle(.secondary)
             projectSwitcher

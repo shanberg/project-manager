@@ -1,6 +1,6 @@
 # Areas
 
-**Status:** built, 2026-08-26. Every step in the order of work below is committed, across PmLib, the CLI, the contract, the Mac app and the Raycast extension. Cadence is deliberately absent — see the section on it.
+**Status:** built, 2026-08-26, and reviewed. Every step in the order of work below is committed across PmLib, the CLI, the contract, the Mac app and the Raycast extension, and the seven defects the pre-release review turned up are fixed. Two things are known-missing on purpose: cadence, and adopting a folder you already have — both below.
 
 This settles what an Area *is* before any of it is written, because most of the answer turns out to be "relax four assumptions", not "add a second document type" — and because the interesting question is where the difference between the two kinds is allowed to live.
 
@@ -201,6 +201,12 @@ The tempting design is a declared rhythm — `weekly`, `monthly` — with an Are
 It's deferred anyway, because the better version of the idea is calendar-shaped — surfacing the right notes *during* the meeting rather than nagging that a meeting is overdue — and that's a larger conversation that applies to projects just as much. Building an interval field first would leave the calendar work arguing with an existing feature instead of replacing nothing.
 
 Until then Areas have one time signal, free: `modified`, the notes-file mtime the index already reads, shown as last-touched and sortable by recency. Not a nag. Enough to see which Area has been ignored.
+
+## Still missing, on purpose
+
+**Adopting a folder you already have.** An Area is a directory PM has written notes into — which is what stops it hijacking the folders you keep for Obsidian, and also what stops a PARA vault full of real Areas from being brought in. `pm new --area Home` over an existing `areas/Home` is refused as a collision, correctly, and there is nothing else to reach for. This is the largest remaining gap between the feature and a vault that already has Areas in it.
+
+**Case.** The fallback derives `areas`; a vault laid out as `Projects` / `Archive` / `Areas` has the capitalized form. On case-insensitive APFS they are the same directory, which is why it works — on a case-sensitive volume PM would make a second one beside it. Preferring an existing case variant when the parent has one is a small fix nobody has needed yet.
 
 ## Order of work
 

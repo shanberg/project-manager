@@ -287,17 +287,22 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return try document(spec, input, options) { rawText in
             var notes = try parseNotes(markdown: rawText)
             try setDetail(&notes, key: input.key ?? "", value: input.value)
-            guard let out = try writeNotesPreservingFormat(rawText: rawText, incoming: notes) else {
+            guard let out = try writeNotesPreservingFormat(rawText: rawText, incoming: notes,
+                                                           kind: detailKind) else {
                 throw ApiError(.writeFailed, "Couldn't splice that section.")
             }
             return Outcome(rawText: out, note: Phrase(past: "Updated \(input.key ?? "the notes")", future: "update \(input.key ?? "the notes")"))
         }
     case "notes.addLink":
+        // Links are common to both kinds, so this can't trip the header guard — the kind is passed
+        // because the writer always wants one, not because this action has a decision to make.
+        let linkKind = ProjectKind.of(folderName: try folderName(of: try resolvedProject(input)))
         return try document(spec, input, options) { rawText in
             guard let url = input.text, !url.isEmpty else { throw PmError.emptyTodoText }
             var notes = try parseNotes(markdown: rawText)
             notes.links.append(LinkEntry(label: input.label ?? url, url: url))
-            guard let out = try writeNotesPreservingFormat(rawText: rawText, incoming: notes) else {
+            guard let out = try writeNotesPreservingFormat(rawText: rawText, incoming: notes,
+                                                           kind: linkKind) else {
                 throw ApiError(.writeFailed, "Couldn't add the link.")
             }
             return Outcome(rawText: out, note: Phrase(past: "Added the link", future: "add the link"))

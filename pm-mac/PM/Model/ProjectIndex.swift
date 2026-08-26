@@ -101,6 +101,9 @@ final class ProjectIndex: ObservableObject {
     struct Recent: Identifiable, Equatable {
         let projectKey: String
         let name: String
+        /// Project or area, so a switcher row draws the right mark. Derived from the name like
+        /// everywhere else, so a Recent needs nothing stored to know.
+        var kind: ProjectKind { ProjectKind.of(folderName: name) }
         let done: Int
         let total: Int
         let nextDue: String?

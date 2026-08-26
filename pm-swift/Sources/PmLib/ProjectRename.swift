@@ -21,7 +21,11 @@ public func parseProjectPrefixAndTitle(folderName: String, domainCodes: [String]
     throw PmError.projectFolderMalformed(folderName)
 }
 
-/// Rename a project folder by changing only the title segment after `Domain-<digits>`. Updates notes `#` title and renames the notes file when needed.
+/// Give a project or area a new title. Updates the notes `#` title and renames the notes file when needed.
+///
+/// A project keeps its `Domain-<digits>` prefix and only the title segment moves — the number is its
+/// identity and renaming isn't renumbering. An area has no prefix to keep: its name *is* its title, so
+/// the new folder name is simply the new title.
 /// - Parameter dryRun: check everything and work out the new folder name, then stop before the move.
 public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
                                dryRun: Bool = false) throws -> String {
@@ -33,9 +37,15 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
     let (config, _) = try loadConfigAndPaths()
     let projectPath = try resolveProjectPath(nameOrPrefix: nameOrPrefix)
     let oldName = (projectPath as NSString).lastPathComponent
-    let domainCodes = Array(config.domains.keys)
-    let (prefix, _) = try parseProjectPrefixAndTitle(folderName: oldName, domainCodes: domainCodes)
-    let newBasename = "\(prefix) \(trimmed)"
+    let kind = ProjectKind.of(folderName: oldName)
+    let newBasename: String
+    if kind.isNumbered {
+        let domainCodes = Array(config.domains.keys)
+        let (prefix, _) = try parseProjectPrefixAndTitle(folderName: oldName, domainCodes: domainCodes)
+        newBasename = "\(prefix) \(trimmed)"
+    } else {
+        newBasename = trimmed
+    }
     if newBasename == oldName { return newBasename }
     let parent = (projectPath as NSString).deletingLastPathComponent
     let dest = (parent as NSString).appendingPathComponent(newBasename)
@@ -53,7 +63,7 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
         notes.title = trimmed
         // Update only the title line, preserving all other formatting. Fall back to the full
         // serializer if the title line can't be spliced (e.g. no `# ` heading).
-        let content = (try writeNotesPreservingFormat(rawText: raw, incoming: notes)) ?? serializeNotes(notes, kind: ProjectKind.of(notesPath: canonical))
+        let content = (try writeNotesPreservingFormat(rawText: raw, incoming: notes, kind: ProjectKind.of(notesPath: canonical))) ?? serializeNotes(notes, kind: ProjectKind.of(notesPath: canonical))
         if resolved == canonical {
             try ioResolved.writeContent(path: canonical, content: content)
         } else {

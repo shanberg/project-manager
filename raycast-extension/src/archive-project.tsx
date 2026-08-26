@@ -10,18 +10,21 @@ import {
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 import { runPmWithPrefs } from "./lib/pm";
+import { parseListAllOutput } from "./lib/utils";
 import type { PreferenceValues } from "./lib/types";
 
+/**
+ * Everything that can be put away: the active projects and the areas both. `pm archive` takes either,
+ * and an area you no longer hold is exactly the thing this command is for.
+ */
 async function fetchActiveProjects(
   configPath: string | undefined,
   pmCliPath: string | undefined,
 ): Promise<string[]> {
   const prefs = { configPath, pmCliPath };
-  const { stdout } = await runPmWithPrefs(prefs, ["list"]);
-  return stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const { stdout } = await runPmWithPrefs(prefs, ["list", "--all"]);
+  const { active, areas } = parseListAllOutput(stdout);
+  return [...active, ...areas];
 }
 
 export default function Command() {

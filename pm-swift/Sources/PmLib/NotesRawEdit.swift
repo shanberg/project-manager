@@ -527,8 +527,22 @@ private let rawCalloutStartPattern = try? NSRegularExpression(pattern: #"^>\s*\[
 /// everything else byte-for-byte. Returns nil when the change can't be spliced safely (a changed
 /// section's anchor is missing, or the Sessions region changed) — the caller should fall back to
 /// the full serializer so the change is never silently dropped.
-public func writeNotesPreservingFormat(rawText: String, incoming: ProjectNotes) throws -> String? {
+public func writeNotesPreservingFormat(rawText: String, incoming: ProjectNotes,
+                                       kind: ProjectKind) throws -> String? {
     let existing = try parseNotes(markdown: rawText)
+
+    // A write may not *introduce* a section this kind doesn't have. Note the third clause: a section
+    // already written into the document is left alone, because the serializer deliberately preserves a
+    // non-empty omitted section — that's what keeps a Problem somebody typed into an area by hand in
+    // Obsidian from vanishing. What that protection must not become is a way in.
+    //
+    // It throws rather than returning nil. Nil means "can't splice this, fall back to the full
+    // serializer", and the full serializer would then write the section for exactly the reason above —
+    // so a refusal expressed as nil would be a refusal that wrote the thing anyway.
+    for section in HeaderSection.allCases
+    where !kind.headerSections.contains(section) && !incoming.isEmpty(section) && existing.isEmpty(section) {
+        throw PmError.sectionNotApplicable(kind: kind.rawValue, section: section.label)
+    }
 
     // Session/todo edits are handled by the surgical todo path; `notes write` shouldn't change them.
     // If they differ, splicing would drop the change — fall back to the full serializer.
