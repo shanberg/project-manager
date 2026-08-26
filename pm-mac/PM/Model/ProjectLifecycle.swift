@@ -96,7 +96,10 @@ enum ProjectLifecycle {
 
     // MARK: Moving the project folders themselves
 
-    /// Re-point open projects after the active/archive folders have been changed in Settings.
+    /// Re-point open projects after the project folders have been changed in Settings.
+    ///
+    /// All three roots, including areas — which can move without being touched, since an unset
+    /// `areasPath` is derived from the others.
     ///
     /// Every key names the folder it was found in, so changing that setting invalidates all of them at
     /// once. A project whose folder is also present under the new path is the same project and simply
@@ -114,6 +117,7 @@ enum ProjectLifecycle {
             switch base {
             case old.activePath: rebased = new.activePath
             case old.archivePath: rebased = new.archivePath
+            case old.areasPath: rebased = new.areasPath
             default: rebased = nil
             }
             guard let rebased, rebased != base else { continue }
