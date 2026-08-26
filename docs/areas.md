@@ -1,6 +1,6 @@
 # Areas
 
-**Status:** proposed, 2026-08-26. Step 1 below is committed — `projectTitle` and its tests. Everything else is unbuilt.
+**Status:** part-built, 2026-08-26. Steps 1–4 in the order of work below are committed: `ProjectKind`, the third root, the Area scan, and kind-aware serialization, all headless and tested. Creation, the API surface, the app and Raycast are unbuilt — there is no way to make an Area yet.
 
 This settles what an Area *is* before any of it is written, because most of the answer turns out to be "relax four assumptions", not "add a second document type" — and because the interesting question is where the difference between the two kinds is allowed to live.
 
@@ -70,8 +70,14 @@ public extension ProjectKind {
     /// Whether its names carry a `CODE-NNN ` prefix and draw a number.
     var isNumbered: Bool { self == .project }
 
-    /// Which root its folders live under, and what its scaffold is.
+    /// Which kind a folder is, read off its name — never stored.
+    static func of(folderName: String) -> ProjectKind
+
+    /// Where it lives unarchived, which is where unarchiving returns it to.
+    var homeScope: ProjectScope
     func root(in paths: ResolvedPaths) -> String
+
+    /// The scaffold a new one is created with.
     func subfolders(in config: PmConfig) -> [String]
 
     /// What putting one away is called.
@@ -142,7 +148,13 @@ A third root beside active and archive, reached by a new `areasPath` config key 
 
 **Scaffold.** `docs/` and `resources/`, from a new `areaSubfolders` config key. The rest is project vocabulary.
 
-**`ProjectScope` gains a third case, and `opposite` goes.** Archiving an Area moves it to the same `archive/` folder — one archive, as PARA has it — but unarchiving then has two possible destinations and nothing in the folder name to choose between them, since an Area's name carries no code. The move takes an explicit destination, and the scope a thing returns to is recorded when it's put away rather than inferred.
+**`ProjectScope` gains a third case, and `opposite` goes.** `opposite` worked while there were two roots and stopped the moment there were three: everything archives into the one `archive/` — one archive, as PARA has it — but what comes back out goes to `active` or to `areas` depending on what it is.
+
+The first draft of this said the answer would be *recorded* when a folder was put away. That was wrong, and the fix is better than the thing it replaces: **the kind is derived from the folder's name, never stored.** `W-12 Website Refresh` and `Team 1:1s` are not the same shape, so an archived folder still says which it is a year later, and both kinds can share one archive with no marker file at all.
+
+A stored field would have to survive being moved in Finder, renamed in Obsidian, and restored from a backup, and would be silently wrong the first time it didn't. Folder names are already how PM identifies a project; this asks them one more question. It also means the grammar `projectTitle` was taught in step 1 — strip a prefix only when there is one — *is* the kind discriminator, shared rather than stated twice.
+
+The cost is that renaming a project's folder to drop its prefix turns it into an Area. That's the same bargain every other name-derived fact here makes, and it is at least visible.
 
 ### The defect this depended on — fixed
 
@@ -187,10 +199,10 @@ Until then Areas have one time signal, free: `modified`, the notes-file mtime th
 ## Order of work
 
 1. ~~`projectTitle` strips only a real code prefix, with tests.~~ **Done.**
-2. `ProjectKind` and `HeaderSection` in PmLib, with the properties above and nothing consuming them yet.
-3. `areasPath` and `areaSubfolders` in config; the Area scan; `ProjectScope` third case and the explicit archive destination.
-4. `serializeNotes` takes a kind and applies the emit rule; round-trip tests both kinds, plus the hand-written-Problem-on-an-Area case.
-5. `project.create` / `project.list` / `notes.setDetails` take kind; manifest bump.
+2. ~~`ProjectKind` and `HeaderSection` in PmLib.~~ **Done.**
+3. ~~`areasPath` and `areaSubfolders` in config; the Area scan; `ProjectScope` third case; the kind derived from the folder name.~~ **Done.**
+4. ~~`serializeNotes` takes a kind and applies the emit rule.~~ **Done.**
+5. Creating one: an Area template, and a `createArea` beside `createProject` that draws no number. `project.create` / `project.list` / `notes.setDetails` take kind; manifest bump.
 6. App: index, sidebar section and kind filter, New Area, the section-list header form.
 7. Raycast: New Area, and the kind filter in List Projects.
 
