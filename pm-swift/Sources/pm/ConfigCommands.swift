@@ -37,42 +37,47 @@ func runConfigInit() {
     } catch { fail(error) }
 }
 
+/// The value `pm config get` shows for a key.
+///
+/// `getConfigValue` reports the configuration as stored, which is the right answer for a key that was
+/// written down and the wrong one for `areasPath`: it is unset in every config predating Areas, and
+/// printing "null" would tell a reader nothing about where their areas actually live. Resolved here,
+/// once, so the single-key form and the whole-config dump can't disagree about it.
+private func displayValue(for key: PmConfigKey, config: PmConfig) -> PmConfigValue {
+    if key == .areasPath, let resolved = try? resolvePaths(config: config).areasPath {
+        return .string(resolved)
+    }
+    return getConfigValue(config: config, key: key)
+}
+
+private func render(_ value: PmConfigValue, key: String) throws -> String {
+    switch value {
+    case .unknownKey: fail(PmError.unknownConfigKey(key))
+    case .string(let s): return s ?? "null"
+    case .bool(let b): return "\(b)"
+    case .stringArray(let a): return try prettyJSON(a as NSArray, key: key)
+    case .stringDictionary(let d): return try prettyJSON(d as NSDictionary, key: key)
+    }
+}
+
+private func prettyJSON(_ object: Any, key: String) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: object, options: .prettyPrinted)
+    guard let str = String(data: data, encoding: .utf8) else {
+        stderr("Failed to encode config value '\(key)' as UTF-8.")
+        exit(1)
+    }
+    return str
+}
+
 func runConfigGet(key: String?) {
     do {
         guard let config = try loadConfig() else { fail(PmError.configNotFound) }
         if let k = key {
-            switch k {
-            case "activePath":
-                print(config.activePath)
-            case "archivePath":
-                print(config.archivePath)
-            case "paraPath":
-                print(config.paraPath ?? "null")
-            case "notesTemplatePath":
-                print(config.notesTemplatePath ?? "null")
-            case "useObsidianCLI":
-                print(config.useObsidianCLI ?? false)
-            case "obsidianVault":
-                print(config.obsidianVault ?? "null")
-            case "obsidianVaultPath":
-                print(config.obsidianVaultPath ?? "null")
-            case "domains":
-                let data = try JSONSerialization.data(withJSONObject: config.domains as NSDictionary, options: .prettyPrinted)
-                guard let str = String(data: data, encoding: .utf8) else {
-                    stderr("Failed to encode config value '\(k)' as UTF-8.")
-                    exit(1)
-                }
-                print(str)
-            case "subfolders":
-                let data = try JSONSerialization.data(withJSONObject: config.subfolders as NSArray, options: .prettyPrinted)
-                guard let str = String(data: data, encoding: .utf8) else {
-                    stderr("Failed to encode config value '\(k)' as UTF-8.")
-                    exit(1)
-                }
-                print(str)
-            default:
-                fail(PmError.unknownConfigKey(k))
-            }
+            // The key table lives in PmLib and is the same one `config set` validates against. This
+            // used to be a second copy of it here, which is how `areasPath` came to be readable in the
+            // whole-config dump and "unknown" when asked for by name.
+            guard let typed = PmConfigKey(rawValue: k) else { fail(PmError.unknownConfigKey(k)) }
+            print(try render(displayValue(for: typed, config: config), key: k))
         } else {
             var obj: [String: Any] = [
                 "activePath": config.activePath,
@@ -84,7 +89,7 @@ func runConfigGet(key: String?) {
             // Resolved rather than raw. `areasPath` is unset in every config written before Areas
             // existed, and a reader handed null would have to re-derive the fallback itself — which is
             // the same rule stated twice, in another language, in the surface most likely to drift.
-            obj["areasPath"] = (try? resolvePaths(config: config).areasPath) ?? config.areasPath ?? NSNull()
+            obj["areasPath"] = displayValue(for: .areasPath, config: config).stringValue ?? NSNull()
             obj["areaSubfolders"] = config.areaSubfolders ?? defaultAreaSubfolders
             obj["notesTemplatePath"] = config.notesTemplatePath ?? NSNull()
             obj["areaNotesTemplatePath"] = config.areaNotesTemplatePath ?? NSNull()
@@ -104,27 +109,26 @@ func runConfigGet(key: String?) {
 func runConfigSet(key: String, valueStr: String) {
     do {
         guard var config = try loadConfig() else { fail(PmError.configNotFound) }
-        if key == "activePath" || key == "archivePath" || key == "paraPath" {
-            try setConfigValue(config: &config, key: key, value: valueStr)
-        } else if key == "notesTemplatePath" || key == "obsidianVault" || key == "obsidianVaultPath" {
-            try setConfigValue(config: &config, key: key, value: valueStr.isEmpty ? "" : valueStr)
-        } else if key == "useObsidianCLI" {
-            try setConfigValue(config: &config, key: key, value: valueStr)
-        } else if key == "domains" || key == "subfolders" {
+        guard let typed = PmConfigKey(rawValue: key) else { fail(PmError.unknownConfigKey(key)) }
+        // Which keys take JSON and which take a plain string is a fact about the key, and it lives with
+        // the key. This used to be a list here, and a key added to the table without also being added
+        // to the list was readable in the dump and unsettable.
+        let value: Any
+        switch configValueKind(for: typed) {
+        case .string, .bool:
+            value = valueStr
+        case .stringArray, .stringDictionary:
             guard let data = valueStr.data(using: .utf8) else {
                 stderr("Invalid UTF-8 in value.")
                 exit(1)
             }
-            let value: Any
             do {
                 value = try JSONSerialization.jsonObject(with: data)
             } catch {
                 fail(PmError.invalidConfigValue(key: key, expectedType: "valid JSON"))
             }
-            try setConfigValue(config: &config, key: key, value: value)
-        } else {
-            fail(PmError.unknownConfigKey(key))
         }
+        try setConfigValue(config: &config, key: key, value: value)
         try saveConfig(config)
         print("Updated \(key)")
     } catch { fail(error) }

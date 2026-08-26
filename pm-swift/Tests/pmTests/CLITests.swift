@@ -509,4 +509,61 @@ final class CLITests: XCTestCase {
         XCTAssertTrue((written.stdout + written.stderr).contains("no Problem section"),
                       written.stdout + written.stderr)
     }
+
+    /// Every key the config table publishes must be readable by name and settable — not just present
+    /// in the whole-config dump.
+    ///
+    /// `pm config get` and `pm config set` each kept their own list of keys beside the real one, so
+    /// `areasPath` landed in the dump, answered "Unknown key" when asked for by name, and couldn't be
+    /// set at all. Asserting over `PmConfigKey.allCases` is what makes the next key added impossible
+    /// to half-wire.
+    func testEveryConfigKeyIsReadableByName() throws {
+        try skipIfNoBinary()
+        for key in PmConfigKey.allCases {
+            let got = runPm(["config", "get", key.rawValue])
+            XCTAssertEqual(got.exitCode, 0, "config get \(key.rawValue): \(got.stderr)")
+            XCTAssertFalse(got.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "config get \(key.rawValue) printed nothing")
+        }
+    }
+
+    func testEveryConfigKeyRoundTrips() throws {
+        try skipIfNoBinary()
+        for key in PmConfigKey.allCases {
+            // Paths that must stay pointing somewhere real are left alone; the rest get a value and
+            // are read back.
+            let value: String
+            switch configValueKind(for: key) {
+            case .string where key == .activePath || key == .archivePath: continue
+            case .string: value = "/tmp/pm-test-\(key.rawValue)"
+            case .bool: value = "true"
+            case .stringArray: value = #"["one","two"]"#
+            case .stringDictionary: value = #"{"Z":"Zed"}"#
+            }
+            let set = runPm(["config", "set", key.rawValue, value])
+            XCTAssertEqual(set.exitCode, 0, "config set \(key.rawValue): \(set.stderr)")
+
+            let got = runPm(["config", "get", key.rawValue]).stdout
+            switch configValueKind(for: key) {
+            case .string: XCTAssertEqual(got.trimmingCharacters(in: .whitespacesAndNewlines), value, key.rawValue)
+            case .bool: XCTAssertTrue(got.contains("true"), key.rawValue)
+            case .stringArray: XCTAssertTrue(got.contains("one") && got.contains("two"), key.rawValue)
+            case .stringDictionary: XCTAssertTrue(got.contains("Zed"), key.rawValue)
+            }
+        }
+    }
+
+    /// And the whole-config dump agrees with the single-key form about every key it prints.
+    func testTheConfigDumpAgreesWithTheSingleKeyForm() throws {
+        try skipIfNoBinary()
+        let dump = runPm(["config", "get"]).stdout
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(dump.utf8)) as? [String: Any])
+        for key in PmConfigKey.allCases where configValueKind(for: key) == .string {
+            guard let dumped = object[key.rawValue] as? String else { continue }
+            let single = runPm(["config", "get", key.rawValue]).stdout
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            XCTAssertEqual(single, dumped, "\(key.rawValue) reads differently in the two forms")
+        }
+    }
 }

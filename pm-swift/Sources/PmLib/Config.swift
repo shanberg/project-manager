@@ -291,12 +291,32 @@ public func setConfigValue(config: inout PmConfig, key: PmConfigKey, value: PmCo
     }
 }
 
-private func typeName(for key: PmConfigKey) -> String {
+/// What shape a config key's value has.
+///
+/// Published because every surface that reads or writes config needs it and each one had grown its own
+/// copy: `pm config set` decided which keys take JSON by listing them, and `pm config get` listed them
+/// again to decide how to print. Two hand-kept lists beside the real one is how `areasPath` came to be
+/// in the whole-config dump, "unknown" when asked for by name, and unsettable.
+public enum PmConfigValueKind {
+    case string, bool, stringArray, stringDictionary
+}
+
+public func configValueKind(for key: PmConfigKey) -> PmConfigValueKind {
     switch key {
-    case .activePath, .archivePath, .areasPath, .paraPath, .notesTemplatePath, .areaNotesTemplatePath, .obsidianVault, .obsidianVaultPath: return "String"
-    case .useObsidianCLI: return "Boolean"
-    case .domains: return "object (key-value pairs)"
-    case .subfolders, .areaSubfolders: return "array of strings"
+    case .activePath, .archivePath, .areasPath, .paraPath,
+         .notesTemplatePath, .areaNotesTemplatePath, .obsidianVault, .obsidianVaultPath: return .string
+    case .useObsidianCLI: return .bool
+    case .domains: return .stringDictionary
+    case .subfolders, .areaSubfolders: return .stringArray
+    }
+}
+
+private func typeName(for key: PmConfigKey) -> String {
+    switch configValueKind(for: key) {
+    case .string: return "String"
+    case .bool: return "Boolean"
+    case .stringDictionary: return "object (key-value pairs)"
+    case .stringArray: return "array of strings"
     }
 }
 
