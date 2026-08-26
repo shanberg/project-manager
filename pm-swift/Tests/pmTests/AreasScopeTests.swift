@@ -136,4 +136,91 @@ final class AreasScopeTests: XCTestCase {
         config.areaSubfolders = ["notes"]
         XCTAssertEqual(ProjectKind.area.subfolders(in: config), ["notes"])
     }
+
+    // MARK: How the derived folder is spelled
+
+    /// A PARA vault laid out as `Projects` / `Archive` / `Areas` has already chosen the spelling, and a
+    /// derived path shouldn't argue with it. On a case-insensitive volume the disagreement is invisible
+    /// to `fileExists` and highly visible in every message and payload that prints the path; on a
+    /// case-sensitive one PM would make a second directory beside the first.
+    func testTheDerivedAreasFolderTakesTheSpellingOnDisk() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        for sub in ["Projects", "Archive", "Areas"] {
+            try FileManager.default.createDirectory(atPath: (root as NSString).appendingPathComponent(sub),
+                                                    withIntermediateDirectories: true)
+        }
+        let config = PmConfig(paraPath: root,
+                              activePath: (root as NSString).appendingPathComponent("Projects"),
+                              archivePath: (root as NSString).appendingPathComponent("Archive"),
+                              domains: defaultDomains, subfolders: defaultSubfolders)
+        let paths = try resolvePaths(config: config, environment: [:])
+        XCTAssertEqual((paths.areasPath as NSString).lastPathComponent, "Areas")
+    }
+
+    /// Beside the active folder, the same way.
+    func testTheGuessBesideActiveAlsoTakesTheSpellingOnDisk() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        for sub in ["active", "archive", "AREAS"] {
+            try FileManager.default.createDirectory(atPath: (root as NSString).appendingPathComponent(sub),
+                                                    withIntermediateDirectories: true)
+        }
+        let config = PmConfig(activePath: (root as NSString).appendingPathComponent("active"),
+                              archivePath: (root as NSString).appendingPathComponent("archive"),
+                              domains: defaultDomains, subfolders: defaultSubfolders)
+        let paths = try resolvePaths(config: config, environment: [:])
+        XCTAssertEqual((paths.areasPath as NSString).lastPathComponent, "AREAS")
+    }
+
+    /// With nothing there, `areas` is as good a spelling as any — PM is about to choose it.
+    func testWithNoFolderThereTheDerivedNameIsLowercase() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: (root as NSString).appendingPathComponent("active"),
+                                                withIntermediateDirectories: true)
+        let config = PmConfig(activePath: (root as NSString).appendingPathComponent("active"),
+                              archivePath: (root as NSString).appendingPathComponent("archive"),
+                              domains: defaultDomains, subfolders: defaultSubfolders)
+        let paths = try resolvePaths(config: config, environment: [:])
+        XCTAssertEqual((paths.areasPath as NSString).lastPathComponent, "areas")
+    }
+
+    /// Only the *name* is taken from the canonical answer. The canonical form resolves symlinks too,
+    /// and adopting the whole of it would re-root areasPath somewhere its siblings aren't.
+    func testResolutionDoesNotRerootThePath() throws {
+        let real = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        let link = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer {
+            try? FileManager.default.removeItem(atPath: real)
+            try? FileManager.default.removeItem(atPath: link)
+        }
+        try FileManager.default.createDirectory(atPath: (real as NSString).appendingPathComponent("Areas"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: (real as NSString).appendingPathComponent("active"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+
+        let config = PmConfig(paraPath: link,
+                              activePath: (link as NSString).appendingPathComponent("active"),
+                              archivePath: (link as NSString).appendingPathComponent("archive"),
+                              domains: defaultDomains, subfolders: defaultSubfolders)
+        let paths = try resolvePaths(config: config, environment: [:])
+        XCTAssertEqual(paths.areasPath, (link as NSString).appendingPathComponent("Areas"),
+                       "the parent must stay as given — only the folder's own name comes from disk")
+    }
+
+    /// An explicitly configured path is used verbatim, like activePath and archivePath. Someone who
+    /// wrote it down meant it.
+    func testAnExplicitAreasPathIsNotSecondGuessed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: (root as NSString).appendingPathComponent("Areas"),
+                                                withIntermediateDirectories: true)
+        let config = PmConfig(activePath: "/a", archivePath: "/b",
+                              areasPath: (root as NSString).appendingPathComponent("areas"),
+                              domains: defaultDomains, subfolders: defaultSubfolders)
+        let paths = try resolvePaths(config: config, environment: [:])
+        XCTAssertEqual((paths.areasPath as NSString).lastPathComponent, "areas")
+    }
 }

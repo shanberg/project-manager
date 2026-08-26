@@ -136,6 +136,28 @@ public struct ResolvedPaths {
     }
 }
 
+/// The areas folder inside `parent`, spelled the way the filesystem spells it.
+///
+/// A derived path picks the name, and a PARA vault laid out as `Projects` / `Archive` / `Areas` has
+/// picked a different one. On a case-insensitive volume the difference is invisible to `fileExists` —
+/// the folder opens, the scan works — and highly visible everywhere a path is *shown*: every message,
+/// every JSON payload, every log line says `areas` about a folder called `Areas`. On a case-sensitive
+/// volume it stops being cosmetic and PM makes a second directory beside the first.
+///
+/// `canonicalPath` is the filesystem's own answer to "what is this really called". Only the last
+/// component of it is taken: the canonical form also resolves symlinks, and adopting the whole thing
+/// would quietly re-root `areasPath` somewhere its siblings aren't (`/tmp` becoming `/private/tmp`
+/// under `activePath` that still says `/tmp`).
+///
+/// Nil when nothing is there, which is the ordinary case for a vault that has never made one — and
+/// then `areas` is as good a spelling as any, because PM is about to choose it.
+func areasFolder(in parent: String) -> String {
+    let candidate = (parent as NSString).appendingPathComponent("areas")
+    guard let values = try? URL(fileURLWithPath: candidate).resourceValues(forKeys: [.canonicalPathKey]),
+          let canonical = values.canonicalPath else { return candidate }
+    return (parent as NSString).appendingPathComponent((canonical as NSString).lastPathComponent)
+}
+
 /// Where Areas go when nothing says otherwise: beside the active folder.
 ///
 /// A guess, and a cheap one to be wrong about. Scanning a directory that isn't there yields no Areas,
@@ -143,7 +165,7 @@ public struct ResolvedPaths {
 /// when the first Area is created and the folder appears next to `active/`. Setting `areasPath` or
 /// `paraPath` overrides it.
 func defaultAreasPath(besideActive activePath: String) -> String {
-    ((activePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("areas")
+    areasFolder(in: (activePath as NSString).deletingLastPathComponent)
 }
 
 /// Resolve active/archive paths from config (and optional env). Pass nil for env to use process environment.
@@ -156,7 +178,7 @@ internal func resolvePaths(config: PmConfig, environment: [String: String]?) thr
         if let a = env["PM_AREAS_PATH"], !a.isEmpty { return (a as NSString).expandingTildeInPath }
         if let a = config.areasPath, !a.isEmpty { return (a as NSString).expandingTildeInPath }
         if let para = config.paraPath, !para.isEmpty {
-            return ((para as NSString).expandingTildeInPath as NSString).appendingPathComponent("areas")
+            return areasFolder(in: (para as NSString).expandingTildeInPath)
         }
         return defaultAreasPath(besideActive: activePath)
     }

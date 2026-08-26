@@ -217,9 +217,13 @@ pm adopt "Work"       # take it on
 
 Only Areas. Adopting a folder as a *project* would mean renaming it to `CODE-NNN Title` — taking a number and changing what the folder is called on disk — which is a different act with a different blast radius, and nobody has asked for it.
 
-## Still missing, on purpose
+### A derived path doesn't get to name the folder
 
-**Case.** The fallback derives `areas`; a vault laid out as `Projects` / `Archive` / `Areas` has the capitalized form. On case-insensitive APFS they are the same directory, which is why it works — on a case-sensitive volume PM would make a second one beside it. Preferring an existing case variant when the parent has one is a small fix nobody has needed yet.
+The fallback spells it `areas`; a vault laid out as `Projects` / `Archive` / `Areas` has already chosen otherwise. On a case-insensitive volume the disagreement is invisible to `fileExists` — the folder opens, the scan works — and highly visible everywhere a path is *shown*: every message, every JSON payload and every log line says `areas` about a folder called `Areas`. On a case-sensitive volume it stops being cosmetic and PM makes a second directory beside the first.
+
+So a derived path asks the filesystem what the folder is really called, via `canonicalPath`. Only the last component of that answer is taken: the canonical form resolves symlinks too, and adopting the whole of it would quietly re-root `areasPath` somewhere its siblings aren't — `/tmp` becoming `/private/tmp` under an `activePath` that still says `/tmp`. There's a test with a symlinked vault for exactly that.
+
+An explicitly configured `areasPath` is used verbatim, like `activePath` and `archivePath`. Someone who wrote it down meant it.
 
 ## Order of work
 
