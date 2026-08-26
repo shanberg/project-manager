@@ -709,6 +709,16 @@ final class QuickBarModel: ObservableObject {
     /// first layout of a new summon would otherwise animate away from the last one's rows.
     @Published var animatesLayout = false
 
+    /// The tallest the panel may grow on the screen it was summoned to, set by the controller each
+    /// time the bar comes up.
+    ///
+    /// Only the note surface can want the room, and only it reads this: everything else in the bar is
+    /// a fixed number of rows. It lives here rather than in `QuickBarMetrics` because it isn't a
+    /// constant — the answer is a fraction of a particular screen's visible height, and the bar is
+    /// summoned to whichever screen the pointer is on. Zero until the first summon, which the view
+    /// reads as "no answer yet" and falls back from.
+    @Published var panelHeightLimit: CGFloat = 0
+
     /// Recent projects (empty query) and everything (a query), supplied by the controller so the model
     /// stays free of the scan.
     var recents: [ProjectIndex.Recent] = []

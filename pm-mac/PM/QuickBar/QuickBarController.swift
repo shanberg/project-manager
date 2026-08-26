@@ -81,6 +81,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // Remember where you came from before anything moves, so dismissing can hand focus back.
         if !wasActive { previousApp = NSWorkspace.shared.frontmostApplication }
         seed(mode: mode)
+        // Before the first layout, since the note surface clamps itself against it.
+        model.panelHeightLimit = (summonScreen()?.visibleFrame.height ?? 0) * Self.maxHeightFraction
         let panel = ensurePanel()
         rebuildContent()
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -1232,9 +1234,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Centred horizontally, high on the screen — where a summoned bar goes, and above the middle so
     /// its rows drop into empty space rather than over the thing you're reading.
     private func position(_ panel: NSPanel) {
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
-            ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else { return }
+        guard let visible = summonScreen()?.visibleFrame else { return }
         let size = panel.frame.size
         let origin = NSPoint(x: visible.midX - size.width / 2,
                              y: visible.maxY - visible.height * Self.topInsetFraction - size.height)
@@ -1243,6 +1243,22 @@ final class QuickBarController: NSObject, NSWindowDelegate {
 
     /// How far down the screen the bar's top edge sits, as a fraction of the visible height.
     private static let topInsetFraction: CGFloat = 0.22
+
+    /// The tallest the panel may grow, as a fraction of that same visible height.
+    ///
+    /// Only a note being written ever asks for it, and a note being written wants the room: writing
+    /// three paragraphs into a surface that stopped growing after twelve lines means writing the last
+    /// two of them blind. Sixty per cent is the most that still reads as a panel over your work rather
+    /// than a window in front of it, and it lands the bottom edge well clear of the screen's — the top
+    /// edge is pinned at 22%, so a full-height bar ends at 82% and never has to be nudged back up.
+    private static let maxHeightFraction: CGFloat = 0.6
+
+    /// The screen the bar belongs to: whichever one the pointer is on, since that's the one being
+    /// looked at. Both the position and the height ceiling are answers about that screen, and they have
+    /// to be answers about the *same* screen.
+    private func summonScreen() -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+    }
 
     // MARK: NSWindowDelegate
 

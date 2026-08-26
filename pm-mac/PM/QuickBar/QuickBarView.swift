@@ -14,6 +14,11 @@ struct QuickBarView: View {
     /// The note editor's laid-out height, as it reports it. Clamped by `clampedNoteHeight`, which is
     /// what the editor is actually given — so the panel grows with the prose and then stops.
     @State private var noteHeight: CGFloat = 0
+    /// The whole bar's laid-out height, and the note block's share of it. The difference is everything
+    /// else the bar is showing, which is what the editor's ceiling has to leave room for — see
+    /// `noteHeightCeiling`.
+    @State private var contentHeight: CGFloat = 0
+    @State private var noteBlockHeight: CGFloat = 0
     /// Measured content height, for the panel's auto-fit.
     var onContentHeight: (CGFloat) -> Void = { _ in }
 
@@ -74,7 +79,11 @@ struct QuickBarView: View {
         .background(GeometryReader { geo in
             Color.clear.preference(key: QuickBarHeightKey.self, value: geo.size.height)
         })
-        .onPreferenceChange(QuickBarHeightKey.self) { onContentHeight($0) }
+        .onPreferenceChange(QuickBarHeightKey.self) {
+            contentHeight = $0
+            onContentHeight($0)
+        }
+        .onPreferenceChange(QuickBarNoteBlockHeightKey.self) { noteBlockHeight = $0 }
         .preferredColorScheme(colorMode.colorScheme)
         .background { GlassBackground() }
         .clipShape(RoundedRectangle(cornerRadius: ProjectWindow.cornerRadius, style: .continuous))
@@ -116,9 +125,13 @@ struct QuickBarView: View {
     private var heightSignature: some Equatable {
         [String(model.rows.count), String(model.overflow > 0), model.receipt?.spoken ?? "",
          String(model.preview?.lines.count ?? 0), hint.map(spoken) ?? "",
-         // The editor's height is content, not chrome: it changes as you type, and the panel has to
-         // follow it on the same curve as everything else here.
-         String(Int(clampedNoteHeight)), String(model.noteTail.count)]
+         // Deliberately *not* the editor's height. It used to be here, on the grounds that the panel
+         // should follow the prose on the same curve as everything else — but the prose changes height
+         // while you are typing into it, and a twelfth of a second of easing is twelve hundredths in
+         // which the frame is shorter than the text inside it. Every line typed restarted that curve,
+         // and the whole time it ran the editor had something to scroll. The bar still animates for
+         // everything the bar decides; the one thing you are writing changes size at once.
+         String(model.noteTail.count)]
     }
 
     /// What moves the ghost, and nothing else.
@@ -261,6 +274,7 @@ struct QuickBarView: View {
                                    onSubmit: { model.runSelection() },
                                    onCancel: { model.leaveNote() },
                                    onContentHeight: { noteHeight = $0 },
+                                   growthCeiling: noteHeightCeiling,
                                    focusRequest: model.noteFocusToken,
                                    baseFont: QuickBarMetrics.noteFont,
                                    textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset))
@@ -270,17 +284,43 @@ struct QuickBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, QuickBarMetrics.noteBlockInset)
+        .background(GeometryReader { geo in
+            Color.clear.preference(key: QuickBarNoteBlockHeightKey.self, value: geo.size.height)
+        })
     }
 
     /// How tall the editor is allowed to be: the prose's own height, floored and capped.
-    ///
-    /// The floor is about three lines, so a surface you've just opened looks like somewhere to write
-    /// rather than a field that grew a scrollbar. The ceiling is about fourteen, past which it scrolls
-    /// — which keeps the whole panel inside the same size family as the capture list it replaced, and
-    /// keeps this a bar. A note longer than fourteen lines is one you should be writing in the window,
-    /// and the window is one ⌘↩ and a click away.
     private var clampedNoteHeight: CGFloat {
-        min(max(noteHeight, QuickBarMetrics.noteMinHeight), QuickBarMetrics.noteMaxHeight)
+        min(max(noteHeight, QuickBarMetrics.noteMinHeight), noteHeightCeiling)
+    }
+
+    /// The cap: everything the panel is allowed to take on this screen, less whatever else the bar is
+    /// currently showing.
+    ///
+    /// It used to be a constant — about twelve lines — on the theory that a note longer than that was
+    /// one to write in the window. That was the wrong place to draw it. The window is a ⌘↩ away, but
+    /// you don't know you want it until you're already three paragraphs in and typing under the fold,
+    /// and a surface that stops growing while you're still writing into it is one you're writing into
+    /// blind. The panel may now take sixty per cent of the screen it was summoned to; see
+    /// `QuickBarController.maxHeightFraction` for why that fraction.
+    ///
+    /// The chrome is measured rather than assumed because it isn't fixed: the hint line is always
+    /// there, and the "earlier today" tail is there when today already has a note. Taking the editor's
+    /// own frame out of the whole bar's height is the one subtraction that stays true as either
+    /// changes, and it settles rather than oscillates — a shorter cap shortens the editor and the bar
+    /// by the same amount, leaving the difference where it was.
+    private var noteHeightCeiling: CGFloat {
+        // `noteBlockHeight` is zero for the first pass after the surface opens — the block wasn't in
+        // the tree to be measured — and the difference would be the whole capture bar rather than the
+        // note's chrome. One pass at the old fixed ceiling, then the real answer.
+        guard model.panelHeightLimit > 0, noteBlockHeight > 0 else {
+            return QuickBarMetrics.noteFallbackMaxHeight
+        }
+        // Everything that isn't the editor's own frame — which includes the padding around the block
+        // the editor sits in, since the cap is a number the editor's `.frame(height:)` is given.
+        let editorFrame = noteBlockHeight - QuickBarMetrics.noteBlockInset * 2
+        let chrome = max(0, contentHeight - editorFrame)
+        return max(QuickBarMetrics.noteMinHeight, model.panelHeightLimit - chrome)
     }
 
     /// The tail of today's note, dimmed, under the thing being written.
@@ -875,11 +915,19 @@ enum QuickBarMetrics {
     /// here" is the glyph, the placeholder and a hint line that names the note's destination; none of
     /// them need the room.
     ///
-    /// The ceiling is about twelve lines, past which it scrolls, which keeps the whole panel inside
-    /// the size family of the capture list it replaced. A note longer than that is one to write in the
-    /// window, and the window is a ⌘⏎ and a click away.
+    /// The ceiling is a share of the screen and so isn't a constant at all — see the view's
+    /// `noteHeightCeiling`. This is only what's used before any screen has been asked: about twelve
+    /// lines, which is what the ceiling was when it was fixed.
     static var noteMinHeight: CGFloat { ceil(noteLineHeight) + noteTextInset * 2 }
-    static let noteMaxHeight: CGFloat = 272
+    static let noteFallbackMaxHeight: CGFloat = 272
+}
+
+/// The note block's own height, so the rest of the bar can be worked out by subtraction.
+private struct QuickBarNoteBlockHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }
 
 private struct QuickBarHeightKey: PreferenceKey {

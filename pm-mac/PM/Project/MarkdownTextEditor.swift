@@ -34,8 +34,22 @@ struct MarkdownTextEditor: NSViewRepresentable {
     ///
     /// The measurement is the used rect plus both container insets: what the scroll view would need to
     /// show the whole note without scrolling. The caller is expected to clamp it — see the quick bar's
-    /// `noteMinHeight`/`noteMaxHeight`, which is where "grows with the prose, then scrolls" is decided.
+    /// `noteMinHeight` and `noteHeightCeiling`, which is where "grows with the prose, then scrolls" is
+    /// decided. A host that clamps should hand the same ceiling back as `growthCeiling`.
     var onContentHeight: ((CGFloat) -> Void)? = nil
+
+    /// The tallest the host will grow this editor to before it starts scrolling — the ceiling it
+    /// applies to what `onContentHeight` reports. Zero (the default) is a host that gives the editor a
+    /// fixed frame, where scrolling is the whole arrangement.
+    ///
+    /// The editor needs the number for one reason: while the prose still fits under the ceiling, the
+    /// host is following it line for line and there is nothing to scroll. AppKit doesn't know that. It
+    /// scrolls the caret into view after every insertion, and at the moment it does the frame is still
+    /// the height the note was *before* this keystroke — so the last line is out of sight by exactly
+    /// the line just typed, and AppKit dutifully scrolls to it. A frame later the host has grown, the
+    /// clip view snaps back, and the overlay scroller that flashed on the way has already been seen.
+    /// Knowing the ceiling, the editor can simply decline to chase a caret the host is about to reveal.
+    var growthCeiling: CGFloat = 0
 
     /// Bumped to ask for the caret. Any change puts first responder back on the text view.
     ///
@@ -82,7 +96,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = TopPinningScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -125,6 +139,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onCancel = onCancel
         textView.noteURL = noteURL
+        textView.growthCeiling = growthCeiling
         textView.string = text
         context.coordinator.highlight(textView)
         // After this turn: the text view has no width until it's in the scroll view and laid out, and a
@@ -145,6 +160,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             shortcuts.onSubmit = onSubmit
             shortcuts.onCancel = onCancel
             shortcuts.noteURL = noteURL
+            shortcuts.growthCeiling = growthCeiling
         }
         guard let textView = context.coordinator.textView else { return }
 
@@ -260,6 +276,23 @@ struct MarkdownTextEditor: NSViewRepresentable {
             }
             storage.endEditing()
         }
+    }
+}
+
+/// A scroll view that keeps its document at the top whenever the whole of it fits.
+///
+/// The clip view's origin outlives the reason it was moved. A note that scrolled — because it was past
+/// the host's ceiling, or because the caret was chased before the host grew — and is then cut back down
+/// to something that fits leaves the offset behind, so the first lines sit above the top edge with
+/// blank space under the last. Re-checking on layout costs nothing and is a no-op for a note that
+/// really is taller than its frame, which is the takeover's usual state.
+private final class TopPinningScrollView: NSScrollView {
+    override func layout() {
+        super.layout()
+        guard let document = documentView, contentView.bounds.origin.y != 0,
+              document.frame.height <= contentView.bounds.height + 0.5 else { return }
+        contentView.scroll(to: .zero)
+        reflectScrolledClipView(contentView)
     }
 }
 
@@ -393,6 +426,29 @@ private final class ShortcutTextView: NSTextView {
     var onCancel: (() -> Void)?
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
+    /// See `MarkdownTextEditor.growthCeiling`. Zero means the host isn't growing, so the caret is this
+    /// view's own to chase.
+    var growthCeiling: CGFloat = 0
+
+    /// Don't chase the caret while the host is still growing to show it.
+    ///
+    /// AppKit scrolls the insertion point into view after an edit, and under a host that sizes itself
+    /// to the prose that scroll is always one keystroke early: the frame it measures against is the one
+    /// from before the line was typed. The result is a clip view that jumps down and snaps back on the
+    /// next frame, flashing an overlay scroller each time. Past the ceiling the host has stopped
+    /// growing, the note genuinely scrolls, and this gets out of the way.
+    override func scrollRangeToVisible(_ range: NSRange) {
+        guard growthCeiling <= 0 || laidOutHeight() > growthCeiling else { return }
+        super.scrollRangeToVisible(range)
+    }
+
+    /// What the whole note needs to show without scrolling. The same measurement
+    /// `MarkdownTextEditor.Coordinator.reportHeight` hands the host, so the two agree about the ceiling.
+    private func laidOutHeight() -> CGFloat {
+        guard let container = textContainer, let layout = layoutManager else { return 0 }
+        layout.ensureLayout(for: container)
+        return layout.usedRect(for: container).height + textContainerInset.height * 2
+    }
 
     // MARK: keys
 
