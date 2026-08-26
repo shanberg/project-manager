@@ -122,6 +122,13 @@ public extension ProjectKind {
     /// Whether names carry a `CODE-NNN ` prefix and draw a number from the shared sequence.
     var isNumbered: Bool { self == .project }
 
+    /// Whether a completion ring means anything — whether there's a denominator to fill toward.
+    ///
+    /// An area's `done/total` is a fraction of a number that keeps growing, so a ring on one would sit
+    /// at some arbitrary fill forever and mean nothing by it. Surfaces that would draw a ring show
+    /// what's open and how long ago it was touched instead.
+    var showsProgress: Bool { self == .project }
+
     /// The singular noun, for labels and commands ("New Area").
     var displayName: String {
         switch self {

@@ -68,9 +68,9 @@ final class ProjectIndex: ObservableObject {
         let detailsLoaded: Bool
         var id: String { projectKey }
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
-        /// Whether a completion ring means anything here. An area has no denominator — it isn't
-        /// heading anywhere — so the row shows what's open and when it was last touched instead.
-        var showsProgress: Bool { kind == .project }
+        /// Whether a completion ring means anything here — the kind's answer, forwarded so a view can
+        /// ask a row rather than reach through it.
+        var showsProgress: Bool { kind.showsProgress }
     }
 
     /// One open task, somewhere. What a cross-project search matches against, and enough to go to it.

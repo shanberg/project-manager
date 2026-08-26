@@ -87,7 +87,9 @@ public extension ProjectKind {
 
 Everything downstream *reads* those properties rather than re-deciding: `serializeNotes` walks `kind.headerSections`, `createProject` consults `isNumbered` / `root` / `subfolders`, the app's header form renders the same section list, the sidebar's kind filter is `ProjectKind.allCases`, and the menu item's title is `retireVerb`.
 
-The invariant that makes it hold: **`if kind == .area` appears in `ProjectKind.swift` and nowhere else.** A difference that can't be phrased as a property of the kind is the signal to add a property, not to branch at the call site. Grepping one symbol then gives the complete list of every place the two kinds part ways, and adding a third kind — if that ever happens — is a data change in one file rather than a hunt.
+The invariant that makes it hold: **no call site decides anything by comparing against a specific kind.** A difference that can't be phrased as a property of the kind is the signal to add a property, not to branch where it's needed. Grepping one symbol then gives the complete list of every place the two kinds part ways, and adding a third kind — if that ever happens — is a data change in one file rather than a hunt.
+
+The rule is about *deciding*, not about mentioning. Selecting rows by kind — the sidebar's kind filter, the partition that pulls Areas into their own section — is a query, and comparing there is exactly what it means. What isn't allowed is a call site working out for itself what an Area should *do*: the first pass of the app had a row deciding `kind == .area` before it showed a date, and that belongs behind `showsProgress`, where the ring reads it too.
 
 One more property, worth naming because it's free: **the read path doesn't diverge at all.** `parseNotes` reads whatever sections are present in a document and always has; it needs no kind and gets none. Only writing and presenting consult it.
 

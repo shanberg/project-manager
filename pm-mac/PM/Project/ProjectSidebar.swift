@@ -686,10 +686,11 @@ private struct ProjectSidebarRow: View {
                     Spacer(minLength: 0)
                     if let due = entry.nextDue {
                         SidebarDueLabel(due: due, isSelected: isSelected)
-                    } else if entry.kind == .area, entry.detailsLoaded {
-                        // An area has no due date, so the slot the date rides in carries the one time
-                        // signal an area does have: when it was last written to. It also explains the
-                        // order the list is in when sorting by recency, which is the default.
+                    } else if !entry.showsProgress, entry.detailsLoaded {
+                        // Nothing with a ring has room for this, and nothing without a ring has a due
+                        // date — so the slot the date rides in carries the one time signal an area
+                        // does have: when it was last written to. It also explains the order the list
+                        // is in when sorting by recency, which is the default.
                         Text(Self.lastTouched(entry.modified))
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
