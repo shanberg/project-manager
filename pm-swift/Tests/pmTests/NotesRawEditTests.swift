@@ -963,5 +963,42 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertTrue(updated.contains("#project-tag"))
         XCTAssertTrue(updated.contains("### Wed, Feb 25, 2025\n\nSession recap.\n\n- [ ] Todo one"))
     }
+
+    // MARK: The final newline
+
+    /// A format-preserving edit must not change whether the file ends with a newline.
+    ///
+    /// `components(separatedBy: "\n")` turns a trailing newline into a final empty element, so a
+    /// transform that removes lines *to the end of the file* takes that element with it. Every other
+    /// transform here splices somewhere in the middle and never meets the problem, which is why this
+    /// went unnoticed until deleting the last session left a file with no final newline — a byte
+    /// nobody asked to change, showing up in every diff of a vault kept in version control.
+    func testDeletingTheLastSessionKeepsTheFinalNewline() throws {
+        let raw = "# T\n\n## Sessions\n\n### Wed, Aug 26, 2026\n"
+        let out = try XCTUnwrap(deleteSessionPreservingFormat(rawText: raw, sessionIndex: 0))
+        XCTAssertEqual(out, "# T\n\n## Sessions\n")
+    }
+
+    /// `pruneEmptySessions` removes to the end of the file the same way, and had the same defect.
+    func testPruningToTheEndKeepsTheFinalNewline() throws {
+        let raw = "# T\n\n## Sessions\n\n### Wed, Aug 26, 2026\n"
+        let result = try XCTUnwrap(pruneEmptySessionsPreservingFormat(rawText: raw))
+        XCTAssertEqual(result.removed, 1)
+        XCTAssertEqual(result.rawText, "# T\n\n## Sessions\n")
+    }
+
+    /// And it's preserved, not imposed: a document that genuinely ends without one still does.
+    func testAFileWithoutAFinalNewlineDoesNotGrowOne() throws {
+        let raw = "# T\n\n## Sessions\n\n### Wed, Aug 26, 2026"
+        let out = try XCTUnwrap(deleteSessionPreservingFormat(rawText: raw, sessionIndex: 0))
+        XCTAssertFalse(out.hasSuffix("\n"), "got: \(out.debugDescription)")
+    }
+
+    /// Deleting a session that isn't the last one never touched the tail, and still doesn't.
+    func testDeletingAnEarlierSessionIsUnaffected() throws {
+        let raw = "# T\n\n## Sessions\n\n### Wed, Aug 26, 2026\n\n### Tue, Aug 25, 2026\n"
+        let out = try XCTUnwrap(deleteSessionPreservingFormat(rawText: raw, sessionIndex: 0))
+        XCTAssertEqual(out, "# T\n\n## Sessions\n\n### Tue, Aug 25, 2026\n")
+    }
 }
 

@@ -866,6 +866,23 @@ public func commitSessionNotePreservingFormat(rawText: String, sessionIndex: Int
     return lines.joined(separator: "\n")
 }
 
+/// Join edited lines back into a document, keeping whether it ended with a newline.
+///
+/// `components(separatedBy: "\n")` turns a trailing newline into a final empty element, so a transform
+/// that removes lines *to the end of the file* takes that element with them and the document silently
+/// loses its last byte. Every other transform here splices somewhere in the middle and never meets the
+/// problem — which is why this went unnoticed until deleting the last session left a file with no
+/// final newline.
+///
+/// A format-preserving edit must not change whether a file ends with one. It is a byte nobody asked to
+/// change, it shows up in every diff of a vault kept in version control, and "preserving format" has
+/// to mean the whole file or it doesn't mean much.
+private func joinedPreservingFinalNewline(_ lines: [String], of original: String) -> String {
+    let joined = lines.joined(separator: "\n")
+    guard original.hasSuffix("\n"), !joined.hasSuffix("\n") else { return joined }
+    return joined + "\n"
+}
+
 /// Delete a session — its heading and whole body region — preserving format. When deleting the last
 /// session, also drops the blank line that separated it from the previous one so the file doesn't end
 /// on a dangling blank. Returns nil if the session can't be located. The caller gates this to empty
@@ -879,7 +896,7 @@ public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) ->
         start -= 1
     }
     lines.removeSubrange(start..<end)
-    return lines.joined(separator: "\n")
+    return joinedPreservingFinalNewline(lines, of: rawText)
 }
 
 /// Delete every *empty* session — one whose body holds nothing but blank lines, so no note and no
@@ -901,5 +918,5 @@ public func pruneEmptySessionsPreservingFormat(rawText: String) -> (rawText: Str
         lines.removeSubrange(start..<end)
         removed += 1
     }
-    return removed > 0 ? (lines.joined(separator: "\n"), removed) : nil
+    return removed > 0 ? (joinedPreservingFinalNewline(lines, of: rawText), removed) : nil
 }
