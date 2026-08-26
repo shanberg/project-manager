@@ -847,7 +847,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// panel's editor to ask for it. The shape is the answer anyway: what's worth seeing is the task
     /// and its whole subtree dropping a level.
     private func wrapped(_ notes: ProjectNotes, task: Todo) -> PreviewOutcome? {
-        guard let raw = wrapTaskPreservingFormat(rawText: serializeNotes(notes),
+        guard let raw = wrapTaskPreservingFormat(rawText: serializeNotes(notes, kind: .project),
                                                  sessionIndex: task.sessionIndex,
                                                  lineIndex: task.lineIndex,
                                                  parentText: Self.wrapPlaceholder),

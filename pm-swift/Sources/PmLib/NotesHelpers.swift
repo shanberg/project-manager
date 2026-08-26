@@ -86,7 +86,9 @@ public func readNotesFile(notesPath: String, notesIO: NotesIO? = nil) throws -> 
 /// Serialize and write the notes file. When `notesIO` is nil, uses direct file I/O.
 public func writeNotesFile(notesPath: String, notes: ProjectNotes, notesIO: NotesIO? = nil) throws {
     let io = notesIO ?? DirectNotesIO()
-    let content = serializeNotes(notes)
+    // The kind is a fact about the folder, so it's read from the path rather than threaded through
+    // every caller — one more place to pass it is one more place to pass the wrong one.
+    let content = serializeNotes(notes, kind: ProjectKind.of(notesPath: notesPath))
     try io.writeContent(path: notesPath, content: content)
 }
 

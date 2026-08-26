@@ -250,6 +250,6 @@ final class NotesIOTests: XCTestCase {
         XCTAssertEqual(notesViaDirect.title, notesViaObsidian.title)
         XCTAssertEqual(notesViaDirect.summary, notesViaObsidian.summary)
         XCTAssertEqual(notesViaDirect.sessions.count, notesViaObsidian.sessions.count)
-        XCTAssertEqual(serializeNotes(notesViaDirect), serializeNotes(notesViaObsidian), "Serialized notes must be identical for both paths")
+        XCTAssertEqual(serializeNotes(notesViaDirect, kind: .project), serializeNotes(notesViaObsidian, kind: .project), "Serialized notes must be identical for both paths")
     }
 }

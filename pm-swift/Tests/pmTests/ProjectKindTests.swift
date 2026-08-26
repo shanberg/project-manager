@@ -114,3 +114,88 @@ final class ProjectKindTests: XCTestCase {
         }
     }
 }
+
+/// The write-side omission rule: what a document of each kind is written with.
+final class KindAwareSerializationTests: XCTestCase {
+
+    /// A project is written exactly as it was before the kind existed. This is the regression guard on
+    /// turning four hardcoded blocks into a loop.
+    func testProjectSerializationIsUnchanged() {
+        let notes = ProjectNotes(title: "Website Refresh", summary: "s", problem: "p",
+                                 goals: ["a", "b", "c"], approach: "x")
+        let out = serializeNotes(notes, kind: .project)
+        XCTAssertTrue(out.contains("> [!summary] Summary"))
+        XCTAssertTrue(out.contains("> [!question] Problem"))
+        XCTAssertTrue(out.contains("> [!info] Goals"))
+        XCTAssertTrue(out.contains("> [!info] Approach"))
+        XCTAssertLessThan(out.range(of: "> [!question] Problem")!.lowerBound,
+                          out.range(of: "> [!info] Goals")!.lowerBound,
+                          "sections must keep document order")
+    }
+
+    /// An empty area never grows the two callouts it has no use for.
+    func testAreaOmitsProblemAndApproach() {
+        let out = serializeNotes(ProjectNotes(title: "Team 1:1s"), kind: .area)
+        XCTAssertTrue(out.contains("> [!summary] Summary"))
+        XCTAssertTrue(out.contains("> [!info] Goals"))
+        XCTAssertFalse(out.contains("Problem"), "an area shouldn't grow an empty Problem")
+        XCTAssertFalse(out.contains("Approach"), "an area shouldn't grow an empty Approach")
+        XCTAssertTrue(out.contains("## Links"))
+        XCTAssertTrue(out.contains("## Learnings"))
+        XCTAssertTrue(out.contains("## Sessions"))
+    }
+
+    /// The other half of the rule, and the one that matters: this function is the fallback the
+    /// format-preserving writer drops to, so if omission were unconditional, a Problem typed into an
+    /// area by hand in Obsidian would vanish on the next unrelated edit with nothing to say it had.
+    func testAreaKeepsASectionSomebodyActuallyWrote() throws {
+        let markdown = """
+        # Team 1:1s
+
+        > [!summary] Summary
+        > weekly
+
+        > [!question] Problem
+        > the skip-levels keep colliding with these
+
+        > [!info] Goals
+        > 1.  keep them
+        > 2.  
+        > 3.  
+
+        ## Links
+
+        ## Learnings
+
+        ## Sessions
+
+        """
+        let notes = try parseNotes(markdown: markdown)
+        XCTAssertEqual(notes.problem, "the skip-levels keep colliding with these")
+
+        let out = serializeNotes(notes, kind: .area)
+        XCTAssertTrue(out.contains("> [!question] Problem"), "a written Problem must survive")
+        XCTAssertTrue(out.contains("the skip-levels keep colliding with these"))
+
+        // And it still round-trips, so the next read sees what the last write left.
+        XCTAssertEqual(try parseNotes(markdown: out).problem, notes.problem)
+    }
+
+    /// Reading never consults the kind: a document is parsed by what's in it.
+    func testParsingIsIndifferentToKind() throws {
+        let out = serializeNotes(ProjectNotes(title: "T", summary: "s", problem: "p",
+                                              goals: ["g", "", ""], approach: "a"), kind: .project)
+        let reparsed = try parseNotes(markdown: out)
+        XCTAssertEqual(reparsed.problem, "p")
+        XCTAssertEqual(reparsed.approach, "a")
+        XCTAssertEqual(reparsed.summary, "s")
+    }
+
+    /// The kind comes off the path, so no caller can pass the wrong one.
+    func testKindIsReadFromANotesPath() {
+        XCTAssertEqual(ProjectKind.of(notesPath: "/PARA/areas/Team 1:1s/docs/Notes - Team 1:1s.md"), .area)
+        XCTAssertEqual(ProjectKind.of(notesPath: "/PARA/active/W-12 Website Refresh/docs/Notes - Website Refresh.md"), .project)
+        XCTAssertEqual(ProjectKind.of(notesPath: "/PARA/archive/Team 1:1s/docs/Notes - Team 1:1s.md"), .area,
+                       "an archived area is still an area")
+    }
+}

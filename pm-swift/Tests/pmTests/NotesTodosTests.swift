@@ -310,7 +310,7 @@ final class NotesTodosTests: XCTestCase {
         let session = Session(date: "Wed, Feb 25, 2025", label: "", body: "- [ ] One\n- [ ] Two @\n- [ ] Three")
         let notes = ProjectNotes(title: "T", sessions: [session])
         let normalized = normalizeFocusMarker(notes: notes)
-        let serialized = serializeNotes(normalized)
+        let serialized = serializeNotes(normalized, kind: .project)
         let reparsed = try parseNotes(markdown: serialized)
         let todos = try parseTodos(notes: reparsed)
         XCTAssertEqual(todos.count, 3)

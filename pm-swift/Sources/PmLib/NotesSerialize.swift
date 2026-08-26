@@ -54,17 +54,30 @@ private func serializeSessions(_ sessions: [Session]) -> String {
     }.joined(separator: "\n\n")
 }
 
-public func serializeNotes(_ notes: ProjectNotes) -> String {
+/// Write a whole notes document from the model.
+///
+/// The header is whatever `kind` says it is, plus anything already written that the kind leaves out.
+/// The first half of that is the rule — an Area has no Problem and no Approach and shouldn't grow
+/// empty ones. The second half is what keeps the rule from destroying anything: this function is the
+/// fallback the format-preserving writer drops to, so a Problem somebody typed into an Area by hand
+/// in Obsidian would otherwise disappear on the next unrelated edit, with nothing to say it had.
+///
+/// Which means omission is a *write-side* rule and not a parsing one. `parseNotes` reads every
+/// section it finds, for both kinds, and always has.
+public func serializeNotes(_ notes: ProjectNotes, kind: ProjectKind) -> String {
     var parts: [String] = []
     parts.append("# \(notes.title)\n")
-    parts.append(serializeCallout(type: "summary", label: "Summary", content: notes.summary))
-    parts.append("\n")
-    parts.append(serializeCallout(type: "question", label: "Problem", content: notes.problem))
-    parts.append("\n")
-    parts.append("> [!info] Goals\n\(serializeGoals(notes.goals))")
-    parts.append("\n")
-    parts.append(serializeCallout(type: "info", label: "Approach", content: notes.approach))
-    parts.append("\n")
+    // allCases is in document order, so this writes the sections where a reader expects them
+    // regardless of what order the kind happens to list them in.
+    for section in HeaderSection.allCases where kind.headerSections.contains(section) || !notes.isEmpty(section) {
+        switch notes.content(section) {
+        case .prose(let text):
+            parts.append(serializeCallout(type: section.calloutType, label: section.label, content: text))
+        case .numbered(let items):
+            parts.append("> [!\(section.calloutType)] \(section.label)\n\(serializeGoals(items))")
+        }
+        parts.append("\n")
+    }
     parts.append("## Links\n\n")
     parts.append(serializeLinks(notes.links))
     parts.append("\n\n## Learnings\n\n")

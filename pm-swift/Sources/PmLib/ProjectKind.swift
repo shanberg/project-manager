@@ -61,6 +61,17 @@ public extension ProjectKind {
         numberedPrefixRange(in: folderName) == nil ? .area : .project
     }
 
+    /// Which kind the folder holding a notes file is.
+    ///
+    /// Every notes file PM writes lives at `<folder>/docs/Notes - <title>.md`, so the folder is two
+    /// levels up and the name is the answer. Reading it from the path rather than taking it as an
+    /// argument means there is no call site that can pass the wrong one.
+    static func of(notesPath: String) -> ProjectKind {
+        let docs = (notesPath as NSString).deletingLastPathComponent
+        let folder = (docs as NSString).deletingLastPathComponent
+        return of(folderName: (folder as NSString).lastPathComponent)
+    }
+
     /// Where a folder of this kind lives when it isn't archived — the scope unarchiving returns it to.
     var homeScope: ProjectScope {
         switch self {

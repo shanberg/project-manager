@@ -83,7 +83,7 @@ final class NotesRawEditTests: XCTestCase {
     /// This documents the contrast — the surgical path above does not.
     func testModelRoundTripWouldCorruptFormatting() throws {
         let notes = try parseNotes(markdown: Self.messyMarkdown)
-        let reserialized = serializeNotes(notes)
+        let reserialized = serializeNotes(notes, kind: .project)
         XCTAssertNotEqual(reserialized, Self.messyMarkdown, "Sanity: the old path does rewrite the file")
         XCTAssertFalse(reserialized.contains("tags: [project, design]"), "Old path drops YAML frontmatter")
         XCTAssertFalse(reserialized.contains("> 1.   First goal"), "Old path normalizes goal spacing")
@@ -829,7 +829,7 @@ final class NotesRawEditTests: XCTestCase {
     /// splice each independently — a body scan that ran past the next callout header used to overwrite
     /// the following callouts, silently dropping one of the two edits.
     func testWriteSplicesTwoAdjacentCallouts() throws {
-        let template = serializeNotes(ProjectNotes(title: "T"))
+        let template = serializeNotes(ProjectNotes(title: "T"), kind: .project)
         var incoming = try parseNotes(markdown: template)
         incoming.problem = "The problem"
         incoming.goals = ["First goal", "", ""]

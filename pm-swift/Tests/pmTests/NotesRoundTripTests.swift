@@ -59,7 +59,7 @@ final class NotesRoundTripTests: XCTestCase {
         XCTAssertEqual(parsed.sessions[1].label, "Sprint 1")
         XCTAssertTrue(parsed.sessions[1].body.contains("[x] Done item"))
 
-        let serialized = serializeNotes(parsed)
+        let serialized = serializeNotes(parsed, kind: .project)
         let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Round-trip parse → serialize → parse should equal original")
     }
@@ -74,7 +74,7 @@ final class NotesRoundTripTests: XCTestCase {
         XCTAssertTrue(parsed.links.count >= 1, "Links section should parse")
         XCTAssertTrue(parsed.learnings.count >= 1, "Learnings section should parse")
         XCTAssertEqual(parsed.sessions.count, 0, "Empty template has no sessions")
-        let serialized = serializeNotes(parsed)
+        let serialized = serializeNotes(parsed, kind: .project)
         let reparsed = try parseNotes(markdown: serialized)
         XCTAssertEqual(parsed, reparsed, "Empty template parse → serialize → parse should equal original")
     }
