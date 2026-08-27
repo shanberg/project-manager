@@ -2650,14 +2650,13 @@ private struct SessionHeader: View {
                 headerLine
             }
 
-            // The note read view, rendering the note's markdown (formatting applied, markers removed).
-            // A session with no note draws nothing here — the header line above is the target either
-            // way, so there's no placeholder standing in for a note that isn't written yet.
+            // The note read view, rendering the note's markdown (formatting applied, markers removed)
+            // and drawing whatever pictures it embeds. A session with no note draws nothing here — the
+            // header line above is the target either way, so there's no placeholder standing in for a
+            // note that isn't written yet.
             if !prose.isEmpty {
-                Text(renderedMarkdown(prose, base: Self.noteFont, baseColor: .labelColor,
-                                      note: store.notesPath.map { URL(fileURLWithPath: $0) }))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                RenderedNote(prose: prose, font: Self.noteFont,
+                             noteURL: store.notesPath.map { URL(fileURLWithPath: $0) })
             }
         }
         .padding(.horizontal, 12)

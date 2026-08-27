@@ -61,6 +61,25 @@ final class MarkdownHighlightTests: XCTestCase {
         XCTAssertTrue(syntaxPieces(t).contains("["))
     }
 
+    func testImageEmbedDimsItsBangAndIsStrippedExactlyOnce() {
+        let t = "![a shot](attachments/shot.png)"
+        XCTAssertTrue(syntaxPieces(t).contains("!"), "the bang is a marker like any other")
+        // The read view deletes every syntax span, so two spans over the same characters would delete
+        // twice and corrupt the note. Together they have to cover the embed exactly once.
+        let syntax = markdownSpans(in: t).filter { $0.kind == .syntax }.map { $0.range }
+        XCTAssertEqual(Set(syntax).count, syntax.count, "no span is added twice")
+        XCTAssertEqual(syntax.map { String(t[$0]) }.joined().count + "a shot".count, t.count,
+                       "the markers and the alt account for the whole embed")
+    }
+
+    func testAnEmptyAltIsStillALinkConstruct() {
+        // `![](shot.png)` — what a paste with no name for the picture writes. Nothing reads, so there
+        // is no content span; the point is that all of it is markers, and the read view drops all of it.
+        let t = "![](shot.png)"
+        XCTAssertEqual(pieces(t, .link), [])
+        XCTAssertEqual(syntaxPieces(t).joined().count, t.count)
+    }
+
     func testWikilink() {
         XCTAssertEqual(pieces("see [[Design Notes]] first", .wikilink), ["Design Notes"])
         XCTAssertTrue(syntaxPieces("see [[Design Notes]] first").contains("[["))

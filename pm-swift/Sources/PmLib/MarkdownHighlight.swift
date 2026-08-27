@@ -38,9 +38,12 @@ private enum MarkdownRE {
     static let blockquote = try? NSRegularExpression(pattern: #"(?m)^([ \t]*>[ \t]?)(.*)$"#)
     static let list = try? NSRegularExpression(pattern: #"(?m)^([ \t]*(?:[-*+]|\d{1,9}\.)[ \t]+)"#)
     static let code = try? NSRegularExpression(pattern: #"`([^`\n]+)`"#)
-    static let link = try? NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\]\()([^)\n]+)(\))"#)
+    // The label is allowed to be empty so `![](shot.png)` — an image pasted by something that had no
+    // name for it — is still a construct rather than four stray characters of prose.
+    static let link = try? NSRegularExpression(pattern: #"(\[)([^\]\n]*)(\]\()([^)\n]+)(\))"#)
     // `[[note]]` or `[[note|shown as this]]` — the alias, when there is one, is what reads.
     static let wikilink = try? NSRegularExpression(pattern: #"(\[\[)([^\]\n|]+)(?:(\|)([^\]\n]*))?(\]\])"#)
+    static let image = markdownImageRE
     static let bold = try? NSRegularExpression(pattern: #"(\*\*|__)(.+?)\1"#)
     static let strike = try? NSRegularExpression(pattern: #"(~~)(.+?)(~~)"#)
     static let italicStar = try? NSRegularExpression(pattern: #"(?<![\*\w])\*(?!\*)([^*\n]+?)\*(?![\*\w])"#)
@@ -100,6 +103,11 @@ public func markdownSpans(in text: String) -> [MarkdownSpan] {
         addSyntax(m.range(at: 4))   // url
         addSyntax(m.range(at: 5))   // )
     }
+    // Image embeds: the `!` in `![alt](path)`. The `[alt](path)` half is a link and was styled as one
+    // above, so the bang is all that's left — and it's a marker like any other, so it dims with them
+    // and the read view drops it. Deliberately the only span added here: a second one over characters
+    // the link rule already claimed would be deleted twice when the read view strips its markers.
+    each(MarkdownRE.image) { m in addSyntax(m.range(at: 1)) }
     // Wikilinks: [[note]] or [[note|alias]] — the alias (or the target, when there's no alias) is what
     // reads; the brackets, the pipe and the target it hides are dimmable syntax.
     each(MarkdownRE.wikilink) { m in

@@ -364,9 +364,6 @@ public func pasteLink(_ text: String, selection: Range<String.Index>, url: Strin
 
 // MARK: - Dropped files
 
-private let markdownImageExtensions: Set<String> =
-    ["png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "svg", "tiff", "tif", "bmp"]
-
 /// Percent-encode a path for the inside of a markdown link — spaces and parentheses are what actually
 /// break `](…)`.
 private func markdownPathEscaped(_ path: String) -> String {
@@ -393,8 +390,15 @@ public func markdownRelativePath(for file: URL, relativeTo note: URL?, maxUpward
 /// The markdown to insert for a file dropped into a note: an embed for an image, a link for anything
 /// else, labelled with the file's name.
 public func markdownFileLink(for file: URL, relativeTo note: URL?) -> String {
-    let path = markdownPathEscaped(markdownRelativePath(for: file, relativeTo: note))
     let label = file.deletingPathExtension().lastPathComponent
-    let isImage = markdownImageExtensions.contains(file.pathExtension.lowercased())
-    return "\(isImage ? "!" : "")[\(label)](\(path))"
+    guard isMarkdownImagePath(file.path) else {
+        return "[\(label)](\(markdownPathEscaped(markdownRelativePath(for: file, relativeTo: note))))"
+    }
+    return markdownImageEmbed(for: file, relativeTo: note, alt: label)
+}
+
+/// The embed to write for an image at `file`, with the alt text of the caller's choosing — the file's
+/// own name when it was dropped and already had one, something like "Pasted image" when it didn't.
+public func markdownImageEmbed(for file: URL, relativeTo note: URL?, alt: String) -> String {
+    "![\(alt)](\(markdownPathEscaped(markdownRelativePath(for: file, relativeTo: note))))"
 }

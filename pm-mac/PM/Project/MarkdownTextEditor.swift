@@ -17,8 +17,9 @@ import PmLib
 /// Return continues the list or quote you're in (and ends it on an empty item), Tab indents a list item
 /// and Shift-Tab outdents it, ⌥↑/⌥↓ move the line, ⌘⇧D duplicates it, typing `*`/`` ` ``/`(` over a
 /// selection wraps it instead of replacing it, pasting a URL over a selection makes it a link, dropping
-/// a file writes the link to it, ⌘B / ⌘I / ⌘K format, and ⌘-click follows a link. Prose is spell-checked
-/// while every kind of autocorrection stays off.
+/// or pasting a file writes the link to it, pasting a picture embeds it — saving it beside the note
+/// when it has no file of its own — ⌘B / ⌘I / ⌘K format, and ⌘-click follows a link. Prose is
+/// spell-checked while every kind of autocorrection stays off.
 ///
 /// All of the text logic lives in PmLib (`markdownSpans`, `continueList`, `indentLines`, `moveLines`,
 /// `wrapSelection`, `pasteLink`, `markdownFileLink`, …) so it's unit-tested without a text view; this
@@ -212,8 +213,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // autocorrect it never touches a character of the markup.
         textView.isContinuousSpellCheckingEnabled = true
         textView.isGrammarCheckingEnabled = false
-        // Dropped files become markdown links rather than nothing at all.
-        textView.registerForDraggedTypes([.fileURL])
+        // Dropped files become markdown links rather than nothing at all, and a picture dragged out of
+        // a web page — which has no file to link — is written into the note's attachments folder.
+        //
+        // This *replaces* the set `NSTextView` registers for itself, which is the point: left to its
+        // own devices it takes an image drop as a text attachment, and an attachment is not something
+        // a plain-markdown file can hold. Every type named here is one this class handles below.
+        textView.registerForDraggedTypes([.fileURL] + NoteImagePasteboard.imageTypes)
         textView.font = baseFont
         // The grid an empty note starts on, and what the caret measures itself against before the
         // first highlight pass has anything to style. Without it the first character you type lands
@@ -649,7 +655,8 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 /// An `NSTextView` that adds the editing behaviours a markdown editor is expected to have, with no
 /// visible toolbar: Return continues a list, Tab indents one, ⌥↑/⌥↓ move a line, ⌘⇧D duplicates it,
 /// ⌘B / ⌘I / ⌘K format the selection, typing a marker over a selection wraps it, a pasted URL becomes a
-/// link, a dropped file becomes a link to itself, and ⌘-click follows a link.
+/// link, a dropped or pasted file becomes a link to itself, a pasted picture becomes an embed, and
+/// ⌘-click follows a link.
 ///
 /// Every one of them edits through the normal text-change path (`shouldChangeText`/`didChangeText`), so
 /// it's a single undoable step and the delegate re-highlights afterward, and every one of them is a
@@ -801,13 +808,61 @@ private final class ShortcutTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        // A URL pasted over a selection links the selection. Anything else pastes as itself.
+        let pasteboard = NSPasteboard.general
+        // A URL pasted over a selection links the selection.
         if selectedRange().length > 0,
-           let pasted = NSPasteboard.general.string(forType: .string), isPastableURL(pasted) {
+           let pasted = pasteboard.string(forType: .string), isPastableURL(pasted) {
             apply { pasteLink($0, selection: $1, url: pasted) }
             return
         }
+        // A picture pasted into a note becomes a picture *in* the note, by the same two rules a drop
+        // uses: an image file is linked where it already lives, and an image with no file — a
+        // screenshot, a copy out of a browser — is written into the note's attachments folder first,
+        // because otherwise there's nothing for the link to point at. Anything else pastes as itself.
+        if let files = NoteImagePasteboard.imageFiles(on: pasteboard) {
+            insert(fileLinks(for: files), at: selectedRange())
+            return
+        }
+        if let image = NoteImagePasteboard.imageData(on: pasteboard),
+           let embed = savedImageEmbed(image) {
+            insert(embed, at: selectedRange())
+            return
+        }
         super.paste(sender)
+    }
+
+    // MARK: writing images into the note
+
+    /// Write a pasted image beside the note and return the embed for where it landed, or nil when
+    /// there's nowhere to put it — the quick bar's note isn't a file yet, and a note that can't say
+    /// where it lives can't hold a relative link to anything.
+    ///
+    /// A failed write falls through to the normal paste rather than beeping: the picture is still on
+    /// the pasteboard, and text in the note beats nothing in the note.
+    private func savedImageEmbed(_ image: (data: Data, ext: String)) -> String? {
+        guard let noteURL else { return nil }
+        do {
+            let file = try saveNoteAttachment(image.data, ext: image.ext, forNoteAt: noteURL)
+            return markdownImageEmbed(for: file, relativeTo: noteURL, alt: "Pasted image")
+        } catch {
+            Log.write("note attachment write failed: \(error)")
+            return nil
+        }
+    }
+
+    /// The markdown for a set of files, one per line.
+    private func fileLinks(for files: [URL]) -> String {
+        files.map { markdownFileLink(for: $0, relativeTo: noteURL) }.joined(separator: "\n")
+    }
+
+    /// Splice `snippet` in over `target` as one undoable edit, leaving the caret after it.
+    @discardableResult
+    private func insert(_ snippet: String, at target: NSRange) -> Bool {
+        guard shouldChangeText(in: target, replacementString: snippet) else { return false }
+        textStorage?.replaceCharacters(in: target, with: snippet)
+        didChangeText()
+        setSelectedRange(NSRange(location: target.location + (snippet as NSString).length, length: 0))
+        return true
     }
 
     // MARK: dropped files
@@ -818,24 +873,37 @@ private final class ShortcutTextView: NSTextView {
         return (urls?.isEmpty ?? true) ? nil : urls
     }
 
+    /// A dragged image that isn't a file — one dragged straight out of a web page — which the note
+    /// writes down for itself, exactly as it does for a pasted one.
+    private func draggedImage(_ sender: NSDraggingInfo) -> (data: Data, ext: String)? {
+        guard noteURL != nil else { return nil }
+        return NoteImagePasteboard.imageData(on: sender.draggingPasteboard)
+    }
+
+    private func acceptsDrag(_ sender: NSDraggingInfo) -> Bool {
+        droppedFiles(sender) != nil || draggedImage(sender) != nil
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        droppedFiles(sender) != nil ? .copy : super.draggingEntered(sender)
+        acceptsDrag(sender) ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        droppedFiles(sender) != nil ? .copy : super.draggingUpdated(sender)
+        acceptsDrag(sender) ? .copy : super.draggingUpdated(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let files = droppedFiles(sender) else { return super.performDragOperation(sender) }
-        let snippet = files.map { markdownFileLink(for: $0, relativeTo: noteURL) }.joined(separator: "\n")
+        let snippet: String
+        if let files = droppedFiles(sender) {
+            snippet = fileLinks(for: files)
+        } else if let image = draggedImage(sender), let embed = savedImageEmbed(image) {
+            snippet = embed
+        } else {
+            return super.performDragOperation(sender)
+        }
         // Land it where it was dropped, not where the caret happened to be.
         let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
-        let target = NSRange(location: at, length: 0)
-        guard shouldChangeText(in: target, replacementString: snippet) else { return false }
-        textStorage?.replaceCharacters(in: target, with: snippet)
-        didChangeText()
-        setSelectedRange(NSRange(location: at + (snippet as NSString).length, length: 0))
+        guard insert(snippet, at: NSRange(location: at, length: 0)) else { return false }
         window?.makeFirstResponder(self)
         return true
     }
