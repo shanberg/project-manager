@@ -458,25 +458,22 @@ private final class TopPinningScrollView: NSScrollView {
     }
 }
 
-/// Resolve a markdown link's destination to something openable: an absolute URL as it's written, and a
-/// relative path against the folder the note itself lives in — which is how a link to another note or
-/// an attachment in the same vault is written, and the only way it can be resolved.
+/// Resolve a markdown link's destination to something openable: an `http:`-style URL as it's written,
+/// and anything else as a file, looked for the way `resolveNoteReference` looks — beside the note
+/// first, then where the vault keeps its attachments.
+///
+/// The search is what makes a note written elsewhere readable here. A link relative to the note is
+/// PM's own form and resolves on the first try; a path relative to the *vault root* is Obsidian's, and
+/// from a note several folders down it means nothing until someone looks up.
+///
+/// A destination that points at nothing comes back nil, and callers rely on that: it isn't a link, so
+/// the read view leaves it as plain text and a ⌘-click in the editor places the caret instead of
+/// handing the Finder a file it can't open.
 func markdownDestinationURL(_ destination: String, relativeTo note: URL?) -> URL? {
     let raw = destination.trimmingCharacters(in: .whitespaces)
     guard !raw.isEmpty else { return nil }
     if let url = URL(string: raw), url.scheme != nil, !url.isFileURL { return url }
-    let path = NSString(string: raw.removingPercentEncoding ?? raw).expandingTildeInPath
-    let file: URL
-    if path.hasPrefix("/") {
-        file = URL(fileURLWithPath: path)
-    } else if let note {
-        file = URL(fileURLWithPath: path, relativeTo: note.deletingLastPathComponent()).standardizedFileURL
-    } else {
-        return nil
-    }
-    // A path that points at nothing isn't a link: leave it as plain text in the read view, and let a
-    // ⌘-click in the editor place the caret instead of handing the Finder a file it can't open.
-    return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    return resolveNoteReference(raw, noteAt: note)
 }
 
 /// Maps a markdown span kind to text attributes, sized/faced relative to `base` so the same styling

@@ -110,14 +110,24 @@ public func markdownSpans(in text: String) -> [MarkdownSpan] {
     each(MarkdownRE.image) { m in addSyntax(m.range(at: 1)) }
     // Wikilinks: [[note]] or [[note|alias]] — the alias (or the target, when there's no alias) is what
     // reads; the brackets, the pipe and the target it hides are dimmable syntax.
+    //
+    // Unless it's an embed. `![[shot.png|300]]` is the same construct with a `!` in front, and there
+    // the part after the pipe is a display *size*, not an alias — there's no text in an embed for an
+    // alias to rename. So the two swap roles: the target reads and the size dims. Read the other way
+    // round, an embed with a width showed the reader the number 300 and nothing else.
     each(MarkdownRE.wikilink) { m in
-        let alias = m.range(at: 4)
-        addContent(alias.location == NSNotFound ? m.range(at: 2) : alias, .wikilink)
-        addSyntax(m.range(at: 1))   // [[
-        if alias.location != NSNotFound {
-            addSyntax(m.range(at: 2))   // the target
-            addSyntax(m.range(at: 3))   // |
+        let whole = m.range, target = m.range(at: 2), pipe = m.range(at: 3), alias = m.range(at: 4)
+        let bang = NSRange(location: whole.location - 1, length: 1)
+        let isEmbed = whole.location > 0 && (text as NSString).substring(with: bang) == "!"
+        if isEmbed {
+            addSyntax(bang)
+            addContent(target, .wikilink)
+            if alias.location != NSNotFound { addSyntax(pipe); addSyntax(alias) }
+        } else {
+            addContent(alias.location == NSNotFound ? target : alias, .wikilink)
+            if alias.location != NSNotFound { addSyntax(target); addSyntax(pipe) }
         }
+        addSyntax(m.range(at: 1))   // [[
         addSyntax(m.range(at: 5))   // ]]
     }
     // Emphasis: bold and strikethrough carry paired markers; italic is a single char each side.

@@ -36,8 +36,8 @@ struct RenderedNote: View {
                     Text(renderedMarkdown(text, base: font, baseColor: color, note: noteURL))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
-                case .image(let destination, let alt):
-                    NoteImage(destination: destination, alt: alt, noteURL: noteURL,
+                case .image(let destination, let alt, let width):
+                    NoteImage(destination: destination, alt: alt, width: width, noteURL: noteURL,
                               font: font, maxHeight: maxImageHeight)
                 }
             }
@@ -54,6 +54,8 @@ struct RenderedNote: View {
 private struct NoteImage: View {
     let destination: String
     let alt: String
+    /// The width the note asked for, from an Obsidian embed's `![[shot.png|300]]`.
+    let width: Double?
     let noteURL: URL?
     let font: NSFont
     let maxHeight: CGFloat
@@ -66,9 +68,11 @@ private struct NoteImage: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 // Never blown up past what it is, never taller than its share of the row: a small
-                // picture stays small, a big one shrinks into the column.
-                .frame(maxWidth: image.size.width, maxHeight: min(maxHeight, image.size.height),
-                       alignment: .leading)
+                // picture stays small, a big one shrinks into the column. A note that asked for a
+                // width gets it, capped the same way — `![[shot.png|300]]` is someone saying this
+                // screenshot is a detail, not the subject, and the note's judgement beats the default.
+                .frame(maxWidth: min(image.size.width, width.map { CGFloat($0) } ?? .greatestFiniteMagnitude),
+                       maxHeight: min(maxHeight, image.size.height), alignment: .leading)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 // A hairline, because a screenshot's own background is usually the window's: without
                 // it a light picture on a light row has no edge and reads as part of the note's page.

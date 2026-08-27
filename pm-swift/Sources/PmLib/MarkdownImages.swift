@@ -22,15 +22,20 @@ public func isMarkdownImagePath(_ path: String) -> Bool {
 
 // MARK: - Locating embeds
 
-/// A located `![alt](destination)` embed: where the whole construct sits, and what it points at.
+/// A located embed: where the whole construct sits, what it points at, and how big the note asked for
+/// it to be drawn.
 public struct MarkdownImage: Equatable {
     public let range: Range<String.Index>
     public let alt: String
     public let destination: String
-    public init(range: Range<String.Index>, alt: String, destination: String) {
+    /// The width in points the note asked for, from an Obsidian embed's `![[shot.png|300]]`. Nil is
+    /// "however big it is", which is every markdown embed — the syntax has nowhere to say otherwise.
+    public let width: Double?
+    public init(range: Range<String.Index>, alt: String, destination: String, width: Double? = nil) {
         self.range = range
         self.alt = alt
         self.destination = destination
+        self.width = width
     }
 }
 
@@ -38,10 +43,29 @@ public struct MarkdownImage: Equatable {
 /// that had no name for it takes.
 let markdownImageRE = try? NSRegularExpression(pattern: #"(!)\[([^\]\n]*)\]\(([^)\n]+)\)"#)
 
-/// Locate the image embeds in `text`, in source order.
+/// `![[target]]` or `![[target|300]]` — how Obsidian writes an embed, and the default on a fresh
+/// install. The part after the pipe is a *display size*, not an alias: in a link `[[note|shown]]` names
+/// what reads, but in an embed there is no text to name, and Obsidian reads it as a width (or `WxH`).
+/// Getting that wrong is visible — it made `![[shot.png|300]]` read as the number 300.
+let markdownWikiImageRE = try? NSRegularExpression(pattern: #"(!)\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]"#)
+
+/// The width from an embed's size spec: `300` or `300x200`, and nothing from anything else.
+private func embedWidth(_ spec: String?) -> Double? {
+    guard let spec else { return nil }
+    let digits = spec.prefix { $0.isNumber }
+    guard !digits.isEmpty, let width = Double(digits), width > 0 else { return nil }
+    return width
+}
+
+/// Locate the image embeds in `text` — both syntaxes — in source order.
+///
+/// Both, because a note in a vault is written by two hands. PM writes markdown embeds, and Obsidian
+/// writes wikilink ones; the same note holds whichever the last editor used, and a reader shouldn't be
+/// able to tell which that was.
 public func markdownImages(in text: String) -> [MarkdownImage] {
     let full = NSRange(location: 0, length: (text as NSString).length)
     var out: [MarkdownImage] = []
+
     markdownImageRE?.enumerateMatches(in: text, range: full) { m, _, _ in
         guard let m,
               let whole = Range(m.range, in: text),
@@ -50,7 +74,19 @@ public func markdownImages(in text: String) -> [MarkdownImage] {
         out.append(MarkdownImage(range: whole, alt: String(text[alt]),
                                  destination: String(text[destination])))
     }
-    return out
+    markdownWikiImageRE?.enumerateMatches(in: text, range: full) { m, _, _ in
+        guard let m,
+              let whole = Range(m.range, in: text),
+              let target = Range(m.range(at: 2), in: text) else { return }
+        let destination = String(text[target])
+        let size = Range(m.range(at: 3), in: text).map { String(text[$0]) }
+        // A wikilink embed carries no alt text at all, so the file's own name is the best thing to say
+        // when the picture can't be found — which is the only time the alt is ever read.
+        out.append(MarkdownImage(range: whole,
+                                 alt: (destination as NSString).lastPathComponent,
+                                 destination: destination, width: embedWidth(size)))
+    }
+    return out.sorted { $0.range.lowerBound < $1.range.lowerBound }
 }
 
 // MARK: - Splitting a note for rendering
@@ -59,7 +95,8 @@ public func markdownImages(in text: String) -> [MarkdownImage] {
 public enum MarkdownNoteSegment: Equatable {
     /// Markdown to render as text. Never empty, and never contains an image embed.
     case prose(String)
-    case image(destination: String, alt: String)
+    /// A picture. `width` is the size the note asked for, when it asked.
+    case image(destination: String, alt: String, width: Double? = nil)
 }
 
 /// Cut `text` into the prose runs and the image embeds between them, in source order.
@@ -85,8 +122,11 @@ public func markdownNoteSegments(in text: String) -> [MarkdownNoteSegment] {
         // An embed that points at something that isn't an image is a link written with a stray `!`,
         // not a picture. Left in the prose, where the text renderer already knows what to do with it.
         guard isMarkdownImagePath(image.destination) else { continue }
+        // Two regexes over one string can both claim a stretch of it (a malformed embed is the way in),
+        // and a segment that ran backwards would duplicate prose.
+        guard image.range.lowerBound >= cursor else { continue }
         addProse(cursor..<image.range.lowerBound)
-        out.append(.image(destination: image.destination, alt: image.alt))
+        out.append(.image(destination: image.destination, alt: image.alt, width: image.width))
         cursor = image.range.upperBound
     }
     addProse(cursor..<text.endIndex)
