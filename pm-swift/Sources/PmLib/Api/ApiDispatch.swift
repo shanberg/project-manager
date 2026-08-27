@@ -101,6 +101,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "value": input.value,
         "limit": input.limit.map { JSONValue.number(Double($0)) },
         "sessionOrdinal": input.sessionOrdinal.map { JSONValue.number(Double($0)) },
+        "sessionDigest": input.sessionDigest.map(JSONValue.string),
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
@@ -277,8 +278,21 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return try document(spec, input, options) { rawText in
             let notes = try parseNotes(markdown: rawText)
             let index = try sessionIndex(input, in: notes)
-            guard let out = deleteSessionPreservingFormat(rawText: rawText, sessionIndex: index) else {
+            // The guard this action's error message has always promised, finally made.
+            //
+            // It used to be nothing but a message: the refusal was reported whenever the delete
+            // returned nil, which it does only when the heading can't be found, and the actual "does
+            // it still hold tasks" test lived in the app's menu — where it gates the affordance
+            // against the document the window is showing, while the delete lands against a freshly
+            // re-read one. Anything that shifted the session indices in between (a note from the
+            // quick bar starting a new session is enough) turned a delete of an empty sitting into a
+            // delete of a different one, tasks and all. Every caller that isn't the app — the CLI,
+            // MCP, Raycast — had no gate whatsoever.
+            if try parseTodos(notes: notes).contains(where: { $0.sessionIndex == index }) {
                 throw ApiError(.writeFailed, "That session still has tasks in it.")
+            }
+            guard let out = deleteSessionPreservingFormat(rawText: rawText, sessionIndex: index) else {
+                throw ApiError(.writeFailed, "Couldn't delete that session.")
             }
             return Outcome(rawText: out, note: Phrase(past: "Deleted the session", future: "delete the session"))
         }
@@ -787,23 +801,24 @@ private func focusing(_ rawText: String, sessionIndex: Int, lineIndex: Int) thro
 }
 
 /// A session named by ISO date (preferred) or index, the same either-or a task reference accepts.
+/// Which session an action's input names, resolved through `SessionRef` so the date/ordinal/digest
+/// rules live in one tested place rather than being restated here.
+///
+/// `session` is an ISO date or an index, the same either-or it has always been; `sessionDigest` is the
+/// new part, and optional in the same spirit as a task's — a person typing an index at a prompt asserts
+/// nothing, while a caller that read early and acts late should always send one.
 private func sessionIndex(_ input: ApiInput, in notes: ProjectNotes) throws -> Int {
     guard let session = input.session else {
         throw ApiError(.missingField, "This action needs a session.", detail: .string("session"))
     }
+    let ref: SessionRef
     if let index = Int(session) {
-        guard index >= 0, index < notes.sessions.count else {
-            throw ApiError(.staleReference, "This project has no session \(index).")
-        }
-        return index
+        ref = SessionRef(date: nil, ordinal: 0, index: index, digest: input.sessionDigest)
+    } else {
+        ref = SessionRef(date: session, ordinal: input.sessionOrdinal ?? 0,
+                         index: nil, digest: input.sessionDigest)
     }
-    let heading = try sessionHeadingDate(iso: session)
-    let matching = notes.sessions.enumerated().filter { $0.element.date == heading }.map(\.offset)
-    let ordinal = input.sessionOrdinal ?? 0
-    guard ordinal >= 0, ordinal < matching.count else {
-        throw ApiError(.staleReference, "This project has no session dated \(session).")
-    }
-    return matching[ordinal]
+    return try resolveSessionRef(ref, notes: notes).index
 }
 
 private func setDetail(_ notes: inout ProjectNotes, key: String, value: JSONValue?) throws {

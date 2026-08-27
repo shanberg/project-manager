@@ -885,8 +885,12 @@ private func joinedPreservingFinalNewline(_ lines: [String], of original: String
 
 /// Delete a session — its heading and whole body region — preserving format. When deleting the last
 /// session, also drops the blank line that separated it from the previous one so the file doesn't end
-/// on a dangling blank. Returns nil if the session can't be located. The caller gates this to empty
-/// sessions (no task lines) so tasks are never removed with it.
+/// on a dangling blank. Returns nil if the session can't be located.
+///
+/// Deliberately raw about tasks: it removes the region it is given, whatever is in it. Refusing a
+/// session that still holds tasks is `session.delete`'s rule, applied at the API boundary where the
+/// refusal has a message to carry — see `ApiDispatch`. Keeping it out of here leaves the primitive
+/// usable by anything that means to remove a session and its contents together.
 public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) -> String? {
     var lines = rawText.components(separatedBy: "\n")
     guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }

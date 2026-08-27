@@ -29,7 +29,12 @@ import Foundation
 ///
 /// Eight hex characters is ample: the digest is checked against one known position rather than used
 /// as a lookup key, so a collision has to land on that exact line to matter.
-public func taskDigest(_ text: String) -> String {
+public func taskDigest(_ text: String) -> String { contentDigest(text) }
+
+/// The hash both digests are, so `taskDigest` and `sessionDigest` cannot drift apart: what one
+/// asserts about a task's text the other asserts about a session's label, in the same eight
+/// characters and with the same normalization.
+func contentDigest(_ text: String) -> String {
     let normalized = text.trimmingCharacters(in: .whitespaces).precomposedStringWithCanonicalMapping
     return SHA256.hash(data: Data(normalized.utf8)).prefix(4)
         .map { String(format: "%02x", $0) }.joined()

@@ -1139,7 +1139,14 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 then()
                 return
             }
-            store.renameSession(index, label: label, then: then)
+            // Referenced rather than indexed, like every other session write. The window here is one
+            // runloop — the index comes straight out of the reload above — but there is no reason for
+            // the last positional write in the app to be this one.
+            guard let ref = store.sessionRef(at: index) else {
+                then()
+                return
+            }
+            store.renameSession(ref, label: label, then: then)
         }
     }
 

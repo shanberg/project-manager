@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.3.0"
+public let apiContractVersion = "1.4.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -143,12 +143,14 @@ public enum ApiRegistry {
                       fields: [project,
                                ApiField("session", .string, required: true, "Session ISO date or index."),
                                ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
+                               ApiField("sessionDigest", .string, "Digest of the label you read, to catch a session that has since changed."),
                                ApiField("label", .string, required: true, "The new label.")]),
         ApiActionSpec(name: "session.delete", tier: .mutation,
                       summary: "Delete a session that has no tasks in it.",
                       fields: [project,
                                ApiField("session", .string, required: true, "Session ISO date or index."),
-                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0)]),
+                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
+                               ApiField("sessionDigest", .string, "Digest of the label you read, to catch a session that has since changed.")]),
 
         // MARK: Notes
         ApiActionSpec(name: "notes.setDetail", tier: .mutation,

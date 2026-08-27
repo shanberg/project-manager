@@ -247,6 +247,20 @@ struct EditorTarget: Equatable {
     enum Kind { case add, due, edit, wrap, quickAdd, sessionLabel, sessionNote, sessionAddTask }
     let key: String
     let kind: Kind
+    /// For a session editor: which session it was opened on, named the way `SessionRef` names one —
+    /// by date, ordinal and a digest of its label — rather than by the index inside `key`.
+    ///
+    /// An editor is open for as long as someone is typing into it, and a session index does not survive
+    /// that reliably: a note written from the quick bar starts a sitting, splices it in at the top, and
+    /// every index below it means a different session than it did a moment ago. Captured here when the
+    /// editor opens, the reference still names what the person was looking at when they commit.
+    var session: SessionRef? = nil
+
+    /// Identity is `key` and `kind` alone: the reference is what a target *carries*, not what it *is*.
+    /// Every `activeEditor == EditorTarget(key:kind:)` test in the view asks "is this editor the open
+    /// one", and would start answering no if it had to match a reference the asker has no reason to
+    /// reconstruct.
+    static func == (a: EditorTarget, b: EditorTarget) -> Bool { a.key == b.key && a.kind == b.kind }
 }
 
 /// The active inline editor reports its window-space frame so a mouse-down monitor can tell an

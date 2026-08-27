@@ -89,6 +89,17 @@ final class DryRunTests: XCTestCase {
         call("task.add", ["project": "W-1", "text": "Chase the deposit",
                           "anchor": reference("Book the venue"), "position": "child"])
         call("task.complete", ["project": "W-1", "task": reference("Send the invoice")])
+        // An empty sitting for `session.delete` to act on. Every seeded task lives in today's session,
+        // and deleting one that still holds tasks is refused — see
+        // `testDeletingASessionWithTasksIsRefused`. Appended directly because `## Sessions` is the last
+        // section and no action makes a *second* session on the same day inside the idle window, which
+        // is the whole point of that window. It goes in *before* a journalled notes write, so the
+        // revision the journal remembers still matches the file and `journal.undo` isn't refused for a
+        // change the test itself made behind the API's back.
+        if let notes = notesPath, var text = try? String(contentsOfFile: notes, encoding: .utf8) {
+            text += "\n### Mon, Jan 6, 2025 Old sitting\n"
+            try? text.write(toFile: notes, atomically: true, encoding: .utf8)
+        }
         call("notes.addLink", ["project": "W-1", "text": "https://example.com", "label": "Brief"])
         call("project.focus", ["project": "W-1"])
         // A folder in the areas root with nothing in it — what `project.adopt` acts on. Made directly
@@ -144,7 +155,8 @@ final class DryRunTests: XCTestCase {
             "session.start": ["project": "W-1"],
             "session.note": ["project": "W-1", "prose": "Spoke to the vendor."],
             "session.rename": ["project": "W-1", "session": "0", "label": "Kickoff"],
-            "session.delete": ["project": "W-1", "session": "0"],
+            // Index 1: the empty sitting `seed()` appends. Session 0 holds the seeded tasks.
+            "session.delete": ["project": "W-1", "session": "1"],
             "notes.setDetail": ["project": "W-1", "key": "summary", "value": "A new summary."],
             "notes.addLink": ["project": "W-1", "text": "https://example.org"],
             "project.create": ["title": "Something New", "domain": "W"],
@@ -156,6 +168,31 @@ final class DryRunTests: XCTestCase {
             "config.set": ["key": "activePath", "value": "/tmp/somewhere-else"],
             "journal.undo": ["project": "W-1"],
         ]
+    }
+
+    /// The project's notes file, found by shape rather than by rebuilding the naming rules here.
+    private var notesPath: String? {
+        let docs = (root as NSString).appendingPathComponent("active/W-1 Redesign/docs")
+        return (try? FileManager.default.contentsOfDirectory(atPath: docs))?
+            .first { $0.hasSuffix(".md") }
+            .map { (docs as NSString).appendingPathComponent($0) }
+    }
+
+    /// `session.delete` says "That session still has tasks in it." when it refuses. For a long time
+    /// that was only a message: the refusal was reported whenever the delete returned nil, which it
+    /// does only when the heading can't be found, and the real test lived in the app's session menu —
+    /// evaluated against the document the window was showing while the write landed against a freshly
+    /// re-read one. Anything that shifted the session indices in between (a note from the quick bar
+    /// starting a new session is enough) turned a delete of an empty sitting into a delete of a
+    /// different one, tasks and all, and no caller outside the app had a gate at all.
+    func testDeletingASessionWithTasksIsRefused() throws {
+        try XCTSkipUnless(haveBinary)
+        seed()
+        let before = world()
+        let result = call("session.delete", ["project": "W-1", "session": "0"])
+        let message = (result["error"] as? [String: Any])?["message"] as? String
+        XCTAssertEqual(message, "That session still has tasks in it.")
+        XCTAssertEqual(world(), before, "A refused delete wrote nothing")
     }
 
     /// The actions this fixture can't make succeed. Empty, deliberately: "wrote nothing" is trivially

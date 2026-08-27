@@ -765,8 +765,23 @@ final class PMStore: ObservableObject {
 
     // MARK: Session mutations (each flows through `mutate`, so ⌘Z undo/redo covers it)
 
+    /// The strongest reference that can be made to the session at `index` right now: its date, its
+    /// ordinal among that day's sittings, and a digest of its label.
+    ///
+    /// Anything that reads a session and acts on it *later* — an editor you type into, a menu item you
+    /// click — should take one of these at the moment it opens and hand it back when it commits. An
+    /// `Int` captured then and used now names whatever has since moved into that position, which is how
+    /// a note written from the quick bar could redirect an open editor onto a different sitting. See
+    /// `SessionRef`.
+    func sessionRef(at index: Int) -> SessionRef? {
+        guard let notes, notes.sessions.indices.contains(index) else { return nil }
+        return SessionRef(session: notes.sessions[index], at: index, in: notes)
+    }
+
     /// Whether the session at `index` has any task lines — gates the "Delete session" affordance
-    /// so tasks are never removed with it.
+    /// so tasks are never removed with it. The affordance only; the write refuses on its own account
+    /// (see `session.delete` in `ApiDispatch`), because a gate read here is read against a document
+    /// the write will not be applied to.
     func hasTasks(sessionIndex index: Int) -> Bool {
         todos.contains { $0.sessionIndex == index }
     }
@@ -814,34 +829,50 @@ final class PMStore: ObservableObject {
         }) { try PMContract.perform("session.start", PMContract.input(project: $0)) }
     }
 
-    /// Rename the session at `index` (its trailing label; the date is preserved).
-    func renameSession(_ index: Int, label: String, then: (@MainActor () -> Void)? = nil) {
+    /// Fill in the session-addressing fields of an action's input from a reference.
+    private static func address(_ input: inout ApiInput, _ ref: SessionRef) {
+        input.session = ref.date ?? ref.index.map(String.init)
+        input.sessionOrdinal = ref.ordinal
+        input.sessionDigest = ref.digest
+    }
+
+    /// Rename the session `ref` names (its trailing label; the date is preserved).
+    func renameSession(_ ref: SessionRef, label: String, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
             try PMContract.perform("session.rename", PMContract.input(project: project) {
-                $0.session = String(index)
+                Self.address(&$0, ref)
                 $0.label = label
             })
         }
     }
 
-    /// Set (or clear, with empty `prose`) the leading-prose note under the session at `index`.
-    func setSessionNote(_ index: Int, prose: String) {
-        mutate { try PmLib.setSessionNote(project: $0, sessionIndex: index, prose: prose) }
-    }
-
-    /// Delete the session at `index`. The app only offers this for sessions with no tasks.
-    func deleteSession(_ index: Int) {
+    /// Delete the session `ref` names. Refused by the write itself if it still holds tasks.
+    func deleteSession(_ ref: SessionRef) {
         mutate { project in
             try PMContract.perform("session.delete", PMContract.input(project: project) {
-                $0.session = String(index)
+                Self.address(&$0, ref)
             })
         }
     }
 
-    /// Append a task to the session at `index` (used to populate an otherwise-empty session).
-    func addTaskToSession(_ index: Int, text: String, due: String? = nil) {
-        mutate { try PmLib.appendTaskToSession(project: $0, sessionIndex: index, text: text, due: due) }
+    /// Replace the note of the session `ref` names.
+    func setSessionNote(_ ref: SessionRef, prose: String) {
+        mutate { try PmLib.setSessionNote(project: $0, session: ref, prose: prose) }
     }
+
+    /// Append a task to the session `ref` names.
+    func addTaskToSession(_ ref: SessionRef, text: String, due: String? = nil) {
+        mutate { try PmLib.appendTaskToSession(project: $0, session: ref, text: text, due: due) }
+    }
+
+    // There are deliberately no `Int`-indexed forms of the four writes above.
+    //
+    // Every one of them used to take a bare session index, and each was a place where a number read at
+    // one moment was applied to the document at another. `sessionRef(at:)` costs a caller nothing and
+    // the reference it makes survives the splice that the index doesn't, so the positional form has no
+    // remaining use here — and leaving it available is leaving the bug available. `SessionRef` still
+    // carries an index for callers that genuinely have nothing else (the CLI's positional arguments);
+    // this store is never one of them.
 
     /// Add prose to the current session's note, starting a session when there isn't one to continue —
     /// no session for today, or the project left alone past `PmLib.sessionIdleWindow`.

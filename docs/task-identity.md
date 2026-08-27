@@ -121,9 +121,27 @@ Almost nothing, because task references are barely persisted.
 - `PMStore.focusedKey`, `lastCompletedKey`, and the `"si:li"` strings in the quick bar are per-launch and in memory. They change where they cross the contract boundary and nowhere else.
 - `TaskEntity.id` is `"<sessionIndex>:<lineIndex>\u{1F}<projectKey>"`, handed to Siri and Shortcuts. Existing saved shortcuts holding an old id would resolve to a stale reference and refuse, which is the correct behaviour and the one place a user could notice the change.
 
+## Sessions have the same problem, and now the same answer
+
+Everything above is about a task's position moving. The **sessions themselves** move for exactly the same reason, and were addressed by a bare `Int` anyway — so `renameSession`, `deleteSession`, `setSessionNote` and `addTaskToSession` were each trusting a number that the next write could redefine.
+
+This is not theoretical. A note written from the quick bar starts a sitting, splices it in at the top, and shifts every index below it. A session-note editor that was already open then auto-saved on its way out, wrote its untouched copy of the *previous* sitting's prose to what it still believed was its own index, and destroyed the note that had just been written into the new one. The document's own journal held both revisions, which is how it was recovered.
+
+`SessionRef` (`pm-swift/Sources/PmLib/SessionRef.swift`) is `TaskRef`'s counterpart, with the same two defences:
+
+```
+SessionRef = { date, ordinal = 0, index, digest }
+```
+
+`date` is an ISO date, not an index, so the splice doesn't move it. `digest` is `sessionDigest` — the same eight-character hash `taskDigest` uses, over the session's **label**, since the label is what distinguishes two sittings on one day. Both digests call one shared `contentDigest` so they cannot drift apart. Resolution has the same three outcomes: **hit**, **relocated** (found among that day's other sittings), **stale** (refused, never guessed). An unlabelled session digests to a constant and discriminates nothing, which is deliberate — with one sitting that day the date has already identified it, and with several unlabelled ones there is nothing to tell them apart by.
+
+On the wire, `session` already accepted an ISO date or an index; `sessionDigest` is the new field, optional in the same spirit as a task's.
+
+**The panel is converted here, unlike for tasks.** The runloop argument below holds for a write fired straight after a read; it does not hold for an editor someone is typing into, which is open for as long as they take. `PMStore` has no `Int`-indexed session writes left at all — the positional form survives only inside `SessionRef`, for callers that genuinely have nothing else.
+
 ## What is deliberately not converted
 
-- **The panel.** It links PmLib in-process and re-reads after every write, so its positions are never more than a runloop old. It goes on calling the positional overloads, which build a digest-less reference and behave exactly as before.
+- **The panel's task positions.** It links PmLib in-process and re-reads after every write, so its positions are never more than a runloop old. It goes on calling the positional overloads, which build a digest-less reference and behave exactly as before. (Its *session* references are converted — see above.)
 - **`moveSubtree`.** Drag-reorder inside the panel, with no slow caller. It still takes raw positions.
 - **Bulk operations** (`toggleAll`, `setDueAll`, subtree deletes). A digest on one task doesn't attest that its children are unchanged; those want a document revision, which belongs with the contract work.
 
@@ -136,3 +154,5 @@ Almost nothing, because task references are barely persisted.
 Both the defect and the design were checked by running the real PmLib transforms — `sessionAddPreservingFormat`, `appendTaskToSession`, `insertTaskRelative`, `completeTodoWithDescendants`, `applyFocusToTodoAt`, `setDueOnTodoAt`, `setTextOnTodoAt` — against fixtures and diffing, with resolution implemented exactly as specified above. 13/13 checks passed, covering: the ISO/heading round trip; a date-based reference resolving as a clean `HIT` through the session shift that sends the index-based one to a different real task; an insert within the session forcing a `RELOCATED`; two sessions created on one date via the CLI path; and refusal on both a rename and a date with no session. Digest stability was confirmed separately across completion, focus moving, and due dates being set and cleared.
 
 The harness is scratch. It should become a test in `pm-swift/Tests/pmTests` when this is implemented.
+
+`SessionRef` was verified as tests from the start: `pm-swift/Tests/pmTests/SessionRefTests.swift` covers the splice a date-named reference survives (and the bare index that doesn't), the digest catching a position that came to mean something else, relocation within a day, refusal on ambiguity and on a missing date, ordinals across two sittings, and the incident above reproduced end to end through the real transforms.

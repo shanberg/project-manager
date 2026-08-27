@@ -17,7 +17,12 @@ public func parseSessionDateArgument(_ string: String) throws -> Date {
 public func formatSessionDate(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
-    formatter.timeZone = TimeZone(identifier: "UTC")
+    // The reader's own timezone, not UTC. A session heading names the day *you* had, and under UTC
+    // "today" rolled over at 8pm on the US east coast — so an evening note opened a session dated
+    // tomorrow, sitting above the one you'd been writing in all day. That's wrong on its face, and it
+    // also quietly shifts every session index below it, which is how a stale editor ends up writing
+    // into the wrong sitting.
+    formatter.timeZone = .current
     formatter.dateFormat = "EEE, MMM d, yyyy"
     return formatter.string(from: date)
 }

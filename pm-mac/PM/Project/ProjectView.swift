@@ -561,7 +561,8 @@ struct ProjectView: View {
         // A selected session header anchors the add on the session itself, appending to it. That's how
         // a task gets into a session with nothing in it yet, now that no button offers to.
         if let si = selectedSessionIndex {
-            activeEditor = EditorTarget(key: Self.sessionKey(si), kind: .sessionAddTask)
+            activeEditor = EditorTarget(key: Self.sessionKey(si), kind: .sessionAddTask,
+                                        session: store.sessionRef(at: si))
         } else if let anchor = actionTargets.first ?? store.focusedTodo ?? store.openTodos.first {
             // Explicitly *after*, which is what the paragraph above has always claimed. The position
             // used to come from whatever the anchor row's own state happened to hold, and that state
@@ -1557,7 +1558,7 @@ struct ProjectView: View {
             InlineTextEditor(seed: sessionLabel(si),
                              placeholder: "Session label (optional)",
                              submitLabel: "Rename", allowsEmpty: true) { label in
-                store.renameSession(si, label: label)
+                if let ref = activeEditor?.session { store.renameSession(ref, label: label) }
                 activeEditor = nil
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
@@ -1610,7 +1611,8 @@ struct ProjectView: View {
     /// Open a session's note in the full-column editor — the double-click on any part of a session,
     /// Return on a selected one, and the context menu's Add/Edit Note.
     private func openSessionNote(_ index: Int) {
-        activeEditor = EditorTarget(key: Self.sessionKey(index), kind: .sessionNote)
+        activeEditor = EditorTarget(key: Self.sessionKey(index), kind: .sessionNote,
+                                    session: store.sessionRef(at: index))
     }
 
     /// One session's visible task rows, tiled with no spacing so their drop gaps abut.
@@ -1656,7 +1658,7 @@ struct ProjectView: View {
         if activeEditor == EditorTarget(key: Self.sessionKey(index), kind: .sessionAddTask) {
             AddEditor(leadingIcon: AnyView(TaskStatusIcon())) { text, due in
                 // Appends, so it chains in order with the editor staying put — see `quickAddEditor`.
-                store.addTaskToSession(index, text: text, due: due)
+                if let ref = activeEditor?.session { store.addTaskToSession(ref, text: text, due: due) }
             } onCancel: { activeEditor = nil }
                 .reportEditorFrame()
                 .padding(.horizontal, 12)
@@ -2624,10 +2626,15 @@ private struct SessionHeader: View {
     /// The session's editable note — its leading prose (lines before the first task), trimmed.
     private var prose: String { leadingSessionProse(body: session.body) }
 
-    /// The reading face for the rendered note: the plain system face at full contrast. A session note
-    /// is working text read alongside the task rows, not the printed-brief typography of the project
-    /// details, so it takes the UI face rather than the details' dim serif.
-    private static let noteFont = NSFont.systemFont(ofSize: 13)
+    /// The reading face for the rendered note: the editor's own face, at the editor's own size.
+    ///
+    /// Literally the same font object, because the seam worth removing here is the one between reading
+    /// a note and editing it. It used to be the 13pt system face while the editor was 14pt system, so
+    /// opening a note re-set it and re-wrapped it — the note you were looking at was not the note you
+    /// got. A session note is still working text read alongside the task rows rather than the
+    /// printed-brief serif of the project details; it just happens that the editor's monospaced face is
+    /// what it should have been all along, and sharing it costs nothing.
+    private static let noteFont = MarkdownTextEditor.baseFont
     private var context: String { session.label.isEmpty ? session.date : "\(session.date) · \(session.label)" }
 
     var body: some View {
@@ -2635,7 +2642,7 @@ private struct SessionHeader: View {
             if isRenaming {
                 InlineTextEditor(seed: session.label, placeholder: "Session label (optional)",
                                  submitLabel: "Rename", allowsEmpty: true) { label in
-                    store.renameSession(index, label: label)
+                    if let ref = activeEditor?.session { store.renameSession(ref, label: label) }
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
                     .reportEditorFrame()
@@ -2728,19 +2735,27 @@ private struct SessionMenu: View {
     private var key: String { ProjectView.sessionKey(index) }
 
     var body: some View {
-        Button { activeEditor = EditorTarget(key: key, kind: .sessionNote) } label: {
+        Button {
+            activeEditor = EditorTarget(key: key, kind: .sessionNote, session: store.sessionRef(at: index))
+        } label: {
             Label(hasNote ? "Edit Note…" : "Add Note…", systemImage: "note.text")
         }
-        Button { activeEditor = EditorTarget(key: key, kind: .sessionAddTask) } label: {
+        Button {
+            activeEditor = EditorTarget(key: key, kind: .sessionAddTask, session: store.sessionRef(at: index))
+        } label: {
             Label("Add Task…", systemImage: "plus")
         }
-        Button { activeEditor = EditorTarget(key: key, kind: .sessionLabel) } label: {
+        Button {
+            activeEditor = EditorTarget(key: key, kind: .sessionLabel, session: store.sessionRef(at: index))
+        } label: {
             Label("Rename Session…", systemImage: "pencil")
         }
         // Deleting is offered only for a session with no tasks, so tasks are never removed with it.
         if !store.hasTasks(sessionIndex: index) {
             Divider()
-            Button(role: .destructive) { store.deleteSession(index) } label: {
+            Button(role: .destructive) {
+                if let ref = store.sessionRef(at: index) { store.deleteSession(ref) }
+            } label: {
                 Label("Delete Session", systemImage: "trash")
             }
         }
@@ -2768,6 +2783,22 @@ private struct SessionNoteTakeover: View {
     let onBack: () -> Void
 
     @State private var text: String
+    /// The prose this takeover opened with, and the identity of the session it opened *on*.
+    ///
+    /// Both are `@State` captured at init, deliberately, because `session` is not: SwiftUI rebuilds
+    /// this struct from the store on every change, so by the time the editor closes `session` is
+    /// whatever now sits at `index` — which is not necessarily what was being edited. A note written
+    /// from the quick bar can start a new session and insert it above this one, and then `index` names
+    /// a different sitting than it did a moment ago.
+    ///
+    /// That is not hypothetical: it silently destroyed a note. The takeover auto-saves on the way out,
+    /// the way out fired after a quick-bar note had inserted a new session at index 0, and this view
+    /// wrote its untouched copy of the *previous* session's prose over the note that had just been
+    /// written into the new one.
+    @State private var seed: String
+    @State private var seedLabel: String
+    /// Which session this was opened on, by `SessionRef` rather than by `index`.
+    @State private var ref: SessionRef
     /// The session's label, as typed. Committed on Return and on the way out, beside the prose.
     @State private var label: String
     /// Whether the pointer is over the label field, which is how a plain-looking line of header text
@@ -2792,6 +2823,10 @@ private struct SessionNoteTakeover: View {
         self.onBack = onBack
         _text = State(initialValue: leadingSessionProse(body: session.body))
         _label = State(initialValue: session.label)
+        _seed = State(initialValue: leadingSessionProse(body: session.body))
+        _seedLabel = State(initialValue: session.label)
+        _ref = State(initialValue: store.sessionRef(at: index)
+            ?? SessionRef(index: index, digest: sessionDigest(session.label)))
     }
 
     var body: some View {
@@ -2810,12 +2845,15 @@ private struct SessionNoteTakeover: View {
             // it and a relative link can be followed back out of it.
             MarkdownTextEditor(text: $text, onSubmit: onBack,
                                noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
+                               opensAtStart: true,
                                topInset: barHeight)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
                 // Prose wants the readable cap as much as the task rows do; it used to inherit it from
-                // a frame around the whole column.
-                .modifier(ReadableWidth())
+                // a frame around the whole column. Its own cap rather than the general one: a note is
+                // set in a fixed-advance face, so its comfortable width is a character count and can be
+                // stated as one. See `MarkdownTextEditor.measureWidth`.
+                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             // Same chrome as the task list's header — this stands in the same titlebar strip, so it
@@ -2823,7 +2861,7 @@ private struct SessionNoteTakeover: View {
             // fades out rather than a bar that ends in a rule. Cap inside the scrim, as there: the
             // title stays at the width of the prose it heads, the scrim spans the pane.
             header
-                .modifier(ReadableWidth())
+                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
                 .background(SoftHeaderScrim())
                 .background(GeometryReader { geo in
                     Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
@@ -2948,6 +2986,8 @@ private struct SessionNoteTakeover: View {
                     .textFieldStyle(.plain)
                     .font(.caption)
                     .lineLimit(1)
+                    // Return in the label field renames the session it was opened on, resolved the
+                    // same way the note's own save resolves it.
                     .onSubmit { commitLabel() }
             }
         .padding(.leading, 4)
@@ -2968,19 +3008,40 @@ private struct SessionNoteTakeover: View {
     /// The label rides along: it's edited in the same view and leaves by the same exits, and the store's
     /// serial IO queue keeps the two writes in order — the heading rewrite preserves the body and the
     /// body rewrite preserves the heading, so neither can land on top of the other.
+    /// Save on the way out — but only what was actually changed, and only into the session this was
+    /// opened on.
+    ///
+    /// Both guards matter, and neither substitutes for the other. Writing nothing when nothing was
+    /// typed is what stops an editor that was merely opened and closed from overwriting whatever
+    /// arrived while it was up; the idempotence this used to lean on only holds while the document
+    /// underneath is unchanged, which is exactly the case that goes wrong. And `ref` names the sitting
+    /// by date and label rather than by the index it had on the way in, so a real edit can't land in a
+    /// session that has since moved into that position. A reference that can no longer be resolved
+    /// refuses the write rather than guessing — see `resolveSessionRef`.
+    ///
+    /// The note goes first and the label second, deliberately: the reference asserts the label it was
+    /// made with, so renaming before writing would invalidate it for the write that follows.
     private func commit() {
+        if text != seed {
+            let cleaned = sanitizeSessionNoteProse(text).prose
+            store.setSessionNote(ref, prose: text)
+            // After the sanitizer's rewrite, not before: the seed has to be what the editor is now
+            // holding, or the next commit sees a difference that is only this one's own tidying.
+            if cleaned != text { text = cleaned }
+            seed = text
+        }
         commitLabel()
-        let cleaned = sanitizeSessionNoteProse(text).prose
-        store.setSessionNote(index, prose: text)
-        if cleaned != text { text = cleaned }
     }
 
-    /// Rename the session, if the label actually moved. Guarded rather than left to the store's
-    /// byte-idempotence, so simply opening and closing a note doesn't touch the file at all.
     private func commitLabel() {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != session.label else { return }
-        store.renameSession(index, label: trimmed)
+        // Against the label this opened with, not `session`'s — see `seed` for why the two differ.
+        guard trimmed != seedLabel else { return }
+        store.renameSession(ref, label: trimmed)
+        seedLabel = trimmed
+        // The reference asserted the old label; after the rename it has to describe the session as it
+        // now is, or a second commit from this same editor would be refused as stale.
+        ref.digest = sessionDigest(trimmed)
     }
 }
 

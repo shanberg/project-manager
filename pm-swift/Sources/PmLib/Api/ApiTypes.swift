@@ -117,6 +117,9 @@ public struct ApiInput: Codable, Equatable {
     public var position: String?
     public var session: String?
     public var sessionOrdinal: Int?
+    /// `sessionDigest` of the label the caller believes the named session has — the session half of
+    /// what `TaskRefInput.digest` asserts about a task. See `SessionRef`.
+    public var sessionDigest: String?
     public var text: String?
     public var due: String?
     public var clearDue: Bool?
