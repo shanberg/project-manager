@@ -260,13 +260,20 @@ struct QuickBarView: View {
                 .animation(.easeOut(duration: 0.18), value: model.mode.symbol)
             ZStack(alignment: .topLeading) {
                 // A placeholder of its own: an `NSTextView` has none, and an editor that opens empty
-                // and unlabelled is the one moment this surface doesn't say what it's for. Set where
-                // the editor's own first line starts, in the editor's own face.
+                // and unlabelled is the one moment this surface doesn't say what it's for.
+                //
+                // Set where the editor's own first line starts, which means the gutter as well as the
+                // top inset. It used to take only the inset, and so began a gutter's width left of the
+                // caret it was standing in for — the placeholder and the thing you typed over it
+                // didn't start in the same place, which is the one thing a placeholder has to do.
+                // It's also given the editor's actual face rather than a system face at the same point
+                // size, so the invitation is set in the type the note will be.
                 if model.noteText.isEmpty {
                     Text(QuickBarMode.note.placeholder)
-                        .font(.system(size: QuickBarMetrics.noteFont.pointSize))
+                        .font(Font(QuickBarMetrics.noteFont))
                         .foregroundStyle(.tertiary)
                         .padding(.top, QuickBarMetrics.noteTextInset)
+                        .padding(.leading, QuickBarMetrics.noteGutter)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -277,7 +284,8 @@ struct QuickBarView: View {
                                    growthCeiling: noteHeightCeiling,
                                    focusRequest: model.noteFocusToken,
                                    baseFont: QuickBarMetrics.noteFont,
-                                   textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset))
+                                   textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset),
+                                   gutterAdvances: QuickBarMetrics.noteGutterAdvances)
                     .frame(height: clampedNoteHeight)
                     .accessibilityLabel(QuickBarMode.note.placeholder)
             }
@@ -332,7 +340,9 @@ struct QuickBarView: View {
                 .foregroundStyle(.tertiary)
             ForEach(Array(model.noteTail.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
-                    .font(.callout)
+                    // The same face the surface above writes in: this is note prose too, and it read
+                    // as a different document when it was set in a different type.
+                    .font(Font(QuickBarMetrics.noteFont))
                     .foregroundStyle(.secondary)
                     // Two lines each, so a long paragraph can't push the writing surface off the
                     // screen. It's context, and context that grows without limit stops being context.
@@ -887,38 +897,68 @@ enum QuickBarMetrics {
     /// that a row you were about to press ⏎ on has stopped moving before you get there.
     static let resizeDuration: TimeInterval = 0.12
 
-    /// The face the note surface writes in: the field's own size, because it replaces the field.
+    /// The face the note surface writes in: the window's, exactly.
     ///
-    /// The seam this avoids is the one you'd see rather than reason about. ⇧⏎ is meant to read as the
-    /// line you were typing carrying on somewhere roomier — and a line that changes size at the moment
-    /// it changes container is a different line arriving, not the same one continuing.
-    static let noteFont = NSFont.systemFont(ofSize: 18)
+    /// This has stepped down twice. It was the capture field's own 18pt, so that ⇧⏎ read as the line
+    /// you were typing carrying on somewhere roomier; then 15pt system, because 18pt prose in a 560pt
+    /// strip is a handful of words per line. Both were chasing continuity with the *field above*, and
+    /// both were the wrong thing to be continuous with. A note written here is the same note the
+    /// session editor opens, and one of the two surfaces was setting it in a face the other never
+    /// uses — so the note you wrote reflowed the first time you went to look at it.
+    ///
+    /// Continuity with the field costs one frame at the moment of promotion. Continuity with the
+    /// editor costs nothing and is true for as long as the note exists. See
+    /// `MarkdownTextEditor.baseFont` for why that face is monospaced.
+    static let noteFont = MarkdownTextEditor.baseFont
 
-    /// One laid-out line of it. Asked of the layout manager rather than guessed from the point size,
-    /// because everything below is aligned against the field to the pixel and a guess is a seam.
+    /// One laid-out line of it, before the note's own leading is added under it. Asked of the layout
+    /// manager rather than guessed from the point size, because the glyph beside the first line is
+    /// aligned against this to the pixel and a guess is a seam.
     static let noteLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: noteFont)
 
-    /// The text's own inset inside the editor, and the space either side of the block around it.
+    /// The gap the editor adds *below* each line — see `MarkdownTextEditor.lineHeightMultiple`. Needed
+    /// here only to say how tall a given number of lines is, which is what the floor is expressed in.
+    static let noteLeading: CGFloat =
+        (noteLineHeight * (MarkdownTextEditor.lineHeightMultiple - 1)).rounded()
+
+    /// The width of the margin markers hang into. The window's number, for the window's reason: four
+    /// advances clears `# ` through `### `, `- `, `> ` and `1. `, so every line of content in either
+    /// surface lands on the same column.
     ///
-    /// Split this way so the first line of a note lands exactly where the field's text does. The field
-    /// pads 12 above its line; the editor pads 4 and the text container adds 8, and 4 + 8 is 12. The
-    /// same sum runs underneath, so an empty note is the height the field was — which is the whole
-    /// trick: the surface opens at the size of the thing it replaced and grows from there.
+    /// It was two here, to keep a captured note starting near the left edge the field it replaced
+    /// started at. That bought half a seam — the first character still moved, just less — at the price
+    /// of a gutter that was this panel's alone, so a list typed here hung differently than the same
+    /// list typed in the window.
+    static let noteGutterAdvances: CGFloat = MarkdownTextEditor.gutterAdvances
+
+    /// How far in from the block's left edge the editor's own first character sits: the gutter every
+    /// unmarked line is indented by. The placeholder is offset by exactly this, which is the whole of
+    /// why it now sits under the caret rather than a gutter's width to its left.
+    static let noteGutter: CGFloat =
+        (("0" as NSString).size(withAttributes: [.font: noteFont]).width * noteGutterAdvances)
+
     static let noteTextInset: CGFloat = 8
     static let noteBlockInset: CGFloat = 4
 
     /// The editor's floor and ceiling.
     ///
-    /// The floor is one line. It used to be three, on the theory that a writing surface should look
-    /// like one on arrival — but three lines of nothing under the caret is a gap you notice, and it
-    /// made the promotion out of a capture line a jump rather than a continuation. What says "write
-    /// here" is the glyph, the placeholder and a hint line that names the note's destination; none of
-    /// them need the room.
+    /// The floor is six lines — a textarea you can see yourself writing a paragraph into, rather than
+    /// a field that happens to accept returns. It has been three (a writing surface should look like
+    /// one) and then one (three lines of nothing under the caret is a gap you notice, and the
+    /// promotion out of a capture line should be a continuation rather than a jump). One line was the
+    /// right floor while this surface was pretending to still be the field; it is the wrong floor for
+    /// a surface that means to be the session editor with less chrome. The room is the invitation.
     ///
     /// The ceiling is a share of the screen and so isn't a constant at all — see the view's
     /// `noteHeightCeiling`. This is only what's used before any screen has been asked: about twelve
     /// lines, which is what the ceiling was when it was fixed.
-    static var noteMinHeight: CGFloat { ceil(noteLineHeight) + noteTextInset * 2 }
+    static let noteMinLines: CGFloat = 6
+    static var noteMinHeight: CGFloat {
+        // `n` lines is `n` line heights with `n - 1` gaps between them: the leading goes below each
+        // line but the layout manager doesn't hang one off the last. Matching how the editor measures
+        // itself is what keeps the sixth line the last one that fits rather than the one that grows.
+        ceil(noteLineHeight * noteMinLines + noteLeading * (noteMinLines - 1)) + noteTextInset * 2
+    }
     static let noteFallbackMaxHeight: CGFloat = 272
 }
 

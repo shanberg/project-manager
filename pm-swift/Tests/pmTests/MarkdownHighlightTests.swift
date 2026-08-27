@@ -143,4 +143,109 @@ final class MarkdownHighlightTests: XCTestCase {
         XCTAssertEqual(t, "[site](url)")
         XCTAssertEqual(String(t[sel]), "url")
     }
+
+    // MARK: blocks
+
+    private func blocks(_ text: String) -> [(MarkdownBlockKind, String, String, String)] {
+        markdownBlocks(in: text).map { b in
+            (b.kind, String(text[b.indent]), String(text[b.marker]),
+             String(text[b.marker.upperBound..<b.range.upperBound]))
+        }
+    }
+
+    func testBlocksCoverEveryLineIncludingBlanks() {
+        let text = "one\n\n# two\n"
+        let bs = markdownBlocks(in: text)
+        XCTAssertEqual(bs.count, 4, "Three lines plus the empty one after the trailing newline")
+        XCTAssertEqual(bs.map { String(text[$0.range]) }, ["one", "", "# two", ""])
+    }
+
+    func testBlockSplitsIndentFromMarker() {
+        let bs = blocks("  - item")
+        XCTAssertEqual(bs.count, 1)
+        XCTAssertEqual(bs[0].0, .list)
+        XCTAssertEqual(bs[0].1, "  ", "The indent is its own part, so the content column can step by it")
+        XCTAssertEqual(bs[0].2, "- ", "The marker excludes the indent, so its hang is depth-independent")
+        XCTAssertEqual(bs[0].3, "item")
+    }
+
+    func testBlockMarkerWidthIsDepthIndependent() {
+        // The whole point of splitting indent from marker: `- ` is two characters at every depth, so
+        // the hang is one constant and only the content column moves.
+        for indent in ["", "  ", "    ", "\t"] {
+            let bs = blocks(indent + "- item")
+            XCTAssertEqual(bs[0].2, "- ", "Marker stays `- ` under indent \(indent.debugDescription)")
+            XCTAssertEqual(bs[0].1, indent)
+        }
+    }
+
+    func testBlockHeadingLevelAndMarker() {
+        let bs = blocks("### Title")
+        XCTAssertEqual(bs[0].0, .heading(level: 3))
+        XCTAssertEqual(bs[0].2, "### ")
+        XCTAssertEqual(bs[0].3, "Title")
+    }
+
+    func testBlockHashWithoutSpaceIsNotAHeading() {
+        // Half-typed `#` must not reformat the line out from under the caret.
+        XCTAssertEqual(blocks("#")[0].0, .paragraph)
+        XCTAssertEqual(blocks("#tag")[0].0, .paragraph)
+        XCTAssertEqual(blocks("####### seven")[0].0, .paragraph)
+    }
+
+    func testHashesHangBeforeTheSpaceArrives() {
+        // The kind stays a paragraph — `#tag` is not a heading — but the hashes are still the marker,
+        // so they hang. That is what lets a line be promoted to a heading without its words moving:
+        // every step below puts the content on the same column.
+        for (line, marker) in [("#Plain", "#"), ("# Plain", "# "),
+                               ("##Plain", "##"), ("## Plain", "## "),
+                               ("###Plain", "###"), ("### Plain", "### ")] {
+            XCTAssertEqual(blocks(line)[0].2, marker, "marker of \(line.debugDescription)")
+            XCTAssertEqual(blocks(line)[0].3, "Plain", "content of \(line.debugDescription)")
+        }
+        XCTAssertEqual(blocks("####### seven")[0].2, "", "Seven hashes is not a marker at all")
+    }
+
+    func testLoneBulletHangsButAWordJammedAgainstOneDoesNot() {
+        XCTAssertEqual(blocks("-")[0].2, "-", "The first keystroke of a new item hangs")
+        XCTAssertEqual(blocks("*")[0].2, "*")
+        // `*emphasis*` opening a line is prose, not a bullet: hanging its asterisk would misread a
+        // common thing to protect a rare one.
+        XCTAssertEqual(blocks("*emphasis* opens the line")[0].2, "")
+        XCTAssertEqual(blocks("-5 degrees overnight")[0].2, "")
+    }
+
+    func testBlockParagraphRangeIncludesTheNewline() {
+        // A paragraph style has to cover the terminator, or AppKit lays the line out to suit whatever
+        // style the newline kept.
+        let text = "one\ntwo"
+        let bs = markdownBlocks(in: text)
+        XCTAssertEqual(String(text[bs[0].range]), "one")
+        XCTAssertEqual(String(text[bs[0].paragraph]), "one\n")
+        XCTAssertEqual(String(text[bs[1].paragraph]), "two", "The last line has no terminator to take")
+        // Every paragraph range together covers the text exactly once, with no gap and no overlap.
+        XCTAssertEqual(bs.map { String(text[$0.paragraph]) }.joined(), text)
+    }
+
+    func testBlockQuoteAndOrderedList() {
+        XCTAssertEqual(blocks("> quoted")[0].0, .blockquote)
+        XCTAssertEqual(blocks("> quoted")[0].2, "> ")
+        XCTAssertEqual(blocks(">quoted")[0].2, ">")
+        XCTAssertEqual(blocks("10. tenth")[0].0, .list)
+        XCTAssertEqual(blocks("10. tenth")[0].2, "10. ")
+    }
+
+    func testBlockPlainAndBlankLinesHaveNoMarker() {
+        XCTAssertEqual(blocks("just prose")[0].2, "")
+        XCTAssertEqual(blocks("")[0].0, .paragraph)
+        XCTAssertEqual(blocks("   ")[0].1, "   ", "A whitespace-only line is all indent")
+    }
+
+    func testBlockKindsAgreeWithSpans() {
+        // A line the block scanner calls a heading is one the span tokenizer highlights as a heading,
+        // and vice versa \u2014 they read the same grammar, so a note can't be shaped one way and styled another.
+        let text = "# yes\n#no\n- item\n> quote\nplain"
+        let kinds = markdownBlocks(in: text).map(\.kind)
+        XCTAssertEqual(kinds, [.heading(level: 1), .paragraph, .list, .blockquote, .paragraph])
+    }
 }

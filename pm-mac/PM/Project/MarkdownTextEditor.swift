@@ -4,8 +4,14 @@ import PmLib
 
 /// A plain-text markdown *source* editor with live syntax highlighting, backed by `NSTextView` (the
 /// app's floor is macOS 13, below SwiftUI's rich-text `TextEditor`). It edits the raw markdown of a
-/// session note — never transforming characters — and only restyles them: headings enlarge, emphasis
-/// goes bold/italic, links tint, and the literal markers dim. Native undo (⌘Z) works per-keystroke.
+/// session note — never transforming characters — and only restyles them: emphasis goes bold/italic,
+/// links tint, the literal markers dim and hang out in the margin, and every line sits on one column.
+/// Native undo (⌘Z) works per-keystroke.
+///
+/// Its typographic rule is that **nothing moves while you edit**, formatting included. That is why the
+/// face is monospaced and why headings are bold rather than big: in a fixed-advance face a change of
+/// weight is a change of colour and nothing more, so wrapping a word in `**` or turning a line into a
+/// heading reflows no text and shifts no line. See `baseFont` and `MarkdownGrid`.
 ///
 /// On top of that it does what a markdown editor is expected to do and a bare text view doesn't:
 /// Return continues the list or quote you're in (and ends it on an empty item), Tab indents a list item
@@ -64,10 +70,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// The face the prose is set in, and the size every markdown style is derived from.
     ///
     /// A parameter rather than the static it used to read directly, because the two hosts want
-    /// different sizes for the same reason: a takeover fills a window column, where 14pt is a page of
-    /// prose; the quick bar's note surface *replaces a text field* that is set at 18pt, and a first
-    /// line that changes size the instant ⇧⏎ turns one into the other is the seam this is meant not
-    /// to have. `markdownAttributes` already sizes everything relative to whatever it's given.
+    /// different faces for the same reason: a takeover fills a window column and is a reading surface,
+    /// so it takes the monospaced default; the quick bar's note surface *replaces a text field* set at
+    /// 18pt system, and a first line that changes face or size the instant ⇧⏎ turns one into the other
+    /// is the seam this is meant not to have. Everything below is relative to whatever it's given —
+    /// `markdownAttributes` derives its styles from this face, `MarkdownGrid` measures its gutter in it
+    /// — so a proportional host still gets hanging markers and aligned wraps, just without the
+    /// no-reflow guarantee that only a fixed-advance face can make.
     var baseFont: NSFont = MarkdownTextEditor.baseFont
 
     /// Where the text starts, inside the editor's own bounds.
@@ -83,15 +92,87 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// against it. Nil just means those fall back to absolute paths.
     var noteURL: URL? = nil
 
+    /// Whether the note opens at its beginning — caret before the first character, scrolled to the top.
+    ///
+    /// The takeover wants this: you opened the note to read it, and its first line is the one you came
+    /// for. The quick bar's note surface must not have it — that surface is a capture line that grew,
+    /// and the caret belongs after the words already typed.
+    ///
+    /// Caret placement is the whole of it, and that's enough: setting a text view's `string` leaves the
+    /// caret at the *end* of it, and taking first responder scrolls that caret into view — so a note
+    /// opened without this lands at its bottom. With the caret at the start there is nothing to chase,
+    /// the note is already showing its first line, and no scrolling correction is needed anywhere.
+    var opensAtStart: Bool = false
+
     /// Height of the bar this editor runs up underneath, if it has one. Applied as the scroll view's
     /// top content inset, which is what lets the prose scroll *under* the bar while still starting
     /// below it at rest — the same arrangement `safeAreaInset` gives the task list's `ScrollView`.
     /// Zero (the default) is an editor that owns its whole frame.
     var topInset: CGFloat = 0
 
-    /// The editor's default reading face — the system font at a comfortable editing size, and what a
-    /// host that doesn't care gets. See `baseFont` for the one that does.
-    static let baseFont = NSFont.systemFont(ofSize: 14)
+    /// The editor's default reading face — and the reason it's monospaced.
+    ///
+    /// A note is markdown *source*, and the thing that makes editing source feel cheap is text that
+    /// moves while you work on it. In a proportional face it always does: wrapping a word in `**`
+    /// re-sets it in bold, bold glyphs are wider than roman ones, and the rest of the paragraph
+    /// rewraps around a formatting change that added no words. In a fixed-advance face every weight
+    /// and slant shares one advance width, so bolding a word is a change of colour and nothing else —
+    /// no reflow, no jitter, the line you were reading stays where it was.
+    ///
+    /// The same property is what lets the markers *hang* exactly (see `markdownParagraphStyle`): `## `
+    /// is three advances wide whatever the heading says, so the gutter is a grid rather than a
+    /// measurement that changes per line.
+    ///
+    /// 13pt because mono reads larger than its point size — the glyphs are wider and the column is
+    /// denser — so it sits beside the 13pt task rows without shouting, and matches the rendered read
+    /// view exactly, which is what stops a note resizing at the moment you open it to edit.
+    static let baseFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    /// How much taller than its natural leading a line of note prose is set. Mono at its default
+    /// leading is a wall; this is the single number that makes it a page.
+    ///
+    /// Applied as `lineSpacing` — the difference from the natural height, added *below* each line —
+    /// rather than as `lineHeightMultiple`, which is the same total and the wrong geometry. A multiple
+    /// puts the slack above the glyphs, and AppKit draws the caret over the whole line fragment: the
+    /// text sat at the bottom of a 23pt box with a 23pt caret beside it, overhanging by half its own
+    /// height again. Below the text the slack costs nothing, because `drawInsertionPoint` can then
+    /// simply clamp the caret's height and leave its origin alone.
+    /// 1.38 rather than the 1.45 this started at: mono sets a denser column than the proportional face
+    /// it replaced, and at 1.45 a note read as more gap than text — a blank line between two paragraphs
+    /// became a chasm. Rounded to whole points where it's applied, so every line sits on an integer
+    /// grid and no two are a subpixel apart.
+    static let lineHeightMultiple: CGFloat = 1.38
+
+    /// The width of the margin every marker hangs into, in character advances.
+    ///
+    /// Four covers `# ` through `### `, `- `, `> `, and `1. ` through `10. ` — every marker a note
+    /// actually uses — so all of them hang clear and every line of content lands on one column. A
+    /// longer marker (`#### `, and deeper) clamps at the margin rather than widening it: a gutter that
+    /// grew to fit the deepest marker in the document would move the whole note sideways the moment
+    /// you typed one, which is the thing this design exists to prevent.
+    static let gutterAdvances: CGFloat = 4
+
+    /// This editor's own gutter, in character advances. Defaults to the reading value above.
+    ///
+    /// A parameter because the two hosts are different rooms. A takeover is a page, where four
+    /// characters of margin is where the markers live and the cost is nothing. The quick bar is a
+    /// 560pt strip standing in for a one-line field, where four characters of a proportional face is
+    /// over 40pt of permanently empty space before the first word — and that field's own text starts
+    /// hard against the left edge, so the promotion out of it would step sideways. Two covers `- ` and
+    /// `> `, the markers a captured note actually uses.
+    var gutterAdvances: CGFloat = MarkdownTextEditor.gutterAdvances
+
+    /// How wide a column of note prose is allowed to get: 78 characters of it, plus the gutter the
+    /// markers hang in.
+    ///
+    /// Measured in characters because that's the thing that actually governs readability, and because
+    /// a fixed-advance face makes it exact rather than an estimate. The 700pt cap this replaces for
+    /// notes was set for proportional text; at this face it is nearer 90 characters a line, which is
+    /// past the width at which the eye reliably finds the start of the next one.
+    static let measureWidth: CGFloat = {
+        let advance = ("0" as NSString).size(withAttributes: [.font: baseFont]).width
+        return (advance * (78 + gutterAdvances)).rounded()
+    }()
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -134,6 +215,20 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // Dropped files become markdown links rather than nothing at all.
         textView.registerForDraggedTypes([.fileURL])
         textView.font = baseFont
+        // The grid an empty note starts on, and what the caret measures itself against before the
+        // first highlight pass has anything to style. Without it the first character you type lands
+        // flush at the margin and jumps onto the column a keystroke later.
+        var grid = MarkdownGrid(base: baseFont, advances: gutterAdvances)
+        let empty = grid.style(indent: "", marker: "")
+        textView.defaultParagraphStyle = empty
+        // …and in the typing attributes, which is the pair that actually governs the caret.
+        //
+        // An empty note has no characters for the highlight pass to attach a paragraph style to, and
+        // `defaultParagraphStyle` alone does not reach `typingAttributes` — so the caret opened at x=0
+        // with no head indent and jumped a whole gutter to the right the instant the first character
+        // landed and gave the style something to hold on to. Stated here it starts where the text will.
+        textView.typingAttributes = [.font: baseFont, .foregroundColor: NSColor.labelColor,
+                                     .paragraphStyle: empty]
         textView.textContainerInset = textInset
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
@@ -141,7 +236,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.noteURL = noteURL
         textView.growthCeiling = growthCeiling
         textView.string = text
+        if opensAtStart {
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+        }
         context.coordinator.highlight(textView)
+        scrollView.pinsNextLayout = true
         // After this turn: the text view has no width until it's in the scroll view and laid out, and a
         // height measured before that is the height of text wrapped to nothing.
         afterCurrentUpdate { [weak textView] in
@@ -179,12 +278,19 @@ struct MarkdownTextEditor: NSViewRepresentable {
         let wantedInset = NSSize(width: textInset.width, height: textInset.height + topInset)
         if textView.textContainerInset != wantedInset {
             textView.textContainerInset = wantedInset
+            // The bar's measured height arriving is the last thing that moves the note before you see
+            // it, and it moves it by the height of the bar. Pin, or the first lines open underneath.
+            (scrollView as? TopPinningScrollView)?.pinsNextLayout = true
             // The scroller still spans the whole height, so start its track below the bar.
             scrollView.scrollerInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
         }
         if textView.string != text {
             textView.string = text
+            if opensAtStart {
+                textView.setSelectedRange(NSRange(location: 0, length: 0))
+            }
             context.coordinator.highlight(textView)
+            (scrollView as? TopPinningScrollView)?.pinsNextLayout = true
             // Text put in from outside — a draft restored, or the editor emptied after a note was
             // written — changes the height without a keystroke to notice it.
             afterCurrentUpdate { context.coordinator.reportHeight(textView) }
@@ -260,21 +366,45 @@ struct MarkdownTextEditor: NSViewRepresentable {
             report(layout.usedRect(for: container).height + textView.textContainerInset.height * 2)
         }
 
-        /// Re-style the whole (short) note: reset to the base attributes, then layer each span's style.
+        /// Re-style the whole (short) note in three passes: reset to the base attributes, lay every
+        /// line on the paragraph grid, then layer each span's style.
+        ///
+        /// The grid pass is separate because indent, hang and wrap alignment are *paragraph* properties
+        /// — an `NSParagraphStyle` applies to whole paragraphs, so it can't be carried by a span that
+        /// covers three words in the middle of one. Setting it per line from `markdownBlocks` is what
+        /// makes a wrapped bullet align under its own text instead of falling back to the margin, and
+        /// what puts the markers in the gutter.
+        ///
         /// Style-only, on the text storage — it doesn't register undo actions, so native text undo stays
         /// per-keystroke.
         func highlight(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
             let text = textView.string
+            let base = parent.baseFont
             let full = NSRange(location: 0, length: storage.length)
+            var grid = MarkdownGrid(base: base, advances: parent.gutterAdvances)
             storage.beginEditing()
-            storage.setAttributes([.font: parent.baseFont, .foregroundColor: NSColor.labelColor],
+            storage.setAttributes([.font: base,
+                                   .foregroundColor: NSColor.labelColor,
+                                   .paragraphStyle: grid.style(indent: "", marker: "")],
                                   range: full)
+            for block in markdownBlocks(in: text) {
+                let style = grid.style(indent: String(text[block.indent]), marker: String(text[block.marker]))
+                // `paragraph`, not `range`: the newline belongs to the paragraph it ends, and leaving
+                // it on the previous style gives AppKit one paragraph with two styles to lay out.
+                storage.addAttribute(.paragraphStyle, value: style, range: NSRange(block.paragraph, in: text))
+            }
             for span in markdownSpans(in: text) {
                 let ns = NSRange(span.range, in: text)
-                storage.addAttributes(markdownAttributes(for: span.kind, base: parent.baseFont), range: ns)
+                storage.addAttributes(markdownAttributes(for: span.kind, base: base), range: ns)
             }
             storage.endEditing()
+            // Deleting the last character puts the note back in the state that has nothing to carry the
+            // style, so the caret has to be told again. See `makeNSView`.
+            if storage.length == 0 {
+                textView.typingAttributes = [.font: base, .foregroundColor: NSColor.labelColor,
+                                             .paragraphStyle: grid.style(indent: "", marker: "")]
+            }
         }
     }
 }
@@ -287,11 +417,37 @@ struct MarkdownTextEditor: NSViewRepresentable {
 /// blank space under the last. Re-checking on layout costs nothing and is a no-op for a note that
 /// really is taller than its frame, which is the takeover's usual state.
 private final class TopPinningScrollView: NSScrollView {
+    /// Set when a document is put in from outside, to pin the *next* layout to the top whether or not
+    /// the note fits.
+    ///
+    /// The fits-in-view rule below can't cover this on its own, and used to look like it did only
+    /// because notes were shorter: a note opened into a takeover is taller than the pane more often
+    /// than not, so "it fits" is the exceptional case rather than the normal one. A freshly loaded
+    /// document starts at its own top — the first line of the note is the one you opened it to read,
+    /// and finding it already scrolled under the header bar is the whole of the bug this fixes.
+    var pinsNextLayout = false
+
     override func layout() {
         super.layout()
-        guard let document = documentView, contentView.bounds.origin.y != 0,
-              document.frame.height <= contentView.bounds.height + 0.5 else { return }
-        contentView.scroll(to: .zero)
+        // How far down the document we are — *not* `contentView.bounds.origin.y`, which is a different
+        // question with a different answer.
+        //
+        // A clip view showing the top of a document taller than itself does not sit at bounds origin
+        // zero: the document view's own frame origin goes negative and the clip's bounds origin matches
+        // it, and it's the two being equal that means "at the top". Scrolling the bounds to zero breaks
+        // that pairing and moves the note *down* by the whole of the document's negative origin, which
+        // is how a pin-to-top ended up hiding the first lines behind the header bar. `documentVisibleRect`
+        // is stated in document coordinates and so answers the question directly, whatever convention
+        // the two frames happen to be using underneath.
+        let offset = documentVisibleRect.minY
+        guard let document = documentView, offset != 0 else {
+            pinsNextLayout = false
+            return
+        }
+        guard pinsNextLayout || document.frame.height <= contentView.bounds.height + 0.5 else { return }
+        pinsNextLayout = false
+        contentView.scroll(to: NSPoint(x: contentView.bounds.origin.x,
+                                       y: contentView.bounds.origin.y - offset))
         reflectScrolledClipView(contentView)
     }
 }
@@ -320,11 +476,27 @@ func markdownDestinationURL(_ destination: String, relativeTo note: URL?) -> URL
 /// Maps a markdown span kind to text attributes, sized/faced relative to `base` so the same styling
 /// serves the live editor (base = system) and the rendered read view (base = serif). Shared so the
 /// editor and the main-view note can't drift apart.
-func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont) -> [NSAttributedString.Key: Any] {
+func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
+                        scaleHeadings: Bool = false) -> [NSAttributedString.Key: Any] {
     func trait(_ t: NSFontTraitMask) -> NSFont { NSFontManager.shared.convert(base, toHaveTrait: t) }
     switch kind {
     case .heading(let level):
-        let bump: CGFloat = level == 1 ? 6 : level == 2 ? 4 : level == 3 ? 2 : 1
+        // In the editor (`scaleHeadings: false`): bold, at body size, at every level. Hierarchy comes
+        // from weight, from the space the note's own blank lines already put above a heading, and from
+        // the hashes hanging in the gutter — not from size, which is the one axis that can't change
+        // without moving the rest of the document. A heading that grew would push everything below it
+        // down the instant you typed the `#`, and would take its own text off the column every other
+        // line is set on.
+        //
+        // In the rendered read view: sized. Not an inconsistency but the consequence of one — that view
+        // *deletes* the markers, so the hashes that carry the level in the editor aren't there to read,
+        // and without size an H1 and an H3 are the same bold line. Nothing is typed into a rendered
+        // view, so the rule the editor is keeping doesn't apply to it; the body text, which is what
+        // actually resized under you before, is now identical across the two.
+        guard scaleHeadings else {
+            return [.font: trait(.boldFontMask), .foregroundColor: NSColor.labelColor]
+        }
+        let bump: CGFloat = level == 1 ? 5 : level == 2 ? 3 : level == 3 ? 1 : 0
         let sized = NSFont(descriptor: base.fontDescriptor, size: base.pointSize + bump) ?? base
         return [.font: NSFontManager.shared.convert(sized, toHaveTrait: .boldFontMask),
                 .foregroundColor: NSColor.labelColor]
@@ -333,8 +505,11 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont) -> [NSAttribut
     case .italic:
         return [.font: trait(.italicFontMask)]
     case .code:
-        return [.font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 1, weight: .regular),
-                .foregroundColor: NSColor.secondaryLabelColor]
+        // Same face and size as the prose around it — in a monospaced note there is no mono face left
+        // to switch *to*, and a size change here would break the grid for the sake of a distinction a
+        // tint already makes. The background is what says "code"; it costs no width.
+        return [.font: NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .regular),
+                .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.12)]
     case .link:
         return [.foregroundColor: NSColor.controlAccentColor,
                 .underlineStyle: NSUnderlineStyle.single.rawValue]
@@ -351,6 +526,65 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont) -> [NSAttribut
                 .foregroundColor: NSColor.secondaryLabelColor]
     case .syntax:
         return [.foregroundColor: NSColor.tertiaryLabelColor]
+    }
+}
+
+/// Lays every line of a note on one column, with its marker hanging in the margin beside it.
+///
+/// Given a content column `G` (the gutter), a line renders as `[indent][marker][content]`, and the two
+/// indents that put it where it belongs are:
+///
+///   firstLineHeadIndent = G - width(marker)    → the marker starts left of the column, content on it
+///   headIndent          = G + width(indent)    → wrapped lines align under the content, not the marker
+///
+/// The marker's own width is the only thing the hang depends on, which is why `MarkdownBlock` keeps
+/// the indent and the marker apart: `- ` is two advances at every nesting depth, so a nested item's
+/// bullet hangs exactly as far as a top-level one's and only the column steps right — by precisely the
+/// whitespace that was typed, whether the note nests by two spaces, four, or tabs.
+///
+/// A value type with a cache because a note's prefixes repeat: a list is fifteen lines of `- ` and the
+/// prose between them is fifteen lines of nothing, so measuring is a handful of calls per pass rather
+/// than two per line. Widths are measured rather than counted in advances so the same grid serves the
+/// quick bar's proportional face, where a marker's width is not its character count.
+private struct MarkdownGrid {
+    let base: NSFont
+    let gutter: CGFloat
+    /// The gap under each line — see `MarkdownTextEditor.lineHeightMultiple` for why it goes below.
+    let leading: CGFloat
+    private var widths: [String: CGFloat] = [:]
+    private var styles: [String: NSParagraphStyle] = [:]
+
+    init(base: NSFont, advances: CGFloat) {
+        self.base = base
+        self.gutter = ("0" as NSString).size(withAttributes: [.font: base]).width * advances
+        self.leading = (NSLayoutManager().defaultLineHeight(for: base)
+            * (MarkdownTextEditor.lineHeightMultiple - 1)).rounded()
+    }
+
+    mutating func style(indent: String, marker: String) -> NSParagraphStyle {
+        let key = "\(indent)\u{0}\(marker)"
+        if let hit = styles[key] { return hit }
+        let column = gutter + width(indent)
+        let style = NSMutableParagraphStyle()
+        // Clamped at the margin: a marker wider than the gutter (`#### ` and deeper) starts flush left
+        // and pushes its own content a little right, rather than widening the gutter for the whole
+        // note. See `gutterAdvances`.
+        style.firstLineHeadIndent = max(0, gutter - width(marker))
+        style.headIndent = column
+        style.lineSpacing = leading
+        // No synthetic spacing above a heading or between paragraphs. This is a *source* editor: the
+        // blank lines that separate blocks are real lines, visible and editable, and adding space on
+        // top of them would both double-count and make typing a `#` shove the rest of the note down.
+        styles[key] = style
+        return style
+    }
+
+    private mutating func width(_ s: String) -> CGFloat {
+        if s.isEmpty { return 0 }
+        if let hit = widths[s] { return hit }
+        let w = (s as NSString).size(withAttributes: [.font: base]).width
+        widths[s] = w
+        return w
     }
 }
 
@@ -395,7 +629,8 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
     let storage = NSMutableAttributedString(string: text, attributes: [.font: base, .foregroundColor: baseColor])
     let spans = markdownSpans(in: text)
     for span in spans where span.kind != .syntax {
-        storage.addAttributes(markdownAttributes(for: span.kind, base: base), range: NSRange(span.range, in: text))
+        storage.addAttributes(markdownAttributes(for: span.kind, base: base, scaleHeadings: true),
+                              range: NSRange(span.range, in: text))
     }
     for link in markdownLinks(in: text) {
         guard let url = markdownDestinationURL(link.destination, relativeTo: note) else { continue }
@@ -430,6 +665,29 @@ private final class ShortcutTextView: NSTextView {
     /// view's own to chase.
     var growthCeiling: CGFloat = 0
 
+    /// Draw the caret at the height of the text, not of the line box.
+    ///
+    /// AppKit hands `drawInsertionPoint` the whole line fragment, and a note's fragment is the glyph
+    /// box plus the gap to the next line — 23pt of box around 15pt of text. Left alone the caret is
+    /// the taller of the two and reads as sitting off the line it's on.
+    ///
+    /// Clamping the height is enough, and moving it would be wrong: the leading is applied as
+    /// `lineSpacing`, so the slack is *below* the text and the top of the fragment is already the top
+    /// of the glyphs. Shrinking rather than growing also means AppKit's own invalidation rect still
+    /// covers everything drawn, so there's no trail to clean up behind a blinking caret.
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        var caret = rect
+        caret.size.height = min(rect.height, caretHeight)
+        super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
+    }
+
+    /// Ascender to descender of the face at the caret — the text's own height, rounded up so the caret
+    /// never stops a fraction short of a glyph.
+    private var caretHeight: CGFloat {
+        let face = (typingAttributes[.font] as? NSFont) ?? font ?? MarkdownTextEditor.baseFont
+        return (face.ascender - face.descender).rounded(.up)
+    }
+
     /// Don't chase the caret while the host is still growing to show it.
     ///
     /// AppKit scrolls the insertion point into view after an edit, and under a host that sizes itself
@@ -441,6 +699,8 @@ private final class ShortcutTextView: NSTextView {
         guard growthCeiling <= 0 || laidOutHeight() > growthCeiling else { return }
         super.scrollRangeToVisible(range)
     }
+
+
 
     /// What the whole note needs to show without scrolling. The same measurement
     /// `MarkdownTextEditor.Coordinator.reportHeight` hands the host, so the two agree about the ceiling.

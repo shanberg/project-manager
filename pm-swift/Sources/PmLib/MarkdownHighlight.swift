@@ -230,3 +230,137 @@ public func wrapLink(_ text: String, selection: Range<String.Index>) -> (text: S
     let b = s.index(s.startIndex, offsetBy: urlStart + placeholder.count)
     return (s, a..<b)
 }
+
+// MARK: - Block structure (for paragraph styling)
+
+/// What a single source line is, block-wise. `markdownSpans` answers "what should this run of
+/// characters look like"; this answers "what shape is this line", which is the question an
+/// `NSParagraphStyle` is the answer to — indent, hang and wrap alignment are per-paragraph, and no
+/// amount of per-span styling can express them.
+public enum MarkdownBlockKind: Equatable {
+    case paragraph
+    case heading(level: Int)
+    case list
+    case blockquote
+}
+
+/// One source line, split into the three parts that decide how it lays out: the whitespace it's
+/// indented by, the marker that names it, and the content that reads.
+///
+/// The split is what lets a marker *hang*. Given a content column X, a line laid out with
+/// `firstLineHeadIndent = X - width(marker)` and `headIndent = X + width(indent)` puts its marker in
+/// the margin, its content on the column, and its wrapped lines under the content rather than back
+/// under the marker. Because `indent` and `marker` are separated, that arithmetic is the same at every
+/// nesting depth: the content column steps right by exactly the whitespace that was typed, and the
+/// marker always hangs its own width to the left of it — whether the note nests by two spaces, by
+/// four, or by tabs.
+public struct MarkdownBlock: Equatable {
+    /// The whole line, newline excluded.
+    public let range: Range<String.Index>
+    /// The line *including* its terminating newline — the range a paragraph style has to cover.
+    ///
+    /// A line and the paragraph it forms are not the same characters, and styling only the former
+    /// leaves the newline carrying whatever paragraph style was underneath. AppKit then has one
+    /// paragraph with two conflicting styles in it and lays the fragment out to suit the terminator,
+    /// which shows up as a line that is mysteriously taller or indented differently than its
+    /// neighbours. Callers applying `.paragraphStyle` want this range, not `range`.
+    public let paragraph: Range<String.Index>
+    public let kind: MarkdownBlockKind
+    /// The leading whitespace, if any. Empty for an unindented line.
+    public let indent: Range<String.Index>
+    /// The marker itself with its trailing space — `- `, `## `, `> `, `1. ` — and *not* the indent in
+    /// front of it. Empty for a plain paragraph.
+    public let marker: Range<String.Index>
+
+    public init(range: Range<String.Index>, paragraph: Range<String.Index>, kind: MarkdownBlockKind,
+                indent: Range<String.Index>, marker: Range<String.Index>) {
+        self.range = range
+        self.paragraph = paragraph
+        self.kind = kind
+        self.indent = indent
+        self.marker = marker
+    }
+}
+
+/// Walk `text` line by line and classify each one. Every line comes back, in source order and covering
+/// the text exactly once — a blank line and a plain line are both `.paragraph` with empty marker — so a
+/// caller can style the whole document by iterating this alone.
+public func markdownBlocks(in text: String) -> [MarkdownBlock] {
+    var out: [MarkdownBlock] = []
+    var lineStart = text.startIndex
+
+    while true {
+        let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
+        let after = lineEnd == text.endIndex ? lineEnd : text.index(after: lineEnd)
+        out.append(classifyBlock(text, lineStart..<lineEnd, paragraph: lineStart..<after))
+        if lineEnd == text.endIndex { break }
+        lineStart = after
+    }
+    return out
+}
+
+/// Classify one line. Ordered as the block grammars actually compete: a `>` claims the line before a
+/// list marker inside it does, and a `#` claims it before either — which matches `markdownSpans`, so
+/// the shape a line is given and the styling it gets can't disagree.
+private func classifyBlock(_ text: String, _ line: Range<String.Index>,
+                           paragraph: Range<String.Index>) -> MarkdownBlock {
+    let indentEnd = text[line].firstIndex { $0 != " " && $0 != "\t" } ?? line.upperBound
+    let indent = line.lowerBound..<indentEnd
+    let rest = text[indentEnd..<line.upperBound]
+
+    func block(_ kind: MarkdownBlockKind, markerLength: Int) -> MarkdownBlock {
+        let end = text.index(indentEnd, offsetBy: markerLength, limitedBy: line.upperBound) ?? line.upperBound
+        return MarkdownBlock(range: line, paragraph: paragraph, kind: kind,
+                             indent: indent, marker: indentEnd..<end)
+    }
+    func plain(markerLength: Int = 0) -> MarkdownBlock {
+        let end = text.index(indentEnd, offsetBy: markerLength, limitedBy: line.upperBound) ?? line.upperBound
+        return MarkdownBlock(range: line, paragraph: paragraph, kind: .paragraph,
+                             indent: indent, marker: indentEnd..<end)
+    }
+
+    // `#{1,6}` plus at least one space is a heading.
+    //
+    // Without the space the *kind* is still a paragraph — `#tag` is not a heading and must not be
+    // styled as one — but the hashes are still returned as the marker, so they still hang. That split
+    // is deliberate, and it's what makes converting a line into a heading free of movement: the run of
+    // hashes grows leftward into the gutter as you type it, and the words you're promoting never leave
+    // the column they were already on. Recognising the marker only once the space arrived meant the
+    // text jumped one column right per hash and then snapped back — twice the movement, for a change
+    // that should have looked like none.
+    let hashes = rest.prefix { $0 == "#" }.count
+    if hashes >= 1, hashes <= 6 {
+        let after = rest.dropFirst(hashes)
+        if let first = after.first, first == " " || first == "\t" {
+            let spaces = after.prefix { $0 == " " || $0 == "\t" }.count
+            return block(.heading(level: hashes), markerLength: hashes + spaces)
+        }
+        return plain(markerLength: hashes)
+    }
+    // `>` with at most one space after it, matching the blockquote span regex.
+    if rest.first == ">" {
+        let after = rest.dropFirst()
+        let space = (after.first == " " || after.first == "\t") ? 1 : 0
+        return block(.blockquote, markerLength: 1 + space)
+    }
+    // `-`/`*`/`+` or `1.`, then at least one space.
+    var markerLength = 0
+    if let first = rest.first, first == "-" || first == "*" || first == "+" {
+        markerLength = 1
+    } else {
+        let digits = rest.prefix { $0.isNumber }.count
+        if digits >= 1, digits <= 9, rest.dropFirst(digits).first == "." { markerLength = digits + 1 }
+    }
+    if markerLength > 0 {
+        let after = rest.dropFirst(markerLength)
+        let spaces = after.prefix { $0 == " " || $0 == "\t" }.count
+        if spaces > 0 { return block(.list, markerLength: markerLength + spaces) }
+        // A bullet alone on the line — the first keystroke of a new item. It hangs, so the text you're
+        // about to type starts on the column rather than one place right of it and jumping left when
+        // the space lands. Not extended to a bullet with a word already jammed against it the way the
+        // hashes are: `*emphasis*` opening a line is ordinary prose, and hanging its asterisk would
+        // misread a common thing to protect a rare one.
+        if after.isEmpty { return plain(markerLength: markerLength) }
+    }
+    return plain()
+}
