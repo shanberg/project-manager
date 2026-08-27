@@ -454,7 +454,8 @@ struct ProjectSidebar: View {
     }
 
     /// Filter, sort, then gather into sections. `Dictionary(grouping:)` preserves the order of the
-    /// values it's handed, so sorting once up front orders every section.
+    /// values it's handed, so sorting up front orders the Domain grouping's sections; Due re-sorts by
+    /// date within its own branch below, since due order and `sort` order aren't the same thing.
     private static func arranged(_ projects: [PMStore.ProjectEntry],
                                  status: ProjectStatusFilter,
                                  kinds: ProjectKindFilter,
@@ -478,7 +479,16 @@ struct ProjectSidebar: View {
             let byDomain = Dictionary(grouping: rest, by: \.domain)
             groups = byDomain.keys.sorted().map { ProjectGroup(title: $0, entries: byDomain[$0] ?? []) }
         case .due:
-            let byBucket = Dictionary(grouping: rest, by: DueBucket.of)
+            // The due date, not `sort`, decides order within a bucket — otherwise "Later" (which spans
+            // weeks to years) reads as shuffled whenever `sort` is Code or Recency. Same comparator as
+            // `upNext`: soonest first on the parsed date, `sort` only breaks a tie.
+            let dueSorted = rest.sorted { a, b in
+                let da = a.nextDue.flatMap(RelativeDue.parse) ?? .distantFuture
+                let db = b.nextDue.flatMap(RelativeDue.parse) ?? .distantFuture
+                if da != db { return da < db }
+                return sort.precedes(a, b)
+            }
+            let byBucket = Dictionary(grouping: dueSorted, by: DueBucket.of)
             groups = DueBucket.allCases.compactMap { bucket in
                 guard let entries = byBucket[bucket] else { return nil }
                 return ProjectGroup(title: bucket.title, entries: entries)
