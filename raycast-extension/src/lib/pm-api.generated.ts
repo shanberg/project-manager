@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.3.0";
+export const API_CONTRACT_VERSION = "1.4.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -161,6 +161,8 @@ export interface SessionDeleteInput {
   project: string;
   /** Session ISO date or index. */
   session: string;
+  /** Digest of the label you read, to catch a session that has since changed. */
+  sessionDigest?: string;
   /** Which session of that date. Default 0. */
   sessionOrdinal?: number;
 }
@@ -181,6 +183,8 @@ export interface SessionRenameInput {
   project: string;
   /** Session ISO date or index. */
   session: string;
+  /** Digest of the label you read, to catch a session that has since changed. */
+  sessionDigest?: string;
   /** Which session of that date. Default 0. */
   sessionOrdinal?: number;
 }
