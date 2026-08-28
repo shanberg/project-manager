@@ -138,7 +138,11 @@ struct ProjectView: View {
     /// The separation between one session and the session before it. Applied *outside* the heading's
     /// band, so it reads as a gap between two blocks rather than as padding belonging to one of them,
     /// and the heading stays visibly closer to its own tasks than to the session above.
-    static let sessionGap: CGFloat = 8
+    ///
+    /// Four times the heading's own padding, because the rows either side of it are tight — a task row
+    /// carries 3pt — and a gap that only matched the heading's cushion read as one more row's worth of
+    /// space rather than as the end of a session.
+    static let sessionGap: CGFloat = 16
     /// The unanchored add editor's identity. Its own kind, so its key can't collide with a task row's
     /// `"session:line"` or a session's `"sess:<index>"`.
     static let quickAddTarget = EditorTarget(key: "quick", kind: .quickAdd)
