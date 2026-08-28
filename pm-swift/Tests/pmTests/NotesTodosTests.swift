@@ -519,4 +519,265 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertFalse(todos[1].checked, "B unchecked")
         XCTAssertFalse(todos[2].isFocused, "C not focused")
     }
+
+    // MARK: - waiting: [[target]]
+
+    /// A bracketed wait target parses off the line and out of the text.
+    func testParseTodosWaitingInline() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Send the launch email waiting: [[Website Refresh]]\n- [ ] Other"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].text, "Send the launch email")
+        XCTAssertEqual(todos[0].waiting, "Website Refresh")
+        XCTAssertNil(todos[1].waiting)
+    }
+
+    /// All three trailing tokens on one line, in canonical order.
+    func testParseTodosWaitingWithDueAndFocus() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Send it waiting: [[W-1 Website Refresh]] due: 2026-03-11 @"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos[0].text, "Send it")
+        XCTAssertEqual(todos[0].waiting, "W-1 Website Refresh")
+        XCTAssertEqual(todos[0].dueDate, "2026-03-11")
+        XCTAssertTrue(todos[0].isFocused)
+    }
+
+    /// A line written with the tokens the other way round parses identically — the peel loop doesn't
+    /// care about order, and `render` repairs it to canonical on the next edit.
+    func testTaskContentSplitAcceptsAnyTokenOrder() {
+        let canonical = TaskContent.split("Send it waiting: [[Site]] due: 2026-03-11 @")
+        let scrambled = TaskContent.split("Send it @ due: 2026-03-11 waiting: [[Site]]")
+        XCTAssertEqual(scrambled.text, "Send it")
+        XCTAssertEqual(scrambled.waiting, "Site")
+        XCTAssertEqual(scrambled.due, "2026-03-11")
+        XCTAssertTrue(scrambled.focused)
+        XCTAssertEqual(canonical, scrambled)
+        XCTAssertEqual(scrambled.render(), "Send it waiting: [[Site]] due: 2026-03-11 @")
+    }
+
+    /// The word "waiting:" in a sentence is prose, not a token — this is what the brackets buy.
+    func testParseTodosUnbracketedWaitingIsNotAToken() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Stop waiting: it already shipped"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertNil(todos[0].waiting)
+        XCTAssertEqual(todos[0].text, "Stop waiting: it already shipped")
+    }
+
+    /// A wait survives an edit that rewrites the line for another reason.
+    func testCompleteTodoPreservesWaitingInline() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] Do X waiting: [[Vendor Contract]] due: 2027-01-01\n- [ ] Other"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0,
+                                                      advanceFocus: false)
+        XCTAssertTrue(updated.sessions[0].body.contains("waiting: [[Vendor Contract]]"))
+        XCTAssertTrue(updated.sessions[0].body.contains("due: 2027-01-01"))
+    }
+
+    /// effectiveWaiting: an own wait stands; a child with none inherits its parent's.
+    func testTodosWithEffectiveWaiting() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Root waiting: [[Legal]]
+                  - [ ] Child no wait
+                - [ ] Unrelated
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let withWait = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(withWait[0].effectiveWaiting, "Legal")
+        XCTAssertNil(withWait[1].waiting)
+        XCTAssertEqual(withWait[1].effectiveWaiting, "Legal")
+        XCTAssertNil(withWait[2].effectiveWaiting)
+    }
+
+    /// A task's own wait beats an ancestor's — it's more specific, not competing.
+    func testTodosWithEffectiveWaitingOwnBeatsAncestor() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Parent waiting: [[Legal]]
+                  - [ ] Child waiting: [[Finance]]
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let withWait = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(withWait[1].effectiveWaiting, "Finance")
+    }
+
+    /// Nearest ancestor wins, not the outermost — the closest link in the chain is what blocks.
+    func testTodosWithEffectiveWaitingNearestAncestorWins() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Grandparent waiting: [[Legal]]
+                  - [ ] Parent waiting: [[Finance]]
+                    - [ ] Child no wait
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let withWait = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(withWait[2].effectiveWaiting, "Finance")
+    }
+
+    // MARK: - waiting and focus
+
+    /// Focus advance skips a waiting task and takes the next available one instead.
+    func testCompleteAdvanceFocusSkipsWaitingTask() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] A @
+                - [ ] B waiting: [[Legal]]
+                - [ ] C
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0,
+                                                      advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertFalse(todos[1].isFocused, "B is waiting, so focus passes over it")
+        XCTAssertTrue(todos[2].isFocused, "C is the next task that can actually be started")
+    }
+
+    /// A child of a waiting parent is waiting too, so focus skips the whole subtree.
+    func testCompleteAdvanceFocusSkipsSubtreeUnderWaitingParent() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] A @
+                - [ ] B waiting: [[Legal]]
+                  - [ ] B1
+                - [ ] C
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0,
+                                                      advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertFalse(todos[2].isFocused, "B1 inherits B's wait")
+        XCTAssertTrue(todos[3].isFocused)
+    }
+
+    /// When everything left is waiting there is no next task, and focus clears rather than landing on
+    /// work that can't start.
+    func testCompleteAdvanceFocusClearsWhenAllRemainingAreWaiting() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] A @
+                - [ ] B waiting: [[Legal]]
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0,
+                                                      advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertFalse(todos.contains(where: { $0.isFocused }))
+        XCTAssertEqual(todos[1].waiting, "Legal", "and the wait itself survives untouched")
+    }
+
+    /// Dive In won't dive into blocked work either — same rule, same predicate.
+    func testNextDiveInLeafSkipsWaiting() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Parent @
+                  - [ ] Blocked waiting: [[Vendor]]
+                  - [ ] Doable
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let next = nextDiveInLeaf(todos: try parseTodos(notes: notes))
+        XCTAssertEqual(next?.text, "Doable")
+    }
+
+    // MARK: - the three questions
+
+    /// Each question gets a different answer for the same list.
+    func testOpenAvailableAndWaitingPartitionTheList() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [x] Done
+                - [ ] Doable
+                - [ ] Blocked waiting: [[Legal]]
+                  - [ ] Under the blocked one
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(todos.openTasks.map(\.text), ["Doable", "Blocked", "Under the blocked one"])
+        XCTAssertEqual(todos.availableTasks.map(\.text), ["Doable"])
+        XCTAssertEqual(todos.waitingTasks.map(\.text), ["Blocked", "Under the blocked one"])
+    }
+
+    /// With nothing focused, the hero is the first task that could be picked up — not the first open
+    /// one. This is the defect that made four surfaces offer work focus itself declined to.
+    func testHeroTaskSkipsWaitingWhenNothingIsFocused() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Blocked waiting: [[Legal]]
+                - [ ] Doable
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(todos.heroTask?.text, "Doable")
+    }
+
+    /// A focused task that is waiting still wins: getting there took a deliberate act, and the hero
+    /// reports what the document says rather than overruling it.
+    func testHeroTaskKeepsAFocusedWaitingTask() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: """
+                - [ ] Blocked waiting: [[Legal]] @
+                - [ ] Doable
+                """
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertEqual(todos.heroTask?.text, "Blocked")
+    }
+
+    /// Everything blocked means there is no hero, which is the honest answer.
+    func testHeroTaskIsNilWhenEverythingIsWaiting() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025", label: "",
+            body: "- [ ] Blocked waiting: [[Legal]]"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
+        XCTAssertNil(todos.heroTask)
+    }
 }

@@ -55,6 +55,10 @@ func diffTodos(before: [Todo], after: [Todo]) -> [ApiChange] {
             changes.append(ApiChange(kind: new.checked ? .completed : .reopened,
                                      ref: reference(to: new), now: new.text))
         }
+        if old.waiting != new.waiting {
+            changes.append(ApiChange(kind: .blocked, ref: reference(to: new),
+                                     was: old.waiting, now: new.waiting))
+        }
         if old.dueDate != new.dueDate {
             changes.append(ApiChange(kind: .retimed, ref: reference(to: new),
                                      was: old.dueDate, now: new.dueDate))
@@ -158,6 +162,18 @@ func summarize(action: String, changes: [ApiChange], batch: Bool = false) -> Phr
             let n = many(count(.retimed)) ?? "the"
             phrase = Phrase(past: "Cleared \(batch ? n : "the") due date\(batch && count(.retimed) != 1 ? "s" : "")",
                             future: "clear \(batch ? n : "the") due date\(batch && count(.retimed) != 1 ? "s" : "")")
+        }
+    case "task.setWaiting":
+        let n = many(count(.blocked))
+        if let on = changes.first(where: { $0.kind == .blocked })?.now {
+            phrase = batch
+                ? Phrase(past: "\(n ?? "The tasks") waiting on \(on)",
+                         future: "make \(n ?? "them") wait on \(on)")
+                : Phrase(past: "Waiting on \(on)", future: "make it wait on \(on)")
+        } else {
+            let what = n ?? "the task"
+            phrase = Phrase(past: "\(n == nil ? "No longer waiting" : "\(what) no longer waiting")",
+                            future: "stop \(n ?? "it") waiting")
         }
     case "task.wrap":
         let n = count(.moved)

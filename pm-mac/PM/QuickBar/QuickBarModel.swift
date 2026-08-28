@@ -131,8 +131,8 @@ struct CaptureTarget: Equatable {
     var name: String
     var shortName: String
 
-    /// Whichever of the two this app has been told to write. See `QuickBarModel.display`.
-    var displayName: String { QuickBarModel.display(name, short: shortName) }
+    /// Whichever of the two this app has been told to write. See `ProjectCodes.display`.
+    var displayName: String { ProjectCodes.display(name, short: shortName) }
 }
 
 /// Where a line typed into the quick bar goes.
@@ -467,11 +467,15 @@ enum QuickBarRow: Identifiable, Equatable {
         switch self {
         case .capture: return nil
         case .project(_, let name, _, let domain, _):
+            // The row is titled short and the code rides down here, so the code is the part that goes
+            // when the app has been told not to write them — leaving the domain, which is the rest of
+            // what this line was for.
+            guard ProjectCodes.areShown else { return domain.isEmpty ? nil : domain }
             let code = name.split(separator: " ").first.map(String.init) ?? name
             return domain.isEmpty ? code : "\(code)  ·  \(domain)"
         // Which project it's in, always — a task's text is the same sentence wherever it lives, and
         // "reply to the draft" means two different jobs in two different projects.
-        case .task(let task): return QuickBarModel.display(task.projectName, short: task.projectShortName)
+        case .task(let task): return ProjectCodes.display(task.projectName, short: task.projectShortName)
         // The text a verb was given, echoed back — or, for a command sitting in the list with none
         // yet, the text it would take and the word that introduces it.
         case .command(let command, let argument):
@@ -1041,7 +1045,7 @@ final class QuickBarModel: ObservableObject {
             if argument.trimmingCharacters(in: .whitespaces).isEmpty {
                 return RowSet(rows: recents.prefix(Self.rowLimit).map {
                     .project(key: $0.projectKey, name: $0.name,
-                             shortName: shortName(of: $0.name), domain: "", isArchived: false)
+                             shortName: ProjectCodes.shortName(of: $0.name), domain: "", isArchived: false)
                 })
             }
             let matches = ProjectSearch.rank(allProjects, query: argument) { entry in
@@ -1112,38 +1116,6 @@ final class QuickBarModel: ObservableObject {
         let cut = text.prefix(limit)
         let trimmed = cut.contains(" ") ? cut[cut.startIndex..<cut.lastIndex(of: " ")!] : cut
         return trimmed.trimmingCharacters(in: .whitespaces) + "…"
-    }
-
-    /// A folder name without its "CODE-NNN " prefix.
-    ///
-    /// Static because the view wants it too: the sidebar's `PMSidebarShowCode` decides whether a name
-    /// is shown with its code, and the bar has only ever been handed the full name.
-    nonisolated static func shortName(of name: String) -> String {
-        guard let dash = name.firstIndex(of: "-"),
-              let space = name[dash...].firstIndex(of: " ") else { return name }
-        let rest = name[name.index(after: space)...].trimmingCharacters(in: .whitespaces)
-        return rest.isEmpty ? name : rest
-    }
-
-    /// The recents list carries only the full folder name, so the title has to come off the front here.
-    private func shortName(of name: String) -> String { Self.shortName(of: name) }
-
-    /// A project's folder name as this app has been told to write them.
-    ///
-    /// `PMSidebarShowCode` is the sidebar's preference by name and the app's by meaning: it's a choice
-    /// about codes, not about one list, and a bar that spells out a code the rest of the app has been
-    /// told to leave off is the app disagreeing with itself. Read from defaults rather than bound
-    /// through `@AppStorage` because the controller composes its receipts outside any view — and the
-    /// bar is never on screen at the same time as Settings, so there is nothing for a live binding to
-    /// keep up with.
-    ///
-    /// `short` is passed when the caller already has the name parsed — the project index splits the
-    /// prefix off as it scans, and its answer is the authoritative one.
-    nonisolated static func display(_ full: String, short: String? = nil) -> String {
-        guard UserDefaults.standard.object(forKey: "PMSidebarShowCode") as? Bool ?? true else {
-            return short ?? shortName(of: full)
-        }
-        return full
     }
 
     /// A due date spelled out — "Sat, Aug 22". Shared so the field's badge and a receipt written after

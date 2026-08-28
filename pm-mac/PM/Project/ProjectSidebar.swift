@@ -157,11 +157,10 @@ struct ProjectSidebar: View {
     @AppStorage("PMSidebarKind") private var kindFilter: ProjectKindFilter = .all
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
-    /// Whether rows keep the folder name's "CODE-NNN " prefix. Off, a row reads as the bare project
-    /// name — which is what you want once the codes are yours and the domain section already says
-    /// which one you're in. It's a display choice only: the tooltip, the copied name and the sort
-    /// orders all still see the full name.
-    @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
+    /// Whether rows keep the folder name's "CODE-NNN " prefix — the app-wide preference, not the
+    /// list's own (see `ProjectCodes`). It's a display choice only: the tooltip, the copied name and
+    /// the sort orders all still see the full name.
+    @AppStorage(ProjectCodes.defaultsKey) private var showsCode: Bool = true
     /// How far ahead the Up Next band looks (`.off` hides it). Read here and in the bottom bar, which
     /// is where it's set — see `SidebarBottomBar`.
     @AppStorage("PMSidebarUpNext") private var upNextHorizon: UpNextHorizon = .week
@@ -516,8 +515,6 @@ struct SidebarBottomBar: View {
     @AppStorage("PMSidebarKind") private var kindFilter: ProjectKindFilter = .all
     @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
     @AppStorage("PMSidebarSort") private var sortOrder: ProjectSortOrder = .recency
-    /// See `ProjectSidebar.showsCode` — same key, read here so the menu can toggle it.
-    @AppStorage("PMSidebarShowCode") private var showsCode: Bool = true
     /// See `ProjectSidebar.upNextHorizon` — same key, set here.
     @AppStorage("PMSidebarUpNext") private var upNextHorizon: UpNextHorizon = .week
 
@@ -579,9 +576,10 @@ struct SidebarBottomBar: View {
             } label: {
                 Label("Sort By", systemImage: "arrow.up.arrow.down")
             }
-            // With the other three rather than below the divider: this decides *which* projects appear
-            // at the top of the list, which is the same kind of decision as filtering and grouping.
-            // Below the divider is where the one display-only choice lives.
+            // With the other three: this decides *which* projects appear at the top of the list, which
+            // is the same kind of decision as filtering and grouping. Everything in this menu now
+            // arranges the list — showing project codes moved out to View ▸ Show Project Codes, being
+            // a choice about how the app writes a name everywhere rather than about this one list.
             //
             // Nothing here spells out that Group By ▸ Due suppresses the band. Disabling the submenu in
             // that case would be worse than silence — it reads as broken rather than as redundant, and
@@ -595,13 +593,6 @@ struct SidebarBottomBar: View {
                 .pickerStyle(.inline)
             } label: {
                 Label("Up Next", systemImage: "calendar.badge.clock")
-            }
-            Divider()
-            // A checkbox rather than a fourth submenu: it's one binary display choice, not a choice
-            // between alternatives, and the three submenus above are all "which projects, in what
-            // order" — this one only changes how a row is written.
-            Toggle(isOn: $showsCode) {
-                Label("Show Project Code", systemImage: "number")
             }
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
@@ -633,7 +624,7 @@ private struct ProjectSidebarRow: View {
     /// Whether the row sits in the list's selection — the due date's tint has to stand down on the
     /// highlight, where a red or orange word doesn't read.
     let isSelected: Bool
-    /// Whether the name keeps its "CODE-NNN " prefix (`PMSidebarShowCode`).
+    /// Whether the name keeps its "CODE-NNN " prefix (`ProjectCodes`).
     let showsCode: Bool
     /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
     /// other row, which falls back to the warmed values.
@@ -796,7 +787,7 @@ private struct UpNextCard: View {
     let entry: PMStore.ProjectEntry
     /// Whether the row sits in the list's selection. Drives the stand-down described above.
     let isSelected: Bool
-    /// Whether the name keeps its "CODE-NNN " prefix (`PMSidebarShowCode`), as the rows do.
+    /// Whether the name keeps its "CODE-NNN " prefix (`ProjectCodes`), as the rows do.
     let showsCode: Bool
     /// Live (done, total) when this is the window's own project, which the cached scan can lag behind.
     let liveProgress: (done: Int, total: Int)?

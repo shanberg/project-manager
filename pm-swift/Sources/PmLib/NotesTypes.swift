@@ -63,12 +63,19 @@ public struct Todo: Codable, Equatable {
     public var dueDate: String?
     /// Effective due date for display: own dueDate if set, else earliest due among ancestors (nearest deadline). Not stored in notes; computed when producing notes show output.
     public var effectiveDueDate: String?
+    /// Parsed from inline `waiting: [[<target>]]` — the name this task is waiting on. Stored as-is.
+    public var waiting: String?
+    /// Effective wait for display: own `waiting` if set, else the *nearest* waiting ancestor's. Unlike
+    /// a due date, which takes the earliest ancestor's because deadlines compete, a wait is inherited
+    /// from whichever ancestor is closest — a subtree under a blocked parent is blocked by that parent,
+    /// and a grandparent's older wait doesn't override it. Not stored in notes.
+    public var effectiveWaiting: String?
     /// `taskDigest` of `text` — what a caller sends back to prove it still means this task.
     public var digest: String?
     /// The ISO date of this task's session, the stable half of a `TaskRef` coordinate.
     public var sessionISODate: String?
 
-    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
+    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, waiting: String? = nil, effectiveWaiting: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
         self.text = text
         self.checked = checked
         self.rawLine = rawLine
@@ -79,6 +86,8 @@ public struct Todo: Codable, Equatable {
         self.isFocused = isFocused
         self.dueDate = dueDate
         self.effectiveDueDate = effectiveDueDate
+        self.waiting = waiting
+        self.effectiveWaiting = effectiveWaiting
         self.digest = digest
         self.sessionISODate = sessionISODate
     }

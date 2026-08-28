@@ -229,7 +229,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func applyTitle() {
         guard let window else { return }
         let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = (title?.isEmpty ?? true) ? store.projectName : title
+        // The folder name is the fallback and the one that carries a code, so it's written the way the
+        // rest of the app has been told to write names — see `ProjectCodes`.
+        let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
         window.title = name ?? "PM"
         let p = store.progress
         window.subtitle = p.total > 0 ? "\(p.done) of \(p.total) done" : ""

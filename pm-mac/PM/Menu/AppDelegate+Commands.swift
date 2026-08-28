@@ -86,6 +86,11 @@ extension AppDelegate: NSMenuItemValidation {
         UserDefaults.standard.set(raw, forKey: "PMPanelColorMode")
     }
 
+    /// Whether project names are written with their `CODE-NNN` prefix — app-wide, so it's here in View
+    /// rather than in the sidebar's own arrange menu, where it used to be. Settings ▸ Projects has the
+    /// same switch with the sentence explaining it.
+    @objc func toggleProjectCodes() { ProjectCodes.areShown.toggle() }
+
     // MARK: Task and Project
 
     /// Every item in the Task and Project menus, run through the one shared dispatcher. The command
@@ -129,6 +134,9 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleNotes):
             item.state = UserDefaults.standard.bool(forKey: "PMPanelDetailsExpanded") ? .on : .off
             return store.projectName != nil
+        case #selector(toggleProjectCodes):
+            item.state = ProjectCodes.areShown ? .on : .off
+            return true
         // Every Task and Project item, answered from the one availability table.
         case #selector(runCommand(_:)):
             guard let raw = item.representedObject as? String,

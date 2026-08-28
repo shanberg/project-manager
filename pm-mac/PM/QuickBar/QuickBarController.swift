@@ -409,7 +409,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             return index.openTasks
         }
         let isArchived = focusedProjectScope == .archive
-        let short = QuickBarModel.shortName(of: name)
+        let short = ProjectCodes.shortName(of: name)
         let live = store.openTodos.compactMap { todo -> ProjectIndex.TaskEntry? in
             let text = todo.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
@@ -583,7 +583,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             // the bar stays open behind it. The store the delegate follows re-points asynchronously,
             // so the rows this rebuilds may still name the project you just left; `focusedStoreChanged`
             // arrives with the real one a moment later and rebuilds them again.
-            confirm(.done("Focused \(QuickBarModel.display(name, short: shortName))"))
+            confirm(.done("Focused \(ProjectCodes.display(name, short: shortName))"))
 
         case .task(let entry):
             goTo(entry, reveal: reveal)
@@ -630,7 +630,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// two — every add or completion above a line renumbers it. See `locate(_:in:)`.
     private func goTo(_ entry: ProjectIndex.TaskEntry, reveal: Bool) {
         isRunning = true
-        let there = QuickBarModel.display(entry.projectName, short: entry.projectShortName)
+        let there = ProjectCodes.display(entry.projectName, short: entry.projectShortName)
         // Already in this project, and its store is loaded and current — nothing to re-read.
         if let store = focusedStore, store.projectKey == entry.projectKey {
             focus(entry, in: store, named: nil, reveal: reveal)
@@ -989,9 +989,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .startSession:
             return argument.isEmpty ? "Opened the current session" : "This session: “\(argument)”"
         case .archiveProject:
-            return focusedStore?.projectName.map { "Archived \(QuickBarModel.display($0))" }
+            return focusedStore?.projectName.map { "Archived \(ProjectCodes.display($0))" }
         case .unarchiveProject:
-            return focusedStore?.projectName.map { "Unarchived \(QuickBarModel.display($0))" }
+            return focusedStore?.projectName.map { "Unarchived \(ProjectCodes.display($0))" }
         default:
             return nil
         }

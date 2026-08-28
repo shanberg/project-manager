@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.4.0";
+export const API_CONTRACT_VERSION = "1.5.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -317,6 +317,22 @@ export interface TaskSetTextInput {
   text: string;
 }
 
+/** Set or clear what a task is waiting on, or do it to several. */
+export interface TaskSetWaitingInput {
+  /** Remove the wait instead of setting one. */
+  clearWaiting?: boolean;
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+  /** What it's waiting on: a project, an area, or a person's name. */
+  waiting?: string;
+}
+
 /** Dissolve a parent task, promoting its children. */
 export interface TaskUnwrapInput {
   /** Project name or unambiguous prefix. */
@@ -383,6 +399,7 @@ export interface ApiInputs {
   "task.search": TaskSearchInput;
   "task.setDue": TaskSetDueInput;
   "task.setText": TaskSetTextInput;
+  "task.setWaiting": TaskSetWaitingInput;
   "task.unwrap": TaskUnwrapInput;
   "task.whatsDue": TaskWhatsDueInput;
   "task.wrap": TaskWrapInput;
@@ -433,6 +450,7 @@ export const API_TIERS: Record<
   "task.search": "query",
   "task.setDue": "mutation",
   "task.setText": "mutation",
+  "task.setWaiting": "mutation",
   "task.unwrap": "mutation",
   "task.whatsDue": "query",
   "task.wrap": "mutation",

@@ -242,6 +242,9 @@ enum MainMenu {
         // window's split view controller, so it animates and persists in one place.
         add(menu, "Show Projects", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
             key: "s", modifiers: [.command, .option])
+        // With the other two "show me this" checkmarks rather than in the sidebar's arrange menu: it's
+        // how the whole app writes a project's name, not how one list is arranged. See `ProjectCodes`.
+        add(menu, "Show Project Codes", #selector(AppDelegate.toggleProjectCodes), target: target, key: "")
         menu.addItem(.separator())
 
         let appearance = NSMenu(title: "Appearance")

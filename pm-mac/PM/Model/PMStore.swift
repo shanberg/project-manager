@@ -56,6 +56,14 @@ final class PMStore: ObservableObject {
     @Published private(set) var notesPath: String?
     @Published private(set) var notes: ProjectNotes?
     @Published private(set) var todos: [Todo] = []
+    /// What each distinct wait target on this project's tasks turns out to name, resolved once per
+    /// load rather than once per row.
+    ///
+    /// A row asks this rather than resolving for itself because resolution walks every project folder
+    /// name: per-row that's the folder list times the task list on every redraw, and a task list is
+    /// redrawn on every keystroke in the note beside it. Keyed by the target string exactly as the
+    /// task line spells it, which is what `Todo.effectiveWaiting` carries.
+    @Published private(set) var waitTargets: [String: WaitTarget] = [:]
     @Published private(set) var focusedKey: String?
     /// When this project's notes file was last written, read at each reload. It's what tells a
     /// command whether it's continuing the current session or starting a new one — see
@@ -153,7 +161,17 @@ final class PMStore: ObservableObject {
         self.boundKey = boundKey
         ProjectIndex.shared.$recents.assign(to: &$indexRecents)
         ProjectIndex.shared.$allProjects.assign(to: &$allProjects)
+        // A sink rather than an assign, because what a landing folder scan changes here isn't a
+        // mirrored value but a derived one: archiving the project a task waits on turns that wait from
+        // pending to released, and it happens in a different window from the one showing the task.
+        ProjectIndex.shared.$waitRoots
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.resolveWaits() }
+            }
+            .store(in: &cancellables)
     }
+
+    private var cancellables = Set<AnyCancellable>()
 
     /// Point this store at a different project (or back at `focused.json`) and reload.
     func bind(to key: String?) {
@@ -165,10 +183,42 @@ final class PMStore: ObservableObject {
     // MARK: Derived state for the UI
 
     /// The currently focused todo, if any.
+    /// Re-resolve every distinct wait on the current tasks against the folder scan.
+    ///
+    /// Called on load, and again whenever the folder scan lands — archiving the project a task waits
+    /// on is what turns that wait from pending to released, and it happens in a different window from
+    /// the one showing the task.
+    func resolveWaits() {
+        let targets = todos.compactMap(\.effectiveWaiting)
+        guard !targets.isEmpty else {
+            if !waitTargets.isEmpty { waitTargets = [:] }
+            return
+        }
+        let roots = ProjectIndex.shared.waitRoots.map { (scope: $0.scope, folders: $0.folders) }
+        guard !roots.isEmpty else { return }
+        let resolved = resolveWaitTargets(targets, roots: roots)
+        if resolved != waitTargets { waitTargets = resolved }
+    }
+
+    /// What a task is waiting on, and what that name turns out to be — nil when it isn't waiting.
+    ///
+    /// Reads `effectiveWaiting`, so a task under a waiting parent answers with the parent's wait, and
+    /// reports whether the wait is this task's own: a descendant draws it as reported rather than
+    /// declared. An unscanned or unknown target resolves to `.unresolved`, which is a real answer —
+    /// most things anyone waits on are people.
+    func wait(for todo: Todo) -> (target: String, resolution: WaitTarget, isOwn: Bool)? {
+        guard let target = todo.effectiveWaiting else { return nil }
+        return (target, waitTargets[target] ?? .unresolved, todo.waiting != nil)
+    }
+
     var focusedTodo: Todo? { todos.first { $0.isFocused } }
 
     /// Open (unchecked) todos in document order.
-    var openTodos: [Todo] { todos.filter { !$0.checked } }
+    var openTodos: [Todo] { todos.openTasks }
+    /// The open tasks that could actually be picked up — what every surface offering you a task shows.
+    var availableTodos: [Todo] { todos.availableTasks }
+    /// This project's current task: the focused one, else the first available one.
+    var heroTodo: Todo? { todos.heroTask }
 
     /// Completion progress as (done, total). Total counts all parsed todos.
     var progress: (done: Int, total: Int) {
@@ -183,7 +233,7 @@ final class PMStore: ObservableObject {
     /// The hero task a load presents — the focused todo, else the first open one — reduced to the
     /// fields needed to classify how it moved. Mirrors the focus panel hero task.
     private func makeHeroSnapshot(_ todos: [Todo]) -> HeroSnapshot? {
-        guard let h = todos.first(where: { $0.isFocused }) ?? todos.first(where: { !$0.checked }) else { return nil }
+        guard let h = todos.heroTask else { return nil }
         return HeroSnapshot(key: Self.key(for: h), text: h.text, depth: h.depth,
                             session: h.sessionIndex, line: h.lineIndex)
     }
@@ -224,6 +274,7 @@ final class PMStore: ObservableObject {
             errorMessage = key == nil ? nil : "Invalid project."
             hasLoaded = true
             ProjectIndex.shared.warmRecents()
+            ProjectIndex.shared.warmWaitRoots()
             ProjectIndex.shared.warmAllProjects()
             then?()
             return
@@ -272,6 +323,7 @@ final class PMStore: ObservableObject {
                     self.projectPath = projectPath
                     self.notes = output.notes
                     self.todos = output.todos
+                    self.resolveWaits()
                     self.lastEditedAt = lastEdited
                     self.focusedKey = output.focusedKey
                     self.errorMessage = nil
@@ -286,6 +338,7 @@ final class PMStore: ObservableObject {
                     }
                     self.heroSnapshot = newHero
                     ProjectIndex.shared.warmRecents()
+                    ProjectIndex.shared.warmWaitRoots()
                     // A switch reorders the sidebar (the new project jumps to the top of its group) and
                     // moves the selection, so re-scan straight away rather than waiting out the TTL.
                     ProjectIndex.shared.warmAllProjects(force: projectChanged)
@@ -481,6 +534,15 @@ final class PMStore: ObservableObject {
         mutate(then: then) { project in
             try PMContract.perform("task.setDue", PMContract.input(project: project, task: todo) {
                 if let due { $0.due = due } else { $0.clearDue = true }
+            })
+        }
+    }
+
+    /// Set or clear what a task is waiting on.
+    func setWaiting(_ todo: Todo, waiting: String?, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { project in
+            try PMContract.perform("task.setWaiting", PMContract.input(project: project, task: todo) {
+                if let waiting { $0.waiting = waiting } else { $0.clearWaiting = true }
             })
         }
     }

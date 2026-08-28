@@ -57,7 +57,7 @@ public func notesShow(handle: NotesHandle) throws -> NotesShowOutput {
 /// file a person also edits in Obsidian.
 public func notesShow(rawText: String) throws -> NotesShowOutput {
     let notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
-    let todos = todosWithEffectiveDueDates(try parseTodos(notes: notes))
+    let todos = todosWithEffectiveWaiting(todosWithEffectiveDueDates(try parseTodos(notes: notes)))
     let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
     return NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey, revision: revision(of: rawText))
 }
@@ -339,6 +339,32 @@ public func setDueOnTodo(project: String, ref: TaskRef, due: String?) throws -> 
 
 public func setDueOnTodo(project: String, sessionIndex: Int, lineIndex: Int, due: String?) throws {
     try setDueOnTodo(project: project, ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex), due: due)
+}
+
+/// Set (or clear, with `waiting == nil`) the inline `waiting:` target on a todo line.
+@discardableResult
+public func setWaitingOnTodo(project: String, ref: TaskRef, waiting: String?) throws -> ResolvedTaskRef {
+    if let w = waiting, !isValidWaitTarget(w) { throw PmError.invalidWaitTarget(w) }
+    return try editTodos(project: project, ref: ref) { notes, at in
+        setWaitingOnTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex,
+                           waiting: waiting)
+    }
+}
+
+public func setWaitingOnTodo(project: String, sessionIndex: Int, lineIndex: Int, waiting: String?) throws {
+    try setWaitingOnTodo(project: project,
+                         ref: TaskRef(sessionIndex: sessionIndex, lineIndex: lineIndex),
+                         waiting: waiting)
+}
+
+/// Validate a `waiting:` target: non-empty, single-line, and free of the brackets that delimit it.
+///
+/// A target containing `]]` would close its own token early and leave the remainder as task text — the
+/// write would succeed and the next read would disagree with it. Refusing here is what keeps the
+/// round trip total.
+public func isValidWaitTarget(_ s: String) -> Bool {
+    let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    return !t.isEmpty && !t.contains("\n") && !t.contains("[[") && !t.contains("]]")
 }
 
 /// Validate a `due:` value: non-empty, single-line, and free of the reserved `due:` / `@` tokens.

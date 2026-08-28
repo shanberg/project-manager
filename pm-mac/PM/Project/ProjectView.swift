@@ -23,6 +23,9 @@ struct ProjectView: View {
     /// The app color-scheme override, persisted across sessions. `.system` follows the OS setting;
     /// `.light`/`.dark` pin the appearance (of both the content and the glass/vibrancy material).
     @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
+    /// Whether a project name is written with its code — app-wide, see `ProjectCodes`. Bound rather
+    /// than read statically so the header re-titles itself the moment it's toggled.
+    @AppStorage(ProjectCodes.defaultsKey) private var showsCode = true
     /// The single "notes" view mode, toggled from the header's view-options menu and persisted across
     /// sessions. When on, the window shows the project-details brief below the header *and* reveals
     /// every session (including empty ones) as a first-class header with its editable prose note and
@@ -275,7 +278,7 @@ struct ProjectView: View {
                 SessionNoteTakeover(
                     index: takeover.index,
                     session: takeover.session,
-                    projectName: store.notes?.title.trimmed ?? store.projectName ?? "",
+                    projectName: displayTitle ?? "",
                     store: store,
                     state: state,
                     onBack: { activeEditor = nil }
@@ -1183,7 +1186,7 @@ struct ProjectView: View {
             // A click on the pill is a click on the pill, not the start of a window drag.
             .background(WindowDragExcluder())
             .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project"))
+            .accessibilityLabel(Text(displayTitle ?? "No focused project"))
             .help(detailsExpanded ? "Hide notes" : "Show notes")
     }
 
@@ -1267,10 +1270,18 @@ struct ProjectView: View {
         store.projectName != nil || store.projectPath != nil || store.progress.total > 0
     }
 
+    /// What this window calls its project: the notes title where there is one, else the folder name —
+    /// which is the half of that pair carrying a code, so it goes through `ProjectCodes`. Nil when the
+    /// window is on nothing, which each caller words for itself.
+    private var displayTitle: String? {
+        store.notes?.title.trimmed
+            ?? store.projectName.map { ProjectCodes.display($0, showing: showsCode) }
+    }
+
     /// The project title. Plain text — the pill around it carries the gesture, so the text itself
     /// carries none.
     private var projectTitle: some View {
-        Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project")
+        Text(displayTitle ?? "No focused project")
             .font(.title3.weight(.semibold))
             .lineLimit(1)
             .truncationMode(.tail)
@@ -1725,6 +1736,8 @@ struct ProjectView: View {
                     dragProvider: { dragProvider(for: todo) },
                     onDelete: { requestDelete($0) },
                     onSetDue: { applyDue($0, from: todo) },
+                    onGoToProject: { state.openProject($0, false) },
+                    onOpenProjectNamed: { state.openProject(named: $0) },
                     onAddTask: { text, due in commitAdd(text: text, due: due, anchor: todo) },
                     addPosition: $addPosition
                 )
@@ -2313,6 +2326,11 @@ private struct TaskRow: View {
     /// Commit the row's due editor. Routed through the parent so a date set on a row inside a
     /// multi-selection lands on the whole selection, like the context menu's version.
     var onSetDue: (String?) -> Void = { _ in }
+    /// Open the project this task is waiting on. Routed through the parent because whether that
+    /// retargets this window or opens another one is the window's decision, not the row's.
+    var onGoToProject: (String) -> Void = { _ in }
+    /// The same, by folder name — what a `[[…]]` clicked inside one of this row's editors carries.
+    var onOpenProjectNamed: (String) -> Void = { _ in }
     /// Commit one task from this row's add editor. Routed through the parent because what happens
     /// *after* a commit — advancing the anchor so the next task lands below this one — is a decision
     /// about the whole list, not about this row. See `ProjectView.commitAdd`.
@@ -2325,6 +2343,7 @@ private struct TaskRow: View {
     private var key: String { PMStore.key(for: todo) }
     private var isAdding: Bool { activeEditor == EditorTarget(key: key, kind: .add) }
     private var isEditingDue: Bool { activeEditor == EditorTarget(key: key, kind: .due) }
+    private var isEditingWaiting: Bool { activeEditor == EditorTarget(key: key, kind: .waiting) }
     private var isEditingText: Bool { activeEditor == EditorTarget(key: key, kind: .edit) }
     private var isWrapping: Bool { activeEditor == EditorTarget(key: key, kind: .wrap) }
     /// Hover-revealed controls (plus, "＋date") are suppressed while any editor is open, so the window
@@ -2351,7 +2370,8 @@ private struct TaskRow: View {
             // the row one level deeper so it visibly nests under the parent-to-be above it.
             if isEditingText {
                 InlineTextEditor(seed: todo.text, placeholder: "Task text", submitLabel: "Save",
-                                 leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked))) { text in
+                                 leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked)),
+                                 onOpenProject: onOpenProjectNamed) { text in
                     store.editText(todo, text: text)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
@@ -2409,6 +2429,22 @@ private struct TaskRow: View {
                     .reportEditorFrame()
                     .padding(.leading, indent(todo.depth))
             }
+            if isEditingWaiting {
+                // A plain text field rather than a project picker: the target is as often a person as
+                // a project ("waiting: [[Dana]]"), and a picker would have no row to offer for one.
+                // What it's typed against is `resolveWaitTarget`, which is lenient enough to take a
+                // title, a code, or a name that resolves to nothing at all.
+                InlineTextEditor(seed: todo.waiting ?? "", placeholder: "Waiting on…",
+                                 submitLabel: "Save",
+                                 leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked)),
+                                 onOpenProject: onOpenProjectNamed) { text in
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    store.setWaiting(todo, waiting: trimmed.isEmpty ? nil : trimmed)
+                    activeEditor = nil
+                } onCancel: { activeEditor = nil }
+                    .reportEditorFrame()
+                    .padding(.leading, indent(todo.depth))
+            }
             if isAdding && (addPosition == .after || addPosition == .child) {
                 addEditor.padding(.leading, indent(todo.depth + (addPosition == .child ? 1 : 0)))
             }
@@ -2431,7 +2467,8 @@ private struct TaskRow: View {
                 .onTapGesture { onClick(NSEvent.modifierFlags) }
                 .contextMenu {
                     TaskMenu(todo: todo, targets: contextTargets(), store: store,
-                             openEditor: openEditor, openAdd: openAdd, onDelete: onDelete)
+                             openEditor: openEditor, openAdd: openAdd, onDelete: onDelete,
+                             onGoToProject: onGoToProject)
                 }
                 // Selection lives on the row, so the row has to report it: VoiceOver reads the task
                 // with its state, and the gestures it can't perform (double-click to focus, ⌫ to
@@ -2493,13 +2530,25 @@ private struct TaskRow: View {
             // the qualifier usually is. Rows are variable-height already (editors open inside them),
             // and `RowFrame` measures the frame rather than assuming a row height, so the drag/drop
             // geometry follows a wrapped row without being told.
-            Text(todo.text)
-                .font(.system(size: 13, weight: todo.isFocused ? .semibold : .regular))
-                .strikethrough(todo.checked, color: .secondary)
-                .foregroundStyle(todo.checked ? .secondary : .primary)
-                // Wrap rather than compress: in an `HStack` a `Text` will squeeze itself to one
-                // truncated line before it asks for a second one.
+            // The task, and what it's waiting on, as one run — see `taskLineText`. The wait is part of
+            // the sentence, so it wraps with it rather than competing for the trailing edge, which
+            // keeps meaning one thing: when this is due.
+            TokenTextLabel(attributed: taskLineAttributed(todo, wait: store.wait(for: todo)),
+                           onOpenProject: onOpenProjectNamed)
+                // The row aligns on the first text baseline; a representable has none of its own, so
+                // it supplies one rather than letting SwiftUI fall back to its bottom edge.
+                .alignmentGuide(.firstTextBaseline) { _ in
+                    TokenTextLabel.firstBaseline(size: 13, focused: todo.isFocused)
+                }
+                // Wrap rather than compress, as the `Text` this replaced did. The label reports the
+                // height its wrapped text needs and is transparent to every click that isn't on a
+                // pill, so the row keeps its own selection, activation and drag.
                 .fixedSize(horizontal: false, vertical: true)
+                // Sized before the spacer beside it. Both are flexible, and an `HStack` divides what's
+                // left between its flexible children — so without this the task text and the empty gap
+                // each took half the row, and every task wrapped in a window with room to spare. The
+                // words are the content; the gap is what's left over.
+                .layoutPriority(1)
 
             Spacer(minLength: 4)
 
@@ -2524,8 +2573,8 @@ private struct TaskRow: View {
     /// exactly where the new task will land. Committing doesn't close it — the parent moves it down to
     /// the next slot so a list can be typed straight through.
     private var addEditor: some View {
-        AddEditor(leadingIcon: AnyView(TaskStatusIcon()), onAdd: onAddTask,
-                  onCancel: { activeEditor = nil })
+        AddEditor(leadingIcon: AnyView(TaskStatusIcon()), onOpenProject: onOpenProjectNamed,
+                  onAdd: onAddTask, onCancel: { activeEditor = nil })
             .reportEditorFrame()
     }
 
@@ -2976,7 +3025,8 @@ private struct SessionNoteTakeover: View {
         ZStack(alignment: .top) {
             // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
             // it and a relative link can be followed back out of it.
-            MarkdownTextEditor(text: $text, onSubmit: onBack,
+            MarkdownTextEditor(onOpenProject: { state.openProject(named: $0) },
+                               text: $text, onSubmit: onBack,
                                placeholder: "Write a note…",
                                noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
                                opensAtStart: true,

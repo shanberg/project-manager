@@ -120,6 +120,8 @@ struct AddEditor: View {
     /// Optional leading status glyph (an empty circle for the not-yet-created task), so the new task
     /// reads with the same visual identity as a real row while it's being typed.
     var leadingIcon: AnyView? = nil
+    /// Open the project a `[[…]]` in the field names. Nil where the surface has nowhere to go.
+    var onOpenProject: ((String) -> Void)?
     let onAdd: (String, String?) -> Void
     let onCancel: () -> Void
 
@@ -134,10 +136,13 @@ struct AddEditor: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let leadingIcon { leadingIcon }
             VStack(alignment: .leading, spacing: 4) {
-                TextField("Task text", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($textFocused)
-                    .onSubmit(submit)
+                // The completing field, not a plain one: `@` names a project and `/` opens what a task
+                // line can carry, exactly as in the note editor. This is where most tasks are actually
+                // written, so it's the surface that most needs them.
+                CompletingTextField(text: $text, placeholder: "Task text",
+                                    onSubmit: submit, onCancel: onCancel,
+                                    onOpenProject: onOpenProject)
+                    .frame(height: 21)
 
                 HStack(spacing: 6) {
                     Toggle("Due", isOn: $useDue).toggleStyle(.checkbox)
@@ -195,6 +200,8 @@ struct InlineTextEditor: View {
     /// where clearing the field removes the label. Task text editors leave this false so a blank
     /// submit is a no-op.
     let allowsEmpty: Bool
+    /// Open the project a `[[…]]` in the field names.
+    var onOpenProject: ((String) -> Void)?
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
@@ -202,12 +209,13 @@ struct InlineTextEditor: View {
     @FocusState private var focused: Bool
 
     init(seed: String = "", placeholder: String, submitLabel: String, leadingIcon: AnyView? = nil,
-         allowsEmpty: Bool = false,
+         allowsEmpty: Bool = false, onOpenProject: ((String) -> Void)? = nil,
          onSubmit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.placeholder = placeholder
         self.submitLabel = submitLabel
         self.leadingIcon = leadingIcon
         self.allowsEmpty = allowsEmpty
+        self.onOpenProject = onOpenProject
         self.onSubmit = onSubmit
         self.onCancel = onCancel
         _text = State(initialValue: seed)
@@ -216,10 +224,10 @@ struct InlineTextEditor: View {
     var body: some View {
         HStack(spacing: 6) {
             if let leadingIcon { leadingIcon }
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
-                .onSubmit(submit)
+            CompletingTextField(text: $text, placeholder: placeholder,
+                                onSubmit: submit, onCancel: onCancel,
+                                onOpenProject: onOpenProject)
+                .frame(height: 21)
             Button(submitLabel, action: submit).keyboardShortcut(.defaultAction)
             Button("Cancel", action: onCancel)
         }
@@ -244,7 +252,7 @@ struct InlineTextEditor: View {
 /// collide; the unanchored quick add belongs to no row and takes its own kind. Only one editor is
 /// ever open at a time.
 struct EditorTarget: Equatable {
-    enum Kind { case add, due, edit, wrap, quickAdd, sessionLabel, sessionNote, sessionAddTask }
+    enum Kind { case add, due, waiting, edit, wrap, quickAdd, sessionLabel, sessionNote, sessionAddTask }
     let key: String
     let kind: Kind
     /// For a session editor: which session it was opened on, named the way `SessionRef` names one —

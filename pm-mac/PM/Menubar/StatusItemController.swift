@@ -32,7 +32,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         updateButton()
+        // The button is the one part of the item that isn't rebuilt on demand: the menu is composed in
+        // `menuNeedsUpdate` every time it opens, but the title sits there between store changes. So it
+        // has to be told when the name it's showing is meant to be written differently.
+        NotificationCenter.default.addObserver(self, selector: #selector(projectCodesChanged),
+                                               name: ProjectCodes.didChange, object: nil)
     }
+
+    @objc private func projectCodesChanged() { updateButton() }
 
     /// Hosts the button's content (ring + task + project) as SwiftUI so only the task element animates
     /// when the focused task moves. Kept across updates (its `rootView` is reassigned) so SwiftUI can
@@ -88,7 +95,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// The focused (or first open) task reduced to what the bar shows, or nil when everything's done.
     /// `key` + `text` give the hosted task view its transition identity so a move animates just it.
     private func currentTaskGlyph() -> MenubarTitleContent.Task? {
-        guard let next = store.focusedTodo ?? store.openTodos.first else { return nil }
+        guard let next = store.heroTodo else { return nil }
         let due = next.dueDate ?? next.effectiveDueDate
         return MenubarTitleContent.Task(
             key: PMStore.key(for: next),
@@ -102,7 +109,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let name = store.projectName else { return nil }
         var parts: [String] = []
         let p = store.progress
-        parts.append(p.total > 0 ? "\(store.notes?.title ?? name): \(p.done)/\(p.total) done" : (store.notes?.title ?? name))
+        let title = store.notes?.title ?? ProjectCodes.display(name)
+        parts.append(p.total > 0 ? "\(title): \(p.done)/\(p.total) done" : title)
         if let focused = store.focusedTodo, let due = focused.effectiveDueDate ?? focused.dueDate {
             parts.append("Next due: \(RelativeDue.short(due))")
         }
@@ -112,10 +120,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parts.joined(separator: "\n")
     }
 
-    /// The project's human title (notes title), falling back to the folder name.
+    /// The project's human title (notes title), falling back to the folder name — which is the one
+    /// of the two that carries a code, so it goes through `ProjectCodes`.
     private func projectTitle(_ name: String) -> String {
         let t = store.notes?.title.trimmingCharacters(in: .whitespaces) ?? ""
-        return t.isEmpty ? name : t
+        return t.isEmpty ? ProjectCodes.display(name) : t
     }
 
     /// Yellow after 1h on the focused task, red after 2h — from `task-timing.json` in the config dir.
@@ -197,7 +206,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Glance: title + progress bar (custom view — the native menu can't draw one).
         let p = store.progress
-        menu.addItem(headerHostItem(title: store.notes?.title ?? name, done: p.done, total: p.total))
+        menu.addItem(headerHostItem(title: store.notes?.title ?? ProjectCodes.display(name),
+                                    done: p.done, total: p.total))
 
         // Constant action: complete the focused task, with ⌥ Undo.
         if let focused = store.focusedTodo {
@@ -337,7 +347,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let (item, sub) = submenu("Switch Project", symbol: "arrow.left.arrow.right")
         let recents = store.recents   // mtime-ordered, focused project already excluded, capped
         for recent in recents {
-            let r = actionItem(truncate(recent.name, 40), #selector(switchProject(_:)))
+            let r = actionItem(truncate(ProjectCodes.display(recent.name), 40), #selector(switchProject(_:)))
             if recent.total > 0 {
                 r.image = MenubarRing.image(fraction: recent.fraction, hasProject: true,
                                             showsProgress: recent.kind.showsProgress, tint: nil)

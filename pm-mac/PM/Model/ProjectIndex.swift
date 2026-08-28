@@ -147,6 +147,7 @@ final class ProjectIndex: ObservableObject {
     /// `recentsQueue` so a long list of per-project notes reads can't delay a mutation or the recents warm.
     private let projectsQueue = DispatchQueue(label: "com.stuarthanberg.pm.all-projects")
     private var allProjectsWarmedAt: Date = .distantPast
+    private var waitRootsWarmedAt: Date = .distantPast
 
     /// How many sidebars are currently showing the full project list. The scan runs only while this is
     /// above zero, so a window with its sidebar hidden costs nothing.
@@ -194,6 +195,74 @@ final class ProjectIndex: ObservableObject {
                 guard let self, warmed != self.recents else { return }
                 self.recents = warmed
             }
+        }
+    }
+
+    // MARK: Wait targets
+
+    /// Every project folder name, grouped by scope, for resolving what a task says it's waiting on.
+    ///
+    /// Folder names only — no notes are read. That's what lets this be ungated where `allProjects`
+    /// isn't: a task row has to draw its wait whether or not a sidebar is open, and three directory
+    /// listings is a cost every reload can carry where a `notesShow` per project is not.
+    @Published private(set) var waitRoots: [WaitRoot] = []
+
+    struct WaitRoot: Equatable {
+        let scope: ProjectScope
+        /// The root's path — the first half of a `projectKey`, so a folder this resolves to can be
+        /// opened without a second scan to find out where it lives.
+        let base: String
+        let folders: [String]
+    }
+
+    /// Everything an `@` mention can offer, from the same folder scan the waits resolve against — so
+    /// the list you pick from and the list a target resolves in can't disagree.
+    ///
+    /// Built off `waitRoots` rather than `allProjects` for the reason that scan is ungated: mentions
+    /// have to work in a note editor with no sidebar open, and this costs three directory listings
+    /// where `allProjects` costs a notes read per project.
+    var mentionCandidates: [MentionCandidate] {
+        waitRoots.flatMap { root in
+            root.folders.map { folder in
+                let kind = ProjectKind.of(folderName: folder)
+                let short = projectTitle(fromFolderName: folder)
+                let code = kind.isNumbered ? String(folder.prefix(while: { $0 != " " })) : ""
+                return MentionCandidate(name: folder, shortName: short, code: code,
+                                        kind: kind, isArchived: root.scope.isArchived)
+            }
+        }
+    }
+
+    /// The `projectKey` for a folder name, or nil if no scanned root holds it.
+    func projectKey(forFolder folder: String) -> String? {
+        for root in waitRoots where root.folders.contains(folder) {
+            return "\(root.base):\(folder)"
+        }
+        return nil
+    }
+
+    /// Rebuild `waitRoots`. Shares the recents TTL, so the watcher-driven reloads don't re-list the
+    /// folders on every keystroke.
+    func warmWaitRoots(force: Bool = false) {
+        if !force, Date().timeIntervalSince(waitRootsWarmedAt) < Self.ttl { return }
+        waitRootsWarmedAt = Date()
+        recentsQueue.async { [weak self] in
+            guard let roots = Self.scanWaitRoots() else { return }
+            Task { @MainActor in
+                guard let self, roots != self.waitRoots else { return }
+                self.waitRoots = roots
+            }
+        }
+    }
+
+    private nonisolated static func scanWaitRoots() -> [WaitRoot]? {
+        guard let (config, paths) = try? loadConfigAndPaths() else { return nil }
+        let codes = Array(config.domains.keys)
+        return ProjectScope.allCases.map { scope in
+            let base = scope.path(in: paths)
+            return WaitRoot(scope: scope, base: base,
+                            folders: (try? getFolders(basePath: base, scope: scope,
+                                                      domainCodes: codes)) ?? [])
         }
     }
 
@@ -342,8 +411,8 @@ final class ProjectIndex: ObservableObject {
     /// switchers' second line. Mirrors the menubar button's `focusedTodo ?? openTodos.first`, and is
     /// nil when everything is done.
     private nonisolated static func heroTaskText(_ todos: [Todo]) -> String? {
-        let hero = todos.first { $0.isFocused } ?? todos.first { !$0.checked }
-        let text = hero?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = todos.heroTask.map { displayingWikilinks($0.text) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return (text?.isEmpty ?? true) ? nil : text
     }
 
@@ -359,7 +428,10 @@ final class ProjectIndex: ObservableObject {
             .map { todo in
                 TaskEntry(projectKey: item.projectKey, projectName: item.name,
                           projectShortName: item.shortName, isArchived: item.isArchived,
-                          text: todo.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                          // The name, not the markup: this text is both searched and shown, and
+                          // nobody types brackets when they're looking for a task.
+                          text: displayingWikilinks(todo.text)
+                              .trimmingCharacters(in: .whitespacesAndNewlines),
                           due: todo.dueDate ?? todo.effectiveDueDate, isFocused: todo.isFocused,
                           sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)
             }

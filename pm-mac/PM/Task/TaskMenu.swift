@@ -20,6 +20,37 @@ struct TaskMenu: View {
     /// Seed the add position, then open the add editor.
     let openAdd: (TaskInsertPosition) -> Void
     var onDelete: ([Todo]) -> Void = { _ in }
+    /// Open the project a task is waiting on. Supplied by the project window; the focus panel has no
+    /// window to retarget, so it leaves this out and the "Go to" item doesn't appear there.
+    var onGoToProject: ((String) -> Void)?
+
+    /// Setting, clearing, and following what a task is waiting on.
+    ///
+    /// Single-selection only. A batch wait would have to be one target for every task in it, which is
+    /// the case that never comes up — waits arrive one at a time, as you find out about them.
+    ///
+    /// "Stop Waiting" appears only for a task's *own* wait. An inherited one belongs to the ancestor
+    /// that declared it, and clearing it from here would silently edit a different row.
+    @ViewBuilder private var waitingItems: some View {
+        if !isMulti {
+            Button { openEditor(.waiting) } label: {
+                Label(todo.waiting == nil ? "Waiting On…" : "Change What It's Waiting On…",
+                      systemImage: "clock")
+            }
+            if todo.waiting != nil {
+                Button { store.setWaiting(todo, waiting: nil) } label: {
+                    Label("Stop Waiting", systemImage: "clock.badge.xmark")
+                }
+            }
+            if let wait = store.wait(for: todo), let folder = wait.resolution.folder,
+               let onGoToProject, let key = ProjectIndex.shared.projectKey(forFolder: folder) {
+                Button { onGoToProject(key) } label: {
+                    Label("Go to \(projectTitle(fromFolderName: folder))",
+                          systemImage: "arrow.turn.down.right")
+                }
+            }
+        }
+    }
 
     /// The set commands act on, never empty (a menu opened on a row always has that row).
     private var scope: [Todo] { targets.isEmpty ? [todo] : targets }
@@ -81,6 +112,8 @@ struct TaskMenu: View {
                 Button { store.setDue(todo, due: nil) } label: { Label("Remove Due Date", systemImage: "calendar.badge.minus") }
             }
         }
+        Divider()
+        waitingItems
         Divider()
         // Deleting takes each task's whole subtree; the confirmation says how much that is.
         Button(role: .destructive) { onDelete(scope) } label: {

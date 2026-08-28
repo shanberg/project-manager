@@ -148,6 +148,8 @@ final class DryRunTests: XCTestCase {
             "task.focus": ["project": "W-1", "task": reference("Book the venue")],
             "task.diveIn": ["project": "W-1"],
             "task.setDue": ["project": "W-1", "task": reference("Book the venue"), "due": "2026-12-01"],
+            "task.setWaiting": ["project": "W-1", "task": reference("Book the venue"),
+                                "waiting": "Website Refresh"],
             "task.setText": ["project": "W-1", "task": reference("Book the venue"), "text": "Book a venue"],
             "task.wrap": ["project": "W-1", "task": reference("Review the contract"), "text": "Paperwork"],
             "task.unwrap": ["project": "W-1", "task": reference("Book the venue")],

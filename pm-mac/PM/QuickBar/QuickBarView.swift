@@ -567,7 +567,7 @@ struct QuickBarView: View {
     /// so, which is what a `@…` redirect puts there.
     private var destination: String? {
         guard model.reading.target == nil else { return nil }
-        return model.focusedProjectName.map { QuickBarModel.display($0) }
+        return model.focusedProjectName.map { ProjectCodes.display($0) }
     }
 
     /// The line under the rows.
@@ -635,7 +635,7 @@ struct QuickBarView: View {
                         Self.switchHint(model.mode)]
             }
             if model.isEmptyState || model.rows.isEmpty { return Self.nothingMatched("command", model) }
-            return [[.text(QuickBarModel.display(project))],
+            return [[.text(ProjectCodes.display(project))],
                     Self.revealHint,
                     Self.switchHint(model.mode)]
 
@@ -661,7 +661,7 @@ struct QuickBarView: View {
 
     /// Where the note lands, named: the project the writing was aimed at, or the focused one.
     private var noteDestination: String? {
-        model.noteTarget?.displayName ?? model.focusedProjectName.map { QuickBarModel.display($0) }
+        model.noteTarget?.displayName ?? model.focusedProjectName.map { ProjectCodes.display($0) }
     }
 
     /// The line for a search that found nothing. Names what was searched for and leaves ⇥ on the end,

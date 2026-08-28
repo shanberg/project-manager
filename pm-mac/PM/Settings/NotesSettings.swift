@@ -12,6 +12,7 @@ struct NotesSettingsView: View {
         Form {
             if let config = store.config {
                 template(config)
+                display
                 obsidian(config)
             } else {
                 Text(store.loadError ?? "No config yet. Set your project folders first.")
@@ -47,6 +48,29 @@ struct NotesSettingsView: View {
             // it, and handing that to an Area would give every Area the two sections the kind exists
             // to leave out.
             Text("The Markdown a new project or area's notes start from. Write {{title}} where the title should go. Cleared, PM uses its built-in template — which for an Area is a Summary and Goals, and nothing else.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Display
+
+    /// Whether references read as pills or as the markup they are.
+    ///
+    /// Lives beside the notes settings rather than in a pane of its own because it's a question about
+    /// the same thing they are: what the file says versus what you see. Stored in `UserDefaults`, not
+    /// in pm config — the file is unchanged either way, so this is a fact about this Mac's reading of
+    /// it rather than about the project.
+    @ViewBuilder
+    private var display: some View {
+        Section {
+            Toggle("Show link syntax", isOn: Binding(get: { TokenDisplay.showsSyntax },
+                                                     set: { TokenDisplay.showsSyntax = $0 }))
+        } header: {
+            Text("Display")
+        } footer: {
+            Text("Off, a reference reads as a pill — “Vendor Contract”. On, it reads as it's written "
+                 + "in the file — “[[W-3 Vendor Contract]]”. Either way the file is the same.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

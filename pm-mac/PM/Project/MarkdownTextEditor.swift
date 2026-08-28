@@ -25,6 +25,9 @@ import PmLib
 /// `wrapSelection`, `pasteLink`, `markdownFileLink`, …) so it's unit-tested without a text view; this
 /// type maps spans to AppKit attributes and routes keys at the transforms.
 struct MarkdownTextEditor: NSViewRepresentable {
+    /// Open the project a `[[…]]` names, by folder name. Nil where the surface has nowhere to go.
+    var onOpenProject: ((String) -> Void)?
+
     @Binding var text: String
     /// Called on ⌘↩ — the takeover uses it to save and close.
     var onSubmit: (() -> Void)? = nil
@@ -229,7 +232,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
         container.widthTracksTextView = true
         // Folded into `textInset.width` instead, so one number owns where the text starts.
         container.lineFragmentPadding = 0
-        let layoutManager = NSLayoutManager()
+        // Draws `[[…]]` as a pill and the brackets as its padding. See `TokenLayoutManager`.
+        let layoutManager = TokenLayoutManager()
         layoutManager.addTextContainer(container)
         let storage = NSTextStorage()
         storage.addLayoutManager(layoutManager)
@@ -241,6 +245,18 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isRichText = false
         textView.allowsUndo = true
+        textView.onOpenProject = onOpenProject
+        // Flipping "Show link syntax" changes how wide every token lays out, so the glyphs have to be
+        // regenerated rather than merely redrawn.
+        NotificationCenter.default.addObserver(forName: TokenDisplay.didChange, object: nil,
+                                               queue: .main) { [weak textView] _ in
+            guard let textView, let manager = textView.layoutManager else { return }
+            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+            manager.invalidateGlyphs(forCharacterRange: whole, changeInLength: 0,
+                                     actualCharacterRange: nil)
+            manager.invalidateLayout(forCharacterRange: whole, actualCharacterRange: nil)
+            textView.needsDisplay = true
+        }
         textView.drawsBackground = false
         // A markdown source editor: no smart quotes/dashes/replacements that would corrupt the markup.
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -607,7 +623,14 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
     case .wikilink:
         // A vault reference reads as a link, without the underline: the target is a note in the same
         // folder, not a place off in a browser.
-        return [.foregroundColor: NSColor.controlAccentColor]
+        //
+        // The wash behind it is what says "one thing". It has to be there because the token *behaves*
+        // as one — the caret steps over it and backspace takes all of it — and a control that behaves
+        // atomically while looking like ordinary text is a control whose keys feel broken. The
+        // brackets keep their own dimmed syntax styling either side of it, so nothing is hidden; the
+        // shape is doing the work that removing them would.
+        return [.foregroundColor: NSColor.controlAccentColor,
+                .backgroundColor: NSColor.controlAccentColor.withAlphaComponent(0.10)]
     case .listMarker:
         return [.foregroundColor: NSColor.secondaryLabelColor]
     case .blockquote:
@@ -746,7 +769,7 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 /// Every one of them edits through the normal text-change path (`shouldChangeText`/`didChangeText`), so
 /// it's a single undoable step and the delegate re-highlights afterward, and every one of them is a
 /// pure PmLib transform over (text, selection) — this class decides *when*, never *what*.
-private final class ShortcutTextView: NSTextView {
+final class ShortcutTextView: NSTextView {
     /// Invoked on ⌘↩ to commit and close the editor.
     var onSubmit: (() -> Void)?
     /// Invoked on Escape, when the host has something for it to mean. See `MarkdownTextEditor.onCancel`.
@@ -755,6 +778,15 @@ private final class ShortcutTextView: NSTextView {
     var onToggleImmersive: (() -> Void)?
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
+
+    /// The `@` mention list, and the sigil position the reader last dismissed it at.
+    ///
+    /// Dismissal is remembered per sigil rather than globally: Escape means "not this one", and the
+    /// next `@` typed should still offer help. Cleared as soon as the caret leaves the span, so
+    /// coming back to a dismissed mention and typing more brings it back.
+    /// The `@` / `/` completion loop, shared with the task list's editors — see `CompletionController`.
+    let completions = CompletionController()
+
     /// See `MarkdownTextEditor.growthCeiling`. Zero means the host isn't growing, so the caret is this
     /// view's own to chase.
     var growthCeiling: CGFloat = 0
@@ -860,73 +892,113 @@ private final class ShortcutTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         if drewPlaceholder != showsPlaceholder { needsDisplay = true }
+        refreshCompletions()
     }
 
-    /// Don't chase the caret while the host is still growing to show it.
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity,
+                                    stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if !stillSelecting { refreshCompletions() }
+    }
+
+    // MARK: @ mentions
+
+    /// Ask the shared controller what should be showing, given where the caret is now.
     ///
-    /// AppKit scrolls the insertion point into view after an edit, and under a host that sizes itself
-    /// to the prose that scroll is always one keystroke early: the frame it measures against is the one
-    /// from before the line was typed. The result is a clip view that jumps down and snaps back on the
-    /// next frame, flashing an overlay scroller each time. Past the ceiling the host has stopped
-    /// growing, the note genuinely scrolls, and this gets out of the way.
-    override func scrollRangeToVisible(_ range: NSRange) {
-        guard growthCeiling <= 0 || laidOutHeight() > growthCeiling else { return }
-        super.scrollRangeToVisible(range)
+    /// This view contributes the two facts only it has: its text, and where its glyphs are on screen.
+    private func refreshCompletions() {
+        let text = string
+        guard selectedRange().length == 0,
+              let caret = Range(selectedRange(), in: text)?.lowerBound else {
+            return completions.dismissAll()
+        }
+        // `firstRect` is already in screen space; see `MentionPopover.show`.
+        completions.refresh(text: text, caret: caret, screenAnchor: { range in
+            self.firstRect(forCharacterRange: NSRange(range, in: text), actualRange: nil)
+        }, in: self)
     }
 
+    // MARK: atomic tokens
+    //
+    // A `[[…]]` is presented as one thing even though the file holds it as twenty characters. The
+    // storage stays exactly the markdown — `NotesRawEdit` splices raw text and `notesShow` takes a
+    // revision of the exact bytes, and both would need a translation layer if this substituted an
+    // attachment for the token. So atomicity here is *behaviour*, not representation: the caret steps
+    // over it, backspace takes all of it, and a click inside lands beside it rather than within.
+    //
+    // Each rule is a PmLib transform over (text, index); this decides only when to ask.
 
-
-    /// What the whole note needs to show without scrolling. The same measurement
-    /// `MarkdownTextEditor.Coordinator.reportHeight` hands the host, so the two agree about the ceiling.
-    private func laidOutHeight() -> CGFloat {
-        guard let container = textContainer, let layout = layoutManager else { return 0 }
-        layout.ensureLayout(for: container)
-        return layout.usedRect(for: container).height + textContainerInset.height * 2
+    /// A click landing between the brackets goes to the nearer edge, and a drag that covers part of a
+    /// token covers all of it.
+    override func selectionRange(forProposedRange proposedCharRange: NSRange,
+                                 granularity: NSSelectionGranularity) -> NSRange {
+        let proposed = super.selectionRange(forProposedRange: proposedCharRange, granularity: granularity)
+        let text = string
+        guard let range = Range(proposed, in: text) else { return proposed }
+        return NSRange(snapSelection(in: text, to: range), in: text)
     }
 
-    // MARK: keys
+    override func moveLeft(_ sender: Any?) {
+        if stepOverToken(forward: false) { return }
+        super.moveLeft(sender)
+    }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard let ch = event.charactersIgnoringModifiers?.lowercased() else {
-            return super.performKeyEquivalent(with: event)
+    override func moveRight(_ sender: Any?) {
+        if stepOverToken(forward: true) { return }
+        super.moveRight(sender)
+    }
+
+    /// Move the caret one place, treating a whole token as one place. Returns false when there's no
+    /// token in the way, so the caller falls through to AppKit's own movement.
+    private func stepOverToken(forward: Bool) -> Bool {
+        let text = string
+        guard selectedRange().length == 0,
+              let caret = Range(selectedRange(), in: text)?.lowerBound,
+              let stepped = stepCaret(in: text, from: caret, forward: forward),
+              // Only claim the keystroke when a token was actually stepped over. An ordinary character
+              // is AppKit's to move across, and reimplementing that here would get grapheme clusters
+              // and bidi wrong for no gain.
+              abs(text.distance(from: caret, to: stepped)) > 1 else { return false }
+        setSelectedRange(NSRange(stepped..<stepped, in: text))
+        return true
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        let deleted = applyIfPossible { text, selection in
+            guard selection.isEmpty else { return nil }
+            return deleteWikilinkBefore(text, index: selection.lowerBound)
         }
-        if flags == .command {
-            switch ch {
-            case "b": apply { toggleWrap($0, selection: $1, marker: "**") }; return true
-            case "i": apply { toggleWrap($0, selection: $1, marker: "*") }; return true
-            case "k": apply { wrapLink($0, selection: $1) }; return true
-            case "\r": onSubmit?(); return true   // ⌘↩ saves and closes
-            default: break
-            }
-        }
-        if flags == [.command, .shift], ch == "d" {
-            apply { duplicateLines($0, selection: $1) }
+        if deleted { return }
+        super.deleteBackward(sender)
+    }
+
+    /// Route a key to the completion list, and write back whatever it asks for.
+    ///
+    /// The write goes through `applyIfPossible` like every other edit this view makes, so a mention is
+    /// one undoable step and the delegate re-highlights after it — the controller decides *what* the
+    /// text becomes and this decides how it gets there.
+    private func handleCompletionKey(_ keyCode: UInt16) -> Bool {
+        let text = string
+        guard let caret = Range(selectedRange(), in: text)?.lowerBound else { return false }
+        switch completions.handle(keyCode: keyCode, text: text, caret: caret) {
+        case .ignored:
+            return false
+        case .handled:
             return true
+        case .apply(let newText, let selection):
+            let applied = applyIfPossible { _, _ in (newText, selection) }
+            // `didChangeText` already ran a refresh; ask again now the controller knows a `/waiting`
+            // has handed over to the picker.
+            if applied { refreshCompletions() }
+            return applied
         }
-        // ⌃⌘F — the system's own Enter Full Screen, borrowed only where there's no window full screen
-        // for it to mean. Claimed here rather than as a menu item because a window's
-        // `performKeyEquivalent` runs before the main menu gets the event, so a host that wants this
-        // would never see the key otherwise; and left entirely alone when no host wants it, so the View
-        // menu's item still works for a note being edited in a project window.
-        if flags == [.control, .command], ch == "f", let onToggleImmersive {
-            onToggleImmersive()
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    /// Escape. Handed to the host when it wants it, and otherwise left to the text view — where it
-    /// dismisses an open completion list, which is a use worth not stealing.
-    override func cancelOperation(_ sender: Any?) {
-        guard let onCancel else {
-            super.cancelOperation(sender)
-            return
-        }
-        onCancel()
     }
 
     override func keyDown(with event: NSEvent) {
+        // The completion list gets first refusal on the keys it owns, and only while it's up. Handled
+        // here rather than in `doCommand` because ⎋ and ⇥ already mean things further down (cancel the
+        // editor, move key view), and a list that's showing has to win before those run.
+        if completions.isVisible, handleCompletionKey(event.keyCode) { return }
         // ⌥↑ / ⌥↓ move the line, the binding every editor that has the feature uses. It costs the
         // system's option-arrow paragraph navigation, which in a note this size is the cheaper of the
         // two: the lines being reordered are bullets, and there are no paragraphs to jump between.
@@ -1086,7 +1158,19 @@ private final class ShortcutTextView: NSTextView {
 
     // MARK: following links
 
+    /// Open the project a token names, by folder name. Supplied by the surface that owns navigation.
+    var onOpenProject: ((String) -> Void)?
+
     override func mouseDown(with event: NSEvent) {
+        // A **plain** click on a `[[…]]` opens what it names. The ⌘ below is required for a markdown
+        // link because the caret has to be able to land inside `[label](url)` to edit it — and that
+        // reason doesn't survive an atomic token, where the caret can never land inside. A plain click
+        // on a pill has nothing else it could mean; the space either side of it is where you click to
+        // put the caret.
+        if let onOpenProject, let name = tokenName(under: event) {
+            onOpenProject(name)
+            return
+        }
         // ⌘-click follows a link. A plain click stays a plain click: this is a source editor, and the
         // caret has to be able to land inside `[label](url)` to edit it.
         if event.modifierFlags.contains(.command), let url = link(under: event) {
@@ -1094,6 +1178,19 @@ private final class ShortcutTextView: NSTextView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    /// The name inside the `[[…]]` the pointer is over, if it's over one. Embeds are excluded — a
+    /// picture is a picture, and clicking one shouldn't navigate anywhere.
+    private func tokenName(under event: NSEvent) -> String? {
+        let text = string
+        let offset = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        guard offset <= (text as NSString).length else { return nil }
+        let index = String.Index(utf16Offset: offset, in: text)
+        guard let span = wikilinkSpans(in: text).first(where: {
+            $0.lowerBound <= index && index <= $0.upperBound
+        }), !text[span].hasPrefix("!") else { return nil }
+        return String(text[span]).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
     }
 
     /// The link the pointer is over, anywhere in its `[label](url)`, resolved against the note.

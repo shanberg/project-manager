@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.4.0"
+public let apiContractVersion = "1.5.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -115,6 +115,17 @@ public enum ApiRegistry {
                       // Both pairs, because omitting `due` used to mean "clear it" — so a caller that
                       // meant to set a date and left the field out silently lost the one already there.
                       oneOf: [["task", "tasks"], ["due", "clearDue"]]),
+        ApiActionSpec(name: "task.setWaiting", tier: .mutation,
+                      summary: "Set or clear what a task is waiting on, or do it to several.",
+                      fields: [project, optionalTask, tasks, revision,
+                               ApiField("waiting", .string,
+                                        "What it's waiting on: a project, an area, or a person's name."),
+                               ApiField("clearWaiting", .boolean,
+                                        "Remove the wait instead of setting one.")],
+                      // Both pairs, for the reason `task.setDue` needs both: a caller that meant to
+                      // set a target and left the field out would otherwise silently clear the one
+                      // already there.
+                      oneOf: [["task", "tasks"], ["waiting", "clearWaiting"]]),
         ApiActionSpec(name: "task.setText", tier: .mutation,
                       summary: "Rename a task in place.",
                       fields: [project, task,

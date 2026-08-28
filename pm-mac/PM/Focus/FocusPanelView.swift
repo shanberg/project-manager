@@ -44,10 +44,13 @@ struct FocusPanelView: View {
     /// Shared with the project window: the appearance override is an app-wide preference, not a
     /// per-surface one.
     @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
+    /// Likewise for whether a project name carries its code — see `ProjectCodes`. Bound rather than
+    /// read statically so the switcher re-labels itself the moment it's toggled.
+    @AppStorage(ProjectCodes.defaultsKey) private var showsCode = true
 
     /// The task the card centers on: the truly focused todo if there is one, else the first open task
     /// so the panel still has something to show.
-    private var hero: Todo? { store.focusedTodo ?? store.openTodos.first }
+    private var hero: Todo? { store.heroTodo }
 
     private var isEditing: Bool { activeEditor != nil || addingTask }
 
@@ -174,13 +177,17 @@ struct FocusPanelView: View {
                         store.setFocusedProject(key: recent.projectKey)
                     } label: {
                         // Native menus render a single line, so the focused task rides after the name.
-                        Text(recent.name)
+                        Text(ProjectCodes.display(recent.name, showing: showsCode))
                             + Text(recent.focusedText.map { "  —  \($0.truncated(40))" } ?? "")
                     }
                 }
             }
         } label: {
-            Text(store.notes?.title.trimmed ?? store.projectName ?? "No focused project")
+            // The notes title is the project's own words and never carried a code; the folder name,
+            // which is the fallback, is the one that has to be asked about.
+            Text(store.notes?.title.trimmed
+                 ?? store.projectName.map { ProjectCodes.display($0, showing: showsCode) }
+                 ?? "No focused project")
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)

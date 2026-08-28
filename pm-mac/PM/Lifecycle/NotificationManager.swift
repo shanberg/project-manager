@@ -100,7 +100,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         center.removeAllPendingNotificationRequests()   // this app owns all pending requests
         let now = Date().timeIntervalSince1970
-        let title = store.notes?.title ?? store.projectName ?? "PM"
+        let title = store.notes?.title ?? store.projectName.map { ProjectCodes.display($0) } ?? "PM"
 
         // Stale nudges for the focused task.
         if wantsStale, let focused = store.focusedTodo, seenAt > 0 {

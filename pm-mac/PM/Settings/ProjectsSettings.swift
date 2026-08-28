@@ -15,6 +15,10 @@ struct ProjectsSettingsView: View {
     @AppStorage(CodeEditor.defaultsKey) private var storedEditor = ""
     /// Whether link rows fetch their site's icon — the app's only network call. See `FaviconLoader`.
     @AppStorage(FaviconLoader.defaultsKey) private var fetchFavicons = true
+    /// Whether project names carry their code. Read through `@AppStorage` so the switch follows the
+    /// same preference being toggled from View ▸ Show Project Codes while this pane is open; written
+    /// through `ProjectCodes`, which is what tells the AppKit surfaces to redraw.
+    @AppStorage(ProjectCodes.defaultsKey) private var showsProjectCodes = true
 
     var body: some View {
         Form {
@@ -133,6 +137,15 @@ struct ProjectsSettingsView: View {
             ListSectionHeader(title: "Domains", addTitle: "Add Domain", onAdd: addDomain)
         } footer: {
             Text("The code leads a project's name — W-012 Website Refresh. Renaming a code here doesn't rename existing projects, which keep the code they were created with.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section {
+            Toggle("Show project codes", isOn: Binding(get: { showsProjectCodes },
+                                                       set: { ProjectCodes.areShown = $0 }))
+        } footer: {
+            Text("Off, PM writes a project as “Website Refresh” everywhere it names one — the sidebar, the menu bar, the quick bar and its windows. The folders keep their codes, and so does anything written into a note.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -353,6 +366,7 @@ struct ProjectsSettingsView: View {
         store.createDefault(activePath: active, archivePath: archive)
         ProjectIndex.shared.warmAllProjects(force: true)
         ProjectIndex.shared.warmRecents(force: true)
+        ProjectIndex.shared.warmWaitRoots(force: true)
     }
 
     private func pickFolder(message: String) -> String? {

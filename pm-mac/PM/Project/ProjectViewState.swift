@@ -52,6 +52,16 @@ final class ProjectViewState: ObservableObject {
     /// whether that means retargeting this window or opening another one.
     var openProject: (_ projectKey: String, _ inNewWindow: Bool) -> Void = { _, _ in }
 
+    /// Open the project a `[[…]]` names, given the folder name written inside it.
+    ///
+    /// The lookup lives here rather than at each editor, so a token clicked in the note, in an Add Task
+    /// field and in a row's context menu all reach the same window by the same route. A name that
+    /// resolves to nothing does nothing — `[[Dana]]` is a person, and clicking it is not an error.
+    func openProject(named folder: String) {
+        guard let key = ProjectIndex.shared.projectKey(forFolder: folder) else { return }
+        openProject(key, false)
+    }
+
     /// Show/hide the sidebar. Supplied by the window: collapsing is the split view's job, so the
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}

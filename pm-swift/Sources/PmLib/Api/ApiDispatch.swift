@@ -104,6 +104,8 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "sessionDigest": input.sessionDigest.map(JSONValue.string),
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
+        "waiting": input.waiting.map(JSONValue.string),
+        "clearWaiting": input.clearWaiting.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
@@ -176,6 +178,13 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             if let d = due, !isValidTodoDue(d) { throw PmError.invalidTodoDue(d) }
             return setDueOnTodoAt(notes: notes, sessionIndex: at.sessionIndex,
                                   lineIndex: at.lineIndex, due: due)
+        }
+    case "task.setWaiting":
+        return try editing(spec, input, options) { notes, at in
+            let waiting = (input.clearWaiting == true) ? nil : input.waiting
+            if let w = waiting, !isValidWaitTarget(w) { throw PmError.invalidWaitTarget(w) }
+            return setWaitingOnTodoAt(notes: notes, sessionIndex: at.sessionIndex,
+                                      lineIndex: at.lineIndex, waiting: waiting)
         }
     case "task.diveIn":
         return try document(spec, input, options) { rawText in

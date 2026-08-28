@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("=== PM launched (build \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "?")) configDir=\(PMFiles.configDir.path) ===")
         NSApp.setActivationPolicy(.regular)
+        // Before the menu is built or a name is written anywhere: a preference that moved keys has to
+        // finish moving before anything reads the new one.
+        ProjectCodes.migrateLegacyKey()
         MainMenu.install(target: self)
 
         // Point the menubar at the focused project before anything reads `store`.

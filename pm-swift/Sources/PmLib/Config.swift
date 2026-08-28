@@ -429,6 +429,8 @@ public enum PmError: Error, CustomStringConvertible {
     case emptyRenameTitle
     /// Todo `due:` value was empty, multi-line, or contained reserved tokens (`due:`, `@`).
     case invalidTodoDue(String)
+    /// Todo `waiting:` target was empty, multi-line, or carried the brackets that delimit it.
+    case invalidWaitTarget(String)
     /// Todo text was empty or only whitespace.
     case emptyTodoText
     /// Session note text was empty or only whitespace.
@@ -467,6 +469,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .moveTargetExists(let path): return "A project with that name is already there: \(path)"
         case .emptyRenameTitle: return "New project title cannot be empty."
         case .invalidTodoDue(let value): return "Invalid due value: \(value)"
+        case .invalidWaitTarget(let value): return "Invalid waiting target: \(value)"
         case .emptyTodoText: return "Task text is required."
         case .emptySessionNote: return "Session note text is required."
         case .staleReference(let detail): return "That task has changed since you read it: \(detail). Read the project again and retry."

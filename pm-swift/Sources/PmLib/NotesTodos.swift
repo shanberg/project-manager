@@ -7,6 +7,17 @@ private let dueInlinePattern: NSRegularExpression? = {
     try? NSRegularExpression(pattern: #"\s+due:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?|\d{1,2}-\d{1,2}-\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)(?=\s*@|\s*$)"#)
 }()
 
+/// Inline `waiting: [[Target]]` — what this task is waiting on before it can move.
+///
+/// The target is always bracketed, and that isn't decoration. `due:` can be permissive about what
+/// follows it because a date has a shape; a wait target is a name, so an unbracketed `waiting:` would
+/// swallow the rest of any task line that happens to contain the word — "stop waiting: it's done"
+/// would parse as a wait on "it's done". Brackets give the value the terminator it otherwise lacks,
+/// and they're the syntax the vault these notes live in already uses for naming another note.
+private let waitingInlinePattern: NSRegularExpression? = {
+    try? NSRegularExpression(pattern: #"\s+waiting:\s*\[\[([^\]\n]+)\]\]\s*$"#)
+}()
+
 // MARK: - Task line content
 //
 // Every mutation below decomposes a task line into (list prefix, checkbox, content) and rewrites the
@@ -14,44 +25,73 @@ private let dueInlinePattern: NSRegularExpression? = {
 // inline `due:` and its focus marker — so no caller has to re-derive it with a raw `hasSuffix(" @")`,
 // which silently misreads any line where the two tokens aren't in the canonical order.
 
-/// A task line's content, split into its parts. Canonical storage order is `<text> due: <date> @`,
-/// but a line written by an older or third-party client can carry the two tokens the other way round
-/// (`<text> @ due: <date>`); `split` accepts both so a stray order can never hide the focus marker or
-/// the due from an edit, and `render` always writes the canonical order back — so any line touched by
-/// an edit is repaired in place.
+/// A task line's content, split into its parts. Canonical storage order is
+/// `<text> waiting: [[<target>]] due: <date> @`, but a line written by an older or third-party client
+/// can carry the trailing tokens in any other order; `split` accepts all of them so a stray order can
+/// never hide a token from an edit, and `render` always writes the canonical order back — so any line
+/// touched by an edit is repaired in place.
 public struct TaskContent: Equatable {
-    /// The task text, with the due and focus tokens removed.
+    /// The task text, with the waiting, due and focus tokens removed.
     public var text: String
     /// Inline `due:` value, stored as-is for display. nil when the task has no own due.
     public var due: String?
+    /// Inline `waiting:` target — the name inside the brackets, stored as-is. nil when this task isn't
+    /// waiting on anything of its own. Whether that name is a project, an area or a person is a
+    /// question for a resolver that can see the folders; nothing here knows or needs to.
+    public var waiting: String?
     /// True when this line carries the ` @` focus marker.
     public var focused: Bool
 
-    public init(text: String, due: String? = nil, focused: Bool = false) {
+    public init(text: String, due: String? = nil, waiting: String? = nil, focused: Bool = false) {
         self.text = text
         self.due = due
+        self.waiting = waiting
         self.focused = focused
     }
 
-    /// Split a task line's content (everything after the checkbox) into its parts. The focus marker is
-    /// peeled before *and* after the due so either order parses identically.
+    /// Split a task line's content (everything after the checkbox) into its parts.
+    ///
+    /// Peels trailing tokens in a loop rather than in a fixed sequence, because with three of them the
+    /// unrolled version would need six orderings to stay order-agnostic. Each token only has to know
+    /// how to recognise itself at the end of what's left; the loop makes any arrangement of them parse
+    /// identically. First value wins, so a line carrying a token twice keeps the outermost one rather
+    /// than silently taking the last.
     public static func split(_ content: String) -> TaskContent {
         var rest = content.trimmingCharacters(in: .whitespaces)
         var focused = false
-        if let stripped = strippingFocusMarker(rest) { rest = stripped; focused = true }
         var due: String?
-        if let (value, without) = strippingInlineDue(rest) { due = value; rest = without }
-        if let stripped = strippingFocusMarker(rest) { rest = stripped; focused = true }
+        var waiting: String?
+        while true {
+            if let stripped = strippingFocusMarker(rest) {
+                rest = stripped; focused = true; continue
+            }
+            if let (value, without) = strippingInlineDue(rest) {
+                if due == nil { due = value }
+                rest = without; continue
+            }
+            if let (value, without) = strippingWaiting(rest) {
+                if waiting == nil { waiting = value }
+                rest = without; continue
+            }
+            break
+        }
         return TaskContent(
             text: rest.trimmingCharacters(in: .whitespaces),
             due: (due?.isEmpty == false) ? due : nil,
+            waiting: (waiting?.isEmpty == false) ? waiting : nil,
             focused: focused
         )
     }
 
-    /// Render back to a content string in canonical order: `<text> due: <date> @`.
+    /// Render back to a content string in canonical order:
+    /// `<text> waiting: [[<target>]] due: <date> @`.
+    ///
+    /// Waiting sits inside the due, not outside it, so that `dueInlinePattern` — which only matches a
+    /// due followed by the focus marker or the end of the line — keeps matching a line that carries
+    /// both. A canonical order that put the wait last would break every existing due.
     public func render() -> String {
         var out = text.trimmingCharacters(in: .whitespaces)
+        if let waiting = waiting, !waiting.isEmpty { out += " waiting: [[\(waiting)]]" }
         if let due = due, !due.isEmpty { out += " due: \(due)" }
         if focused { out += focusMarkerSuffix }
         return out
@@ -61,6 +101,21 @@ public struct TaskContent: Equatable {
     private static func strippingFocusMarker(_ s: String) -> String? {
         guard s.hasSuffix(focusMarkerSuffix) else { return nil }
         return String(s.dropLast(focusMarkerSuffix.count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Drop a trailing inline `waiting: [[<target>]]`, returning the bracketed name and the remaining
+    /// content. Anchored at the end, like the focus marker — a `waiting:` in the middle of a sentence
+    /// is prose, not a token.
+    private static func strippingWaiting(_ s: String) -> (waiting: String, without: String)? {
+        guard let pattern = waitingInlinePattern,
+              let m = pattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let r0 = Range(m.range(at: 0), in: s),
+              let r1 = Range(m.range(at: 1), in: s) else {
+            return nil
+        }
+        let without = String(s[..<r0.lowerBound]) + String(s[r0.upperBound...])
+        return (String(s[r1]).trimmingCharacters(in: .whitespaces),
+                without.trimmingCharacters(in: .whitespaces))
     }
 
     /// Drop a trailing inline `due: <date>`, returning its value and the remaining content.
@@ -158,6 +213,7 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                 lineIndex: lineIndex,
                 isFocused: isFocused,
                 dueDate: dueDate,
+                waiting: content.waiting,
                 digest: taskDigest(text),
                 sessionISODate: isoDate
             ))
@@ -210,9 +266,102 @@ public func todosWithEffectiveDueDates(_ todos: [Todo]) -> [Todo] {
     }
 }
 
+/// The nearest waiting ancestor (parent, then grandparent, …). Returns nil if no ancestor is waiting.
+///
+/// Nearest, not earliest — see `Todo.effectiveWaiting`. Two ancestors both waiting isn't a conflict to
+/// resolve, it's a chain, and the one that blocks this task is the closest link in it.
+private func nearestAncestorWaiting(sessionTodos: [Todo], idx: Int) -> String? {
+    var i = idx
+    while let p = parentOf(sessionTodos: sessionTodos, idx: i) {
+        if let w = sessionTodos[p].waiting { return w }
+        i = p
+    }
+    return nil
+}
+
+/// Returns todos with `effectiveWaiting` set: own wait if there is one, else the nearest waiting
+/// ancestor's. Use when producing notes show output.
+///
+/// Copies each todo and sets the one field, for the same reason `todosWithEffectiveDueDates` does —
+/// a rebuild from a field list silently drops whatever is added to `Todo` next.
+public func todosWithEffectiveWaiting(_ todos: [Todo]) -> [Todo] {
+    let bySession = Dictionary(grouping: todos) { $0.sessionIndex }
+    return todos.map { todo in
+        var out = todo
+        if let own = todo.waiting {
+            out.effectiveWaiting = own
+            return out
+        }
+        let sessionTodos = (bySession[todo.sessionIndex] ?? []).sorted { $0.lineIndex < $1.lineIndex }
+        guard let idx = sessionTodos.firstIndex(where: { $0.lineIndex == todo.lineIndex }) else {
+            return out
+        }
+        out.effectiveWaiting = nearestAncestorWaiting(sessionTodos: sessionTodos, idx: idx)
+        return out
+    }
+}
+
 private let todoLinePattern: NSRegularExpression? = {
     try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
 }()
+
+public extension Todo {
+    /// Whether this task can be handed to someone as the thing to do next.
+    ///
+    /// Focus is a promise that the task it lands on is workable, so a task waiting on something else
+    /// isn't a candidate — not because it doesn't matter, but because offering it is offering work
+    /// that can't start. Reads `effectiveWaiting`, so a task under a blocked parent is skipped too:
+    /// the parent's wait is the child's.
+    ///
+    /// Note what this means when *everything* open is waiting — no candidate anywhere, and focus
+    /// clears. That's the honest answer, and the callers already handle it: a project with nothing
+    /// available has nothing to be focused on.
+    ///
+    /// Absent any wait this is exactly `!checked`, which is what every selector below tested before.
+    var isAvailableForFocus: Bool { !checked && effectiveWaiting == nil }
+}
+
+// MARK: - The three questions a task list gets asked
+//
+// A wait answers each of them differently, and every surface that asks one should ask it here rather
+// than spelling out its own filter. The rule is `ProjectKind`'s: a call site may *select* by these,
+// but it doesn't get to decide for itself what "next" means — that difference lives in one place, so
+// grepping one symbol gives the complete list of everywhere it's honoured.
+//
+// This existed as four separate spellings before waits did, which is how the sidebar, the switcher,
+// the menubar and the focus panel all came to promise work that focus itself would have skipped.
+
+public extension Array where Element == Todo {
+    /// **What's outstanding.** Open, whether or not it's waiting.
+    ///
+    /// Counts, progress rings, task search and due dates all want this one. A blocked task still has
+    /// to be done, and a blocked task with a deadline is *exactly* when the deadline matters — hiding
+    /// it because something is in the way would suppress the warning at the moment it's earned.
+    var openTasks: [Todo] { filter { !$0.checked } }
+
+    /// **What you could pick up.** Open and not waiting on anything.
+    ///
+    /// Everything that offers you a task: focus advancement, the sidebar's next-task line, the
+    /// switcher's second line, the menubar, the focus panel card.
+    ///
+    /// Requires `effectiveWaiting` to have been computed — it comes that way out of `notesShow`,
+    /// which is the single read path every surface goes through.
+    var availableTasks: [Todo] { filter(\.isAvailableForFocus) }
+
+    /// **What you're blocked on.** Open and waiting, whether the wait is its own or inherited.
+    var waitingTasks: [Todo] { filter { !$0.checked && $0.effectiveWaiting != nil } }
+
+    /// The task a surface should show as this project's current one: the focused task, else the first
+    /// one that could actually be picked up.
+    ///
+    /// The fallback is the half that matters. A project with nothing focused used to show its first
+    /// *open* task, which after waits arrived meant four surfaces offering work that couldn't start
+    /// while focus itself declined to.
+    ///
+    /// A focused task that is waiting still wins — focus advancement skips waits, so getting there
+    /// took a deliberate act, and this reports what the document says rather than overruling it.
+    var heroTask: Todo? { first(where: \.isFocused) ?? availableTasks.first }
+}
 
 // MARK: - Now-style focus advance (parent's first leaf, else next sibling's first leaf, else parent)
 // Full flow: docs/task-focus-flow.md
@@ -231,7 +380,7 @@ private func firstLeafOfParentExcluding(sessionTodos: [Todo], parentIdx: Int, in
     var i = parentIdx + 1
     while i < sessionTodos.count, sessionTodos[i].depth > parentDepth {
         let isLeaf = (i + 1 >= sessionTodos.count) || (sessionTodos[i + 1].depth <= sessionTodos[i].depth)
-        if isLeaf, !indicesToComplete.contains(i) {
+        if isLeaf, !indicesToComplete.contains(i), sessionTodos[i].isAvailableForFocus {
             return i
         }
         i += 1
@@ -280,7 +429,7 @@ private func firstOpenLeafNotInSet(todos: [Todo], completedSessionIndex: Int, in
         let sessionTodos = todos.filter { $0.sessionIndex == sessionIdx }.sorted { $0.lineIndex < $1.lineIndex }
         for i in 0..<sessionTodos.count {
             let t = sessionTodos[i]
-            guard !t.checked else { continue }
+            guard t.isAvailableForFocus else { continue }
             if sessionIdx == completedSessionIndex, indicesToComplete.contains(t.lineIndex) { continue }
             let isLeaf = (i + 1 >= sessionTodos.count) || (sessionTodos[i + 1].depth <= t.depth)
             if isLeaf { return t }
@@ -311,10 +460,13 @@ private func selectNewCurrentAfterRemoval(
         candidates.append(parentIdx)
     }
     let validCandidates = candidates.filter { !indicesToComplete.contains($0) }
-    if let firstUnchecked = validCandidates.first(where: { !sessionTodos[$0].checked }) {
-        return sessionTodos[firstUnchecked]
+    if let firstAvailable = validCandidates.first(where: { sessionTodos[$0].isAvailableForFocus }) {
+        return sessionTodos[firstAvailable]
     }
-    if let firstAny = validCandidates.first {
+    // Falling back to a *checked* candidate keeps focus somewhere structural when the subtree is
+    // finished; falling back to a waiting one would be handing over blocked work, so those drop out
+    // here and the caller's document-wide search gets a turn instead.
+    if let firstAny = validCandidates.first(where: { sessionTodos[$0].effectiveWaiting == nil }) {
         return sessionTodos[firstAny]
     }
     return nil
@@ -337,13 +489,17 @@ private func selectNewCurrentAfterRemoval(
 /// task whose next task in the same session isn't deeper; a new session always ends the subtree.
 public func nextDiveInLeaf(todos: [Todo]) -> Todo? {
     guard !todos.isEmpty else { return nil }
+    // Computed here rather than required of the caller: `effectiveWaiting` is nil both when a task
+    // isn't waiting and when nobody worked out whether it was, and a selector that can't tell those
+    // apart would quietly hand back blocked work whenever a caller forgot the pass.
+    let todos = todosWithEffectiveWaiting(todos)
     func isLeaf(_ i: Int) -> Bool {
         let n = i + 1
         return n >= todos.count
             || todos[n].sessionIndex != todos[i].sessionIndex
             || todos[n].depth <= todos[i].depth
     }
-    func isOpenLeaf(_ i: Int) -> Bool { !todos[i].checked && isLeaf(i) }
+    func isOpenLeaf(_ i: Int) -> Bool { todos[i].isAvailableForFocus && isLeaf(i) }
 
     guard let fi = todos.firstIndex(where: { $0.isFocused }) else {
         // Nothing focused: the first open leaf anywhere.
@@ -365,7 +521,7 @@ public func nextDiveInLeaf(todos: [Todo]) -> Todo? {
 
 /// Complete the todo at (sessionIndex, lineIndex) and all its descendants. Optionally move focus to next open todo (now-style: parent's first leaf, else next sibling first leaf, else parent).
 public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) throws -> ProjectNotes {
-    let todos = try parseTodos(notes: notes)
+    let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
     guard sessionIndex < notes.sessions.count else { return notes }
     let sessionTodos = todos.filter { $0.sessionIndex == sessionIndex }.sorted { $0.lineIndex < $1.lineIndex }
     guard lineIndex < sessionTodos.count else { return notes }
@@ -466,9 +622,28 @@ public func applyFocusToTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex
     )
 }
 
-/// Set or clear the inline `due:` on the task at (sessionIndex, lineIndex). Passing nil clears it.
-/// Preserves the checkbox state and the focus marker; canonical order is "<text> due: <date> @".
-public func setDueOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, due: String?) -> ProjectNotes {
+/// Set or clear the inline `waiting:` on the task at (sessionIndex, lineIndex). Passing nil clears it.
+///
+/// Written as a sibling of `setDueOnTodoAt` rather than folded into a shared "set a token" helper:
+/// the two differ only in the field they assign, but that field is the whole operation, and the
+/// generalised version would take a key path or an enum to say which — a parameter whose only job is
+/// to undo the generalisation.
+public func setWaitingOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int,
+                               waiting: String?) -> ProjectNotes {
+    editTaskLine(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex) { content in
+        content.waiting = (waiting?.isEmpty == false) ? waiting : nil
+    }
+}
+
+/// Rewrite one task line's content in place, leaving every other line — and the line's own list
+/// prefix and checkbox — exactly as it was found.
+///
+/// The walk this does (find the nth task line in a session, splice it, leave the rest) was written out
+/// once per mutation before there were three of them. It is the part that has to agree with
+/// `parseTodos` about what counts as a task line and in what order, so it is the part worth having in
+/// one place.
+func editTaskLine(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int,
+                  _ mutate: (inout TaskContent) -> Void) -> ProjectNotes {
     guard sessionIndex < notes.sessions.count, let pattern = todoLinePattern else { return notes }
     let session = notes.sessions[sessionIndex]
     let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -487,47 +662,31 @@ public func setDueOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: In
             taskCount += 1
             continue
         }
-        // Swap in the new due; the text and the focus marker ride along untouched.
         var content = TaskContent.split(String(line[r3]))
-        content.due = (due?.isEmpty == false) ? due : nil
+        mutate(&content)
         outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
         taskCount += 1
     }
     var updated = notes
-    updated.sessions[sessionIndex] = Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n"))
+    updated.sessions[sessionIndex] = Session(date: session.date, label: session.label,
+                                             body: outLines.joined(separator: "\n"))
     return updated
 }
 
-/// Replace the task text at (sessionIndex, lineIndex), preserving the list prefix/indent, checkbox
-/// state, any inline `due:`, and the focus marker. Canonical order is "<text> due: <date> @".
-public func setTextOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, text: String) -> ProjectNotes {
-    guard sessionIndex < notes.sessions.count, let pattern = todoLinePattern else { return notes }
-    let session = notes.sessions[sessionIndex]
-    let lines = session.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    var taskCount = 0
-    var outLines: [String] = []
-    for line in lines {
-        guard let m = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let r1 = Range(m.range(at: 1), in: line),
-              let r2 = Range(m.range(at: 2), in: line),
-              let r3 = Range(m.range(at: 3), in: line) else {
-            outLines.append(line)
-            continue
-        }
-        if taskCount != lineIndex {
-            outLines.append(line)
-            taskCount += 1
-            continue
-        }
-        // Swap in the new text; the due and the focus marker ride along untouched.
-        var content = TaskContent.split(String(line[r3]))
-        content.text = text.trimmingCharacters(in: .whitespaces)
-        outLines.append("\(String(line[r1]))[\(String(line[r2]))] \(content.render())")
-        taskCount += 1
+/// Set or clear the inline `due:` on the task at (sessionIndex, lineIndex). Passing nil clears it.
+/// The text, the wait and the focus marker ride along untouched.
+public func setDueOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, due: String?) -> ProjectNotes {
+    editTaskLine(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex) { content in
+        content.due = (due?.isEmpty == false) ? due : nil
     }
-    var updated = notes
-    updated.sessions[sessionIndex] = Session(date: session.date, label: session.label, body: outLines.joined(separator: "\n"))
-    return updated
+}
+
+/// Replace the task text at (sessionIndex, lineIndex), preserving the list prefix/indent, checkbox
+/// state, and the inline `due:`, `waiting:` and focus tokens.
+public func setTextOnTodoAt(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, text: String) -> ProjectNotes {
+    editTaskLine(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex) { content in
+        content.text = text.trimmingCharacters(in: .whitespaces)
+    }
 }
 
 /// Uncheck the task at (sessionIndex, lineIndex) and move focus to it. One logical write.

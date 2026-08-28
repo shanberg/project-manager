@@ -302,6 +302,7 @@ final class ApiTests: XCTestCase {
         input.entry = "e"
         input.now = "2026-08-22"
         input.due = "2026-09-01"
+        input.waiting = "Website Refresh"
         input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
         input.folder = "f"
         input.kind = "project"
@@ -402,6 +403,8 @@ final class ApiTests: XCTestCase {
         case "tasks": input.tasks = [TaskRefInput(session: "0", line: 1, digest: "def")]
         case "due": input.due = "2026-12-01"
         case "clearDue": input.clearDue = true
+        case "waiting": input.waiting = "Website Refresh"
+        case "clearWaiting": input.clearWaiting = true
         case "limit": input.limit = 1
         case "sessionOrdinal": input.sessionOrdinal = 0
         default: XCTFail("no test value for \(field)", file: file, line: line)

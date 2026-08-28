@@ -167,6 +167,7 @@ enum ProjectLifecycle {
     private static func refresh() {
         ProjectIndex.shared.warmAllProjects(force: true)
         ProjectIndex.shared.warmRecents(force: true)
+        ProjectIndex.shared.warmWaitRoots(force: true)
     }
 
     // MARK: Failure

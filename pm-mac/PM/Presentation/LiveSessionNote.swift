@@ -117,7 +117,7 @@ final class LiveSessionNote {
     /// in.
     private func seedFromStore() {
         guard let store, isOpen else { return }
-        onProjectName(store.projectName.map { QuickBarModel.display($0) })
+        onProjectName(store.projectName.map { ProjectCodes.display($0) })
         onNoteURL(store.notesPath.map { URL(fileURLWithPath: $0) })
         guard let index = store.todaySessionIndex, let sessions = store.notes?.sessions,
               index < sessions.count else {

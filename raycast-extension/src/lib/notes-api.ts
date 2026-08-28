@@ -52,6 +52,10 @@ export interface Todo {
   dueDate?: string | null;
   /** Effective due for display: own dueDate if set, else earliest due among ancestors (nearest deadline). From notes show. */
   effectiveDueDate?: string | null;
+  /** What this task is waiting on, from an inline `waiting: [[target]]`. A project, an area, or a person. */
+  waiting?: string | null;
+  /** Effective wait for display: own `waiting` if set, else the nearest waiting ancestor's. From notes show. */
+  effectiveWaiting?: string | null;
   /** Short hash of `text`, from notes show. Sent back on writes to prove this is still the task we read. */
   digest?: string | null;
   /** ISO date of this task's session — the half of its address that survives a session being started. */

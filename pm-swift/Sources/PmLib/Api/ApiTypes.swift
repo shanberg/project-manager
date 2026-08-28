@@ -123,6 +123,9 @@ public struct ApiInput: Codable, Equatable {
     public var text: String?
     public var due: String?
     public var clearDue: Bool?
+    /// The name of what a task is waiting on — a project, an area, or a person.
+    public var waiting: String?
+    public var clearWaiting: Bool?
     public var advanceFocus: Bool?
     public var label: String?
     public var prose: String?
@@ -166,6 +169,8 @@ public struct ApiOptions: Equatable {
 public struct ApiChange: Codable, Equatable {
     public enum Kind: String, Codable {
         case added, removed, completed, reopened, retimed, renamed, moved, focused, unfocused
+        /// What the task is waiting on was set, changed, or cleared.
+        case blocked
     }
     public var kind: Kind
     public var ref: TaskRefInput?
