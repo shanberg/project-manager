@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.5.0";
+export const API_CONTRACT_VERSION = "1.6.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -341,6 +341,12 @@ export interface TaskUnwrapInput {
   task: TaskRef;
 }
 
+/** Everything you're waiting on, grouped by what it's waiting on. */
+export interface TaskWaitingInput {
+  /** Which projects to look in. Default active. */
+  scope?: "active" | "archive" | "all";
+}
+
 /** Open tasks with a due date, soonest first. */
 export interface TaskWhatsDueInput {
   /** Cap the number returned. */
@@ -401,6 +407,7 @@ export interface ApiInputs {
   "task.setText": TaskSetTextInput;
   "task.setWaiting": TaskSetWaitingInput;
   "task.unwrap": TaskUnwrapInput;
+  "task.waiting": TaskWaitingInput;
   "task.whatsDue": TaskWhatsDueInput;
   "task.wrap": TaskWrapInput;
 }
@@ -452,6 +459,7 @@ export const API_TIERS: Record<
   "task.setText": "mutation",
   "task.setWaiting": "mutation",
   "task.unwrap": "mutation",
+  "task.waiting": "query",
   "task.whatsDue": "query",
   "task.wrap": "mutation",
 };
