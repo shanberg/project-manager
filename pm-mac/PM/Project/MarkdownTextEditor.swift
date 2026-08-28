@@ -25,7 +25,12 @@ import PmLib
 /// `wrapSelection`, `pasteLink`, `markdownFileLink`, …) so it's unit-tested without a text view; this
 /// type maps spans to AppKit attributes and routes keys at the transforms.
 struct MarkdownTextEditor: NSViewRepresentable {
-    /// Open the project a `[[…]]` names, by folder name. Nil where the surface has nowhere to go.
+    /// Open the project a `[[…]]` names, by folder name.
+    ///
+    /// Every surface that draws a token now supplies one, which is the point: a pill that looks like a
+    /// link and isn't is worse than the markup it replaced. What "open" means differs — a project
+    /// window retargets itself, the immersive note and the quick bar step out of the way and put a
+    /// window in front — so the destination is the host's to decide and this only reports the click.
     var onOpenProject: ((String) -> Void)?
 
     @Binding var text: String
@@ -992,6 +997,51 @@ final class ShortcutTextView: NSTextView {
             if applied { refreshCompletions() }
             return applied
         }
+    }
+
+    // MARK: keys
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard let ch = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        if flags == .command {
+            switch ch {
+            case "b": apply { toggleWrap($0, selection: $1, marker: "**") }; return true
+            case "i": apply { toggleWrap($0, selection: $1, marker: "*") }; return true
+            case "k": apply { wrapLink($0, selection: $1) }; return true
+            case "\r": onSubmit?(); return true   // ⌘↩ saves and closes
+            default: break
+            }
+        }
+        if flags == [.command, .shift], ch == "d" {
+            apply { duplicateLines($0, selection: $1) }
+            return true
+        }
+        // ⌃⌘F — the system's own Enter Full Screen, borrowed only where there's no window full screen
+        // for it to mean. Claimed here rather than as a menu item because a window's
+        // `performKeyEquivalent` runs before the main menu gets the event, so a host that wants this
+        // would never see the key otherwise; and left entirely alone when no host wants it, so the View
+        // menu's item still works for a note being edited in a project window.
+        if flags == [.control, .command], ch == "f", let onToggleImmersive {
+            onToggleImmersive()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Escape. Handed to the host when it wants it, and otherwise left to the text view — where it
+    /// dismisses an open completion list, which is a use worth not stealing.
+    ///
+    /// The list gets Escape before this, in `keyDown`: a visible list is what the key means while it's
+    /// up, and only once it's gone does Escape mean the editor.
+    override func cancelOperation(_ sender: Any?) {
+        guard let onCancel else {
+            super.cancelOperation(sender)
+            return
+        }
+        onCancel()
     }
 
     override func keyDown(with event: NSEvent) {

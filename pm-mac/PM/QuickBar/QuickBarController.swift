@@ -60,6 +60,14 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.onEnterNote = { [weak self] target in self?.beganNote(target: target) }
         model.onEnterImmersive = { [weak self] in self?.enterImmersive() }
         model.onLeaveNote = { [weak self] in self?.endNote() }
+        // The same exit a `@` row takes: the draft is written down, then the bar goes away and the
+        // project comes forward. Only once the name resolves — `[[Dana]]` is a person, and clicking
+        // one should not close the note you were writing.
+        model.onOpenProject = { [weak self] folder in
+            guard WindowManager.shared.open(named: folder) else { return }
+            self?.endNote()
+            self?.hide(restoringFocus: false)
+        }
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }

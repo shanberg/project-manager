@@ -75,18 +75,26 @@ struct CompletingTextField: NSViewRepresentable {
         var parent: CompletingTextField
         weak var field: NSTextField?
         let completions = CompletionController()
-        /// A field editor's layout manager belongs to the window, so this can only be its *delegate* —
-        /// which carries the glyph half of `TokenLayoutManager` (brackets become the pill's padding)
-        /// but not the drawing half, since `drawBackground` is an override rather than a delegate
-        /// method. The field therefore shows a token's spacing without its fill. Installed while this
-        /// field is the one being edited and taken off again when it isn't; leaving it on would reshape
-        /// whatever got edited next.
+        /// The fallback for a window that doesn't lend a token-aware field editor.
+        ///
+        /// A field editor's layout manager belongs to the window, so a field can normally only reach
+        /// its *delegate* — which carries the glyph half of `TokenLayoutManager`, where brackets become
+        /// the pill's padding, but not the drawing half, since `drawBackground` is an override rather
+        /// than a delegate method. That combination is what showed a token's spacing with nothing
+        /// inside it. `TextFocusWindow` now hands these fields a `TokenFieldEditor` with a real one
+        /// underneath, so this is only used somewhere that hasn't — half a pill still being better
+        /// than markup.
         let glyphHider = TokenLayoutManager()
 
         init(_ parent: CompletingTextField) { self.parent = parent }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
-            editor?.layoutManager?.delegate = glyphHider
+            // Never over a real one: assigning here would replace a `TokenFieldEditor`'s layout manager
+            // with a *different* `TokenLayoutManager` as its delegate, and the removal below would then
+            // leave it with none at all for whatever was edited next.
+            if let manager = editor?.layoutManager, !(manager is TokenLayoutManager) {
+                manager.delegate = glyphHider
+            }
             restyle()
         }
 
@@ -217,8 +225,10 @@ struct CompletingTextField: NSViewRepresentable {
         func restyleFromField() { restyle() }
 
         func controlTextDidEndEditing(_ notification: Notification) {
-            if editor?.layoutManager?.delegate === glyphHider {
-                editor?.layoutManager?.delegate = nil
+            // Only ever the one this coordinator installed — leaving it on would reshape whatever got
+            // edited next through the same shared editor.
+            if let manager = editor?.layoutManager, manager.delegate === glyphHider {
+                manager.delegate = nil
             }
             completions.dismissAll()
         }

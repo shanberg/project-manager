@@ -44,6 +44,23 @@ final class WindowManager {
         return controller
     }
 
+    /// Open a window on the project a `[[…]]` names, given the folder name written inside it.
+    ///
+    /// The app-wide half of `ProjectViewState.openProject(named:)`. A project window retargets itself
+    /// — the token is in a note you're reading, and the window it's in is where you want to end up —
+    /// but the surfaces with no window of their own (the immersive session note, the quick bar's note
+    /// mode) have nothing to retarget, so for them following a token means putting a window in front.
+    ///
+    /// A name that resolves to nothing does nothing, and returns false so a caller can decline to
+    /// dismiss itself over it. `[[Dana]]` is a person; clicking it is not an error and should not
+    /// close the thing you were writing in.
+    @discardableResult
+    func open(named folder: String) -> Bool {
+        guard let key = ProjectIndex.shared.projectKey(forFolder: folder) else { return false }
+        open(projectKey: key)
+        return true
+    }
+
     /// The project ⌘T should open: the most recently edited one that doesn't already have a window.
     /// A tab on the project you're already in would just be a duplicate, so "New Tab" means "another
     /// project alongside this one".

@@ -412,6 +412,24 @@ final class TextFocusWindow: NSWindow {
     /// Called on every first-responder change with whether the new one is an editable text view.
     var onTextFocusChange: ((Bool) -> Void)?
 
+    /// The token-aware field editor, made on first use and then shared — one per window, which is what
+    /// a field editor is.
+    private lazy var tokenEditor = TokenFieldEditor()
+
+    /// Lend the token fields an editor that can draw a pill, and everything else the standard one.
+    ///
+    /// A `[[…]]` behaves as one thing in these fields — the caret steps over it, backspace takes all of
+    /// it — and until this existed it did that while looking like plain text with odd spacing in it.
+    /// The shared editor could only be reached through its delegate, which carries the glyph half of
+    /// `TokenLayoutManager` and not the drawing half; see `TokenFieldEditor`.
+    ///
+    /// Scoped to `TokenClickField` rather than given to every field in the window, because a window
+    /// also holds the find bar and the details form, and none of those contain a token to draw.
+    override func fieldEditor(_ createFlag: Bool, for client: Any?) -> NSText? {
+        guard TokenFieldEditor.wants(client) else { return super.fieldEditor(createFlag, for: client) }
+        return tokenEditor
+    }
+
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
         let accepted = super.makeFirstResponder(responder)
         // Read back `firstResponder` rather than trusting the argument: handing a window an

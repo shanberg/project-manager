@@ -253,7 +253,8 @@ struct QuickBarView: View {
             // It was a `Text` overlaid here, positioned by adding up this view's constants — which is
             // how it spent a release standing a gutter's width to the left of the caret it was
             // standing in for. See `MarkdownTextEditor.placeholder`.
-            MarkdownTextEditor(text: $model.noteText,
+            MarkdownTextEditor(onOpenProject: { model.onOpenProject($0) },
+                               text: $model.noteText,
                                onSubmit: { model.runSelection() },
                                onCancel: { model.leaveNote() },
                                onToggleImmersive: { model.enterImmersive() },

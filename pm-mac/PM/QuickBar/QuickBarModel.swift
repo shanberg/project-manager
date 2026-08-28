@@ -792,6 +792,10 @@ final class QuickBarModel: ObservableObject {
     /// what was on screen — see `QuickBarController.endNote`.
     var onLeaveNote: () -> Void = {}
 
+    /// A click on a `[[…]]` in the note body. The controller owns what going somewhere means, as it
+    /// does for a `@` row — one route out of this bar, not two.
+    var onOpenProject: (String) -> Void = { _ in }
+
     // MARK: Rows
 
     func reset(mode: QuickBarMode) {

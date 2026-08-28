@@ -40,6 +40,9 @@ final class SessionNoteSurfaceModel: ObservableObject {
     var onTextChanged: (String) -> Void = { _ in }
     /// Escape, or a click on the ground.
     var onClose: () -> Void = {}
+    /// A click on a `[[…]]`. Supplied by the host, which owns both halves: going to the project, and
+    /// stepping out of the way first.
+    var onOpenProject: (String) -> Void = { _ in }
 
     /// Put text in from *outside* — a reload, or the host seeding the surface — without it coming
     /// straight back out as an edit.
@@ -144,7 +147,8 @@ struct SessionNoteSurface: View {
         // No `onSubmit` either. There is nothing for ⌘↩ to commit when every keystroke is already
         // the write, and a key that claims to save implies there was a moment before it when the
         // note wasn't saved.
-        MarkdownTextEditor(text: $model.text,
+        MarkdownTextEditor(onOpenProject: model.onOpenProject,
+                           text: $model.text,
                            onCancel: model.onClose,
                            onScroll: { scrollY = $0 },
                            placeholder: "Write a note for today…",

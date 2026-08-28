@@ -150,3 +150,52 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     }
 
 }
+
+/// A field editor that draws tokens as pills.
+///
+/// An `NSTextField` doesn't own the text view that edits it. The window lends every field the *same*
+/// field editor, so a field can only reach that editor's `delegate` — which carries
+/// `TokenLayoutManager`'s glyph half, where brackets become the pill's padding, and not its drawing
+/// half, because `drawBackground` is an override rather than a delegate method. That is exactly what
+/// the task field looked like for a while: a token's spacing with nothing inside it, which reads as a
+/// layout bug rather than as a style.
+///
+/// `NSWindow.fieldEditor(_:for:)` is the hook that fixes it. A window can hand a particular client an
+/// editor of its own, built on a real `TokenLayoutManager` — and one per window shared by every token
+/// field in it is precisely what a field editor is, so nothing about the arrangement is unusual except
+/// which layout manager is underneath.
+///
+/// The stack is built by hand for the reason the note editor's is: reaching for `layoutManager` on a
+/// text view made the ordinary way would silently drop it into TextKit 1 compatibility, and a stack
+/// assembled deliberately is one whose parts are known.
+final class TokenFieldEditor: NSTextView {
+    init() {
+        let container = NSTextContainer(size: NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                                     height: CGFloat.greatestFiniteMagnitude))
+        // A field editor scrolls its one line sideways rather than wrapping it, which is what the
+        // fields using this ask for (`cell.wraps = false`, `cell.isScrollable = true`).
+        container.widthTracksTextView = false
+        container.heightTracksTextView = false
+        let layoutManager = TokenLayoutManager()
+        layoutManager.addTextContainer(container)
+        let storage = NSTextStorage()
+        storage.addLayoutManager(layoutManager)
+
+        super.init(frame: .zero, textContainer: container)
+        // The flag AppKit reads to give this the one-line behaviour a field wants: Return ends editing
+        // rather than inserting, and Tab moves on.
+        isFieldEditor = true
+        isRichText = false
+        isHorizontallyResizable = true
+        isVerticallyResizable = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("TokenFieldEditor is created in code") }
+
+    /// Whether a field editor client wants one of these.
+    ///
+    /// Here rather than inline in the window, so the rule has one statement: a window asked for a
+    /// field editor decides by calling this, and a test can check the decision without standing up a
+    /// window controller to ask.
+    static func wants(_ client: Any?) -> Bool { client is TokenClickField }
+}

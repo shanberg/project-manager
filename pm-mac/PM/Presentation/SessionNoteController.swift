@@ -26,6 +26,13 @@ final class SessionNoteController: NSObject {
         super.init()
         surface.onTextChanged = { [weak self] text in self?.note.changed(text) }
         surface.onClose = { [weak self] in self?.dismiss() }
+        // Following a reference means leaving: this surface fills the screen, and a window opened
+        // behind it would be a window nobody can see. Dismissed only once the name is known to
+        // resolve, so clicking `[[Dana]]` doesn't throw you out of the note for nothing.
+        surface.onOpenProject = { [weak self] folder in
+            guard WindowManager.shared.open(named: folder) else { return }
+            self?.dismiss()
+        }
         note.onProse = { [weak self] in self?.surface.applyExternalChange($0) }
         note.onSessionLabel = { [weak self] in self?.surface.sessionLabel = $0 }
         note.onNoteURL = { [weak self] in self?.surface.noteURL = $0 }
