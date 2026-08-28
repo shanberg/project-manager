@@ -139,6 +139,19 @@ and the MCP server all follow:
 `temporaryDirectory/UUID()` tree and removes it — so it needs no sandbox. This script is for
 the manual passes, which are what actually leak.
 
+The Mac app's AppKit views have a suite of their own:
+
+```
+cd pm-mac && xcodebuild -scheme PM -destination 'platform=macOS,arch=arm64' test
+```
+
+`PMViewTests` drives the note editor and the task field with real `NSEvent`s and asserts through the
+layout manager — which keys get swallowed, where the caret lands, whether a bracket became padding,
+where the completion list ended up on screen. It is **hostless**: the few files under test compile
+straight into the bundle beside `PMViewTests/Stubs.swift`, so nothing launches PM.app and nothing can
+reach your notes. A view that starts reaching for `PMStore` or `WindowManager` stops building here,
+which is a useful pressure to have on views.
+
 ## Publishing (maintainers)
 
 The CLI is a Swift binary. Version is in `package.json` (used by the release script) and in `pm-swift/Sources/pm/Version.swift` (used by `pm --version`); keep them in sync when cutting a release. Create a GitHub Release (tag); the release script builds the Swift binary, creates a tarball, uploads it to the release, and updates the Homebrew formula. See `docs/RELEASE.md`.

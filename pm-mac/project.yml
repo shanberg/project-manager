@@ -84,6 +84,9 @@ targets:
         INAlternativeAppNames:
           - INAlternativeAppName: Project Manager
           - INAlternativeAppName: PM Projects
+    scheme:
+      testTargets:
+        - PMViewTests
     entitlements:
       path: PM/PM.entitlements
       properties:
@@ -92,3 +95,39 @@ targets:
         com.apple.security.app-sandbox: false
         # Explicitly non-debuggable so TCC treats it as a normal app (see CODE_SIGN_INJECT... above).
         com.apple.security.get-task-allow: false
+
+  # The AppKit views, driven with real events and asserted through the layout manager.
+  #
+  # Hostless on purpose. A unit-test bundle hosted by PM.app would need no stubs and would also launch
+  # the app — `applicationDidFinishLaunching` opens windows, reads the projects folder, and can trip a
+  # TCC prompt — so running the view tests would touch somebody's real notes. Instead the handful of
+  # files under test are compiled straight into the bundle beside `Stubs.swift`, which is what the
+  # scratch harness these grew out of did with symlinks.
+  #
+  # A file added here has to be a file that compiles alone: reach for `PMStore` or `WindowManager` from
+  # one of them and this target stops building, which is a useful pressure to have on views.
+  PMViewTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: PMViewTests
+      - path: PM/Project/MarkdownTextEditor.swift
+      - path: PM/Project/MentionPopover.swift
+      - path: PM/Project/CompletionController.swift
+      - path: PM/Project/TokenLayoutManager.swift
+      - path: PM/Task/CompletingTextField.swift
+      - path: PM/Task/TokenTextLabel.swift
+      - path: PM/QuickBar/ProjectSearch.swift
+    dependencies:
+      - package: PmLib
+        product: PmLib
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stuarthanberg.pm.viewtests
+        GENERATE_INFOPLIST_FILE: YES
+        # Nothing here is signed for distribution and nothing needs an identity; a test bundle picking
+        # up the app's Developer ID only slows the build down and fails on a machine without it.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
