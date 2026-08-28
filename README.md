@@ -115,6 +115,24 @@ Config location: `~/.config/pm/config.json` (or `$XDG_CONFIG_HOME/pm/`)
 
 Override: `PM_CONFIG_HOME=/custom/path pm ...`
 
+## Testing against a throwaway vault
+
+Never exercise the app or the CLI by hand against your real PARA folder — a few minutes of
+poking at "new project" leaves permanent scaffolds behind. `scripts/dev-vault.sh` points
+`PM_CONFIG_HOME` at a scratch vault under `.dev-vault/` (gitignored), which the app, the CLI
+and the MCP server all follow:
+
+```
+./scripts/dev-vault.sh app        # build PM.app and launch it against the dev vault
+./scripts/dev-vault.sh pm list    # run the CLI against the dev vault
+./scripts/dev-vault.sh shell      # a shell with PM_CONFIG_HOME already exported
+./scripts/dev-vault.sh reset      # wipe it back to empty
+```
+
+`swift test` is already self-contained — every test that touches disk builds its own
+`temporaryDirectory/UUID()` tree and removes it — so it needs no sandbox. This script is for
+the manual passes, which are what actually leak.
+
 ## Publishing (maintainers)
 
 The CLI is a Swift binary. Version is in `package.json` (used by the release script) and in `pm-swift/Sources/pm/Version.swift` (used by `pm --version`); keep them in sync when cutting a release. Create a GitHub Release (tag); the release script builds the Swift binary, creates a tarball, uploads it to the release, and updates the Homebrew formula. See `docs/RELEASE.md`.

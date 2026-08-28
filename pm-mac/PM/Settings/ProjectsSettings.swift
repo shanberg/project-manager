@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import PmLib
 
 /// Projects: where they live, what domains they can be filed under, and what folders each one gets.
@@ -9,6 +10,11 @@ import PmLib
 /// see one state, and there's no window in which a pane left open holds a stale copy.
 struct ProjectsSettingsView: View {
     @ObservedObject private var store = ConfigStore.shared
+    /// The raw code-editor preference. Empty means unset, which `CodeEditor` resolves rather than
+    /// treating as off — see `CodeEditor.resolvedBundleID`.
+    @AppStorage(CodeEditor.defaultsKey) private var storedEditor = ""
+    /// Whether link rows fetch their site's icon — the app's only network call. See `FaviconLoader`.
+    @AppStorage(FaviconLoader.defaultsKey) private var fetchFavicons = true
 
     var body: some View {
         Form {
@@ -16,6 +22,8 @@ struct ProjectsSettingsView: View {
                 folders(config)
                 domains(config)
                 structure(config)
+                codeEditor
+                links
             } else {
                 firstRun
             }
@@ -237,6 +245,92 @@ struct ProjectsSettingsView: View {
             var folders = config.areaSubfolders ?? defaultAreaSubfolders
             change(&folders)
             config.areaSubfolders = folders
+        }
+    }
+
+    // MARK: Code editor
+
+    /// Which app "Open in…" uses for a project that's a repository.
+    ///
+    /// The menu item behind this was hardcoded to Cursor and gated on a `src/` folder, which made it a
+    /// feature exactly one person could use. The picker lists the known editors that are actually
+    /// installed — offering to open a project in an app you don't have is worse than not offering —
+    /// plus anything previously chosen by hand, plus Off.
+    @ViewBuilder
+    private var codeEditor: some View {
+        Section {
+            Picker("Open code projects in", selection: editorSelection) {
+                ForEach(editorChoices, id: \.bundleID) { choice in
+                    Text(choice.name).tag(choice.bundleID)
+                }
+                Divider()
+                Text("Nothing").tag(CodeEditor.offValue)
+            }
+            Button("Choose Another App…") { chooseEditor() }
+        } header: {
+            Text("Code")
+        } footer: {
+            Text("A project counts as code when its folder is a git repository. The menu item appears under Project ▸ in the menu bar item, and only for those.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The installed known editors, plus a hand-picked one that isn't on the list so the picker can
+    /// show what's actually selected rather than silently landing on something else.
+    private var editorChoices: [(name: String, bundleID: String)] {
+        var choices = CodeEditor.known.filter { CodeEditor.isInstalled($0.bundleID) }
+        if let current = CodeEditor.resolvedBundleID,
+           !choices.contains(where: { $0.bundleID == current }) {
+            choices.append((name: CodeEditor.displayName(current), bundleID: current))
+        }
+        return choices
+    }
+
+    /// Shows the *resolved* editor rather than the raw preference, so an unset value displays the one
+    /// the menu will really use instead of leaving the picker on nothing. Writes go through
+    /// `storedEditor` so the pane redraws — a plain `UserDefaults` write would land silently and leave
+    /// the picker showing the old choice until something else caused a body pass.
+    private var editorSelection: Binding<String> {
+        Binding(
+            get: {
+                storedEditor == CodeEditor.offValue
+                    ? CodeEditor.offValue
+                    : (CodeEditor.resolvedBundleID ?? CodeEditor.offValue)
+            },
+            set: { storedEditor = $0 })
+    }
+
+    private func chooseEditor() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Choose"
+        panel.message = "Choose the app to open code projects in."
+        guard panel.runModal() == .OK, let url = panel.url,
+              let bundleID = Bundle(url: url)?.bundleIdentifier else { return }
+        storedEditor = bundleID
+    }
+
+    // MARK: Links
+
+    /// The one network call the app makes, and the switch for it.
+    ///
+    /// Worth a pane row rather than a silent default: the hosts reached are read out of a project's
+    /// own notes, so an internal tracker or a client's staging box is exactly the kind of address that
+    /// ends up in there. An app that touches the network nowhere else owes its user the sentence.
+    @ViewBuilder
+    private var links: some View {
+        Section {
+            Toggle("Show site icons beside links", isOn: $fetchFavicons)
+        } header: {
+            Text("Links")
+        } footer: {
+            Text("Fetches each linked site's own icon from that site, once per site, and keeps it for the session. Nothing else is sent and no third-party icon service is used — but it is the only time PM goes to the network, so it's here to turn off.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

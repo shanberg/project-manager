@@ -222,23 +222,50 @@ struct ListDropDelegate: DropDelegate {
     let onUpdate: (DropTarget?) -> Void
     /// Commit the resolved move; returns whether it was accepted.
     let onPerform: (DropTarget) -> Bool
+    /// Resolve a slot for a drag that came from *outside* the list. Same geometry as `onCompute`, minus
+    /// the "don't drop a subtree into itself" exclusion — there's no subtree in the air, so nothing to
+    /// exclude, and `onCompute` refuses everything while no row of ours is being dragged.
+    let onComputeExternal: (CGPoint) -> DropTarget?
+    /// Land text or files from another app at the resolved slot. Returns whether it was accepted.
+    let onDropExternal: ([NSItemProvider], DropTarget?) -> Bool
 
-    func validateDrop(info: DropInfo) -> Bool { isActive() }
+    /// Whether this drag came from somewhere else — text from a document, files from the Finder.
+    private func isExternal(_ info: DropInfo) -> Bool {
+        !isActive() && info.hasItemsConforming(to: [.text, .fileURL])
+    }
+
+    func validateDrop(info: DropInfo) -> Bool { isActive() || isExternal(info) }
+
+    private func slot(_ info: DropInfo) -> DropTarget? {
+        isActive() ? onCompute(info.location) : onComputeExternal(info.location)
+    }
 
     /// The drag starts inside the list, so entry is the first thing that happens to it. Without this
     /// the indicator waited for the pointer to move again, and a short drag onto the neighbouring row
     /// could be released before one ever appeared.
-    func dropEntered(info: DropInfo) { onUpdate(onCompute(info.location)) }
+    func dropEntered(info: DropInfo) { onUpdate(slot(info)) }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        let target = onCompute(info.location)
+        let target = slot(info)
         onUpdate(target)
+        // `.copy` for anything from outside: text dragged out of a document is still in that document
+        // afterwards, and the cursor should say so rather than claiming a move.
+        guard isActive() else { return DropProposal(operation: .copy) }
         return DropProposal(operation: target == nil ? .forbidden : .move)
     }
 
     func dropExited(info: DropInfo) { onUpdate(nil) }
 
     func performDrop(info: DropInfo) -> Bool {
+        guard isActive() else {
+            let target = onComputeExternal(info.location)
+            onUpdate(nil)
+            // Files first: a Finder drag also carries a text representation of its path, and landing a
+            // task called "/Users/…/notes.pdf" is not what dragging a file onto a list means.
+            let files = info.itemProviders(for: [.fileURL])
+            let providers = files.isEmpty ? info.itemProviders(for: [.text]) : files
+            return onDropExternal(providers, target)
+        }
         guard let target = onCompute(info.location) else { onUpdate(nil); return false }
         return onPerform(target)
     }

@@ -25,10 +25,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var onSetFloating: (Bool) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
 
-    /// Cached favicons for project links, keyed by host. Fetched once per host in the background.
-    private var faviconCache: [String: NSImage] = [:]
-    private var faviconTried: Set<String> = []
-
     init(store: PMStore) {
         self.store = store
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -148,8 +144,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// mutation of the status button, which would cancel that loop and dismiss the menu.
     private var menuIsOpen = false
 
-    /// DIAGNOSTIC: lightweight delegate for submenus so we can trace their open/close/highlight in the
-    /// log without the controller's own menu-lifecycle side effects (rebuild, button update).
+    /// Lightweight delegate for submenus so their open/close/highlight can be traced in the log
+    /// without the controller's own menu-lifecycle side effects (rebuild, button update). Silent
+    /// unless the log is switched on — see `Log.isEnabled`.
     private let submenuLogger = SubmenuLogger()
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -205,9 +202,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Constant action: complete the focused task, with ⌥ Undo.
         if let focused = store.focusedTodo {
             menu.addItem(.separator())
-            menu.addItem(actionItem("Complete: \(truncate(focused.text, 34))", #selector(completeFocused), symbol: "checkmark.circle"))
+            menu.addItem(actionItem("Complete: \(truncate(focused.text, 34))", #selector(completeFocused),
+                                    symbol: PMCommand.complete.symbol))
             if store.lastCompletedKey != nil {
-                let undo = actionItem("Undo Last Complete", #selector(undoLast), symbol: "arrow.uturn.backward")
+                // The table's name, not a shorter one of this menu's own — "Undo Last Complete" here
+                // against "Undo Last Completion" in the menu bar was two names for one command.
+                let undo = actionItem(PMCommand.undoLast.title, #selector(undoLast),
+                                      symbol: PMCommand.undoLast.symbol)
                 undo.isAlternate = true
                 undo.keyEquivalentModifierMask = .option
                 menu.addItem(undo)
@@ -234,7 +235,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Constant actions inline; less-frequent actions collapsed into submenus (Balanced layout).
         menu.addItem(.separator())
-        menu.addItem(actionItem("Dive In", #selector(diveIn), symbol: "arrow.down.to.line"))
+        menu.addItem(actionItem(PMCommand.diveIn.title, #selector(diveIn), symbol: PMCommand.diveIn.symbol))
         menu.addItem(addMenuItem())
         menu.addItem(projectMenuItem())
 
@@ -261,57 +262,73 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             Self.forceImageVisible(item)
         }
         let sub = NSMenu(title: title)
-        sub.delegate = submenuLogger   // DIAGNOSTIC: trace submenu open/close/highlight
+        sub.delegate = submenuLogger   // traces open/close/highlight when the log is on
         item.submenu = sub
         return (item, sub)
     }
 
-    /// "Add ▸" — the task add/edit commands. Each summons the focus panel with that editor already
-    /// open on the focused task: the panel is a non-activating HUD, so typing into it doesn't pull you
-    /// out of whatever you were doing, which is the property these commands wanted from Raycast.
-    private func addMenuItem() -> NSMenuItem {
-        let (item, sub) = submenu("Add", symbol: "plus")
-        sub.addItem(editorItem("Narrow Focus…", kind: .add, position: .child,
-                               symbol: "arrow.turn.down.right"))
-        sub.addItem(editorItem("Add After…", kind: .add, position: .after, symbol: "arrow.down"))
-        let before = editorItem("Add Before…", kind: .add, position: .before, symbol: "arrow.up")
-        before.isAlternate = true
-        before.keyEquivalentModifierMask = .option
-        sub.addItem(before)
-        sub.addItem(.separator())
-        sub.addItem(editorItem("Edit Task…", kind: .edit, symbol: "pencil"))
-        sub.addItem(editorItem("Wrap Task…", kind: .wrap,
-                               symbol: "arrow.up.and.down.and.arrow.left.and.right"))
+    /// "Add ▸" and "Project ▸", both built from `PMCommand`.
+    ///
+    /// These used to be two hand-written lists, which is how the dropdown came to offer Rename and
+    /// Archive while the menu bar offered neither, and to call one action "Open in Finder" here and
+    /// "Reveal Project in Finder" there. Same table now, same names, same availability — only the
+    /// grouping is this surface's own, because a dropdown read at a glance wants fewer, fatter
+    /// submenus than a menu bar browsed by name.
+    private func commandSubmenu(_ group: PMCommand.StatusMenuGroup, title: String,
+                                symbol: String) -> NSMenuItem {
+        let (item, sub) = submenu(title, symbol: symbol)
+        let context = PMCommand.Context(store: store)
+        for command in PMCommand.statusMenu(group) {
+            guard command.isAvailable(in: context) else { continue }
+            if command.startsMenuGroup, sub.numberOfItems > 0 { sub.addItem(.separator()) }
+            let entry = actionItem(command.title(in: context), #selector(runCommand(_:)),
+                                   symbol: command.symbol)
+            entry.representedObject = command.rawValue
+            // The apps get their own icons where we can find them — a Finder or Obsidian item reads
+            // faster with the app's face on it than with a generic glyph.
+            if let icon = appIcon(for: command) { entry.image = icon }
+            Self.forceImageVisible(entry)
+            // Add Before rides under Add After on ⌥, as it always has: same gesture, opposite
+            // direction, and the pair reads as one choice rather than two items.
+            if command == .addBefore {
+                entry.isAlternate = true
+                entry.keyEquivalentModifierMask = .option
+            }
+            sub.addItem(entry)
+        }
         return item
     }
 
-    /// "Project ▸" — open/rename the project and add to its notes, plus its links (already loaded, no
+    /// The Project submenu, plus the focused project's own links underneath it (already loaded, so no
     /// extra IO).
     private func projectMenuItem() -> NSMenuItem {
-        let (item, sub) = submenu("Project", symbol: "folder")
-        let finder = actionItem("Open in Finder", #selector(openInFinder), symbol: "folder")
-        if let icon = AppIcons.menuIcon(.finder) { finder.image = icon }
-        sub.addItem(finder)
-        let obsidian = actionItem("Open in Obsidian", #selector(openInObsidian), symbol: "book.closed")
-        if let icon = AppIcons.menuIcon(.obsidian) { obsidian.image = icon }
-        sub.addItem(obsidian)
-        // Open in Cursor, only for code projects (a `src/` dir), matching the old Raycast behavior.
-        if let path = store.projectPath,
-           FileManager.default.fileExists(atPath: (path as NSString).appendingPathComponent("src")) {
-            sub.addItem(actionItem("Open in Cursor", #selector(openInCursor), symbol: "chevron.left.forwardslash.chevron.right"))
-        }
-        sub.addItem(.separator())
-        sub.addItem(actionItem("Open Project Window", #selector(showPanel), symbol: "doc.text"))
-        sub.addItem(actionItem("Rename Project…", #selector(renameProject), symbol: "square.and.pencil"))
-        sub.addItem(actionItem("Add Session Note…", #selector(addSessionNote), symbol: "note.text"))
-        sub.addItem(actionItem("Add Link…", #selector(addLink), symbol: "link"))
+        let item = commandSubmenu(.project, title: "Project", symbol: "folder")
         let links = linkItems()
-        if !links.isEmpty {
+        if !links.isEmpty, let sub = item.submenu {
             sub.addItem(.separator())
             sub.addItem(disabledItem("Links"))
             links.forEach { sub.addItem($0) }
         }
         return item
+    }
+
+    private func addMenuItem() -> NSMenuItem {
+        commandSubmenu(.add, title: "Add", symbol: "plus")
+    }
+
+    /// The real app's icon for the commands that hand off to one.
+    private func appIcon(for command: PMCommand) -> NSImage? {
+        switch command {
+        case .openInFinder: return AppIcons.menuIcon(.finder)
+        case .openInObsidian: return AppIcons.menuIcon(.obsidian)
+        case .openInEditor:
+            guard let bundleID = CodeEditor.resolvedBundleID,
+                  let url = CodeEditor.url(for: bundleID) else { return nil }
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = NSSize(width: 16, height: 16)
+            return icon
+        default: return nil
+        }
     }
 
     /// "Switch Project ▸" — a few recents for quick switching, then out to the project window's own
@@ -335,8 +352,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         if !recents.isEmpty { sub.addItem(.separator()) }
         sub.addItem(actionItem("All Projects…", #selector(browseAllProjects), symbol: "magnifyingglass"))
-        sub.addItem(actionItem("New Project…", #selector(newProject), symbol: "plus.square"))
-        sub.addItem(actionItem("Settings…", #selector(openSettings), symbol: "gearshape"))
+        sub.addItem(actionItem(PMCommand.newProject.title, #selector(newProject), symbol: PMCommand.newProject.symbol))
+        sub.addItem(actionItem(PMCommand.settings.title, #selector(openSettings), symbol: PMCommand.settings.symbol))
         return item
     }
 
@@ -442,7 +459,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 let label = (entry.label ?? link.label ?? "").trimmingCharacters(in: .whitespaces)
                 let host = prettyHost(raw)
                 let item = actionItem(truncate(label.isEmpty ? host : label, 40), #selector(openLink(_:)), symbol: "link")
-                if let favicon = faviconCache[host] { item.image = favicon }   // cached; else keeps the link glyph
+                // Whatever's arrived; anything still in flight keeps the link glyph until next open.
+                if let favicon = FaviconLoader.shared.menuIcon(for: host) { item.image = favicon }
                 item.representedObject = url
                 if #available(macOS 14.4, *), !label.isEmpty, host != label { item.subtitle = host }
                 items.append(item)
@@ -462,29 +480,31 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: Async enrichment (link favicons)
 
-    /// Fetches favicons for the focused project's link hosts once each, from the linked host's own
-    /// `/favicon.ico` (no third-party favicon service). Cached for the app's lifetime.
+    /// Ask `FaviconLoader` for the focused project's link hosts, so the icons are in hand by the time
+    /// the menu is built.
+    ///
+    /// This used to be a second fetcher living here, with its own cache, its own five-second timeout
+    /// and its own record of what had already failed — which meant the menu and the project window
+    /// could disagree about which links had icons, and each one's misses taught the other nothing. The
+    /// menu can't await anything (`menuNeedsUpdate` is synchronous), so the split is warm here, read
+    /// the cache there.
     private func warmFavicons() {
-        guard let links = store.notes?.links else { return }
+        FaviconLoader.shared.warm(hosts: linkHosts())
+    }
+
+    /// Every distinct host named by the focused project's links.
+    private func linkHosts() -> Set<String> {
+        guard let links = store.notes?.links else { return [] }
         var hosts = Set<String>()
         for link in links {
             for entry in [link] + (link.children ?? []) {
-                guard let raw = entry.url?.trimmingCharacters(in: .whitespaces), raw.lowercased().hasPrefix("http") else { continue }
+                guard let raw = entry.url?.trimmingCharacters(in: .whitespaces),
+                      raw.lowercased().hasPrefix("http") else { continue }
                 let host = prettyHost(raw)
                 if !host.isEmpty { hosts.insert(host) }
             }
         }
-        for host in hosts where !faviconTried.contains(host) {
-            faviconTried.insert(host)
-            guard let url = URL(string: "https://\(host)/favicon.ico") else { continue }
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 5
-            URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-                guard let data, !data.isEmpty, let image = NSImage(data: data) else { return }
-                image.size = NSSize(width: 16, height: 16)
-                DispatchQueue.main.async { Log.write("MENU favicon done \(host)"); self?.faviconCache[host] = image }
-            }.resume()
-        }
+        return hosts
     }
 
     // MARK: Item builders
@@ -517,78 +537,29 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         item.setValue(NSNumber(value: 1), forKey: "preferredImageVisibility")
     }
 
-    /// A menu item that summons the focus panel with one of its editors open.
-    private func editorItem(_ title: String, kind: EditorTarget.Kind,
-                            position: TaskInsertPosition = .child, symbol: String?) -> NSMenuItem {
-        let item = actionItem(title, #selector(openFocusEditor(_:)), symbol: symbol)
-        item.representedObject = FocusEditorCommand(kind: kind, position: position)
-        item.isEnabled = store.focusedTodo != nil || store.openTodos.first != nil
-        return item
-    }
-
     // MARK: Actions
 
-    /// What an Add ▸ item carries. A boxed value rather than the request itself, so the menu doesn't
-    /// mint request ids for commands nobody chose.
-    private final class FocusEditorCommand: NSObject {
-        let kind: EditorTarget.Kind
-        let position: TaskInsertPosition
-        init(kind: EditorTarget.Kind, position: TaskInsertPosition) {
-            self.kind = kind
-            self.position = position
-        }
-    }
-
-    @objc private func openFocusEditor(_ sender: NSMenuItem) {
-        guard let command = sender.representedObject as? FocusEditorCommand else { return }
-        FocusPanelController.shared.show(editor: command.kind, position: command.position)
+    /// Every command item in the dropdown, through the one dispatcher the menu bar uses. The command
+    /// rides on `representedObject` as its raw value — see `commandSubmenu`.
+    @objc private func runCommand(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let command = PMCommand(rawValue: raw) else { return }
+        PMCommandRunner.run(command, store: store)
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
     }
 
-    @objc private func openInObsidian() { ObsidianLink.open(store: store) }
-
-    @objc private func renameProject() {
-        guard let name = store.projectName, let key = store.projectKey else { return }
-        // Archived or not is a question about where the folder lives, which the key already answers.
-        let isArchived = (try? loadConfigAndPaths()).map { key.hasPrefix("\($0.1.archivePath):") } ?? false
-        ProjectPrompts.rename(projectNamed: name, isArchived: isArchived)
-    }
-
-    /// Start (or jump to) the current session in the project window — the note goes in the notes, so this
-    /// opens the place that edits them rather than offering a second, smaller editor for the same text.
-    @objc private func addSessionNote() {
-        WindowManager.shared.openFocusedProject().newSession(nil)
-    }
-
-    @objc private func addLink() { ProjectPrompts.addLink(store: store) }
-
     @objc private func browseAllProjects() {
         WindowManager.shared.openFocusedProject().revealProjectList()
     }
 
-    @objc private func newProject() {
-        ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
-    }
+    @objc private func newProject() { PMCommandRunner.run(.newProject, store: store) }
 
-    @objc private func openInFinder() {
-        guard let path = store.projectPath else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-    }
-
-    @objc private func openInCursor() {
-        guard let path = store.projectPath else { return }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        p.arguments = ["-a", "Cursor", path]
-        try? p.run()
-    }
-
-    @objc private func diveIn() { store.diveIn() }
-    @objc private func completeFocused() { if let f = store.focusedTodo { store.complete(f) } }
-    @objc private func undoLast() { store.undoLast() }
+    @objc private func diveIn() { PMCommandRunner.run(.diveIn, store: store) }
+    @objc private func completeFocused() { PMCommandRunner.run(.complete, store: store) }
+    @objc private func undoLast() { PMCommandRunner.run(.undoLast, store: store) }
     @objc private func focusTask(_ sender: NSMenuItem) { if let t = sender.representedObject as? Todo { store.focus(t) } }
     @objc private func switchProject(_ sender: NSMenuItem) { if let k = sender.representedObject as? String { store.setFocusedProject(key: k) } }
     @objc private func showPanel() { onShowPanel() }
@@ -611,7 +582,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
-/// DIAGNOSTIC ONLY: traces submenu lifecycle to pm-mac.log to pin down the menu-close-on-hover bug.
+/// Traces submenu lifecycle to pm-mac.log — the menu-close-on-hover class of bug is invisible without
+/// it, since the thing that goes wrong is a menu that has already closed by the time you could look.
+///
+/// Every one of these is per *highlight*, so it writes a line for each row the pointer crosses. That's
+/// the right granularity for the bug and the wrong one for a log that's always on, which is why `Log`
+/// is switched off unless a debug build, `PM_LOG` or `PMLogEnabled` asks for it — see `Log.isEnabled`.
 final class SubmenuLogger: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) { Log.write("SUB willOpen \(menu.title)") }
     func menuDidClose(_ menu: NSMenu) { Log.write("SUB didClose \(menu.title)") }

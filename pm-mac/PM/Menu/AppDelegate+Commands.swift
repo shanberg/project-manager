@@ -11,6 +11,19 @@ extension AppDelegate: NSMenuItemValidation {
         SettingsWindowController.shared.show()
     }
 
+    /// Help ▸ PM Help. The documentation lives in the repository and is maintained there; a bundled
+    /// help book would be a second copy to keep true.
+    @objc func openHelp() {
+        guard let url = URL(string: "https://github.com/shanberg/project-manager#readme") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Help ▸ Keyboard Shortcuts. Every global shortcut here is rebindable and most ship unbound, so
+    /// the honest answer to "what are the keys" is the pane that holds them rather than a printed list.
+    @objc func openShortcutsSettings() {
+        SettingsWindowController.shared.show(selecting: .shortcuts)
+    }
+
     @objc func newWindow() {
         WindowManager.shared.open(projectKey: PMFiles.focusedProjectKey())
     }
@@ -73,25 +86,26 @@ extension AppDelegate: NSMenuItemValidation {
         UserDefaults.standard.set(raw, forKey: "PMPanelColorMode")
     }
 
-    // MARK: Task
+    // MARK: Task and Project
 
-    @objc func completeFocused() {
-        guard let focused = store.focusedTodo else { return }
-        store.complete(focused)
+    /// Every item in the Task and Project menus, run through the one shared dispatcher. The command
+    /// rides on `representedObject` as its raw value — see `MainMenu.domainMenuItem`.
+    @objc func runCommand(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let command = PMCommand(rawValue: raw) else { return }
+        PMCommandRunner.run(command, store: store)
     }
 
-    @objc func undoLastCompletion() {
-        store.undoLast()
-    }
+    /// The global shortcuts still bind to named methods rather than to `runCommand`, because a hotkey
+    /// has no menu item to carry a `representedObject` on. They go through the same runner, so a
+    /// command can't behave one way from the menu and another from the keyboard.
+    @objc func completeFocused() { PMCommandRunner.run(.complete, store: store) }
 
-    @objc func diveInCommand() {
-        store.diveIn()
-    }
+    @objc func undoLastCompletion() { PMCommandRunner.run(.undoLast, store: store) }
 
-    @objc func revealProject() {
-        guard let path = store.projectPath else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-    }
+    @objc func diveInCommand() { PMCommandRunner.run(.diveIn, store: store) }
+
+    @objc func revealProject() { PMCommandRunner.run(.openInFinder, store: store) }
 
     // MARK: Validation
 
@@ -115,18 +129,42 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleNotes):
             item.state = UserDefaults.standard.bool(forKey: "PMPanelDetailsExpanded") ? .on : .off
             return store.projectName != nil
+        // Every Task and Project item, answered from the one availability table.
+        case #selector(runCommand(_:)):
+            guard let raw = item.representedObject as? String,
+                  let command = PMCommand(rawValue: raw) else { return false }
+            return command.isAvailable(in: PMCommand.Context(store: store))
         case #selector(completeFocused):
-            return store.focusedTodo != nil
+            return PMCommand.complete.isAvailable(in: PMCommand.Context(store: store))
         case #selector(undoLastCompletion):
-            return store.lastCompletedKey != nil
+            return PMCommand.undoLast.isAvailable(in: PMCommand.Context(store: store))
         case #selector(diveInCommand):
-            return store.nextTodo != nil
+            return PMCommand.diveIn.isAvailable(in: PMCommand.Context(store: store))
         case #selector(revealProject):
-            return store.projectPath != nil
+            return PMCommand.openInFinder.isAvailable(in: PMCommand.Context(store: store))
         case #selector(closeAllWindows):
             return !WindowManager.shared.controllers.isEmpty
         default:
             return true
+        }
+    }
+}
+
+/// The Task and Project menus, refreshed as they open.
+///
+/// Only the titles: availability is `validateMenuItem`'s job and AppKit runs that for every item on
+/// its own. What needs a delegate is the one command whose *name* depends on the machine — Open in
+/// Editor reads whichever app Settings ▸ Projects names, and a menu that said "Open in Editor" would
+/// be making you press it to find out which.
+///
+/// The context is built once here rather than per item, because two of its facts touch the filesystem.
+extension AppDelegate: NSMenuDelegate {
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        let context = PMCommand.Context(store: store)
+        for item in menu.items {
+            guard let raw = item.representedObject as? String,
+                  let command = PMCommand(rawValue: raw) else { continue }
+            item.title = command.title(in: context)
         }
     }
 }

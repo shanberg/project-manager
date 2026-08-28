@@ -146,8 +146,14 @@ final class AreaCreateTests: XCTestCase {
     func testRenamingAnAreaMovesTheWholeName() throws {
         let (config, paths, root) = try makeVault()
         defer { try? FileManager.default.removeItem(atPath: root) }
+        let savedConfigHome = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
         setenv("PM_CONFIG_HOME", root, 1)
-        defer { unsetenv("PM_CONFIG_HOME") }
+        // Restore rather than unset: unsetting drops every later test in the bundle back onto the
+        // developer's real ~/.config/pm, which is how a test write reaches the real vault.
+        defer {
+            if let saved = savedConfigHome { setenv("PM_CONFIG_HOME", saved, 1) }
+            else { unsetenv("PM_CONFIG_HOME") }
+        }
         try saveConfig(PmConfig(activePath: paths.activePath, archivePath: paths.archivePath,
                                 areasPath: paths.areasPath, domains: config.domains,
                                 subfolders: config.subfolders))
@@ -166,8 +172,14 @@ final class AreaCreateTests: XCTestCase {
     func testRenamingAProjectStillKeepsItsPrefix() throws {
         let (config, paths, root) = try makeVault()
         defer { try? FileManager.default.removeItem(atPath: root) }
+        let savedConfigHome = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
         setenv("PM_CONFIG_HOME", root, 1)
-        defer { unsetenv("PM_CONFIG_HOME") }
+        // Restore rather than unset: unsetting drops every later test in the bundle back onto the
+        // developer's real ~/.config/pm, which is how a test write reaches the real vault.
+        defer {
+            if let saved = savedConfigHome { setenv("PM_CONFIG_HOME", saved, 1) }
+            else { unsetenv("PM_CONFIG_HOME") }
+        }
         try saveConfig(PmConfig(activePath: paths.activePath, archivePath: paths.archivePath,
                                 areasPath: paths.areasPath, domains: config.domains,
                                 subfolders: config.subfolders))

@@ -103,6 +103,32 @@ final class ProjectViewState: ObservableObject {
 
     func requestFind() { findRequest &+= 1 }
 
+    /// Whether a search is narrowing the list right now — the bar open *and* something typed into it.
+    ///
+    /// Published up out of the pane because the window validates Find Next / Find Previous, and "is
+    /// there anything to step through" is a question only the content can answer. `findVisible` alone
+    /// would be the wrong answer: an open bar with an empty field filters nothing, so there are no
+    /// matches to be next in.
+    @Published var findIsFiltering = false
+
+    /// Bumped by Edit ▸ Find ▸ Find Next / Find Previous, with the direction alongside. Same counter
+    /// pattern as `newTaskRequest`; the direction rides separately rather than in the counter so the
+    /// two consecutive ⌘Gs that mean the same thing still read as two distinct requests.
+    @Published var findStepRequest = 0
+    private(set) var findStepDirection = 1
+
+    func requestFindStep(_ direction: Int) {
+        findStepDirection = direction
+        findStepRequest &+= 1
+    }
+
+    /// Bumped by Edit ▸ Find ▸ Use Selection for Find (⌘E). Only ever reaches the window when no text
+    /// field has the keyboard — an `NSTextView` answers `performFindPanelAction:` itself and claims it
+    /// first, which is the behaviour a Mac user expects while they're typing.
+    @Published var useSelectionForFindRequest = 0
+
+    func requestUseSelectionForFind() { useSelectionForFindRequest &+= 1 }
+
     /// Bumped by File ▸ All Projects…, which reveals the sidebar and puts the keyboard in it. Same
     /// counter pattern as `newTaskRequest`: the sidebar's focus is a `@FocusState` it owns, so the only
     /// way in from outside is to ask.

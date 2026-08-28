@@ -314,14 +314,78 @@ final class ApiTests: XCTestCase {
         for spec in ApiRegistry.actions where spec.tier != .affordance {
             // Given every field a value, nothing should be reported missing. What fails here is a
             // field the validator can't see, not a field the caller didn't send.
+            //
+            // Dry run, because this is checking validation and nothing past it. `validate` runs
+            // ahead of the tier check and the write, so the flag costs this test no coverage — and
+            // without it the loop reaches `project.create` with a title and a domain, which
+            // succeeds against whatever vault the ambient config points at. That is not
+            // hypothetical: it created a `W-0NN t` project in the real vault on every run.
             do {
-                _ = try performApi(spec.name, input)
+                _ = try performApi(spec.name, input, options: ApiOptions(dryRun: true))
             } catch let error as ApiError where error.code == .missingField {
                 XCTFail("\(spec.name): \(error.message)")
             } catch {
                 // Anything else means validation passed and the action tried to run, which is all
-                // this is checking — there's no project on disk here.
+                // this is checking.
             }
+        }
+    }
+
+    /// The sweep above hands every action a valid title and domain, so `project.create` doesn't just
+    /// validate — it runs, and it runs against whatever config the process is pointed at. Unnoticed,
+    /// that put a `W-0NN t` project in the developer's real vault on every `swift test`.
+    ///
+    /// This pins the property that made it a leak rather than a bug: the sweep writes nothing. It
+    /// runs the same loop against a vault of its own and asserts the vault stays empty, so dropping
+    /// the `dryRun` flag fails here instead of showing up in someone's Documents folder weeks later.
+    func testTheValidationSweepWritesNothing() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let active = root.appendingPathComponent("Projects")
+        let archive = root.appendingPathComponent("Archive")
+        let areas = root.appendingPathComponent("Areas")
+        for dir in [active, archive, areas] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let savedConfigHome = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
+        setenv("PM_CONFIG_HOME", root.path, 1)
+        defer {
+            if let saved = savedConfigHome { setenv("PM_CONFIG_HOME", saved, 1) }
+            else { unsetenv("PM_CONFIG_HOME") }
+        }
+        try saveConfig(PmConfig(activePath: active.path, archivePath: archive.path,
+                                areasPath: areas.path, domains: ["W": "Work"],
+                                subfolders: ["docs"]))
+
+        var input = ApiInput()
+        input.project = "p"
+        input.text = "t"
+        input.title = "t"
+        input.domain = "W"
+        input.prose = "n"
+        input.label = "l"
+        input.session = "0"
+        input.key = "summary"
+        input.value = .string("v")
+        input.query = "q"
+        input.entry = "e"
+        input.now = "2026-08-22"
+        input.due = "2026-09-01"
+        input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
+        input.folder = "f"
+        input.kind = "project"
+
+        for spec in ApiRegistry.actions where spec.tier != .affordance {
+            _ = try? performApi(spec.name, input, options: ApiOptions(dryRun: true))
+        }
+
+        for dir in [active, archive, areas] {
+            let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+                .filter { $0 != ".DS_Store" }
+            XCTAssertEqual(left, [],
+                           "the validation sweep wrote \(left) into \(dir.lastPathComponent) — it must be a dry run")
         }
     }
 

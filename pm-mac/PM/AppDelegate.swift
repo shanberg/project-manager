@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .quickFindTask: { QuickBarController.shared.toggle(mode: .findTask) },
             .quickGoToProject: { QuickBarController.shared.toggle(mode: .goToProject) },
             .quickNote: { QuickBarController.shared.toggle(mode: .note) },
+            .writeSessionNoteFullScreen: { SessionNoteController.shared.toggle() },
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
             .openProjectWindow: { [weak self] in self?.newWindow() },
             .newProject: { [weak self] in self?.newProject() },

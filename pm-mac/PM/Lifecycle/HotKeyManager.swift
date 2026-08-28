@@ -13,6 +13,8 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     case quickFindTask
     case quickGoToProject
     case quickNote
+    /// Today's session note, full screen. See `SessionNoteController`.
+    case writeSessionNoteFullScreen
     case toggleFocusPanel
     case openProjectWindow
     case newProject
@@ -29,6 +31,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         case .quickFindTask: return "Find a Task"
         case .quickGoToProject: return "Go to Project"
         case .quickNote: return "Write a Session Note"
+        case .writeSessionNoteFullScreen: return "Write a Session Note Full Screen"
         case .toggleFocusPanel: return "Show or Hide Focus Panel"
         case .openProjectWindow: return "Open Focused Project"
         case .newProject: return "New Project…"
@@ -59,6 +62,13 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         // whole point of a note surface in a panel is that it's available from inside the meeting.
         case .quickNote:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_N), carbonModifiers: UInt32(controlKey | optionKey))
+        // ⌃⌥⇧N: the same key as the quick bar's note, with a shift on it. Bound out of the box like the
+        // other four, and deliberately next to `quickNote` rather than somewhere of its own — the two
+        // are the same errand at two sizes, and a shortcut whose relationship to another one is visible
+        // in the keys is one you can guess at rather than having to look up.
+        case .writeSessionNoteFullScreen:
+            return KeyCombo(keyCode: UInt32(kVK_ANSI_N),
+                            carbonModifiers: UInt32(controlKey | optionKey | shiftKey))
         // ⌃⌥P, the panel's summon shortcut since the Tauri build.
         case .toggleFocusPanel:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_P), carbonModifiers: UInt32(controlKey | optionKey))

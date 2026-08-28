@@ -18,3 +18,10 @@ DerivedData/
 # raycast dev wrapper: compiled scheme helper
 raycast-extension/scripts/.cache/
 pm-swift/build/
+
+# Throwaway vault for manual testing (scripts/dev-vault.sh) and its debug build
+.dev-vault/
+pm-mac/.build-dev/
+
+# Scratch vault used by manual testing
+scratch-note/

@@ -529,6 +529,25 @@ final class PMStore: ObservableObject {
         }
     }
 
+    /// Paste (or drop) a block of tasks in after `anchor`'s whole subtree, at the anchor's own depth.
+    /// With no anchor they go at the end of the current session.
+    ///
+    /// One `mutate`, so a paste of nine lines is one write and one ⌘Z — the same rule `deleteTasks`
+    /// follows, and the reason this is a `PmLib` splice rather than a run of `task.add` calls: after
+    /// the first of those the store's in-memory tasks no longer describe the document the second would
+    /// have to anchor against, and each would bank its own undo step.
+    func pasteTasks(_ block: [PastedTask], after anchor: Todo?, then: (@MainActor () -> Void)? = nil) {
+        guard !block.isEmpty else { return }
+        let session = anchor == nil ? (todaySessionIndex ?? notes?.sessions.indices.last) : nil
+        mutate(then: then) { project in
+            try PmLib.insertTaskBlock(project: project,
+                                      block: block,
+                                      anchorSessionIndex: anchor?.sessionIndex,
+                                      anchorLineIndex: anchor?.lineIndex,
+                                      sessionIndex: session)
+        }
+    }
+
     /// Move a task (and its subtree) to the end of a session, at top level. What a drop on a session
     /// with no tasks means: there's no task there to sit beside, so the session is the whole address.
     func moveSubtree(_ todo: Todo, toSession index: Int) {
@@ -856,8 +875,8 @@ final class PMStore: ObservableObject {
     }
 
     /// Replace the note of the session `ref` names.
-    func setSessionNote(_ ref: SessionRef, prose: String) {
-        mutate { try PmLib.setSessionNote(project: $0, session: ref, prose: prose) }
+    func setSessionNote(_ ref: SessionRef, prose: String, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try PmLib.setSessionNote(project: $0, session: ref, prose: prose) }
     }
 
     /// Append a task to the session `ref` names.

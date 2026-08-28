@@ -52,7 +52,7 @@ enum QuickBarMode: CaseIterable {
         // what the *rest* of the line is for, which works when the rest of the line is a query. Prose
         // has no character it can't legitimately begin with, and a note that silently lost its first
         // one to a mode switch would be the field editing you. Reached by ⌃⌥N, by ⇧⏎ out of a capture
-        // line, and by `>note` — three deliberate keystrokes, none of them a character you might type.
+        // line, and by ⇥ round the ring — three deliberate keystrokes, none a character you might type.
         case .note: return nil
         }
     }
@@ -99,16 +99,20 @@ enum QuickBarMode: CaseIterable {
     /// find a line, find a project, do something to one. A mode you reached by pressing ⇥ once too
     /// many times is three more presses from home, which is the whole reason the cycle is short.
     ///
-    /// Note is deliberately *not* in the cycle. Two reasons, and either would do: ⇥ inside the editor
-    /// already means indent-this-list-item, which is worth more there than a mode switch; and turning
-    /// a launcher into a writing surface is too large a change to be one press away from a key people
-    /// hit by accident. Its own value here is what Escape falls back to.
+    /// Note sits at the end of the ring, after the acting mode and before the writing one comes round
+    /// again. It used to be outside the cycle, on the grounds that ⇥ inside the editor already means
+    /// indent-this-list-item and that turning a launcher into a writing surface shouldn't be one
+    /// accidental press away. The first of those is still true and is unaffected — ⇥ only switches
+    /// modes while the *field* has the keyboard, and in note mode it doesn't; the editor does, and it
+    /// indents. The second bought a mode nobody could find: the rule "⇥ cycles the modes" was simply
+    /// false, and the one mode it excluded was the one with no sigil to discover it by. Four presses
+    /// from home is not an accident.
     var next: QuickBarMode {
         switch self {
         case .capture: return .findTask
         case .findTask: return .goToProject
         case .goToProject: return .command
-        case .command: return .capture
+        case .command: return .note
         case .note: return .capture
         }
     }
@@ -582,8 +586,25 @@ final class QuickBarModel: ObservableObject {
             guard noteText != oldValue else { return }
             receipt = nil
             rebuild()
+            guard !isApplyingProse else { return }
             onNoteChanged(noteText)
         }
+    }
+
+    /// True while `applyNoteProse` is filling the editor from disk. What comes *out* of the editor is
+    /// a keystroke to be written through; what goes *in* from the file is not, and echoing it back
+    /// would schedule a write of the text we just read.
+    private var isApplyingProse = false
+
+    /// Put today's prose in the editor — the live note handing over what it read. Not a keystroke.
+    func applyNoteProse(_ prose: String) {
+        guard noteText != prose else { return }
+        isApplyingProse = true
+        noteText = prose
+        isApplyingProse = false
+        // The caret belongs at the end of what's already there, so typing continues the note rather
+        // than landing wherever the editor last left it.
+        noteFocusToken += 1
     }
 
     /// Where the note goes, when that isn't the focused project.
@@ -682,6 +703,10 @@ final class QuickBarModel: ObservableObject {
     /// one of the two, since it's already in one folder or the other.
     @Published var focusedProjectIsArchived = false { didSet { if focusedProjectIsArchived != oldValue { rebuild() } } }
 
+    /// The focused project's folder on disk. What the commands that hand off to another app need to
+    /// know they have somewhere to send it — see `PMCommand.Context`.
+    @Published var focusedProjectPath: String? { didSet { if focusedProjectPath != oldValue { rebuild() } } }
+
     /// The focused project's key, for ranking: a task in the project you're already in wins a tie
     /// against the same words somewhere else.
     @Published var focusedProjectKey: String? { didSet { if focusedProjectKey != oldValue { rebuild() } } }
@@ -755,6 +780,13 @@ final class QuickBarModel: ObservableObject {
     /// The writing surface opening, however it was asked for. The controller answers with the draft
     /// belonging to wherever the note is going.
     var onEnterNote: (CaptureTarget?) -> Void = { _ in }
+    /// ⌃⌘F in the writing surface: take this note full screen. The controller owns the presentation —
+    /// the model's part is only to know that the key was pressed and that the mode allows it.
+    var onEnterImmersive: () -> Void = {}
+
+    /// The writing surface is closing. Raised before the text is cleared, so the controller can write
+    /// what was on screen — see `QuickBarController.endNote`.
+    var onLeaveNote: () -> Void = {}
 
     // MARK: Rows
 
@@ -810,6 +842,13 @@ final class QuickBarModel: ObservableObject {
         enterNote(text: seed.isEmpty ? "" : seed + "\n", target: reading.target)
     }
 
+    /// Hand this note to the full-screen surface. Refused outside note mode: there is no prose to hand
+    /// over, and the key belongs to the window everywhere else.
+    func enterImmersive() {
+        guard mode == .note else { return }
+        onEnterImmersive()
+    }
+
     /// What Escape does in note mode: back to the launcher, empty-handed.
     ///
     /// Not a dismiss. Escape in a writing surface means "out of the writing surface", and the bar has
@@ -817,8 +856,6 @@ final class QuickBarModel: ObservableObject {
     /// is what was wanted. Nothing is lost on the way: the controller has been writing the draft down
     /// since the first keystroke, and puts it back on the next summon.
     func leaveNote() {
-        noteText = ""
-        noteTarget = nil
         switchTo(.capture, text: "")
     }
 
@@ -945,17 +982,13 @@ final class QuickBarModel: ObservableObject {
 
     private func buildRows() -> RowSet {
         switch mode {
-        // One row, never drawn.
+        // No rows at all.
         //
-        // The note surface has no list to choose from — there is one destination and ⌘↩ goes to it —
-        // and the view knows not to render one. But the row is what the controller runs: `isRunnable`
-        // gates an empty note, `spokenDescription` is what VoiceOver reads, and `apply(.sessionNote…)`
-        // is reached the same way it is from the capture list. A second path to the same write would
-        // be a second place for it to go wrong.
+        // There used to be exactly one, never drawn, which the ⌘↩ commit ran. The surface is live now
+        // — every keystroke is already on disk — so there is nothing to commit and nothing for a row
+        // to be. Escape leaves; ⌃⌘F makes it bigger; neither is a decision about the prose.
         case .note:
-            let text = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return RowSet(rows: [.capture(placement: .sessionNote, text: text, due: nil,
-                                          anchor: nil, target: noteTarget)])
+            return RowSet(rows: [])
 
         case .capture:
             // Somewhere to put it: the project you're in, or the one the line named. With neither,
@@ -976,7 +1009,7 @@ final class QuickBarModel: ObservableObject {
             return RowSet(rows: rows)
 
         case .command:
-            let available = QuickBarCommand.allCases.filter(isAvailable)
+            let available = PMCommand.offeredInQuickBar.filter(isAvailable)
             // A verb with text after it is one command with one argument, not a list to choose from —
             // you already named it.
             if let parsed = QuickBarCommand.split(argument, in: available) {
@@ -1043,16 +1076,27 @@ final class QuickBarModel: ObservableObject {
 
     /// Whether a command has anything to act on right now. What isn't offered can't be run into a
     /// no-op from a bar you can't see the consequences of.
-    private func isAvailable(_ command: QuickBarCommand) -> Bool {
-        switch command {
-        case .newProject, .settings: return true
-        case .complete, .editTask, .setDue, .wrapTask: return focusedTaskText != nil
-        case .undoLast: return canUndoCompletion
-        case .diveIn: return hasNextTask
-        case .archiveProject: return focusedProjectName != nil && !focusedProjectIsArchived
-        case .unarchiveProject: return focusedProjectName != nil && focusedProjectIsArchived
-        default: return focusedProjectName != nil
-        }
+    ///
+    /// Answered by the shared table rather than by a second switch here — this used to be the third
+    /// independent opinion on the question, alongside the menu bar's and the menu extra's.
+    private func isAvailable(_ command: PMCommand) -> Bool {
+        command.isAvailable(in: commandContext)
+    }
+
+    /// The facts the table asks for, read off this model.
+    ///
+    /// Archived-ness comes through the override rather than the store's key: the bar already tracked
+    /// it, and re-deriving it would mean a config read per command per keystroke.
+    private var commandContext: PMCommand.Context {
+        var context = PMCommand.Context()
+        context.hasProject = focusedProjectName != nil
+        context.hasFocusedTask = focusedTaskText != nil
+        context.hasNextTask = hasNextTask
+        context.canUndoCompletion = canUndoCompletion
+        context.hasPath = focusedProjectPath != nil
+        context.projectPath = focusedProjectPath
+        context.isArchivedOverride = focusedProjectIsArchived
+        return context
     }
 
     /// How many rows the bar will show. Enough to choose from, few enough to read without scrolling —
@@ -1128,9 +1172,23 @@ final class QuickBarModel: ObservableObject {
     /// of it is a different mode. Goes through `baseMode` rather than writing a sigil, so deleting
     /// your way back through the text can't strand you somewhere you never asked to be.
     func switchTo(_ next: QuickBarMode, text: String) {
+        // Leaving the writing surface: the note is closed here, before its text is cleared, so what
+        // gets written is what was on screen. Every way out goes through this — Escape, ⇥ round the
+        // ring, an empty state's row — so there is one place the surface can end.
+        if mode == .note, next != .note {
+            onLeaveNote()
+            noteText = ""
+            noteTarget = nil
+        }
         query = text
         baseMode = next
         selection = 0
+        // Entering it: the surface has to be filled from disk, which is the controller's to do. ⇥ round
+        // the ring reaches note mode the same way ⌃⌥N does, so it has to open the same way too.
+        if next == .note {
+            noteFocusToken += 1
+            onEnterNote(nil)
+        }
     }
 
     /// Take the ghosted completion into the field. Returns whether there was one to take.
@@ -1168,10 +1226,9 @@ final class QuickBarModel: ObservableObject {
         case .capture: return capturePreview()
         case .command: return commandPreview()
         case .findTask, .goToProject: return nil
-        // The note surface has `noteTail` instead. A five-line diagram of a session is the right answer
-        // to "where would this line go" and the wrong one to "what am I adding to": once the thing
-        // being written is ten lines of prose, the useful context is the prose it joins, in its own
-        // words, not a picture of the tasks underneath it.
+        // The note surface needs no preview: it holds the note itself. A five-line diagram of a
+        // session answers "where would this line go", which is a question about a line — and there
+        // isn't one here, there's the prose, and you can see it.
         case .note: return nil
         }
     }
@@ -1182,14 +1239,7 @@ final class QuickBarModel: ObservableObject {
     /// amount for the same reason: you are continuing a train of thought, and the thought you are
     /// continuing is the last one. The whole note is a scroll away in the window; this is the part that
     /// changes what you're about to write.
-    var noteTail: [String] {
-        guard mode == .note, noteTarget == nil else { return [] }
-        guard let existing = todayNote?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !existing.isEmpty else { return [] }
-        return existing.split(separator: "\n").map(String.init)
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .suffix(2)
-    }
+
 
     private func capturePreview() -> SessionPreview? {
         guard let placement = previewPlacement else { return nil }

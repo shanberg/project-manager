@@ -26,7 +26,8 @@ enum MainMenu {
         mainMenu.addItem(fileMenuItem(target: target))
         mainMenu.addItem(editMenuItem())
         mainMenu.addItem(viewMenuItem(target: target))
-        mainMenu.addItem(taskMenuItem(target: target))
+        mainMenu.addItem(domainMenuItem(.task, title: "Task", target: target))
+        mainMenu.addItem(domainMenuItem(.project, title: "Project", target: target))
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
@@ -35,6 +36,7 @@ enum MainMenu {
 
         let helpItem = NSMenuItem()
         let helpMenu = NSMenu(title: "Help")
+        fillHelpMenu(helpMenu, target: target)
         helpItem.submenu = helpMenu
         mainMenu.addItem(helpItem)
 
@@ -156,19 +158,63 @@ enum MainMenu {
         return item
     }
 
-    /// Edit ▸ Find. A submenu with one item today, but it's the submenu Mac users open looking for
-    /// search — flattening ⌘F up into Edit would put it somewhere nobody looks for it.
+    /// Edit ▸ Find — the submenu Mac users open looking for search. Flattening ⌘F up into Edit would
+    /// put it somewhere nobody looks for it.
     ///
-    /// `performFindPanelAction:` is the standard Find selector, so it routes through the responder
-    /// chain to whichever window is front (see `ProjectWindowController`) and disables itself when no
-    /// window can answer it.
+    /// `performFindPanelAction:` is the standard Find selector, so all four items share it and are
+    /// told apart by their `tag`, which is an `NSTextFinder.Action` raw value. That's AppKit's own
+    /// convention for this menu, and it's what lets a focused text view claim ⌘E for its own selection
+    /// before the window ever sees it. The action routes through the responder chain to whichever
+    /// window is front (see `ProjectWindowController`), which validates each item for itself — Next and
+    /// Previous stay dim until a search is actually narrowing the list.
     private static func findMenuItem() -> NSMenuItem {
         let item = NSMenuItem()
         let menu = NSMenu(title: "Find")
-        menu.addItem(withTitle: "Find…", action: Selector(("performFindPanelAction:")), keyEquivalent: "f")
+        let action = Selector(("performFindPanelAction:"))
+
+        func add(_ title: String, _ finderAction: NSTextFinder.Action, key: String,
+                 modifiers: NSEvent.ModifierFlags = [.command]) {
+            let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+            entry.tag = finderAction.rawValue
+            entry.keyEquivalentModifierMask = modifiers
+        }
+
+        add("Find…", .showFindInterface, key: "f")
+        // The find bar filters rather than highlighting in place, so "next match" means the next row
+        // of the narrowed list — see `ProjectView.stepFind`. ⌘G / ⇧⌘G either way: what the keys mean
+        // to the person pressing them is "show me the next one", and that's what they do.
+        add("Find Next", .nextMatch, key: "g")
+        add("Find Previous", .previousMatch, key: "g", modifiers: [.command, .shift])
+        menu.addItem(.separator())
+        // ⌘E. In a text field the field editor answers this and searches for what's selected there; in
+        // the task list the window answers and searches for the selected task's text.
+        add("Use Selection for Find", .setSearchString, key: "e")
+
         item.submenu = menu
         item.title = "Find"
         return item
+    }
+
+    // MARK: Help
+
+    /// Help ▸. It held nothing at all — so the menu contained only the system's search field, which
+    /// had no items to search and no help book behind it, and an app with a CLI, a URL scheme, an
+    /// Obsidian convention and a domain-numbering scheme is not one with nothing to explain.
+    ///
+    /// Two items rather than a help book: the documentation already exists and is already maintained
+    /// in the repository, and a bundled copy would be a second one to keep true. The shortcuts item is
+    /// here because every global shortcut in this app is rebindable, so "what are the keys" is a
+    /// question only the Shortcuts pane can answer.
+    private static func fillHelpMenu(_ menu: NSMenu, target: AppDelegate) {
+        let help = menu.addItem(withTitle: "PM Help", action: #selector(AppDelegate.openHelp),
+                                keyEquivalent: "?")
+        help.keyEquivalentModifierMask = [.command]
+        help.target = target
+        menu.addItem(.separator())
+        let shortcuts = menu.addItem(withTitle: "Keyboard Shortcuts",
+                                     action: #selector(AppDelegate.openShortcutsSettings),
+                                     keyEquivalent: "")
+        shortcuts.target = target
     }
 
     // MARK: View
@@ -214,22 +260,30 @@ enum MainMenu {
         return item
     }
 
-    // MARK: Task
+    // MARK: Task and Project
 
-    /// The domain menu — the actions the menubar item and the row context menus already offer, given a
-    /// home in the menu bar where they're discoverable and carry their shortcuts.
-    private static func taskMenuItem(target: AppDelegate) -> NSMenuItem {
+    /// The two domain menus, generated from `PMCommand`.
+    ///
+    /// They used to be one four-item Task menu written out by hand, while the menu extra's submenus and
+    /// the quick bar's `>` list each declared their own — so eleven commands the other two surfaces
+    /// offered had no home in the menu bar at all, and there was no Project menu despite a fully-formed
+    /// `Project ▸` submenu existing in the dropdown. Reading the table means a command added there
+    /// appears here without anyone remembering to come and add it, and means the name it appears under
+    /// is the same name every other surface uses.
+    private static func domainMenuItem(_ section: PMCommand.MenuSection, title: String,
+                                       target: AppDelegate) -> NSMenuItem {
         let item = NSMenuItem()
-        let menu = NSMenu(title: "Task")
-        add(menu, "Complete Focused Task", #selector(AppDelegate.completeFocused), target: target,
-            key: "\r", modifiers: [.command, .shift])
-        add(menu, "Undo Last Completion", #selector(AppDelegate.undoLastCompletion), target: target, key: "")
-        menu.addItem(.separator())
-        add(menu, "Dive In", #selector(AppDelegate.diveInCommand), target: target, key: "d",
-            modifiers: [.command, .shift])
-        menu.addItem(.separator())
-        add(menu, "Reveal Project in Finder", #selector(AppDelegate.revealProject), target: target,
-            key: "r", modifiers: [.command, .shift])
+        let menu = NSMenu(title: title)
+        // Validation and titles are live — see `AppDelegate.menuNeedsUpdate` — because a command's
+        // availability, and the editor command's name, depend on what's focused right now.
+        menu.delegate = target
+        for command in PMCommand.menu(section) {
+            if command.startsMenuGroup, menu.numberOfItems > 0 { menu.addItem(.separator()) }
+            let entry = add(menu, command.title, #selector(AppDelegate.runCommand(_:)), target: target,
+                            key: command.keyEquivalent?.key ?? "",
+                            modifiers: command.keyEquivalent?.modifiers ?? [.command])
+            entry.representedObject = command.rawValue
+        }
         item.submenu = menu
         return item
     }

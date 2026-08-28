@@ -346,14 +346,34 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         afterCurrentUpdate { [weak self] in self?.state.requestEditDetails() }
     }
 
-    /// Edit ▸ Find ▸ Find…. Opens the window's find bar and puts the cursor in it.
+    /// Edit ▸ Find. One selector for the whole submenu, dispatched on the item's tag — which is how
+    /// AppKit's own find menu works, and why `MainMenu` sets `NSTextFinder.Action` raw values as tags
+    /// rather than giving each item a selector of its own.
+    ///
+    /// Only reaches this window when nothing closer in the responder chain wants it. `NSTextView`
+    /// implements `performFindPanelAction:`, so while a field editor holds the keyboard ⌘E means "use
+    /// the text I selected" and never gets here — which is the behaviour a Mac user expects and comes
+    /// free from routing it this way.
     @objc func performFindPanelAction(_ sender: Any?) {
-        state.requestFind()
+        let tag = (sender as? NSMenuItem)?.tag ?? NSTextFinder.Action.showFindInterface.rawValue
+        switch NSTextFinder.Action(rawValue: tag) {
+        case .nextMatch: state.requestFindStep(1)
+        case .previousMatch: state.requestFindStep(-1)
+        case .setSearchString: state.requestUseSelectionForFind()
+        default: state.requestFind()
+        }
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(newTask(_:)), #selector(newSession(_:)), #selector(performFindPanelAction(_:)):
+        case #selector(performFindPanelAction(_:)):
+            guard store.projectName != nil else { return false }
+            // Next/Previous need matches to step between; the other two only need a project.
+            switch NSTextFinder.Action(rawValue: item.tag) {
+            case .nextMatch, .previousMatch: return state.findIsFiltering
+            default: return true
+            }
+        case #selector(newTask(_:)), #selector(newSession(_:)):
             return store.projectName != nil
         case #selector(newWindowForTab(_:)):
             // Nothing to open if every project is already on screen.

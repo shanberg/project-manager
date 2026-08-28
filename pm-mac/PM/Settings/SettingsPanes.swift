@@ -52,6 +52,8 @@ struct WindowsSettingsView: View {
     /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, because
     /// Raycast toggles them too.
     @State private var panelSettings = PanelSettings.load()
+    @AppStorage(ScreenDimSettings.quickBarDimsKey) private var quickBarDims = false
+    @AppStorage(ScreenDimSettings.strengthKey) private var dimStrength = ScreenDimSettings.defaultStrength
 
     var body: some View {
         Form {
@@ -80,7 +82,25 @@ struct WindowsSettingsView: View {
             } header: {
                 Text("Project Windows")
             } footer: {
-                Text("Project windows are normal Mac windows: resizable, tabbable, and remembered per project.")
+                Text("Project windows are normal Mac windows: resizable, tabbable, and reopened where you left them. Size and position belong to the window rather than to the project, so pointing one at a different project doesn't move or resize it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Dim the screen behind the quick bar", isOn: $quickBarDims)
+                Slider(value: $dimStrength, in: 0.1...0.7, step: 0.02) {
+                    Text("Dimming")
+                } minimumValueLabel: {
+                    Text("Subtle").font(.caption)
+                } maximumValueLabel: {
+                    Text("Strong").font(.caption)
+                }
+                .disabled(!quickBarDims)
+            } header: {
+                Text("Quick Bar")
+            } footer: {
+                Text("A scrim over your windows while the quick bar is up, to push the background back. It stays under the menu bar and clicks pass straight through it, so clicking away still dismisses the bar. Reduce Transparency takes it close to solid.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

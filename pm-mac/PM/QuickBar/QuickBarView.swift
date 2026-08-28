@@ -31,9 +31,8 @@ struct QuickBarView: View {
             } else {
                 field
             }
-            // Never in note mode: there is one destination and one key that goes to it, and a list of
-            // one you can't arrow within is a control pretending to be a choice. What ⌘↩ will do is
-            // said in the hint line instead. The row itself still exists — see `QuickBarModel.buildRows`.
+            // Never in note mode, which has no rows at all now that the surface is live and there is
+            // nothing to commit. See `QuickBarModel.buildRows`.
             if !model.rows.isEmpty, model.mode != .note {
                 Divider()
                 rowList
@@ -44,14 +43,6 @@ struct QuickBarView: View {
             if let preview = model.preview {
                 Divider()
                 previewBox(preview)
-            }
-            // What the note is being added to, in its own words. The prose equivalent of the ghost
-            // line: there it's your task drawn into a real session, here it's your paragraph following
-            // the real ones. Absent when today has no note yet, which is its own answer — you're
-            // starting one.
-            if !model.noteTail.isEmpty {
-                Divider()
-                noteTailBlock
             }
             // The receipt takes the hint's place rather than the whole bar's.
             //
@@ -131,7 +122,7 @@ struct QuickBarView: View {
          // which the frame is shorter than the text inside it. Every line typed restarted that curve,
          // and the whole time it ran the editor had something to scroll. The bar still animates for
          // everything the bar decides; the one thing you are writing changes size at once.
-         String(model.noteTail.count)]
+        ]
     }
 
     /// What moves the ghost, and nothing else.
@@ -258,37 +249,23 @@ struct QuickBarView: View {
                 .padding(.top, QuickBarMetrics.noteTextInset)
                 .contentTransition(.symbolEffect(.replace))
                 .animation(.easeOut(duration: 0.18), value: model.mode.symbol)
-            ZStack(alignment: .topLeading) {
-                // A placeholder of its own: an `NSTextView` has none, and an editor that opens empty
-                // and unlabelled is the one moment this surface doesn't say what it's for.
-                //
-                // Set where the editor's own first line starts, which means the gutter as well as the
-                // top inset. It used to take only the inset, and so began a gutter's width left of the
-                // caret it was standing in for — the placeholder and the thing you typed over it
-                // didn't start in the same place, which is the one thing a placeholder has to do.
-                // It's also given the editor's actual face rather than a system face at the same point
-                // size, so the invitation is set in the type the note will be.
-                if model.noteText.isEmpty {
-                    Text(QuickBarMode.note.placeholder)
-                        .font(Font(QuickBarMetrics.noteFont))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, QuickBarMetrics.noteTextInset)
-                        .padding(.leading, QuickBarMetrics.noteGutter)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-                MarkdownTextEditor(text: $model.noteText,
-                                   onSubmit: { model.runSelection() },
-                                   onCancel: { model.leaveNote() },
-                                   onContentHeight: { noteHeight = $0 },
-                                   growthCeiling: noteHeightCeiling,
-                                   focusRequest: model.noteFocusToken,
-                                   baseFont: QuickBarMetrics.noteFont,
-                                   textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset),
-                                   gutterAdvances: QuickBarMetrics.noteGutterAdvances)
-                    .frame(height: clampedNoteHeight)
-                    .accessibilityLabel(QuickBarMode.note.placeholder)
-            }
+            // The placeholder is the editor's own, drawn on the column its first character lands on.
+            // It was a `Text` overlaid here, positioned by adding up this view's constants — which is
+            // how it spent a release standing a gutter's width to the left of the caret it was
+            // standing in for. See `MarkdownTextEditor.placeholder`.
+            MarkdownTextEditor(text: $model.noteText,
+                               onSubmit: { model.runSelection() },
+                               onCancel: { model.leaveNote() },
+                               onToggleImmersive: { model.enterImmersive() },
+                               onContentHeight: { noteHeight = $0 },
+                               growthCeiling: noteHeightCeiling,
+                               focusRequest: model.noteFocusToken,
+                               placeholder: QuickBarMode.note.placeholder,
+                               baseFont: QuickBarMetrics.noteFont,
+                               textInset: NSSize(width: 0, height: QuickBarMetrics.noteTextInset),
+                               gutterAdvances: QuickBarMetrics.noteGutterAdvances)
+                .frame(height: clampedNoteHeight)
+                .accessibilityLabel(QuickBarMode.note.placeholder)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, QuickBarMetrics.noteBlockInset)
@@ -331,32 +308,6 @@ struct QuickBarView: View {
         return max(QuickBarMetrics.noteMinHeight, model.panelHeightLimit - chrome)
     }
 
-    /// The tail of today's note, dimmed, under the thing being written.
-    private var noteTailBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Earlier today")
-                .font(.caption2)
-                .textCase(.uppercase)
-                .foregroundStyle(.tertiary)
-            ForEach(Array(model.noteTail.enumerated()), id: \.offset) { _, paragraph in
-                Text(paragraph)
-                    // The same face the surface above writes in: this is note prose too, and it read
-                    // as a different document when it was set in a different type.
-                    .font(Font(QuickBarMetrics.noteFont))
-                    .foregroundStyle(.secondary)
-                    // Two lines each, so a long paragraph can't push the writing surface off the
-                    // screen. It's context, and context that grows without limit stops being context.
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Earlier today: " + model.noteTail.joined(separator: ". "))
-    }
 
     /// One of the field's badges. Tinted ones are saying something happened to the line — it's going
     /// somewhere else, or it's carrying a date marker that won't become a date; the plain one is only
@@ -689,17 +640,21 @@ struct QuickBarView: View {
                     Self.switchHint(model.mode)]
 
         case .note:
-            // This line is doing the row list's job as well as its own. With no rows on screen it is
-            // the only thing that names where the note is going, and the only thing that says which
-            // key commits it — in a surface where ⏎ is a newline, that is not guessable.
+            // This line is doing the row list's job as well as its own: with no rows on screen it is
+            // the only thing that names where the note is going.
+            //
+            // It no longer names a key that commits, because nothing does. The surface holds today's
+            // whole note and every keystroke is already written — so what it says instead is that
+            // it's saved, which is the one thing a person needs to know about a surface with no save
+            // in it. Escape is "done" rather than "back" for the same reason.
             guard let destination = noteDestination else {
                 return [[.text("No focused project — ⌃⌥O finds one, then write the note.")]]
             }
-            var parts = [[HintPart.text("Adding to \(destination) · today")]]
-            if !model.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                parts.append(Self.hint([.command, .return], "save"))
-            }
-            parts.append(Self.hint([.escape], "back"))
+            var parts = [[HintPart.text("Today's note in \(destination) · saved as you type")]]
+            // Named here or nowhere. A mode with no rows has no other surface to advertise a key on,
+            // and a full-screen writing surface nobody knows about is a feature that doesn't exist.
+            parts.append(Self.hint([.control, .command, .letter("f")], "full screen"))
+            parts.append(Self.hint([.escape], "done"))
             return parts
         }
     }
@@ -754,7 +709,7 @@ struct QuickBarView: View {
             var segment = Text("")
             for part in parts {
                 switch part {
-                case .key(let cap): segment = segment + Text(Image(systemName: cap.symbol))
+                case .key(let cap): segment = segment + cap.drawn
                 case .text(let words): segment = segment + Text(words)
                 }
             }
@@ -793,8 +748,13 @@ struct QuickBarView: View {
 private enum KeyCap {
     case command, option, control, shift, escape, tab, rightArrow
     case `return`
+    /// A letter in a chord — the `F` of ⌃⌘F. Drawn as the letter rather than as a symbol: there is no
+    /// SF Symbol for a bare key cap, and the boxed ones (`f.square`) put a frame around one member of a
+    /// chord whose other members have none, which reads as two different kinds of thing.
+    case letter(String)
 
-    var symbol: String {
+    /// The symbol that stands for the key, for the keys that have one.
+    var symbol: String? {
         switch self {
         case .command: return "command"
         case .option: return "option"
@@ -807,7 +767,17 @@ private enum KeyCap {
         // is and the drawing on the key itself — an arrow stopped at a bar — so it's the closest thing
         // to the legend, and near enough that it doesn't read as the odd one out beside the rest.
         case .tab: return "arrow.right.to.line"
+        case .letter: return nil
         }
+    }
+
+    /// How the key is drawn in the line.
+    var drawn: Text {
+        guard let symbol else {
+            if case .letter(let character) = self { return Text(character.uppercased()) }
+            return Text("")
+        }
+        return Text(Image(systemName: symbol))
     }
 
     /// What it's called out loud, for the reader who gets no glyphs at all.
@@ -821,6 +791,7 @@ private enum KeyCap {
         case .return: return "Return"
         case .tab: return "Tab"
         case .rightArrow: return "Right arrow"
+        case .letter(let character): return character.uppercased()
         }
     }
 }
@@ -864,7 +835,7 @@ private struct QuickBarRowView: View {
             // in passing rather than looked up. Only on the selected row, because that's the only row
             // ⏎ would act on — on all of them it would be a claim that any of them is next.
             if isSelected, row.isRunnable {
-                Image(systemName: KeyCap.return.symbol)
+                KeyCap.return.drawn
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -930,12 +901,6 @@ enum QuickBarMetrics {
     /// of a gutter that was this panel's alone, so a list typed here hung differently than the same
     /// list typed in the window.
     static let noteGutterAdvances: CGFloat = MarkdownTextEditor.gutterAdvances
-
-    /// How far in from the block's left edge the editor's own first character sits: the gutter every
-    /// unmarked line is indented by. The placeholder is offset by exactly this, which is the whole of
-    /// why it now sits under the caret rather than a gutter's width to its left.
-    static let noteGutter: CGFloat =
-        (("0" as NSString).size(withAttributes: [.font: noteFont]).width * noteGutterAdvances)
 
     static let noteTextInset: CGFloat = 8
     static let noteBlockInset: CGFloat = 4

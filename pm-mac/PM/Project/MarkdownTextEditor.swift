@@ -43,6 +43,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// show the whole note without scrolling. The caller is expected to clamp it — see the quick bar's
     /// `noteMinHeight` and `noteHeightCeiling`, which is where "grows with the prose, then scrolls" is
     /// decided. A host that clamps should hand the same ceiling back as `growthCeiling`.
+    /// Called on ⌃⌘F, when the host has somewhere fuller to put this editor. Nil — the default, and
+    /// what every host but the quick bar's note surface passes — leaves the key alone, so the View
+    /// menu's own Enter Full Screen still reaches the window a takeover is sitting in. A borderless
+    /// panel has no full screen to enter, which is exactly why the key is free there to mean this.
+    var onToggleImmersive: (() -> Void)? = nil
+
     var onContentHeight: ((CGFloat) -> Void)? = nil
 
     /// The tallest the host will grow this editor to before it starts scrolling — the ceiling it
@@ -58,6 +64,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Knowing the ceiling, the editor can simply decline to chase a caret the host is about to reveal.
     var growthCeiling: CGFloat = 0
 
+    /// How far down the document the view is scrolled, reported whenever that changes.
+    ///
+    /// `documentVisibleRect.minY`, not the clip view's bounds origin — see `TopPinningScrollView` for
+    /// why those are different questions. Zero means the top of the note is showing.
+    ///
+    /// The full-screen surface uses it to keep its one line of chrome just above the first line of
+    /// prose and then pin it to the top edge once you scroll past it.
+    var onScroll: ((CGFloat) -> Void)? = nil
+
     /// Bumped to ask for the caret. Any change puts first responder back on the text view.
     ///
     /// It used to be a `didFocus` flag on the coordinator — focus once, on the way in — which is right
@@ -67,6 +82,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// wherever the field it replaced had dropped it, which is nowhere. A value the host owns can't be
     /// stale in that way. Left at its default it focuses exactly once, which is the takeover's case.
     var focusRequest: Int = 0
+
+    /// What the editor says when the note is empty. Empty — the default — says nothing.
+    ///
+    /// Drawn by the text view, from the very attributes the next keystroke will take, because where a
+    /// placeholder goes is a question only the text view can answer. See
+    /// `ShortcutTextView.placeholder`.
+    var placeholder: String = ""
 
     /// The face the prose is set in, and the size every markdown style is derived from.
     ///
@@ -104,6 +126,22 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// opened without this lands at its bottom. With the caret at the start there is nothing to chase,
     /// the note is already showing its first line, and no scrolling correction is needed anywhere.
     var opensAtStart: Bool = false
+
+    /// Space above the first line that is **not** mirrored below it.
+    ///
+    /// `textContainerInset` is an `NSSize`, so AppKit applies its height at both ends — which is what
+    /// `textInset` and `topInset` get, deliberately: a bar to start under, and matching room to scroll
+    /// the last line up off the bottom edge. This one is for a gap that only makes sense at the top.
+    ///
+    /// The full-screen note surface uses it to put the first line on an eyeline a third of the way down
+    /// the screen without a matching third of blank below the last one — which would mean the prose
+    /// could never actually reach the bottom of the display.
+    ///
+    /// Done by splitting the difference rather than by restructuring the document: the container inset
+    /// carries *half* of this at each end, which makes the laid-out height come out right, and
+    /// `textContainerOrigin` is shifted down by the other half, which puts the text where the asymmetry
+    /// says it should be. See `ShortcutTextView.textContainerOrigin`.
+    var extraTopSpace: CGFloat = 0
 
     /// Height of the bar this editor runs up underneath, if it has one. Applied as the scroll view's
     /// top content inset, which is what lets the prose scroll *under* the bar while still starting
@@ -235,10 +273,14 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // landed and gave the style something to hold on to. Stated here it starts where the text will.
         textView.typingAttributes = [.font: baseFont, .foregroundColor: NSColor.labelColor,
                                      .paragraphStyle: empty]
-        textView.textContainerInset = textInset
+        textView.extraTopSpace = extraTopSpace
+        textView.placeholder = placeholder
+        textView.textContainerInset = NSSize(width: textInset.width,
+                                             height: textInset.height + extraTopSpace / 2)
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onCancel = onCancel
+        textView.onToggleImmersive = onToggleImmersive
         textView.noteURL = noteURL
         textView.growthCeiling = growthCeiling
         textView.string = text
@@ -251,11 +293,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // height measured before that is the height of text wrapped to nothing.
         afterCurrentUpdate { [weak textView] in
             guard let textView else { return }
+            context.coordinator.ensureFullLayout(textView)
             context.coordinator.reportHeight(textView)
         }
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
+        context.coordinator.observeScrolling(of: scrollView)
         return scrollView
     }
 
@@ -264,8 +308,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
         if let shortcuts = context.coordinator.textView as? ShortcutTextView {
             shortcuts.onSubmit = onSubmit
             shortcuts.onCancel = onCancel
+            shortcuts.onToggleImmersive = onToggleImmersive
             shortcuts.noteURL = noteURL
             shortcuts.growthCeiling = growthCeiling
+            shortcuts.extraTopSpace = extraTopSpace
+            shortcuts.placeholder = placeholder
         }
         guard let textView = context.coordinator.textView else { return }
 
@@ -281,7 +328,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // `textContainerInset`'s height applies to top and bottom alike, so the note also gains that
         // much room past its last line. In an editor that's welcome rather than a cost: it's the room
         // that lets you scroll the line you're typing up off the bottom edge.
-        let wantedInset = NSSize(width: textInset.width, height: textInset.height + topInset)
+        let wantedInset = NSSize(width: textInset.width,
+                                 height: textInset.height + topInset + extraTopSpace / 2)
         if textView.textContainerInset != wantedInset {
             textView.textContainerInset = wantedInset
             // The bar's measured height arriving is the last thing that moves the note before you see
@@ -292,10 +340,14 @@ struct MarkdownTextEditor: NSViewRepresentable {
         }
         if textView.string != text {
             textView.string = text
+            // An edit made from outside doesn't run through `didChangeText`, which is where the empty
+            // note otherwise notices it has gained or lost its placeholder.
+            textView.needsDisplay = true
             if opensAtStart {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
             }
             context.coordinator.highlight(textView)
+            context.coordinator.ensureFullLayout(textView)
             (scrollView as? TopPinningScrollView)?.pinsNextLayout = true
             // Text put in from outside — a draft restored, or the editor emptied after a note was
             // written — changes the height without a keystroke to notice it.
@@ -313,10 +365,31 @@ struct MarkdownTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextEditor
         weak var textView: NSTextView?
+        /// Held so it can be taken down with the coordinator; a live observer on a dead view is a crash
+        /// waiting for the next scroll.
+        private var scrollObserver: Any?
         /// The last `focusRequest` acted on. Nil until the first update, so a fresh editor focuses.
         var focusedRequest: Int?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
+
+        deinit {
+            if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
+        }
+
+        /// Follow the clip view, for a host that asked to know where the prose is.
+        func observeScrolling(of scrollView: NSScrollView) {
+            guard scrollObserver == nil else { return }
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView, queue: .main) { [weak self, weak scrollView] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let scrollView else { return }
+                        self.parent.onScroll?(scrollView.documentVisibleRect.minY)
+                    }
+                }
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
@@ -356,6 +429,21 @@ struct MarkdownTextEditor: NSViewRepresentable {
             if window.firstResponder === textView { return true }
             guard let editor = window.firstResponder as? NSTextView else { return false }
             return editor.delegate === textView.delegate
+        }
+
+        /// Lay the whole document out now, rather than as it comes into view.
+        ///
+        /// TextKit lays out lazily, and a host that never asks how tall the text is never triggers the
+        /// full pass — so the document view keeps growing for a while after the note appears. In a
+        /// window nobody notices; on a surface that fades in over a fifth of a second it's visible as
+        /// the scroller resizing and the text shifting under you, just as everything is settling.
+        ///
+        /// Called where a whole document arrives — created, or replaced from outside — and deliberately
+        /// not on every keystroke: an edit invalidates layout from that point on, and forcing the rest
+        /// of a long note through it per character is real work for an answer nobody reads.
+        func ensureFullLayout(_ textView: NSTextView) {
+            guard let container = textView.textContainer, let layout = textView.layoutManager else { return }
+            layout.ensureLayout(for: container)
         }
 
         /// Measure the laid-out text and hand the height to whoever asked for it.
@@ -663,11 +751,35 @@ private final class ShortcutTextView: NSTextView {
     var onSubmit: (() -> Void)?
     /// Invoked on Escape, when the host has something for it to mean. See `MarkdownTextEditor.onCancel`.
     var onCancel: (() -> Void)?
+    /// Invoked on ⌃⌘F. See `MarkdownTextEditor.onToggleImmersive`.
+    var onToggleImmersive: (() -> Void)?
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
     /// See `MarkdownTextEditor.growthCeiling`. Zero means the host isn't growing, so the caret is this
     /// view's own to chase.
     var growthCeiling: CGFloat = 0
+    /// See `MarkdownTextEditor.extraTopSpace`. The container inset carries half of it at each end; this
+    /// is the other half, moved from the bottom to the top.
+    var extraTopSpace: CGFloat = 0 {
+        didSet {
+            guard extraTopSpace != oldValue else { return }
+            needsDisplay = true
+            needsLayout = true
+        }
+    }
+
+    /// Where the text begins inside the view.
+    ///
+    /// AppKit's own answer is the container inset's height, applied identically top and bottom. Shifted
+    /// down by half of `extraTopSpace` here — the inset carries the other half at *both* ends, so the
+    /// laid-out height already includes the whole of it, and moving the origin simply decides which end
+    /// gets it. The result is a top gap of `inset + extraTopSpace` over a bottom gap of `inset`, with no
+    /// change to how tall the document is or how anything else measures it.
+    override var textContainerOrigin: NSPoint {
+        var origin = super.textContainerOrigin
+        origin.y += extraTopSpace / 2
+        return origin
+    }
 
     /// Draw the caret at the height of the text, not of the line box.
     ///
@@ -690,6 +802,64 @@ private final class ShortcutTextView: NSTextView {
     private var caretHeight: CGFloat {
         let face = (typingAttributes[.font] as? NSFont) ?? font ?? MarkdownTextEditor.baseFont
         return (face.ascender - face.descender).rounded(.up)
+    }
+
+    // MARK: the empty note
+
+    /// What to show when there's nothing in the note yet. See `MarkdownTextEditor.placeholder`.
+    ///
+    /// Drawn here rather than by the host, because where it belongs is a sum only this view holds all
+    /// the terms of. The first character of a note lands at `textContainerOrigin` — the host's
+    /// `textInset`, its `topInset`, and half its `extraTopSpace`, the other half being in the container
+    /// inset — plus the head indent of the paragraph style in `typingAttributes`, which is a gutter
+    /// measured in advances of whatever face the host asked for. Every host that drew its own
+    /// placeholder had to rebuild that sum by hand from constants of its own, and each one got a
+    /// different term of it wrong: the quick bar's stood a gutter to the left of the caret until it was
+    /// handed the gutter as a number, the full-screen surface's did the same a release later, and the
+    /// window's takeover simply opened blank.
+    ///
+    /// Drawing it from the attributes the *next keystroke* will take makes the question unaskable. The
+    /// placeholder and the character typed over it can't start in different places, because the same
+    /// paragraph style puts them both there.
+    var placeholder: String = "" {
+        didSet {
+            guard placeholder != oldValue else { return }
+            setAccessibilityPlaceholderValue(placeholder.isEmpty ? nil : placeholder)
+            needsDisplay = true
+        }
+    }
+
+    /// Showing when there's something to show and nothing typed over it. Marked text counts as typed:
+    /// an IME's half-finished character is still something in the note.
+    private var showsPlaceholder: Bool {
+        !placeholder.isEmpty && string.isEmpty && !hasMarkedText()
+    }
+
+    /// Whether it was showing the last time this view drew, so the note redraws when its first
+    /// character arrives or its last one leaves. AppKit invalidates the glyphs it laid out, and the
+    /// placeholder is not one of them.
+    private var drewPlaceholder = false
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drewPlaceholder = showsPlaceholder
+        guard drewPlaceholder, let container = textContainer else { return }
+        // `typingAttributes` carries the host's face and the grid's style for an unmarked line, whose
+        // `firstLineHeadIndent` is the gutter. Given to a string drawn from the container's own origin,
+        // that indent puts the first glyph exactly where the caret beside it is standing. Only the
+        // colour changes: an invitation, not text.
+        var attributes = typingAttributes
+        attributes[.foregroundColor] = NSColor.tertiaryLabelColor
+        let origin = textContainerOrigin
+        let box = NSRect(x: origin.x, y: origin.y,
+                         width: container.size.width,
+                         height: max(0, bounds.height - origin.y))
+        NSAttributedString(string: placeholder, attributes: attributes).draw(in: box)
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        if drewPlaceholder != showsPlaceholder { needsDisplay = true }
     }
 
     /// Don't chase the caret while the host is still growing to show it.
@@ -732,6 +902,15 @@ private final class ShortcutTextView: NSTextView {
         }
         if flags == [.command, .shift], ch == "d" {
             apply { duplicateLines($0, selection: $1) }
+            return true
+        }
+        // ⌃⌘F — the system's own Enter Full Screen, borrowed only where there's no window full screen
+        // for it to mean. Claimed here rather than as a menu item because a window's
+        // `performKeyEquivalent` runs before the main menu gets the event, so a host that wants this
+        // would never see the key otherwise; and left entirely alone when no host wants it, so the View
+        // menu's item still works for a note being edited in a project window.
+        if flags == [.control, .command], ch == "f", let onToggleImmersive {
+            onToggleImmersive()
             return true
         }
         return super.performKeyEquivalent(with: event)

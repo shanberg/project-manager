@@ -924,3 +924,81 @@ public func pruneEmptySessionsPreservingFormat(rawText: String) -> (rawText: Str
     }
     return removed > 0 ? (joinedPreservingFinalNewline(lines, of: rawText), removed) : nil
 }
+
+// MARK: - Pasting a block of tasks
+
+/// One task in a block being pasted or dropped into a project.
+///
+/// `depth` is relative to the block, not to the document: the shallowest line in a pasted selection is
+/// depth 0 whatever it was indented to where it came from, and everything else keeps its offset from
+/// that. Which document depth the block lands at is the insertion's business, not the block's.
+public struct PastedTask: Equatable, Sendable {
+    public var depth: Int
+    public var text: String
+    public var due: String?
+    public var checked: Bool
+
+    public init(depth: Int, text: String, due: String? = nil, checked: Bool = false) {
+        self.depth = depth
+        self.text = text
+        self.due = due
+        self.checked = checked
+    }
+}
+
+/// Render a block as task lines at `rootIndent` spaces, in `prefix`'s list style.
+private func taskBlockLines(_ block: [PastedTask], rootIndent: Int, prefix: String) -> [String] {
+    // The prefix carries the source line's own indent, which is not the indent we want — the block's
+    // is computed per line. Strip it back to the bare marker ("- ", "* ", "1. ").
+    let marker = prefix.drop { $0 == " " }
+    return block.map { task in
+        let indent = String(repeating: " ", count: rootIndent + max(0, task.depth) * 2)
+        let box = task.checked ? "[x]" : "[ ]"
+        let text = task.text.trimmingCharacters(in: .whitespaces)
+        let dueSuffix = (task.due?.isEmpty == false) ? " due: \(task.due!)" : ""
+        return "\(indent)\(marker)\(box) \(text)\(dueSuffix)"
+    }
+}
+
+/// Insert `block` immediately after the whole subtree of the task at (anchorSessionIndex,
+/// anchorLineIndex), with the block's root at the anchor's own depth.
+///
+/// After the subtree rather than after the anchor's line, which is where `insertTaskRelative` puts a
+/// single task: a paste of several lines dropped between a task and its children would read as having
+/// been adopted by it. A block goes after the thing you pasted onto, entire.
+///
+/// One splice for the whole block, so a paste is one write and one undo step — a batch a person made
+/// in one gesture should come back in one. That is also why this exists rather than the app calling
+/// `task.add` per line: N contract calls would be N undo steps, and after the first one the app's
+/// in-memory tasks no longer describe the document it would have to anchor the second against.
+public func insertTaskBlockPreservingFormat(
+    rawText: String,
+    anchorSessionIndex: Int,
+    anchorLineIndex: Int,
+    block: [PastedTask]
+) -> String? {
+    guard !block.isEmpty else { return nil }
+    var lines = rawText.components(separatedBy: "\n")
+    guard let anchor = rawTaskLineNumber(lines, sessionIndex: anchorSessionIndex,
+                                         taskIndex: anchorLineIndex) else { return nil }
+    let range = rawSubtreeRange(lines, start: anchor)
+    let rendered = taskBlockLines(block, rootIndent: leadingSpaces(lines[anchor]),
+                                  prefix: listPrefix(of: lines[anchor]))
+    lines.insert(contentsOf: rendered, at: range.upperBound)
+    return lines.joined(separator: "\n")
+}
+
+/// Append `block` at the end of a session's task list — what a paste means with no task to land beside.
+/// Lands in the same slot a newly added task would: after the last task, else after the session's
+/// leading prose, else right under the heading.
+public func appendTaskBlockToSession(
+    rawText: String,
+    sessionIndex: Int,
+    block: [PastedTask]
+) -> String? {
+    guard !block.isEmpty else { return nil }
+    var lines = rawText.components(separatedBy: "\n")
+    guard let slot = rawSessionAppendSlot(lines, sessionIndex: sessionIndex) else { return nil }
+    lines.insert(contentsOf: taskBlockLines(block, rootIndent: 0, prefix: slot.prefix), at: slot.line)
+    return lines.joined(separator: "\n")
+}

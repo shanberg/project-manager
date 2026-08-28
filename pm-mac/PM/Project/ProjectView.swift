@@ -362,6 +362,12 @@ struct ProjectView: View {
         .onChange(of: state.newTaskRequest) { _ in beginNewTask() }
         // Edit ▸ Find ▸ Find… — same counter trick as New Task, for the same reason.
         .onChange(of: state.findRequest) { _ in beginFind() }
+        // The rest of the Find submenu, on the same pattern.
+        .onChange(of: state.findStepRequest) { _ in stepFind(by: state.findStepDirection) }
+        .onChange(of: state.useSelectionForFindRequest) { _ in useSelectionForFind() }
+        // Publish "a search is narrowing the list" up to the window, which is what validates Find Next
+        // and Find Previous — see `ProjectViewState.findIsFiltering`.
+        .onChange(of: isFiltering) { state.findIsFiltering = $0 }
         // ⌘Z / ⇧⌘Z undo & redo the window edits (move, complete, due, text, add, wrap…). Hidden
         // zero-size buttons carry the shortcuts so they work whenever the window is key.
         .background(keyboardShortcuts)
@@ -447,6 +453,9 @@ struct ProjectView: View {
         .onDisappear {
             modifiers.stop(); outsideClick.stop(); mouseUp.stop(); rightClick.stop()
             dragEnd.disarm()
+            // The window outlives this pane on a retarget, and a stale "there are matches" would leave
+            // Find Next enabled over a list that isn't filtered any more.
+            state.findIsFiltering = false
         }
     }
 
@@ -483,6 +492,11 @@ struct ProjectView: View {
             Button("Copy", action: copySelection)
                 .keyboardShortcut("c", modifiers: .command)
                 .disabled(contentCommandsStandDown || !canCopySelection)
+            // ⌘V lands text as tasks — see `pasteTasks`. Stands down with the rest while a field has
+            // the keyboard, where ⌘V means paste into the text you're typing.
+            Button("Paste", action: pasteTasks)
+                .keyboardShortcut("v", modifiers: .command)
+                .disabled(contentCommandsStandDown || !canPasteTasks)
             Button("Select All", action: selectAllInFocusedPane)
                 .keyboardShortcut("a", modifiers: .command)
                 .disabled(contentCommandsStandDown)
@@ -671,6 +685,36 @@ struct ProjectView: View {
             copySelectedProjects()
         } else {
             TaskPasteboard.copy(markdown: store.markdown(for: actionTargets))
+        }
+    }
+
+    /// Whether ⌘V has anything to put in the list. Reads the pasteboard rather than guessing, so the
+    /// command is dim for a copied image and live for a copied paragraph.
+    private var canPasteTasks: Bool {
+        state.focusedPane == .tasks && store.projectName != nil
+            && NSPasteboard.general.canReadObject(forClasses: [NSString.self], options: nil)
+    }
+
+    /// ⌘V. Land whatever text is on the pasteboard as tasks, after the selected row's subtree — or at
+    /// the end of the current session when nothing's selected.
+    ///
+    /// The selection moves to what was pasted, the way every Mac list leaves a paste selected: it's
+    /// what you'd act on next, and it's the only confirmation that the thing arrived where you meant.
+    private func pasteTasks() {
+        let block = TaskPasteboard.tasksOnPasteboard()
+        guard !block.isEmpty else { NSSound.beep(); return }
+        let anchor = actionTargets.count == 1 ? actionTargets.first : nil
+        let before = Set(rowKeys)
+        store.pasteTasks(block, after: anchor) {
+            // After the reload, so the keys name rows that exist. Whatever's new is what landed.
+            let arrived = rowKeys.filter { !before.contains($0) }
+            guard !arrived.isEmpty else { return }
+            selection = Set(arrived)
+            selectionAnchor = arrived.first
+            if let first = arrived.first {
+                scrollToken &+= 1
+                scrollTarget = ScrollRequest(key: first, token: scrollToken)
+            }
         }
     }
 
@@ -934,6 +978,40 @@ struct ProjectView: View {
         findVisible = false
         findQuery = ""
         focusTasks()
+    }
+
+    /// ⌘G / ⇧⌘G — Edit ▸ Find ▸ Find Next and Find Previous.
+    ///
+    /// This bar filters rather than highlighting matches in place, so there is no "next highlight" to
+    /// jump to: the narrowed list *is* the matches, and stepping means moving the selection down it.
+    /// That's still worth having — with the keyboard in the find field you can walk the results without
+    /// leaving it, and the row you land on is the one Return and ⌘C will act on.
+    ///
+    /// Wraps at both ends, like every other find in the system. With nothing selected it starts at
+    /// whichever end you're heading away from, so the first ⌘G lands on the first match rather than the
+    /// second.
+    private func stepFind(by direction: Int) {
+        let keys = rowKeys
+        guard !keys.isEmpty else { NSSound.beep(); return }
+        let current = selection.count == 1 ? selection.first.flatMap(keys.firstIndex(of:)) : nil
+        let next = current.map { ($0 + direction + keys.count) % keys.count }
+            ?? (direction > 0 ? 0 : keys.count - 1)
+        let key = keys[next]
+        selection = [key]
+        selectionAnchor = key
+        scrollToken &+= 1
+        scrollTarget = ScrollRequest(key: key, token: scrollToken)
+    }
+
+    /// ⌘E — Edit ▸ Find ▸ Use Selection for Find. Search for the selected task's own text.
+    ///
+    /// Only ever runs when no field has the keyboard: an `NSTextView` answers `performFindPanelAction:`
+    /// itself, so while you're typing ⌘E means the text you selected there and never reaches the
+    /// window. Opens the bar if it's shut, since searching for something is the reason you'd ask.
+    private func useSelectionForFind() {
+        guard let todo = actionTargets.first else { NSSound.beep(); return }
+        findQuery = todo.text
+        findVisible = true
     }
 
     /// The scrollable content below the pinned header: the optional details brief and the task/session
@@ -1237,11 +1315,15 @@ struct ProjectView: View {
         Toggle(isOn: Binding(get: { detailsExpanded }, set: { setDetails($0) })) {
             Label("Show notes", systemImage: "note.text")
         }
-        // The ⌥⌘S shortcut lives on a hidden button (see `keyboardShortcuts`) rather than here — a closed
-        // SwiftUI menu's items aren't in the responder chain, so a key equivalent set here wouldn't fire.
+        // No shortcut named here. ⌥⌘S can't be *set* on this item — a closed SwiftUI menu's items
+        // aren't in the responder chain, so a key equivalent here wouldn't fire, and it lives on a
+        // hidden button instead (see `keyboardShortcuts`). Spelling it into the title was the way
+        // round that, and it bought a menu item whose key equivalent doesn't right-align in its own
+        // column, doesn't localise, and doesn't follow the binding. The View menu advertises ⌥⌘S
+        // properly, in the place a Mac user looks for it; this popover doesn't need to say it twice.
         Toggle(isOn: Binding(get: { state.sidebarVisible },
                              set: { _ in state.toggleSidebar() })) {
-            Label("Show projects  ⌥⌘S", systemImage: "sidebar.leading")
+            Label("Show projects", systemImage: "sidebar.leading")
         }
         Divider()
         Picker("Appearance", selection: $colorMode) {
@@ -1505,14 +1587,18 @@ struct ProjectView: View {
         .onPreferenceChange(SessionFramesKey.self) { sessionFrames = $0 }
         .overlay(alignment: .topLeading) { dropIndicator }
         // The app's own task type leads, so a reorder is matched by identity rather than by "some
-        // text arrived"; `.text` stays in the list only because the same drag also carries markdown.
-        // Foreign drags are turned away regardless — `isActive` is false unless one of our own rows
-        // started the drag.
-        .onDrop(of: [TaskPasteboard.taskKeysType, .text], delegate: ListDropDelegate(
+        // text arrived". `.text` and `.fileURL` are what a drag from *outside* brings: a few lines out
+        // of a document become tasks through the same parser ⌘V uses, and a file becomes a task
+        // linking it. Which of the two paths a drag takes is decided by `isActive` — whether one of
+        // our own rows started it — so an in-app reorder is never read as a text drop, even though our
+        // own drag carries markdown too.
+        .onDrop(of: [TaskPasteboard.taskKeysType, .text, .fileURL], delegate: ListDropDelegate(
             isActive: { draggingKey != nil },
             onCompute: { computeDropTarget(at: $0) },
             onUpdate: { dropTarget = $0 },
-            onPerform: { performListDrop($0) }
+            onPerform: { performListDrop($0) },
+            onComputeExternal: { computeExternalDropTarget(at: $0) },
+            onDropExternal: { performExternalDrop($0, at: $1) }
         ))
         // The list is the keyboard target for ↑/↓, ⌫, ⌘A and ⌘C. The focus *ring* is suppressed — a
         // blue rectangle around the whole list would be heavy here — and which pane has
@@ -1697,6 +1783,54 @@ struct ProjectView: View {
                                         draggedSubtree: store.subtreeKeys(of: dragged),
                                         contentInset: Self.rowContentInset,
                                         indentStep: Self.indentStep)
+    }
+
+    /// Resolve a slot for a drag that started outside the app. Same geometry as `computeDropTarget`,
+    /// minus the dragged subtree — there isn't one, so nothing has to be excluded from the list.
+    private func computeExternalDropTarget(at p: CGPoint) -> DropTarget? {
+        TaskDropResolver.resolve(pointer: p,
+                                 rows: rowFrames,
+                                 sessionFrames: sessionFrames,
+                                 draggedSubtree: [],
+                                 contentInset: Self.rowContentInset,
+                                 indentStep: Self.indentStep)
+    }
+
+    /// Land text or files dragged in from another app.
+    ///
+    /// Text goes through the same parser ⌘V uses, so a list dragged out of a document arrives with its
+    /// nesting and its checkboxes intact and a paragraph arrives as one task. A file arrives as a task
+    /// that links it — the notes are markdown read in Obsidian, where that link is live.
+    ///
+    /// The providers load asynchronously, so this answers `true` for "I'll take it" and does the write
+    /// when the text turns up. There's nothing useful to say in the gap: a drop that will land in a
+    /// tenth of a second doesn't need a spinner.
+    private func performExternalDrop(_ providers: [NSItemProvider], at target: DropTarget?) -> Bool {
+        guard store.projectName != nil, !providers.isEmpty else { return false }
+        let anchor = target.flatMap(anchorTask(for:))
+
+        Task { @MainActor in
+            var block: [PastedTask] = []
+            for provider in providers {
+                if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+                   let url = await provider.loadFileURL() {
+                    let name = url.deletingPathExtension().lastPathComponent
+                    block.append(PastedTask(depth: 0, text: "[\(name)](\(url.absoluteString))"))
+                } else if let text = await provider.loadText() {
+                    block.append(contentsOf: TaskPasteboard.parse(text))
+                }
+            }
+            guard !block.isEmpty else { return }
+            store.pasteTasks(block, after: anchor)
+        }
+        return true
+    }
+
+    /// The task a resolved slot sits after, for a drop that inserts rather than moves. Nil for a drop
+    /// on an empty session, where the session itself is the whole address.
+    private func anchorTask(for target: DropTarget) -> Todo? {
+        guard case let .beside(session, line, _) = target.destination else { return nil }
+        return store.todos.first { $0.sessionIndex == session && $0.lineIndex == line }
     }
 
     /// Commit a resolved drop: move the dragged subtree to the target's destination, then clear state.
@@ -2843,6 +2977,7 @@ private struct SessionNoteTakeover: View {
             // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
             // it and a relative link can be followed back out of it.
             MarkdownTextEditor(text: $text, onSubmit: onBack,
+                               placeholder: "Write a note…",
                                noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
                                opensAtStart: true,
                                topInset: barHeight)
@@ -3479,49 +3614,6 @@ private struct FaviconView: View {
         }
         .frame(width: 14, height: 14)
         .task(id: host) { image = await FaviconLoader.shared.favicon(for: host) }
-    }
-}
-
-/// Fetches and caches site favicons for the Links block. Each host is fetched once — directly from the
-/// site's own `/favicon.ico`, so no third-party favicon service sees which sites are linked — decoded to
-/// an `NSImage`, and served from an in-memory cache thereafter. Hosts with no usable icon are remembered
-/// as misses so the view stops retrying. Fetches are deduped, so repeated rows for one host share a load.
-@MainActor
-final class FaviconLoader {
-    static let shared = FaviconLoader()
-
-    private var cache: [String: NSImage] = [:]
-    private var misses: Set<String> = []
-    private var inflight: [String: Task<NSImage?, Never>] = [:]
-
-    func favicon(for host: String) async -> NSImage? {
-        let key = host.lowercased()
-        guard !key.isEmpty else { return nil }
-        if let img = cache[key] { return img }
-        if misses.contains(key) { return nil }
-        if let task = inflight[key] { return await task.value }
-
-        let task = Task<NSImage?, Never> { await Self.fetch(host: key) }
-        inflight[key] = task
-        let img = await task.value
-        inflight[key] = nil
-        if let img { cache[key] = img } else { misses.insert(key) }
-        return img
-    }
-
-    nonisolated private static func fetch(host: String) async -> NSImage? {
-        guard let url = URL(string: "https://\(host)/favicon.ico") else { return nil }
-        var req = URLRequest(url: url, timeoutInterval: 8)
-        // A browser-like UA — some hosts 403 the default URLSession agent.
-        req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }
-            return img
-        } catch {
-            return nil
-        }
     }
 }
 

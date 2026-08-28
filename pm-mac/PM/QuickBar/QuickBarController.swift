@@ -37,6 +37,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// Watches ⌥ while the bar is up, so a row's label can flip under it. Installed on summon and
     /// removed on dismiss — there's nothing to watch when the bar isn't taking keystrokes.
     private var flagsMonitor: Any?
+    /// The scrim behind the bar itself, when it's turned on. A separate dimmer from the immersive
+    /// surface's own, at a lower level and a far gentler strength — the bar sits *over* your work and
+    /// has to leave it legible, which is the whole difference between the two intensities.
+    private let quickBarDimmer = ScreenDimmer(level: QuickBarController.quickBarDimLevel)
+
     /// The capture line the bar was last closed on without running anything, and when.
     ///
     /// Escape already takes two presses so that a half-typed sentence isn't lost to one — but every
@@ -51,8 +56,10 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.onRun = { [weak self] row, modifiers in self?.run(row, modifiers: modifiers) }
         model.onDismiss = { [weak self] in self?.hide() }
         model.dryRun = { [weak self] command, argument in self?.dryRun(command, argument: argument) }
-        model.onNoteChanged = { [weak self] text in self?.saveNoteDraft(text) }
+        model.onNoteChanged = { [weak self] text in self?.liveNote.changed(text) }
         model.onEnterNote = { [weak self] target in self?.beganNote(target: target) }
+        model.onEnterImmersive = { [weak self] in self?.enterImmersive() }
+        model.onLeaveNote = { [weak self] in self?.endNote() }
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -97,6 +104,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // After this turn of the run loop, which is the one the first layout's fit arrives on.
         DispatchQueue.main.async { [weak self] in self?.model.animatesLayout = true }
         installFlagsMonitor()
+        showQuickBarDimIfWanted()
         Log.write("quick bar shown: mode=\(mode) anchor=\(model.focusedTaskText ?? "none") frame=\(panel.frame) key=\(panel.isKeyWindow) appActive=\(wasActive)->\(NSApp.isActive)")
     }
 
@@ -112,7 +120,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// useless rather than merely untidy. One retry, so a genuine refusal isn't turned into a loop.
     private func assertKeyOnceSettled(_ panel: KeyablePanel) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self, self.isVisible, !panel.isKeyWindow else { return }
+            guard let self, panel.isVisible, !panel.isKeyWindow else { return }
             Log.write("quick bar re-taking key")
             self.pendingHide?.cancel()
             self.pendingHide = nil
@@ -147,6 +155,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
 
     func hide(restoringFocus: Bool = true) {
         stashUnsentLine()
+        // Whatever is in the writing surface goes in now rather than on the debounce that was still
+        // counting. A bar that closes is not a decision about the prose — there is nothing to decide.
+        endNote()
         pendingHide?.cancel()
         pendingHide = nil
         pendingDismiss?.cancel()
@@ -161,6 +172,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         Log.write("quick bar hidden")
         panel.orderOut(nil)
         releaseProjectIndex()
+        quickBarDimmer.hide(duration: Self.dimFade)
         // Only when PM is still the active app: if you've already clicked into something else, that
         // click is a more recent answer to "where should the focus be" than this is.
         if restoringFocus, NSApp.isActive, let previous, !previous.isTerminated {
@@ -187,53 +199,40 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         stashedAt = Date()
     }
 
-    // MARK: Note drafts
+    // MARK: The note surface
 
-    /// Where a note being written is kept between summons, keyed by the project it's going to.
+    /// Today's note, open for editing — the same `LiveSessionNote` the full-screen surface drives.
     ///
-    /// The stash above is the capture line's equivalent, and the difference between them is the whole
-    /// reason this exists. A task line is short, is one line, and is cheap to type again — so it's
-    /// caught on the way out and offered back for two minutes. Half a page of thinking is none of
-    /// those things. It's written down on every keystroke, it doesn't expire, it survives the app
-    /// quitting, and it comes back in the editor rather than as a row you have to accept — because
-    /// the prose is its own offer, and nothing about it needs deciding before you carry on.
-    private static let noteDraftsKey = "PMQuickBarNoteDrafts"
+    /// This mode used to compose one paragraph and append it on ⌘↩, and keep a draft in `UserDefaults`
+    /// between summons so nothing was lost while it waited to be committed. Both of those existed
+    /// because there was a moment at which prose became saved, and everything before that moment was
+    /// at risk. There is no such moment now: the surface opens holding today's whole note and every
+    /// keystroke is written through, so there is nothing to draft and nothing to commit. That also
+    /// makes ⌃⌘F to the full-screen surface a change of size rather than a change of rules — the two
+    /// are the same editor on the same prose at two widths.
+    private let liveNote = LiveSessionNote()
 
-    /// Which draft the open note is. The project it's going to, decided when the surface opened.
-    private var noteDraftKey: String?
-
-    private var noteDrafts: [String: String] {
-        UserDefaults.standard.dictionary(forKey: Self.noteDraftsKey) as? [String: String] ?? [:]
-    }
-
-    /// The writing surface opened. Work out which draft this is, and put it back if there is one.
+    /// The writing surface opened. Point the live note at wherever this note is going and let it fill
+    /// the editor from disk.
     private func beganNote(target: CaptureTarget?) {
-        noteDraftKey = target?.key ?? focusedStore?.projectKey
-        // Only into an empty editor. A promotion out of a capture line arrives with that line already
-        // in it, and the line you just typed is a more recent answer than a draft from yesterday — so
-        // the draft waits rather than being pushed in front of it or, worse, appended to it.
-        guard model.noteText.isEmpty, let key = noteDraftKey,
-              let draft = noteDrafts[key], !draft.isEmpty else { return }
-        model.noteText = draft
-        Log.write("quick bar restored a note draft for \(key) (\(draft.count) characters)")
+        // Idempotent: ⇥ into the surface, a summon straight into it and a promotion out of a capture
+        // line all land here, and two of them can follow each other within one summon.
+        guard !liveNote.isOpen else { return }
+        guard let key = target?.key ?? focusedStore?.projectKey else { return }
+        // Anything already typed — a capture line promoted with ⇧⏎ — is carried in and appended to
+        // what's there, exactly as the full-screen surface does with a handover.
+        let carried = model.noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.noteText = ""
+        liveNote.onProse = { [weak self] prose in self?.model.applyNoteProse(prose) }
+        liveNote.open(projectKey: key, appending: carried.isEmpty ? nil : carried)
+        Log.write("quick bar opened today's note for \(key)")
     }
 
-    /// Write the note down as it's typed. Cheap enough to do per keystroke, and the alternative is
-    /// choosing a moment at which prose becomes worth keeping.
-    private func saveNoteDraft(_ text: String) {
-        guard let key = noteDraftKey else { return }
-        var drafts = noteDrafts
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            drafts.removeValue(forKey: key)
-        } else {
-            drafts[key] = text
-        }
-        UserDefaults.standard.set(drafts, forKey: Self.noteDraftsKey)
-    }
-
-    /// Whether the bar is holding prose nobody has written down anywhere but here.
-    private var holdsUnsavedNote: Bool {
-        model.mode == .note && !model.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// Leave the surface, writing whatever is in it now. `then` runs once that write has landed, which
+    /// is what lets ⌃⌘F hand over to a surface that reads the same file.
+    private func endNote(then: (@MainActor () -> Void)? = nil) {
+        guard liveNote.isOpen else { then?(); return }
+        liveNote.close(model.noteText, then: then)
     }
 
     /// Say what just happened, hand the field back, and stay.
@@ -280,6 +279,52 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         pendingDismiss = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.dwell(for: receipt), execute: work)
     }
+
+    // MARK: Handing a note to the full-screen surface
+
+    /// ⌃⌘F in the note surface: carry on writing this note somewhere with nothing else on the screen.
+    ///
+    /// The bar doesn't become that surface, it hands over to it. `SessionNoteController` opens today's
+    /// whole note for editing, which is a different thing from what this mode does — the bar composes
+    /// one paragraph and appends it — so the half-typed paragraph goes across as prose to be added
+    /// rather than as a state this bar is still holding. Cleared here on the way out, which clears its
+    /// draft with it: it lives in the other surface now, and two places offering the same paragraph
+    /// back is how it gets written twice.
+    func enterImmersive() {
+        guard let panel, panel.isVisible, model.mode == .note else { return }
+        // Nothing is carried across any more. Both surfaces edit the same prose live, so the handover
+        // is: write what's here, then open the other one on it. The completion is what makes that
+        // ordering real — the write is debounced and the store re-reads afterwards, and presenting
+        // before it lands would seed the full-screen surface from the document as it was.
+        endNote { [weak self] in
+            self?.model.noteText = ""
+            SessionNoteController.shared.present()
+        }
+        hide(restoringFocus: false)
+        Log.write("quick bar handed its note to the full-screen surface")
+    }
+
+    // MARK: The bar's own scrim
+
+    /// Dim the screen behind the bar, if that's been asked for.
+    ///
+    /// Tied to the bar being up rather than to the mode it's in, deliberately. ⇧↩ promotes a capture
+    /// line into the writing surface mid-sentence, and a scrim that belonged to note mode would black
+    /// the screen out at that keystroke — a change of mode reading as a change of application.
+    private func showQuickBarDimIfWanted() {
+        guard ScreenDimSettings.quickBarDims else { return }
+        quickBarDimmer.show(strength: ScreenDimSettings.quickBarStrength, duration: Self.dimFade)
+    }
+
+    /// Just under `.floating`, where the bar and the focus panel live: over your windows, under the
+    /// thing it's dimming for. Below the menu bar too — a scrim that's only meant to push the
+    /// background back has no business covering the clock.
+    private static let quickBarDimLevel =
+        NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+
+    /// Short. The bar itself appears at once and always has — a summon you have to wait for is a
+    /// summon that's late — so its scrim can only be the fastest fade that still isn't a flash.
+    private static let dimFade: TimeInterval = 0.14
 
     /// Take the receipt down and give the footer back to the hint. The bar itself stays.
     private func clearReceipt() {
@@ -347,8 +392,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.restorable = mode == .capture && Date().timeIntervalSince(stashedAt) < Self.stashLifetime
             ? stashedLine : nil
         model.reset(mode: mode)
-        // After the reset, which empties the editor: the draft is the one thing about a note summon
-        // that isn't fresh, and it goes in last so nothing above can clear it again.
+        // After the reset, which empties the editor: the note's own prose is the one thing about a
+        // note summon that isn't fresh, and it's read in last so nothing above can clear it again.
         if mode == .note { beganNote(target: nil) }
     }
 
@@ -405,6 +450,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.canUndoCompletion = focusedStore?.lastCompletedKey != nil
         model.hasNextTask = focusedStore?.nextTodo != nil
         model.focusedProjectIsArchived = focusedProjectScope == .archive
+        model.focusedProjectPath = focusedStore?.projectPath
     }
 
     /// The focused project's store changed. Only of interest while the bar is on screen — the rest of
@@ -1037,6 +1083,12 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             FocusPanelController.shared.show(editor: .edit)
         case .wrapTask:
             FocusPanelController.shared.show(editor: .wrap)
+        // Not offered in `>` (see `PMCommand.inQuickBar`) — typing a line and choosing where it lands
+        // is what the capture rows already do, and better. Handled anyway so the table stays the one
+        // list: a command added to `>` later shouldn't have to remember to come and teach this switch.
+        case .narrowFocus, .addAfter, .addBefore, .openInEditor:
+            guard let store else { break }
+            PMCommandRunner.run(command, store: store)
         case .sessionNote:
             if argument.isEmpty {
                 // Only ⌘⏎ reaches this now; the plain form opened the panel's editor and returned.
@@ -1279,15 +1331,18 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// press. The same grace period the focus panel uses, and the same re-check: if the keyboard came
     /// back, this wasn't you leaving.
     func windowDidResignKey(_ notification: Notification) {
-        // Unsaved prose keeps the bar on screen. The one case that earns the focus panel's pinning,
+        // An open note keeps the bar on screen. The one case that earns the focus panel's pinning,
         // and it earns it twice over: writing about the thing you're looking at means looking at the
         // thing you're writing about, so clicking into it must not cost you the surface — and half a
         // page is not something to take away on a click that might have been a scroll. `acceptsKey`
         // stays set as well as the hide being skipped, which is what lets a click back into the panel
         // pick the keyboard up again; cleared, the bar would sit there refusing to be typed into.
         //
-        // The draft is written down regardless. This is about not interrupting you, not about safety.
-        guard !holdsUnsavedNote else { return }
+        // Nothing is at stake either way — the prose is on disk within the debounce. This is about not
+        // interrupting you, and it was never about safety. An *empty* surface isn't an interruption to
+        // protect, so it goes with the rest: what keeps the bar is a note being written, not the mode.
+        guard !(liveNote.isOpen
+                && !model.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) else { return }
         panel?.acceptsKey = false
         // A receipt used to be exempt from this, because putting the receipt up meant handing the
         // front back — the resign was the bar doing as it was told. It doesn't hand anything back now,

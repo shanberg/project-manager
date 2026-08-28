@@ -243,6 +243,29 @@ final class ProjectSplitViewController: NSSplitViewController {
         UserDefaults.standard.set(!sidebarItem.isCollapsed, forKey: ProjectWindow.sidebarDefaultsKey)
     }
 
+    /// Tick View ▸ Show Projects while the sidebar is showing.
+    ///
+    /// `toggleSidebar:` targets nil, so it walks the responder chain to here rather than to the app
+    /// delegate — which means this is the only place that can answer for it. Without this the item sat
+    /// permanently unchecked beside two neighbours (Show Focus Panel, Show Notes) that both check
+    /// themselves in `AppDelegate.validateMenuItem`, so a window with its sidebar open showed a View
+    /// menu offering to show it.
+    ///
+    /// A checkmark rather than a Show/Hide title swap, matching those two neighbours: three items in
+    /// one group should say what they are the same way.
+    ///
+    /// Not an `override`: `NSSplitViewController` implements this in Objective-C but doesn't surface it
+    /// to Swift, so there's nothing to override and nothing to call `super` on. Validation is only ever
+    /// asked of the object that would *receive* the action, and the only action this controller answers
+    /// is `toggleSidebar:` — so everything else that reaches here is already enabled by virtue of
+    /// having got here.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleSidebar(_:)) {
+            item.state = sidebarItem.isCollapsed ? .off : .on
+        }
+        return true
+    }
+
     /// Hold the shared project scan open exactly while this window's sidebar is showing.
     private func syncProjectScan() {
         let wanted = !sidebarItem.isCollapsed

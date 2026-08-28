@@ -15,6 +15,10 @@ import PmLib
 /// No gestures of its own. This is a read view inside a selectable row, and the row owns the click:
 /// one selects the session, two open the note. The editor is where an image is replaced or removed,
 /// which is the same place its markdown was written.
+///
+/// Pictures are clipped to a rounded rectangle and given no border, which is what Messages does with
+/// an image in the chat stream: the shape and the space around it do the separating, and a line drawn
+/// round the edge would be one more thing in a list that is mostly text. A picture is a picture.
 struct RenderedNote: View {
     let prose: String
     let font: NSFont
@@ -66,23 +70,36 @@ private struct NoteImage: View {
         if let url, let image = NoteImageCache.shared.image(at: url) {
             Image(nsImage: image)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
-                // Never blown up past what it is, never taller than its share of the row: a small
-                // picture stays small, a big one shrinks into the column. A note that asked for a
-                // width gets it, capped the same way — `![[shot.png|300]]` is someone saying this
-                // screenshot is a detail, not the subject, and the note's judgement beats the default.
-                .frame(maxWidth: min(image.size.width, width.map { CGFloat($0) } ?? .greatestFiniteMagnitude),
-                       maxHeight: min(maxHeight, image.size.height), alignment: .leading)
+                .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
+                // One axis, never two. An aspect-fitting picture inside a frame bounded on *both*
+                // sides is fitted into that box and left there — the leftover is empty frame, not
+                // picture, and it's the frame that anything drawn around the edge follows. A portrait
+                // screenshot under a 220pt height cap came out 66pt wide in a 300pt-wide box.
+                //
+                // So the height cap is restated as the width that produces it, and only the width is
+                // constrained; the height then follows from the picture's own proportions and the box
+                // is the picture. See `drawnWidth`.
+                .frame(maxWidth: drawnWidth(image), alignment: .leading)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                // A hairline, because a screenshot's own background is usually the window's: without
-                // it a light picture on a light row has no edge and reads as part of the note's page.
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
                 .accessibilityLabel(alt.isEmpty ? "Image" : alt)
                 .help(url.lastPathComponent)
         } else {
             missing
         }
+    }
+
+    /// The widest this picture is drawn: never blown up past what it is, never so wide that it breaks
+    /// the height cap, and never wider than the note asked for.
+    ///
+    /// The height cap arrives here as a width because that's the only way to hold both without
+    /// bounding both — at a fixed aspect ratio, "no taller than 220pt" and "no wider than 220pt times
+    /// the aspect" are the same sentence, and the second one can be said on the axis the layout is
+    /// already using. A note that named a width (`![[shot.png|300]]`) is someone saying the picture is
+    /// a detail rather than the subject, and that beats the default.
+    private func drawnWidth(_ image: NSImage) -> CGFloat {
+        let aspect = image.size.width / image.size.height
+        let asked = width.map { CGFloat($0) } ?? .greatestFiniteMagnitude
+        return min(image.size.width, asked, maxHeight * aspect)
     }
 
     private var missing: some View {

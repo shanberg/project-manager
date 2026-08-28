@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -93,6 +99,12 @@ const available = seeded !== null;
 
 describe.skipIf(!available)("the client against a real pm", () => {
   const prefs = seeded as PreferenceValues;
+
+  // `seed()` runs at module scope, so nothing else will take the vault away. Without this the
+  // suite leaves a populated `pm-client-*` tree in $TMPDIR behind on every run.
+  afterAll(() => {
+    rmSync(path.dirname(prefs.configPath), { recursive: true, force: true });
+  });
 
   it("reads tasks that carry what it takes to write them back", async () => {
     const data = await getNotes(prefs, "W-1");

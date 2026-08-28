@@ -547,3 +547,35 @@ public func appendTaskToSession(project: String, sessionIndex: Int, text: String
     }
     try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
 }
+
+/// Paste a block of tasks into `project`, after the anchor task's whole subtree — or, with no anchor,
+/// at the end of the session at `sessionIndex`.
+///
+/// A direct `NotesRawEdit` call rather than a contract action, on the same footing as `moveSubtree`:
+/// it's a surface gesture (a paste, a text drop) whose whole payload is resolved at the moment it
+/// happens, with no caller that reads early and acts late for a task digest to protect against. The
+/// one write is what makes a pasted block a single undo step.
+public func insertTaskBlock(
+    project: String,
+    block: [PastedTask],
+    anchorSessionIndex: Int? = nil,
+    anchorLineIndex: Int? = nil,
+    sessionIndex: Int? = nil
+) throws {
+    guard !block.isEmpty else { return }
+    let handle = try resolveNotesHandle(project: project)
+    let rawText = try handle.io.readContent(path: handle.notesPath)
+    let updated: String?
+    if let anchorSessionIndex, let anchorLineIndex {
+        updated = insertTaskBlockPreservingFormat(rawText: rawText,
+                                                  anchorSessionIndex: anchorSessionIndex,
+                                                  anchorLineIndex: anchorLineIndex,
+                                                  block: block)
+    } else if let sessionIndex {
+        updated = appendTaskBlockToSession(rawText: rawText, sessionIndex: sessionIndex, block: block)
+    } else {
+        updated = nil
+    }
+    guard let updated else { throw PmError.notesNotFound(handle.notesPath) }
+    try handle.io.writeContent(path: handle.notesPath, content: updated)
+}

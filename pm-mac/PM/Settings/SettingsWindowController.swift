@@ -39,10 +39,20 @@ final class SettingsWindowController: NSWindowController {
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-    func show() {
+    /// The panes, named so a command can ask for one by name rather than by index — an index would
+    /// silently point at the wrong pane the next time the order changes.
+    enum Pane: String {
+        case general, windows, projects, notes, shortcuts, notifications
+    }
+
+    func show(selecting pane: Pane? = nil) {
         // Settings belong to the app, not a document, so they open centered on first use and remember
         // where they were put after that.
         if window?.frameAutosaveName.isEmpty ?? true { window?.center() }
+        if let pane, let tabs = contentViewController as? NSTabViewController,
+           let index = tabs.tabViewItems.firstIndex(where: { $0.identifier as? String == pane.rawValue }) {
+            tabs.selectedTabViewItemIndex = index
+        }
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
