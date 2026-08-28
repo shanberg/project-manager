@@ -73,11 +73,13 @@ config.set
 
 ```
 project.list   project.get     notes.get      task.list
-task.search    task.whatsDue   task.progress  focus.get
-capture.parse  config.get
+task.search    task.waiting    task.whatsDue  task.progress
+focus.get      capture.parse   config.get
 ```
 
 `capture.parse` and `task.search` moved out of the macOS app into PmLib to be published. `capture.parse` reads a line the way the quick bar does — `due:friday`, `due:in 2w`, a trailing `@project` — so every surface accepts the same phrasing. `task.search` ranks on whole words rather than the subsequence matching that finds projects, because you remember a task as some of the words in it.
+
+`task.waiting` is the same walk asked a different question: every task with a `waiting:` token, grouped by what it's waiting on, released groups first. It is a query rather than a window feature because the grouping has rules in it — which spellings of a target are one target, which band a group sorts into — and a second implementation of those rules beside the first is exactly what this contract exists to prevent. The macOS Waiting window is one adapter over it.
 
 Both brought their vocabulary with them. The due-date presets — "Today", "This Weekend", "Next Week" — are now `PmLib.duePresets`, read by the parser *and* offered by the app's due menu, so the words a menu shows and the words a typed line is matched against cannot drift apart. `TaskSearch` ranks anything conforming to `SearchableTask`, so the app's warmed index and a fresh scan share one ranking; the app keeps its index, and the CLI and MCP pay one scan rather than maintaining one.
 

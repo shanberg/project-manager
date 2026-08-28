@@ -22,10 +22,40 @@ final class WaitTargetTests: XCTestCase {
                        .pending(folder: "W-1 Website Refresh"))
     }
 
-    /// An unambiguous code prefix, the way the CLI has always let you name a project.
-    func testResolvesByCodePrefix() {
+    /// A bare code, the way the CLI has always let you name a project.
+    func testResolvesByCode() {
         let r = roots(active: ["W-1 Website Refresh", "H-4 Kitchen"])
         XCTAssertEqual(resolveWaitTarget("W-1", roots: r), .pending(folder: "W-1 Website Refresh"))
+    }
+
+    /// **The rename case.** The token still says what the folder was called when it was written, and
+    /// the folder has since been retitled — so folder-name and title matching both miss, and only the
+    /// code the two names still share can carry it. This is the whole reason the code rule exists.
+    func testRenamedProjectStillResolves() {
+        let r = roots(active: ["W-1 Site Refresh"])
+        XCTAssertEqual(resolveWaitTarget("W-1 Website Refresh", roots: r),
+                       .pending(folder: "W-1 Site Refresh"))
+    }
+
+    /// A code is the whole token or none of it: `W-1` must not answer for `W-10`. The prefix rule this
+    /// replaced could not tell these two apart and called the pair ambiguous.
+    func testCodeDoesNotMatchALongerNumber() {
+        let r = roots(active: ["W-1 Site", "W-10 Site Redesign"])
+        XCTAssertEqual(resolveWaitTarget("W-1", roots: r), .pending(folder: "W-1 Site"))
+        XCTAssertEqual(resolveWaitTarget("W-10", roots: r), .pending(folder: "W-10 Site Redesign"))
+    }
+
+    /// Two folders carrying one code — a copied folder, a hand-made duplicate — name nothing, for the
+    /// same reason two matching titles do.
+    func testDuplicateCodesAreUnresolved() {
+        let r = roots(active: ["W-1 Site", "W-1 Site copy"])
+        XCTAssertEqual(resolveWaitTarget("W-1 Site Refresh", roots: r), .unresolved)
+    }
+
+    /// A code PM has never issued isn't a near-miss to be repaired — it names nothing.
+    func testUnknownCodeIsUnresolved() {
+        let r = roots(active: ["W-1 Site"])
+        XCTAssertEqual(resolveWaitTarget("W-9 Something", roots: r), .unresolved)
     }
 
     /// Names are typed into sentences, so case doesn't decide the answer.
@@ -64,14 +94,15 @@ final class WaitTargetTests: XCTestCase {
         XCTAssertNil(resolveWaitTarget("Dana", roots: r).folder)
     }
 
-    /// A prefix that could mean two projects tells the reader nothing, so it says nothing.
+    /// The name-prefix rule is the fallback for folders carrying no code, and an ambiguous prefix
+    /// tells the reader nothing, so it says nothing.
     func testAmbiguousPrefixIsUnresolved() {
-        let r = roots(active: ["W-1 Site", "W-10 Site Redesign"])
-        XCTAssertEqual(resolveWaitTarget("W-1", roots: r), .unresolved)
+        let r = roots(areas: ["Team Standups", "Team Standups (old)"])
+        XCTAssertEqual(resolveWaitTarget("Team", roots: r), .unresolved)
     }
 
-    /// A whole title beats a prefix: a folder actually titled "W-1" isn't shadowed by the prefix rule.
-    func testTitleBeatsPrefix() {
+    /// A whole title beats a code: a folder actually titled "W-1" isn't shadowed by the code rule.
+    func testTitleBeatsCode() {
         let r = roots(active: ["P-3 W-1", "W-1 Website Refresh"])
         XCTAssertEqual(resolveWaitTarget("W-1", roots: r), .pending(folder: "P-3 W-1"))
     }
@@ -96,5 +127,27 @@ final class WaitTargetTests: XCTestCase {
     func testEmptyTargetIsUnresolved() {
         let r = roots(active: ["W-1 Website Refresh"])
         XCTAssertEqual(resolveWaitTarget("   ", roots: r), .unresolved)
+    }
+
+    // MARK: The code a name carries
+
+    func testProjectCodeReadsTheCode() {
+        XCTAssertEqual(projectCode(fromName: "W-1 Website Refresh"), "W-1")
+        XCTAssertEqual(projectCode(fromName: "W-1"), "W-1")
+        XCTAssertEqual(projectCode(fromName: "  W-1  "), "W-1")
+        XCTAssertEqual(projectCode(fromName: "H-004 Maxwell Carmody"), "H-004")
+    }
+
+    /// The lookahead: a code ends at a space or at the end, so `W-1` is never read out of `W-12`.
+    func testProjectCodeStopsAtTheWholeToken() {
+        XCTAssertEqual(projectCode(fromName: "W-12 Thing"), "W-12")
+        XCTAssertNil(projectCode(fromName: "W-1x Thing"))
+    }
+
+    /// An area carries none, which is what makes it an area.
+    func testProjectCodeIsNilWithoutOne() {
+        XCTAssertNil(projectCode(fromName: "Team 1:1s"))
+        XCTAssertNil(projectCode(fromName: "Dana"))
+        XCTAssertNil(projectCode(fromName: ""))
     }
 }

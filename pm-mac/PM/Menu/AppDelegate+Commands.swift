@@ -55,6 +55,9 @@ extension AppDelegate: NSMenuItemValidation {
         ProjectPrompts.adoptArea { key in WindowManager.shared.open(projectKey: key) }
     }
 
+    /// Show (or put away) the cross-project Waiting list.
+    @objc func toggleWaiting() { WaitingWindowController.shared.toggle() }
+
     @objc func quickCapture() { QuickBarController.shared.toggle(mode: .capture) }
 
     @objc func quickNote() { QuickBarController.shared.toggle(mode: .note) }

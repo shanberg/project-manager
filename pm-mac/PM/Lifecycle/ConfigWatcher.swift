@@ -26,6 +26,9 @@ final class ConfigWatcher {
     private var pollTimer: DispatchSourceTimer?
     /// Notes paths currently being watched/polled (empty when nothing is open).
     private var currentNotesPaths: [String] = []
+    /// The PARA root directories. Polled for their own mtime, which changes when a folder is created,
+    /// renamed, archived or deleted inside them — none of which touches a file this otherwise watches.
+    private var currentRootPaths: [String] = []
     /// Last-seen combined mtime signature of the watched files; a change triggers `onChange`.
     private var lastSignature: String = ""
 
@@ -105,6 +108,24 @@ final class ConfigWatcher {
         }
     }
 
+    /// (Re)point the poll at the PARA roots.
+    ///
+    /// A directory's mtime moves when its contents are added to, removed from, or renamed — so three
+    /// extra `stat`s per poll are the whole cost of noticing a project archived, created or renamed by
+    /// the CLI, by Raycast, or in Finder. Without them PM finds out at the next reload it happens to
+    /// do for another reason, which for an idle app is not soon: the unblock announcement in
+    /// particular is about a project *other* than the one you're in, so nothing else was going to ask.
+    func watchRoots(paths: [String]) {
+        let snapshot = paths.sorted()
+        queue.async { [weak self] in
+            guard let self, snapshot != self.currentRootPaths else { return }
+            self.currentRootPaths = snapshot
+            // Adopt the new signature without firing: gaining a watch isn't a change to what it
+            // watches, and reloading here would make every launch reload twice.
+            self.lastSignature = self.currentSignature()
+        }
+    }
+
     /// Check the watched files right now, outside the poll's cadence.
     ///
     /// Called when the app comes forward. The poll interval is a background-cost tradeoff, but the
@@ -158,6 +179,7 @@ final class ConfigWatcher {
             PMFiles.configDir.appendingPathComponent("panel-settings.json").path,
         ]
         paths.append(contentsOf: currentNotesPaths.sorted())
+        paths.append(contentsOf: currentRootPaths)
         for path in paths {
             if let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date {
                 parts.append("\(path):\(date.timeIntervalSince1970)")

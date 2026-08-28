@@ -43,6 +43,29 @@ func numberedPrefixRange(in folderName: String) -> Range<String.Index>? {
     return Range(match.range, in: folderName)
 }
 
+/// The same grammar with the trailing space made optional, so a bare code is still a code.
+///
+/// `numberedProjectPrefix` requires whitespace after the number because it is asked about *folder
+/// names*, where a code is always followed by a title. This one is asked about names people type,
+/// where `W-1` on its own is the commonest way to say which project you mean. The lookahead is what
+/// keeps the two honest about the same thing: `W-1` must end there, so `W-12` never reads as `W-1`.
+let projectCodeToken = try? NSRegularExpression(pattern: #"^[A-Za-z]+-\d+(?=\s|$)"#)
+
+/// The `CODE-NNN` a name begins with, or nil when it begins with something else.
+///
+/// This is the part of a project's name that doesn't move. A title is edited — expanded, corrected,
+/// retitled outright — and the code it sits behind stays what it was, because renumbering a project
+/// would break every path and reference that already names it. So the code is what a stored reference
+/// can be resolved by when the rest of the name has drifted; see `matchWaitTarget`.
+public func projectCode(fromName name: String) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let regex = projectCodeToken,
+          let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+          let range = Range(match.range, in: trimmed)
+    else { return nil }
+    return String(trimmed[range])
+}
+
 public extension ProjectKind {
     /// Which kind a folder is, read off its name.
     ///

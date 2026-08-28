@@ -236,6 +236,13 @@ enum MainMenu {
         track(.toggleFocusPanel,
               add(menu, "Show Focus Panel", #selector(AppDelegate.toggleFocusPanel),
                   target: target, key: ""))
+        // Beside the focus panel because they are the app's two cross-project windows, answering the
+        // same question from opposite ends: one is what you can do now, the other is what you can't
+        // and who has it. ⌃⌘W rather than the ⌥⌘W the name asks for — that one is already File ▸
+        // Close All Windows, and ⌃⌘ is where this app puts a third command on a taken letter (⌃⌘N is
+        // New Project).
+        add(menu, "Show Waiting", #selector(AppDelegate.toggleWaiting), target: target, key: "w",
+            modifiers: [.command, .control])
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front

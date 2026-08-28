@@ -197,6 +197,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(switchProjectMenuItem())
             menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
                                    modifiers: [.control, .option]))
+            menu.addItem(actionItem("Waiting…", #selector(showWaiting), symbol: "clock", key: ""))
             menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
             menu.addItem(.separator())
             menu.addItem(settingsMenuItem())
@@ -255,6 +256,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // no single key of its own — it's the Dock icon, ⌥⌘N, and this.
         menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
                                    modifiers: [.control, .option]))
+        // The menu is the focused project's, and this is the one item on it that isn't: what you're
+        // waiting on is a question about everything, and this menu is where you are when you notice
+        // there's nothing here you can pick up.
+        menu.addItem(actionItem("Waiting…", #selector(showWaiting), symbol: "clock", key: ""))
         menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
 
         menu.addItem(.separator())
@@ -574,6 +579,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func switchProject(_ sender: NSMenuItem) { if let k = sender.representedObject as? String { store.setFocusedProject(key: k) } }
     @objc private func showPanel() { onShowPanel() }
     @objc private func togglePanel() { onTogglePanel() }
+    /// Straight to the window rather than through a closure like the panel above: this menu is bound
+    /// to a project and the Waiting list isn't, so there's no state here for the app delegate to
+    /// supply and nothing to route.
+    @objc private func showWaiting() { WaitingWindowController.shared.show() }
     @objc private func togglePin() { onSetPinned(!settings().pinned) }
     @objc private func toggleFloat() { onSetFloating(!settings().floating) }
     @objc private func quit() { NSApp.terminate(nil) }

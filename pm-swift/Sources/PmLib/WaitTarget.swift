@@ -36,19 +36,30 @@ public enum WaitTarget: Equatable, Sendable {
 
 /// Match a wait target against one root's folder names, leniently.
 ///
-/// Three ways to name the same folder, tried from the most complete statement to the least:
+/// Four ways to name the same folder, tried from the most complete statement to the least:
 ///
 /// 1. the folder name itself — `W-1 Website Refresh`
 /// 2. the title alone — `Website Refresh`, which is what a person writes and what the app offers
-/// 3. an unambiguous code prefix — `W-1`, which is how the CLI has always let you name a project
+/// 3. the code it carries — `W-1`, or anything else beginning `W-1 `, however the title has since
+///    been rewritten
+/// 4. an unambiguous name prefix, for the folders that carry no code at all
 ///
-/// Title before prefix, because a title is a whole answer and a prefix is an abbreviation of one; a
-/// folder literally titled `W-1` would otherwise be shadowed by the prefix rule. All three compare
-/// case-insensitively: this is a name someone typed into a sentence, not a path.
+/// Title before code, because a title is a whole answer and a code is a handle for one; a folder
+/// literally titled `W-1` would otherwise be shadowed. All four compare case-insensitively: this is a
+/// name someone typed into a sentence, not a path.
 ///
-/// A prefix matching more than one folder returns nil rather than picking. `matchProjectResult` calls
-/// that `ambiguous` and the CLI turns it into an error, which is right when a command is about to act
-/// on one project; here the caller is drawing a row, and the honest thing to draw for a name that
+/// **Rule 3 is what makes renaming a project invisible.** A stored `[[W-1 Website Refresh]]` stops
+/// matching by rules 1 and 2 the moment the folder becomes `W-1 Site Refresh` — the query is now
+/// longer than the folder and diverges partway through, so no amount of prefix leniency saves it. What
+/// both names still agree on is the code, and the code is the one part of a project's name that
+/// doesn't move: renumbering would break every path already pointing at it. So a target that carries a
+/// code is resolved by its code alone, and the title either side of the rename is treated as the
+/// commentary it is. The row then draws the *resolved* title rather than the stored one, which is why
+/// a rename doesn't just keep working — it stops being visible at all.
+///
+/// A code or prefix matching more than one folder returns nil rather than picking. `matchProjectResult`
+/// calls that `ambiguous` and the CLI turns it into an error, which is right when a command is about to
+/// act on one project; here the caller is drawing a row, and the honest thing to draw for a name that
 /// could mean two projects is the same thing drawn for a name that means none.
 func matchWaitTarget(_ target: String, in folders: [String]) -> String? {
     let q = target.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -59,6 +70,12 @@ func matchWaitTarget(_ target: String, in folders: [String]) -> String? {
     }
     if byTitle.count == 1 { return byTitle[0] }
     if byTitle.count > 1 { return nil }
+    if let code = projectCode(fromName: q) {
+        let byCode = folders.filter {
+            projectCode(fromName: $0)?.caseInsensitiveCompare(code) == .orderedSame
+        }
+        return byCode.count == 1 ? byCode[0] : nil
+    }
     let byPrefix = folders.filter { $0.lowercased().hasPrefix(q.lowercased()) }
     return byPrefix.count == 1 ? byPrefix[0] : nil
 }

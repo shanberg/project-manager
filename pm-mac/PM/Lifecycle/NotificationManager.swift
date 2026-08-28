@@ -17,6 +17,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var lastSignature = ""
 
     private static let failureCategory = "pm.failure"
+    private static let unblockCategory = "pm.unblock"
     private static let staleCategory = "pm.stale"
     private static let dueCategory = "pm.due"
     private static let completeAction = "pm.action.complete"
@@ -58,6 +59,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             // No actions: there's nothing PM can do about a failed write on the user's behalf.
             UNNotificationCategory(identifier: Self.failureCategory, actions: [],
                                    intentIdentifiers: [], options: []),
+            // No actions either, but for the opposite reason: what to do about freed work is a list to
+            // read, not a button to press, so the tap opens that list.
+            UNNotificationCategory(identifier: Self.unblockCategory, actions: [],
+                                   intentIdentifiers: [], options: []),
         ])
     }
 
@@ -75,6 +80,23 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = message
         content.categoryIdentifier = Self.failureCategory
         center.add(UNNotificationRequest(identifier: "pm.failure.\(UUID().uuidString)",
+                                         content: content, trigger: nil))
+    }
+
+    /// Announce that something being waited on has landed.
+    ///
+    /// Delivered immediately and outside `sync`'s signature check, like `reportFailure` and for the
+    /// same reason: this reports an event that already happened once, not a state to keep a schedule
+    /// in step with. `WaitingWatcher` decides *whether* — including the "once" — and this only says it.
+    func announceUnblock(target: String, count: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "\(target) is done"
+        content.body = count == 1
+            ? "1 task was waiting on it."
+            : "\(count) tasks were waiting on it."
+        content.categoryIdentifier = Self.unblockCategory
+        content.sound = .default
+        center.add(UNNotificationRequest(identifier: "pm.unblock.\(UUID().uuidString)",
                                          content: content, trigger: nil))
     }
 
@@ -168,6 +190,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             content.sound = .default
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Self.snoozeInterval, repeats: false)
             center.add(UNNotificationRequest(identifier: requestID + ".snoozed", content: content, trigger: trigger))
+        case UNNotificationDefaultActionIdentifier where category == Self.unblockCategory:
+            // The one notification whose answer is a list: tapping it opens the list.
+            WaitingWindowController.shared.show()
         default:
             break   // default tap: nothing (opening the panel would require a foreground hop)
         }

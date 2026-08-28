@@ -412,6 +412,23 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                              : "\(ranked.count) match\(ranked.count == 1 ? "" : "es").",
                          data: try JSONValue.encoding(Array(ranked)))
 
+    case "task.waiting":
+        // Active by default, where the other cross-project query defaults to all. A wait is a claim
+        // about work that hasn't happened yet, and an archived project's unfinished tasks are not
+        // waiting on anything any more — they were put down.
+        let scope = input.scope ?? "active"
+        let buckets = try waitingBuckets(includeArchived: scope != "active",
+                                         includeActive: scope != "archive")
+        let count = buckets.reduce(0) { $0 + $1.tasks.count }
+        let released = buckets.filter { $0.state == "released" }.count
+        var summary = "Nothing is waiting."
+        if !buckets.isEmpty {
+            summary = "\(count) task\(count == 1 ? "" : "s") waiting on "
+                + "\(buckets.count) thing\(buckets.count == 1 ? "" : "s")."
+            if released > 0 { summary += " \(released) released." }
+        }
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(buckets))
+
     case "capture.parse":
         let line = input.text ?? ""
         let now = try input.now.map(parseSessionDateArgument) ?? Date()

@@ -92,7 +92,9 @@ pm archive W-1                     # By prefix (unambiguous)
 pm unarchive W-1                   # Move from archive back to active
 ```
 
-**Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released. See [docs/links.md](docs/links.md).
+**Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released — and PM says so once, out loud, because the tasks that were freed are usually in a project you weren't looking at. Renaming the project it names changes nothing you can see: the token resolves by the code it carries, and the current title is what gets drawn. See [docs/links.md](docs/links.md).
+
+**The Waiting list:** One window, across every project, of everything you're waiting on, grouped by what it's waiting on — ⌃⌘W, or Waiting… from the menubar. Anything that has landed sits at the top with a button that clears the wait on the whole group. `pm api call task.waiting` answers the same question on the command line.
 
 **In the note editor:** `@` names a project or area — a filtered list, arrow keys, Return — and writes the `[[…]]` the vault reads. `/` opens what a line can carry: make it a task, give it a due date, or start a wait (which hands straight to the `@` picker). A `[[…]]` behaves as one thing: the caret steps over it and backspace takes all of it.
 

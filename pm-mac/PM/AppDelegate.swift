@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController!
     private var watcher: ConfigWatcher!
     private var notifier: NotificationManager!
+    private var cancellables: Set<AnyCancellable> = []
     private let windows = WindowManager.shared
     /// Fills File ▸ Open Recent on demand; held here so it outlives the menu it serves.
     let recentProjectsMenuDelegate = RecentProjectsMenuDelegate()
@@ -45,6 +46,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).
         notifier = NotificationManager(store: store)
         notifier.requestAuthorization()
+
+        // Unconditionally, before anything asks: the folder scan the waits resolve against otherwise
+        // only warms as a side effect of a project loading successfully, so a launch with no focused
+        // project — or one whose folder has gone — left every `waiting:` token on every row
+        // unresolved, and the watcher below with nothing to watch.
+        ProjectIndex.shared.warmWaitRoots()
+
+        // The unblock moment. Watches the archive's membership — which the folder scan already
+        // reports — and speaks when something a task was waiting on lands there. See `WaitingWatcher`.
+        WaitingWatcher.shared.announce = { [weak self] title, count in
+            self?.notifier.announceUnblock(target: title, count: count)
+        }
+        WaitingWatcher.shared.start()
 
         // Global shortcuts. Only the panel's (⌃⌥P) is bound out of the box — it used to summon the
         // project window, which made it decide between hiding a window and hiding the whole app; a
@@ -70,6 +84,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
         watcher = ConfigWatcher { [weak self] in self?.handleExternalChange() }
         watcher.start()
+        // And the PARA roots themselves, so a project archived outside PM is noticed rather than
+        // waiting for some unrelated reload to stumble on it. The folder scan already publishes where
+        // they are, so this follows it rather than resolving the config a second time.
+        ProjectIndex.shared.$waitRoots
+            .map { $0.map(\.base) }
+            .removeDuplicates()
+            .sink { [weak self] bases in
+                Task { @MainActor in self?.watcher?.watchRoots(paths: bases) }
+            }
+            .store(in: &cancellables)
 
         // Be active for the first protected-folder access so a TCC prompt (if any) can present.
         NSApp.activate(ignoringOtherApps: true)
@@ -220,6 +244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings = disk
             FocusPanelController.shared.applyPanelSettings(disk)
         }
+        // Force rather than let the TTL decide: an external change is exactly the case where the
+        // folder membership may have moved, and the wait roots are what tells a wait it's been
+        // released. Three directory listings per debounced external edit is the cost this scan was
+        // designed to be affordable at.
+        ProjectIndex.shared.warmWaitRoots(force: true)
         reloadAllStores()
     }
 
@@ -297,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://capture | goto         → the quick bar, in one of its two modes
     // pmpanel://window | open?project= → a project window
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
+    // pmpanel://waiting                → the cross-project Waiting list
     // pmpanel://settings               → the Settings window
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -322,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Every other PM surface is reachable from here; Settings was the one that wasn't, which made
         // it the one thing a script could change the config for but never show anybody.
         case "settings": SettingsWindowController.shared.show()
+        case "waiting": WaitingWindowController.shared.show()
         case "open":
             // A blank or unparseable key would otherwise open a second projectless window, which looks
             // like a bug and can't be told from the empty state.

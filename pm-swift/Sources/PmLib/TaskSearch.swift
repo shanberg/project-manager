@@ -119,13 +119,29 @@ public enum TaskSearch {
 ///
 /// The contract's search result. It carries the reference — session date, line, digest — because a
 /// search that made you look the task up again before doing anything with it would be half an answer.
-public struct TaskSearchHit: Codable, Equatable, SearchableTask {
+public struct TaskSearchHit: Codable, Equatable, Sendable, SearchableTask {
     public let projectFolder: String
     public let projectName: String
     public let projectKey: String
     public let isArchived: Bool
     public let text: String
     public let due: String?
+    /// What this task's own line says it's waiting on. Nil when the line says nothing — including for
+    /// a task that is waiting only because something above it is.
+    ///
+    /// Split from `effectiveWaiting` for the same reason `Todo` splits them, and the split is
+    /// load-bearing here: **this is the one that can be written to.** Clearing a wait means editing the
+    /// line that declares it, so a caller acting on a list of waiting tasks has to send the refs of the
+    /// ones that declare their own — a `clearWaiting` aimed at an inheritor edits a line with no
+    /// `waiting:` on it and silently changes nothing.
+    public let waiting: String?
+    /// What this task is waiting on in practice — its own token, else the nearest waiting ancestor's.
+    /// This is what it *means* for the task to be blocked, so it's what the grouping reads.
+    ///
+    /// Carried by the search hit rather than by a type of its own because the scan that fills these is
+    /// the only cross-project walk there is, and "everything I'm waiting on" is a filter over exactly
+    /// the rows it already produced. See `waitingBuckets`.
+    public let effectiveWaiting: String?
     public let isFocused: Bool
     public let session: String?
     public let line: Int
@@ -156,7 +172,7 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
                   let rawText = try? String(contentsOfFile: notesPath, encoding: .utf8),
                   let notes = try? parseNotes(markdown: rawText),
                   let todos = try? parseTodos(notes: normalizeFocusMarker(notes: notes)) else { continue }
-            for todo in todosWithEffectiveDueDates(todos) where !todo.checked {
+            for todo in todosWithEffectiveWaiting(todosWithEffectiveDueDates(todos)) where !todo.checked {
                 hits.append(TaskSearchHit(
                     projectFolder: folder,
                     projectName: projectTitle(fromFolderName: folder),
@@ -164,6 +180,8 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
                     isArchived: archived,
                     text: todo.text,
                     due: todo.effectiveDueDate ?? todo.dueDate,
+                    waiting: todo.waiting,
+                    effectiveWaiting: todo.effectiveWaiting,
                     isFocused: todo.isFocused,
                     session: todo.sessionISODate,
                     line: todo.lineIndex,

@@ -103,7 +103,11 @@ func taskLineAttributed(_ todo: Todo, wait: TaskWait?, size: CGFloat = 13) -> NS
         nameAttributes[.font] = NSFontManager.shared.convert(
             NSFont.systemFont(ofSize: size, weight: style.weight), toHaveTrait: .italicFontMask)
     }
-    out.append(NSAttributedString(string: wait.target, attributes: nameAttributes))
+    // The name it goes by now, not the name it was written under — see `waitDisplayName`. A project
+    // renamed after this token was stored still draws its current title here, so the rename is
+    // invisible rather than merely survivable.
+    out.append(NSAttributedString(string: waitDisplayName(target: wait.target, resolution: wait.resolution),
+                                  attributes: nameAttributes))
     if let symbol = style.symbol,
        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
         .withSymbolConfiguration(.init(pointSize: size * 0.85, weight: style.weight)) {

@@ -121,6 +121,7 @@ struct WindowsSettingsView: View {
 struct NotificationSettingsView: View {
     @AppStorage(NotificationSettings.staleKey) private var staleNudges = true
     @AppStorage(NotificationSettings.dueKey) private var dueAlerts = true
+    @AppStorage(NotificationSettings.unblockKey) private var unblockAlerts = true
 
     var body: some View {
         Form {
@@ -129,6 +130,16 @@ struct NotificationSettingsView: View {
                 Toggle("Alert me when a task reaches its due date", isOn: $dueAlerts)
             } footer: {
                 Text("Both are scheduled for the focused project only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Tell me when something I'm waiting on is archived", isOn: $unblockAlerts)
+            } footer: {
+                // Its own section because it is the one alert about work in a project you are not in.
+                Text("Archiving a project frees every task waiting on it, wherever they live. "
+                     + "Delivered once, when it happens.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -145,6 +156,7 @@ struct NotificationSettingsView: View {
         .scenePadding()
         .onChange(of: staleNudges) { _ in NotificationSettings.changed() }
         .onChange(of: dueAlerts) { _ in NotificationSettings.changed() }
+        .onChange(of: unblockAlerts) { _ in NotificationSettings.changed() }
     }
 }
 
@@ -152,9 +164,14 @@ struct NotificationSettingsView: View {
 enum NotificationSettings {
     static let staleKey = "PMNotifyStale"
     static let dueKey = "PMNotifyDue"
+    static let unblockKey = "PMNotifyUnblock"
 
     static var staleNudges: Bool { UserDefaults.standard.object(forKey: staleKey) as? Bool ?? true }
     static var dueAlerts: Bool { UserDefaults.standard.object(forKey: dueKey) as? Bool ?? true }
+    /// Whether the unblock moment is announced — see `WaitingWatcher`. Unlike the other two this
+    /// isn't scheduled ahead of time; it fires when a project is archived, which is why it is read at
+    /// the moment of the event rather than folded into `NotificationManager.sync`'s signature.
+    static var unblockAlerts: Bool { UserDefaults.standard.object(forKey: unblockKey) as? Bool ?? true }
 
     /// Posted when a toggle changes so the scheduler can rebuild — it skips rescheduling when its
     /// inputs look unchanged, and a settings flip isn't one of the inputs it watches.

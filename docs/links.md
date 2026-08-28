@@ -1,8 +1,8 @@
 # Waiting on
 
 **Status:** built, 2026-08-28. `TaskContent` carries the token, `WaitTarget.swift` resolves it,
-`task.setWaiting` publishes it, and the Mac app draws it inside the task line. Two things are
-known-missing on purpose: the cross-project Waiting grouping, and the unblock moment — both below.
+`task.setWaiting` publishes it, the Mac app draws it inside the task line, `task.waiting` groups every
+wait in the vault, and `WaitingWatcher` says so out loud when one is released.
 
 This settles what a link between projects *is* before any of it is written, because the answer turns
 out to be "not a link between projects."
@@ -79,10 +79,10 @@ chain, and the one that blocks this task is the closest link in it.
 
 ## Resolution is lenient, and failure isn't an error
 
-`resolveWaitTarget` tries three ways of naming the same folder, from the most complete statement to the
-least: the folder name, the title alone, then an unambiguous code prefix. Title before prefix, so a
-folder literally titled `W-1` isn't shadowed by the prefix rule. All three compare case-insensitively —
-this is a name someone typed into a sentence, not a path.
+`resolveWaitTarget` tries four ways of naming the same folder, from the most complete statement to the
+least: the folder name, the title alone, the `CODE-NNN` it carries, then an unambiguous name prefix for
+the folders that carry no code. Title before code, so a folder literally titled `W-1` isn't shadowed.
+All four compare case-insensitively — this is a name someone typed into a sentence, not a path.
 
 Roots are searched active → areas → archive, the same order `resolveProjectPath` uses. The order is
 load-bearing rather than tidy: a project unarchived back into `active` is live again, so `active`
@@ -97,8 +97,34 @@ Three outcomes, and note that none of them is an error:
 
 A name PM can't place is `unresolved`, not invalid, and that distinction is most of why the feature is
 worth having: most things anyone waits on are people, and none of them are in the projects folder. An
-ambiguous prefix collapses into the same case deliberately — the honest thing to draw for a name that
+ambiguous code collapses into the same case deliberately — the honest thing to draw for a name that
 could mean two projects is what you'd draw for one that means none.
+
+### The code rule, and why renaming is invisible
+
+A stored `[[W-1 Website Refresh]]` stops matching by folder name or by title the moment the project
+becomes `W-1 Site Refresh`: the query is now *longer* than the folder and diverges partway through, so
+no amount of prefix leniency reaches it. What both names still agree on is the code — and a code is the
+one part of a project's name that doesn't move, because renumbering would break every path already
+pointing at it. So a target carrying a code is resolved by its code alone and the title either side of
+the rename is treated as the commentary it is.
+
+That is only half of it. The other half is `waitDisplayName`, which draws the resolved project's
+**current** title rather than the stored token. Without it a rename would merely survive: every surface
+would go on asserting a name nobody uses any more, which is worse than the broken link it replaced —
+a dead reference announces itself and a stale one doesn't.
+
+`projectCode(fromName:)` is `numberedProjectPrefix` with the trailing space made optional and a
+lookahead in its place, because `W-1` typed on its own is still a code and must never be read out of
+`W-12`. The prefix rule it displaced could not tell those two apart and called the pair ambiguous;
+`testCodeDoesNotMatchALongerNumber` is that improvement written down.
+
+**The boundary, stated plainly.** A rename is invisible when the token carries the code — which is
+every token PM writes, because the `@` picker applies `MentionCandidate.name`, the full folder name.
+A token typed by hand as a bare title, `[[Website Refresh]]`, has nothing stable in it: rename the
+project and it goes unresolved, correctly, because there is no longer anything in the vault by that
+name and PM keeps no rename history to consult. That is the same bargain every name-derived fact in
+this app makes, and it is at least visible — the row stops claiming a status it can't back up.
 
 ## What it changes about using PM
 
@@ -253,6 +279,24 @@ broken selecting a task by clicking its text.
 Surfaces without a layout manager — a menu item, the sidebar's next-task line, the quick bar's search
 rows — get the same result by rewriting, through `displayingWikilinks`. Both are presentation.
 
+**A text field doesn't own its layout manager**, which is why the task editors were the last surface
+to get a pill. The window lends every field the *same* field editor, so a field can only reach that
+editor's `delegate` — and a delegate carries `TokenLayoutManager`'s glyph half, where brackets become
+padding, but not its drawing half, because `drawBackground` is an override. A token's spacing with
+nothing inside it reads as a layout bug rather than as a style. `NSWindow.fieldEditor(_:for:)` is the
+hook: `TextFocusWindow` hands a `TokenClickField` a `TokenFieldEditor` built on a real one, and one
+per window shared by every token field in it is exactly what a field editor already is.
+
+### Every surface that draws a token can be clicked through
+
+A pill that looks like a link and isn't is worse than the markup it replaced, so `onOpenProject` is
+supplied everywhere one is drawn — the note editor, the task rows, the inline task fields, the
+immersive session note and the quick bar's note mode. What "open" means differs by surface and that is
+the host's decision, not the editor's: a project window **retargets itself**, because the token is in
+a note you are already reading; the two surfaces with no window of their own step out of the way and
+put one in front. Both of those dismiss only once the name is known to resolve — `[[Dana]]` is a
+person, and clicking one should not close the note you were writing.
+
 ### Four things that cost a round each
 
 Written down because each is invisible until it bites, and three of them are the same shape: a
@@ -290,22 +334,94 @@ declined to. The defect predates waits; waits made it load-bearing.
 A focused task that is waiting still wins. Focus advancement skips waits, so getting there took a
 deliberate act, and the hero reports what the document says rather than overruling it.
 
-## Known-missing, on purpose
+## The Waiting list
 
-**The Waiting grouping.** One list, across every project, of everything you're waiting on, grouped by
-target — because the unblock event is per-target, so grouping that way makes each one a readable list
-the moment it lands. This is where the alignment given up by drawing inline has to be paid back, and
-it is the other half of the feature rather than a nice-to-have.
+The inline token answers "why can't I do *this*?" It is part of the sentence the task makes and wraps
+with it, which is the right shape for a task list and the wrong shape for the other question: **what am
+I waiting on?** Asked that way the target is the subject rather than a modifier, and the tasks are its
+list — one heading, one column, everything under it aligned. The alignment given up by drawing inline
+is paid back here, which is why this was always the other half of the feature and not a nice-to-have.
 
-**Renames.** A stored `[[W-1 Website Refresh]]` stops resolving the moment the project is renamed to
-`W-1 Site Refresh`: the query is longer than the folder and diverges, so no rule matches. Writing the
-full folder name is half the answer; the other half is a rule that resolves a target by the `CODE-NNN`
-it starts with, plus drawing the *resolved* title rather than the stored text — so a rename becomes
-invisible, the way it is in Linear.
+Grouping by target is also what makes the unblock event legible. Archiving a project releases every
+task waiting on it at once, and that is *one* event about *one* target. A list ordered any other way
+would deliver it as several unrelated rows quietly changing colour.
 
-**The unblock moment.** Archive W-1 and every task waiting on it goes live. Today that shows up as a
-green check the next time you look at the project. It should announce itself once — "3 tasks were
-waiting on W-1" — and that deserves to be designed rather than left as a badge quietly flipping.
+**Merged on the resolved folder, not on the text.** `[[W-1]]`, `[[Website Refresh]]` and
+`[[W-1 Website Refresh]]` are three spellings of one thing to wait on, so they make one group; an
+unresolved target has nothing but its text, so it keys on that, case-insensitively.
+
+**Released first.** Every other ordering here is arbitrary and this one isn't: a released group is the
+only kind carrying news — work you filed away as blocked is live again, today. Pending is a thing to
+act on when somebody else is done. Unresolved goes last, not because it matters least but because PM
+knows least about it. Within a band, alphabetical by the title shown: sorting by size would tell you
+how much one person is holding up, and would also reorder the list every time you ticked something off.
+
+### The write is smaller than the list
+
+A group lists everything the target is holding up, and most of those are usually children of one
+waiting parent — they carry no `waiting:` of their own. So `TaskSearchHit` splits `waiting` (this
+line's own token, the only thing that can be edited) from `effectiveWaiting` (what it means for the
+task to be blocked, which is what the grouping reads). Stop Waiting writes only the first set.
+
+Sending all of them instead is not an error, which is the trap: `task.setWaiting` edits the lines it's
+given, finds no token on an inheritor, and reports fewer changes than the button promised. The
+discovery cost one CLI call — "1 task no longer waiting" against four refs — and it is the reason both
+halves are on the hit rather than one merged field.
+
+### One question, three surfaces
+
+`task.waiting` is a contract query, so the grouping is not the window's private idea of the answer. The
+CLI, a model over MCP and Raycast all get the same buckets in the same order, and the window is one
+adapter over `waitingBuckets` rather than a second implementation beside it.
+
+It runs its own scan rather than reading `ProjectIndex.openTasks`, which already holds every open task
+and would have answered for free. That index is gated on a sidebar being open, capped at a hundred
+projects, and carries no digest — so its rows could be listed but not acted on. This is a window
+somebody opens on purpose to deal with a list, so it pays for one honest scan and gets rows that can
+be written to.
+
+## The unblock moment
+
+Archive W-1 and every task waiting on it goes live — in files W-1 never touches, because nothing writes
+into another project's notes. So the change arrives as several rows in several windows quietly turning
+green, most of them not on screen. That is the one state change in this feature a person has to be
+*told* rather than shown.
+
+**What it watches is the archive's membership, not the tasks.** The event is a folder arriving in the
+archive root, and `ProjectIndex.waitRoots` already lists those folders, is ungated, and reloads with
+everything else. Only when a folder is genuinely new there does `WaitingWatcher` pay for one
+`waitingBuckets` scan to find out whether anything cared. Archive nothing and it costs nothing.
+
+Four things had to be true for "once" to mean once:
+
+- **The baseline is persisted**, or archiving on Friday and opening PM on Monday says nothing.
+- **The first run seeds silently.** A fresh install would otherwise announce every project ever
+  archived, which is the exact failure "announce once" exists to prevent. A *missing* file is a first
+  run; an empty list is a genuinely empty archive.
+- **It lives in the config dir, not in defaults.** What it describes belongs to a vault, and defaults
+  belong to the app. `PM_CONFIG_HOME` points PM at another vault with its own archive; one baseline
+  shared between them reads every project in the second vault's archive as newly landed. Which is
+  precisely what happened the first time this was tested against the dev vault.
+- **It keys on the code, not the folder name.** The rest of this feature already decided the code is
+  the identity and the title is commentary; keying on the name here would make *renaming an archived
+  project* look like a fresh archiving and deliver months-old news as new. An area carries no code and
+  falls back to its name, so renaming an archived area still re-announces — a rarer case, with nothing
+  stable to hold on to.
+
+The set is *replaced* rather than added to, so a project unarchived and archived again announces again
+— that is the same news a second time, and it is news both times.
+
+### The roots had to be watched for any of it to fire
+
+`ConfigWatcher` watched the config dir and the open projects' notes files. Archiving from the CLI moves
+a folder in `Projects/` and touches neither, so PM found out at whatever reload it happened to do next
+— and for an idle app that is not soon. Adding the three PARA roots to the poll costs three `stat`s
+every two seconds and fixes more than this: a project created, renamed or archived outside PM is now
+noticed at all.
+
+The same session turned up why `waitRoots` could be empty for a whole launch: it only warmed as a side
+effect of a project loading *successfully*. A launch with no focused project, or one whose folder had
+gone, left every `waiting:` token on every row unresolved. It is warmed at launch now.
 
 ## Deliberately not built
 
