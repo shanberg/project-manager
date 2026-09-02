@@ -87,8 +87,13 @@ func taskLineAttributed(_ todo: Todo, wait: TaskWait?, size: CGFloat = 13) -> NS
     if todo.checked { base[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
 
     // The text as written, tokens and all: the layout manager needs the brackets present to turn them
-    // into the pill's padding, so nothing is stripped here.
-    let out = NSMutableAttributedString(string: todo.text, attributes: base)
+    // into the pill's padding, so nothing is stripped here — only the name *inside* each token is
+    // brought up to date, so a pill names the project it currently is rather than the one it was when
+    // somebody typed it. See `resolvingWikilinks`.
+    let out = NSMutableAttributedString(
+        string: resolvingWikilinks(todo.text, shorteningCodes: !ProjectCodes.areShown,
+                                   resolving: ProjectIndex.shared.currentName(of:)),
+        attributes: base)
 
     guard let wait else { return out }
     let style = WaitRunStyle(resolution: wait.resolution, isOwn: wait.isOwn)
@@ -105,9 +110,11 @@ func taskLineAttributed(_ todo: Todo, wait: TaskWait?, size: CGFloat = 13) -> NS
     }
     // The name it goes by now, not the name it was written under — see `waitDisplayName`. A project
     // renamed after this token was stored still draws its current title here, so the rename is
-    // invisible rather than merely survivable.
-    out.append(NSAttributedString(string: waitDisplayName(target: wait.target, resolution: wait.resolution),
-                                  attributes: nameAttributes))
+    // invisible rather than merely survivable. `waitDisplayName` always shortens; when codes are
+    // being written this says the folder's whole name, so the wait and the pill above it agree.
+    let waitName = wait.resolution.folder.map { ProjectCodes.display($0) }
+        ?? waitDisplayName(target: wait.target, resolution: wait.resolution)
+    out.append(NSAttributedString(string: waitName, attributes: nameAttributes))
     if let symbol = style.symbol,
        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
         .withSymbolConfiguration(.init(pointSize: size * 0.85, weight: style.weight)) {

@@ -99,7 +99,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let due = next.dueDate ?? next.effectiveDueDate
         return MenubarTitleContent.Task(
             key: PMStore.key(for: next),
-            text: truncate(next.text, 30),
+            // The name, not the markup: a `[[…]]` in a task reads as a pill everywhere else, and the
+            // bar is the one place it was still spelling out brackets and a code.
+            text: truncate(ProjectIndex.shared.displayText(next.text), 30),
             due: due.map { RelativeDue.short($0) },
             overdue: due.map(RelativeDue.isOverdue) ?? false
         )

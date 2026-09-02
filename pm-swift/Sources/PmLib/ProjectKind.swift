@@ -56,7 +56,7 @@ let projectCodeToken = try? NSRegularExpression(pattern: #"^[A-Za-z]+-\d+(?=\s|$
 /// This is the part of a project's name that doesn't move. A title is edited — expanded, corrected,
 /// retitled outright — and the code it sits behind stays what it was, because renumbering a project
 /// would break every path and reference that already names it. So the code is what a stored reference
-/// can be resolved by when the rest of the name has drifted; see `matchWaitTarget`.
+/// can be resolved by when the rest of the name has drifted; see `matchWrittenName`.
 public func projectCode(fromName name: String) -> String? {
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let regex = projectCodeToken,

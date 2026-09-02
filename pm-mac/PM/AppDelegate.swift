@@ -60,6 +60,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         WaitingWatcher.shared.start()
 
+        // The index caches task text with its `[[…]]` already rendered, so the preference is baked
+        // into what it holds rather than applied when a row draws. Toggling it therefore has to
+        // re-scan — which is cheap enough to do on an explicit, rare choice, and is the same warm the
+        // Projects pane runs when the folders themselves change.
+        NotificationCenter.default.addObserver(forName: ProjectCodes.didChange, object: nil,
+                                               queue: .main) { _ in
+            Task { @MainActor in
+                ProjectIndex.shared.warmAllProjects(force: true)
+                ProjectIndex.shared.warmRecents(force: true)
+            }
+        }
+
         // Global shortcuts. Only the panel's (⌃⌥P) is bound out of the box — it used to summon the
         // project window, which made it decide between hiding a window and hiding the whole app; a
         // HUD's toggle is just show/hide, and opening a project window is now the Dock icon and ⌥⌘N.

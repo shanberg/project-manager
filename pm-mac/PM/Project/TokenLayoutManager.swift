@@ -71,10 +71,43 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         }
     }
 
-    private func isBracket(_ character: Int, in text: String) -> Bool {
-        tokens(in: text).contains {
-            NSLocationInRange(character, $0.opening) || NSLocationInRange(character, $0.closing)
+    /// The `CODE-NNN ` prefix inside a token, when the app has been told not to write codes — the
+    /// range that has to disappear for a pill to read `Vendor Contract` while the file still says
+    /// `[[W-3 Vendor Contract]]`.
+    ///
+    /// This is the same trade the brackets already make, and the reason it's honest: a pill is a
+    /// rendering, not the text. Nothing here edits the storage, every offset still counts these
+    /// characters, and turning "Show link syntax" on brings the whole token back as written.
+    ///
+    /// An alias (`[[note|shown as this]]`) is left alone — the words after the pipe are the ones
+    /// somebody chose, and there is no code in them to drop. The prefix's length comes from PmLib's
+    /// parser rather than from a second copy of the grammar here.
+    private func codeRange(inTokenAt span: NSRange, in text: String) -> NSRange? {
+        guard !ProjectCodes.areShown else { return nil }
+        let ns = text as NSString
+        let inner = ns.substring(with: NSRange(location: span.location + 2, length: span.length - 4))
+        guard !inner.contains("|") else { return nil }
+        let short = projectTitle(fromFolderName: inner)
+        guard !short.isEmpty, (short as NSString).length < (inner as NSString).length else { return nil }
+        return NSRange(location: span.location + 2,
+                       length: (inner as NSString).length - (short as NSString).length)
+    }
+
+    /// How wide a hidden character draws, or nil when it isn't one of them.
+    ///
+    /// One lookup for both kinds because this is asked per glyph and each call re-scans the line: a
+    /// bracket carries a quarter of the padding, a code character carries nothing at all.
+    private func hiddenWidth(at character: Int, in text: String) -> CGFloat? {
+        for token in tokens(in: text) {
+            if NSLocationInRange(character, token.opening) || NSLocationInRange(character, token.closing) {
+                return padding / 4
+            }
+            if let code = codeRange(inTokenAt: token.span, in: text),
+               NSLocationInRange(character, code) {
+                return 0
+            }
         }
+        return nil
     }
 
     // MARK: glyph generation
@@ -87,7 +120,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string else { return 0 }
         var properties = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
         var changed = false
-        for i in 0..<glyphRange.length where isBracket(charIndexes[i], in: text) {
+        for i in 0..<glyphRange.length where hiddenWidth(at: charIndexes[i], in: text) != nil {
             properties[i] = .controlCharacter
             changed = true
         }
@@ -101,8 +134,8 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                        shouldUse action: NSLayoutManager.ControlCharacterAction,
                        forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string,
-              isBracket(charIndex, in: text) else { return action }
-        // Whitespace, so the pair occupies a width this decides and paints nothing.
+              hiddenWidth(at: charIndex, in: text) != nil else { return action }
+        // Whitespace, so each run occupies a width this decides and paints nothing.
         return .whitespace
     }
 
@@ -112,15 +145,12 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                        proposedLineFragment proposedRect: NSRect,
                        glyphPosition: NSPoint, characterIndex charIndex: Int) -> NSRect {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string,
-              let token = tokens(in: text).first(where: {
-                  NSLocationInRange(charIndex, $0.opening) || NSLocationInRange(charIndex, $0.closing)
-              }) else { return .zero }
-        // Two characters per side, so each carries half the padding. The opening pair carries the glyph
-        // as well, which is why it is the wider of the two.
-        _ = token
-        // A **quarter** each. This is asked per glyph, and there are two bracket characters on each
-        // side — so a half here gave each side a full `padding` and the token twice what was set.
-        return NSRect(x: glyphPosition.x, y: 0, width: padding / 4, height: proposedRect.height)
+              let width = hiddenWidth(at: charIndex, in: text) else { return .zero }
+        // A **quarter** for a bracket. This is asked per glyph, and there are two bracket characters
+        // on each side — so a half here gave each side a full `padding` and the token twice what was
+        // set. A hidden code character asks for nothing: it is meant to leave no trace, not to leave
+        // a gap where a code used to be.
+        return NSRect(x: glyphPosition.x, y: 0, width: width, height: proposedRect.height)
     }
 
     // MARK: drawing

@@ -150,4 +150,27 @@ final class WaitTargetTests: XCTestCase {
         XCTAssertNil(projectCode(fromName: "Dana"))
         XCTAssertNil(projectCode(fromName: ""))
     }
+
+    // MARK: One lookup, for every written name
+
+    /// `resolveWrittenName` is the same four rules without the wait vocabulary — because it turns out
+    /// not to be a question about waits. Navigation used to match folder names character for
+    /// character while resolution had four rules, which is how a row came to draw a renamed project's
+    /// current title while clicking that title did nothing.
+    func testWrittenNamesResolveByTheSameRulesAsWaits() {
+        let groups = [["W-1 Site Refresh", "H-4 Kitchen"], ["Team 1:1s"]]
+        XCTAssertEqual(resolveWrittenName("W-1 Site Refresh", in: groups), "W-1 Site Refresh")
+        XCTAssertEqual(resolveWrittenName("Site Refresh", in: groups), "W-1 Site Refresh")
+        XCTAssertEqual(resolveWrittenName("W-1", in: groups), "W-1 Site Refresh")
+        // The rename: written under the old title, still lands.
+        XCTAssertEqual(resolveWrittenName("W-1 Website Refresh", in: groups), "W-1 Site Refresh")
+        XCTAssertEqual(resolveWrittenName("Team 1:1s", in: groups), "Team 1:1s")
+        XCTAssertNil(resolveWrittenName("Dana", in: groups))
+    }
+
+    /// The groups are searched in the order given — what's in hand before what's been put away.
+    func testWrittenNamesPreferTheEarlierGroup() {
+        XCTAssertEqual(resolveWrittenName("W-1", in: [["W-1 Live"], ["W-1 Archived"]]), "W-1 Live")
+        XCTAssertEqual(resolveWrittenName("W-1", in: [[], ["W-1 Archived"]]), "W-1 Archived")
+    }
 }

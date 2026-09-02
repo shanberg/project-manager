@@ -176,6 +176,10 @@ final class ProjectIndex: ObservableObject {
     func warmRecents(force: Bool = false) {
         if !force, Date().timeIntervalSince(recentsWarmedAt) < Self.ttl { return }
         recentsWarmedAt = Date()
+        // Taken on the main actor, before the work leaves it: these rows show project names, and a
+        // scan has no way to reach `waitRoots` from a background queue.
+        let groups = writtenNameGroups
+        let shortening = !ProjectCodes.areShown
         recentsQueue.async { [weak self] in
             guard let list = Self.recentsByEdit(limit: Self.recentsLimit) else { return }
             let warmed: [Recent] = list.map { r in
@@ -189,7 +193,8 @@ final class ProjectIndex: ObservableObject {
                               total: out.todos.count,
                               nextDue: Self.earliestDue(out.todos),
                               summary: summary.isEmpty ? nil : summary,
-                              focusedText: Self.heroTaskText(out.todos))
+                              focusedText: Self.heroTaskText(out.todos, shorteningCodes: shortening,
+                                                             in: groups))
             }
             Task { @MainActor in
                 guard let self, warmed != self.recents else { return }
@@ -233,12 +238,50 @@ final class ProjectIndex: ObservableObject {
         }
     }
 
-    /// The `projectKey` for a folder name, or nil if no scanned root holds it.
+    /// The folder lists a written `[[…]]` name is resolved against, in the order a name should be
+    /// understood: what's in hand, then what's standing, then what's been put away.
+    ///
+    /// Snapshotted rather than read from inside the background scans, because `waitRoots` is main-actor
+    /// state and those scans are not. Empty until the first scan lands, which is the same answer the
+    /// strict lookup used to give and self-corrects on the next warm.
+    var writtenNameGroups: [[String]] { waitRoots.map(\.folders) }
+
+    /// The `projectKey` for a written name, or nil if no scanned root answers to it.
+    ///
+    /// **Resolved leniently, not matched exactly.** This is the lookup behind every click on a token,
+    /// and it used to require the name in the file to equal a folder name character for character —
+    /// while the wait on the same line was resolved by four rules including the project's code. So a
+    /// row drew a renamed project's *current* title and clicking that title did nothing, and a
+    /// hand-typed `[[Website Refresh]]` never navigated at all, because the folder is
+    /// `W-1 Website Refresh`. One question, one answer: see `resolveWrittenName`.
     func projectKey(forFolder folder: String) -> String? {
-        for root in waitRoots where root.folders.contains(folder) {
-            return "\(root.base):\(folder)"
+        guard let resolved = resolveWrittenName(folder, in: writtenNameGroups) else { return nil }
+        for root in waitRoots where root.folders.contains(resolved) {
+            return "\(root.base):\(resolved)"
         }
         return nil
+    }
+
+    /// What a stored `[[…]]` target names now, for a surface drawing the words rather than navigating.
+    func currentName(of target: String) -> String? {
+        resolveWrittenName(target, in: writtenNameGroups)
+    }
+
+    /// A line of text as it reads: brackets gone, and each token showing what it names *now*.
+    ///
+    /// The one call every plain-text surface makes — the menubar rows, the sidebar's next-task line,
+    /// the quick bar's search rows, the Waiting list. Gathered here rather than spelled out at each
+    /// site so the two decisions in it, whether to show codes and whether to resolve, can't be made
+    /// four different ways.
+    func displayText(_ text: String) -> String {
+        Self.displayText(text, shorteningCodes: !ProjectCodes.areShown, in: writtenNameGroups)
+    }
+
+    /// The same, for a background scan holding a snapshot of the folder groups.
+    nonisolated static func displayText(_ text: String, shorteningCodes: Bool,
+                                        in groups: [[String]]) -> String {
+        displayingWikilinks(text, shorteningCodes: shorteningCodes,
+                            resolving: { resolveWrittenName($0, in: groups) })
     }
 
     /// Rebuild `waitRoots`. Shares the recents TTL, so the watcher-driven reloads don't re-list the
@@ -296,6 +339,8 @@ final class ProjectIndex: ObservableObject {
         guard wantsAllProjects else { return }
         if !force, Date().timeIntervalSince(allProjectsWarmedAt) < Self.ttl { return }
         allProjectsWarmedAt = Date()
+        let groups = writtenNameGroups
+        let shortening = !ProjectCodes.areShown
         projectsQueue.async { [weak self] in
             guard let listing = Self.allProjectsByEdit() else { return }
             Task { @MainActor in self?.seedAllProjects(listing) }
@@ -309,10 +354,13 @@ final class ProjectIndex: ObservableObject {
                 }
                 warmed.append(item.entry(done: out.todos.filter { $0.checked }.count,
                                          total: out.todos.count,
-                                         nextTask: Self.heroTaskText(out.todos),
+                                         nextTask: Self.heroTaskText(out.todos,
+                                                                     shorteningCodes: shortening,
+                                                                     in: groups),
                                          nextDue: Self.earliestDue(out.todos),
                                          detailsLoaded: true))
-                tasks += Self.openTasks(of: out.todos, in: item)
+                tasks += Self.openTasks(of: out.todos, in: item, shorteningCodes: shortening,
+                                        resolvingIn: groups)
             }
             let collected = tasks
             Task { @MainActor in
@@ -410,8 +458,10 @@ final class ProjectIndex: ObservableObject {
     /// A recent project's "current task" — its focused task, else its first open one — for the
     /// switchers' second line. Mirrors the menubar button's `focusedTodo ?? openTodos.first`, and is
     /// nil when everything is done.
-    private nonisolated static func heroTaskText(_ todos: [Todo]) -> String? {
-        let text = todos.heroTask.map { displayingWikilinks($0.text) }?
+    private nonisolated static func heroTaskText(_ todos: [Todo], shorteningCodes: Bool,
+                                                 in groups: [[String]]) -> String? {
+        let text = todos.heroTask
+            .map { displayText($0.text, shorteningCodes: shorteningCodes, in: groups) }?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (text?.isEmpty ?? true) ? nil : text
     }
@@ -421,16 +471,19 @@ final class ProjectIndex: ObservableObject {
     /// Capped per project for the same reason `maxDetailWarm` caps the scan: one pathological notes
     /// file shouldn't be able to make the search list unbounded. Past the cap the project's remaining
     /// tasks aren't searchable, which is a much smaller failure than the alternative.
-    private nonisolated static func openTasks(of todos: [Todo], in item: ProjectListing) -> [TaskEntry] {
+    private nonisolated static func openTasks(of todos: [Todo], in item: ProjectListing,
+                                             shorteningCodes: Bool,
+                                             resolvingIn groups: [[String]]) -> [TaskEntry] {
         todos.lazy
             .filter { !$0.checked && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
             .prefix(maxTasksPerProject)
             .map { todo in
                 TaskEntry(projectKey: item.projectKey, projectName: item.name,
                           projectShortName: item.shortName, isArchived: item.isArchived,
-                          // The name, not the markup: this text is both searched and shown, and
-                          // nobody types brackets when they're looking for a task.
-                          text: displayingWikilinks(todo.text)
+                          // The name, not the markup, and the name it goes by now: this text is both
+                          // searched and shown, and nobody looks for a task by the brackets in it or
+                          // by what a project used to be called.
+                          text: displayText(todo.text, shorteningCodes: shorteningCodes, in: groups)
                               .trimmingCharacters(in: .whitespacesAndNewlines),
                           due: todo.dueDate ?? todo.effectiveDueDate, isFocused: todo.isFocused,
                           sessionIndex: todo.sessionIndex, lineIndex: todo.lineIndex)

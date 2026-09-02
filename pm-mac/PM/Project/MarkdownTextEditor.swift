@@ -251,16 +251,19 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.onOpenProject = onOpenProject
-        // Flipping "Show link syntax" changes how wide every token lays out, so the glyphs have to be
-        // regenerated rather than merely redrawn.
-        NotificationCenter.default.addObserver(forName: TokenDisplay.didChange, object: nil,
-                                               queue: .main) { [weak textView] _ in
-            guard let textView, let manager = textView.layoutManager else { return }
-            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
-            manager.invalidateGlyphs(forCharacterRange: whole, changeInLength: 0,
-                                     actualCharacterRange: nil)
-            manager.invalidateLayout(forCharacterRange: whole, actualCharacterRange: nil)
-            textView.needsDisplay = true
+        // Flipping "Show link syntax" — or "Show Project Codes", which hides a run inside the token
+        // the same way — changes how wide every token lays out, so the glyphs have to be regenerated
+        // rather than merely redrawn.
+        for change in [TokenDisplay.didChange, ProjectCodes.didChange] {
+            NotificationCenter.default.addObserver(forName: change, object: nil,
+                                                   queue: .main) { [weak textView] _ in
+                guard let textView, let manager = textView.layoutManager else { return }
+                let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+                manager.invalidateGlyphs(forCharacterRange: whole, changeInLength: 0,
+                                         actualCharacterRange: nil)
+                manager.invalidateLayout(forCharacterRange: whole, actualCharacterRange: nil)
+                textView.needsDisplay = true
+            }
         }
         textView.drawsBackground = false
         // A markdown source editor: no smart quotes/dashes/replacements that would corrupt the markup.
@@ -784,6 +787,10 @@ final class ShortcutTextView: NSTextView {
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
 
+    /// The pasteboard a paste reads. The general one in the app, always; a test points it at its own
+    /// so running the suite doesn't wipe what you had copied.
+    var pasteSource: NSPasteboard = .general
+
     /// The `@` mention list, and the sigil position the reader last dismissed it at.
     ///
     /// Dismissal is remembered per sigil rather than globally: Escape means "not this one", and the
@@ -1105,8 +1112,34 @@ final class ShortcutTextView: NSTextView {
         super.insertText(string, replacementRange: replacementRange)
     }
 
+    /// Whether a paste is this view's own business rather than `NSTextView`'s: a picture, which the
+    /// note turns into a link or an embed. Asked in `paste(_:)` and again by menu validation, which is
+    /// why it reads types and never bytes.
+    ///
+    /// An image with no file of its own is written beside the note, so it takes a note to accept one —
+    /// a view that can't say where it lives has nowhere to put the picture and shouldn't claim it.
+    func handlesPastedImage(on pasteboard: NSPasteboard) -> Bool {
+        if NoteImagePasteboard.imageFiles(on: pasteboard) != nil { return true }
+        return noteURL != nil && NoteImagePasteboard.holdsImageData(on: pasteboard)
+    }
+
+    /// Edit ▸ Paste is validated against `readablePasteboardTypes`, which for a plain-text view is
+    /// text and nothing else — no image type is in it. So a pasteboard carrying *only* a picture left
+    /// the item disabled, and with the menu declining ⌘V and the list's own paste standing down for
+    /// the editor, the keystroke reached nobody and AppKit beeped: `paste(_:)` below never ran at all.
+    /// A screenshot beeped while the same picture copied out of a browser pasted fine, the difference
+    /// being the source URL a browser puts on the pasteboard beside the image — a text flavour, which
+    /// validated the item and let the paste through to the code that handles pictures.
+    ///
+    /// So say the view can take it. The picture branches in `paste(_:)` are the reason this class
+    /// overrides paste in the first place; they can't run behind a disabled menu item.
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), handlesPastedImage(on: pasteSource) { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
+        let pasteboard = pasteSource
         // A URL pasted over a selection links the selection.
         if selectedRange().length > 0,
            let pasted = pasteboard.string(forType: .string), isPastableURL(pasted) {

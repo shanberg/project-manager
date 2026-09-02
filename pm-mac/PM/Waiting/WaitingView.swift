@@ -13,6 +13,9 @@ import PmLib
 /// will still be in tomorrow.
 struct WaitingView: View {
     @StateObject private var model = WaitingModel()
+    /// Whether a project name keeps its code — app-wide, see `ProjectCodes`. Bound so the list
+    /// re-labels itself the moment it's toggled.
+    @AppStorage(ProjectCodes.defaultsKey) private var showsCode = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -101,12 +104,15 @@ struct WaitingView: View {
             // and nobody wants to read brackets in a list they're triaging.
             // Italic for an inherited wait, matching the task list's own run — it reads as *reported*
             // rather than as less important, which is the distinction being drawn.
-            Text(displayingWikilinks(hit.text))
+            Text(ProjectIndex.shared.displayText(hit.text))
                 .foregroundStyle(released ? .primary : .secondary)
                 .italic(hit.waiting == nil)
                 .lineLimit(2)
             Spacer(minLength: 8)
-            Text(ProjectCodes.display(hit.projectFolder))
+            // `showsCode` is read as an `@AppStorage` above so this view is invalidated when the
+            // preference flips — the strings built here and in `displayText` both depend on it, and
+            // only a binding schedules the redraw.
+            Text(ProjectCodes.display(hit.projectFolder, showing: showsCode))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

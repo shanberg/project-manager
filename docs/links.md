@@ -119,6 +119,34 @@ lookahead in its place, because `W-1` typed on its own is still a code and must 
 `W-12`. The prefix rule it displaced could not tell those two apart and called the pair ambiguous;
 `testCodeDoesNotMatchALongerNumber` is that improvement written down.
 
+**One lookup, not two.** `resolveWrittenName` is these same four rules without the wait vocabulary,
+because it turns out not to be a question about waits: a `waiting: [[…]]` asks whether a wait still
+holds, a click on any `[[…]]` asks where to go, and a menubar row asks what to call it. Answering
+those separately is how PM came to draw a renamed project's *current* title in a row while clicking
+that same title did nothing — navigation matched folder names character for character while
+resolution had four rules. The strict version also meant a hand-typed `[[Website Refresh]]` had never
+navigated at all, since the folder is `W-1 Website Refresh`; only the full names the `@` picker writes
+worked.
+
+**Read surfaces resolve; editing surfaces don't.** A row, a menu item, a sidebar line and the Waiting
+list all draw the name a token means now — through `displayingWikilinks(resolving:)` where the
+brackets come out, and `resolvingWikilinks` where they stay because a layout manager is turning them
+into the pill's padding. The note editor and the inline task field show the text **as stored**, and
+must: the caret lands on real characters there and backspace deletes real ones, so a field showing a
+name the file doesn't contain would be editing something other than what it displays. Clicking a task
+row swaps the resolved label for the raw field, which is the line drawn in one gesture.
+
+**The code shows up where it earns its place.** With "Show Project Codes" off, a pill drops the
+`CODE-NNN ` prefix — but only where the title left behind still names one project. Two projects called
+`Refresh` would otherwise leave two pills both reading `Refresh`, and a click on either would resolve
+to neither, because the title rule finds two matches and correctly declines. So the shortening asks
+the resolver whether the short form comes back to the same folder, and keeps the code when it doesn't.
+Two rows in one list can legitimately differ, and the difference is information.
+
+That rule only works because navigation is lenient: what a click hands back is the name the pill
+*shows*, and `[[Site Refresh]]` has to find `W-1 Site Refresh`. Shortening the pill before that would
+have broken clicking it.
+
 **The boundary, stated plainly.** A rename is invisible when the token carries the code — which is
 every token PM writes, because the `@` picker applies `MentionCandidate.name`, the full folder name.
 A token typed by hand as a bare title, `[[Website Refresh]]`, has nothing stable in it: rename the

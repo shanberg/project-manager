@@ -211,8 +211,9 @@ struct TaskMenuRowContent: View {
                 .font(.system(size: 13))
                 .foregroundStyle(sel ? Color.white : (todo.isFocused ? Color.accentColor : Color.secondary))
                 .frame(width: 16)
-            // The name, not the markup — see `displayingWikilinks`.
-            Text(displayingWikilinks(todo.text))
+            // The name, not the markup — see `displayingWikilinks` — and written the way the app has
+            // been told to write names.
+            Text(ProjectIndex.shared.displayText(todo.text))
                 .font(.system(size: 13, weight: todo.isFocused ? .semibold : .regular))
                 .lineLimit(1)
                 .foregroundStyle(sel ? Color.white : Color.primary)

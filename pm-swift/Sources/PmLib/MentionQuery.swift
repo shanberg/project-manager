@@ -207,25 +207,112 @@ public func deleteWikilinkBefore(_ text: String,
 ///
 /// Embeds are left alone. `![[shot.png]]` names a picture, and a reader that turned it into the bare
 /// word `shot.png` would be claiming a file is a sentence.
-public func displayingWikilinks(_ text: String) -> String {
+public func displayingWikilinks(_ text: String, shorteningCodes: Bool = false,
+                                resolving: WikilinkResolver? = nil) -> String {
     var out = ""
     var index = text.startIndex
     for span in wikilinkSpans(in: text) where !text[span].hasPrefix("!") {
         out += text[index..<span.lowerBound]
-        out += wikilinkDisplayName(String(text[span]))
+        out += wikilinkDisplayName(String(text[span]), shorteningCodes: shorteningCodes,
+                                   resolving: resolving)
         index = span.upperBound
     }
     out += text[index...]
     return out
 }
 
+/// The same text with every `[[target]]` rewritten to the name that target goes by now — **brackets
+/// and all**, unlike `displayingWikilinks`, which takes them out.
+///
+/// For the surfaces that hide the brackets by *laying them out* at zero width rather than by removing
+/// them: the task rows, the note editor. Those need the characters present — the layout manager turns
+/// each bracket into the pill's padding, and the click that opens a token maps a glyph back to a
+/// character index in this same string. So the rename has to be applied inside the token rather than
+/// by rewriting it away.
+///
+/// Presentation only, like everything else here. What this returns is drawn; the file keeps the name
+/// it was written with, and nothing downstream takes an offset into a note from it.
+///
+/// An alias is left alone — `[[target|shown as this]]` already says what to show.
+public func resolvingWikilinks(_ text: String, shorteningCodes: Bool = false,
+                               resolving: WikilinkResolver) -> String {
+    var out = ""
+    var index = text.startIndex
+    for span in wikilinkSpans(in: text) where !text[span].hasPrefix("!") {
+        let token = String(text[span])
+        let inner = token.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        out += text[index..<span.lowerBound]
+        if inner.firstIndex(of: "|") == nil, let current = resolving(inner) {
+            var shown = current
+            if shorteningCodes, let short = shortTitleIfUnambiguous(current, resolving: resolving) {
+                shown = short
+            }
+            out += shown == inner ? token : "[[\(shown)]]"
+        } else {
+            out += token
+        }
+        index = span.upperBound
+    }
+    out += text[index...]
+    return out
+}
+
+/// A folder's title, but only when dropping the code leaves a name that still points back at it.
+///
+/// **The check is what makes shortening safe.** Dropping the code off `W-1 Refresh` and `H-2 Refresh`
+/// leaves two tokens both reading `Refresh`, and a click on either then resolves to neither — the
+/// title rule finds two matches and declines, correctly. Asking whether the short form comes back to
+/// the same folder means the code survives exactly where it is doing work and nowhere else, which is
+/// more useful than a preference obeyed uniformly.
+private func shortTitleIfUnambiguous(_ folder: String, resolving: (String) -> String?) -> String? {
+    let short = projectTitle(fromFolderName: folder)
+    guard !short.isEmpty, short != folder, resolving(short) == folder else { return nil }
+    return short
+}
+
+/// The bare title, for a name there is nothing to check against — no resolver, or one that couldn't
+/// place it. The behaviour every caller had before a resolver existed.
+private func shortTitle(_ name: String) -> String {
+    let short = projectTitle(fromFolderName: name)
+    return short.isEmpty ? name : short
+}
+
+/// What a stored target names *now*, or nil when the caller can't say.
+///
+/// Optional at every call site because most callers genuinely can't: PmLib is handed a string, and
+/// only something holding a scan of the folders knows whether the project has since been renamed.
+/// Where one can be supplied, it should be — a surface drawing the name a project no longer goes by
+/// is asserting something false, and unlike a broken link it doesn't announce itself.
+public typealias WikilinkResolver = (String) -> String?
+
 /// What a `[[…]]` reads as: the alias when it has one, else the target.
 ///
 /// The alias rule is the vault's — `[[note|shown as this]]` — and the same one `MarkdownHighlight`
 /// applies when it decides which half of a wikilink to colour.
-public func wikilinkDisplayName(_ token: String) -> String {
+///
+/// `shorteningCodes` drops a target's `CODE-NNN ` prefix, for a caller whose app has been told not to
+/// write codes (the Mac app's `ProjectCodes`). A flag rather than a preference read here, because
+/// PmLib serves the CLI too and has no business knowing what an app's defaults say.
+///
+/// `resolving` turns the stored target into what it names now, so a project renamed after the token
+/// was written reads as the project it is. Applied before the shortening, because the code prefix to
+/// drop belongs to the current folder name and not to the one somebody wrote down last year.
+///
+/// **An alias is left alone by both.** `[[target|shown as this]]` is already the words somebody chose
+/// to show, and neither a rename nor a preference is a reason to overrule them.
+public func wikilinkDisplayName(_ token: String, shorteningCodes: Bool = false,
+                                resolving: WikilinkResolver? = nil) -> String {
     let inner = token.trimmingCharacters(in: CharacterSet(charactersIn: "![]"))
-    guard let pipe = inner.firstIndex(of: "|") else { return inner }
+    guard let pipe = inner.firstIndex(of: "|") else {
+        // Only a *resolved* name can be asked whether its title still names it uniquely — an
+        // unresolved one has no folder to compare against, so it is shortened the old way or not at
+        // all.
+        guard let resolving, let current = resolving(inner) else {
+            return shorteningCodes ? shortTitle(inner) : inner
+        }
+        guard shorteningCodes else { return current }
+        return shortTitleIfUnambiguous(current, resolving: resolving) ?? current
+    }
     return String(inner[inner.index(after: pipe)...])
 }
 
@@ -235,10 +322,13 @@ public func wikilinkDisplayName(_ token: String) -> String {
 /// Returned as (range, displayName) rather than as a rewritten string, because a row that wants to
 /// *style* the names needs to know where they are, and one that only wants to read them has
 /// `displayingWikilinks` above.
-public func wikilinkDisplaySpans(in text: String) -> [(range: Range<String.Index>, name: String)] {
+public func wikilinkDisplaySpans(in text: String, shorteningCodes: Bool = false,
+                                 resolving: WikilinkResolver? = nil)
+    -> [(range: Range<String.Index>, name: String)] {
     wikilinkSpans(in: text)
         .filter { !text[$0].hasPrefix("!") }
-        .map { ($0, wikilinkDisplayName(String(text[$0]))) }
+        .map { ($0, wikilinkDisplayName(String(text[$0]), shorteningCodes: shorteningCodes,
+                                        resolving: resolving)) }
 }
 
 /// Where each token's name lands in `displayingWikilinks(text)`, as character offsets into the
@@ -249,10 +339,13 @@ public func wikilinkDisplaySpans(in text: String) -> [(range: Range<String.Index
 /// after it shifts left by the total removed so far. A row that got this wrong would tint a few
 /// characters beside the name rather than the name, which reads as a rendering glitch rather than as a
 /// bug in an offset.
-public func wikilinkDisplayRanges(in text: String) -> [(offset: Int, length: Int, name: String)] {
+public func wikilinkDisplayRanges(in text: String, shorteningCodes: Bool = false,
+                                  resolving: WikilinkResolver? = nil)
+    -> [(offset: Int, length: Int, name: String)] {
     var out: [(offset: Int, length: Int, name: String)] = []
     var removed = 0
-    for span in wikilinkDisplaySpans(in: text) {
+    for span in wikilinkDisplaySpans(in: text, shorteningCodes: shorteningCodes,
+                                     resolving: resolving) {
         let source = text.distance(from: text.startIndex, to: span.range.lowerBound)
         let sourceLength = text.distance(from: span.range.lowerBound, to: span.range.upperBound)
         out.append((offset: source - removed, length: span.name.count, name: span.name))

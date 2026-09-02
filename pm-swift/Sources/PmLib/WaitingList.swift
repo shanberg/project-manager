@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Reading the name from the folder rather than from the token is what makes a rename invisible. The
 /// stored token goes on saying `W-1 Website Refresh` long after the project became `W-1 Site Refresh`
-/// — `matchWaitTarget`'s code rule is what keeps it resolving, and this is what keeps anyone from
+/// — `matchWrittenName`'s code rule is what keeps it resolving, and this is what keeps anyone from
 /// having to know it did. Drawing the stored text instead would leave every surface quietly asserting
 /// an old name, which is worse than the broken link it replaced: a dead reference announces itself,
 /// and a stale one doesn't.

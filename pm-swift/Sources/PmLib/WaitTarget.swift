@@ -34,7 +34,7 @@ public enum WaitTarget: Equatable, Sendable {
     }
 }
 
-/// Match a wait target against one root's folder names, leniently.
+/// Match a written name against one root's folder names, leniently.
 ///
 /// Four ways to name the same folder, tried from the most complete statement to the least:
 ///
@@ -61,7 +61,7 @@ public enum WaitTarget: Equatable, Sendable {
 /// calls that `ambiguous` and the CLI turns it into an error, which is right when a command is about to
 /// act on one project; here the caller is drawing a row, and the honest thing to draw for a name that
 /// could mean two projects is the same thing drawn for a name that means none.
-func matchWaitTarget(_ target: String, in folders: [String]) -> String? {
+func matchWrittenName(_ target: String, in folders: [String]) -> String? {
     let q = target.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !q.isEmpty else { return nil }
     if let exact = folders.first(where: { $0.caseInsensitiveCompare(q) == .orderedSame }) { return exact }
@@ -91,7 +91,7 @@ func matchWaitTarget(_ target: String, in folders: [String]) -> String? {
 /// - Parameter roots: each scope with its folder names, in `ProjectScope.allCases` order.
 public func resolveWaitTarget(_ target: String, roots: [(scope: ProjectScope, folders: [String])]) -> WaitTarget {
     for root in roots {
-        guard let folder = matchWaitTarget(target, in: root.folders) else { continue }
+        guard let folder = matchWrittenName(target, in: root.folders) else { continue }
         return root.scope.isArchived ? .released(folder: folder) : .pending(folder: folder)
     }
     return .unresolved
@@ -109,6 +109,25 @@ public func resolveWaitTargets(_ targets: [String],
         out[target] = resolveWaitTarget(target, roots: roots)
     }
     return out
+}
+
+/// The folder a written name means, searched in the order the groups are given — what's in hand
+/// before what's been put away.
+///
+/// The same question `resolveWaitTarget` asks, without the wait vocabulary, because it turns out not
+/// to be a question about waits. A `waiting: [[…]]` asks it to decide whether a wait still holds; a
+/// click on any `[[…]]` asks where to go; a menubar row asks what to call it. Answering those with
+/// different rules is how a row comes to draw a project's current title while the click on that same
+/// title does nothing — which is exactly what happened, because navigation matched folder names
+/// exactly while resolution had four rules.
+///
+/// Takes bare lists rather than scoped roots so a caller that only has folder names — a background
+/// scan holding a snapshot — can ask without inventing scopes for them.
+public func resolveWrittenName(_ name: String, in folderGroups: [[String]]) -> String? {
+    for folders in folderGroups {
+        if let folder = matchWrittenName(name, in: folders) { return folder }
+    }
+    return nil
 }
 
 /// Read the project roots off disk and resolve against them. For callers with no folder lists of their

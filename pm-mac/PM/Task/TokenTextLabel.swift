@@ -80,9 +80,11 @@ final class TokenLabelView: NSView {
         container.widthTracksTextView = false
         layoutManager.addTextContainer(container)
         storage.addLayoutManager(layoutManager)
-        NotificationCenter.default.addObserver(forName: TokenDisplay.didChange, object: nil,
-                                               queue: .main) { [weak self] _ in
-            self?.reflowForDisplayChange()
+        for name in [TokenDisplay.didChange, ProjectCodes.didChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil,
+                                                   queue: .main) { [weak self] _ in
+                self?.reflowForDisplayChange()
+            }
         }
     }
 
