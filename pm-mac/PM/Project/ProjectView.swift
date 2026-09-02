@@ -1231,24 +1231,25 @@ struct ProjectView: View {
 
     /// The two add buttons: a task, and a note about the session you're in.
     ///
-    /// Both summon the quick bar over the window rather than opening an editor inside it, which is the
-    /// point of them — the bar is where capture lives, it already knows how to read a due date out of
-    /// the line and how to place the result, and its note mode is a real markdown editor. A second,
-    /// lesser version of either sitting in the header would be a third place for the same write to go
-    /// wrong. The in-window editors are still there and still unchanged: ⌘N opens the inline add row,
-    /// and double-clicking a session opens its note in the column.
+    /// Both open an editor *in this window*, and are exactly ⌘N and ⇧⌘N under the pointer. They used to
+    /// summon the quick bar over the window instead, on the reasoning that the bar is where capture
+    /// lives — but the bar is a way *into* a project from anywhere else, and clicking a button in the
+    /// window you are already looking at is the one case where you are not anywhere else. Being thrown
+    /// into a floating bar to write a line into the list a few points below it is a detour with a
+    /// panel in it. What the bar knew and the header didn't — how to read `due:friday` off the line —
+    /// the add editor knows now too (see `AddEditor`), so the bar isn't the richer surface any more.
     ///
-    /// The glyphs are the modes' own, taken from `QuickBarMode` rather than restated here, so the
-    /// button and the surface it opens can never come to disagree about what they mean.
+    /// The glyphs are still the quick bar modes' own, taken from `QuickBarMode` rather than restated
+    /// here: the button and the bar do the same two things, and should go on looking like it.
     private var addTaskButton: some View {
         headerButton(symbol: QuickBarMode.capture.symbol, help: "Add a task") {
-            state.openQuickBar(.capture)
+            beginNewTask()
         }
     }
 
     private var addNoteButton: some View {
         headerButton(symbol: QuickBarMode.note.symbol, help: "Write a session note") {
-            state.openQuickBar(.note)
+            beginCurrentSession()
         }
     }
 

@@ -66,11 +66,6 @@ final class ProjectViewState: ObservableObject {
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}
 
-    /// Summon the quick bar over this window, pointed at the project it's showing — the header's Add
-    /// Task and Add Note buttons. Supplied by the window, which owns the "and make sure the app's
-    /// focus is this project first" half; the bar itself always writes to the focused project.
-    var openQuickBar: (QuickBarMode) -> Void = { _ in }
-
     /// How far in from this window's leading edge its close/minimise/zoom buttons reach, plus a
     /// margin. Whichever pane is leftmost insets its header by this so the two never overlap.
     ///

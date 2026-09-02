@@ -1116,15 +1116,12 @@ final class QuickBarModel: ObservableObject {
 
     /// Shorten a task's text to fit in a row's title, on a word boundary where there is one.
     nonisolated static func truncate(_ text: String, _ limit: Int) -> String {
-        guard text.count > limit else { return text }
-        let cut = text.prefix(limit)
-        let trimmed = cut.contains(" ") ? cut[cut.startIndex..<cut.lastIndex(of: " ")!] : cut
-        return trimmed.trimmingCharacters(in: .whitespaces) + "…"
+        DueLabels.truncate(text, limit)
     }
 
     /// A due date spelled out — "Sat, Aug 22". Shared so the field's badge and a receipt written after
     /// the bar has gone say the date the same way.
-    nonisolated static func dueLabel(_ date: Date) -> String { dueFormatter.string(from: date) }
+    nonisolated static func dueLabel(_ date: Date) -> String { DueLabels.day(date) }
 
     // MARK: Keyboard
 
@@ -1539,31 +1536,9 @@ final class QuickBarModel: ObservableObject {
         rows.indices.contains(selection) ? rows[selection] : nil
     }
 
-    /// The due date the typed line parsed to, spelled out — "Sat, Aug 22", or "Sat, Aug 22 3:00 PM"
-    /// when a time was typed too — or nil when it carries no date. Written in full where a task's own
-    /// badge would say "in 1w": a badge on an existing task tells you how much time is left, while this
-    /// confirms that the "friday 3pm" you just typed landed on the day and time you meant.
-    var parsedDueLabel: String? {
-        guard let due = reading.due, let date = RelativeDue.parse(due) else { return nil }
-        let day = Self.dueLabel(date)
-        return RelativeDue.carriesTime(due) ? "\(day) \(RelativeDue.timeLabel(date))" : day
-    }
-
-    /// What to say about a `due:` the parser couldn't read.
-    ///
-    /// The phrase stays in the task text, deliberately — losing "due:thurdsay" to a typo is worse than
-    /// a task with a typo in its title. But a line that kept its marker as prose looks exactly like a
-    /// line that never had one, and by the time you could tell the difference the bar has closed and
-    /// you're somewhere else. Said where the date would have been, so the one slot answers the one
-    /// question: what date is this getting?
-    var unreadableDueLabel: String? {
-        guard let phrase = reading.unreadableDue else { return nil }
-        return "“\(Self.truncate(phrase, 18))” isn't a date"
-    }
-
-    nonisolated private static let dueFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d")
-        return formatter
-    }()
+    /// The date and the bad phrase, as the add editor's badges say them too — see `DueLabels`. The
+    /// reading is the same parse either surface makes, so the words about it are shared rather than
+    /// restated.
+    var parsedDueLabel: String? { DueLabels.due(reading.due) }
+    var unreadableDueLabel: String? { DueLabels.unreadable(reading.unreadableDue) }
 }

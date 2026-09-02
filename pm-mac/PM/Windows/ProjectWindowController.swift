@@ -89,7 +89,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
-        state.openQuickBar = { [weak self] mode in self?.openQuickBar(mode) }
         // Publish "a field has the keyboard" into the shared state, which is what stands the window's
         // own ⌘A / ⌘C / ⌘Z / ⌘⌫ down while you're typing — see `ProjectViewState.isEditingText`.
         // Deferred by a turn of the run loop because AppKit changes the first responder from inside
@@ -314,27 +313,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// starting a session first when there isn't one to continue.
     @objc func newSession(_ sender: Any?) {
         state.requestNewSession()
-    }
-
-    /// The header's Add Task and Add Note buttons: summon the quick bar over this window, pointed at
-    /// the project the window is showing.
-    ///
-    /// The bar writes to whatever project is *globally* focused, which the frontmost window owns — so
-    /// clicking a button in this window has already made it the right one, nearly always. The exception
-    /// is the click that made this window main in the same gesture: the focus write is asynchronous
-    /// (see `pushFocusToDisk`), so the bar could be seeded a moment before the app agrees which project
-    /// it's looking at. Rather than race it, the focus is settled first and the bar summoned from the
-    /// completion — a no-op on the common path, where the keys already match.
-    func openQuickBar(_ mode: QuickBarMode) {
-        guard let projectKey else { return }
-        guard projectKey != PMFiles.focusedProjectKey() else {
-            QuickBarController.shared.show(mode: mode)
-            return
-        }
-        PMStore.setGlobalFocus(key: projectKey) {
-            (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
-            QuickBarController.shared.show(mode: mode)
-        }
     }
 
     /// Open the project's details form — the summary, problem, goals, approach and learnings, which

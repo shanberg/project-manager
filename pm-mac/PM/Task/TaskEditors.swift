@@ -145,16 +145,32 @@ struct AddEditor: View {
                     .frame(height: 21)
 
                 HStack(spacing: 6) {
-                    Toggle("Due", isOn: $useDue).toggleStyle(.checkbox)
-                    if useDue {
-                        DatePicker("", selection: $date, displayedComponents: .date)
-                            .datePickerStyle(.field)
-                            .labelsHidden()
+                    // One slot, one answer to "what date is this getting?". A line that says so itself
+                    // takes the slot over from the checkbox rather than sitting beside it: a date typed
+                    // into the text and a date set in a picker, both on screen and disagreeing, is a
+                    // question the editor would be asking the reader to resolve.
+                    if let warning = reading.unreadableDueLabel {
+                        dueBadge(warning, symbol: "exclamationmark.triangle", tint: .orange)
+                    } else if let parsed = reading.dueLabel {
+                        dueBadge(parsed, symbol: "calendar", tint: nil)
+                    } else {
+                        Toggle("Due", isOn: $useDue).toggleStyle(.checkbox)
+                        if useDue {
+                            DatePicker("", selection: $date, displayedComponents: .date)
+                                .datePickerStyle(.field)
+                                .labelsHidden()
+                        }
                     }
                     Spacer()
-                    Button("Add", action: submit).keyboardShortcut(.defaultAction)
+                    // A line that is *only* a date has no task in it, and submitting one is a no-op —
+                    // said here rather than left to be discovered by pressing the button.
+                    Button("Add", action: submit)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(reading.text.isEmpty)
                     Button("Cancel", action: onCancel)
                 }
+                .animation(.snappy, value: reading.due)
+                .animation(.snappy, value: reading.unreadableDue)
             }
         }
         .controlSize(.small)
@@ -163,6 +179,34 @@ struct AddEditor: View {
         // a focus request made from inside that update is resolved against a view that isn't in the
         // responder chain yet — so it lands on nothing and the field opens without a caret.
         .onAppear { afterCurrentUpdate { textFocused = true } }
+    }
+
+    /// What the typed line carries: the text with any `due:` phrase taken off it, the date that phrase
+    /// named, and the phrase that turned out not to be one.
+    ///
+    /// The same read the quick bar makes of the same line, from the same parser — so "due:friday 3pm"
+    /// means one thing in this app rather than one thing per surface that accepts a task. It's what
+    /// makes the header's + button a real replacement for summoning the bar over the window: the bar
+    /// used to be the only place a date could be typed rather than picked.
+    ///
+    /// Recomputed per body pass rather than cached in `@State`: it's a pure function of `text`, and a
+    /// mirror of the field kept in a second place is a mirror that can be stale.
+    private var reading: QuickCaptureParser.Result { QuickCaptureParser.parse(text) }
+
+    /// The date the line named, or the complaint that it didn't — in the slot the checkbox had.
+    private func dueBadge(_ label: String, symbol: String, tint: Color?) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+            Text(label)
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(tint.map { AnyShapeStyle($0.opacity(0.14)) } ?? AnyShapeStyle(.quaternary)))
+        .accessibilityElement(children: .combine)
     }
 
     /// Commit one task and reset for the next one.
@@ -176,9 +220,13 @@ struct AddEditor: View {
     /// task typed after it, and the loudest version of that bug is silent — a list of tasks that all
     /// quietly acquired Friday. One preset from the badge's menu puts it back.
     private func submit() {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        onAdd(trimmed, useDue ? DueFormat.string(date) : nil)
+        let reading = self.reading
+        // The line's own date wins where it has one — it's the half of this the reader is looking
+        // straight at, and it's the half the checkbox has stood down for. An unreadable `due:` leaves
+        // the phrase in the text on purpose (see `QuickCaptureParser`), so the task is written with the
+        // typo in its title rather than quietly without the date it was meant to have.
+        guard !reading.text.isEmpty else { return }
+        onAdd(reading.text, reading.due ?? (useDue ? DueFormat.string(date) : nil))
         text = ""
         useDue = false
         textFocused = true
@@ -269,59 +317,6 @@ struct EditorTarget: Equatable {
     /// one", and would start answering no if it had to match a reference the asker has no reason to
     /// reconstruct.
     static func == (a: EditorTarget, b: EditorTarget) -> Bool { a.key == b.key && a.kind == b.kind }
-}
-
-/// The active inline editor reports its window-space frame so a mouse-down monitor can tell an
-/// outside click (which cancels the editor) from a click within it. Only one editor is open at a
-/// time, so the first non-nil frame wins.
-struct ActiveEditorFrameKey: PreferenceKey {
-    static var defaultValue: CGRect?
-    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = value ?? nextValue() }
-}
-
-extension View {
-    /// Publish this editor's frame (SwiftUI global / window space) for the outside-click monitor.
-    func reportEditorFrame() -> some View {
-        background(GeometryReader { geo in
-            Color.clear.preference(key: ActiveEditorFrameKey.self, value: geo.frame(in: .global))
-        })
-    }
-}
-
-/// Watches for left mouse-downs in its own window while an editor is open and cancels the editor when
-/// the click lands outside its reported frame (swallowing that click so it only dismisses).
-///
-/// Scoped to one window: the app can have several project windows open plus the focus panel, each with
-/// its own editor, and a click in one of them must not dismiss another's.
-final class OutsideClickMonitor: ObservableObject {
-    var editorFrame: CGRect?
-    var onOutsideClick: (() -> Void)?
-    /// The window this monitor belongs to; clicks anywhere else are left alone.
-    weak var window: NSWindow?
-    private var monitor: Any?
-
-    func start() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self,
-                  let window = event.window,
-                  window === self.window
-            else { return event }
-            // SwiftUI's global space is top-left origin; AppKit's locationInWindow is bottom-left.
-            guard let frame = self.editorFrame else { return event }
-            let flipped = CGRect(x: frame.minX, y: window.frame.height - frame.maxY,
-                                 width: frame.width, height: frame.height)
-            if flipped.contains(event.locationInWindow) { return event }
-            self.onOutsideClick?()
-            return nil   // consume: an outside click only dismisses, it doesn't also act
-        }
-    }
-
-    func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        editorFrame = nil
-    }
 }
 
 /// Reports the `NSWindow` a SwiftUI subtree ended up in. Several behaviors here are per-window — the
