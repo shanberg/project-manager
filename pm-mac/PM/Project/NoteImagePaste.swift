@@ -33,6 +33,17 @@ enum NoteImagePasteboard {
         return images.isEmpty ? nil : images
     }
 
+    /// Whether `pasteboard` holds a picture with no file behind it — the same question `imageData`
+    /// answers, asked without reading the bytes.
+    ///
+    /// Worth having separately because it's asked far more often than the bytes are needed: menu
+    /// validation runs on every ⌘-keystroke and every menu opened, and a screenshot on the pasteboard
+    /// is megabytes to copy out for a question about whether it's there at all.
+    static func holdsImageData(on pasteboard: NSPasteboard) -> Bool {
+        guard imageFiles(on: pasteboard) == nil else { return false }
+        return pasteboard.availableType(from: imageTypes) != nil
+    }
+
     /// The bytes to write for an image that has no file of its own, and the extension to write them
     /// under. Nil when the pasteboard holds no picture at all.
     static func imageData(on pasteboard: NSPasteboard) -> (data: Data, ext: String)? {

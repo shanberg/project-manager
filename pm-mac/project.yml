@@ -113,10 +113,12 @@ targets:
     sources:
       - path: PMViewTests
       - path: PM/Project/MarkdownTextEditor.swift
+      - path: PM/Project/NoteImagePaste.swift
       - path: PM/Project/MentionPopover.swift
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Task/CompletingTextField.swift
+      - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift
       - path: PM/QuickBar/ProjectSearch.swift
     dependencies:

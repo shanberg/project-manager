@@ -16,6 +16,7 @@ enum Log { static func write(_ s: String) {} }
 
 /// Codes shown, which is the app's default.
 enum ProjectCodes {
+    static let didChange = Notification.Name("PMProjectCodesDidChange")
     static var areShown: Bool { true }
     static func display(_ full: String, short: String? = nil, showing: Bool = true) -> String {
         showing ? full : (short ?? full)
@@ -24,12 +25,6 @@ enum ProjectCodes {
 
 func afterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
     DispatchQueue.main.async { MainActor.assumeIsolated(work) }
-}
-
-enum NoteImagePasteboard {
-    static let imageTypes: [NSPasteboard.PasteboardType] = []
-    static func imageFiles(on: NSPasteboard) -> [URL]? { nil }
-    static func imageData(on: NSPasteboard) -> (data: Data, ext: String)? { nil }
 }
 
 /// A fixed vault: one project per shape a mention has to handle — two that share a first letter so
