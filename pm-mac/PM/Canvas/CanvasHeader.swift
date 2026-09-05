@@ -100,13 +100,16 @@ final class CanvasHeaderModel: ObservableObject {
         var focusToken = 0
     }
 
-    /// The way back to this window's task list, when the board is being rendered inside a project
-    /// window. Nil in a canvas window, which has nothing else to be.
+    /// Whether this board is one face of a project window, and how to turn it over.
     ///
-    /// A button rather than a menu item, and it is the twin of the project header's canvas button: the
-    /// same switch, pointed the other way, in the same place in the same shape of chrome. Two commands
-    /// that undo each other should not be one button and one buried menu entry.
-    @Published var backToTasks: (() -> Void)?
+    /// Nil in a canvas window, which has no task list to switch to. Set when a project window is
+    /// rendering its project as a board — and then the header carries the *same* `RendererSwitch` the
+    /// task list's header carries, in the same place, so the control doesn't move when you use it.
+    ///
+    /// It was a lone button here and a different lone button there, each findable only once you were
+    /// already on the other side of it and neither saying there was another side.
+    @Published var showsRendererSwitch = false
+    var setRenderer: (ProjectRenderer) -> Void = { _ in }
 
     // MARK: What the controls do. Supplied by the window controller.
 
@@ -175,6 +178,10 @@ struct CanvasControlCapsule: View {
 
     var body: some View {
         HStack(spacing: 2) {
+            if model.showsRendererSwitch {
+                RendererSwitch(renderer: .canvas) { model.setRenderer($0) }
+                divider
+            }
             if let page = model.page {
                 pageGroup(page)
                 divider
@@ -220,9 +227,6 @@ struct CanvasControlCapsule: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
                     .help("Cards are showing the dots you drag lines from")
-            }
-            if let backToTasks = model.backToTasks {
-                button("list.bullet", "Show this project\u{2019}s tasks", action: backToTasks)
             }
             button("magnifyingglass", "Find on this canvas") {
                 model.find.isShowing = true

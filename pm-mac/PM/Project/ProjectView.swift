@@ -1195,11 +1195,19 @@ struct ProjectView: View {
     /// the strip any more, the capsule is also what keeps the progress count legible over whatever has
     /// scrolled underneath it.
     ///
-    /// Reading order is what you're doing, then how you're looking at it, then where else it lives:
-    /// count, add, add, view options, canvas, open.
+    /// Reading order is what you're looking at, then what you're doing, then how you're looking at it,
+    /// then where else it lives: the renderer switch, count, add, add, view options, open.
+    ///
+    /// The switch leads because it answers the first question — which of this project's two faces am I
+    /// on — and because it has to sit in the same place here as it does in the board's header, or using
+    /// it would move it.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
             HStack(spacing: 2) {
+                if store.projectPath != nil {
+                    rendererSwitch
+                    Divider().frame(height: 14).padding(.horizontal, 3)
+                }
                 let p = store.progress
                 if p.total > 0 {
                     Text("\(p.done)/\(p.total)")
@@ -1214,7 +1222,6 @@ struct ProjectView: View {
                     viewOptionsMenu
                 }
                 if store.projectPath != nil {
-                    canvasButton
                     openButton
                 }
             }
@@ -1353,21 +1360,14 @@ struct ProjectView: View {
     /// discover by accident on somebody else's project. Clicking with nothing there makes it, which is
     /// the same bargain the notes file has always had — you get the document by asking for it, not by
     /// deciding to create it first. The tooltip says which of the two is about to happen.
-    /// Show this project as its board, in this window.
+    /// Tasks or canvas, in this window. The board's own header carries the same control — see
+    /// `RendererSwitch`.
     ///
-    /// It used to open a new window on the board, which put two doors on one room: ⌥⌘C already showed
-    /// the same canvas in the window you were in. And of the two, a button in a window's own header is
-    /// the last thing that should mean "make another window" — a header button belongs to the window it
-    /// is in and should act on it. Opening the board in a window of its own is still ⇧⌘C, which now
-    /// says so in its name.
-    ///
-    /// The way back is the board's own header, which carries the same switch pointed the other way.
-    private var canvasButton: some View {
-        headerButton(symbol: "rectangle.3.group",
-                     help: store.canvasPath == nil ? "Create the project canvas"
-                                                   : "Show the project canvas") {
-            state.showCanvas()
-        }
+    /// It used to be a one-way button that opened a new window on the board, which put two doors on one
+    /// room: ⌥⌘C already showed the same canvas in the window you were in. Opening the board in a window
+    /// of its own is still ⇧⌘C, which now says so in its name.
+    private var rendererSwitch: some View {
+        RendererSwitch(renderer: .tasks) { state.setRenderer($0) }
     }
 
     /// Opens the project in Obsidian, or in Finder while ⌥ is held (icon swaps to match), mirroring

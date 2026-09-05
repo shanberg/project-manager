@@ -219,9 +219,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         let pane = CanvasPaneController(store: store)
         pane.title_ = projectName ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
-        // The way back, as a button — the twin of the project header's canvas button, which is what
-        // brought you here.
-        pane.header.backToTasks = { [weak self] in self?.showTasks() }
+        // The same switch the task list's header carries, so the way back is where the way here was.
+        pane.header.showsRendererSwitch = true
+        pane.header.setRenderer = { [weak self] next in
+            guard next == .tasks else { return }
+            self?.showTasks()
+        }
         canvasPane = pane
         contentPane.show(pane)
         pane.focusBoard()
