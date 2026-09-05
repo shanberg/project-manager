@@ -144,4 +144,25 @@ final class NotesHelpersTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertTrue(result == notesA || result == notesB, "Should return one of the notes files when canonical is missing")
     }
+
+    // MARK: Recognising a project's notes file
+
+    /// Asked by anything holding a path that wants to know whether it is looking at a project — a
+    /// canvas card, which renders a project's notes as the project rather than as markdown.
+    func testAProjectsNotesFileIsRecognisedByItsShape() {
+        XCTAssertEqual(projectFolder(ofNotesPath: "/v/S-003 Walkable/docs/Notes - Walkable.md"),
+                       "/v/S-003 Walkable")
+        XCTAssertEqual(projectFolder(ofNotesPath: "/v/Areas/Home/docs/Notes - Home.md"),
+                       "/v/Areas/Home", "an area's notes are the same shape")
+    }
+
+    func testEverythingElseIsJustAMarkdownFile() {
+        for path in ["/v/S-003 Walkable/docs/Meeting.md",
+                     "/v/S-003 Walkable/Notes - Walkable.md",
+                     "/v/S-003 Walkable/docs/deeper/Notes - Walkable.md",
+                     "/v/S-003 Walkable/docs/Notes - Walkable.txt",
+                     "docs/Notes - Orphan.md"] {
+            XCTAssertNil(projectFolder(ofNotesPath: path), path)
+        }
+    }
 }

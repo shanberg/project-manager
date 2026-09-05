@@ -262,6 +262,12 @@ extension CanvasBoardView {
 
         switch node.content {
         case .file(let path, _):
+            // A project's notes card opens the project, and that item comes first: it is a card
+            // *showing* a project (see `CanvasProjectNote`), and the board is read-only, so this is the
+            // way in to actually doing something about what it says.
+            if (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName != nil {
+                add(menu, "Open Project", #selector(openProjectForCard))
+            }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
                 add(menu, "Repair Stored Path", #selector(repairSelectedPaths))
@@ -470,6 +476,14 @@ extension CanvasBoardView {
                          message: "Where should this card point?",
                          initial: card.address) { [weak card] entered in
             card?.setAddress(entered)
+        }
+    }
+
+    /// Open the project a card's notes belong to, in a PM window.
+    @objc private func openProjectForCard() {
+        for id in selection {
+            guard let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName else { continue }
+            WindowManager.shared.open(named: folder)
         }
     }
 

@@ -2623,49 +2623,6 @@ private final class DragEndSentinel {
 /// red for work that had already been finished, which is the one thing red must never mean here. The
 /// date stays, because "3d ago" beside a finished task is how you tell a late finish from a punctual
 /// one; only the urgency comes off it.
-private struct DueChipStyle {
-    var text: Color
-    var stroke: Color
-    var fill: Color
-    var weight: Font.Weight
-    var dashed: Bool
-
-    init(due: String, own: Bool, done: Bool) {
-        // A completed task's date is a record rather than a deadline, so it reads at the quietest step
-        // of the scale — no tint, no fill, no extra weight — while keeping the dashed border that says
-        // whose date it is.
-        let state: DueState = done ? .later : DueState(due: due, own: own)
-        let tint: Color
-        switch state {
-        case .overdue: tint = Color(nsColor: .systemRed)
-        case .soon: tint = Color(nsColor: .systemOrange)
-        case .later, .inherited: tint = .secondary
-        }
-        text = tint
-        stroke = tint
-        dashed = !own
-        if own, state == .overdue {
-            fill = tint.opacity(0.16)
-            weight = .semibold
-        } else if own, state == .soon {
-            fill = tint.opacity(0.10)
-            weight = .medium
-        } else {
-            fill = .clear
-            weight = .regular
-        }
-    }
-
-    private init(text: Color, stroke: Color, fill: Color, weight: Font.Weight, dashed: Bool) {
-        self.text = text; self.stroke = stroke; self.fill = fill
-        self.weight = weight; self.dashed = dashed
-    }
-
-    /// The "＋date" affordance on a task with no date at all — a control, so it stays quiet.
-    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear,
-                                    weight: .regular, dashed: true)
-}
-
 private struct DueChip: View {
     let todo: Todo
     let isEditing: Bool
@@ -2695,10 +2652,10 @@ private struct DueChip: View {
             menuItems
         } label: {
             if let shown {
-                chip(RelativeDue.short(shown.raw),
+                DueBadge.chip(RelativeDue.short(shown.raw),
                      style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
             } else {
-                chip("＋date", style: .empty)
+                DueBadge.chip("＋date", style: .empty)
             }
         }
         // `.button` + `.plain`, not `.borderlessButton`. The borderless style presents the label
@@ -2752,22 +2709,6 @@ private struct DueChip: View {
         return "Set due date"
     }
 
-    private func chip(_ text: String, style: DueChipStyle) -> some View {
-        Text(text)
-            .font(.caption2.weight(style.weight))
-            // A relative badge rewrites itself as the days tick down, and "in 2d" → "in 3d" shouldn't
-            // shift the row's layout to do it.
-            .monospacedDigit()
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 4).fill(style.fill))
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(style.stroke,
-                                  style: StrokeStyle(lineWidth: 1, dash: style.dashed ? [3] : []))
-            )
-            .foregroundStyle(style.text)
-    }
 }
 
 // MARK: Session header + note editor
