@@ -19,12 +19,6 @@ final class WindowSettings: ObservableObject {
         didSet { defaults.set(showOnAllSpaces, forKey: Keys.allSpaces) }
     }
 
-    /// Keep project windows above other apps' windows. (The focus panel has its own float setting, in
-    /// the Raycast-shared file, because Raycast can toggle it.)
-    @Published var floatAboveOthers: Bool {
-        didSet { defaults.set(floatAboveOthers, forKey: Keys.floating) }
-    }
-
     /// Reopen the projects that were open when the app last quit.
     @Published var restoreWindows: Bool {
         didSet { defaults.set(restoreWindows, forKey: Keys.restoreWindows) }
@@ -40,7 +34,6 @@ final class WindowSettings: ObservableObject {
 
     private enum Keys {
         static let allSpaces = "PMWindowAllSpaces"
-        static let floating = "PMWindowFloating"
         static let restoreWindows = "PMWindowRestore"
         static let openProjects = "PMWindowOpenProjects"
     }
@@ -49,7 +42,6 @@ final class WindowSettings: ObservableObject {
         // Default on: a HUD meant to stay with you while you work is no use if it's stranded on
         // the desktop you happened to summon it from.
         showOnAllSpaces = defaults.object(forKey: Keys.allSpaces) as? Bool ?? true
-        floatAboveOthers = defaults.bool(forKey: Keys.floating)
         // Default on: reopening what you had is the Mac norm, and there's no first-run state to lose.
         restoreWindows = defaults.object(forKey: Keys.restoreWindows) as? Bool ?? true
     }

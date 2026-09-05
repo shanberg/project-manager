@@ -100,15 +100,20 @@ final class TaskAddDueTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.text), ["Todo one", "Todo two", "Todo three", "Appended"])
     }
 
+    /// One line added and nothing else disturbed. The appended task goes at the end of the session's
+    /// body, which in this fixture is past the trailing `#project-tag` — that tag sits inside the last
+    /// session with no `## ` after it to end the session, so it is part of that session's note and the
+    /// task joins the end of the note rather than jumping back up above it. Everything above the
+    /// Sessions region is byte-for-byte.
     func testAppendPreservesEverythingElse() throws {
         let r = try XCTUnwrap(appendTaskToSession(
             rawText: Self.markdown, sessionIndex: 0, text: "Appended", due: nil))
         let before = Self.markdown.components(separatedBy: "\n")
         let after = r.rawText.components(separatedBy: "\n")
         XCTAssertEqual(after.count, before.count + 1, "Exactly one line added")
-        // Frontmatter and trailing tag untouched.
         XCTAssertEqual(after.first, "---")
-        XCTAssertEqual(after.last, "#project-tag")
+        XCTAssertEqual(Array(after.dropLast()).suffix(1), ["#project-tag"], "The tag kept its line")
+        XCTAssertEqual(after.last, "- [ ] Appended")
     }
 
     // MARK: - setDueOnTodoAt

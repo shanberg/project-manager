@@ -21,7 +21,8 @@ public func parseProjectPrefixAndTitle(folderName: String, domainCodes: [String]
     throw PmError.projectFolderMalformed(folderName)
 }
 
-/// Give a project or area a new title. Updates the notes `#` title and renames the notes file when needed.
+/// Give a project or area a new title. Updates the notes `#` title, and renames the notes file and
+/// the project's canvas when needed.
 ///
 /// A project keeps its `Domain-<digits>` prefix and only the title segment moves — the number is its
 /// identity and renaming isn't renumbering. An area has no prefix to keep: its name *is* its title, so
@@ -72,5 +73,30 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
             try FileManager.default.removeItem(atPath: resolved)
         }
     }
+    renameProjectCanvas(projectPath: dest, oldFolderName: oldName)
     return newBasename
+}
+
+/// Move the project's canvas onto its new canonical name, so a renamed project's board is still the
+/// one the header opens.
+///
+/// Asks for the old canonical name rather than for whatever `resolveProjectCanvasPath` now finds, and
+/// so moves exactly the file the last rename left behind. Resolving instead would work in the common
+/// case and quietly fail in the one that matters: `docs/Old Title.canvas` beside a second board makes
+/// the folder ambiguous, the resolver answers nil, and the project's canvas would be stranded under a
+/// name nothing looks for. It also means an adopted board — one somebody named themselves, sitting at
+/// the top of the folder — is left alone, which is right. Renaming a project is not a licence to
+/// rename their document.
+///
+/// Nothing here is fatal. The folder and the notes have already moved by this point, and failing the
+/// whole rename over a canvas that is still sitting there readable would be the worse trade.
+private func renameProjectCanvas(projectPath: String, oldFolderName: String) {
+    let oldTitle = projectTitle(fromFolderName: oldFolderName)
+    let docs = (projectPath as NSString).appendingPathComponent("docs")
+    let was = (docs as NSString).appendingPathComponent("\(oldTitle).canvas")
+    let now = getProjectCanvasPath(projectPath: projectPath)
+    guard was != now,
+          FileManager.default.fileExists(atPath: was),
+          !FileManager.default.fileExists(atPath: now) else { return }
+    try? FileManager.default.moveItem(atPath: was, toPath: now)
 }

@@ -143,7 +143,7 @@ final class SessionRefTests: XCTestCase {
         let resolved = try resolveSessionRef(ref, notes: after)
         XCTAssertEqual(resolved.index, 1, "It resolves to the sitting it was opened on, not position 0")
         let written = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: withNew, sessionIndex: resolved.index, prose: "Yesterday's thinking."))
+            rawText: withNew, sessionIndex: resolved.index, body: "Yesterday's thinking."))
 
         XCTAssertTrue(written.contains("Something I must not lose."),
                       "The quick bar's note survived the editor closing over it")

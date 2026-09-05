@@ -124,6 +124,14 @@ enum MainMenu {
         track(.quickFindTask,
               add(menu, "Find a Task…", #selector(AppDelegate.quickFindTask), target: target, key: ""))
         add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
+        // The project's own board, above the file-picker version, because it's the one you want
+        // nearly every time — going looking for a canvas is the rarer errand of the two.
+        add(menu, "Project Canvas", #selector(AppDelegate.projectCanvas), target: target, key: "c",
+            modifiers: [.command, .shift])
+        // ⇧⌘O rather than the ⌘O a document app would use: in PM, "open" already means a project, and
+        // a canvas is a document you reach *from* a project far more often than you go looking for one.
+        add(menu, "Open Canvas…", #selector(AppDelegate.openCanvas), target: target, key: "o",
+            modifiers: [.command, .shift])
         menu.addItem(.separator())
 
         menu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -152,6 +160,9 @@ enum MainMenu {
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        // Answered by a canvas board and by nothing else, so it stays dim everywhere it means nothing.
+        // Here rather than in a canvas-only menu because ⌘D belongs in Edit wherever it appears.
+        menu.addItem(withTitle: "Duplicate", action: Selector(("duplicate:")), keyEquivalent: "d")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())
         item.submenu = menu
@@ -217,6 +228,43 @@ enum MainMenu {
         shortcuts.target = target
     }
 
+    /// The four zoom commands a canvas window answers, routed through the responder chain so they are
+    /// live when a board is in front and dim when it isn't.
+    private static func canvasZoomItems(_ menu: NSMenu) {
+        menu.addItem(.separator())
+        let inn = menu.addItem(withTitle: "Zoom In", action: #selector(CanvasBoardView.zoomIn(_:)),
+                               keyEquivalent: "+")
+        inn.keyEquivalentModifierMask = [.command]
+        let alt = menu.addItem(withTitle: "Zoom In", action: #selector(CanvasBoardView.zoomIn(_:)),
+                               keyEquivalent: "=")
+        alt.isAlternate = true
+        alt.isHidden = true
+        menu.addItem(withTitle: "Zoom Out", action: #selector(CanvasBoardView.zoomOut(_:)),
+                     keyEquivalent: "-")
+        menu.addItem(withTitle: "Actual Size", action: #selector(CanvasBoardView.zoomActualSize(_:)),
+                     keyEquivalent: "0")
+        menu.addItem(withTitle: "Zoom to Fit", action: #selector(CanvasBoardView.zoomToFit(_:)),
+                     keyEquivalent: "9")
+        menu.addItem(.separator())
+    }
+
+    /// The board's mode, as a checkmark.
+    ///
+    /// A checked item rather than two — "View Mode" and "Edit Mode" as a radio pair would be the same
+    /// fact written twice, and this is a switch, not a choice between destinations. Routed to the board
+    /// like the zoom items, so it is dim in a project window and its checkmark reflects the board in
+    /// front of you rather than a global setting.
+    ///
+    /// ⇧⌘E, because plain ⌘E is Use Selection for Find, which every Mac text app has and this app has
+    /// too — see the Find submenu.
+    private static func canvasModeItem(_ menu: NSMenu) {
+        let item = menu.addItem(withTitle: "Edit Mode",
+                                action: #selector(CanvasBoardView.toggleEditMode(_:)),
+                                keyEquivalent: "e")
+        item.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(.separator())
+    }
+
     // MARK: View
 
     private static func viewMenuItem(target: AppDelegate) -> NSMenuItem {
@@ -247,6 +295,11 @@ enum MainMenu {
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
         // window's split view controller, so it animates and persists in one place.
+        // Zoom, answered only by a canvas window — dim in a project window, where there is nothing to
+        // zoom. ⌘= as well as ⌘+ because the plus is a shifted equals on most layouts and AppKit
+        // matches the literal character.
+        canvasZoomItems(menu)
+        canvasModeItem(menu)
         add(menu, "Show Projects", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
             key: "s", modifiers: [.command, .option])
         // With the other two "show me this" checkmarks rather than in the sidebar's arrange menu: it's

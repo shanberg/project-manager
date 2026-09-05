@@ -206,7 +206,7 @@ App Intents carry the reference too. The digest is deliberately *not* folded int
 
 The boundary the second open question asked about. `PMStore` stays responsible for undo/redo, the focus-move classifier, the project index, recents, and its own phrasing — the quick bar's receipts are tuned to a narrow non-activating panel (truncated at 44 characters, withheld entirely for commands whose whole effect is a window opening), and the envelope's `summary` is written for a HUD with room. The contract supplies the sentence; a surface is still free to write its own.
 
-Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (sets a session's prose at an index; the contract only appends to the current one), and `addTaskToSession` (appends to a named session rather than today's).
+Three mutations stay on `NotesService`, each because the contract has no action for them: `moveSubtree` (the panel's drag-reorder — two references, a side and a depth, resolved from a drop's coordinates), `setSessionNote` (replaces a session's whole body at an index; the contract only appends to the current one), and `addTaskToSession` (appends to a named session rather than today's).
 
 ### Batches, and the revision
 

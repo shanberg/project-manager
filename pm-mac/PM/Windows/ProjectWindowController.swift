@@ -134,7 +134,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
 
         applyTitle()
-        applyWindowSettings()
 
         // Measure before the first frame is drawn, not after the window is ordered in. The defaults in
         // `ProjectViewState` are only starting guesses — 92pt of traffic lights and a compact
@@ -236,14 +235,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.subtitle = p.total > 0 ? "\(p.done) of \(p.total) done" : ""
     }
 
-    // MARK: Settings
-
-    /// Float project windows above other apps' windows, if the user asked for it. "Show on all Spaces"
-    /// is deliberately *not* here — it belongs to the focus panel, which is the surface that's meant to
-    /// follow you around. A full editor window that shadows you onto every desktop is a nuisance, not a
-    /// feature.
-    func applyWindowSettings() {
-        window?.level = WindowSettings.shared.floatAboveOthers ? .floating : .normal
+    /// File ▸ Project Canvas, and the header button's twin — this window's project, its board.
+    func openProjectCanvas() {
+        CanvasWindowController.openProjectCanvas(for: store)
     }
 
     // MARK: Sidebar

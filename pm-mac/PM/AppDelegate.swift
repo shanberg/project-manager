@@ -33,6 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the menu is built or a name is written anywhere: a preference that moved keys has to
         // finish moving before anything reads the new one.
         ProjectCodes.migrateLegacyKey()
+        // Off the critical path, and once ever: web cards moved from the app's default store to one of
+        // their own, and the sessions you were already signed in to should come with them.
+        Task { @MainActor in await CanvasWebSession.migrateOldSessions() }
+        // Also off the critical path: normally this is four lookups by content hash and costs
+        // milliseconds, but the launch after an install or a list update recompiles from scratch and
+        // takes about ten seconds. Cards built inside that window catch up on their own.
+        Task { @MainActor in await CanvasContentBlocker.prepare() }
         MainMenu.install(target: self)
 
         // Point the menubar at the focused project before anything reads `store`.
@@ -342,8 +349,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://settings               → the Settings window
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "pmpanel" {
-            handle(url: url)
+        for url in urls {
+            if url.scheme == "pmpanel" {
+                handle(url: url)
+            } else if url.isFileURL, url.pathExtension.lowercased() == "canvas" {
+                Log.write("canvas open requested: \(url.lastPathComponent)")
+                // Double-clicked in Finder, or dropped on the app. PM registers for `.canvas` as an
+                // alternate handler, never the default — the vault's canvases belong to Obsidian, and
+                // an app that quietly took them over on install would be taking a decision that isn't
+                // its to take. "Open With ▸ PM" is the whole claim.
+                CanvasWindowController.open(url: url)
+            }
         }
     }
 

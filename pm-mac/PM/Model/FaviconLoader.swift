@@ -83,6 +83,14 @@ final class FaviconLoader {
         }
     }
 
+    /// A session with no cookie jar of its own and no share in anyone else's.
+    ///
+    /// `URLSession.shared` reads the app's cookie storage — the same file WebKit persists a card's
+    /// session to — so an icon fetch for `jira.example.com` could carry your Jira session cookie to a
+    /// request that has no business having it. An icon is public by definition; nothing about
+    /// fetching one should identify you, and this is the one line that guarantees it.
+    nonisolated private static let anonymous = URLSession(configuration: .ephemeral)
+
     nonisolated private static func fetch(host: String) async -> NSImage? {
         guard let url = URL(string: "https://\(host)/favicon.ico") else { return nil }
         let req = URLRequest(url: url, timeoutInterval: 8)
@@ -92,7 +100,7 @@ final class FaviconLoader {
         // fallback glyph is already what the row shows while a fetch is in flight, so nothing is
         // missing when this comes back empty.
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await anonymous.data(for: req)
             guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                   let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }
             return img

@@ -54,6 +54,11 @@ final class PMStore: ObservableObject {
     /// Resolved path to the focused project's notes file, captured during reload so the app can watch
     /// it without re-scanning the (protected) project directory on every UI update.
     @Published private(set) var notesPath: String?
+    /// The project's canvas, when it has one on disk. Nil is "not made yet", never "this project
+    /// doesn't do canvases" — every project is assumed to want a board, so the header offers to make
+    /// one rather than hiding itself. Re-resolved on every load so a canvas created in Obsidian while
+    /// PM is open turns up without a restart.
+    @Published private(set) var canvasPath: String?
     @Published private(set) var notes: ProjectNotes?
     @Published private(set) var todos: [Todo] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
@@ -264,6 +269,7 @@ final class PMStore: ObservableObject {
             projectName = nil
             projectPath = nil
             notesPath = nil
+            canvasPath = nil
             notes = nil
             todos = []
             lastEditedAt = nil
@@ -328,6 +334,7 @@ final class PMStore: ObservableObject {
                     self.focusedKey = output.focusedKey
                     self.errorMessage = nil
                     self.hasLoaded = true
+                    self.refreshCanvasPath(projectPath: projectPath)
                     let newHero = self.makeHeroSnapshot(output.todos)
                     if !projectChanged {
                         let move = self.classifyHeroMove(from: self.heroSnapshot, to: newHero)
@@ -350,6 +357,55 @@ final class PMStore: ObservableObject {
                 // After the publish, either way: a completion that only ran on success would strand a
                 // caller waiting on it the one time the read failed.
                 then?()
+            }
+        }
+    }
+
+    // MARK: The project's canvas
+
+    /// Re-resolve the project's board off the main thread and publish it.
+    ///
+    /// Its own hop rather than another element in `reload`'s tuple: this is two directory listings and
+    /// nothing else depends on it, so widening the load — which already carries the notes read, the
+    /// prune and the revision — to thread a third path through would cost more in the reading than it
+    /// saves in the running.
+    private func refreshCanvasPath(projectPath: String) {
+        io.async { [weak self] in
+            let resolved = try? resolveProjectCanvasPath(projectPath: projectPath)
+            Task { @MainActor in
+                guard let self, self.projectPath == projectPath else { return }
+                self.canvasPath = resolved
+            }
+        }
+    }
+
+    /// The project's board, made if it hasn't got one yet, handed back on the main actor.
+    ///
+    /// Creation is a side effect of asking for it, which is the whole point of the convention: a
+    /// project is assumed to have a canvas, so opening one is never a two-step ceremony of "make it,
+    /// then open it". Resolution happens again here rather than trusting `canvasPath`, because the
+    /// published value is a snapshot and the answer to "should I write a file" deserves the live one.
+    func openableCanvasPath(_ done: @escaping @MainActor (Result<String, Error>) -> Void) {
+        guard let projectPath else {
+            // A window made a moment ago by the menu command itself: the store's first load is still in
+            // flight, so there is no project folder to answer about yet. Wait for it rather than doing
+            // nothing — a command that silently no-ops the first time you press it, and works the
+            // second, is the kind of bug people stop reporting and start working around. `hasLoaded`
+            // stops this at one retry: after a load, nil means there really is no project.
+            if !hasLoaded { reload { [weak self] in self?.openableCanvasPath(done) } }
+            return
+        }
+        let notesPath = self.notesPath
+        io.async { [weak self] in
+            let result = Result {
+                try resolveProjectCanvasPath(projectPath: projectPath)
+                    ?? createProjectCanvas(projectPath: projectPath, notesPath: notesPath)
+            }
+            Task { @MainActor in
+                if case .success(let path) = result, self?.projectPath == projectPath {
+                    self?.canvasPath = path
+                }
+                done(result)
             }
         }
     }
@@ -936,9 +992,9 @@ final class PMStore: ObservableObject {
         }
     }
 
-    /// Replace the note of the session `ref` names.
-    func setSessionNote(_ ref: SessionRef, prose: String, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { try PmLib.setSessionNote(project: $0, session: ref, prose: prose) }
+    /// Replace the note of the session `ref` names — its whole body, task lines included and in place.
+    func setSessionNote(_ ref: SessionRef, body: String, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try PmLib.setSessionNote(project: $0, session: ref, body: body) }
     }
 
     /// Append a task to the session `ref` names.
@@ -958,9 +1014,9 @@ final class PMStore: ObservableObject {
     /// Add prose to the current session's note, starting a session when there isn't one to continue —
     /// no session for today, or the project left alone past `PmLib.sessionIdleWindow`.
     ///
-    /// Appending, not setting: `setSessionNote` replaces the session's whole leading-prose region, so a
-    /// line typed into the quick bar would silently swallow whatever the session's note already said.
-    /// The note is a running log, and a second entry joins the first.
+    /// Appending, not setting: `setSessionNote` replaces the session's whole body, so a line typed into
+    /// the quick bar would silently swallow the note *and* the tasks the session already held. The note
+    /// is a running log, and a second entry joins the end of the first.
     /// `then` runs after the re-read, which matters when the caller means to open the session next:
     /// this may have just started it, and asking for it against a stale document would make a second
     /// heading.

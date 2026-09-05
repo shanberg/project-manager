@@ -456,30 +456,30 @@ public func renameSession(project: String, sessionIndex: Int, label: String) thr
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
-/// Set (create/replace/clear) a session's note. The freeform text is sanitized so it can't break the
-/// document (headings clamp to within-session levels; typed checkboxes graduate into real tasks in the
-/// session's task list). Empty prose removes the note.
+/// Set (create/replace/clear) a session's note — its whole body, task lines and all, in the order it
+/// was written. The freeform text is sanitized so it can't break the document (headings clamp to
+/// within-session levels). Empty text empties the session.
 /// Replace a session's note, naming the session by `SessionRef` rather than by index.
 ///
 /// The reference is resolved against the document this call has just read — which is the whole point.
 /// An index computed by a caller minutes (or one quick-bar note) earlier may name a different sitting
 /// by the time the write lands; a reference resolved here is checked against the bytes about to be
 /// rewritten. See `SessionRef`.
-public func setSessionNote(project: String, session ref: SessionRef, prose: String) throws {
+public func setSessionNote(project: String, session ref: SessionRef, body: String) throws {
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
     let index = try resolveSessionRef(ref, notes: try parseNotes(markdown: rawText)).index
     guard let updated = commitSessionNotePreservingFormat(rawText: rawText, sessionIndex: index,
-                                                          prose: prose) else {
+                                                          body: body) else {
         throw PmError.notesNotFound(handle.notesPath)
     }
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }
 
-public func setSessionNote(project: String, sessionIndex: Int, prose: String) throws {
+public func setSessionNote(project: String, sessionIndex: Int, body: String) throws {
     let handle = try resolveNotesHandle(project: project)
     let rawText = try handle.io.readContent(path: handle.notesPath)
-    guard let updated = commitSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex, prose: prose) else {
+    guard let updated = commitSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex, body: body) else {
         throw PmError.notesNotFound(handle.notesPath)
     }
     try handle.io.writeContent(path: handle.notesPath, content: updated)
@@ -548,7 +548,7 @@ public func pruneEmptySessions(handle: NotesHandle) throws -> Int {
 /// Append a task to the end of a specific session's task list (or right after its heading when it has
 /// no tasks yet), preserving format. Lets the panel populate an otherwise-empty session directly.
 /// Append a task to a session named by `SessionRef`. Resolved against the document just read, for the
-/// reason given on `setSessionNote(project:session:prose:)`.
+/// reason given on `setSessionNote(project:session:body:)`.
 public func appendTaskToSession(project: String, session ref: SessionRef, text: String,
                                 due: String?) throws {
     guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw PmError.emptyTodoText }

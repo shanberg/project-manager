@@ -27,7 +27,7 @@ enum SessionNoteMerge {
 
     /// - Parameters:
     ///   - edited: what the surface currently holds.
-    ///   - onDisk: today's prose as the store has it now.
+    ///   - onDisk: today's note — the session's whole body — as the store has it now.
     ///   - seed: what the surface last agreed with — read on opening, then whatever it last wrote.
     static func resolve(edited: String, onDisk: String, seed: String) -> Outcome {
         guard edited != onDisk else { return .unchanged }

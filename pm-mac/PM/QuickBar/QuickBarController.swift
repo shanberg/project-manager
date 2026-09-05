@@ -454,7 +454,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.startsNewSession = focusedStore?.willStartNewSession ?? true
         model.todayNote = focusedStore?.todaySessionIndex.flatMap { index in
             focusedStore?.notes?.sessions[index].body
-        }.map { leadingSessionProse(body: $0) }
+        }.map { sessionNoteBody(body: $0) }
         model.canUndoCompletion = focusedStore?.lastCompletedKey != nil
         model.hasNextTask = focusedStore?.nextTodo != nil
         model.focusedProjectIsArchived = focusedProjectScope == .archive

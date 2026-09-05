@@ -362,11 +362,10 @@ public func moveSubtreePreservingFormat(
 /// re-rooted at depth 0. This is the destination a drop into a session with no tasks names: there is
 /// no anchor task there to sit beside, only the session itself.
 ///
-/// Where it lands inside the session is the rule a newly added task already follows — after the last
-/// task if there is one, else after the session's leading prose so the note isn't stranded below the
-/// list, else right under the heading. A session that reads as empty on screen isn't always empty in
-/// the file (the task being dragged is still in it until the splice), which is why this appends rather
-/// than assuming the session is bare.
+/// Where it lands inside the session is the rule a newly added task already follows — the end of the
+/// session's body (`rawSessionAppendSlot`). A session that reads as empty on screen isn't always empty
+/// in the file (the task being dragged is still in it until the splice), which is why this appends
+/// rather than assuming the session is bare.
 public func moveSubtreeToSessionPreservingFormat(
     rawText: String,
     sourceSessionIndex: Int,
@@ -452,18 +451,21 @@ private struct SessionAppendSlot {
     let prefix: String
 }
 
-/// Resolve `sessionIndex`'s append slot: after its last task if it has one, otherwise after its
-/// leading prose (its note), so the note isn't stranded below the list, otherwise right after the
-/// heading. Nil when the session can't be located.
+/// Resolve `sessionIndex`'s append slot: the end of its body — after its last line with anything on
+/// it, or right after the heading when it's empty. Nil when the session can't be located.
+///
+/// The end, not "after the last task". A session reads in the order it happened and a task added to it
+/// is the latest thing to happen, so it belongs at the bottom — which is also where the window draws
+/// the add editor, so what the form previews is where the task lands. Slotting it after the last
+/// *task* instead used to drop it into the middle of a note whenever the session ended in prose.
 private func rawSessionAppendSlot(_ lines: [String], sessionIndex targetSession: Int) -> SessionAppendSlot? {
     var inSessions = false
     var sessionIndex = -1
     var taskIndex = 0
     var headingLine: Int? = nil
     var lastTaskLine: Int? = nil
-    /// Last non-blank prose line of the target session (only meaningful before its first task): a new
-    /// first task lands after it, so the session's leading-prose note stays above the task list.
-    var lastProseLine: Int? = nil
+    /// Last line of the target session with anything on it — prose or task. The append lands after it.
+    var lastContentLine: Int? = nil
     var prefix = "- "
 
     for n in lines.indices {
@@ -478,7 +480,7 @@ private func rawSessionAppendSlot(_ lines: [String], sessionIndex targetSession:
                 headingLine = n
                 taskIndex = 0
                 lastTaskLine = nil
-                lastProseLine = nil
+                lastContentLine = nil
             } else if sessionIndex > targetSession {
                 break
             }
@@ -492,15 +494,16 @@ private func rawSessionAppendSlot(_ lines: [String], sessionIndex targetSession:
         guard sessionIndex == targetSession else { continue }
         if matches(rawTaskPattern, line) {
             lastTaskLine = n
+            lastContentLine = n
             prefix = listPrefix(of: line)
             taskIndex += 1
-        } else if lastTaskLine == nil, !line.trimmingCharacters(in: .whitespaces).isEmpty {
-            lastProseLine = n
+        } else if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            lastContentLine = n
         }
     }
 
     guard let heading = headingLine else { return nil }
-    return SessionAppendSlot(line: (lastTaskLine ?? lastProseLine ?? heading) + 1,
+    return SessionAppendSlot(line: (lastContentLine ?? heading) + 1,
                              taskIndex: taskIndex,
                              prefix: lastTaskLine != nil ? prefix : "- ")
 }
@@ -645,10 +648,16 @@ public func sessionAddPreservingFormat(rawText: String, label: String, date: Dat
 // MARK: - Session-level edits (format-preserving)
 //
 // The panel surfaces sessions (the dated "### ..." entries under "## Sessions") as first-class
-// notes: rename their label, delete an empty one, and write an editable prose body. A session's
-// "note" is its *leading prose* — the lines between the heading and its first task line — so the
-// task list underneath is never disturbed. These helpers walk the Sessions region with the same
-// indexing parseSessionsBlock/parseTodos use, and splice only the affected lines.
+// notes: rename their label, delete an empty one, and write an editable body. A session's "note" is
+// its *whole body* — everything between its heading and the next one, task lines included, in the
+// order it was written. These helpers walk the Sessions region with the same indexing
+// parseSessionsBlock/parseTodos use, and splice only the affected lines.
+//
+// It used to be the *leading* prose — the lines above the first task — with the tasks held apart as a
+// list that everything else appended to. That made the note a preamble rather than a note: prose
+// written after a task was on disk and nowhere on screen, and a checkbox typed in the middle of a
+// paragraph was relocated to the bottom of the session on save. A session is a sitting written down
+// in order, and the order is the content.
 
 /// The 0-based line number of the session heading at `sessionIndex` (indexed as parseSessionsBlock
 /// walks the Sessions region), or nil if there aren't that many sessions.
@@ -697,42 +706,34 @@ private func rawSessionEnd(_ lines: [String], headingLine: Int) -> Int {
     return n
 }
 
-/// The leading prose of a session body: the lines before its first task line, trimmed. Empty when
-/// the body starts with a task (or is blank). Used by the panel to render/seed a session's editable
-/// note; prose that appears *after* a task is preserved on disk but not surfaced here.
-public func leadingSessionProse(body: String) -> String {
-    let lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    var prose: [String] = []
-    for line in lines {
-        if matches(rawTaskPattern, line) { break }
-        prose.append(line)
-    }
-    return prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+/// A session's note: its whole body, trimmed of the blank lines that separate it from the heading
+/// above and from whatever follows. Task lines are part of it and keep their place.
+///
+/// Only the outer whitespace goes. The blank lines *inside* a body are the paragraph breaks someone
+/// typed, and a note surface that tidied them would be rewriting the note every time it was opened.
+public func sessionNoteBody(body: String) -> String {
+    body.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-/// Set (create/replace/clear) a session's leading-prose note, preserving format. The region between
-/// the heading and the session's first task line (or the session end, when it has no tasks) is
-/// rewritten to a canonical block — a blank line, the prose, and a trailing blank when a task or
-/// another heading follows — so exactly one blank separates heading/prose/tasks. Empty `prose`
-/// removes the note. Everything from the first task onward is left byte-for-byte. Returns nil if the
-/// session can't be located.
-public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, prose: String) -> String? {
+/// Set (create/replace/clear) a session's note, preserving format. The session's whole body — the
+/// region between its heading and the next heading/section — is rewritten to a canonical block: a
+/// blank line, the body as given, and a trailing blank when something follows, so exactly one blank
+/// separates a heading from its note and a note from the next heading. Empty `body` empties the
+/// session. Everything outside the session is left byte-for-byte. Returns nil if the session can't be
+/// located.
+///
+/// The body goes down as written, task lines and all. This is the write half of "the note is the
+/// session": whatever order you typed it in is the order it lands in, and nothing is lifted out of it.
+/// Callers that take freeform text from a person want `commitSessionNotePreservingFormat`, which
+/// clamps headings first so a typed `##` can't end the Sessions region.
+public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, body: String) -> String? {
     var lines = rawText.components(separatedBy: "\n")
     guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }
     let end = rawSessionEnd(lines, headingLine: heading)
+    // Another heading or section after this session needs a blank line before it.
+    let followed = end < lines.count
 
-    // The leading-prose region ends at the session's first task line, else at the session end.
-    var firstTask: Int? = nil
-    var n = heading + 1
-    while n < end {
-        if matches(rawTaskPattern, lines[n]) { firstTask = n; break }
-        n += 1
-    }
-    let regionEnd = firstTask ?? end
-    // A following task, or another heading/section after this session, needs a blank line before it.
-    let followed = firstTask != nil || end < lines.count
-
-    let trimmed = prose.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
     var replacement: [String] = []
     if trimmed.isEmpty {
         if followed { replacement = [""] }
@@ -740,7 +741,7 @@ public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, p
         replacement = [""] + trimmed.components(separatedBy: "\n")
         if followed { replacement.append("") }
     }
-    lines.replaceSubrange((heading + 1)..<regionEnd, with: replacement)
+    lines.replaceSubrange((heading + 1)..<end, with: replacement)
     return lines.joined(separator: "\n")
 }
 
@@ -751,9 +752,10 @@ public func setSessionNotePreservingFormat(rawText: String, sessionIndex: Int, p
 /// heading to splice into).
 ///
 /// The note is appended rather than replaced — a session's note is a running log, so a second entry
-/// joins the first under a blank line. The prose goes through the same sanitizing as any other session
-/// note (see `commitSessionNotePreservingFormat`), so pasted headings and checkboxes can't break the
-/// document.
+/// joins the first under a blank line, *after* whatever is already there. Landing at the end and not
+/// above the tasks is the point: the session reads in the order it happened. The prose goes through the
+/// same sanitizing as any other session note (see `commitSessionNotePreservingFormat`), so a pasted
+/// heading can't break the document.
 public func appendSessionNotePreservingFormat(rawText: String, prose: String, lastEdited: Date? = nil,
                                               date: Date = Date()) throws -> String? {
     let addition = prose.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -764,10 +766,10 @@ public func appendSessionNotePreservingFormat(rawText: String, prose: String, la
     let notes = try parseNotes(markdown: current.rawText)
     guard current.sessionIndex < notes.sessions.count else { return nil }
 
-    let existing = leadingSessionProse(body: notes.sessions[current.sessionIndex].body)
+    let existing = sessionNoteBody(body: notes.sessions[current.sessionIndex].body)
     let combined = existing.isEmpty ? addition : existing + "\n\n" + addition
     return commitSessionNotePreservingFormat(rawText: current.rawText,
-                                             sessionIndex: current.sessionIndex, prose: combined)
+                                             sessionIndex: current.sessionIndex, body: combined)
 }
 
 /// Rename a session's label (the trailing text after the date), preserving format. The heading line
@@ -802,68 +804,33 @@ private func demotedHeading(_ line: String) -> String? {
     return String(repeating: "#", count: 4) + after
 }
 
-/// Normalize freeform note text so it can live safely as a session's prose without altering document
-/// structure. Two transforms, matching the app's contract that a note is prose sitting above a session's
-/// task list:
-/// - **Task checkboxes graduate**: every `- [ ] …` / `- [x] …` line is pulled out of the prose and
-///   returned separately (the caller appends them to the session's task list). Their relative
-///   indentation is preserved, shifted so the shallowest sits at the root.
-/// - **Headings clamp**: any heading shallower than H4 is demoted to H4, so a stray `##`/`### <date>`
-///   can't end the Sessions region or split the session.
-/// Everything else (prose, plain bullets, callouts, H4–H6, `#` is clamped too) round-trips verbatim.
-public func sanitizeSessionNoteProse(_ prose: String) -> (prose: String, taskLines: [String]) {
-    var proseLines: [String] = []
-    var taskLines: [String] = []
-    for line in prose.components(separatedBy: "\n") {
-        if matches(rawTaskPattern, line) {
-            taskLines.append(line)
-        } else if let demoted = demotedHeading(line) {
-            proseLines.append(demoted)
-        } else {
-            proseLines.append(line)
-        }
-    }
-    if !taskLines.isEmpty {
-        let minIndent = taskLines.map { leadingSpaces($0) }.min() ?? 0
-        if minIndent > 0 { taskLines = taskLines.map { String($0.dropFirst(minIndent)) } }
-    }
-    let cleanProse = proseLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    return (cleanProse, taskLines)
+/// Normalize freeform note text so it can live safely as a session's body without altering document
+/// structure. One transform: any heading shallower than H4 is demoted to H4, so a stray `##` can't
+/// end the Sessions region and a stray `### <date>` can't split the session in two. Everything else —
+/// prose, task lines, plain bullets, callouts, H4–H6, blank lines — round-trips verbatim.
+///
+/// Task lines used to be pulled out here and handed back separately for the caller to append below the
+/// session's existing ones. That was the mechanism that moved a task out of the sentence it was
+/// written in: type `- [ ] ring the vet` under the paragraph explaining why, save, and the checkbox
+/// was at the bottom of the session with the paragraph pointing at nothing. A checkbox in a note is a
+/// task *there*; the parser reads it as one wherever it sits, so there was never anything to move it
+/// for. Structure is the only thing this still defends, because a `##` genuinely does break the file.
+public func sanitizeSessionNoteBody(_ body: String) -> String {
+    let lines = body.components(separatedBy: "\n").map { demotedHeading($0) ?? $0 }
+    return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-/// Commit a session note the way the panel editor does: sanitize the freeform text (`sanitizeSessionNoteProse`)
-/// so headings can't break structure and any typed checkboxes graduate into real tasks appended to the
-/// session's task list, then splice the clean prose and the (existing + graduated) tasks back into the
-/// session, preserving everything outside it. Idempotent once the editor adopts the returned clean prose
-/// (no checkboxes remain to re-extract). Returns nil if the session can't be located.
-public func commitSessionNotePreservingFormat(rawText: String, sessionIndex: Int, prose: String) -> String? {
-    let (cleanProse, taskLines) = sanitizeSessionNoteProse(prose)
-    var lines = rawText.components(separatedBy: "\n")
-    guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex) else { return nil }
-    let end = rawSessionEnd(lines, headingLine: heading)
-    let bodyLines = Array(lines[(heading + 1)..<end])
-    let firstTaskIdx = bodyLines.firstIndex { matches(rawTaskPattern, $0) }
-
-    // The session's existing tasks (and any trailing lines) are preserved verbatim; trim surrounding
-    // blank lines so the joins below normalize to a single blank.
-    var tail = firstTaskIdx.map { Array(bodyLines[$0...]) } ?? []
-    while tail.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { tail.removeFirst() }
-    while tail.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { tail.removeLast() }
-
-    var region: [String] = []
-    if !cleanProse.isEmpty {
-        region.append("")
-        region.append(contentsOf: cleanProse.components(separatedBy: "\n"))
-    }
-    let tasks = tail + taskLines   // existing tasks, then the newly-graduated ones
-    if !tasks.isEmpty {
-        region.append("")
-        region.append(contentsOf: tasks)
-    }
-    if end < lines.count { region.append("") }   // one blank before a following heading/section
-
-    lines.replaceSubrange((heading + 1)..<end, with: region)
-    return lines.joined(separator: "\n")
+/// Commit a session note the way the panel editor does: sanitize the freeform text
+/// (`sanitizeSessionNoteBody`, so headings can't break the document) and write it as the session's
+/// whole body, preserving everything outside the session. Idempotent once the editor adopts the
+/// returned clean text. Returns nil if the session can't be located.
+///
+/// This is the one call a note surface makes. What it writes is what was typed — the tasks stay in
+/// the paragraphs they belong to, and a note that ends with three checkboxes ends with three
+/// checkboxes rather than having them moved somewhere tidier.
+public func commitSessionNotePreservingFormat(rawText: String, sessionIndex: Int, body: String) -> String? {
+    setSessionNotePreservingFormat(rawText: rawText, sessionIndex: sessionIndex,
+                                   body: sanitizeSessionNoteBody(body))
 }
 
 /// Join edited lines back into a document, keeping whether it ended with a newline.
@@ -988,9 +955,8 @@ public func insertTaskBlockPreservingFormat(
     return lines.joined(separator: "\n")
 }
 
-/// Append `block` at the end of a session's task list — what a paste means with no task to land beside.
-/// Lands in the same slot a newly added task would: after the last task, else after the session's
-/// leading prose, else right under the heading.
+/// Append `block` at the end of a session — what a paste means with no task to land beside. Lands in
+/// the same slot a newly added task would (`rawSessionAppendSlot`): the end of the session's body.
 public func appendTaskBlockToSession(
     rawText: String,
     sessionIndex: Int,

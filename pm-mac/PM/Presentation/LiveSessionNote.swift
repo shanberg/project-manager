@@ -1,7 +1,9 @@
 import AppKit
 import PmLib
 
-/// Today's session note, open for editing. One of these behind every surface that writes prose.
+/// Today's session note, open for editing. One of these behind every surface that writes into a
+/// session. What it holds is the session's whole body — the tasks written down in it as much as the
+/// prose around them — so scrolling up amends the sitting rather than a preamble to it.
 ///
 /// It exists because there used to be two contracts for the same file. The full-screen surface edited
 /// today's whole note live — no save, no revert, every keystroke written through — while the quick
@@ -135,7 +137,7 @@ final class LiveSessionNote {
         let session = sessions[index]
         onSessionLabel(session.label.isEmpty ? "Today" : session.label)
         ref = store.sessionRef(at: index)
-        let prose = leadingSessionProse(body: session.body)
+        let prose = sessionNoteBody(body: session.body)
         seed = prose
         guard let carried = pendingAppend else {
             onProse(prose)
@@ -186,15 +188,15 @@ final class LiveSessionNote {
             then?()
         case .replace(let prose):
             seed = prose
-            store.setSessionNote(ref, prose: prose, then: then)
+            store.setSessionNote(ref, body: prose, then: then)
         case .merged(let prose):
             seed = prose
             Log.write("session note merged an edit made elsewhere while it was open")
-            store.setSessionNote(ref, prose: prose, then: then)
+            store.setSessionNote(ref, body: prose, then: then)
         case .overwrote(let prose):
             seed = prose
             Log.write("session note overwrote an edit made elsewhere while it was open")
-            store.setSessionNote(ref, prose: prose, then: then)
+            store.setSessionNote(ref, body: prose, then: then)
         }
     }
 
@@ -202,6 +204,6 @@ final class LiveSessionNote {
     private static func currentProse(in store: PMStore) -> String {
         guard let index = store.todaySessionIndex, let sessions = store.notes?.sessions,
               index < sessions.count else { return "" }
-        return leadingSessionProse(body: sessions[index].body)
+        return sessionNoteBody(body: sessions[index].body)
     }
 }

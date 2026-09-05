@@ -166,12 +166,6 @@ final class WindowManager {
 
     // MARK: Broadcasts
 
-    /// Re-apply the window-behavior settings to every open window, so a Settings change takes effect
-    /// without reopening anything.
-    func applyWindowSettings() {
-        for controller in controllers { controller.applyWindowSettings() }
-    }
-
     /// Refresh window titles/subtitles after a store change (the project's name or progress moved).
     func refreshTitles() {
         for controller in controllers { controller.applyTitle() }

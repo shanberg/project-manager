@@ -45,6 +45,13 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: PM
+      # A folder reference, not a group: the lists are opaque data read back by name at runtime
+      # (Bundle.urls(forResourcesWithExtension:subdirectory:)), and copying the folder keeps that
+      # lookup working without naming each file here. Regenerate deliberately, before a release,
+      # with scripts/build-blocklists.sh — see CanvasContentBlocker.
+      - path: Resources/BlockLists
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: PmLib
         product: PmLib
@@ -71,6 +78,22 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.stuarthanberg.pm
             CFBundleURLSchemes: [pmpanel]
+        # Canvases open in PM, but PM never becomes the app that owns them: `LSHandlerRank: Alternate`
+        # puts it in "Open With" and leaves Obsidian as the default handler. A vault's canvases are
+        # Obsidian documents, and taking the file association on install would be a decision PM has no
+        # business making on somebody's behalf.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Obsidian Canvas
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [md.obsidian.canvas]
+            CFBundleTypeExtensions: [canvas]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: md.obsidian.canvas
+            UTTypeDescription: Obsidian Canvas
+            UTTypeConformsTo: [public.json]
+            UTTypeTagSpecification:
+              public.filename-extension: [canvas]
         # The private drag type a task selection carries alongside its public markdown
         # representation, so an in-app reorder can be told apart from a text drag out of another
         # app. See Panel/TaskPasteboard.swift.
@@ -117,6 +140,15 @@ targets:
       - path: PM/Project/MentionPopover.swift
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
+      - path: PM/Project/SessionBlocks.swift
+      - path: PM/Canvas/CanvasCardChip.swift
+      - path: PM/Canvas/CanvasPageBudget.swift
+      - path: PM/Canvas/CanvasWebSession.swift
+      - path: PM/Canvas/CanvasColors.swift
+      - path: PM/Canvas/CanvasBlockPolicy.swift
+      - path: PM/Canvas/CanvasSelection.swift
+      - path: PM/Canvas/CanvasSnapping.swift
+      - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Task/CompletingTextField.swift
       - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift

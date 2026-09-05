@@ -188,4 +188,64 @@ final class ProjectRenameTests: XCTestCase {
         let out = try renameProjectTitle(nameOrPrefix: "W-1", newTitle: "Same")
         XCTAssertEqual(out, "W-1 Same")
     }
+
+    // MARK: The project's canvas
+
+    /// A scratch vault with one project in it, and the environment pointed at its config.
+    /// Uses setenv(PM_CONFIG_HOME); do not run in parallel with other code that reads PM_CONFIG_HOME.
+    private func makeVault(project folderName: String) throws -> (project: String, active: String) {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        let configDir = (tmp as NSString).appendingPathComponent("pmcfg")
+        let activePath = (tmp as NSString).appendingPathComponent("active")
+        let archivePath = (tmp as NSString).appendingPathComponent("archive")
+        for path in [configDir, activePath, archivePath] {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: tmp) }
+
+        let config: [String: Any] = ["activePath": activePath, "archivePath": archivePath,
+                                     "domains": ["W": "Work"], "subfolders": ["docs"]]
+        try JSONSerialization.data(withJSONObject: config)
+            .write(to: URL(fileURLWithPath: (configDir as NSString).appendingPathComponent("config.json")))
+
+        let saved = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
+        setenv("PM_CONFIG_HOME", configDir, 1)
+        addTeardownBlock {
+            if let saved { setenv("PM_CONFIG_HOME", saved, 1) } else { unsetenv("PM_CONFIG_HOME") }
+        }
+
+        let projectDir = (activePath as NSString).appendingPathComponent(folderName)
+        try FileManager.default.createDirectory(atPath: (projectDir as NSString).appendingPathComponent("docs"),
+                                                withIntermediateDirectories: true)
+        return (projectDir, activePath)
+    }
+
+    /// The board follows the title, the way the notes file does — otherwise a rename quietly leaves the
+    /// project's canvas under a name nothing looks for.
+    func testRenameMovesTheProjectCanvas() throws {
+        let (projectDir, activePath) = try makeVault(project: "W-1 Old Name")
+        try "{}".write(toFile: (projectDir as NSString).appendingPathComponent("docs/Old Name.canvas"),
+                       atomically: true, encoding: .utf8)
+
+        _ = try renameProjectTitle(nameOrPrefix: "W-1", newTitle: "New Name")
+
+        let newDir = (activePath as NSString).appendingPathComponent("W-1 New Name")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: (newDir as NSString).appendingPathComponent("docs/New Name.canvas")))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (newDir as NSString).appendingPathComponent("docs/Old Name.canvas")))
+    }
+
+    /// A board somebody named themselves keeps its name. Renaming the project is not a licence to
+    /// rename their document, and the resolver still finds it as the lone canvas in the folder.
+    func testRenameLeavesAnAdoptedBoardAlone() throws {
+        let (projectDir, activePath) = try makeVault(project: "W-1 Old Name")
+        try "{}".write(toFile: (projectDir as NSString).appendingPathComponent("The Curse of Strahd.canvas"),
+                       atomically: true, encoding: .utf8)
+
+        _ = try renameProjectTitle(nameOrPrefix: "W-1", newTitle: "New Name")
+
+        let newDir = (activePath as NSString).appendingPathComponent("W-1 New Name")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: (newDir as NSString).appendingPathComponent("The Curse of Strahd.canvas")))
+        XCTAssertEqual(try resolveProjectCanvasPath(projectPath: newDir),
+                       (newDir as NSString).appendingPathComponent("The Curse of Strahd.canvas"))
+    }
 }

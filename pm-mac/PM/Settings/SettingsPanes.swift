@@ -42,11 +42,12 @@ struct GeneralSettingsView: View {
     }
 }
 
-/// Windows: how project windows behave, and how the focus panel behaves.
+/// Windows: how the focus panel and the quick bar behave.
 ///
-/// Two sections, because they're two surfaces with genuinely different jobs. The panel's "on all
-/// Spaces" and "float" are what make it a HUD; a project window mostly wants to be left alone as a
-/// normal window, and only gets the float toggle because some people do want their editor on top.
+/// Project windows aren't here, because there is nothing to decide about them: they're ordinary Mac
+/// windows. Floating belongs to the two surfaces that exist to sit over your work while you use
+/// another app — the focus panel and the quick bar — and a full editor window doing the same thing
+/// was a nuisance rather than a feature.
 struct WindowsSettingsView: View {
     @ObservedObject private var settings = WindowSettings.shared
     /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, because
@@ -70,19 +71,6 @@ struct WindowsSettingsView: View {
                 Text("Focus Panel")
             } footer: {
                 Text("The focus panel shows the task you're on and stays put while you work elsewhere — \(ShortcutHint.focusPanelShowsAndHides) it. On all Spaces, it follows you between desktops and over full-screen apps. (A window still lives on one display: macOS has no way to show the same window on every screen at once.)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Toggle("Float above other windows", isOn: $settings.floatAboveOthers)
-                    .onChange(of: settings.floatAboveOthers) { _ in
-                        WindowManager.shared.applyWindowSettings()
-                    }
-            } header: {
-                Text("Project Windows")
-            } footer: {
-                Text("Project windows are normal Mac windows: resizable, tabbable, and reopened where you left them. Size and position belong to the window rather than to the project, so pointing one at a different project doesn't move or resize it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

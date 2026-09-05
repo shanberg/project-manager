@@ -217,14 +217,7 @@ struct ProjectView: View {
         return Self.sessionIndex(fromRowKey: key)
     }
 
-    /// The visible tasks paired with the identity their rows are diffed on.
-    ///
-    /// Identity is the raw line *plus an occurrence number*. The raw line is what survives a reindex:
-    /// adding or deleting a task shifts every `"session:line"` key below it, so identifying rows by
-    /// key would make the whole tail read as new rows (they'd cross-fade instead of sliding). But a
-    /// raw line isn't unique on its own — two identical task lines in one session ("- [ ] Follow up"
-    /// twice) collide, and SwiftUI's diffing misbehaves on duplicate ids: rows flicker, and the wrong
-    /// one animates out. Counting occurrences keeps the stability and makes the ids unique.
+    /// The visible tasks paired with the identity their rows are diffed on — see `IdentifiedTodo`.
     private var identifiedTodos: [IdentifiedTodo] {
         var seen: [String: Int] = [:]
         return visibleTodos.map { todo in
@@ -1203,7 +1196,7 @@ struct ProjectView: View {
     /// scrolled underneath it.
     ///
     /// Reading order is what you're doing, then how you're looking at it, then where else it lives:
-    /// count, add, add, view options, open.
+    /// count, add, add, view options, canvas, open.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
             HStack(spacing: 2) {
@@ -1220,7 +1213,10 @@ struct ProjectView: View {
                     addNoteButton
                     viewOptionsMenu
                 }
-                if store.projectPath != nil { openButton }
+                if store.projectPath != nil {
+                    canvasButton
+                    openButton
+                }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
@@ -1348,6 +1344,20 @@ struct ProjectView: View {
             Label("Dark", systemImage: "moon").tag(AppColorMode.dark)
         }
         .pickerStyle(.inline)
+    }
+
+    /// Opens the project's canvas — the board that belongs to it the way its notes do.
+    ///
+    /// Always here, whether or not the file exists yet, because a project is assumed to want a board:
+    /// a button that appeared only for projects that already had one would make the canvas a thing you
+    /// discover by accident on somebody else's project. Clicking with nothing there makes it, which is
+    /// the same bargain the notes file has always had — you get the document by asking for it, not by
+    /// deciding to create it first. The tooltip says which of the two is about to happen.
+    private var canvasButton: some View {
+        headerButton(symbol: "rectangle.3.group",
+                     help: store.canvasPath == nil ? "Create the project canvas" : "Open the project canvas") {
+            CanvasWindowController.openProjectCanvas(for: store)
+        }
     }
 
     /// Opens the project in Obsidian, or in Finder while ⌥ is held (icon swaps to match), mirroring
@@ -1589,11 +1599,17 @@ struct ProjectView: View {
         let draggedSubtree: Set<String> = draggingKey
             .flatMap { k in store.todos.first { PMStore.key(for: $0) == k } }
             .map { store.subtreeKeys(of: $0) } ?? []
+        // The visible rows by key, built once for the whole list rather than per session: interleaving
+        // a session's tasks with its prose means looking each task up as the body is walked, and a
+        // linear scan per lookup would make drawing the list quadratic in a long project.
+        let visibleByKey = Dictionary(identifiedTodos.map { (PMStore.key(for: $0.todo), $0) },
+                                      uniquingKeysWith: { first, _ in first })
         // No spacing of its own: a uniform gap between every child would sit between a heading and its
         // own tasks as readily as between two sessions. Each session brings its own `sessionGap`.
         return VStack(alignment: .leading, spacing: 0) {
             if detailsExpanded {
-                revealedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+                revealedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree,
+                                 visibleByKey: visibleByKey)
             } else {
                 groupedSessions(wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             }
@@ -1676,7 +1692,7 @@ struct ProjectView: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { openSessionNote(si) }
                 .contextMenu {
-                    SessionMenu(index: si, hasNote: !sessionProse(si).isEmpty,
+                    SessionMenu(index: si, hasNote: !sessionNote(si).isEmpty,
                                 store: store, activeEditor: $activeEditor)
                 }
                 // Outside the caption's hit area, so the gap between sessions stays blank space rather
@@ -1687,10 +1703,17 @@ struct ProjectView: View {
     }
 
 
-    /// Revealed rendering: every session (including empty ones) as a first-class row — its header, its
-    /// editable prose note, and its tasks. Nothing else: adding a task or a session is a command
+    /// Revealed rendering: every session (including empty ones) as a first-class row — its header, then
+    /// its body in the order it was written. Nothing else: adding a task or a session is a command
     /// (⌘N, ⇧⌘N) and a context-menu item, not a button parked in the list.
-    @ViewBuilder private func revealedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
+    ///
+    /// The body is one sequence, not two. This used to draw the session's leading prose inside its
+    /// header and then every task in the session below it, which read as a note with a task list
+    /// stapled underneath — a task written to finish a thought ended up nowhere near the thought, and
+    /// prose written after a task didn't appear at all. `SessionBody.blocks` gives the body back in
+    /// document order and each piece draws as what it is.
+    @ViewBuilder private func revealedSessions(wrapDescendants: Set<String>, draggedSubtree: Set<String>,
+                                               visibleByKey: [String: IdentifiedTodo]) -> some View {
         let sessions = store.notes?.sessions ?? []
         ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
             SessionHeader(index: index, session: session, store: store, activeEditor: $activeEditor,
@@ -1699,15 +1722,43 @@ struct ProjectView: View {
                           isEmphasized: tasksFocused,
                           onClick: { selectRow(Self.sessionKey(index), modifiers: $0) },
                           onActivate: { openSessionNote(index) })
-            sessionTaskRows(index, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
+            sessionBody(index, session: session, wrapDescendants: wrapDescendants,
+                        draggedSubtree: draggedSubtree, visibleByKey: visibleByKey)
             sessionAddEditor(index)
         }
     }
 
-    /// A session's note prose, for deciding whether the menu offers "Add" or "Edit".
-    private func sessionProse(_ index: Int) -> String {
+    /// One session's body: its prose runs and its task rows, tiled with no spacing so the drop gaps
+    /// between rows abut.
+    @ViewBuilder private func sessionBody(_ si: Int, session: Session, wrapDescendants: Set<String>,
+                                          draggedSubtree: Set<String>,
+                                          visibleByKey: [String: IdentifiedTodo]) -> some View {
+        let blocks = SessionBody.blocks(body: session.body,
+                                        tasks: store.todos.filter { $0.sessionIndex == si },
+                                        visible: { visibleByKey[PMStore.key(for: $0)] })
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(blocks) { block in
+                switch block {
+                case .prose(_, let text):
+                    SessionProseBlock(index: si, text: text, store: store,
+                                      activeEditor: $activeEditor,
+                                      noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
+                                      onClick: { selectRow(Self.sessionKey(si), modifiers: $0) },
+                                      onActivate: { openSessionNote(si) })
+                case .task(let identified):
+                    taskRow(identified.todo, wrapDescendants: wrapDescendants,
+                            draggedSubtree: draggedSubtree)
+                }
+            }
+        }
+    }
+
+    /// A session's note, for deciding whether the menu offers "Add" or "Edit". The whole body, so a
+    /// session that holds nothing but tasks still has a note to edit — because it does now: opening it
+    /// shows those task lines.
+    private func sessionNote(_ index: Int) -> String {
         guard let sessions = store.notes?.sessions, index >= 0, index < sessions.count else { return "" }
-        return leadingSessionProse(body: sessions[index].body)
+        return sessionNoteBody(body: sessions[index].body)
     }
 
     /// Open a session's note in the full-column editor — the double-click on any part of a session,
@@ -1717,37 +1768,45 @@ struct ProjectView: View {
                                     session: store.sessionRef(at: index))
     }
 
-    /// One session's visible task rows, tiled with no spacing so their drop gaps abut.
+    /// One session's visible task rows, tiled with no spacing so their drop gaps abut. The compact
+    /// list's shape: every task in the session, one after another, with no prose between them because
+    /// that view doesn't show prose at all.
     private func sessionTaskRows(_ si: Int, wrapDescendants: Set<String>, draggedSubtree: Set<String>) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(identifiedTodos.filter { $0.todo.sessionIndex == si }) { row in
-                let todo = row.todo
-                let key = PMStore.key(for: todo)
-                TaskRow(
-                    todo: todo,
-                    store: store,
-                    activeEditor: $activeEditor,
-                    draggingKey: $draggingKey,
-                    dimmed: draggedSubtree.contains(key),
-                    ancestorWrapBoost: wrapDescendants.contains(key) ? 1 : 0,
-                    isSelected: selection.contains(key),
-                    // "Emphasized" in the AppKit sense: a selection in the pane that has keyboard
-                    // focus reads stronger than the same selection in a pane that doesn't.
-                    isEmphasized: tasksFocused,
-                    onClick: { selectRow(key, modifiers: $0) },
-                    onActivate: { store.focus(todo) },
-                    contextTargets: { contextTargets(for: todo) },
-                    onHoverChanged: { rowHover.set(key, inside: $0) },
-                    dragProvider: { dragProvider(for: todo) },
-                    onDelete: { requestDelete($0) },
-                    onSetDue: { applyDue($0, from: todo) },
-                    onGoToProject: { state.openProject($0, false) },
-                    onOpenProjectNamed: { state.openProject(named: $0) },
-                    onAddTask: { text, due in commitAdd(text: text, due: due, anchor: todo) },
-                    addPosition: $addPosition
-                )
+                taskRow(row.todo, wrapDescendants: wrapDescendants, draggedSubtree: draggedSubtree)
             }
         }
+    }
+
+    /// A single task row, wired to this window. The one place a `TaskRow` is built, so the compact list
+    /// and a session's interleaved body can't drift into offering different things on the same task.
+    private func taskRow(_ todo: Todo, wrapDescendants: Set<String>,
+                         draggedSubtree: Set<String>) -> some View {
+        let key = PMStore.key(for: todo)
+        return TaskRow(
+            todo: todo,
+            store: store,
+            activeEditor: $activeEditor,
+            draggingKey: $draggingKey,
+            dimmed: draggedSubtree.contains(key),
+            ancestorWrapBoost: wrapDescendants.contains(key) ? 1 : 0,
+            isSelected: selection.contains(key),
+            // "Emphasized" in the AppKit sense: a selection in the pane that has keyboard
+            // focus reads stronger than the same selection in a pane that doesn't.
+            isEmphasized: tasksFocused,
+            onClick: { selectRow(key, modifiers: $0) },
+            onActivate: { store.focus(todo) },
+            contextTargets: { contextTargets(for: todo) },
+            onHoverChanged: { rowHover.set(key, inside: $0) },
+            dragProvider: { dragProvider(for: todo) },
+            onDelete: { requestDelete($0) },
+            onSetDue: { applyDue($0, from: todo) },
+            onGoToProject: { state.openProject($0, false) },
+            onOpenProjectNamed: { state.openProject(named: $0) },
+            onAddTask: { text, due in commitAdd(text: text, due: due, anchor: todo) },
+            addPosition: $addPosition
+        )
     }
 
     /// The per-session add editor, appended to the session it belongs to. It's opened by ⌘N with that
@@ -1913,14 +1972,6 @@ struct RowSelectionBand: View {
             Color.clear
         }
     }
-}
-
-/// The project window two selectable lists. Whichever holds keyboard focus is the one arrow keys, ⌫, ⌘A and
-/// ⌘C drive, and the one whose selection reads emphasized.
-/// A visible task paired with the identity its row is diffed on — see `ProjectView.identifiedTodos`.
-struct IdentifiedTodo: Identifiable {
-    let id: String
-    let todo: Todo
 }
 
 /// Combined trigger for the tasks section's single implicit animation. It must fire on both the visible
@@ -2638,6 +2689,12 @@ private final class DragEndSentinel {
 /// An inherited date takes the dashed border it always had and the colour of its state, but never the
 /// fill. It's still someone else's date — worth noticing when the ancestor is overdue, not worth
 /// shouting on every descendant of it.
+///
+/// A *completed* task drops off the scale entirely. The whole scale is a claim about what still needs
+/// doing, and a task that's checked off doesn't — with completed items revealed the list filled with
+/// red for work that had already been finished, which is the one thing red must never mean here. The
+/// date stays, because "3d ago" beside a finished task is how you tell a late finish from a punctual
+/// one; only the urgency comes off it.
 private struct DueChipStyle {
     var text: Color
     var stroke: Color
@@ -2645,8 +2702,11 @@ private struct DueChipStyle {
     var weight: Font.Weight
     var dashed: Bool
 
-    init(due: String, own: Bool) {
-        let state = DueState(due: due, own: own)
+    init(due: String, own: Bool, done: Bool) {
+        // A completed task's date is a record rather than a deadline, so it reads at the quietest step
+        // of the scale — no tint, no fill, no extra weight — while keeping the dashed border that says
+        // whose date it is.
+        let state: DueState = done ? .later : DueState(due: due, own: own)
         let tint: Color
         switch state {
         case .overdue: tint = Color(nsColor: .systemRed)
@@ -2707,7 +2767,8 @@ private struct DueChip: View {
             menuItems
         } label: {
             if let shown {
-                chip(RelativeDue.short(shown.raw), style: DueChipStyle(due: shown.raw, own: shown.own))
+                chip(RelativeDue.short(shown.raw),
+                     style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
             } else {
                 chip("＋date", style: .empty)
             }
@@ -2783,15 +2844,18 @@ private struct DueChip: View {
 
 // MARK: Session header + note editor
 
-/// A revealed session's first-class row: its date/label line, its leading-prose note when it has one,
-/// and a context menu for renaming, adding a note/task, and deleting an empty session. It selects and
-/// draws its highlight exactly as a task row does, so ⌘N, Return and the arrow keys can reach it.
+/// A revealed session's first-class row: its date/label line, and a context menu for renaming, adding
+/// a note/task, and deleting an empty session. It selects and draws its highlight exactly as a task row
+/// does, so ⌘N, Return and the arrow keys can reach it.
 ///
-/// **Double-click opens the note**, on the header line and the prose alike. It used to rename on the
-/// header line and edit the note on the prose — one gesture, two meanings, decided by which line of the
-/// block you happened to hit, and with no target at all until the note existed. The note is what a
+/// **Double-click opens the note**, here and on any of the session's prose below. It used to rename on
+/// the header line and edit the note on the prose — one gesture, two meanings, decided by which line of
+/// the block you happened to hit, and with no target at all until the note existed. The note is what a
 /// session is for; the label is optional decoration on a heading that's identified by its date, so it
 /// hands the big gesture over and is renamed from the menu or from inside the note editor.
+///
+/// The header no longer draws the note. The body is rendered in document order beside its tasks (see
+/// `SessionBody.blocks` and `SessionProseBlock`) rather than as a preamble the tasks hang off.
 ///
 /// Publishes no `RowFrame`, so it doesn't participate in the task drag-reorder geometry.
 private struct SessionHeader: View {
@@ -2811,18 +2875,8 @@ private struct SessionHeader: View {
 
     private var key: String { ProjectView.sessionKey(index) }
     private var isRenaming: Bool { activeEditor == EditorTarget(key: key, kind: .sessionLabel) }
-    /// The session's editable note — its leading prose (lines before the first task), trimmed.
-    private var prose: String { leadingSessionProse(body: session.body) }
-
-    /// The reading face for the rendered note: the editor's own face, at the editor's own size.
-    ///
-    /// Literally the same font object, because the seam worth removing here is the one between reading
-    /// a note and editing it. It used to be the 13pt system face while the editor was 14pt system, so
-    /// opening a note re-set it and re-wrapped it — the note you were looking at was not the note you
-    /// got. A session note is still working text read alongside the task rows rather than the
-    /// printed-brief serif of the project details; it just happens that the editor's monospaced face is
-    /// what it should have been all along, and sharing it costs nothing.
-    private static let noteFont = MarkdownTextEditor.baseFont
+    /// The session's note, for the menu's Add/Edit wording — the whole body, tasks included.
+    private var note: String { sessionNoteBody(body: session.body) }
     private var context: String { session.label.isEmpty ? session.date : "\(session.date) · \(session.label)" }
 
     var body: some View {
@@ -2836,15 +2890,6 @@ private struct SessionHeader: View {
                     .reportEditorFrame()
             } else {
                 headerLine
-            }
-
-            // The note read view, rendering the note's markdown (formatting applied, markers removed)
-            // and drawing whatever pictures it embeds. A session with no note draws nothing here — the
-            // header line above is the target either way, so there's no placeholder standing in for a
-            // note that isn't written yet.
-            if !prose.isEmpty {
-                RenderedNote(prose: prose, font: Self.noteFont,
-                             noteURL: store.notesPath.map { URL(fileURLWithPath: $0) })
             }
         }
         .padding(.horizontal, 12)
@@ -2871,8 +2916,8 @@ private struct SessionHeader: View {
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
                 .accessibilityAction(named: "Open Session Note", onActivate)
         }
-        // The band spans the whole session block — header line and note together, since they're one
-        // row. Suppressed while the rename editor is up, where the form is the subject.
+        // The band spans the header line. Suppressed while the rename editor is up, where the form is
+        // the subject.
         .background(RowSelectionBand(isSelected: isSelected && !isRenaming,
                                      isEmphasized: isEmphasized,
                                      isHovering: hovering && activeEditor == nil))
@@ -2900,13 +2945,65 @@ private struct SessionHeader: View {
     }
 
     private var menu: some View {
-        SessionMenu(index: index, hasNote: !prose.isEmpty, store: store, activeEditor: $activeEditor)
+        SessionMenu(index: index, hasNote: !note.isEmpty, store: store, activeEditor: $activeEditor)
     }
 
     /// This row's key as a scroll id, so arrow-key navigation can reveal a header that's scrolled out
     /// of view. In the background for the same reason `TaskRow`'s is.
     private var scrollMarker: some View {
         Color.clear.frame(width: 0, height: 0).id(key)
+    }
+}
+
+/// One run of a session's prose, drawn where it was written — between the tasks it belongs to rather
+/// than gathered above them.
+///
+/// It carries the session's gestures, not its own: a click selects the session, a double-click opens
+/// the note, and right-click offers the same menu the header does. That's the point of splitting the
+/// body up — the pieces are in different places on screen but they're still one note, and every piece
+/// of it opens the same editor.
+///
+/// A hover highlight and no selection band. The session's row *is* the header, and painting the
+/// selection on each prose run as well would stripe a selected session across the rows between them.
+/// Hover is transient, so it can say "this is a target" without leaving a pattern behind.
+private struct SessionProseBlock: View {
+    let index: Int
+    let text: String
+    @ObservedObject var store: PMStore
+    @Binding var activeEditor: EditorTarget?
+    let noteURL: URL?
+    var onClick: (NSEvent.ModifierFlags) -> Void = { _ in }
+    var onActivate: () -> Void = {}
+    @State private var hovering = false
+
+    /// The reading face for the rendered note: the editor's own face, at the editor's own size.
+    ///
+    /// Literally the same font object, because the seam worth removing here is the one between reading
+    /// a note and editing it. It used to be the 13pt system face while the editor was 14pt system, so
+    /// opening a note re-set it and re-wrapped it — the note you were looking at was not the note you
+    /// got. A session note is still working text read alongside the task rows rather than the
+    /// printed-brief serif of the project details; it just happens that the editor's monospaced face is
+    /// what it should have been all along, and sharing it costs nothing.
+    private static let noteFont = MarkdownTextEditor.baseFont
+
+    var body: some View {
+        RenderedNote(prose: text, font: Self.noteFont, noteURL: noteURL)
+            .padding(.horizontal, 12)
+            // The same cushion a session heading gets, so a paragraph between two tasks is separated
+            // from them by the same amount the heading is separated from the first one.
+            .padding(.vertical, ProjectView.sessionHeadingPadding)
+            .contentShape(Rectangle())
+            // Declared before the single click so SwiftUI can let the two-count gesture win the race,
+            // exactly as a task row and a session header do it.
+            .onTapGesture(count: 2, perform: onActivate)
+            .onTapGesture { onClick(NSEvent.modifierFlags) }
+            .contextMenu {
+                SessionMenu(index: index, hasNote: true, store: store, activeEditor: $activeEditor)
+            }
+            .background(RowSelectionBand(isSelected: false, isEmphasized: false,
+                                         isHovering: hovering && activeEditor == nil))
+            .onHover { hovering = $0 }
+            .accessibilityAction(named: "Open Session Note", onActivate)
     }
 }
 
@@ -3008,9 +3105,9 @@ private struct SessionNoteTakeover: View {
         self.store = store
         self.state = state
         self.onBack = onBack
-        _text = State(initialValue: leadingSessionProse(body: session.body))
+        _text = State(initialValue: sessionNoteBody(body: session.body))
         _label = State(initialValue: session.label)
-        _seed = State(initialValue: leadingSessionProse(body: session.body))
+        _seed = State(initialValue: sessionNoteBody(body: session.body))
         _seedLabel = State(initialValue: session.label)
         _ref = State(initialValue: store.sessionRef(at: index)
             ?? SessionRef(index: index, digest: sessionDigest(session.label)))
@@ -3189,10 +3286,18 @@ private struct SessionNoteTakeover: View {
         .background(WindowDragExcluder())
     }
 
-    /// Write the current text back to the session's note. The store sanitizes it (headings clamp to
-    /// within-session levels; typed checkboxes graduate into real tasks), so we adopt the same cleaned
-    /// prose locally — that drops the graduated checkboxes from the editor and makes repeated commits
-    /// (this fires from several exit paths) byte-idempotent instead of re-extracting the same tasks.
+    /// Write the current text back to the session's note — the whole body, so a checkbox typed between
+    /// two paragraphs is saved between them. The store sanitizes it (headings clamp to within-session
+    /// levels, which is all that's left to defend), so we adopt the same cleaned text locally and
+    /// repeated commits (this fires from several exit paths) stay byte-idempotent.
+    ///
+    /// Through `SessionNoteMerge`, because what this write can destroy grew. While a note was the lines
+    /// above a session's first task, a save couldn't touch its tasks — everything from the first
+    /// checkbox down was preserved byte-for-byte, so a task added from the quick bar or another window
+    /// while the editor sat open survived it. The body write has no such floor: last-write-wins here
+    /// means the whole sitting. So the same resolver the live note surface uses decides — untouched
+    /// text at the front of ours means their version plus our additions, and only a real divergence
+    /// falls back to overwriting, which is logged.
     ///
     /// The label rides along: it's edited in the same view and leaves by the same exits, and the store's
     /// serial IO queue keeps the two writes in order — the heading rewrite preserves the body and the
@@ -3212,14 +3317,47 @@ private struct SessionNoteTakeover: View {
     /// made with, so renaming before writing would invalidate it for the write that follows.
     private func commit() {
         if text != seed {
-            let cleaned = sanitizeSessionNoteProse(text).prose
-            store.setSessionNote(ref, prose: text)
-            // After the sanitizer's rewrite, not before: the seed has to be what the editor is now
-            // holding, or the next commit sees a difference that is only this one's own tidying.
-            if cleaned != text { text = cleaned }
-            seed = text
+            switch SessionNoteMerge.resolve(edited: text, onDisk: currentBody(), seed: seed) {
+            case .unchanged:
+                seed = text
+            case .replace(let body):
+                write(body)
+            case .merged(let body):
+                Log.write("session note merged an edit made elsewhere while it was open")
+                write(body)
+            case .overwrote(let body):
+                Log.write("session note overwrote an edit made elsewhere while it was open")
+                write(body)
+            }
         }
         commitLabel()
+    }
+
+    /// The session's body as the store has it now, found through `ref` rather than the `index` this
+    /// editor opened on — the index may name a different sitting by the time we save, which is the
+    /// whole reason the reference exists.
+    ///
+    /// A reference that won't resolve answers `seed`, which makes the merge a plain replace and leaves
+    /// the refusal to the write itself: `setSessionNote` resolves the same reference against the bytes
+    /// it is about to rewrite, and declines rather than guessing. Answering `""` here would instead
+    /// look like somebody had emptied the note.
+    private func currentBody() -> String {
+        guard let notes = store.notes,
+              let resolved = try? resolveSessionRef(ref, notes: notes),
+              resolved.index < notes.sessions.count else { return seed }
+        return sessionNoteBody(body: notes.sessions[resolved.index].body)
+    }
+
+    /// Send a body to the store and adopt what it will have written.
+    ///
+    /// The local text is set to the *sanitized* form, not the one handed over: the seed has to be what
+    /// the editor is now holding, or the next commit sees a difference that is only this one's own
+    /// tidying.
+    private func write(_ body: String) {
+        let cleaned = sanitizeSessionNoteBody(body)
+        store.setSessionNote(ref, body: body)
+        if cleaned != text { text = cleaned }
+        seed = cleaned
     }
 
     private func commitLabel() {

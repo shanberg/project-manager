@@ -39,6 +39,25 @@ extension AppDelegate: NSMenuItemValidation {
         WindowManager.shared.openFocusedProject().revealProjectList()
     }
 
+    /// Open an Obsidian canvas in a window of its own.
+    ///
+    /// A separate errand from opening a project, and deliberately not folded into one: a canvas is a
+    /// file, it can live anywhere in the vault — four of the ones in a real vault sit at its root,
+    /// belonging to no project at all — and it opens into a different kind of window.
+    @objc func openCanvas() {
+        CanvasWindowController.runOpenPanel()
+    }
+
+    /// Open the focused project's own canvas, making it if the project hasn't got one yet.
+    ///
+    /// Goes through `openFocusedProject()` like every other command that needs a project, so it works
+    /// with no window up — the menu bar item's menu can reach it, and PM keeps running with everything
+    /// closed. The project window comes forward first and the board opens over it, which is also the
+    /// order you'd want if the canvas turns out to need making.
+    @objc func projectCanvas() {
+        WindowManager.shared.openFocusedProject().openProjectCanvas()
+    }
+
     /// Ask for a domain and a title, create the project, and open it. Runs without a window — it's on
     /// the menu bar item's menu too, and PM keeps running with everything closed.
     @objc func newProject() {

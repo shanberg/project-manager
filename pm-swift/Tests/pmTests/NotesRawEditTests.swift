@@ -647,44 +647,65 @@ final class NotesRawEditTests: XCTestCase {
     ### Fri, Feb 28, 2025 Planning
     """
 
-    /// Leading prose is the run of lines before a body's first task, trimmed; a body that opens with a
-    /// task has none, and a task-free body is all prose.
-    func testLeadingSessionProse() {
-        XCTAssertEqual(leadingSessionProse(body: "Kicked things off.\n\n- [ ] Task"), "Kicked things off.")
-        XCTAssertEqual(leadingSessionProse(body: "- [ ] Task first\nprose after"), "")
-        XCTAssertEqual(leadingSessionProse(body: "Only prose\nmore prose"), "Only prose\nmore prose")
-        XCTAssertEqual(leadingSessionProse(body: ""), "")
+    /// A session's note is its whole body, outer blank lines trimmed. Task lines are part of it and
+    /// keep their place, and prose written after a task is as much of the note as prose written before
+    /// one — that is the difference from the leading-prose reading this replaced.
+    func testSessionNoteBody() {
+        XCTAssertEqual(sessionNoteBody(body: "Kicked things off.\n\n- [ ] Task"),
+                       "Kicked things off.\n\n- [ ] Task")
+        XCTAssertEqual(sessionNoteBody(body: "- [ ] Task first\nprose after"), "- [ ] Task first\nprose after")
+        XCTAssertEqual(sessionNoteBody(body: "Only prose\nmore prose"), "Only prose\nmore prose")
+        XCTAssertEqual(sessionNoteBody(body: "\n\n  spaced  \n\n"), "spaced")
+        XCTAssertEqual(sessionNoteBody(body: ""), "")
     }
 
-    /// Creating a note on a session that has tasks but no prose inserts it between the heading and the
-    /// first task, one blank line either side; the tasks are untouched.
-    func testSetSessionNoteCreatesAboveTasks() throws {
+    /// The blank lines *inside* a body are paragraph breaks somebody typed, so they survive the trim.
+    /// A note surface that tidied them would rewrite the note every time it was opened.
+    func testSessionNoteBodyKeepsInteriorBlankLines() {
+        XCTAssertEqual(sessionNoteBody(body: "One.\n\n\nTwo."), "One.\n\n\nTwo.")
+    }
+
+    /// Writing a note replaces the session's whole body, one blank line under the heading. What goes
+    /// down is what the caller holds — which is why every caller reads the whole body first.
+    func testSetSessionNoteWritesTheWholeBody() throws {
         let updated = try XCTUnwrap(setSessionNotePreservingFormat(
-            rawText: Self.sessionFixture, sessionIndex: 1, prose: "A note."))
-        XCTAssertTrue(updated.contains("### Mon, Mar 03, 2025\n\nA note.\n\n- [ ] Old open"),
-                      "Note sits between the heading and the first task")
+            rawText: Self.sessionFixture, sessionIndex: 1, body: "A note.\n\n- [ ] Old open"))
+        XCTAssertTrue(updated.contains("### Mon, Mar 03, 2025\n\nA note.\n\n- [ ] Old open"))
     }
 
-    /// Replacing an existing note swaps only the prose; the focused task and its marker ride through.
+    /// A task keeps whatever place the body gives it — here, below the paragraph that explains it,
+    /// with more prose after. Nothing is lifted out and gathered at the end.
+    func testSetSessionNoteKeepsTasksWhereTheyAre() throws {
+        let body = "Started on the parser.\n\n- [ ] Fix the tokenizer\n\nThe lexer is the real problem.\n\n- [ ] Rewrite the lexer"
+        let updated = try XCTUnwrap(setSessionNotePreservingFormat(
+            rawText: Self.sessionFixture, sessionIndex: 1, body: body))
+        XCTAssertTrue(updated.contains("### Mon, Mar 03, 2025\n\n" + body))
+        let todos = try parseTodos(notes: parseNotes(markdown: updated))
+            .filter { $0.sessionIndex == 1 }
+        XCTAssertEqual(todos.map(\.text), ["Fix the tokenizer", "Rewrite the lexer"])
+    }
+
+    /// Replacing a body swaps all of it — the session's old note *and* its old tasks.
     func testSetSessionNoteReplacesExisting() throws {
         let updated = try XCTUnwrap(setSessionNotePreservingFormat(
-            rawText: Self.sessionFixture, sessionIndex: 0, prose: "Rewritten."))
-        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\nRewritten.\n\n- [ ] Current focus @"))
-        XCTAssertFalse(updated.contains("Kicked things off"), "Old prose replaced")
+            rawText: Self.sessionFixture, sessionIndex: 0, body: "Rewritten."))
+        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\nRewritten.\n\n### Mon, Mar 03, 2025"))
+        XCTAssertFalse(updated.contains("Kicked things off"), "Old note replaced")
+        XCTAssertFalse(updated.contains("Current focus"), "So are the tasks that were in the body")
     }
 
-    /// An empty note clears the prose, leaving one blank line between heading and first task.
+    /// An empty body empties the session, leaving a bare heading and one blank line before the next.
     func testSetSessionNoteClears() throws {
         let updated = try XCTUnwrap(setSessionNotePreservingFormat(
-            rawText: Self.sessionFixture, sessionIndex: 0, prose: "   "))
-        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\n- [ ] Current focus @"))
+            rawText: Self.sessionFixture, sessionIndex: 0, body: "   "))
+        XCTAssertTrue(updated.contains("### Wed, Mar 05, 2025 Today\n\n### Mon, Mar 03, 2025"))
         XCTAssertFalse(updated.contains("Kicked things off"))
     }
 
-    /// A note on the trailing empty session appends heading → blank → prose, with no spurious trailing.
+    /// A note on the trailing empty session appends heading → blank → body, with no spurious trailing.
     func testSetSessionNoteOnEmptyTrailingSession() throws {
         let updated = try XCTUnwrap(setSessionNotePreservingFormat(
-            rawText: Self.sessionFixture, sessionIndex: 2, prose: "First entry."))
+            rawText: Self.sessionFixture, sessionIndex: 2, body: "First entry."))
         XCTAssertTrue(updated.hasSuffix("### Fri, Feb 28, 2025 Planning\n\nFirst entry."))
     }
 
@@ -712,13 +733,14 @@ final class NotesRawEditTests: XCTestCase {
         """
     }
 
-    /// A second note joins the first under a blank line rather than replacing it, and stays above the
-    /// session's tasks.
-    func testAppendSessionNoteJoinsExistingProse() throws {
+    /// A second note joins the first under a blank line rather than replacing it, at the end of the
+    /// body — after the tasks, not above them. A session reads in the order it happened, and this entry
+    /// happened after the task that is already written down.
+    func testAppendSessionNoteJoinsTheEndOfTheLog() throws {
         let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
             rawText: Self.datedFixture(), prose: "Then reviewed the plan.", date: Self.noteDay))
-        XCTAssertTrue(updated.contains("Kicked things off with a quick sync.\n\nThen reviewed the plan.\n\n- [ ] Current focus @"),
-                      "Appended under the existing note, still above the tasks")
+        XCTAssertTrue(updated.contains("Kicked things off with a quick sync.\n\n- [ ] Current focus @\n\nThen reviewed the plan."),
+                      "Appended at the end of the body, below what was already there")
     }
 
     /// With no session for that day, one is created at the top of the list and takes the note.
@@ -735,7 +757,7 @@ final class NotesRawEditTests: XCTestCase {
     func testAppendSessionNoteTargetsItsOwnDay() throws {
         let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
             rawText: Self.datedFixture(), prose: "Only here.", date: Self.otherDay))
-        XCTAssertTrue(updated.contains("### \(formatSessionDate(Self.otherDay))\n\nOnly here.\n\n- [ ] Old open"))
+        XCTAssertTrue(updated.contains("### \(formatSessionDate(Self.otherDay))\n\n- [ ] Old open\n\nOnly here."))
         XCTAssertEqual(updated.components(separatedBy: "Only here.").count - 1, 1)
     }
 
@@ -843,8 +865,29 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertTrue(result.rawText.contains("### Fri, Feb 28, 2025 Planning\n- [ ] New task"))
     }
 
-    /// A first task appended to a session that has a prose note lands *after* the note, so the note
-    /// stays leading (visible) rather than being stranded below the task.
+    /// A task appended to a session goes at the end of its body, below the paragraph the session ends
+    /// with — not back up after the last checkbox. The session reads in the order things happened, and
+    /// the add editor sits at the bottom of it, so this is the slot the form was previewing.
+    func testAppendTaskLandsAtTheEndOfTheBody() throws {
+        let raw = """
+        ## Sessions
+
+        ### Fri, Feb 28, 2025 Planning
+
+        Kickoff notes.
+
+        - [ ] Ring the vet
+
+        They close at five.
+        """
+        let result = try XCTUnwrap(appendTaskToSession(rawText: raw, sessionIndex: 0,
+                                                       text: "Book the slot", due: nil))
+        XCTAssertTrue(result.rawText.hasSuffix("They close at five.\n- [ ] Book the slot"))
+        XCTAssertEqual(result.lineIndex, 1, "It is the session's second task")
+    }
+
+    /// A first task appended to a session that is all prose joins the end of that prose, continuing the
+    /// note rather than being parked below it.
     func testAppendTaskLandsAfterSessionNote() throws {
         let raw = """
         ## Sessions
@@ -856,8 +899,8 @@ final class NotesRawEditTests: XCTestCase {
         let result = try XCTUnwrap(appendTaskToSession(rawText: raw, sessionIndex: 0, text: "First task", due: nil))
         XCTAssertTrue(result.rawText.contains("Kickoff notes.\n- [ ] First task"))
         let session = try XCTUnwrap(parseNotes(markdown: result.rawText).sessions.first)
-        XCTAssertEqual(leadingSessionProse(body: session.body), "Kickoff notes.",
-                       "The note remains the session's leading prose")
+        XCTAssertEqual(sessionNoteBody(body: session.body), "Kickoff notes.\n- [ ] First task",
+                       "The task joins the end of the note it belongs to")
     }
 
     // MARK: - Session note sanitization (structure-safe commits)
@@ -875,35 +918,36 @@ final class NotesRawEditTests: XCTestCase {
     /// Headings shallower than H4 clamp to H4 so they nest within the session instead of colliding with
     /// the `## Section` / `### <date>` structural markers.
     func testSanitizeDemotesShallowHeadings() {
-        let (prose, tasks) = sanitizeSessionNoteProse("# One\n## Two\n### Wed, Mar 05, 2025\n#### Deep\nplain")
-        XCTAssertEqual(prose, "#### One\n#### Two\n#### Wed, Mar 05, 2025\n#### Deep\nplain")
-        XCTAssertTrue(tasks.isEmpty)
+        XCTAssertEqual(sanitizeSessionNoteBody("# One\n## Two\n### Wed, Mar 05, 2025\n#### Deep\nplain"),
+                       "#### One\n#### Two\n#### Wed, Mar 05, 2025\n#### Deep\nplain")
     }
 
-    /// Checkbox lines are pulled out of the prose (to graduate into tasks), preserving their checked
-    /// state and relative nesting, shifted so the shallowest sits at the root.
-    func testSanitizeExtractsCheckboxesPreservingStructure() {
-        let (prose, tasks) = sanitizeSessionNoteProse("note\n  - [ ] a\n    - [x] b\nmore")
-        XCTAssertEqual(prose, "note\nmore")
-        XCTAssertEqual(tasks, ["- [ ] a", "  - [x] b"])
+    /// Checkbox lines round-trip verbatim, indentation and all. They used to be extracted here and
+    /// handed back for the caller to append below the session's other tasks — which is what moved a
+    /// task out of the sentence it was written in.
+    func testSanitizeLeavesCheckboxesAlone() {
+        XCTAssertEqual(sanitizeSessionNoteBody("note\n  - [ ] a\n    - [x] b\nmore"),
+                       "note\n  - [ ] a\n    - [x] b\nmore")
     }
 
-    /// A checkbox typed in a note graduates into a real task in the session's list; the note keeps only
-    /// the prose.
-    func testCommitGraduatesCheckboxToTask() throws {
+    /// A checkbox typed between two paragraphs is a task *there*. It parses as one, and it stays
+    /// between them rather than being relocated to the end of the session.
+    func testCommitKeepsATypedCheckboxWhereItWasTyped() throws {
         let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: Self.commitBase, sessionIndex: 0, prose: "kept note\n- [ ] Graduated"))
+            rawText: Self.commitBase, sessionIndex: 0,
+            body: "kept note\n\n- [ ] Typed here\n\nwhy it matters\n\n- [ ] Real task"))
         let notes = try parseNotes(markdown: updated)
-        let todos = try parseTodos(notes: notes)
-        XCTAssertEqual(todos.map { $0.text }, ["Real task", "Graduated"])
-        XCTAssertEqual(leadingSessionProse(body: notes.sessions[0].body), "kept note")
+        XCTAssertEqual(try parseTodos(notes: notes).map { $0.text }, ["Typed here", "Real task"])
+        XCTAssertEqual(sessionNoteBody(body: notes.sessions[0].body),
+                       "kept note\n\n- [ ] Typed here\n\nwhy it matters\n\n- [ ] Real task")
     }
 
     /// A stray `## ` in a note no longer ends the Sessions region — the session's tasks survive and the
     /// heading is clamped to H4.
     func testCommitH2DoesNotTruncateSessions() throws {
         let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: Self.commitBase, sessionIndex: 0, prose: "before\n## Random\nafter"))
+            rawText: Self.commitBase, sessionIndex: 0,
+            body: "before\n## Random\nafter\n\n- [ ] Real task"))
         let notes = try parseNotes(markdown: updated)
         XCTAssertEqual(notes.sessions.count, 1)
         XCTAssertEqual(try parseTodos(notes: notes).count, 1, "Real task not lost")
@@ -913,28 +957,28 @@ final class NotesRawEditTests: XCTestCase {
     /// A `### <date>` typed in a note no longer splits the session; it clamps to a harmless H4.
     func testCommitSessionHeadingDoesNotSplit() throws {
         let updated = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: Self.commitBase, sessionIndex: 0, prose: "### Fri, Feb 28, 2025 Foo"))
+            rawText: Self.commitBase, sessionIndex: 0, body: "### Fri, Feb 28, 2025 Foo"))
         let notes = try parseNotes(markdown: updated)
         XCTAssertEqual(notes.sessions.count, 1)
         XCTAssertTrue(updated.contains("#### Fri, Feb 28, 2025 Foo"))
     }
 
-    /// The corruption case: committing again (the editor adopts the cleaned prose after the first save)
+    /// The corruption case: committing again (the editor adopts the cleaned text after the first save)
     /// must be a byte-identical no-op — no duplicated tasks or headings.
-    func testCommitIsIdempotentAfterAdoptingCleanProse() throws {
+    func testCommitIsIdempotentAfterAdoptingCleanBody() throws {
         let raw = "note\n### Fri, Feb 28, 2025 Foo\n- [ ] x"
         let first = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: Self.commitBase, sessionIndex: 0, prose: raw))
-        let cleaned = sanitizeSessionNoteProse(raw).prose   // what the editor now holds
+            rawText: Self.commitBase, sessionIndex: 0, body: raw))
+        let cleaned = sanitizeSessionNoteBody(raw)   // what the editor now holds
         let second = try XCTUnwrap(commitSessionNotePreservingFormat(
-            rawText: first, sessionIndex: 0, prose: cleaned))
+            rawText: first, sessionIndex: 0, body: cleaned))
         XCTAssertEqual(second, first, "Re-commit is a no-op")
-        XCTAssertEqual(try parseTodos(notes: parseNotes(markdown: second)).count, 2, "Real task + one graduated x")
+        XCTAssertEqual(try parseTodos(notes: parseNotes(markdown: second)).map { $0.text }, ["x"])
     }
 
     /// Every session editor returns nil for a session index that doesn't exist (caller skips the write).
     func testSessionEditsReturnNilForBadIndex() {
-        XCTAssertNil(setSessionNotePreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, prose: "x"))
+        XCTAssertNil(setSessionNotePreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, body: "x"))
         XCTAssertNil(renameSessionPreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9, label: "x"))
         XCTAssertNil(deleteSessionPreservingFormat(rawText: Self.sessionFixture, sessionIndex: 9))
     }
@@ -955,11 +999,23 @@ final class NotesRawEditTests: XCTestCase {
         XCTAssertTrue(spliced.contains("> [!info] Approach"), "Following Approach callout not clobbered")
     }
 
-    /// Setting a session note leaves all unrelated content (frontmatter, tags, trailing prose) intact.
+    /// Setting a session note leaves everything outside the session byte-for-byte — frontmatter, the
+    /// callouts, the Links and Learnings sections.
+    ///
+    /// The body itself becomes exactly what was written, which is why an editor seeds itself from
+    /// `sessionNoteBody` and hands the whole thing back. The fixture's trailing `#project-tag` sits
+    /// *inside* the last session's body with no `## ` after it to end the session, so it is part of the
+    /// note and survives by being written back with it.
     func testSetSessionNotePreservesUnrelatedFormatting() throws {
+        let notes = try parseNotes(markdown: Self.messyMarkdown)
+        let body = sessionNoteBody(body: notes.sessions[0].body)
+        XCTAssertTrue(body.hasSuffix("#project-tag"), "The tag is inside the session's body")
+
         let updated = try XCTUnwrap(setSessionNotePreservingFormat(
-            rawText: Self.messyMarkdown, sessionIndex: 0, prose: "Session recap."))
+            rawText: Self.messyMarkdown, sessionIndex: 0, body: "Session recap.\n\n" + body))
         XCTAssertTrue(updated.contains("tags: [project, design]"))
+        XCTAssertTrue(updated.contains("> [!question] Problem"))
+        XCTAssertTrue(updated.contains("- Learning one"))
         XCTAssertTrue(updated.contains("#project-tag"))
         XCTAssertTrue(updated.contains("### Wed, Feb 25, 2025\n\nSession recap.\n\n- [ ] Todo one"))
     }

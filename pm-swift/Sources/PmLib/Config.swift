@@ -394,6 +394,8 @@ public enum PmError: Error, CustomStringConvertible {
     case emptyProjectQuery
     case notesNotFound(String)
     case notesAlreadyExists(String)
+    /// The project's canvas is already on disk, so creating it would write over a board.
+    case canvasAlreadyExists(String)
     case notesTemplateNotFound(String)
     case notesRegexError(pattern: String)
     /// Directory exists but listing contents failed (e.g. permission denied).
@@ -451,6 +453,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .emptyProjectQuery: return "Project name or prefix cannot be empty."
         case .notesNotFound(let path): return "Notes file not found. Expected: \(path)"
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"
+        case .canvasAlreadyExists(let path): return "Canvas already exists: \(path)"
         case .notesTemplateNotFound(let path): return "Notes template file not found: \(path)"
         case .notesRegexError(let pattern): return "Invalid notes regex pattern: \(pattern)"
         case .cannotListDirectory(let path, let message): return "Cannot list directory: \(path). \(message)"
