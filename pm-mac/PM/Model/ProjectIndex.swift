@@ -59,6 +59,10 @@ final class ProjectIndex: ObservableObject {
         let isArchived: Bool
         /// Notes-file mtime (folder mtime as a fallback), for recency sorting.
         let modified: Date
+        /// The project's notes file, which the scan resolves anyway to get `modified` and used to throw
+        /// away. Kept so a sidebar row can be dragged onto a canvas without a second protected-folder
+        /// lookup on the main thread at the moment the drag starts.
+        let notesPath: String?
         let done: Int
         let total: Int
         /// The project's focused task, else its first open one — the row's second line.
@@ -125,14 +129,15 @@ final class ProjectIndex: ObservableObject {
         let kind: ProjectKind
         let isArchived: Bool
         let modified: Date
+        let notesPath: String?
 
         /// Complete this listing with the values a notes read produces (or the zeroes that stand in
         /// until one lands).
         func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool) -> ProjectEntry {
             ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
                          shortName: shortName, domain: domain, kind: kind, isArchived: isArchived,
-                         modified: modified, done: done, total: total, nextTask: nextTask,
-                         nextDue: nextDue, detailsLoaded: detailsLoaded)
+                         modified: modified, notesPath: notesPath, done: done, total: total,
+                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded)
         }
     }
 
@@ -404,7 +409,8 @@ final class ProjectIndex: ObservableObject {
                                       code: parts.code, number: parts.number, shortName: parts.shortName,
                                       domain: parts.domain, kind: ProjectKind.of(folderName: name),
                                       isArchived: scope.isArchived,
-                                      modified: (attrs?[.modificationDate] as? Date) ?? .distantPast)
+                                      modified: (attrs?[.modificationDate] as? Date) ?? .distantPast,
+                                      notesPath: notesPath)
             }
         }
         return result.sorted { $0.modified > $1.modified }

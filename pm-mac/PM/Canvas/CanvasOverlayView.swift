@@ -127,7 +127,7 @@ final class CanvasOverlayView: NSView {
         path.stroke()
     }
 
-    /// The four dots a line is dragged from. Only in edit mode — that is the whole point of the mode:
+    /// The four dots a line is dragged from. Only in connect mode — that is the whole point of the mode:
     /// a board you are reading is cards and lines and nothing else.
     private func drawConnectionAnchors(_ board: CanvasBoardView, _ scale: Double) {
         // Nothing to wire together in a tiled view: the lines are hidden, and a dot that started a line

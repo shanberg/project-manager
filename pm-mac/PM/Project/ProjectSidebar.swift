@@ -261,6 +261,20 @@ struct ProjectSidebar: View {
                         )
                         .tag(entry.projectKey)
                         .listRowSeparator(.hidden)
+                        // Drag a project onto a canvas and it becomes a card of that project — the
+                        // sidebar's rows and a board's cards turn out to be the same objects seen two
+                        // ways, and this is what says so.
+                        //
+                        // The payload is the project's notes file, which the board already knows how to
+                        // accept (`canAccept` takes `.fileURL`, and a file card on a notes file renders
+                        // as the project — see `CanvasProjectNote`). No new drop handling, and the same
+                        // drag also works into the Finder, Obsidian, or anywhere else that takes a file.
+                        .ifCondition(entry.notesPath != nil) { row in
+                            row.onDrag {
+                                NSItemProvider(contentsOf: URL(fileURLWithPath: entry.notesPath!))
+                                    ?? NSItemProvider()
+                            }
+                        }
                     }
                 } header: {
                     SidebarEyebrow("Up Next")
@@ -278,6 +292,20 @@ struct ProjectSidebar: View {
                         )
                         .tag(entry.projectKey)
                         .listRowSeparator(.hidden)
+                        // Drag a project onto a canvas and it becomes a card of that project — the
+                        // sidebar's rows and a board's cards turn out to be the same objects seen two
+                        // ways, and this is what says so.
+                        //
+                        // The payload is the project's notes file, which the board already knows how to
+                        // accept (`canAccept` takes `.fileURL`, and a file card on a notes file renders
+                        // as the project — see `CanvasProjectNote`). No new drop handling, and the same
+                        // drag also works into the Finder, Obsidian, or anywhere else that takes a file.
+                        .ifCondition(entry.notesPath != nil) { row in
+                            row.onDrag {
+                                NSItemProvider(contentsOf: URL(fileURLWithPath: entry.notesPath!))
+                                    ?? NSItemProvider()
+                            }
+                        }
                     }
                 } header: {
                     SidebarEyebrow(group.title)

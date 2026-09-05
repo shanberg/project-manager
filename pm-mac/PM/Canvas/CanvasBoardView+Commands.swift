@@ -267,6 +267,14 @@ extension CanvasBoardView {
             // way in to actually doing something about what it says.
             if (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName != nil {
                 add(menu, "Open Project", #selector(openProjectForCard))
+                // The board is the one surface that shows several projects at once, which makes it the
+                // natural place to say which one you are on — and, until now, the only surface that
+                // couldn't. This is what the CLI, Raycast, the menu bar and the focus panel all read.
+                //
+                // An explicit command rather than a side effect of clicking. Focus reaches outside this
+                // app, and a look across a board should not quietly repoint the things on the other end
+                // of it.
+                add(menu, "Focus This Project", #selector(focusProjectForCard))
             }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
@@ -482,6 +490,16 @@ extension CanvasBoardView {
         }
     }
 
+    /// Make this card's project the app's focused one.
+    @objc private func focusProjectForCard() {
+        guard let id = selection.first,
+              let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName,
+              let key = ProjectIndex.shared.projectKey(forFolder: folder) else { return }
+        PMStore.setGlobalFocus(key: key) {
+            (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
+        }
+    }
+
     /// Open the project a card's notes belong to, in a PM window.
     @objc private func openProjectForCard() {
         for id in selection {
@@ -610,7 +628,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func zoomActualSize(_ sender: Any?) { scrollView?.canvasScroll?.zoomToActualSize() }
     @objc func zoomToFit(_ sender: Any?) { scrollView?.canvasScroll?.zoomToFit() }
 
-    @objc func toggleEditMode(_ sender: Any?) { mode = mode == .edit ? .view : .edit }
+    @objc func toggleConnectMode(_ sender: Any?) { mode = mode == .connect ? .view : .connect }
 
     @objc func setTileArrangement(_ sender: Any?) {
         guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
@@ -622,10 +640,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         switch item.action {
-        case #selector(toggleEditMode(_:)):
+        case #selector(toggleConnectMode(_:)):
             // The validated item *is* the menu item, which is the only chance to tick it — this
             // object answers `validateUserInterfaceItem`, so AppKit never asks `validateMenuItem`.
-            (item as? NSMenuItem)?.state = mode == .edit ? .on : .off
+            (item as? NSMenuItem)?.state = mode == .connect ? .on : .off
             return true
         case #selector(tileSelection(_:)):
             // The one command that says what it will do rather than being dimmed when it can't: with a

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import PDFKit
 import PmLib
@@ -32,6 +33,10 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// Published to this card's SwiftUI content, which starts scrolling and stops holding an open
     /// editor as you step in and out.
     private let engagement = CanvasCardEngagement()
+    /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
+    /// here, from the project's own window, or from anywhere else holding the same store.
+    private var projectEdits: AnyCancellable?
+    private var lastUndoDepth = 0
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -188,6 +193,17 @@ final class CanvasFileNodeView: CanvasNodeView {
         let store = StoreRegistry.shared.acquire(key)
         projectStore = store
         projectStoreKey = key
+        // Every mutation pushes a snapshot, so the stack growing *is* an edit — whoever made it, and
+        // whichever surface they made it on. Watching that rather than wrapping each call site is what
+        // catches the ones made through `TaskMenu`, which talks to the store directly.
+        lastUndoDepth = store.undoStack.count
+        projectEdits = store.$undoStack
+            .sink { [weak self, weak store] stack in
+                guard let self, let store else { return }
+                defer { lastUndoDepth = stack.count }
+                guard stack.count > lastUndoDepth else { return }
+                board.lastEditedProject = store
+            }
         return store
     }
 
@@ -226,6 +242,8 @@ final class CanvasFileNodeView: CanvasNodeView {
     }
 
     private func releaseProject() {
+        projectEdits = nil
+        if board.lastEditedProject === projectStore { board.lastEditedProject = nil }
         StoreRegistry.shared.release(projectStoreKey)
         projectStore = nil
         projectStoreKey = nil

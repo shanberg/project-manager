@@ -36,7 +36,7 @@ extension CanvasBoardView {
         case .handle(let id, let handle):
             guard let node = document.node(id: id) else { return }
             // Grabbing a card's edge picks it, the way clicking a window's edge brings it forward. In
-            // edit mode this is already true — the band is only offered on the selection — but in view
+            // connect mode this is already true — the band is only offered on the selection — but in view
             // mode the edge belongs to whatever card is under it, and a drag there that left the
             // selection alone would be the one gesture on the board that acts on something it hasn't
             // said it is acting on.

@@ -212,16 +212,16 @@ struct CanvasControlCapsule: View {
                     .padding(.trailing, 4)
                     .help("Zoom")
             }
-            if model.mode == .edit, model.room.showsModeLabel {
+            if model.mode == .connect, model.room.showsModeLabel {
                 // A word rather than a segmented control, and only in the mode that isn't the default.
-                // The board announces edit mode loudly enough by itself — every card grows the four
+                // The board announces connect mode loudly enough by itself — every card grows the four
                 // dots you drag lines from — so this is a confirmation rather than the only signal, and
                 // a control that is present always to say something that is true rarely is chrome.
-                Text("Editing")
+                Text("Connecting")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
-                    .help("This board is in edit mode")
+                    .help("Cards are showing the dots you drag lines from")
             }
             button("magnifyingglass", "Find on this canvas") {
                 model.find.isShowing = true
@@ -335,8 +335,8 @@ struct CanvasControlCapsule: View {
                 }
                 Divider()
             }
-            Toggle("Edit Mode", isOn: Binding(get: { model.mode == .edit },
-                                              set: { model.setMode($0 ? .edit : .view) }))
+            Toggle("Connect Cards", isOn: Binding(get: { model.mode == .connect },
+                                                  set: { model.setMode($0 ? .connect : .view) }))
                 .disabled(model.tiling != nil)
             Divider()
             Group {

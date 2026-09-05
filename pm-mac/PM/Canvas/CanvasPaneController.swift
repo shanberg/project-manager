@@ -382,6 +382,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == Selector(("undo:")) { return validateUndo(item, redoing: false) }
+        if item.action == Selector(("redo:")) { return validateUndo(item, redoing: true) }
         guard item.action == #selector(performFindPanelAction(_:)) else { return true }
         switch NSTextFinder.Action(rawValue: item.tag) {
         case .showFindInterface: return true
@@ -393,8 +395,49 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     // MARK: Reacting
 
     private func documentChanged() {
+        // The canvas is now the more recently edited of the two documents a board can hold — see
+        // `CanvasBoardView.lastEditedProject`.
+        scroll.board.lastEditedProject = nil
         scroll.board.documentChanged()
         updateNotice()
+    }
+
+    // MARK: Undo, on a board that can hold two kinds of document
+
+    /// ⌘Z and ⇧⌘Z, routed to whichever document was edited last.
+    ///
+    /// A board holds a canvas — cards moved, resized, added — and it can hold project cards, whose edits
+    /// belong to a `PMStore` and its own snapshot stack. Both are real documents with real histories,
+    /// and the window can only hand back one `UndoManager`. So the routing is here, on the pane, which
+    /// sits in the responder chain ahead of the window: it answers `undo:` itself and sends it to the
+    /// right one.
+    ///
+    /// "Edited last" rather than "whatever has focus", because that is what a person means by ⌘Z. You
+    /// tick a task, you press ⌘Z, and you expect the tick back — not the card you nudged before it.
+    @objc func undo(_ sender: Any?) {
+        if let project = scroll.board.lastEditedProject, project.canUndo { return project.undo() }
+        store.undoManager.undo()
+    }
+
+    @objc func redo(_ sender: Any?) {
+        if let project = scroll.board.lastEditedProject, project.canRedo { return project.redo() }
+        store.undoManager.redo()
+    }
+
+    /// What the Edit menu says, and whether it says it at all.
+    ///
+    /// Named, because the two documents are answering the same key and the title is the only thing that
+    /// can say which one it is about to act on: "Undo Complete Task" and "Undo Move Card" are the
+    /// difference between a command you can trust and one you have to try.
+    private func validateUndo(_ item: NSMenuItem, redoing: Bool) -> Bool {
+        if let project = scroll.board.lastEditedProject, redoing ? project.canRedo : project.canUndo {
+            item.title = redoing ? "Redo" : "Undo"
+            return true
+        }
+        let manager = store.undoManager
+        let can = redoing ? manager.canRedo : manager.canUndo
+        item.title = redoing ? manager.redoMenuItemTitle : manager.undoMenuItemTitle
+        return can
     }
 
     /// The header's quiet percentage. It used to read in the window's subtitle, which a hidden title

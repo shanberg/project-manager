@@ -290,18 +290,23 @@ enum MainMenu {
         menu.addItem(.separator())
     }
 
-    /// The board's mode, as a checkmark.
+    /// The board's one remaining mode, as a checkmark.
     ///
-    /// A checked item rather than two — "View Mode" and "Edit Mode" as a radio pair would be the same
-    /// fact written twice, and this is a switch, not a choice between destinations. Routed to the board
-    /// like the zoom items, so it is dim in a project window and its checkmark reflects the board in
-    /// front of you rather than a global setting.
+    /// Named for what it does rather than for a whole category of activity. It used to be "Edit Mode"
+    /// and to gate colour, resizing, the ring and the grips as well as the connection dots; everything
+    /// but the dots has since left, so the name was promising a great deal more than the switch
+    /// delivered. See `CanvasMode`.
     ///
-    /// ⇧⌘E, because plain ⌘E is Use Selection for Find, which every Mac text app has and this app has
-    /// too — see the Find submenu.
+    /// A checked item rather than two — "View Mode" and "Connect Mode" as a radio pair would be the
+    /// same fact written twice, and this is a switch, not a choice between destinations. Routed to the
+    /// board like the zoom items, so it is dim in a project window and its checkmark reflects the board
+    /// in front of you rather than a global setting.
+    ///
+    /// ⇧⌘E kept, though the name has changed: it is in people's hands, and the two commands are the
+    /// same switch.
     private static func canvasModeItem(_ menu: NSMenu) {
-        let item = menu.addItem(withTitle: "Edit Mode",
-                                action: #selector(CanvasBoardView.toggleEditMode(_:)),
+        let item = menu.addItem(withTitle: "Connect Cards",
+                                action: #selector(CanvasBoardView.toggleConnectMode(_:)),
                                 keyEquivalent: "e")
         item.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(.separator())

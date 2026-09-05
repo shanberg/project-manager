@@ -1,30 +1,33 @@
 import AppKit
 import PmLib
 
-/// Whether the board is being read or being changed.
+/// Whether the board is being read, or wired together.
 ///
-/// A canvas is read far more often than it is edited — it's a board you come back to look at — and the
-/// affordances editing needs are exactly the ones that get in the way of looking. The four connection
-/// dots on a card's sides are the clearest case: useful when you're wiring cards together, and visual
-/// noise on every card you mouse past when you're not.
+/// It used to be view and *edit*, and the name was honest when it meant it: edit mode gated the
+/// connection dots, the selection ring, the eight grips and the colour swatches, which between them
+/// were most of what changing a board consisted of. Everything else has since left the fence. Colour
+/// is gone entirely. Resizing works everywhere, by a card's edge, the way a window is resized — and
+/// with it went the argument that a grip you can drag but cannot see is worse than no grip, which was
+/// true of a grip and false of an edge.
 ///
-/// So they are a mode rather than a hover state. In `.view` the board is cards and lines and nothing
-/// else; in `.edit` the affordances appear.
+/// What is left is drawing lines between cards, and that is what this now says. A mode is an expensive
+/// way to buy one gesture, but this one earns it: the four dots on every card's sides are useful while
+/// you are wiring and are noise on every card you mouse past when you are not, which is exactly the
+/// shape of thing a mode is for. It is narrow, it is named for what it does, and it is off by default.
 ///
-/// **Selecting and moving work in both; shaping a card does not.** A selected card in view mode says
-/// so with a shadow and nothing else — no ring and no eight grips — because on a dashboard
-/// selection is a step on the way to *using* a card, not to redrawing it, and a board that answered
-/// every click with a full set of editing controls would be a board permanently mid-edit. Nudging a
-/// card, on the other hand, is not editing in the sense anyone means, so dragging stays.
+/// Selecting, moving and resizing work in both. A selected card in reading mode says so with a shadow
+/// and nothing else, because on a board selection is a step towards *using* a card.
 enum CanvasMode: String {
-    case view, edit
+    case view, connect
 
-    var showsConnectionAnchors: Bool { self == .edit }
+    var showsConnectionAnchors: Bool { self == .connect }
 
-    /// Whether a selected card offers its eight grips — and whether it can be resized at all. The two
-    /// are one question: a grip you can drag but cannot see is worse than no grip.
-    var showsResizeGrips: Bool { self == .edit }
-
+    /// Whether a selected card draws its ring and its eight grips.
+    ///
+    /// Not whether it can be resized — everything can, always, by its edge. The grips remain because
+    /// they are the one path that still works on a card too small to spare an edge band, and because a
+    /// mode that puts connection dots on a card should also say which card it is talking about.
+    var showsResizeGrips: Bool { self == .connect }
 }
 
 /// One of the eight grips on a selected card.
@@ -84,7 +87,7 @@ enum CanvasHit: Equatable {
     case node(String)
     /// A grip on a selected card.
     case handle(String, CanvasHandle)
-    /// A connection dot. Only ever returned in `.edit`.
+    /// A connection dot. Only ever returned in `.connect`.
     case anchor(String, CanvasSide)
     /// A line, within a few points of its curve.
     case edge(String)
@@ -103,7 +106,7 @@ struct CanvasHitTester {
     var scale: Double
     var mode: CanvasMode
     var selection: Set<String>
-    /// The card the pointer is over, which offers connection dots in `.edit` even when not selected.
+    /// The card the pointer is over, which offers connection dots in `.connect` even when not selected.
     var hovered: String?
     /// Where the cards are actually drawn. The document's own frames unless something is standing in
     /// for them — a tiled view, most of all, where clicking what you can see has to reach the card that
@@ -197,7 +200,7 @@ struct CanvasHitTester {
     /// Which cards hand their edge over to a resize.
     ///
     /// In view mode, any of them — a Mac window does not need selecting before you can grab its edge,
-    /// and that is the whole idiom being borrowed. In edit mode, only the selection: the grips are drawn
+    /// and that is the whole idiom being borrowed. In connect mode, only the selection: the grips are drawn
     /// there, an unselected card is a thing you are about to select, and a band on every card would
     /// make clicking one to select it a coin toss.
     private var resizableByEdge: [String] {
@@ -215,7 +218,7 @@ struct CanvasHitTester {
     /// screen and so grows in card points as you zoom out; at 8% the band alone is 88 points a side,
     /// which on a small card is the whole card. Resizing it there would cost you moving it and — for a
     /// web card — stepping into it, a far worse trade than not resizing something at a zoom where you
-    /// cannot see it. The eight grips still answer for a selected card in edit mode, so nothing becomes
+    /// cannot see it. The eight grips still answer for a selected card in connect mode, so nothing becomes
     /// unresizable. It is the same bargain `canvasBoardKeeps` strikes, for the same reason.
     static func edgeHandle(_ frame: CanvasRect, at point: CanvasPoint, reach: Double) -> CanvasHandle? {
         // `inset(by:)` grows, so this is the card plus the band, and `inner` is the card minus it.

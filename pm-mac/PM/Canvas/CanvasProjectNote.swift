@@ -203,10 +203,21 @@ struct CanvasProjectNote: View {
         .padding(.trailing, 12)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
-        // Double-click to edit the text, which is the task list's own gesture for "work on this row".
-        // No single-click selection: a card has no selection to keep, and a click that did nothing
-        // visible would be a click that looked broken.
-        .onTapGesture(count: 2) { open(.edit, on: todo) }
+        // Double-click *activates* — focuses the task — exactly as it does in the project window. It
+        // used to open the text editor here, which meant the same gesture on the same object meant two
+        // different things depending on which surface you were looking at it through. The surface is
+        // not the thing; the task is.
+        //
+        // ⌥ double-click edits the text, and so does the context menu's Edit. No single-click
+        // selection: a card has no selection to keep, and a click that did nothing visible would be a
+        // click that looked broken.
+        .onTapGesture(count: 2) {
+            if NSEvent.modifierFlags.contains(.option) || todo.checked {
+                open(.edit, on: todo)
+            } else {
+                store.focus(todo)
+            }
+        }
         .contextMenu {
             TaskMenu(todo: todo, store: store,
                      openEditor: { open($0, on: todo) },

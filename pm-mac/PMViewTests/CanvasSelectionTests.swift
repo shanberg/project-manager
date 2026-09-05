@@ -78,13 +78,13 @@ final class CanvasSelectionTests: XCTestCase {
     // MARK: Grips
 
     func testGripsBelongToTheSelectionOnly() {
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
-        XCTAssertEqual(tester(mode: .edit).hit(at(40, 40)), .node("a"),
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
+        XCTAssertEqual(tester(mode: .connect).hit(at(40, 40)), .node("a"),
                        "unselected: it's just the card")
     }
 
     func testAGripBeatsTheCardUnderneath() {
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(at(240, 140)),
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(240, 140)),
                        .handle("a", .bottomRight))
     }
 
@@ -102,17 +102,17 @@ final class CanvasSelectionTests: XCTestCase {
     /// a board has the most cards on it and the pointer has the least room.
     func testGripsStayTheSameSizeToThePointerAtAnyZoom() {
         // 20 canvas units from the corner is 6 view points at 30% — inside the 7pt reach.
-        XCTAssertEqual(tester(scale: 0.3, mode: .edit, selection: ["a"]).hit(at(60, 60)),
+        XCTAssertEqual(tester(scale: 0.3, mode: .connect, selection: ["a"]).hit(at(60, 60)),
                        .handle("a", .topLeft))
         // The same canvas distance at 100% is 20 view points — well outside it.
-        XCTAssertEqual(tester(scale: 1, mode: .edit, selection: ["a"]).hit(at(60, 60)), .node("a"))
+        XCTAssertEqual(tester(scale: 1, mode: .connect, selection: ["a"]).hit(at(60, 60)), .node("a"))
     }
 
     // MARK: Connection dots
 
     func testDotsAreOnlyThereInEditMode() {
         let point = at(240 + CanvasHitTester.anchorOffset, 90)
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(point), .anchor("a", .right))
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(point), .anchor("a", .right))
         XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(point), .node("b"),
                        "in view mode the board is cards and lines and nothing else")
     }
@@ -121,8 +121,8 @@ final class CanvasSelectionTests: XCTestCase {
     /// otherwise wiring two cards together is click, then drag, for every line.
     func testTheHoveredCardOffersDotsInEditMode() {
         let point = at(40 - CanvasHitTester.anchorOffset, 90)
-        XCTAssertEqual(tester(mode: .edit, hovered: "a").hit(point), .anchor("a", .left))
-        XCTAssertEqual(tester(mode: .edit).hit(point), .board, "nothing hovered, nothing offered")
+        XCTAssertEqual(tester(mode: .connect, hovered: "a").hit(point), .anchor("a", .left))
+        XCTAssertEqual(tester(mode: .connect).hit(point), .board, "nothing hovered, nothing offered")
     }
 
     // MARK: Lines

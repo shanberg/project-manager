@@ -45,6 +45,19 @@ final class CanvasBoardView: NSView {
     /// See `CanvasLayout` and `CanvasTiling`.
     private(set) var layout: CanvasLayout = .document
 
+    /// The project whose store was edited more recently than the canvas document, if any — what ⌘Z
+    /// should act on.
+    ///
+    /// Two undo systems meet on a board that holds project cards. The canvas document has an
+    /// `UndoManager` the window hands back; a project has `PMStore`'s own snapshot stack, shared with
+    /// every window showing that project. Neither knows the other exists, so ⌘Z on a board where you
+    /// had just ticked a task undid the last card you moved — or nothing — and the task edit was
+    /// unreachable. Which is worse than no undo, because you believe it worked.
+    ///
+    /// Nil means the canvas document. Set by a project card when its store records an edit, cleared
+    /// whenever the canvas document changes, so it always names the most recent of the two.
+    var lastEditedProject: PMStore?
+
     /// The tilings you drilled in from, outermost first. Escape pops one at a time.
     var tilingHistory: [CanvasTileSession] = []
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
@@ -105,7 +118,7 @@ final class CanvasBoardView: NSView {
     var onPageStateChanged: (() -> Void)?
     func pageStateChanged() { onPageStateChanged?() }
 
-    /// Told when the mode changes, so the selection bar can drop the controls that only edit mode has.
+    /// Told when the mode changes, so the window's header can say which one the board is in.
     var onModeChanged: (() -> Void)?
 
     /// Told when the selection changes, so the floating bar can follow it.
