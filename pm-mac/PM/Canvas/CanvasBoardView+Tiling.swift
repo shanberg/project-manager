@@ -58,12 +58,7 @@ extension CanvasBoardView {
             .map { (id: $0.id, frame: $0.frame) }
         guard !cards.isEmpty else { return NSSound.beep() }
         let visible = canvasRect(visibleRect)
-        // Inset so tiles sit inside the window rather than against its edges, and clear of the header
-        // floating over the top of the board.
-        let area = CanvasRect(x: visible.minX + 18 / liveScale,
-                              y: visible.minY + 54 / liveScale,
-                              width: max(80, visible.width - 36 / liveScale),
-                              height: max(80, visible.height - 72 / liveScale))
+        let area = tileableRect
         let order = CanvasTiling.order(cards)
         let session = CanvasTileSession(
             ids: order,
@@ -172,11 +167,7 @@ extension CanvasBoardView {
     /// you dragged a corner would be making the promise in past tense.
     func retileForWindowSize() {
         guard var session = tiling else { return }
-        let visible = canvasRect(visibleRect)
-        session.area = CanvasRect(x: visible.minX + 18 / liveScale,
-                                  y: visible.minY + 54 / liveScale,
-                                  width: max(80, visible.width - 36 / liveScale),
-                                  height: max(80, visible.height - 72 / liveScale))
+        session.area = tileableRect
         tiling = session
         setLayout(session.layout, animated: false)
     }

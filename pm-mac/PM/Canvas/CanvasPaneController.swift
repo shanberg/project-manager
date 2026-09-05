@@ -20,7 +20,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     let store: CanvasDocumentStore
     private let scroll: CanvasScrollView
     private let notice = CanvasNoticeBar()
-    private let container = NSView()
+    private let container = CanvasPaneContainer()
 
     /// Everything the header shows and everything its controls do. Exposed so an owner can put its own
     /// commands in the options menu — a project window adds the switch back to its task list.
@@ -84,6 +84,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     override func loadView() {
         buildContent()
+        container.onCoveredRegionChange = { [weak self] in self?.coveredRegionChanged() }
         view = container
     }
 
@@ -161,6 +162,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     @objc private func windowGeometryChanged() { measureTitlebar() }
 
+    /// The sidebar opened or closed, so the region the chrome and the tiles have to stay clear of has
+    /// changed. That is a safe-area change and not a frame change — the pane keeps its size and gains a
+    /// covered strip — so neither the resize notification nor the clip view's own hook sees it, and it
+    /// arrives continuously while the sidebar slides rather than once when the flag flips.
+    ///
+    /// AppKit reports it on the *view* (`safeAreaInsetsDidChange`), not on the view controller, which is
+    /// why the pane's container is a subclass rather than a bare `NSView`.
+    fileprivate func coveredRegionChanged() {
+        measureTitlebar()
+        if scroll.board.isTiled { scroll.board.retileForWindowSize() }
+    }
+
     @objc private func paneResized() {
         let room = CanvasHeaderModel.Room(width: container.bounds.width)
         if header.room != room { header.room = room }
@@ -217,7 +230,17 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
         // Held so the leading inset can follow the traffic lights, which move with the titlebar's
         // height and vanish in full screen.
-        pillLeading = pill.leadingAnchor.constraint(equalTo: container.leadingAnchor,
+        //
+        // Against the **safe area**, not the view's own edge, and only on this axis. In a project
+        // window the content pane runs *beneath* the floating sidebar — that is the design, and the
+        // task column stays clear of it by the leading safe-area inset AppKit supplies. The board
+        // should run under it too; its chrome must not, and pinning the pill to the container's raw
+        // leading edge put the board's name behind the sidebar.
+        //
+        // Leading only. The top edge is where this header deliberately runs *into* the titlebar to sit
+        // level with the traffic lights, and a top safe area is exactly the inset that would push it
+        // back out again — which is the bug this header started life with.
+        pillLeading = pill.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor,
                                                     constant: TitlebarButtonMetrics.unmeasured.leadingInset)
 
         NSLayoutConstraint.activate([
@@ -229,7 +252,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             pill.topAnchor.constraint(equalTo: container.topAnchor),
             pillLeading,
             capsule.topAnchor.constraint(equalTo: container.topAnchor),
-            capsule.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            capsule.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor,
+                                              constant: -14),
             // The pill gives way first when the window is too narrow to hold both — the controls have a
             // floor and the title has a truncation.
             pill.trailingAnchor.constraint(lessThanOrEqualTo: capsule.leadingAnchor, constant: -12),
@@ -237,8 +261,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             // Under the chrome rather than level with it, so the banner reads as something the window
             // is telling you about the board rather than as part of the window's controls.
             notice.topAnchor.constraint(equalTo: container.topAnchor, constant: 56),
-            notice.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            notice.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -14),
+            notice.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor,
+                                            constant: 14),
+            notice.trailingAnchor.constraint(lessThanOrEqualTo: container.safeAreaLayoutGuide.trailingAnchor,
+                                             constant: -14),
         ])
         pill.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -557,4 +583,28 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// work isn't quietly running a browser all afternoon.
     private static let idleGrace: TimeInterval = 120
 
+}
+
+/// The pane's own view, which exists only to notice when something starts covering it.
+///
+/// A project window's sidebar slides *over* this pane rather than beside it, so opening or closing it
+/// changes what covers the board without changing the pane's size — no frame change, no notification.
+/// AppKit has `safeAreaInsets` but, unlike UIKit, nothing that tells you when it moved, so this watches
+/// it across layout passes. Layout is the right place to watch from: it runs on every frame of the
+/// sidebar's slide, so the chrome and the tiles follow the animation rather than jumping when it ends.
+///
+/// The compare-and-store is what keeps this from recursing. The callback moves constraints, which asks
+/// for another layout pass, in which the insets are the ones already recorded and nothing fires.
+private final class CanvasPaneContainer: NSView {
+    var onCoveredRegionChange: (() -> Void)?
+    private var covered = NSEdgeInsets()
+
+    override func layout() {
+        super.layout()
+        let now = safeAreaInsets
+        guard now.left != covered.left || now.right != covered.right
+                || now.top != covered.top || now.bottom != covered.bottom else { return }
+        covered = now
+        onCoveredRegionChange?()
+    }
 }

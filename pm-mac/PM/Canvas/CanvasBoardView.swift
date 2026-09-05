@@ -26,6 +26,26 @@ final class CanvasBoardView: NSView {
     let store: CanvasDocumentStore
     weak var scrollView: NSScrollView?
 
+    /// The part of the window a tiled view can actually fill.
+    ///
+    /// The visible rectangle, less anything covering it. In a project window the board runs beneath the
+    /// floating sidebar, so tiles laid out across the whole visible width put their leading column
+    /// behind it — the same mistake the header made, one layer down.
+    ///
+    /// The top is the header's, not a safe area's: the board deliberately runs up under the titlebar,
+    /// and the room the floating chrome needs is a constant this owns rather than something AppKit
+    /// reports.
+    var tileableRect: CanvasRect {
+        let visible = canvasRect(visibleRect)
+        let covered = scrollView?.safeAreaInsets ?? NSEdgeInsets()
+        let leading = Double(covered.left) / liveScale + 18 / liveScale
+        let trailing = Double(covered.right) / liveScale + 18 / liveScale
+        return CanvasRect(x: visible.minX + leading,
+                          y: visible.minY + 54 / liveScale,
+                          width: max(80, visible.width - leading - trailing),
+                          height: max(80, visible.height - 72 / liveScale))
+    }
+
     /// The board's extent in canvas coordinates: everything on it, plus room to drag things outside it.
     /// The view's own size, and the origin every conversion subtracts.
     private(set) var content: CanvasRect = CanvasRect(x: 0, y: 0, width: 1, height: 1)
