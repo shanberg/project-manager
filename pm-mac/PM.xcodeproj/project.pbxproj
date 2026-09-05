@@ -92,6 +92,7 @@
 		953EB4607AD60AD44D6BF571 /* CanvasFileNodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5828CBE0E94A3424D852551B /* CanvasFileNodeView.swift */; };
 		9563B3FC2439B4B4F7EE402F /* ProjectLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58237340FEDA8330FA07488 /* ProjectLifecycle.swift */; };
 		95C16125C8074A478F15EF0B /* CanvasNoticeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 554420A2BAF510903D64577A /* CanvasNoticeBar.swift */; };
+		971AD0F248F4A6388AADD3BC /* WindowChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB60AD5B8184499C07F2DC7B /* WindowChrome.swift */; };
 		9ABD95EC8E5E37FFC95FCEC1 /* TaskPasteboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2951CDF9FD603B6CDB53BA9 /* TaskPasteboard.swift */; };
 		9C7A8AA4984433BAF1022749 /* WindowSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B93A7E209760A3A260C8E79 /* WindowSettings.swift */; };
 		A1E38DC38474781ADB3AB236 /* CanvasBoardView+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109DB8E87E57D7D1D9EBBDFC /* CanvasBoardView+Commands.swift */; };
@@ -123,6 +124,7 @@
 		C28E7142F3467FC8FD2CEF6E /* CanvasSnappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BAE1DEBA51B7E55A3D12E5E /* CanvasSnappingTests.swift */; };
 		C430A832C70639AA390BAC26 /* DueLabels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9831EB99DF551250EFC4CAD8 /* DueLabels.swift */; };
 		C4A9E3D04122D318D057D921 /* ProjectPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 572129A651DA79D128E42804 /* ProjectPrompts.swift */; };
+		C5FD86F542DD37772C08D7BE /* CanvasHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD2F0A659BE24A6D83D8C71 /* CanvasHeader.swift */; };
 		C604CAD25A5756F4BDDB768A /* NoteImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7702E7B244533507CDCE64 /* NoteImagePaste.swift */; };
 		C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
@@ -219,6 +221,7 @@
 		655EF57D49F1C9DD87AFC18D /* FaviconLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconLoader.swift; sourceTree = "<group>"; };
 		670B4F39D9D0E21DA47ABAD9 /* CompletionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionController.swift; sourceTree = "<group>"; };
 		670C6E6568761BF6AA2FF6AB /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
+		6AD2F0A659BE24A6D83D8C71 /* CanvasHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasHeader.swift; sourceTree = "<group>"; };
 		6B08E0DBF5FF2C594E0AC919 /* LiveSessionNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionNote.swift; sourceTree = "<group>"; };
 		6B93A7E209760A3A260C8E79 /* WindowSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSettings.swift; sourceTree = "<group>"; };
 		6DE496B1AB05F26705086349 /* TaskMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenu.swift; sourceTree = "<group>"; };
@@ -295,6 +298,7 @@
 		F492935965C6142489D845E3 /* PM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PM.entitlements; sourceTree = "<group>"; };
 		F54BE74D0FCD869644A6FCB2 /* AdvancedRules */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AdvancedRules; path = Resources/AdvancedRules; sourceTree = SOURCE_ROOT; };
 		F714E00F765F5D12885D0F68 /* PMIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMIntents.swift; sourceTree = "<group>"; };
+		FB60AD5B8184499C07F2DC7B /* WindowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChrome.swift; sourceTree = "<group>"; };
 		FCC72D30EB9E944089C22D2F /* WaitingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -501,6 +505,7 @@
 				4EF0D38D9DB80542D10BF94C /* CanvasContentBlocker.swift */,
 				1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */,
 				5828CBE0E94A3424D852551B /* CanvasFileNodeView.swift */,
+				6AD2F0A659BE24A6D83D8C71 /* CanvasHeader.swift */,
 				7441F9194961AE74FACAD3B1 /* CanvasLinkNodeView.swift */,
 				093983D4AB7BBC953B90AB3A /* CanvasNodeView.swift */,
 				554420A2BAF510903D64577A /* CanvasNoticeBar.swift */,
@@ -529,6 +534,14 @@
 				11B4BF4DE91D07970011CE07 /* ShortcutsSettings.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		C45D0A400AC61A734FC20EFF /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				FB60AD5B8184499C07F2DC7B /* WindowChrome.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		C5DCADE21C6BBAEFE3E203A2 = {
@@ -605,6 +618,7 @@
 				9C99A190E47DF7D077481E2F /* Project */,
 				A3AED3F9A242455E0A058B18 /* QuickBar */,
 				B720E4CBC27DD90D90C9E28B /* Settings */,
+				C45D0A400AC61A734FC20EFF /* Shared */,
 				A46742EDC6D0132A6B2CD606 /* Task */,
 				4E3D995D8CC98FECF1761852 /* Waiting */,
 				2CAE031C1CFC0636423BCA38 /* Windows */,
@@ -727,6 +741,7 @@
 				E72FC312F57CA385A3CD74C8 /* CanvasContentBlocker.swift in Sources */,
 				749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */,
 				953EB4607AD60AD44D6BF571 /* CanvasFileNodeView.swift in Sources */,
+				C5FD86F542DD37772C08D7BE /* CanvasHeader.swift in Sources */,
 				3F8E69BCA288DB380917EB95 /* CanvasLinkNodeView.swift in Sources */,
 				E4697A7B9163BFA9CB4411F2 /* CanvasNodeView.swift in Sources */,
 				95C16125C8074A478F15EF0B /* CanvasNoticeBar.swift in Sources */,
@@ -824,6 +839,7 @@
 				C15C0760AE6D6721EB56B0A2 /* WaitingView.swift in Sources */,
 				63FA676977B97B8AA2D12052 /* WaitingWatcher.swift in Sources */,
 				1B552F102655404937D55CDC /* WaitingWindowController.swift in Sources */,
+				971AD0F248F4A6388AADD3BC /* WindowChrome.swift in Sources */,
 				F624F9A34622007F9CBBB703 /* WindowManager.swift in Sources */,
 				9C7A8AA4984433BAF1022749 /* WindowSettings.swift in Sources */,
 				682B885D994EC5F7B065C269 /* main.swift in Sources */,

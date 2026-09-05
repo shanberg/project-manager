@@ -38,6 +38,11 @@ final class CanvasScrollView: NSScrollView {
         // background at the edges of a board.
         drawsBackground = true
         backgroundColor = CanvasPalette.board
+        // The board runs under the titlebar, because the window has a full-size content view and its
+        // chrome floats over the board rather than sitting above it. Left on, AppKit would inset the
+        // content by the titlebar's height to keep it clear — which is the right default for a document
+        // you scroll and exactly wrong for one the window is deliberately laid over.
+        automaticallyAdjustsContentInsets = false
         contentView.postsBoundsChangedNotifications = true
 
         NotificationCenter.default.addObserver(

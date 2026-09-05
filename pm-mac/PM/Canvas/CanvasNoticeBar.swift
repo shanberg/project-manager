@@ -1,14 +1,18 @@
 import AppKit
 
-/// The strip along the top of a canvas window, for the two things the board itself can't say.
+/// A banner floating under the canvas window's header, for the things the board itself can't say.
 ///
-/// One is that cards on this board point at files that have moved — which is a property of the whole
-/// document, not of any one card, and which is worth saying once at the top rather than only as a
-/// mark on each card you happen to scroll past. The other is that the file changed in another app and
-/// PM re-read it, which the window owes you the moment it happens.
+/// One is that cards on this board point at files that have moved — a property of the whole document,
+/// not of any one card, and worth saying once at the top rather than only as a mark on each card you
+/// happen to scroll past. That mark used to exist, on the card's header strip; cards have no header
+/// strips now, and this is where the fact was always better said anyway. The other is that the file
+/// changed in another app and PM re-read it, which the window owes you the moment it happens.
 ///
-/// It takes no space when there's nothing to say: the bar's height collapses to zero rather than
-/// leaving an empty band, so an ordinary board is board all the way to the titlebar.
+/// **Floating, not a bar.** It used to be a full-width strip stacked above the scroll view, which
+/// pushed the whole board down by 32 points whenever it had something to say and put a hard edge across
+/// the top of the window. Everything else in this window's chrome floats over the board on its own
+/// material; a banner that shoves the content it is describing is the one piece that didn't. It takes
+/// no space at all now — it is simply hidden when there is nothing to say.
 @MainActor
 final class CanvasNoticeBar: NSView {
     enum Kind {
@@ -25,12 +29,21 @@ final class CanvasNoticeBar: NSView {
     private let actionButton = NSButton()
     private let revealButton = NSButton()
     private let dismissButton = NSButton()
-    private var heightConstraint: NSLayoutConstraint!
     private var kind: Kind = .warning
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.cornerCurve = .continuous
+        // The rounded rectangle and its edge are drawn in `draw`, not set on the layer: a layer that
+        // masks to its own bounds clips the shadow away, and this banner floats over a board and needs
+        // the shadow to sit off it.
+        shadow = NSShadow()
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.16
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = CGSize(width: 0, height: -3)
+        isHidden = true
 
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.lineBreakMode = .byTruncatingTail
@@ -64,27 +77,37 @@ final class CanvasNoticeBar: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-        heightConstraint.isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var isFlipped: Bool { true }
 
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 9, cornerHeight: 9, transform: nil)
+    }
+
+    /// The tint sits *over* the window background rather than being the whole of the fill, so the
+    /// banner is opaque enough to read against a board of cards passing under it. A translucent wash on
+    /// its own let a white card show straight through the words.
     override func draw(_ dirty: NSRect) {
-        guard heightConstraint.constant > 0 else { return }
+        let radius = 9.0
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: radius, yRadius: radius)
+        NSColor.windowBackgroundColor.setFill()
+        path.fill()
         let tint: NSColor = kind == .warning
-            ? NSColor.systemOrange.withAlphaComponent(0.16)
-            : NSColor.controlAccentColor.withAlphaComponent(0.12)
+            ? NSColor.systemOrange.withAlphaComponent(0.18)
+            : NSColor.controlAccentColor.withAlphaComponent(0.13)
         tint.setFill()
-        bounds.fill()
-        NSColor.separatorColor.setStroke()
-        let line = NSBezierPath()
-        line.move(to: NSPoint(x: 0, y: bounds.maxY - 0.5))
-        line.line(to: NSPoint(x: bounds.maxX, y: bounds.maxY - 0.5))
-        line.stroke()
+        path.fill()
+        (kind == .warning ? NSColor.systemOrange.withAlphaComponent(0.35)
+                          : NSColor.separatorColor).setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     func show(message: String, kind: Kind, actionTitle: String?) {
@@ -94,13 +117,12 @@ final class CanvasNoticeBar: NSView {
         actionButton.isHidden = actionTitle == nil
         revealButton.isHidden = actionTitle == nil
         if let actionTitle { actionButton.title = actionTitle }
-        heightConstraint.constant = 32
+        isHidden = false
         needsDisplay = true
     }
 
     func dismiss() {
-        heightConstraint.constant = 0
-        needsDisplay = true
+        isHidden = true
     }
 
     @objc private func repairAll() { onRepairAll?() }

@@ -1,24 +1,30 @@
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 import PmLib
 
 /// A window on one canvas.
 ///
-/// Its own window rather than a mode of the project window: a board wants the whole frame and a
-/// project window is already a split view with a task list in it. Tabbable, so several boards stack
-/// the way several projects do, and one window per file — asking for a canvas that is already open
-/// brings its window forward rather than opening a second view of the same document.
+/// A board wants the whole frame, so it gets one — full-size content under a hidden titlebar, with the
+/// window's controls floating over the board instead of occupying a bar across the top of it. That is
+/// the project window's chrome, and using it here rather than something like it is the point: a canvas
+/// is a document window in the same app and shouldn't be a second idea of what a window looks like.
+/// See `CanvasHeaderModel`.
+///
+/// Tabbable, so several boards stack the way several projects do, and one window per file — asking for
+/// a canvas that is already open brings its window forward rather than opening a second view of the
+/// same document.
 @MainActor
-final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate,
-                                    NSMenuItemValidation {
+final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     let store: CanvasDocumentStore
     private let scroll: CanvasScrollView
     private let notice = CanvasNoticeBar()
     private let container = NSView()
 
-    private var zoomLabel: NSTextField?
-    private var modeControl: NSSegmentedControl?
-    private var searchField: NSSearchField?
+    /// Everything the header shows and everything its controls do.
+    private let header = CanvasHeaderModel()
+    private var pill: NSHostingView<CanvasTitlePill>!
+    private var capsule: NSHostingView<CanvasControlCapsule>!
 
     /// Every open canvas, by the file it shows.
     private static var open: [URL: CanvasWindowController] = [:]
@@ -104,26 +110,43 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
         scroll = CanvasScrollView(store: store)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable,
+                                          .fullSizeContentView],
                               backing: .buffered, defer: false)
+        // The project window's chrome, for the same reasons and by the same route: no visible title, no
+        // toolbar in the UI sense, content running to the top of the frame. The title is still *set* —
+        // `titleVisibility` only hides it from the titlebar, while window tabs, the Window menu and ⌘`
+        // all keep reading it, and `representedURL` still gives the proxy icon its file.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.title = url.deletingPathExtension().lastPathComponent
         window.representedURL = url
         window.contentMinSize = NSSize(width: 480, height: 360)
         window.tabbingIdentifier = "PMCanvas"
         window.tabbingMode = .automatic
         window.setFrameAutosaveName("PMCanvasWindow")
+        // An empty toolbar, purely for its geometry — the taller unified titlebar and the lower,
+        // further-inset traffic lights that go with it. Exactly the arrangement `ProjectWindowController`
+        // explains at length; it has no delegate and so no items, and customization is off, so there is
+        // nothing here for anyone to find or toggle.
+        let toolbar = NSToolbar(identifier: "PMCanvasTitlebar")
+        toolbar.allowsUserCustomization = false
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         super.init(window: window)
 
         undoManagerForWindow = undo
         window.delegate = self
+        header.title = window.title
+        wireHeader()
         buildContent()
-        buildToolbar()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
         scroll.board.onModeChanged = { [weak self] in
             guard let self else { return }
-            // The mode can now be flipped from the menu as well as the toolbar, so the segmented
-            // control follows the board rather than being the only thing that knows.
-            modeControl?.selectedSegment = scroll.board.mode == .edit ? 1 : 0
+            // The mode is flipped from the View menu and from the header's options, so the header
+            // follows the board rather than being the only thing that knows.
+            header.mode = scroll.board.mode
         }
 
         store.onChange = { [weak self] in self?.documentChanged() }
@@ -150,31 +173,87 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
 
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { undoManagerForWindow }
 
+    /// The board, edge to edge, with the window's chrome floating over it.
+    ///
+    /// Nothing in this window is a bar. The board fills the content view — under the titlebar, out to
+    /// every edge — and the pill, the capsule and the notice banner are laid over it. The pill and the
+    /// capsule are **separate hosting views sized to their own contents** rather than one strip across
+    /// the top: a strip would hit-test its whole width and swallow every click in the band where the
+    /// cards you are reading actually are.
     private func buildContent() {
+        pill = NSHostingView(rootView: CanvasTitlePill(model: header))
+        capsule = NSHostingView(rootView: CanvasControlCapsule(model: header))
+        // The hosting view is the size SwiftUI says it is, so each view's frame is the pill or the
+        // capsule and not a rectangle of window around it. Set one at a time because the two are
+        // different generic types and an array of them is an array of `NSView`.
+        pill.sizingOptions = [.intrinsicContentSize]
+        capsule.sizingOptions = [.intrinsicContentSize]
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        capsule.translatesAutoresizingMaskIntoConstraints = false
+
         container.translatesAutoresizingMaskIntoConstraints = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         notice.translatesAutoresizingMaskIntoConstraints = false
 
-        container.addSubview(notice)
         container.addSubview(scroll)
+        container.addSubview(notice)
+        container.addSubview(pill)
+        container.addSubview(capsule)
+
+        // Held so the leading inset can follow the traffic lights, which move with the titlebar's
+        // height and vanish in full screen.
+        pillLeading = pill.leadingAnchor.constraint(equalTo: container.leadingAnchor,
+                                                    constant: TitlebarButtonMetrics.unmeasured.leadingInset)
 
         NSLayoutConstraint.activate([
-            notice.topAnchor.constraint(equalTo: container.topAnchor),
-            notice.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            notice.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: notice.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: container.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            pill.topAnchor.constraint(equalTo: container.topAnchor),
+            pillLeading,
+            capsule.topAnchor.constraint(equalTo: container.topAnchor),
+            capsule.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            // The pill gives way first when the window is too narrow to hold both — the controls have a
+            // floor and the title has a truncation.
+            pill.trailingAnchor.constraint(lessThanOrEqualTo: capsule.leadingAnchor, constant: -12),
+
+            // Under the chrome rather than level with it, so the banner reads as something the window
+            // is telling you about the board rather than as part of the window's controls.
+            notice.topAnchor.constraint(equalTo: container.topAnchor, constant: 56),
+            notice.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            notice.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -14),
         ])
+        pill.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         window?.contentView = container
 
         notice.onRepairAll = { [weak self] in self?.repairAllPaths() }
         notice.onReveal = { [weak self] in self?.selectMovedCards() }
     }
 
+    private var pillLeading: NSLayoutConstraint!
+
+    /// Keep the header level with, and clear of, the window's own buttons.
+    ///
+    /// The vertical drop is the header's business (see `TitlebarDrop`), because it depends on how tall
+    /// each piece turns out to be. The leading inset is the window's, because it depends on where the
+    /// traffic lights are — and in full screen there aren't any, so the pill moves back to the edge.
+    private func measureTitlebar() {
+        guard let metrics = window?.titlebarButtonMetrics() else { return }
+        if abs(pillLeading.constant - metrics.leadingInset) > 0.5 {
+            pillLeading.constant = metrics.leadingInset
+        }
+        if header.titlebar != metrics { header.titlebar = metrics }
+    }
+
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        // Forces the theme frame to place its buttons, which is what makes them measurable before the
+        // first frame is drawn — otherwise the header lays out against the starting guess and visibly
+        // settles onto the real numbers as the window opens.
+        window?.layoutIfNeeded()
+        measureTitlebar()
         // Fitted after the window has a size, or "fit" is computed against a zero-width clip view.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -184,207 +263,87 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
         }
     }
 
-    // MARK: Toolbar
+    // The traffic lights move when the titlebar's height changes and disappear in full screen, and the
+    // header follows them rather than holding whatever it measured at construction.
+    func windowDidResize(_ notification: Notification) { measureTitlebar() }
+    func windowDidEnterFullScreen(_ notification: Notification) { measureTitlebar() }
+    func windowDidExitFullScreen(_ notification: Notification) { measureTitlebar() }
 
-    /// A small default set, and the Mac's own answer to anyone who disagrees with it.
-    ///
-    /// Customisation is the point rather than a nicety. Every command up here also lives in the menu
-    /// bar or a card's contextual menu, so the toolbar is a convenience layer, and which conveniences
-    /// are worth permanent screen on a board full of cards is a judgement only the person reading the
-    /// board can make. Ship few, allow all, remember the choice.
-    private func buildToolbar() {
-        let toolbar = NSToolbar(identifier: "PMCanvasToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = true
-        toolbar.autosavesConfiguration = true
-        window?.toolbar = toolbar
-        window?.toolbarStyle = .unified
-    }
+    // MARK: The header
 
-    private enum Item {
-        static let zoom = NSToolbarItem.Identifier("zoom")
-        static let fit = NSToolbarItem.Identifier("fit")
-        static let mode = NSToolbarItem.Identifier("mode")
-        static let add = NSToolbarItem.Identifier("add")
-        static let search = NSToolbarItem.Identifier("search")
-        static let page = NSToolbarItem.Identifier("page")
-    }
-
-    /// Zoom and Fit are deliberately not here. Both are in the View menu with the shortcuts a Mac user
-    /// already has in their hands — ⌘+, ⌘−, ⌘0 — the trackpad zooms by pinch, and the percentage now
-    /// reads in the window's subtitle, which is where a document says what state it is in. Two toolbar
-    /// items were spending permanent space to duplicate all of that. Anyone who wants them back is one
-    /// Customize Toolbar away.
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Item.mode, Item.add, Item.search]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Item.zoom, Item.fit, Item.mode, Item.add, Item.search, Item.page,
-         .flexibleSpace, .space]
+    /// Point the header's controls at the board and the window.
+    private func wireHeader() {
+        header.addCard = { [weak self] in self?.addTextCard() }
+        header.addFrame = { [weak self] in self?.addFrame() }
+        header.addLink = { [weak self] in self?.scroll.board.addLinkCard(at: nil) }
+        header.addFile = { [weak self] in self?.scroll.board.addFileCard(at: nil) }
+        header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
+        header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
+        header.zoomOut = { [weak self] in self?.scroll.zoom(by: 1 / 1.25) }
+        header.zoomToFit = { [weak self] in self?.scroll.zoomToFit() }
+        header.zoomActualSize = { [weak self] in self?.scroll.zoomToActualSize() }
+        header.pageBack = { [weak self] in self?.engagedCard?.goBack() }
+        header.pageForward = { [weak self] in self?.engagedCard?.goForward() }
+        header.pageReload = { [weak self] in self?.engagedCard?.reload() }
+        header.pageHome = { [weak self] in self?.engagedCard?.goHome() }
+        header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
+        header.findChanged = { [weak self] query in self?.search(query) }
+        header.findClosed = { [weak self] in self?.closeFind() }
+        header.findCommitted = { [weak self] in
+            guard let self else { return }
+            window?.makeFirstResponder(scroll.board)
+        }
     }
 
     // MARK: Driving the page inside a card
 
-    /// Back, forward, reload and home for the web card you have stepped into.
+    /// Back, forward, reload, home — and the address the page is actually on.
     ///
-    /// In the window's toolbar rather than on the card, and that is the second answer to where these
-    /// go. On the card they were laid out over the page — which meant fighting the site for the one
-    /// piece of a web page every site puts its own navigation in, at a size that had to be fought back
-    /// from the zoom, in a corner the board also wanted for dragging. The window frame has room that
-    /// belongs to PM, needs no compensation, and is where a Mac app's controls live anyway.
+    /// In the window's chrome rather than on the card, and that is now the *only* place they could be:
+    /// a card has no chrome to put them in. It was the right answer before that was true. On the card
+    /// they were laid out over the page, which meant fighting the site for the one piece of a web page
+    /// every site puts its own navigation in, at a size that had to be fought back from the zoom, in a
+    /// corner the board also wanted for dragging.
     ///
-    /// They appear only while a card is engaged. A board is not a browser, and a toolbar carrying
+    /// They appear only while a card is engaged. A board is not a browser, and a header carrying
     /// browser buttons for a board with nothing running on it would say otherwise.
-    private var pageControls: NSStackView?
-    private var pageBack: NSButton?
-    private var pageForward: NSButton?
-    private var pageHome: NSButton?
-
-    private var enagedCard: CanvasLinkNodeView? {
+    private var engagedCard: CanvasLinkNodeView? {
         scroll.board.engagedPageCard as? CanvasLinkNodeView
     }
 
-    /// Put the controls in the toolbar, or take them out — rather than leaving a disabled row of
-    /// buttons sitting there for the entire time you are not using a page.
     func pageStateChanged() {
-        let card = enagedCard
-        if let toolbar = window?.toolbar {
-            let present = toolbar.items.firstIndex { $0.itemIdentifier == Item.page }
-            if card != nil, present == nil {
-                toolbar.insertItem(withItemIdentifier: Item.page, at: toolbar.items.count)
-            } else if card == nil, let present {
-                toolbar.removeItem(at: present)
-            }
+        guard let card = engagedCard else {
+            header.page = nil
+            return
         }
-        pageBack?.isEnabled = card?.canGoBack ?? false
-        pageForward?.isEnabled = card?.canGoForward ?? false
-        pageHome?.isEnabled = card?.hasWandered ?? false
-    }
-
-    @objc private func pageGoBack() { enagedCard?.goBack() }
-    @objc private func pageGoForward() { enagedCard?.goForward() }
-    @objc private func pageReload() { enagedCard?.reload() }
-    @objc private func pageGoHome() { enagedCard?.goHome() }
-
-    func toolbar(_ toolbar: NSToolbar,
-                 itemForItemIdentifier identifier: NSToolbarItem.Identifier,
-                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        switch identifier {
-        case Item.zoom:
-            let out = NSButton(image: NSImage(systemSymbolName: "minus.magnifyingglass",
-                                              accessibilityDescription: "Zoom Out")!,
-                               target: self, action: #selector(zoomOut))
-            let label = NSTextField(labelWithString: "100%")
-            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            label.textColor = .secondaryLabelColor
-            label.alignment = .center
-            label.widthAnchor.constraint(equalToConstant: 42).isActive = true
-            zoomLabel = label
-            let inn = NSButton(image: NSImage(systemSymbolName: "plus.magnifyingglass",
-                                              accessibilityDescription: "Zoom In")!,
-                               target: self, action: #selector(zoomIn))
-            for button in [out, inn] { button.bezelStyle = .texturedRounded; button.isBordered = false }
-            let stack = NSStackView(views: [out, label, inn])
-            stack.orientation = .horizontal
-            stack.spacing = 2
-            item.view = stack
-            item.label = "Zoom"
-
-        case Item.page:
-            func button(_ symbol: String, _ help: String, _ action: Selector) -> NSButton {
-                let button = NSButton(image: NSImage(systemSymbolName: symbol,
-                                                     accessibilityDescription: help)!,
-                                      target: self, action: action)
-                button.bezelStyle = .texturedRounded
-                button.toolTip = help
-                return button
-            }
-            let back = button("chevron.left", "Back", #selector(pageGoBack))
-            let forward = button("chevron.right", "Forward", #selector(pageGoForward))
-            let reload = button("arrow.clockwise", "Reload", #selector(pageReload))
-            let home = button("house", "Back to this card\u{2019}s page", #selector(pageGoHome))
-            pageBack = back
-            pageForward = forward
-            pageHome = home
-            let stack = NSStackView(views: [back, forward, reload, home])
-            stack.orientation = .horizontal
-            stack.spacing = 2
-            pageControls = stack
-            item.view = stack
-            item.label = "Page"
-            // The item is inserted the moment a card is engaged, so its buttons have to arrive already
-            // agreeing with that card rather than waiting for the next thing to happen.
-            DispatchQueue.main.async { [weak self] in self?.pageStateChanged() }
-
-        case Item.fit:
-            item.view = NSButton(title: "Fit", target: self, action: #selector(zoomToFit))
-            (item.view as? NSButton)?.bezelStyle = .texturedRounded
-            item.label = "Fit"
-
-        case Item.mode:
-            // The mode the whole interaction model turns on. Two words rather than a switch, because
-            // "Edit" has to be readable at a glance — the connection dots appearing is a big enough
-            // change to the board that you should never be unsure which mode you're in.
-            let control = NSSegmentedControl(labels: ["View", "Edit"],
-                                             trackingMode: .selectOne,
-                                             target: self, action: #selector(modeChanged(_:)))
-            control.selectedSegment = 0
-            control.setToolTip("Reading: cards and lines, nothing else", forSegment: 0)
-            control.setToolTip("Editing: cards offer the dots you drag lines from", forSegment: 1)
-            modeControl = control
-            item.view = control
-            item.label = "Mode"
-
-        case Item.add:
-            let button = NSPopUpButton(frame: .zero, pullsDown: true)
-            button.bezelStyle = .texturedRounded
-            button.imagePosition = .imageOnly
-            let menu = NSMenu()
-            menu.addItem(NSMenuItem())  // the pull-down's own title slot
-            menu.addItem(withTitle: "Card", action: #selector(addTextCard), keyEquivalent: "")
-            menu.addItem(withTitle: "Frame", action: #selector(addFrame), keyEquivalent: "")
-            menu.addItem(withTitle: "Link…", action: #selector(addLink), keyEquivalent: "")
-            menu.addItem(withTitle: "File…", action: #selector(addFile), keyEquivalent: "")
-            for entry in menu.items { entry.target = self }
-            button.menu = menu
-            button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")
-            item.view = button
-            item.label = "Add"
-
-        case Item.search:
-            let field = NSSearchField()
-            field.placeholderString = "Find on canvas"
-            field.sendsSearchStringImmediately = false
-            field.sendsWholeSearchString = false
-            field.target = self
-            field.action = #selector(searchChanged(_:))
-            field.widthAnchor.constraint(equalToConstant: 170).isActive = true
-            searchField = field
-            item.view = field
-            item.label = "Find"
-
-        default:
-            return nil
-        }
-        return item
+        header.page = CanvasHeaderModel.Page(
+            host: card.liveHost,
+            savedAddress: card.address,
+            wandered: card.hasWandered,
+            canGoBack: card.canGoBack,
+            canGoForward: card.canGoForward,
+            age: card.loadedAt.map { canvasFreshnessLabel(for: $0) })
     }
 
     // MARK: Finding
 
-    private var lastQuery: String { searchField?.stringValue ?? "" }
+    private var lastQuery: String { header.find.query }
 
-    @objc private func searchChanged(_ sender: NSSearchField) {
-        let query = sender.stringValue
+    /// Run the query, and say when it found nothing.
+    ///
+    /// The count goes in the field's own trailing edge; only the empty result gets the banner, because
+    /// that is the one outcome where the board itself shows you nothing and would otherwise look like a
+    /// board that had simply lost your selection.
+    private func search(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             scroll.board.select([])
+            header.find.summary = ""
             notice.dismiss()
             updateNotice()
             return
         }
         let found = scroll.board.find(query)
+        header.find.summary = found.isEmpty ? "" : "\(found.count)"
         if found.isEmpty {
             notice.show(message: "Nothing on this canvas matches \u{201C}\(query)\u{201D}.",
                         kind: .informational, actionTitle: nil)
@@ -394,17 +353,27 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
         }
     }
 
+    /// Close the field and drop the query with it — a selection you can no longer see the reason for is
+    /// a selection you'll wonder about.
+    private func closeFind() {
+        header.find = CanvasHeaderModel.Find()
+        scroll.board.select([])
+        updateNotice()
+        window?.makeFirstResponder(scroll.board)
+    }
+
     /// Edit ▸ Find. AppKit's standard Find selector, told apart by the item's `tag` — the same
     /// convention the project window follows, so ⌘F means the same thing in both.
+    ///
+    /// The field grows out of the header's capsule rather than opening a bar of its own; ⌘F while it is
+    /// already open re-focuses and selects, so a second press is "search again" rather than a no-op.
     @objc func performFindPanelAction(_ sender: Any?) {
         let action = (sender as? NSMenuItem).map { NSTextFinder.Action(rawValue: $0.tag) } ?? .showFindInterface
         switch action {
         case .showFindInterface:
-            window?.makeFirstResponder(searchField)
-            searchField?.selectText(nil)
-        case .nextMatch:
-            scroll.board.findNext(lastQuery)
-        case .previousMatch:
+            header.find.isShowing = true
+            header.find.focusToken &+= 1
+        case .nextMatch, .previousMatch:
             scroll.board.findNext(lastQuery)
         default:
             break
@@ -427,12 +396,10 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
         updateNotice()
     }
 
-    /// Where a document says what state it is in. The toolbar's own readout is still fed, for anyone
-    /// who has added that item back.
+    /// The header's quiet percentage. It used to read in the window's subtitle, which a hidden title
+    /// takes with it.
     private func showZoom(_ zoom: CGFloat) {
-        let reading = "\(Int((zoom * 100).rounded()))%"
-        window?.subtitle = reading == "100%" ? "" : reading
-        zoomLabel?.stringValue = reading
+        header.zoom = Double(zoom)
     }
 
     private func noteOutsideChange() {
@@ -501,10 +468,6 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
     @objc private func zoomIn() { scroll.zoom(by: 1.25) }
     @objc private func zoomOut() { scroll.zoom(by: 1 / 1.25) }
     @objc private func zoomToFit() { scroll.zoomToFit() }
-
-    @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        scroll.board.mode = sender.selectedSegment == 1 ? .edit : .view
-    }
 
     /// A new card lands in the middle of what you're looking at, which is the only place you can be
     /// sure you'll see it.

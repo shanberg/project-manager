@@ -167,37 +167,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// content area, and a resize can bring either about. Measured only in `show()`, a window that went
     /// full screen kept a titlebar-sized gap above a header with no titlebar over it, and the same
     /// stale-constant problem the measurement exists to avoid came back by another route.
+    /// Write the window's own button geometry through to the view state, ignoring sub-point noise so a
+    /// live resize doesn't republish (and re-lay-out the whole column) on every frame for a value that
+    /// hasn't moved. The measuring itself is `NSWindow.titlebarButtonMetrics`, shared with the canvas
+    /// window's header.
     private func measureTitlebarButtons() {
-        guard let window, let content = window.contentView else { return }
-        // Full screen has no titlebar over the content and no traffic lights sitting in it, so the
-        // header wants neither the leading inset nor the vertical drop. Asking the buttons where they
-        // are here answers for the auto-hiding bar, which is not where the content is.
-        guard !window.styleMask.contains(.fullScreen) else {
-            publishTitlebarMetrics(inset: 0, centerY: 0)
-            return
+        guard let metrics = window?.titlebarButtonMetrics() else { return }
+        if abs(state.leadingTitlebarInset - metrics.leadingInset) > 0.5 {
+            state.leadingTitlebarInset = metrics.leadingInset
         }
-        guard let close = window.standardWindowButton(.closeButton),
-              let zoom = window.standardWindowButton(.zoomButton) else { return }
-        // Measured in the content view's own space, not the window's. The header is laid out from the
-        // top of the content view, and that is not reliably the top of the window frame — a tab bar
-        // moves one and not the other, and a window-frame-relative drop puts the header the height of
-        // the tab bar out of true.
-        //
-        // AppKit's coordinates are bottom-left and the views' are top-down, hence the flip through the
-        // content view's height for "how far down from the top are these buttons centred".
-        let inset = content.convert(zoom.bounds, from: zoom).maxX + 12
-        let box = content.convert(close.bounds, from: close)
-        publishTitlebarMetrics(inset: inset, centerY: content.bounds.height - box.midY)
-    }
-
-    /// Write measurements through to the view state, ignoring sub-point noise so a live resize doesn't
-    /// republish (and re-lay-out the whole column) on every frame for a value that hasn't moved.
-    private func publishTitlebarMetrics(inset: CGFloat, centerY: CGFloat) {
-        if inset >= 0, abs(state.leadingTitlebarInset - inset) > 0.5 {
-            state.leadingTitlebarInset = inset
-        }
-        if centerY >= 0, abs(state.titlebarButtonCenterY - centerY) > 0.5 {
-            state.titlebarButtonCenterY = centerY
+        if abs(state.titlebarButtonCenterY - metrics.buttonCenterY) > 0.5 {
+            state.titlebarButtonCenterY = metrics.buttonCenterY
         }
     }
 
