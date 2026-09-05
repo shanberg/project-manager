@@ -448,8 +448,11 @@ extension CanvasBoardView {
         beginEditing(id)
     }
 
+    /// The file card menu's "Open in Obsidian". Not `beginEditing`, which is what a click means and no
+    /// longer the same errand: on a project card a click steps into the project, and this item says
+    /// Obsidian and has to mean it.
     @objc private func openSelected() {
-        for id in selection { nodeViews[id]?.beginEditing() }
+        for id in selection { (nodeViews[id] as? CanvasFileNodeView)?.openInOwningApp() }
     }
 
     @objc private func revealSelected() {

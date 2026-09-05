@@ -191,10 +191,20 @@ final class CanvasFileNodeView: CanvasNodeView {
         return store
     }
 
+    /// Whether this card shows a project rather than a file.
+    ///
+    /// Asked of the path, not of whether the store happens to be held. A card zoomed out past reading
+    /// draws a summary and never acquires a store, and what a click on it means should not depend on
+    /// how far out the board happens to be.
+    var isProjectCard: Bool {
+        guard stored.subpath == nil, let url = location.url else { return false }
+        return CanvasProjectSource.projectKey(for: url) != nil
+    }
+
     /// A card showing a project takes its own clicks, the way a web card does — you tick a box, retype
     /// a task, set a date. Everything else on a board is read, so everything else waits for a
     /// double-click.
-    override var engagesOnClick: Bool { projectStoreKey != nil }
+    override var engagesOnClick: Bool { isProjectCard && !isSimplified }
 
     override func engagementChanged() {
         engagement.isEngaged = isEngaged
@@ -278,13 +288,36 @@ final class CanvasFileNodeView: CanvasNodeView {
 
     // MARK: Opening
 
-    override func beginEditing() { open() }
+    /// What "work on this card" means, which is not the same thing for every file.
+    ///
+    /// For nearly all of them it means opening the document, because PM does not edit pictures, PDFs or
+    /// somebody's markdown — the card is a view of a file that belongs to another app. For a project it
+    /// means the opposite: the card *is* the project, editable in place (see `CanvasProjectNote`), and
+    /// handing it to Obsidian would be walking past the thing you clicked on to open its source.
+    ///
+    /// This is what a single click reaches on a project card, through `engagesOnClick` — so getting it
+    /// wrong meant a click on a project launching Obsidian, which is the one place a click on it should
+    /// never go.
+    override func beginEditing() {
+        guard isProjectCard else { return open() }
+        // Too far out to read, let alone edit. "Open this" then means the project window, which is
+        // where a project you cannot see on the board is actually usable — still the project, still
+        // not Obsidian.
+        guard !isSimplified else {
+            if let folder = projectFolderName { WindowManager.shared.open(named: folder) }
+            return
+        }
+        engage(true)
+    }
 
-    /// Open the file where it belongs: a note in Obsidian, anything else in whatever owns it.
+    /// Open the file where it belongs: a note in Obsidian, anything else in whatever owns it. What the
+    /// card's own menu item does, on any card including a project's.
     ///
     /// A note goes to Obsidian rather than to a text editor because that is where it is written, and
     /// the canvas it is on is an Obsidian document — jumping to a different app to read a note that
     /// lives in the vault would be PM asserting an ownership it doesn't have.
+    func openInOwningApp() { open() }
+
     private func open() {
         guard let url = location.url else { return }
         if ["md", "markdown"].contains(url.pathExtension.lowercased()) {
