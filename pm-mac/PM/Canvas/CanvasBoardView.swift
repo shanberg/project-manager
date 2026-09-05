@@ -316,6 +316,16 @@ final class CanvasBoardView: NSView {
     /// Only so a change can be logged once rather than on every settle.
     private var pagesLive: Set<String> = []
 
+    /// Let every card go, because the board is going with it.
+    ///
+    /// `refreshNodeViews` already calls `prepareForRemoval` on a card that scrolls out of view, which is
+    /// where a card gives back whatever it is holding — a project's store, most of all. A window closing
+    /// takes the whole board without scrolling anything anywhere, so nothing would be given back at the
+    /// one moment everything should be.
+    func releaseCards() {
+        for view in nodeViews.values { view.prepareForRemoval() }
+    }
+
     /// Freeze every page on this board — the window has stopped being looked at.
     func pauseAllPages() {
         settleWork?.cancel()

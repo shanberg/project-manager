@@ -24,6 +24,15 @@ import PmLib
 final class CanvasFileNodeView: CanvasNodeView {
     private var location: CanvasFileLocation = .missing
 
+    /// The project this card shows, when it shows one — its store, and the key the registry knows it
+    /// by so the hold can be given back. Shared with the project window (`StoreRegistry`), so a task
+    /// ticked here is ticked there, with no second copy of the document to keep in step.
+    private var projectStore: PMStore?
+    private var projectStoreKey: String?
+    /// Published to this card's SwiftUI content, which starts scrolling and stops holding an open
+    /// editor as you step in and out.
+    private let engagement = CanvasCardEngagement()
+
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
         contentChanged()
@@ -39,6 +48,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     override func contentChanged() {
         let (path, subpath) = stored
         location = board.store.resolver.resolve(path)
+        // The card may have been pointed somewhere else entirely. A hold on the project it used to show
+        // is a project kept open for a card that has stopped showing it.
+        if projectStoreKey != nil,
+           projectStoreKey != location.url.flatMap(CanvasProjectSource.projectKey(for:)) {
+            releaseProject()
+        }
 
         // Zoomed out, a note renders as a grey texture and a PDF page as a grey rectangle, and both
         // cost a full layout to produce. The filename is what you are actually reading at this size.
@@ -133,15 +148,11 @@ final class CanvasFileNodeView: CanvasNodeView {
             // A project's notes are a project, not a markdown file — see `CanvasProjectNote`. Only for
             // the whole document: a `#Heading` subpath is a request for one part of the file, and the
             // task list is not a part of a file, so a card pointing into one falls through to prose.
-            if subpath == nil, let project = CanvasProjectNoteSource.read(url) {
+            if subpath == nil, let store = projectStore(for: url) {
                 return NSHostingView(rootView:
-                    ScrollView(.vertical) {
-                        CanvasProjectNote(notes: project.notes, todos: project.todos, noteURL: url) {
-                            folder in WindowManager.shared.open(named: folder)
-                        }
-                        .padding(.vertical, 10)
-                    }
-                    .scrollDisabled(true))
+                    CanvasProjectNote(store: store, engagement: engagement, noteURL: url) { folder in
+                        WindowManager.shared.open(named: folder)
+                    })
             }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
@@ -164,6 +175,50 @@ final class CanvasFileNodeView: CanvasNodeView {
             label.alignment = .center
             return label
         }
+    }
+
+    /// The project's store, taken from the registry the first time this card asks and held until the
+    /// card goes away.
+    ///
+    /// Retained rather than fetched per render, because acquiring is what triggers the project's first
+    /// read: asking again on every rebuild would be a reload per zoom threshold crossed.
+    private func projectStore(for url: URL) -> PMStore? {
+        if let projectStore { return projectStore }
+        guard let key = CanvasProjectSource.projectKey(for: url) else { return nil }
+        let store = StoreRegistry.shared.acquire(key)
+        projectStore = store
+        projectStoreKey = key
+        return store
+    }
+
+    /// A card showing a project takes its own clicks, the way a web card does — you tick a box, retype
+    /// a task, set a date. Everything else on a board is read, so everything else waits for a
+    /// double-click.
+    override var engagesOnClick: Bool { projectStoreKey != nil }
+
+    override func engagementChanged() {
+        engagement.isEngaged = isEngaged
+        if isEngaged {
+            // The keyboard has to reach the text fields inside. A hosting view takes it on behalf of
+            // whatever SwiftUI has focused.
+            if let content = subviews.first { window?.makeFirstResponder(content) }
+        } else if let content = subviews.first,
+                  (window?.firstResponder as? NSView)?.isDescendant(of: content) == true {
+            window?.makeFirstResponder(board)
+        }
+    }
+
+    /// Scrolled off the board: give the project's store back. The registry drops it when the last
+    /// holder does, and a board of forty project cards would otherwise hold forty projects open for as
+    /// long as the window lived.
+    override func prepareForRemoval() {
+        releaseProject()
+    }
+
+    private func releaseProject() {
+        StoreRegistry.shared.release(projectStoreKey)
+        projectStore = nil
+        projectStoreKey = nil
     }
 
     private func missingView(_ path: String) -> NSView {

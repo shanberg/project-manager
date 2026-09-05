@@ -85,3 +85,96 @@ struct DueChipStyle {
                                     weight: .regular, dashed: true)
 }
 
+
+/// The chip as a control: click it and pick a date.
+///
+/// Shared by the project window's task rows and a canvas project card, so the two offer the same dates
+/// in the same words. A card is otherwise read-only, and this is one of the two exceptions — a deadline
+/// is the thing you most often want to change from a board, and the second-most is ticking the task off.
+struct DueChip: View {
+    let todo: Todo
+    let isEditing: Bool
+    /// Reveal the empty-state "＋date" affordance (true while hovering the row). A real own/inherited
+    /// date is content, not a control, so it stays visible regardless.
+    let reveal: Bool
+    /// Apply a due date — nil clears it. Whatever the row's date commands apply to, this applies to.
+    let onPick: (String?) -> Void
+    /// Open the precise picker, for a date the presets haven't got.
+    let onPickCustom: () -> Void
+
+    /// The date this chip is showing, and whether the task owns it or inherited it from an ancestor.
+    private var shown: (raw: String, own: Bool)? {
+        if let own = todo.dueDate { return (own, true) }
+        if let inherited = todo.effectiveDueDate { return (inherited, false) }
+        return nil
+    }
+
+    private var hasDate: Bool { shown != nil }
+    private var showing: Bool { hasDate || reveal || isEditing }
+
+    var body: some View {
+        // Always laid out so hovering only toggles opacity, never the row's height. A real own/
+        // inherited date is content (always visible); the empty-state "＋date" is a control that
+        // fades in on hover/edit but keeps reserving its space.
+        Menu {
+            menuItems
+        } label: {
+            if let shown {
+                DueBadge.chip(RelativeDue.short(shown.raw),
+                     style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
+            } else {
+                DueBadge.chip("＋date", style: .empty)
+            }
+        }
+        // `.button` + `.plain`, not `.borderlessButton`. The borderless style presents the label
+        // through a pop-up-button control, which paints it in the control's own label colour — so the
+        // chip's whole severity scale collapsed to plain text the moment it stopped being a `Button`.
+        // The button style routes the label through `PlainButtonStyle` instead, which renders it as
+        // written, exactly as the row's other plain buttons are rendered.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(helpText)
+        .opacity(showing ? 1 : 0)
+        .allowsHitTesting(showing)
+    }
+
+    /// The relative answers first, a calendar for anything else, and a way out.
+    ///
+    /// A menu, because that's what a chip is on this platform — you click the date pill in Reminders
+    /// and get choices, not a stepper. It also puts the editor in the same language as the badge that
+    /// opens it: the badge says "in 2w", so the menu says "Next Week", not 09/03/2026.
+    ///
+    /// Every item routes through `onPick`, which is the row's `onSetDue` — so a date chosen on a row
+    /// inside a multi-selection lands on the whole selection, exactly as the context menu's version
+    /// does. There's no separate single-row path to fall out of step.
+    @ViewBuilder private var menuItems: some View {
+        ForEach(DueSuggestion.options()) { option in
+            Button { onPick(DueFormat.string(option.date)) } label: {
+                Text(option.title) + Text("   \(option.hint)").foregroundStyle(.secondary)
+            }
+        }
+        Divider()
+        Button("Pick a Date…", action: onPickCustom)
+        if todo.dueDate != nil {
+            Divider()
+            Button("Clear Due Date") { onPick(nil) }
+        }
+    }
+
+    /// The tooltip: the exact date the badge is a summary of, plus what clicking does.
+    ///
+    /// The badge says "in 2w" now, which is faster to read and useless for deciding whether that
+    /// clears a deadline — so the date it stands for has to be one hover away. See `RelativeDue.full`.
+    private var helpText: String {
+        if let own = todo.dueDate {
+            return "Due \(RelativeDue.full(own))  ·  click to edit"
+        }
+        if let eff = todo.effectiveDueDate {
+            return "Inherited due \(RelativeDue.full(eff))  ·  click to set this task's own"
+        }
+        return "Set due date"
+    }
+
+}

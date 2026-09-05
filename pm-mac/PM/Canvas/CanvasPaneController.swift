@@ -88,6 +88,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         idleTimer = nil
         stopWatchingTheWindow()
         scroll.board.pauseAllPages()
+        scroll.board.releaseCards()
         store.removeWatcher(self)
         CanvasStoreRegistry.release(store)
     }
