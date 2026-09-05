@@ -219,12 +219,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         let pane = CanvasPaneController(store: store)
         pane.title_ = projectName ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
-        // The way back. In the options menu rather than as a button in the capsule, because it is a
-        // command about the *window* rather than about the board, and the board's own controls should
-        // not be sharing a row with one.
-        pane.header.extraOptions = [
-            CanvasHeaderModel.ExtraCommand(title: "Show Tasks") { [weak self] in self?.showTasks() }
-        ]
+        // The way back, as a button — the twin of the project header's canvas button, which is what
+        // brought you here.
+        pane.header.backToTasks = { [weak self] in self?.showTasks() }
         canvasPane = pane
         contentPane.show(pane)
         pane.focusBoard()

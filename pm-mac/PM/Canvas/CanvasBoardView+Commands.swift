@@ -266,7 +266,14 @@ extension CanvasBoardView {
             // *showing* a project (see `CanvasProjectNote`), and the board is read-only, so this is the
             // way in to actually doing something about what it says.
             if (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName != nil {
-                add(menu, "Open Project", #selector(openProjectForCard))
+                // "Go to" and not "Open", because from a board rendered inside a project window this
+                // retargets the window you are in — the same thing clicking the sidebar does. The
+                // alternate is the other verb, said out loud. See `openProjectForCard`.
+                add(menu, "Go to Project", #selector(openProjectForCard))
+                let newWindow = add(menu, "Open Project in New Window",
+                                    #selector(openProjectInNewWindowForCard))
+                newWindow.keyEquivalentModifierMask = [.option]
+                newWindow.isAlternate = true
                 // The board is the one surface that shows several projects at once, which makes it the
                 // natural place to say which one you are on — and, until now, the only surface that
                 // couldn't. This is what the CLI, Raycast, the menu bar and the focus panel all read.
@@ -500,12 +507,35 @@ extension CanvasBoardView {
         }
     }
 
-    /// Open the project a card's notes belong to, in a PM window.
-    @objc private func openProjectForCard() {
-        for id in selection {
-            guard let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName else { continue }
-            WindowManager.shared.open(named: folder)
+    /// Go to the project a card's notes belong to.
+    ///
+    /// Where that lands depends on where you asked from, which is the Mac's own rule and was the one
+    /// thing this app's several "open" commands disagreed about. A board rendered inside a project
+    /// window retargets *that* window, exactly as clicking its sidebar does — it is the same errand
+    /// reached from a card instead of a row. A board in a window of its own has no window to retarget,
+    /// so it opens or raises one.
+    @objc private func openProjectForCard() { goToProjectForCard(inNewWindow: false) }
+
+    @objc private func openProjectInNewWindowForCard() { goToProjectForCard(inNewWindow: true) }
+
+    /// The same errand a card asks for itself, when it is opened rather than picked from a menu.
+    func goToProject(_ card: CanvasFileNodeView) {
+        guard let key = card.projectFolderName
+            .flatMap(ProjectIndex.shared.projectKey(forFolder:)) else { return }
+        if let host = window?.windowController as? ProjectWindowController {
+            return WindowManager.shared.retarget(host, to: key)
         }
+        WindowManager.shared.open(projectKey: key)
+    }
+
+    private func goToProjectForCard(inNewWindow: Bool) {
+        let folders = selection.compactMap { (nodeViews[$0] as? CanvasFileNodeView)?.projectFolderName }
+        guard let folder = folders.first,
+              let key = ProjectIndex.shared.projectKey(forFolder: folder) else { return }
+        if !inNewWindow, let host = window?.windowController as? ProjectWindowController {
+            return WindowManager.shared.retarget(host, to: key)
+        }
+        WindowManager.shared.open(projectKey: key)
     }
 
     @objc private func openLinkInBrowser() {

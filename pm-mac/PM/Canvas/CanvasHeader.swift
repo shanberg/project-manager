@@ -100,15 +100,13 @@ final class CanvasHeaderModel: ObservableObject {
         var focusToken = 0
     }
 
-    /// Commands an owner puts at the top of the options menu — a project window's way back to its task
-    /// list. Empty in a canvas window, which has nothing else to be.
-    @Published var extraOptions: [ExtraCommand] = []
-
-    struct ExtraCommand: Identifiable {
-        let id = UUID()
-        var title: String
-        var run: () -> Void
-    }
+    /// The way back to this window's task list, when the board is being rendered inside a project
+    /// window. Nil in a canvas window, which has nothing else to be.
+    ///
+    /// A button rather than a menu item, and it is the twin of the project header's canvas button: the
+    /// same switch, pointed the other way, in the same place in the same shape of chrome. Two commands
+    /// that undo each other should not be one button and one buried menu entry.
+    @Published var backToTasks: (() -> Void)?
 
     // MARK: What the controls do. Supplied by the window controller.
 
@@ -223,6 +221,9 @@ struct CanvasControlCapsule: View {
                     .padding(.horizontal, 5)
                     .help("Cards are showing the dots you drag lines from")
             }
+            if let backToTasks = model.backToTasks {
+                button("list.bullet", "Show this project\u{2019}s tasks", action: backToTasks)
+            }
             button("magnifyingglass", "Find on this canvas") {
                 model.find.isShowing = true
                 model.find.focusToken &+= 1
@@ -329,12 +330,6 @@ struct CanvasControlCapsule: View {
 
     private var optionsMenu: some View {
         Menu {
-            if !model.extraOptions.isEmpty {
-                ForEach(model.extraOptions) { command in
-                    Button(command.title, action: command.run)
-                }
-                Divider()
-            }
             Toggle("Connect Cards", isOn: Binding(get: { model.mode == .connect },
                                                   set: { model.setMode($0 ? .connect : .view) }))
                 .disabled(model.tiling != nil)

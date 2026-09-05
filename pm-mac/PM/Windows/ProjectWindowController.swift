@@ -104,6 +104,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
+        state.showCanvas = { [weak self] in self?.setRenderer(.canvas) }
         watchCanvasPath()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
@@ -287,7 +288,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             }
     }
 
-    private func setRenderer(_ next: ProjectRenderer) {
+    func setRenderer(_ next: ProjectRenderer) {
         renderer = next
         switch next {
         case .tasks:

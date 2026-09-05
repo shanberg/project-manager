@@ -322,7 +322,7 @@ final class CanvasFileNodeView: CanvasNodeView {
         // where a project you cannot see on the board is actually usable — still the project, still
         // not Obsidian.
         guard !isSimplified else {
-            if let folder = projectFolderName { WindowManager.shared.open(named: folder) }
+            board.goToProject(self)
             return
         }
         engage(true)

@@ -66,6 +66,11 @@ final class ProjectViewState: ObservableObject {
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}
 
+    /// Render this window's project as its board instead of its task list — View ▸ Show Canvas, and the
+    /// header's canvas button. Supplied by the window, which owns the renderer and the size limits that
+    /// go with it.
+    var showCanvas: () -> Void = {}
+
     /// How far in from this window's leading edge its close/minimise/zoom buttons reach, plus a
     /// margin. Whichever pane is leftmost insets its header by this so the two never overlap.
     ///

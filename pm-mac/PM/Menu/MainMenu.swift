@@ -126,8 +126,13 @@ enum MainMenu {
         add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
         // The project's own board, above the file-picker version, because it's the one you want
         // nearly every time — going looking for a canvas is the rarer errand of the two.
-        add(menu, "Project Canvas", #selector(AppDelegate.projectCanvas), target: target, key: "c",
-            modifiers: [.command, .shift])
+        //
+        // Named for the window it makes. View ▸ Show Canvas puts the same board in the window you are
+        // already in, and the two commands are a keystroke apart; before, both were called some form of
+        // "canvas" and nothing in either name said which one you were about to get. Whether a command
+        // makes a window is the whole of what distinguishes them, so it is what the names say.
+        add(menu, "Open Project Canvas in New Window", #selector(AppDelegate.projectCanvas),
+            target: target, key: "c", modifiers: [.command, .shift])
         // ⇧⌘O rather than the ⌘O a document app would use: in PM, "open" already means a project, and
         // a canvas is a document you reach *from* a project far more often than you go looking for one.
         add(menu, "Open Canvas…", #selector(AppDelegate.openCanvas), target: target, key: "o",

@@ -1353,10 +1353,20 @@ struct ProjectView: View {
     /// discover by accident on somebody else's project. Clicking with nothing there makes it, which is
     /// the same bargain the notes file has always had — you get the document by asking for it, not by
     /// deciding to create it first. The tooltip says which of the two is about to happen.
+    /// Show this project as its board, in this window.
+    ///
+    /// It used to open a new window on the board, which put two doors on one room: ⌥⌘C already showed
+    /// the same canvas in the window you were in. And of the two, a button in a window's own header is
+    /// the last thing that should mean "make another window" — a header button belongs to the window it
+    /// is in and should act on it. Opening the board in a window of its own is still ⇧⌘C, which now
+    /// says so in its name.
+    ///
+    /// The way back is the board's own header, which carries the same switch pointed the other way.
     private var canvasButton: some View {
         headerButton(symbol: "rectangle.3.group",
-                     help: store.canvasPath == nil ? "Create the project canvas" : "Open the project canvas") {
-            CanvasWindowController.openProjectCanvas(for: store)
+                     help: store.canvasPath == nil ? "Create the project canvas"
+                                                   : "Show the project canvas") {
+            state.showCanvas()
         }
     }
 
