@@ -1175,8 +1175,8 @@ struct ProjectView: View {
         return projectTitle
             // Enough inset that the title sits *in* the pill rather than against its edges — a capsule
             // this tight on its text reads as a tag, not as chrome.
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
+            .padding(.vertical, HeaderMetrics.pillInset.vertical)
             .headerBacking(headerChrome, in: Capsule())
             .contentShape(Capsule())
             .onTapGesture { if live { setDetails(!detailsExpanded) } }
@@ -1203,18 +1203,16 @@ struct ProjectView: View {
     /// it would move it.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
-            HStack(spacing: 2) {
+            HeaderCapsule(chrome: headerChrome) {
                 if store.projectPath != nil {
                     rendererSwitch
-                    Divider().frame(height: 14).padding(.horizontal, 3)
+                    HeaderDivider()
                 }
                 let p = store.progress
                 if p.total > 0 {
                     Text("\(p.done)/\(p.total)")
-                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .padding(.horizontal, 4)
+                        .headerCaption()
                 }
                 if store.projectName != nil {
                     addTaskButton
@@ -1225,10 +1223,6 @@ struct ProjectView: View {
                     openButton
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .headerBacking(headerChrome, in: Capsule())
-            .background(WindowDragExcluder())
         }
     }
 
@@ -1256,20 +1250,11 @@ struct ProjectView: View {
         }
     }
 
-    /// One control in the trailing capsule: a symbol at the size and weight the others use, in a hit
-    /// area big enough to click without aiming. Shared so the buttons can't drift apart.
+    /// One control in the trailing capsule. `HeaderSymbolButton` now, shared with the canvas window's
+    /// header — these were the same code written twice and were already a point apart.
     private func headerButton(symbol: String, help: String,
                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(Text(help))
+        HeaderSymbolButton(symbol: symbol, help: help, action: action)
     }
 
     /// Whether the trailing capsule has anything to hold. With no project focused it doesn't, and an
@@ -1310,9 +1295,9 @@ struct ProjectView: View {
             viewOptionsMenuContent
         } label: {
             Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
                 .foregroundStyle(isViewCustomized ? Color.accentColor : Color.secondary)
-                .frame(width: 20, height: 18)
+                .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
@@ -1384,11 +1369,11 @@ struct ProjectView: View {
                     Image(nsImage: appIcon).resizable().frame(width: 15, height: 15)
                 } else {
                     Image(systemName: finder ? "folder" : "book.closed")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 20, height: 18)
+            .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

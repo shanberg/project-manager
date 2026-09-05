@@ -52,9 +52,9 @@ struct RendererSwitch: View {
         let current = renderer == which
         return Button { select(which) } label: {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
                 .foregroundStyle(current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .frame(width: 24, height: 19)
+                .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
                 .contentShape(Rectangle())
                 .background {
                     if current {

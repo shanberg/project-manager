@@ -48,8 +48,11 @@ final class CanvasHeaderModel: ObservableObject {
     /// can *read elsewhere*. The page group and the find field are things you asked for a moment ago and
     /// are acting on now. The zoom is a number the board itself shows you by being at that zoom. So the
     /// zoom goes first, then the mode label, then the host's words — its buttons stay, because they are
-    /// the only way to drive the page — and the tiled count shortens to a bare fraction before it
-    /// leaves. What never goes: Add, the options menu, and the way out of a tiled view.
+    /// the only way to drive the page. What never goes: the renderer switch, Add, and the options menu.
+    ///
+    /// The tiled count is measured here too, but it isn't in this capsule any more — it belongs to the
+    /// pill, which is where "what am I looking at" is answered. It shortens to a bare fraction rather
+    /// than leaving, because the pill has a title to compress before it needs to drop anything.
     ///
     /// Breakpoints on the window rather than a fitting pass, because the capsule is in a hosting view
     /// sized to its own contents and would report that it fits at any width. Deliberate numbers beat a
@@ -145,19 +148,51 @@ struct CanvasTitlePill: View {
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        Text(model.title)
-            .font(.system(size: 13, weight: .semibold))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .opacity(chrome.contentOpacity)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .headerBacking(chrome, in: Capsule())
-            .contentShape(Capsule())
-            .onHover { hovering = $0 }
-            .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-            .accessibilityLabel(Text(model.title))
-            .modifier(TitlebarDrop(model: model))
+        HStack(spacing: 6) {
+            Text(model.title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            // A tiled view is a state of the thing this pill names, so this is where it goes.
+            //
+            // It was a caption and a bordered "Done" button in the control capsule, where it was the
+            // single worst-fitting thing in the row: a sentence and a bezelled button among borderless
+            // glyphs. No amount of equal padding makes those siblings. The pill answers "what am I
+            // looking at", and "6 of 43 cards" is precisely an answer to that — while the ✕ is the
+            // Finder's own idiom for leaving a temporary, filtered state.
+            if let tiling = model.tiling {
+                Text(verbatim: "·")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Text(model.room.showsLongTilingSummary ? tiling.long : tiling.short)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Button(action: model.leaveTiling) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Leave the tiled view")
+                .accessibilityLabel(Text("Leave the tiled view"))
+            }
+        }
+        .opacity(chrome.contentOpacity)
+        .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
+        .padding(.vertical, HeaderMetrics.pillInset.vertical)
+        .headerBacking(chrome, in: Capsule())
+        .contentShape(Capsule())
+        .onHover { hovering = $0 }
+        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.tiling?.long)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(model.tiling.map { "\(model.title), tiled, \($0.long)" } ?? model.title))
+        .modifier(TitlebarDrop(model: model))
     }
 }
 
@@ -177,31 +212,18 @@ struct CanvasControlCapsule: View {
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        HStack(spacing: 2) {
+        HeaderCapsule(chrome: chrome) {
             if model.showsRendererSwitch {
                 RendererSwitch(renderer: .canvas) { model.setRenderer($0) }
-                divider
+                HeaderDivider()
             }
             if let page = model.page {
                 pageGroup(page)
-                divider
-            }
-            if let tiling = model.tiling {
-                Text(model.room.showsLongTilingSummary ? tiling.long : tiling.short)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .padding(.horizontal, 5)
-                    .help("This board has more cards than the tiled view is showing.")
-                Button("Done", action: model.leaveTiling)
-                    .controlSize(.small)
-                    .padding(.trailing, 2)
-                    .help("Leave the tiled view")
-                divider
+                HeaderDivider()
             }
             if model.find.isShowing {
                 findField
-                divider
+                HeaderDivider()
             }
             // The zoom percentage used to read in the window's subtitle, which a hidden title takes
             // with it. Quiet and monospaced so it can change under your eye without the row twitching
@@ -210,11 +232,9 @@ struct CanvasControlCapsule: View {
             // a percentage you cannot change and did not choose is a number for its own sake.
             if model.tiling == nil, model.room.showsZoom {
                 Text("\(Int((model.zoom * 100).rounded()))%")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .frame(width: 38, alignment: .trailing)
-                    .padding(.trailing, 4)
+                    .frame(width: 34, alignment: .trailing)
+                    .headerCaption()
                     .help("Zoom")
             }
             if model.mode == .connect, model.room.showsModeLabel {
@@ -223,27 +243,21 @@ struct CanvasControlCapsule: View {
                 // dots you drag lines from — so this is a confirmation rather than the only signal, and
                 // a control that is present always to say something that is true rarely is chrome.
                 Text("Connecting")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
+                    .headerCaption()
                     .help("Cards are showing the dots you drag lines from")
             }
-            button("magnifyingglass", "Find on this canvas") {
+            HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
                 model.find.isShowing = true
                 model.find.focusToken &+= 1
             }
             addMenu
             optionsMenu
         }
-        .opacity(chrome.contentOpacity)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .headerBacking(chrome, in: Capsule())
         .onHover { hovering = $0 }
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.page)
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.find.isShowing)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.tiling?.long)
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
         .modifier(TitlebarDrop(model: model))
     }
@@ -257,23 +271,25 @@ struct CanvasControlCapsule: View {
         // one thing here that can cost you something.
         if model.room.showsPageHost || page.wandered {
             Text(page.host)
-                .font(.caption)
                 .foregroundStyle(page.wandered ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: model.room.hostWidth)
-                .padding(.horizontal, 5)
+                .headerCaption()
                 .help(pageHelp(page))
         }
-        button("chevron.left", "Back", enabled: page.canGoBack, action: model.pageBack)
-        button("chevron.right", "Forward", enabled: page.canGoForward, action: model.pageForward)
-        button("arrow.clockwise", "Reload", action: model.pageReload)
-        button("house", "Back to this card\u{2019}s address",
-               enabled: page.wandered, action: model.pageHome)
+        HeaderSymbolButton(symbol: "chevron.left", help: "Back",
+                           enabled: page.canGoBack, action: model.pageBack)
+        HeaderSymbolButton(symbol: "chevron.right", help: "Forward",
+                           enabled: page.canGoForward, action: model.pageForward)
+        HeaderSymbolButton(symbol: "arrow.clockwise", help: "Reload", action: model.pageReload)
+        HeaderSymbolButton(symbol: "house", help: "Back to this card\u{2019}s address",
+                           enabled: page.wandered, action: model.pageHome)
         if page.wandered {
             // Only once the page has actually gone somewhere else — on a card sitting on its own
             // address this would be an offer to change nothing.
-            button("pin", "Set as this card\u{2019}s address", action: model.pageAdoptAddress)
+            HeaderSymbolButton(symbol: "pin", help: "Set as this card\u{2019}s address",
+                               action: model.pageAdoptAddress)
         }
     }
 
@@ -303,6 +319,7 @@ struct CanvasControlCapsule: View {
                     onCancel: model.findClosed,
                     onCommit: model.findCommitted)
             .frame(width: model.room.findWidth)
+            .headerItem()
             .overlay(alignment: .trailing) {
                 if !model.find.summary.isEmpty {
                     Text(model.find.summary)
@@ -328,7 +345,7 @@ struct CanvasControlCapsule: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 22)
+        .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
         .help("Add to this canvas")
     }
 
@@ -350,36 +367,10 @@ struct CanvasControlCapsule: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 22)
+        .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
         .help("View options")
     }
 
-    // MARK: Pieces
-
-    private var divider: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .frame(width: 1, height: 15)
-            .padding(.horizontal, 4)
-    }
-
-    /// One control in the capsule: a symbol at the size and weight the others use, in a hit area big
-    /// enough to click without aiming. Shared so the buttons can't drift apart — the same reasoning as
-    /// the project header's `headerButton`.
-    private func button(_ symbol: String, _ help: String, enabled: Bool = true,
-                        action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(enabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-                .frame(width: 20, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(help)
-        .accessibilityLabel(Text(help))
-    }
 }
 
 /// Drops a piece of header chrome to sit level with the traffic lights, wherever the system has put

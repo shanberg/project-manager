@@ -116,3 +116,108 @@ extension NSWindow {
                                      buttonCenterY: content.bounds.height - box.midY)
     }
 }
+
+// MARK: - The metrics both headers are laid out on
+
+/// The one set of numbers a floating header's contents are built from.
+///
+/// Both headers grew the same way: each element arrived with padding chosen for itself, which is fine
+/// at three items and falls apart at ten. Counted at the point this was written, one row held six
+/// different item heights — 18pt symbol buttons, 19pt renderer segments, menus with no height set at
+/// all, bare caption text, a bordered `.small` button and a 21pt search field — plus three hit widths,
+/// two different dividers with different insets and colours, and a readout with padding on one side.
+/// Nothing there is a wrong value. There was no layout system, so there was nothing for a value to be
+/// wrong against.
+///
+/// A header item is a box of `itemHeight`. That is the whole rule, and it is what stops the row
+/// wobbling: text, buttons, menus, a search field and a segmented switch are wildly different things
+/// vertically, and the only way they read as one row is if something insists they are the same height.
+enum HeaderMetrics {
+    /// Every item is this tall. Chosen off the tallest thing that has to appear in a header — a small
+    /// `NSSearchField` — because forcing a control below its natural height clips it, while giving a
+    /// glyph more room than it needs only makes it easier to hit.
+    static let itemHeight: CGFloat = 21
+    /// A glyph button's hit area. Wider than the glyph, so a control can be clicked without aiming.
+    static let hitWidth: CGFloat = 24
+    static let iconSize: CGFloat = 12
+    /// Between items that belong together.
+    static let gap: CGFloat = 2
+    /// Inside a run of text, so words don't sit against the item beside them.
+    static let textInset: CGFloat = 6
+    /// The capsule's own inset around its row.
+    static let capsuleInset = (horizontal: 6.0, vertical: 4.0)
+    /// The pill's, which is looser because it holds a name rather than controls.
+    static let pillInset = (horizontal: 14.0, vertical: 7.0)
+}
+
+extension View {
+    /// Make this a header item: one height, whatever it is inside.
+    func headerItem() -> some View {
+        frame(height: HeaderMetrics.itemHeight)
+    }
+
+    /// A run of words in a header — a readout, not a control.
+    func headerCaption() -> some View {
+        font(.caption)
+            .monospacedDigit()
+            .padding(.horizontal, HeaderMetrics.textInset)
+            .headerItem()
+    }
+}
+
+/// The trailing capsule both headers wear: one row, one spacing, one inset, one piece of glass.
+///
+/// A container rather than a convention, because a convention is what the two headers already had and
+/// they drifted apart twice in a day — the two divider implementations, written an hour apart in two
+/// files, are the receipt. Supplying items to a shared container is the only version of this that
+/// cannot drift.
+struct HeaderCapsule<Content: View>: View {
+    let chrome: HeaderChrome
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: HeaderMetrics.gap) { content }
+            .opacity(chrome.contentOpacity)
+            .padding(.horizontal, HeaderMetrics.capsuleInset.horizontal)
+            .padding(.vertical, HeaderMetrics.capsuleInset.vertical)
+            .headerBacking(chrome, in: Capsule())
+            // A click on a control is a click on that control, not the start of a window drag.
+            .background(WindowDragExcluder())
+    }
+}
+
+/// The line between two groups of header items.
+struct HeaderDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: 1, height: 14)
+            .padding(.horizontal, 4)
+    }
+}
+
+/// One control in a header: a symbol at the size and weight every other one uses, in a hit area big
+/// enough to click without aiming.
+///
+/// Shared by both headers so they cannot drift, which they had — the project window's buttons and the
+/// canvas window's were the same code written twice, and were already a point apart.
+struct HeaderSymbolButton: View {
+    let symbol: String
+    let help: String
+    var enabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
+                .foregroundStyle(enabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(Text(help))
+    }
+}
