@@ -248,6 +248,48 @@ enum MainMenu {
         menu.addItem(.separator())
     }
 
+    /// Filling the window with a card, or with a handful of them.
+    ///
+    /// One command at both ends: with one card selected ⌘Return is "show me this properly", which
+    /// otherwise means zooming in and hunting for it, and with six it is a tiled view of the six.
+    /// Fullscreen and tile are the same idea at different counts, and one key for both is what makes it
+    /// worth learning. Escape backs out.
+    ///
+    /// ⌘Return rather than a letter because it is the "open this, big" gesture the Finder, Mail and
+    /// Photos all use, and because it reads as an intensifier of Return, which on this board steps into
+    /// a card.
+    private static func canvasTilingItems(_ menu: NSMenu) {
+        let tile = menu.addItem(withTitle: "Fill Window with Selection",
+                                action: #selector(CanvasBoardView.tileSelection(_:)),
+                                keyEquivalent: "\r")
+        tile.keyEquivalentModifierMask = [.command]
+        let arrange = NSMenu(title: "Arrange Tiles")
+        for arrangement in CanvasTiling.Arrangement.allCases {
+            let entry = arrange.addItem(withTitle: arrangement.title,
+                                        action: #selector(CanvasBoardView.setTileArrangement(_:)),
+                                        keyEquivalent: "")
+            entry.representedObject = arrangement.rawValue
+        }
+        let arrangeItem = menu.addItem(withTitle: "Arrange Tiles", action: nil, keyEquivalent: "")
+        arrangeItem.submenu = arrange
+
+        // Frames as workspaces. A frame is already a named container of cards, which is what a
+        // workspace is, so ⌃1…9 is the tiling manager's own gesture arriving on a thing the board
+        // already had. Nine, because that is how many a row of number keys holds and how many every
+        // manager that does this offers.
+        let frames = NSMenu(title: "Go to Frame")
+        for index in 0..<9 {
+            let entry = frames.addItem(withTitle: "Frame \(index + 1)",
+                                       action: #selector(CanvasBoardView.goToWorkspace(_:)),
+                                       keyEquivalent: "\(index + 1)")
+            entry.keyEquivalentModifierMask = [.control]
+            entry.tag = index
+        }
+        let framesItem = menu.addItem(withTitle: "Go to Frame", action: nil, keyEquivalent: "")
+        framesItem.submenu = frames
+        menu.addItem(.separator())
+    }
+
     /// The board's mode, as a checkmark.
     ///
     /// A checked item rather than two — "View Mode" and "Edit Mode" as a radio pair would be the same
@@ -307,6 +349,7 @@ enum MainMenu {
         // zoom. ⌘= as well as ⌘+ because the plus is a shifted equals on most layouts and AppKit
         // matches the literal character.
         canvasZoomItems(menu)
+        canvasTilingItems(menu)
         canvasModeItem(menu)
         add(menu, "Show Projects", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
             key: "s", modifiers: [.command, .option])

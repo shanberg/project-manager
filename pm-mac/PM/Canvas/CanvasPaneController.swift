@@ -45,6 +45,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
+        scroll.board.onTilingChanged = { [weak self] in
+            guard let self else { return }
+            header.tiling = scroll.board.tilingSummary
+        }
         scroll.board.onModeChanged = { [weak self] in
             guard let self else { return }
             // The mode is flipped from the View menu and from the header's options, so the header
@@ -273,6 +277,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
+        header.leaveTiling = { [weak self] in self?.scroll.board.untile(animated: true) }
         header.findCommitted = { [weak self] in
             guard let self else { return }
             view.window?.makeFirstResponder(scroll.board)

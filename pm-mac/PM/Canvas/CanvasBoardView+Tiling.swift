@@ -1,0 +1,170 @@
+import AppKit
+import PmLib
+
+/// The board as a window manager: filling the window with a handful of cards, and the small grammar
+/// that applies while it is doing so.
+///
+/// **⌘Return is one command at both ends.** With one card selected it fills the window with that card,
+/// which is today's most tedious manoeuvre on a board — zoom in, pan, find it. With six selected it is a
+/// grid. Fullscreen and tile are the same idea at different counts, and making them one key is what
+/// makes it worth learning.
+///
+/// While tiled the board has a different grammar rather than a broken version of its usual one. There is
+/// no free space to move a card into, so a drag *swaps* two cards, which is what a drag means in every
+/// tiling manager. There is nothing to marquee and nothing to wire together, so the sweep and the
+/// connection dots are off. What is left is: look, focus, step in, swap, and leave.
+@MainActor
+extension CanvasBoardView {
+
+    var isTiled: Bool { tiling != nil }
+
+    // MARK: Entering and leaving
+
+    /// ⌘Return. Fill the window with the selection, or with what is on screen when nothing is selected.
+    @objc func tileSelection(_ sender: Any?) {
+        if isTiled { return untile(animated: true) }
+        var ids = selection.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
+        // A frame is a container of cards, so tiling one means tiling what is in it. This is the
+        // "frames are workspaces" reading, and it is the one command where it pays off immediately.
+        for id in selection {
+            guard let node = document.node(id: id), node.isGroup else { continue }
+            ids.formUnion(canvasCardsInside(node.frame, of: document))
+        }
+        // Nothing selected: everything you can currently see. A board you have scrolled to a corner of
+        // is a selection you made with the scroll bar.
+        if ids.isEmpty {
+            let visible = canvasRect(visibleRect)
+            ids = Set(document.nodes.filter { !$0.isGroup && $0.frame.intersects(visible) }.map(\.id))
+        }
+        guard !ids.isEmpty else { return NSSound.beep() }
+        tile(ids)
+    }
+
+    /// Tile these cards, whatever asked for it.
+    func tile(_ ids: Set<String>, arrangement: CanvasTiling.Arrangement? = nil) {
+        let cards = document.nodes.filter { ids.contains($0.id) && !$0.isGroup }
+            .map { (id: $0.id, frame: $0.frame) }
+        guard !cards.isEmpty else { return NSSound.beep() }
+        let visible = canvasRect(visibleRect)
+        // Inset so tiles sit inside the window rather than against its edges, and clear of the header
+        // floating over the top of the board.
+        let area = CanvasRect(x: visible.minX + 18 / liveScale,
+                              y: visible.minY + 54 / liveScale,
+                              width: max(80, visible.width - 36 / liveScale),
+                              height: max(80, visible.height - 72 / liveScale))
+        let session = CanvasTileSession(ids: CanvasTiling.order(cards),
+                                        arrangement: arrangement ?? preferredArrangement(for: cards.count),
+                                        area: area,
+                                        restoreVisible: visible)
+        tiling = session
+        selection = selection.intersection(ids)
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+    }
+
+    /// A grid, unless there are enough cards that one of them ought to be the one you are working in.
+    ///
+    /// Two or three tiles are peers and a grid says so. Past four, a grid makes every card equally small
+    /// — which is the wrong answer to "I am reading this one and watching those", the shape a board of
+    /// this size is nearly always in.
+    private func preferredArrangement(for count: Int) -> CanvasTiling.Arrangement {
+        count >= 4 ? .masterStack : .grid
+    }
+
+    /// Escape. Put every card back where the board says it belongs.
+    func untile(animated: Bool) {
+        guard let session = tiling else { return }
+        tiling = nil
+        setLayout(.document, animated: animated)
+        // Back to the region you were looking at, which a tiled view never moved but a fullscreen of one
+        // card may well have made meaningless to return to blind.
+        scrollView?.canvasScroll?.centre(on: CanvasPoint(x: session.restoreVisible.midX,
+                                                         y: session.restoreVisible.midY))
+        onTilingChanged?()
+    }
+
+    /// Swap the arrangement without leaving the tiling.
+    func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
+        guard var session = tiling, session.arrangement != arrangement else { return }
+        session.arrangement = arrangement
+        tiling = session
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+    }
+
+    /// Make the focused card the master tile — ⌘⇧Return, and a double-click on a stack tile.
+    func promoteInTiling(_ id: String) {
+        guard var session = tiling else { return }
+        session.promote(id)
+        tiling = session
+        setLayout(session.layout, animated: true)
+    }
+
+    /// A drag inside a tiled view: the two cards change places.
+    func swapInTiling(_ id: String, with other: String) {
+        guard var session = tiling else { return }
+        session.swap(id, with: other)
+        tiling = session
+        setLayout(session.layout, animated: true)
+    }
+
+    /// Drag the divider between the master tile and the stack.
+    func setMasterFraction(_ fraction: Double) {
+        guard var session = tiling, session.arrangement == .masterStack else { return }
+        session.masterFraction = min(0.85, max(0.3, fraction))
+        tiling = session
+        setLayout(session.layout, animated: false)
+    }
+
+    // MARK: Frames as workspaces
+
+    /// The board's frames, in reading order — the workspaces you can step between.
+    ///
+    /// A frame is already a named container of cards, which is what a workspace is. Nothing had to be
+    /// built for this; it only had to be noticed.
+    var workspaces: [CanvasNode] {
+        document.nodes.filter(\.isGroup).sorted {
+            $0.frame.minY == $1.frame.minY ? $0.frame.minX < $1.frame.minX
+                                           : $0.frame.minY < $1.frame.minY
+        }
+    }
+
+    /// ⌃1…9. Go to a frame: fit it in the window and select what is in it.
+    ///
+    /// Fitting rather than tiling, because a frame was arranged by hand and the arrangement is the
+    /// point — that is what distinguishes a frame from a bag of cards. ⌘Return then tiles what this
+    /// selected, for the times it isn't.
+    @objc func goToWorkspace(_ sender: Any?) {
+        guard let index = (sender as? NSMenuItem)?.tag, index >= 0 else { return }
+        let frames = workspaces
+        guard index < frames.count else { return NSSound.beep() }
+        let frame = frames[index]
+        if isTiled { untile(animated: false) }
+        selection = canvasCardsInside(frame.frame, of: document)
+        scrollView?.canvasScroll?.zoom(toFit: frame.frame.inset(by: 60))
+    }
+
+    /// What the window's header says while a tiling is up.
+    ///
+    /// It has to say *something*. A board showing six of forty-three cards, with the other
+    /// thirty-seven hidden and the lines between them gone, looks exactly like a board most of which has
+    /// been deleted — and the moment you think that is the moment you stop trusting the feature.
+    var tilingSummary: String? {
+        guard let tiling else { return nil }
+        let total = document.nodes.filter { !$0.isGroup }.count
+        return tiling.ids.count == 1
+            ? "1 card of \(total)"
+            : "\(tiling.ids.count) of \(total) cards"
+    }
+}
+
+/// The cards a frame contains — the ones whose centres fall inside it.
+///
+/// By centre rather than by containment, which is how a frame on a real board actually holds things: a
+/// card nudged so its corner pokes out of the frame it belongs to is still in the group, and every
+/// other part of this app agrees (see `canvasDragSet`).
+func canvasCardsInside(_ frame: CanvasRect, of document: CanvasDocument) -> Set<String> {
+    Set(document.nodes.filter { node in
+        !node.isGroup && frame.contains(x: node.frame.midX, y: node.frame.midY)
+    }.map(\.id))
+}

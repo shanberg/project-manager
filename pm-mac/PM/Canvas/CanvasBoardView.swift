@@ -41,6 +41,15 @@ final class CanvasBoardView: NSView {
             refreshCursor()
         }
     }
+    /// Where the cards are drawn — the document's own layout unless something is standing in for it.
+    /// See `CanvasLayout` and `CanvasTiling`.
+    private(set) var layout: CanvasLayout = .document
+
+    /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
+    var tiling: CanvasTileSession?
+    /// Told when a tiling is entered, left or rearranged, so the window can say what it is showing.
+    var onTilingChanged: (() -> Void)?
+
     var selection: Set<String> = [] { didSet { selectionChanged(from: oldValue) } }
     /// The card under the pointer. The board carries its tooltip, because the card can't: an unengaged
     /// card returns nil from `hitTest` and so never sees the mouse. See `CanvasNodeView.cardDescription`.
@@ -65,6 +74,11 @@ final class CanvasBoardView: NSView {
         case resize(String, CanvasHandle, original: CanvasRect)
         case marquee(from: CanvasPoint, additive: Bool, base: Set<String>)
         case connect(from: String, side: CanvasSide, to: CanvasPoint)
+        /// Inside a tiled view: dragging one tile over another to change their places. `over` is the
+        /// tile the drop would land on, so the overlay can say so before you let go.
+        case swap(from: String, over: String?)
+        /// Inside a tiled view: dragging the divider between the master tile and the stack.
+        case resizeSplit
     }
 
     var nodeViews: [String: CanvasNodeView] = [:]
@@ -191,7 +205,15 @@ final class CanvasBoardView: NSView {
         let keep = visible.inset(by: max(visible.width, visible.height) * 0.5)
 
         var wanted: Set<String> = []
-        for node in document.nodes where !node.isGroup && node.frame.intersects(keep) {
+        // While a layout is standing in for the document, every card it shows is wanted whatever the
+        // file says about where it is, and every card already built is kept — see `layoutNodeViews` on
+        // why the ones being hidden are not thrown away.
+        if !layout.isDocument {
+            wanted.formUnion(layout.visible ?? [])
+            wanted.formUnion(nodeViews.keys)
+        }
+        for node in document.nodes
+        where !node.isGroup && (wanted.contains(node.id) || layout.frame(of: node).intersects(keep)) {
             wanted.insert(node.id)
             if let existing = nodeViews[node.id] {
                 existing.update(node: node, scale: liveScale)
@@ -213,9 +235,53 @@ final class CanvasBoardView: NSView {
     private func layoutNodeViews() {
         for (id, view) in nodeViews {
             guard let node = document.node(id: id) else { continue }
-            view.frame = viewRect(node.frame)
+            // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
+            // other thirty-seven and rebuild them on the way out — which for a board of web cards means
+            // reloading every page you were watching, as the price of having glanced at six of them.
+            view.isHidden = !layout.shows(id)
+            let wanted = viewRect(layout.frame(of: node))
+            if animatesLayout, view.frame != wanted, !view.isHidden {
+                view.animator().frame = wanted
+            } else {
+                view.frame = wanted
+            }
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
+    }
+
+    /// Set while cards should slide to their new places rather than appear there — entering and leaving
+    /// a tiled arrangement, and nothing else. Every other layout pass is a drag, a scroll or a resize,
+    /// where the card is already following your hand and an animation would be a lag.
+    private var animatesLayout = false
+
+    /// Change what the board is showing, with the cards moving to their new frames.
+    ///
+    /// Both halves matter. The animation is what makes a tiled view legible — six cards appearing in a
+    /// grid says nothing about which card went where, and six cards flying there says all of it — and
+    /// it is the same argument in reverse on the way out.
+    func setLayout(_ next: CanvasLayout, animated: Bool) {
+        guard next != layout else { return }
+        layout = next
+        refreshNodeViews()
+        guard animated else {
+            layoutNodeViews()
+            overlay.needsDisplay = true
+            needsDisplay = true
+            settlePageBudget()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.28
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            animatesLayout = true
+            layoutNodeViews()
+            animatesLayout = false
+        } completionHandler: { [weak self] in
+            self?.layoutNodeViews()
+            self?.settlePageBudget()
+        }
+        overlay.needsDisplay = true
+        needsDisplay = true
     }
 
     /// Zoom changed: cards that render differently at different sizes get told.
@@ -271,14 +337,18 @@ final class CanvasBoardView: NSView {
         var candidates: [CanvasPageBudget.Candidate] = []
         for (id, view) in nodeViews where view.isPageCard {
             guard let node = document.node(id: id) else { continue }
-            let onScreen = node.frame.intersects(visible)
+            // What is *drawn*, and only if it is drawn at all. Tiling is a resource decision as much as
+            // a layout one: the cards a tiled view has hidden are not on screen however central the
+            // file thinks they are, and the six it is showing are all central at once, which is more
+            // than the budget would ever have been asked for by scrolling.
+            let onScreen = view.isHidden ? false : layout.frame(of: node).intersects(visible)
             if onScreen { view.lastVisibleAt = now }
             candidates.append(.init(id: id,
                                     wantsPage: view.wantsPage,
                                     isVisible: onScreen,
                                     isEngaged: view.isEngaged,
-                                    distanceFromCentre: hypot(node.frame.midX - centre.x,
-                                                              node.frame.midY - centre.y),
+                                    distanceFromCentre: hypot(layout.frame(of: node).midX - centre.x,
+                                                              layout.frame(of: node).midY - centre.y),
                                     secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt)))
         }
         let live = CanvasPageBudget.live(among: candidates)
@@ -342,6 +412,10 @@ final class CanvasBoardView: NSView {
         CanvasPalette.board.setFill()
         dirty.fill()
         drawGrid(in: dirty)
+        // Frames and lines are statements about where cards are, and a tiled view has moved them. A line
+        // routed to a position a card no longer has would be fiction drawn at full contrast; a tiled
+        // view is about content, and the relationships are still there when you come back out.
+        guard layout.isDocument else { return }
         drawGroups(in: dirty)
         drawEdges(in: dirty)
     }

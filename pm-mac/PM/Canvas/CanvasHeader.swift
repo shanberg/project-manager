@@ -26,6 +26,12 @@ final class CanvasHeaderModel: ObservableObject {
     /// The web card you have stepped into, if any.
     @Published var page: Page?
     @Published var find = Find()
+    /// What a tiled view is showing, e.g. "6 of 43 cards". Nil when the board is showing itself.
+    ///
+    /// It has to say something. A board showing six of forty-three cards, with the rest hidden and the
+    /// lines between them gone, looks exactly like a board most of which has been deleted — and the
+    /// moment you think that is the moment you stop trusting the feature.
+    @Published var tiling: String?
     @Published var titlebar = TitlebarButtonMetrics.unmeasured
 
     /// What the header knows about the one card whose page is live under your hands.
@@ -84,6 +90,7 @@ final class CanvasHeaderModel: ObservableObject {
     var findChanged: (String) -> Void = { _ in }
     var findClosed: () -> Void = {}
     var findCommitted: () -> Void = {}
+    var leaveTiling: () -> Void = {}
 }
 
 // MARK: - The pill
@@ -134,6 +141,17 @@ struct CanvasControlCapsule: View {
                 pageGroup(page)
                 divider
             }
+            if let tiling = model.tiling {
+                Text(tiling)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .padding(.horizontal, 5)
+                Button("Done", action: model.leaveTiling)
+                    .controlSize(.small)
+                    .padding(.trailing, 2)
+                divider
+            }
             if model.find.isShowing {
                 findField
                 divider
@@ -174,6 +192,7 @@ struct CanvasControlCapsule: View {
         .animation(.easeOut(duration: 0.18), value: chrome)
         .animation(.snappy(duration: 0.2), value: model.page)
         .animation(.snappy(duration: 0.2), value: model.find.isShowing)
+        .animation(.snappy(duration: 0.2), value: model.tiling)
         .modifier(TitlebarDrop(model: model))
     }
 

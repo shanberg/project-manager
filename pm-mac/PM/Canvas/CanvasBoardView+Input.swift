@@ -11,7 +11,7 @@ extension CanvasBoardView {
 
     var hitTester: CanvasHitTester {
         CanvasHitTester(document: document, scale: liveScale, mode: mode,
-                        selection: selection, hovered: hovered)
+                        selection: selection, hovered: hovered, layout: layout)
     }
 
     private func point(_ event: NSEvent) -> CanvasPoint {
@@ -29,6 +29,8 @@ extension CanvasBoardView {
             doubleClick(at: where_)
             return
         }
+
+        if isTiled { return tiledMouseDown(at: where_, extending: extending) }
 
         switch hitTester.hit(where_) {
         case .handle(let id, let handle):
@@ -66,11 +68,57 @@ extension CanvasBoardView {
         }
     }
 
+    /// A press inside a tiled view.
+    ///
+    /// There is no free space to move a card into and nothing to sweep or wire together, so the whole
+    /// vocabulary is: pick a tile, drag it onto another to swap them, or drag the divider between the
+    /// master and the stack. A press on the background leaves the tiling, which is the tiled equivalent
+    /// of clicking the desktop.
+    private func tiledMouseDown(at where_: CanvasPoint, extending: Bool) {
+        if let divider = tiledDivider, abs(where_.x - divider) <= 9 / liveScale {
+            gesture = .resizeSplit
+            return
+        }
+        switch hitTester.hit(where_) {
+        case .node(let id), .handle(let id, _), .anchor(let id, _):
+            selection = extending ? selection.union([id]) : [id]
+            gesture = .swap(from: id, over: nil)
+        case .edge, .board:
+            selection = []
+        }
+    }
+
+    /// Where the master tile ends, in canvas coordinates — the divider you drag. Nil in a grid, which
+    /// has no split to resize, and nil for a single tile.
+    var tiledDivider: Double? {
+        guard let tiling, tiling.arrangement == .masterStack, tiling.ids.count > 1,
+              let master = tiling.layout.frames[tiling.ids[0]] else { return nil }
+        return master.maxX + CanvasTiling.gap / 2
+    }
+
     // MARK: Dragging
 
     override func mouseDragged(with event: NSEvent) {
         let now = point(event)
         switch gesture {
+        case .swap(let from, _):
+            // The tile under the pointer, if it is a different one. Held on the gesture so the overlay
+            // can show what the drop would do rather than making you guess.
+            let over: String?
+            switch hitTester.hit(now) {
+            case .node(let id), .handle(let id, _), .anchor(let id, _): over = id == from ? nil : id
+            case .edge, .board: over = nil
+            }
+            if case .swap(_, let previous) = gesture, previous != over {
+                gesture = .swap(from: from, over: over)
+                overlay.needsDisplay = true
+            }
+
+        case .resizeSplit:
+            guard let tiling else { break }
+            let fraction = (now.x - tiling.area.minX) / max(1, tiling.area.width)
+            setMasterFraction(fraction)
+
         case .move(let from, let frames):
             let wanted = (dx: now.x - from.x, dy: now.y - from.y)
             let box = frames.values.dropFirst().reduce(frames.values.first ?? .init(x: 0, y: 0, width: 0, height: 0)) {
@@ -129,6 +177,23 @@ extension CanvasBoardView {
             overlay.needsDisplay = true
         }
         switch gesture {
+        case .swap(let from, let over):
+            if let over {
+                swapInTiling(from, with: over)
+            } else if event.clickCount == 2 {
+                // Double-click promotes a stack tile to master, which is what double-clicking a window's
+                // titlebar means in the managers that have a master. In a grid there is nothing to
+                // promote, so it steps into the card instead.
+                if tiling?.arrangement == .masterStack {
+                    promoteInTiling(from)
+                } else {
+                    nodeViews[from]?.beginEditing()
+                }
+            } else if let view = nodeViews[from], view.engagesOnClick, !view.isEngaged {
+                view.beginEditing()
+            }
+        case .resizeSplit:
+            break
         case .move(let from, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)
@@ -286,6 +351,10 @@ extension CanvasBoardView {
         guard !pointerIsInsideACard else { return }
         guard let position = window?.mouseLocationOutsideOfEventStream else { return }
         let where_ = canvasPoint(convert(position, from: nil))
+        if let divider = tiledDivider, abs(where_.x - divider) <= 9 / liveScale {
+            return NSCursor.resizeLeftRight.set()
+        }
+        if isTiled { return NSCursor.arrow.set() }
         switch hitTester.hit(where_) {
         case .handle(_, let handle): cursor(for: handle).set()
         case .anchor: NSCursor.crosshair.set()
@@ -314,19 +383,77 @@ extension CanvasBoardView {
         switch event.specialKey {
         case .delete, .deleteForward:
             deleteSelection()
-        case .leftArrow: nudge(dx: -step(event), dy: 0)
-        case .rightArrow: nudge(dx: step(event), dy: 0)
-        case .upArrow: nudge(dx: 0, dy: -step(event))
-        case .downArrow: nudge(dx: 0, dy: step(event))
+        // ⌥ turns the arrows from "move this card" into "move to the next card", which is the gesture a
+        // tiling window manager is built around and which a board has better information for than a
+        // desktop does. See `CanvasNavigation`.
+        case .leftArrow: arrow(.left, event)
+        case .rightArrow: arrow(.right, event)
+        case .upArrow: arrow(.up, event)
+        case .downArrow: arrow(.down, event)
         default:
             if event.charactersIgnoringModifiers == "\u{1b}" {
-                selection = []
+                // Escape backs out one step at a time, the way it does everywhere: out of a tiled view
+                // first, and only then out of a selection.
+                if isTiled { untile(animated: true) } else { selection = [] }
             } else if event.charactersIgnoringModifiers == "\r", let only = selection.first {
                 beginEditing(only)
             } else {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    private func arrow(_ direction: CanvasNavigation.Direction, _ event: NSEvent) {
+        guard event.modifierFlags.contains(.option) else {
+            let step = step(event)
+            switch direction {
+            case .left: return nudge(dx: -step, dy: 0)
+            case .right: return nudge(dx: step, dy: 0)
+            case .up: return nudge(dx: 0, dy: -step)
+            case .down: return nudge(dx: 0, dy: step)
+            }
+        }
+        moveFocus(direction, extending: event.modifierFlags.contains(.shift))
+    }
+
+    /// Move the selection to the neighbouring card in `direction`.
+    ///
+    /// With nothing selected it starts from the middle of what you are looking at, so the first press
+    /// lands on the card nearest the centre of the window rather than doing nothing — the same courtesy
+    /// a list gives when you press Down with no row selected.
+    ///
+    /// Shift extends rather than replaces, which is what shift means everywhere else in this app's
+    /// selections. It also scrolls the card it lands on into view: a focus move you cannot see is a
+    /// focus move that looks like nothing happened.
+    func moveFocus(_ direction: CanvasNavigation.Direction, extending: Bool) {
+        let candidates = focusCandidates
+        guard !candidates.isEmpty else { return }
+        let current = selection.compactMap { id in candidates.first { $0.id == id }?.frame }
+            .reduce(nil) { (box: CanvasRect?, frame) in box.map { $0.union(frame) } ?? frame }
+            ?? CanvasRect(x: canvasRect(visibleRect).midX, y: canvasRect(visibleRect).midY,
+                          width: 0, height: 0)
+
+        guard let next = CanvasNavigation.next(from: current, direction: direction,
+                                               among: candidates.filter { !selection.contains($0.id) })
+        else { return NSSound.beep() }
+        selection = extending ? selection.union([next]) : [next]
+        reveal(next)
+    }
+
+    /// Every card the focus can land on, with the frame it is actually drawn at — so this follows a
+    /// tiled arrangement rather than the positions the file records.
+    private var focusCandidates: [(id: String, frame: CanvasRect)] {
+        document.nodes.filter { !$0.isGroup && layout.shows($0.id) }
+            .map { ($0.id, layout.frame(of: $0)) }
+    }
+
+    /// Bring a card into view if it isn't already, without moving the board when it is.
+    private func reveal(_ id: String) {
+        guard let node = document.node(id: id) else { return }
+        let frame = layout.frame(of: node)
+        let visible = canvasRect(visibleRect).inset(by: -40)
+        guard !visible.contains(x: frame.midX, y: frame.midY) else { return }
+        scrollView?.canvasScroll?.centre(on: CanvasPoint(x: frame.midX, y: frame.midY))
     }
 
     /// One point, or ten with shift — the same pair every Mac drawing surface uses.

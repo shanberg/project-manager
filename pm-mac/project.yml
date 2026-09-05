@@ -152,6 +152,9 @@ targets:
       - path: PM/Canvas/CanvasBlockPolicy.swift
       - path: PM/Canvas/CanvasSelection.swift
       - path: PM/Canvas/CanvasSnapping.swift
+      - path: PM/Canvas/CanvasTiling.swift
+      - path: PM/Canvas/CanvasNavigation.swift
+      - path: PM/Canvas/CanvasLayout.swift
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Task/CompletingTextField.swift
       - path: PM/Task/OutsideClick.swift

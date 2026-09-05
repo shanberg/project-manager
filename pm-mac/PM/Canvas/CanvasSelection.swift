@@ -105,6 +105,13 @@ struct CanvasHitTester {
     var selection: Set<String>
     /// The card the pointer is over, which offers connection dots in `.edit` even when not selected.
     var hovered: String?
+    /// Where the cards are actually drawn. The document's own frames unless something is standing in
+    /// for them — a tiled view, most of all, where clicking what you can see has to reach the card that
+    /// is there rather than the one the file says is.
+    var layout: CanvasLayout = .document
+
+    /// The frame a card is drawn at.
+    func frame(of node: CanvasNode) -> CanvasRect { layout.frame(of: node) }
 
     /// Half the side of a grip's hit square, in view points.
     static let handleReach: Double = 7
@@ -123,7 +130,7 @@ struct CanvasHitTester {
             for id in interactive where selection.contains(id) {
                 guard let node = document.node(id: id) else { continue }
                 for handle in CanvasHandle.allCases
-                where near(handle.point(in: node.frame), point, Self.handleReach) {
+                where near(handle.point(in: frame(of: node)), point, Self.handleReach) {
                     return .handle(id, handle)
                 }
             }
@@ -132,7 +139,7 @@ struct CanvasHitTester {
             for id in anchorCandidates {
                 guard let node = document.node(id: id) else { continue }
                 for side in CanvasSide.allCases
-                where near(anchorPoint(node.frame, side), point, Self.anchorReach) {
+                where near(anchorPoint(frame(of: node), side), point, Self.anchorReach) {
                     return .anchor(id, side)
                 }
             }
@@ -141,10 +148,14 @@ struct CanvasHitTester {
         // 2. Cards, front to back. Groups are drawn behind everything and are handled below, so a card
         //    inside a frame is always reachable.
         for id in interactive.reversed() {
-            guard let node = document.node(id: id), node.frame.contains(x: point.x, y: point.y)
+            guard let node = document.node(id: id), frame(of: node).contains(x: point.x, y: point.y)
             else { continue }
             return .node(id)
         }
+
+        // A tiled view draws neither lines nor frames — see `CanvasBoardView.draw` — so it must not hit
+        // them either. Everything below this point is the document's own geometry.
+        guard layout.isDocument else { return .board }
 
         // 3. Lines. After cards, because a line that passes under a card belongs to the card there.
         for edge in document.edges.reversed() {
@@ -176,9 +187,11 @@ struct CanvasHitTester {
         }
     }
 
-    /// Cards that take a click on their face — everything except groups, in document order.
+    /// Cards that take a click on their face — everything except groups, in document order, and only
+    /// the ones being drawn. A tiled view has hidden most of the board, and a click landing on a card
+    /// that isn't on screen is the worst kind of bug: nothing looks wrong and the wrong thing happens.
     private var interactive: [String] {
-        document.nodes.filter { !$0.isGroup }.map(\.id)
+        document.nodes.filter { !$0.isGroup && layout.shows($0.id) }.map(\.id)
     }
 
     /// Which cards hand their edge over to a resize.

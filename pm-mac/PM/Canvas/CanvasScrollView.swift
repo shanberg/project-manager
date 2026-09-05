@@ -82,6 +82,19 @@ final class CanvasScrollView: NSScrollView {
         onZoomChanged?(magnification)
     }
 
+    /// Fit a particular region in the window — a frame you have stepped to, rather than the whole board.
+    func zoom(toFit rect: CanvasRect) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        let available = contentView.bounds.size
+        let wanted = min(Self.maximumZoom,
+                         max(Self.minimumZoom,
+                             min(available.width / rect.width, available.height / rect.height)))
+        magnification = wanted
+        board.magnificationChanged()
+        centre(on: CanvasPoint(x: rect.midX, y: rect.midY))
+        onZoomChanged?(magnification)
+    }
+
     func zoomToActualSize() {
         let centre = NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY)
         setMagnification(1, centeredAt: centre)

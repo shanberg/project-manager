@@ -30,8 +30,30 @@ final class CanvasOverlayView: NSView {
         drawConnectionAnchors(board, scale)
         drawGrips(board, scale)
         drawConnectionInFlight(board, scale)
+        drawSwapInFlight(board, scale)
         drawGuides(board, scale)
         drawMarquee(board, scale)
+    }
+
+    /// The two tiles a drop would exchange, while a tiled view is being rearranged.
+    ///
+    /// Both of them, and that is the point: a swap is symmetric, and highlighting only the tile under
+    /// the pointer would say "this one is the target" when what is about to happen is that these two
+    /// change places. Drawn as a filled wash rather than a ring, because at tile size a ring reads as a
+    /// selection and this is a preview of an action.
+    private func drawSwapInFlight(_ board: CanvasBoardView, _ scale: Double) {
+        guard case .swap(let from, let over)? = board.gesture, let over,
+              let a = board.layout.frames[from], let b = board.layout.frames[over] else { return }
+        for rect in [a, b] {
+            let path = NSBezierPath(roundedRect: board.viewRect(rect).insetBy(dx: -2 / scale,
+                                                                             dy: -2 / scale),
+                                    xRadius: 12 / scale, yRadius: 12 / scale)
+            NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
+            path.fill()
+            NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+            path.lineWidth = 2 / scale
+            path.stroke()
+        }
     }
 
     /// The lines that say why a card stopped where it did.
@@ -108,7 +130,9 @@ final class CanvasOverlayView: NSView {
     /// The four dots a line is dragged from. Only in edit mode — that is the whole point of the mode:
     /// a board you are reading is cards and lines and nothing else.
     private func drawConnectionAnchors(_ board: CanvasBoardView, _ scale: Double) {
-        guard board.mode.showsConnectionAnchors else { return }
+        // Nothing to wire together in a tiled view: the lines are hidden, and a dot that started a line
+        // you could not see land would be an offer the mode cannot keep.
+        guard board.mode.showsConnectionAnchors, !board.isTiled else { return }
         var ids = board.selection
         if let hovered = board.hovered { ids.insert(hovered) }
 
@@ -116,7 +140,7 @@ final class CanvasOverlayView: NSView {
         for id in ids {
             guard let node = board.document.node(id: id), !node.isGroup else { continue }
             for side in CanvasSide.allCases {
-                let centre = board.viewPoint(tester.anchorPoint(node.frame, side))
+                let centre = board.viewPoint(tester.anchorPoint(board.layout.frame(of: node), side))
                 let radius = 4.5 / scale
                 let dot = NSBezierPath(ovalIn: NSRect(x: centre.x - radius, y: centre.y - radius,
                                                      width: radius * 2, height: radius * 2))
@@ -139,14 +163,18 @@ final class CanvasOverlayView: NSView {
     /// the ring is a hairline at half strength and the squares are smaller and thinner. They are still
     /// the loudest thing on a board that has them, which is why they are still a mode.
     private func drawGrips(_ board: CanvasBoardView, _ scale: Double) {
+        // A tile's size is the arrangement's to decide, not yours — you resize the split instead. So no
+        // grips, and no ring either: in a tiled view the tiles *are* what you are looking at, and a
+        // selection ring around one of six is noise.
+        guard !board.isTiled else { return }
         // In view mode a selected card answers with a shadow and nothing else — see `CanvasMode` and
         // `CanvasNodeView.refreshElevation`. It is still resizable there; a Mac window has no grips
         // either. Drawing a ring here as well would be the second answer to a question that only
         // wanted one.
         guard board.mode.showsResizeGrips else { return }
         for id in board.selection {
-            guard let node = board.document.node(id: id) else { continue }
-            let rect = board.viewRect(node.frame)
+            guard let node = board.document.node(id: id), board.layout.shows(id) else { continue }
+            let rect = board.viewRect(board.layout.frame(of: node))
 
             // A card you have stepped into gets a halo as well as a ring. The distinction it draws is
             // one you need before you click, not after: on a selected card the next click belongs to

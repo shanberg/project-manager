@@ -612,6 +612,14 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     @objc func toggleEditMode(_ sender: Any?) { mode = mode == .edit ? .view : .edit }
 
+    @objc func setTileArrangement(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let arrangement = CanvasTiling.Arrangement(rawValue: raw) else { return }
+        // Choosing an arrangement with nothing tiled is a request to tile — otherwise the item is a
+        // setting for a state you have to already be in to reach it.
+        if isTiled { setArrangement(arrangement) } else { tileSelection(nil) }
+    }
+
     func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         switch item.action {
         case #selector(toggleEditMode(_:)):
@@ -619,8 +627,37 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // object answers `validateUserInterfaceItem`, so AppKit never asks `validateMenuItem`.
             (item as? NSMenuItem)?.state = mode == .edit ? .on : .off
             return true
+        case #selector(tileSelection(_:)):
+            // The one command that says what it will do rather than being dimmed when it can't: with a
+            // selection it tiles that, with none it tiles what you can see, and once tiled it is the way
+            // back out. Only a board with nothing on it has nothing for it to mean.
+            (item as? NSMenuItem)?.title = isTiled ? "Leave Tiled View"
+                : selection.isEmpty ? "Fill Window with Visible Cards" : "Fill Window with Selection"
+            return isTiled || document.nodes.contains { !$0.isGroup }
+        case #selector(setTileArrangement(_:)):
+            (item as? NSMenuItem).map { entry in
+                entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue
+                    ? .on : .off
+            }
+            return true
+        case #selector(goToWorkspace(_:)):
+            guard let entry = item as? NSMenuItem else { return false }
+            let frames = workspaces
+            guard entry.tag < frames.count else {
+                entry.title = "Frame \(entry.tag + 1)"
+                return false
+            }
+            // Named, so the menu is a list of this board's frames rather than nine numbers.
+            if case .group(let label, _, _) = frames[entry.tag].content, let label, !label.isEmpty {
+                entry.title = label
+            } else {
+                entry.title = "Frame \(entry.tag + 1)"
+            }
+            return true
         case #selector(copy(_:)), #selector(cut(_:)), #selector(duplicate(_:)):
-            return !selection.isEmpty
+            // Not while tiled: a tiled view is a way of looking, and cutting a card out of one would be
+            // editing the board through a lens that has moved everything.
+            return !selection.isEmpty && !isTiled
         case #selector(paste(_:)):
             return NSPasteboard.general.types?.isEmpty == false
         case #selector(selectAll(_:)), #selector(zoomIn(_:)), #selector(zoomOut(_:)),
@@ -632,9 +669,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     }
 }
 
-private extension NSScrollView {
+extension NSScrollView {
     /// This scroll view, if it is a canvas's. The board holds its scroller as an `NSScrollView` so the
-    /// two aren't mutually dependent at construction; the zoom commands need the canvas one.
+    /// two aren't mutually dependent at construction; the zoom commands, the focus moves and the tiling
+    /// all need the canvas one.
     var canvasScroll: CanvasScrollView? { self as? CanvasScrollView }
 }
 
