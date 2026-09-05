@@ -131,10 +131,18 @@ final class CanvasOverlayView: NSView {
 
     /// The eight grips on a selected card. Groups get none: a frame is resized by its own edges, and
     /// eight squares around a 1700pt frame would be eight squares in the middle of nowhere.
+    ///
+    /// **Quiet.** These used to be drawn at the weight of a thing you are about to act on — a 2.5pt
+    /// accent ring and eight filled squares in a 1.5pt accent stroke — which is the weight they have in
+    /// a drawing tool, where shaping is the job. Here it isn't: a card is resized by its edge in either
+    /// mode now, and the grips only say which card the arrow keys and the eight points belong to. So
+    /// the ring is a hairline at half strength and the squares are smaller and thinner. They are still
+    /// the loudest thing on a board that has them, which is why they are still a mode.
     private func drawGrips(_ board: CanvasBoardView, _ scale: Double) {
         // In view mode a selected card answers with a shadow and nothing else — see `CanvasMode` and
-        // `CanvasNodeView.refreshElevation`. Drawing a ring here as well would be the second answer to
-        // a question that only wanted one.
+        // `CanvasNodeView.refreshElevation`. It is still resizable there; a Mac window has no grips
+        // either. Drawing a ring here as well would be the second answer to a question that only
+        // wanted one.
         guard board.mode.showsResizeGrips else { return }
         for id in board.selection {
             guard let node = board.document.node(id: id) else { continue }
@@ -144,6 +152,8 @@ final class CanvasOverlayView: NSView {
             // one you need before you click, not after: on a selected card the next click belongs to
             // the board, and on an engaged one it belongs to whatever is inside the card. A focus
             // glow is the Mac's own way of saying "this is what your input is going to".
+            // The halo keeps its weight. It isn't about shaping — it says where your typing is going,
+            // which is the one thing on this board worth being emphatic about.
             if board.nodeViews[id]?.isEngaged == true {
                 let halo = NSBezierPath(roundedRect: rect.insetBy(dx: -3.5 / scale, dy: -3.5 / scale),
                                         xRadius: 11 / scale, yRadius: 11 / scale)
@@ -152,23 +162,23 @@ final class CanvasOverlayView: NSView {
                 halo.stroke()
             }
 
-            let ring = NSBezierPath(roundedRect: rect.insetBy(dx: -1.5 / scale, dy: -1.5 / scale),
+            let ring = NSBezierPath(roundedRect: rect.insetBy(dx: -1 / scale, dy: -1 / scale),
                                     xRadius: 9 / scale, yRadius: 9 / scale)
-            ring.lineWidth = 2.5 / scale
-            NSColor.controlAccentColor.setStroke()
+            ring.lineWidth = 1.25 / scale
+            NSColor.controlAccentColor.withAlphaComponent(0.55).setStroke()
             ring.stroke()
 
             guard !node.isGroup else { continue }
-            let size = 7.0 / scale
+            let size = 5.5 / scale
             for handle in CanvasHandle.allCases {
                 let p = handle.point(in: node.frame)
                 let at = board.viewPoint(p)
                 let box = NSRect(x: at.x - size / 2, y: at.y - size / 2, width: size, height: size)
-                let path = NSBezierPath(roundedRect: box, xRadius: 1.5 / scale, yRadius: 1.5 / scale)
+                let path = NSBezierPath(ovalIn: box)
                 NSColor.windowBackgroundColor.setFill()
                 path.fill()
-                NSColor.controlAccentColor.setStroke()
-                path.lineWidth = 1.5 / scale
+                NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+                path.lineWidth = 1 / scale
                 path.stroke()
             }
         }

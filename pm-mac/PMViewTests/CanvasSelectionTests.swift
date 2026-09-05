@@ -195,6 +195,42 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertEqual(canvasDragSet(["a"], in: board()), ["a"])
     }
 
+    // MARK: Resizing by the edge
+
+    /// A card is resized by its edge in either mode — the Mac window idiom — so the band has to say
+    /// which edge, hand corners to corners, and leave the inside alone.
+    private let box = CanvasRect(x: 100, y: 100, width: 400, height: 300)
+
+    private func edge(_ x: Double, _ y: Double, reach: Double = 7) -> CanvasHandle? {
+        CanvasHitTester.edgeHandle(box, at: CanvasPoint(x: x, y: y), reach: reach)
+    }
+
+    func testEachEdgeAndCornerAnswersForItself() {
+        XCTAssertEqual(edge(300, 102), .top)
+        XCTAssertEqual(edge(300, 398), .bottom)
+        XCTAssertEqual(edge(102, 250), .left)
+        XCTAssertEqual(edge(498, 250), .right)
+        XCTAssertEqual(edge(102, 102), .topLeft)
+        XCTAssertEqual(edge(498, 102), .topRight)
+        XCTAssertEqual(edge(102, 398), .bottomLeft)
+        XCTAssertEqual(edge(498, 398), .bottomRight)
+    }
+
+    func testTheBandStraddlesTheEdge() {
+        XCTAssertEqual(edge(300, 95), .top, "just outside is still the edge")
+        XCTAssertNil(edge(300, 90), "further out is the board")
+        XCTAssertNil(edge(300, 250), "the middle is the card")
+    }
+
+    /// At 8% zoom the band is 88 points a side, which on a small card is the whole card. Resizing it
+    /// there would cost you moving it and stepping into it, which is the worse trade.
+    func testACardTooSmallToSpareItsEdgesKeepsThem() {
+        let small = CanvasRect(x: 0, y: 0, width: 120, height: 120)
+        XCTAssertNil(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 88))
+        XCTAssertEqual(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 7), .left,
+                       "the same card is resizable once the pointer is a pointer again")
+    }
+
     // MARK: What an engaged card hands to the board
 
     /// A 400×400 card, the size a link card actually is on the one board in the vault that has them.

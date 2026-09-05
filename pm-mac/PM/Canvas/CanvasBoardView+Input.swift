@@ -33,6 +33,12 @@ extension CanvasBoardView {
         switch hitTester.hit(where_) {
         case .handle(let id, let handle):
             guard let node = document.node(id: id) else { return }
+            // Grabbing a card's edge picks it, the way clicking a window's edge brings it forward. In
+            // edit mode this is already true — the band is only offered on the selection — but in view
+            // mode the edge belongs to whatever card is under it, and a drag there that left the
+            // selection alone would be the one gesture on the board that acts on something it hasn't
+            // said it is acting on.
+            if !selection.contains(id) { selection = [id] }
             store.beginInteraction("Resize Card")
             gesture = .resize(id, handle, original: node.frame)
 
@@ -288,15 +294,18 @@ extension CanvasBoardView {
         }
     }
 
+    /// The pointer for an edge or a corner.
+    ///
+    /// `NSCursor.frameResize(position:directions:)` is the system's own answer, and it is the answer to
+    /// the right question: these are the cursors macOS shows on a window's edges, which is exactly what
+    /// a card's edges now are. It also retires a stand-in — there was no public diagonal resize cursor
+    /// before macOS 15, so the four corners used `.crosshair`, which says "this does something in two
+    /// directions" and looks like a tool for drawing.
+    ///
+    /// `.all` rather than `.inward` or `.outward`: a card can be dragged either way from any of its
+    /// edges, and the one-way variants are for an edge that has run out of room to go one of them.
     private func cursor(for handle: CanvasHandle) -> NSCursor {
-        switch handle {
-        case .left, .right: return .resizeLeftRight
-        case .top, .bottom: return .resizeUpDown
-        // AppKit ships no public diagonal resize cursor. `.crosshair` is the honest stand-in — it says
-        // "this grip does something in two directions" without pretending to be the arrow that would
-        // mean one.
-        case .topLeft, .topRight, .bottomLeft, .bottomRight: return .crosshair
-        }
+        .frameResize(position: handle.resizePosition, directions: .all)
     }
 
     // MARK: Keys

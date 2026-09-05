@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import PmLib
 
 /// Whether the board is being read or being changed.
@@ -42,6 +42,20 @@ enum CanvasHandle: CaseIterable {
         case .bottomLeft: return (0, 1)
         case .bottom: return (0.5, 1)
         case .bottomRight: return (1, 1)
+        }
+    }
+
+    /// Where this grip sits, in the terms the system's own resize cursors are named in.
+    var resizePosition: NSCursor.FrameResizePosition {
+        switch self {
+        case .topLeft: return .topLeft
+        case .top: return .top
+        case .topRight: return .topRight
+        case .left: return .left
+        case .right: return .right
+        case .bottomLeft: return .bottomLeft
+        case .bottom: return .bottom
+        case .bottomRight: return .bottomRight
         }
     }
 
@@ -165,6 +179,54 @@ struct CanvasHitTester {
     /// Cards that take a click on their face — everything except groups, in document order.
     private var interactive: [String] {
         document.nodes.filter { !$0.isGroup }.map(\.id)
+    }
+
+    /// Which cards hand their edge over to a resize.
+    ///
+    /// In view mode, any of them — a Mac window does not need selecting before you can grab its edge,
+    /// and that is the whole idiom being borrowed. In edit mode, only the selection: the grips are drawn
+    /// there, an unselected card is a thing you are about to select, and a band on every card would
+    /// make clicking one to select it a coin toss.
+    private var resizableByEdge: [String] {
+        mode.showsResizeGrips ? interactive.filter(selection.contains) : interactive
+    }
+
+    /// Which part of a card's edge a point is on, or nil for its inside — or for a card with no inside
+    /// left to speak of.
+    ///
+    /// The band straddles the edge, `reach` to either side, so it can be grabbed from just outside the
+    /// card as well as just in. A corner wins over the two edges that meet at it, because a corner is
+    /// the harder thing to aim at and the more useful thing to hit.
+    ///
+    /// **A card too small to spare its edges keeps all of them.** `reach` is a pointer's width on
+    /// screen and so grows in card points as you zoom out; at 8% the band alone is 88 points a side,
+    /// which on a small card is the whole card. Resizing it there would cost you moving it and — for a
+    /// web card — stepping into it, a far worse trade than not resizing something at a zoom where you
+    /// cannot see it. The eight grips still answer for a selected card in edit mode, so nothing becomes
+    /// unresizable. It is the same bargain `canvasBoardKeeps` strikes, for the same reason.
+    static func edgeHandle(_ frame: CanvasRect, at point: CanvasPoint, reach: Double) -> CanvasHandle? {
+        // `inset(by:)` grows, so this is the card plus the band, and `inner` is the card minus it.
+        guard frame.inset(by: reach).contains(x: point.x, y: point.y) else { return nil }
+        let inner = frame.inset(by: -reach)
+        guard inner.width > 40, inner.height > 40 else { return nil }
+        guard !inner.contains(x: point.x, y: point.y) else { return nil }
+
+        let onLeft = point.x <= frame.minX + reach
+        let onRight = point.x >= frame.maxX - reach
+        let onTop = point.y <= frame.minY + reach
+        let onBottom = point.y >= frame.maxY - reach
+
+        switch (onTop, onBottom, onLeft, onRight) {
+        case (true, _, true, _): return .topLeft
+        case (true, _, _, true): return .topRight
+        case (_, true, true, _): return .bottomLeft
+        case (_, true, _, true): return .bottomRight
+        case (true, _, _, _): return .top
+        case (_, true, _, _): return .bottom
+        case (_, _, true, _): return .left
+        case (_, _, _, true): return .right
+        default: return nil
+        }
     }
 
     /// Which cards offer connection dots: the selection, plus whatever the pointer is over.

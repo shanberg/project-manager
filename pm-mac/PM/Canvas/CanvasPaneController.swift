@@ -178,6 +178,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // different generic types and an array of them is an array of `NSView`.
         pill.sizingOptions = [.intrinsicContentSize]
         capsule.sizingOptions = [.intrinsicContentSize]
+        // And no safe area, which is the difference between this header sitting *in* the titlebar band
+        // and sitting below it. The window has a full-size content view, so AppKit reports the titlebar
+        // and toolbar as a top safe area inset — correct for content that should stay clear of the
+        // window's chrome, and exactly backwards for chrome that is meant to run up into it. SwiftUI
+        // honours that inset inside a hosting view by default, so the pill was starting below the band
+        // and then taking its own drop on top: about 66 points of droop for a 14-point offset.
+        pill.safeAreaRegions = []
+        capsule.safeAreaRegions = []
         pill.translatesAutoresizingMaskIntoConstraints = false
         capsule.translatesAutoresizingMaskIntoConstraints = false
 
