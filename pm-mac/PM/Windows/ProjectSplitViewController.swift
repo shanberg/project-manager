@@ -23,6 +23,13 @@ final class ProjectSplitViewController: NSSplitViewController {
     private var contentItem: NSSplitViewItem!
     private var sidebarHosting: NSHostingController<ProjectSidebar>!
     private var contentHosting: NSHostingController<ProjectView>!
+    /// The container the content column's two renderers take turns in — see
+    /// `ProjectContentPaneController`.
+    private let contentPane = ProjectContentPaneController()
+    /// The board, while this window is rendering one. Nil when it is showing tasks.
+    private(set) var canvasPane: CanvasPaneController?
+    /// The stand-in for a project that hasn't got a canvas yet.
+    private var canvasEmptyState: NSHostingController<ProjectCanvasEmptyState>?
 
     /// Whether this controller is currently holding the shared project scan open. It owns that retain
     /// rather than the sidebar view, because a collapsed split item keeps its view mounted — the view
@@ -47,6 +54,7 @@ final class ProjectSplitViewController: NSSplitViewController {
 
         sidebarHosting = NSHostingController(rootView: ProjectSidebar(store: store, state: state))
         contentHosting = NSHostingController(rootView: makeContentView())
+        contentPane.show(contentHosting)
         // The content fills whatever frame the split gives it. Left on the default
         // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal size,
         // which fights the user's own window size on every content change.
@@ -59,21 +67,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         // width SwiftUI asks for (see `ProjectSidebar`'s frozen layout), and the whole sidebar slides.
         sidebarHosting.sizingOptions = [.minSize]
 
-        // Contain the content column's push transitions (the session-note takeover slides in from the
-        // trailing edge while the task list slides out the leading one) to the pane. The column used to
-        // do this itself with a SwiftUI `.clipped()`, which meant its scrolling task list sat inside a
-        // clip layer permanently for the sake of a quarter-second animation. A layer mask on the pane
-        // that hosts it is free — the hosting view is layer-backed regardless — and the pane's edge is
-        // the boundary the transition should respect anyway.
-        contentHosting.view.wantsLayer = true
-        contentHosting.view.layer?.masksToBounds = true
-
         // An `NSHostingView` reports its SwiftUI ideal size as an intrinsic size and defends it with
         // the default (500) hugging and compression-resistance priorities — which outrank the split
         // view's own dragging constraints, so the divider simply won't move. Standing both panes down
         // to `.defaultLow` hands the width decision back to the split view, which is what makes the
         // divider draggable and what lets the sidebar honour its min/max thicknesses.
-        for view in [sidebarHosting.view, contentHosting.view] {
+        for view in [sidebarHosting.view, contentPane.view] {
             view.setContentHuggingPriority(.defaultLow, for: .horizontal)
             view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
@@ -86,7 +85,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         // the width the user set — the behaviour every other source-list app has.
         sidebarItem.holdingPriority = .defaultLow - 1
 
-        contentItem = NSSplitViewItem(viewController: contentHosting)
+        contentItem = NSSplitViewItem(viewController: contentPane)
         contentItem.minimumThickness = ProjectWindow.minContentWidth
         contentItem.canCollapse = false
         contentItem.holdingPriority = .defaultLow
@@ -151,6 +150,9 @@ final class ProjectSplitViewController: NSSplitViewController {
                 guard let self else { return }
                 self.state.sidebarVisible = !item.isCollapsed
                 self.syncProjectScan()
+                // With the sidebar showing, the traffic lights sit over *it* and a board in the content
+                // column needs no inset of its own — the same rule the task column's header follows.
+                self.canvasPane?.ignoresTrafficLights = !item.isCollapsed
             }
         }
     }
@@ -177,6 +179,78 @@ final class ProjectSplitViewController: NSSplitViewController {
     private func makeContentView() -> ProjectView {
         ProjectView(store: store, state: state)
     }
+
+    // MARK: What the column shows
+
+    /// Which renderer is up. Read by the window for its menu checkmark and its width cap.
+    private(set) var renderer: ProjectRenderer = .tasks
+
+    /// Show the project's board in the content column.
+    ///
+    /// `url` nil means the project hasn't got a canvas — an empty state offering to make one, rather
+    /// than making one, because switching a view shouldn't write to somebody's vault.
+    func showCanvas(at url: URL?, projectName: String?,
+                    create: @escaping () -> Void) {
+        renderer = .canvas
+        guard let url else {
+            dropCanvas()
+            let empty = NSHostingController(rootView: ProjectCanvasEmptyState(
+                projectName: projectName,
+                create: create,
+                showTasks: { [weak self] in self?.showTasks() }))
+            empty.sizingOptions = []
+            canvasEmptyState = empty
+            contentPane.show(empty)
+            return
+        }
+        // Already on this board — a retarget that landed back on the same project, most often.
+        if let existing = canvasPane, existing.store.url.standardizedFileURL == url.standardizedFileURL {
+            existing.title_ = projectName ?? existing.title_
+            return
+        }
+        dropCanvas()
+        guard let store = try? CanvasStoreRegistry.store(for: url) else {
+            // A canvas that won't parse. Falling back to the task list is the honest answer: the window
+            // still shows the project, and File ▸ Open Canvas reports the error properly.
+            renderer = .tasks
+            contentPane.show(contentHosting)
+            return
+        }
+        let pane = CanvasPaneController(store: store)
+        pane.title_ = projectName ?? url.deletingPathExtension().lastPathComponent
+        pane.ignoresTrafficLights = !sidebarItem.isCollapsed
+        // The way back. In the options menu rather than as a button in the capsule, because it is a
+        // command about the *window* rather than about the board, and the board's own controls should
+        // not be sharing a row with one.
+        pane.header.extraOptions = [
+            CanvasHeaderModel.ExtraCommand(title: "Show Tasks") { [weak self] in self?.showTasks() }
+        ]
+        canvasPane = pane
+        contentPane.show(pane)
+        pane.focusBoard()
+    }
+
+    /// Back to the task list.
+    func showTasks() {
+        renderer = .tasks
+        dropCanvas()
+        contentPane.show(contentHosting)
+        onRendererChanged?()
+    }
+
+    /// Told when the column changes what it is showing, so the window can re-apply its width cap and
+    /// its menus can re-validate.
+    var onRendererChanged: (() -> Void)?
+
+    private func dropCanvas() {
+        canvasPane?.teardown()
+        canvasPane = nil
+        canvasEmptyState = nil
+    }
+
+    /// The board's undo stack while one is showing, so ⌘Z in this window reaches the board rather than
+    /// the task list — and, because the store is shared, undoes in the canvas's own window too.
+    var undoManagerForContent: UndoManager? { canvasPane?.store.undoManager }
 
     // MARK: Retargeting
 
@@ -280,6 +354,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Before the release, so a collapse on the way down can't hand the retain straight back.
         collapseObservation?.invalidate()
         collapseObservation = nil
+        // A board showing here holds the canvas document open, and the last holder is what saves it and
+        // stops it polling the file. A window closing on a board must give that hold back.
+        dropCanvas()
         if holdsProjectScan {
             holdsProjectScan = false
             ProjectIndex.shared.release()

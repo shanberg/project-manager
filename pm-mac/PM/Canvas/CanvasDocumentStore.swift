@@ -11,20 +11,51 @@ import PmLib
 ///
 /// Saving is automatic and debounced: a canvas is dragged around, and a save per frame of a drag would
 /// be absurd while a save only on ⌘S would mean a window you can lose work from.
+///
+/// **One store per file, however many things are looking at it.** A canvas can now be open in its own
+/// window and rendered inside a project window at the same time, and two stores on one file would be
+/// worse than either alone: each debounces its own writes and each watches the file for outside
+/// changes, so a save by one is read by the other as somebody else's edit, reloaded over the top, and
+/// whatever was in flight there is gone. `CanvasStoreRegistry` hands out the same store to every
+/// holder, which makes both surfaces views of one document with one undo stack — the arrangement the
+/// app already uses for projects. That is why the callbacks below are lists rather than single
+/// closures, and why the undo manager is made here rather than handed in.
 @MainActor
 final class CanvasDocumentStore {
     private(set) var document: CanvasDocument
     let url: URL
     let resolver: CanvasFileResolver
 
-    /// Called after any change to `document`, whoever made it — an edit, an undo, or a reload because
-    /// the file changed underneath us.
-    var onChange: (() -> Void)?
-    /// Called when the file was changed by something else and has been re-read. The window says so
-    /// rather than swapping the board out silently.
-    var onReloadedFromDisk: (() -> Void)?
+    /// Everything looking at this document, and what to tell each of them.
+    ///
+    /// Keyed by the watcher so a surface that goes away takes its callbacks with it, and held weakly on
+    /// nothing — the registry's retain count is what keeps a store alive, and a watcher is expected to
+    /// say when it is done.
+    private var watchers: [(owner: ObjectIdentifier, changed: () -> Void, reloaded: () -> Void)] = []
 
-    private let undoManager: UndoManager
+    /// Watch this document. `changed` fires after any change, whoever made it — an edit, an undo, or a
+    /// reload because the file changed underneath us. `reloaded` fires only for that last case, which
+    /// a window says out loud rather than swapping the board out silently.
+    func addWatcher(_ owner: AnyObject, changed: @escaping () -> Void,
+                    reloaded: @escaping () -> Void) {
+        let id = ObjectIdentifier(owner)
+        watchers.removeAll { $0.owner == id }
+        watchers.append((id, changed, reloaded))
+    }
+
+    func removeWatcher(_ owner: AnyObject) {
+        let id = ObjectIdentifier(owner)
+        watchers.removeAll { $0.owner == id }
+    }
+
+    private func documentChanged() { for watcher in watchers { watcher.changed() } }
+    private func documentReloaded() { for watcher in watchers { watcher.reloaded() } }
+
+    /// This document's undo stack, which every window showing it shares. A window hands it back from
+    /// `windowWillReturnUndoManager` so ⌘Z reaches the board rather than whatever text field last had
+    /// focus — and so undoing in one surface undoes in the other, which is the only coherent answer
+    /// when both are the same document.
+    let undoManager: UndoManager
     private var saveWork: DispatchWorkItem?
     /// The modification date of the last write we made or read. What tells our own save apart from
     /// Obsidian's — without it, every autosave would look like an outside change and trigger a reload.
@@ -37,9 +68,9 @@ final class CanvasDocumentStore {
     /// cost is nothing; the interval is about how long you'd tolerate seeing a stale board.
     private static let watchInterval: TimeInterval = 2
 
-    init(url: URL, undoManager: UndoManager) throws {
+    init(url: URL) throws {
         self.url = url
-        self.undoManager = undoManager
+        self.undoManager = UndoManager()
         self.document = try CanvasDocument.read(contentsOf: url)
         self.resolver = CanvasFileResolver(canvas: url)
         self.knownStamp = Self.modified(url)
@@ -66,7 +97,7 @@ final class CanvasDocumentStore {
             registerUndo(restoring: document, actionName: actionName)
         }
         document = next
-        onChange?()
+        documentChanged()
         scheduleSave()
     }
 
@@ -81,7 +112,7 @@ final class CanvasDocumentStore {
         mutate(&next)
         guard next != document else { return }
         document = next
-        onChange?()
+        documentChanged()
         scheduleSave()
     }
 
@@ -128,7 +159,7 @@ final class CanvasDocumentStore {
         let previous = document
         document = next
         registerUndo(restoring: previous, actionName: actionName)
-        onChange?()
+        documentChanged()
         scheduleSave()
     }
 
@@ -198,8 +229,8 @@ final class CanvasDocumentStore {
         guard reloaded != document else { return }
         document = reloaded
         resolver.refresh()
-        onChange?()
-        onReloadedFromDisk?()
+        documentChanged()
+        documentReloaded()
     }
 
     private static func modified(_ url: URL) -> Date? {

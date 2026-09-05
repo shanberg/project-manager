@@ -54,6 +54,16 @@ final class CanvasHeaderModel: ObservableObject {
         var focusToken = 0
     }
 
+    /// Commands an owner puts at the top of the options menu — a project window's way back to its task
+    /// list. Empty in a canvas window, which has nothing else to be.
+    @Published var extraOptions: [ExtraCommand] = []
+
+    struct ExtraCommand: Identifiable {
+        let id = UUID()
+        var title: String
+        var run: () -> Void
+    }
+
     // MARK: What the controls do. Supplied by the window controller.
 
     var addCard: () -> Void = {}
@@ -247,6 +257,12 @@ struct CanvasControlCapsule: View {
 
     private var optionsMenu: some View {
         Menu {
+            if !model.extraOptions.isEmpty {
+                ForEach(model.extraOptions) { command in
+                    Button(command.title, action: command.run)
+                }
+                Divider()
+            }
             Toggle("Edit Mode", isOn: Binding(get: { model.mode == .edit },
                                               set: { model.setMode($0 ? .edit : .view) }))
             Divider()

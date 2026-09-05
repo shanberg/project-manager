@@ -293,6 +293,14 @@ enum MainMenu {
             modifiers: [.command, .control])
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
+        // Render the project window's content column as the project's board instead of its task list.
+        // Routed to the window rather than the app, because it is a property of the window you are in —
+        // and so it is dim in a canvas window, which is already a board and has nothing to switch.
+        //
+        // ⌥⌘C, not the ⇧⌘C on File ▸ Project Canvas: that one opens the board in a window of its own,
+        // and the two are genuinely different requests. Both can be up at once, on one shared document.
+        add(menu, "Show Canvas", #selector(ProjectWindowController.toggleCanvasRenderer(_:)),
+            target: nil, key: "c", modifiers: [.command, .option])
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
         // window's split view controller, so it animates and persists in one place.
         // Zoom, answered only by a canvas window — dim in a project window, where there is nothing to

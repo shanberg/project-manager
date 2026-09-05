@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// One project window: a real Mac window with a hidden titlebar and a full-size content view. The
@@ -13,6 +14,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// The project this window shows. Changing it is `retarget(to:)`, not a write.
     private(set) var projectKey: String?
     private(set) var store: PMStore
+
+    /// Which way this window is rendering its project — its task list, or its board.
+    ///
+    /// **Per window, not per project.** A window is in canvas mode or it isn't, and switching the
+    /// project in it keeps it there. Remembering the choice per project sounds friendlier and means the
+    /// window silently changes shape, and changes the width it is allowed to be, as you walk down the
+    /// sidebar.
+    private var renderer: ProjectRenderer = .tasks
+
+    /// The project's canvas path arrives with the store's first read, and again whenever the project's
+    /// folder is re-scanned. A window in canvas mode has to follow it: the path is nil for the moment
+    /// after a retarget, so acting only at the moment of the switch would leave the window showing the
+    /// previous project's board, or an empty state for a project that has one.
+    private var canvasPathWatch: AnyCancellable?
 
     let state = ProjectViewState()
     private let split: ProjectSplitViewController
@@ -89,6 +104,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
+        watchCanvasPath()
+        split.onRendererChanged = { [weak self] in
+            guard let self else { return }
+            renderer = split.renderer
+            applyWidthLimits()
+        }
         // Publish "a field has the keyboard" into the shared state, which is what stands the window's
         // own ⌘A / ⌘C / ⌘Z / ⌘⌫ down while you're typing — see `ProjectViewState.isEditingText`.
         // Deferred by a turn of the run loop because AppKit changes the first responder from inside
@@ -146,6 +167,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
+    /// ⌘Z goes to whatever this window is showing. With a board up that is the canvas document's own
+    /// stack, shared with the canvas's own window if it also has one open — which is the only coherent
+    /// answer when both are the same document.
+    ///
+    /// The task list gets one manager for the window, which is what AppKit would have made for it
+    /// anyway: implementing this method at all takes the default away, so returning nil here would mean
+    /// no undo in any text field in the window rather than "carry on as before".
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        if renderer == .canvas, let board = split.undoManagerForContent { return board }
+        return windowUndoManager
+    }
+
+    private let windowUndoManager = UndoManager()
+
     // MARK: Presentation
 
     func show() {
@@ -193,6 +228,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.retarget(to: newStore, projectKey: newKey)
         applyTitle()
         pushFocusToDisk()
+        // A window in canvas mode stays in canvas mode across a switch — but the board it is showing is
+        // the *old* project's until it is pointed at the new one. The path arrives with the new store's
+        // first read, so `watchCanvasPath` runs this again when that lands rather than only here.
+        watchCanvasPath()
+        if renderer == .canvas { setRenderer(.canvas) }
     }
 
     /// Put the sidebar's selection back on the project this window is actually showing. Used when a
@@ -218,6 +258,98 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// File ▸ Project Canvas, and the header button's twin — this window's project, its board.
     func openProjectCanvas() {
         CanvasWindowController.openProjectCanvas(for: store)
+    }
+
+    // MARK: Rendering the project as a board
+
+    /// View ▸ Show Canvas — render this window's project as its board rather than as its task list.
+    ///
+    /// A different thing from File ▸ Project Canvas, which opens the board in a window of its own. This
+    /// is the same window looking at the same project a different way, and both can be up at once: the
+    /// document store is shared per file (see `CanvasStoreRegistry`), so the two are views of one board
+    /// with one undo stack rather than two copies racing each other to save.
+    @objc func toggleCanvasRenderer(_ sender: Any?) {
+        setRenderer(renderer == .canvas ? .tasks : .canvas)
+    }
+
+    private func watchCanvasPath() {
+        canvasPathWatch = store.$canvasPath
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, renderer == .canvas else { return }
+                // On the next turn: this fires from inside the store's own publish, and re-entering the
+                // split view's child swap from there is a layout change during an update.
+                afterCurrentUpdate { [weak self] in
+                    guard let self, self.renderer == .canvas else { return }
+                    self.setRenderer(.canvas)
+                }
+            }
+    }
+
+    private func setRenderer(_ next: ProjectRenderer) {
+        renderer = next
+        switch next {
+        case .tasks:
+            split.showTasks()
+        case .canvas:
+            split.showCanvas(at: store.canvasPath.map { URL(fileURLWithPath: $0) },
+                             projectName: window?.title,
+                             create: { [weak self] in self?.createAndShowCanvas() })
+        }
+        applyWidthLimits()
+    }
+
+    /// The empty state's button: make the board, then show it. The creating half is
+    /// `PMStore.openableCanvasPath`, which is the app's one place that decides where a project's canvas
+    /// goes and what starts in it.
+    private func createAndShowCanvas() {
+        store.openableCanvasPath { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                setRenderer(.canvas)
+            case .failure(let error):
+                let alert = NSAlert()
+                alert.messageText = "Couldn't make a canvas for this project."
+                alert.informativeText = (error as? LocalizedError)?.errorDescription
+                    ?? String(describing: error)
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
+    }
+
+    /// The window's size limits, which are not the same for the two renderers.
+    ///
+    /// A task list gains from every extra row it can show and nothing from being stretched sideways, so
+    /// a window showing one stops widening at `maxWindowContentWidth` and declines full screen — the
+    /// green button reverting to plain zoom is the honest affordance for a window with a maximum. A
+    /// board is the opposite: it is a plane, and every point of width is more of it you can see. So the
+    /// cap and the full-screen refusal are lifted for a canvas and re-applied on the way back — and on
+    /// the way back the window is pulled in if it has outgrown the cap in the meantime, since a window
+    /// wider than its own maximum is one the user can never restore by dragging.
+    private func applyWidthLimits() {
+        guard let window else { return }
+        switch renderer {
+        case .canvas:
+            window.contentMaxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                           height: CGFloat.greatestFiniteMagnitude)
+            window.collectionBehavior.remove(.fullScreenNone)
+        case .tasks:
+            window.contentMaxSize = NSSize(width: ProjectWindow.maxWindowContentWidth,
+                                           height: .greatestFiniteMagnitude)
+            if !window.styleMask.contains(.fullScreen) {
+                window.collectionBehavior.insert(.fullScreenNone)
+                let capped = window.frameRect(forContentRect:
+                    NSRect(x: 0, y: 0, width: ProjectWindow.maxWindowContentWidth, height: 100)).width
+                if window.frame.width > capped {
+                    var frame = window.frame
+                    frame.size.width = capped
+                    window.setFrame(frame, display: true, animate: true)
+                }
+            }
+        }
     }
 
     // MARK: Sidebar
@@ -332,6 +464,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(newWindowForTab(_:)):
             // Nothing to open if every project is already on screen.
             return WindowManager.shared.nextUnopenedProjectKey != nil
+        case #selector(toggleCanvasRenderer(_:)):
+            item.state = renderer == .canvas ? .on : .off
+            return store.projectName != nil
         default:
             return true
         }
