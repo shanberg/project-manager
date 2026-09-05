@@ -26,13 +26,53 @@ final class CanvasHeaderModel: ObservableObject {
     /// The web card you have stepped into, if any.
     @Published var page: Page?
     @Published var find = Find()
-    /// What a tiled view is showing, e.g. "6 of 43 cards". Nil when the board is showing itself.
+    /// What a tiled view is showing, long and short — "6 of 43 cards" and "6/43". Nil when the board is
+    /// showing itself.
     ///
     /// It has to say something. A board showing six of forty-three cards, with the rest hidden and the
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
-    @Published var tiling: String?
+    @Published var tiling: (long: String, short: String)?
     @Published var titlebar = TitlebarButtonMetrics.unmeasured
+    /// How much of the window the controls can spend. See `CanvasHeaderModel.Room`.
+    @Published var room = Room.full
+
+    /// How much room the capsule has, and therefore what it can afford to say.
+    ///
+    /// The capsule grew: it can hold the live page's host and four buttons, the tiled view's count and
+    /// its way out, a find field, the zoom, the word "Editing", and three controls. All of that at once
+    /// on a narrow window runs into the title pill, and the pill is the piece that gives way — so the
+    /// window ends up naming the board it is showing with two letters and an ellipsis.
+    ///
+    /// The fix is an order of precedence rather than more space: state you are *in* outlasts state you
+    /// can *read elsewhere*. The page group and the find field are things you asked for a moment ago and
+    /// are acting on now. The zoom is a number the board itself shows you by being at that zoom. So the
+    /// zoom goes first, then the mode label, then the host's words — its buttons stay, because they are
+    /// the only way to drive the page — and the tiled count shortens to a bare fraction before it
+    /// leaves. What never goes: Add, the options menu, and the way out of a tiled view.
+    ///
+    /// Breakpoints on the window rather than a fitting pass, because the capsule is in a hosting view
+    /// sized to its own contents and would report that it fits at any width. Deliberate numbers beat a
+    /// measurement that cannot fail.
+    enum Room {
+        case full, tight, minimal
+
+        init(width: CGFloat) {
+            switch width {
+            case 900...: self = .full
+            case 680..<900: self = .tight
+            default: self = .minimal
+            }
+        }
+
+        var showsZoom: Bool { self == .full }
+        var showsModeLabel: Bool { self == .full }
+        var showsPageHost: Bool { self != .minimal }
+        var hostWidth: CGFloat { self == .full ? 220 : 120 }
+        var findWidth: CGFloat { self == .full ? 170 : 120 }
+        /// The tiled readout in full ("6 of 43 cards") or short ("6/43").
+        var showsLongTilingSummary: Bool { self == .full }
+    }
 
     /// What the header knows about the one card whose page is live under your hands.
     ///
@@ -114,7 +154,7 @@ struct CanvasTitlePill: View {
             .headerBacking(chrome, in: Capsule())
             .contentShape(Capsule())
             .onHover { hovering = $0 }
-            .animation(.easeOut(duration: 0.18), value: chrome)
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
             .accessibilityLabel(Text(model.title))
             .modifier(TitlebarDrop(model: model))
     }
@@ -142,14 +182,16 @@ struct CanvasControlCapsule: View {
                 divider
             }
             if let tiling = model.tiling {
-                Text(tiling)
+                Text(model.room.showsLongTilingSummary ? tiling.long : tiling.short)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .padding(.horizontal, 5)
+                    .help("This board has more cards than the tiled view is showing.")
                 Button("Done", action: model.leaveTiling)
                     .controlSize(.small)
                     .padding(.trailing, 2)
+                    .help("Leave the tiled view")
                 divider
             }
             if model.find.isShowing {
@@ -161,7 +203,7 @@ struct CanvasControlCapsule: View {
             // — the same treatment the project header's progress count gets.
             // Hidden while tiled: the tiles fill the window at whatever zoom they were laid out at, and
             // a percentage you cannot change and did not choose is a number for its own sake.
-            if model.tiling == nil {
+            if model.tiling == nil, model.room.showsZoom {
                 Text("\(Int((model.zoom * 100).rounded()))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -170,7 +212,7 @@ struct CanvasControlCapsule: View {
                     .padding(.trailing, 4)
                     .help("Zoom")
             }
-            if model.mode == .edit {
+            if model.mode == .edit, model.room.showsModeLabel {
                 // A word rather than a segmented control, and only in the mode that isn't the default.
                 // The board announces edit mode loudly enough by itself — every card grows the four
                 // dots you drag lines from — so this is a confirmation rather than the only signal, and
@@ -193,24 +235,31 @@ struct CanvasControlCapsule: View {
         .padding(.vertical, 4)
         .headerBacking(chrome, in: Capsule())
         .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.18), value: chrome)
-        .animation(.snappy(duration: 0.2), value: model.page)
-        .animation(.snappy(duration: 0.2), value: model.find.isShowing)
-        .animation(.snappy(duration: 0.2), value: model.tiling)
+        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.page)
+        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.find.isShowing)
+        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.tiling?.long)
+        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
         .modifier(TitlebarDrop(model: model))
     }
 
     // MARK: The page you have stepped into
 
     @ViewBuilder private func pageGroup(_ page: CanvasHeaderModel.Page) -> some View {
-        Text(page.host)
-            .font(.caption)
-            .foregroundStyle(page.wandered ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: 220)
-            .padding(.horizontal, 5)
-            .help(pageHelp(page))
+        // The host's words are the first thing in this group to go, and its buttons are the last: the
+        // buttons are the only way to drive the page, while the address is also on the page itself. It
+        // holds on longer than anything else that is only informative, though — a wandered card is the
+        // one thing here that can cost you something.
+        if model.room.showsPageHost || page.wandered {
+            Text(page.host)
+                .font(.caption)
+                .foregroundStyle(page.wandered ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: model.room.hostWidth)
+                .padding(.horizontal, 5)
+                .help(pageHelp(page))
+        }
         button("chevron.left", "Back", enabled: page.canGoBack, action: model.pageBack)
         button("chevron.right", "Forward", enabled: page.canGoForward, action: model.pageForward)
         button("arrow.clockwise", "Reload", action: model.pageReload)
@@ -248,7 +297,7 @@ struct CanvasControlCapsule: View {
                     focusToken: model.find.focusToken,
                     onCancel: model.findClosed,
                     onCommit: model.findCommitted)
-            .frame(width: 170)
+            .frame(width: model.room.findWidth)
             .overlay(alignment: .trailing) {
                 if !model.find.summary.isEmpty {
                     Text(model.find.summary)

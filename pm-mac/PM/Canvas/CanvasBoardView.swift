@@ -118,6 +118,8 @@ final class CanvasBoardView: NSView {
         wantsLayer = true
         overlay.board = self
         addSubview(overlay)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Canvas")
         recomputeContent()
     }
 
@@ -273,7 +275,7 @@ final class CanvasBoardView: NSView {
             return
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.28
+            context.duration = Motion.duration(0.28)
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             animatesLayout = true
             layoutNodeViews()

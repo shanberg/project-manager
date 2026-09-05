@@ -79,6 +79,18 @@ extension CanvasBoardView {
         selection = kept.isEmpty ? [order[0]] : kept
         setLayout(session.layout, animated: true)
         onTilingChanged?()
+        announceTiling()
+    }
+
+    /// Say out loud what just happened to the board.
+    ///
+    /// A tiled view hides most of a board and moves the rest, which is a large change to something you
+    /// cannot see happen if you are not looking at it. `NSAccessibility.post` with
+    /// `.layoutChanged` is what the system uses for a window rearranging itself, which is exactly what
+    /// this is.
+    private func announceTiling() {
+        setAccessibilityLabel(tilingSummary.map { "Canvas, tiled, \($0.long)" } ?? "Canvas")
+        NSAccessibility.post(element: self, notification: .layoutChanged)
     }
 
     /// A grid, unless there are enough cards that one of them ought to be the one you are working in.
@@ -98,10 +110,12 @@ extension CanvasBoardView {
             selection = selection.intersection(previous.ids)
             setLayout(previous.layout, animated: animated)
             onTilingChanged?()
+            announceTiling()
             return
         }
         tiling = nil
         setLayout(.document, animated: animated)
+        announceTiling()
         // Back to the region you were looking at, which a tiled view never moved but a fullscreen of one
         // card may well have made meaningless to return to blind.
         scrollView?.canvasScroll?.centre(on: CanvasPoint(x: session.restoreVisible.midX,
@@ -200,12 +214,12 @@ extension CanvasBoardView {
     /// It has to say *something*. A board showing six of forty-three cards, with the other
     /// thirty-seven hidden and the lines between them gone, looks exactly like a board most of which has
     /// been deleted — and the moment you think that is the moment you stop trusting the feature.
-    var tilingSummary: String? {
+    var tilingSummary: (long: String, short: String)? {
         guard let tiling else { return nil }
         let total = document.nodes.filter { !$0.isGroup }.count
-        return tiling.ids.count == 1
-            ? "1 card of \(total)"
-            : "\(tiling.ids.count) of \(total) cards"
+        let long = tiling.ids.count == 1 ? "1 card of \(total)"
+                                         : "\(tiling.ids.count) of \(total) cards"
+        return (long, "\(tiling.ids.count)/\(total)")
     }
 }
 

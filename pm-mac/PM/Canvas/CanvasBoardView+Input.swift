@@ -426,6 +426,10 @@ extension CanvasBoardView {
     /// selections. It also scrolls the card it lands on into view: a focus move you cannot see is a
     /// focus move that looks like nothing happened.
     func moveFocus(_ direction: CanvasNavigation.Direction, extending: Bool) {
+        // One tile filling the window has no neighbours, and the arrows there mean the thing every
+        // window manager means by them in that state: show me the next one. In the board's own reading
+        // order, so cycling through a board is walking across it rather than shuffling it.
+        if let tiling, tiling.ids.count == 1 { return cycleFullscreen(direction) }
         let candidates = focusCandidates
         guard !candidates.isEmpty else { return }
         let current = selection.compactMap { id in candidates.first { $0.id == id }?.frame }
@@ -438,6 +442,21 @@ extension CanvasBoardView {
         else { return NSSound.beep() }
         selection = extending ? selection.union([next]) : [next]
         reveal(next)
+    }
+
+    /// Step the one filling the window on to the next card in the board's reading order.
+    ///
+    /// Left and up go back, right and down go forward, and it wraps — with one card on screen there is
+    /// no edge of the board to run into, only a list to walk.
+    private func cycleFullscreen(_ direction: CanvasNavigation.Direction) {
+        guard let tiling, let showing = tiling.ids.first else { return }
+        let all = CanvasTiling.order(document.nodes.filter { !$0.isGroup }
+                                        .map { (id: $0.id, frame: $0.frame) })
+        guard all.count > 1, let index = all.firstIndex(of: showing) else { return NSSound.beep() }
+        let forward = direction == .right || direction == .down
+        let next = all[(index + (forward ? 1 : all.count - 1)) % all.count]
+        selection = [next]
+        tile([next])
     }
 
     /// Every card the focus can land on, with the frame it is actually drawn at — so this follows a

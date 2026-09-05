@@ -40,6 +40,8 @@ struct CanvasProjectNote: View {
     /// Which position a freshly opened add editor seeds to, set by the menu's Add commands before the
     /// editor opens.
     @State private var addPosition: TaskInsertPosition = .after
+    /// The task row under the pointer, which is what reveals its "＋date".
+    @State private var hovering: String?
 
     private var notes: ProjectNotes? { store.notes }
 
@@ -67,14 +69,28 @@ struct CanvasProjectNote: View {
 
     /// The document's own title. The project window puts this in its header pill; a card has no header,
     /// so it goes where the file actually keeps it — at the top, as a heading.
+    ///
+    /// Named from the *filename* until the store's first read lands. Acquiring a store starts a file
+    /// read, and until it finishes `notes` is nil — so a board of project cards came up as a screenful
+    /// of blank rectangles for as long as that took, which is exactly the moment a card most needs to
+    /// say what it is. The notes file is named for its project, so the name is already in hand.
     @ViewBuilder private var title: some View {
-        if let name = notes?.title, !name.isEmpty {
+        let name = notes?.title.isEmpty == false ? notes!.title : filenameTitle
+        if !name.isEmpty {
             Text(name)
                 .font(.system(size: 14, weight: .semibold))
                 .lineLimit(2)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
+                .foregroundStyle(store.hasLoaded ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
+    }
+
+    /// `Notes - Walkable.md` is the Walkable project. The prefix is the convention `getNotesPath`
+    /// writes; the rest is the title.
+    private var filenameTitle: String {
+        let name = noteURL.deletingPathExtension().lastPathComponent
+        return name.hasPrefix("Notes - ") ? String(name.dropFirst("Notes - ".count)) : name
     }
 
     @ViewBuilder private func session_(_ session: Session, at index: Int) -> some View {
@@ -172,15 +188,17 @@ struct CanvasProjectNote: View {
 
             Spacer(minLength: 4)
 
-            // `reveal` on, unconditionally. In the window the "＋date" affordance fades in on hover
-            // because a list of forty rows would otherwise carry forty of them; a card holds a handful
-            // and has no hover state of its own to hang it off, the card itself being what you hovered.
+            // Revealed on hover, exactly as in the window. Shown unconditionally it put a dashed
+            // "＋date" on every dateless task on the card at once, which on a board of project cards is
+            // a lot of empty controls competing with the tasks they are attached to. The card takes the
+            // pointer once you have stepped into it, so it has a hover state to hang this off after all.
             DueChip(todo: todo,
                     isEditing: activeEditor == EditorTarget(key: key, kind: .due),
-                    reveal: true,
+                    reveal: hovering == key,
                     onPick: { store.setDue(todo, due: $0) },
                     onPickCustom: { open(.due, on: todo) })
         }
+        .onHover { inside in hovering = inside ? key : (hovering == key ? nil : hovering) }
         .padding(.leading, 12 + indent(todo.depth))
         .padding(.trailing, 12)
         .padding(.vertical, 2)

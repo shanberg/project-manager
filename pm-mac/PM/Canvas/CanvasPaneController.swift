@@ -49,6 +49,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
         }
+        // The pane's own width, which is what the capsule has to fit inside — not the window's, since a
+        // project window's sidebar takes a bite out of it.
+        container.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(paneResized),
+                                               name: NSView.frameDidChangeNotification,
+                                               object: container)
         scroll.board.onModeChanged = { [weak self] in
             guard let self else { return }
             // The mode is flipped from the View menu and from the header's options, so the header
@@ -104,6 +110,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         watchTheWindow()
         view.window?.layoutIfNeeded()
         measureTitlebar()
+        paneResized()
         guard !hasFitted else { return }
         hasFitted = true
         // Fitted after the pane has a size, or "fit" is computed against a zero-width clip view.
@@ -153,6 +160,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     @objc private func windowGeometryChanged() { measureTitlebar() }
+
+    @objc private func paneResized() {
+        let room = CanvasHeaderModel.Room(width: container.bounds.width)
+        if header.room != room { header.room = room }
+    }
 
     @objc private func windowBecameKey() {
         idleTimer?.invalidate()

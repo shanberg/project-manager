@@ -358,7 +358,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         let going = [placeholder, frozen].compactMap { $0 }
         if first, !going.isEmpty {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.revealDuration
+                context.duration = Motion.duration(Self.revealDuration)
                 context.allowsImplicitAnimation = true
                 for view in going { view.animator().alphaValue = 0 }
             } completionHandler: { [weak self] in

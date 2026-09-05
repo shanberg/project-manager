@@ -167,6 +167,7 @@ class CanvasNodeView: NSView {
         } else if wasSimplified != isSimplified {
             simplificationChanged()
         }
+        refreshAccessibility()
         needsDisplay = true
     }
 
@@ -222,6 +223,24 @@ class CanvasNodeView: NSView {
 
     /// The card's own content changed — reload it.
     func contentChanged() {}
+
+    /// Say what this card is, to VoiceOver.
+    ///
+    /// A board is a field of unlabelled rectangles otherwise. The description a card already writes for
+    /// its tooltip is the same sentence VoiceOver wants — what the card is and anything unusual about it
+    /// — so there is one answer rather than two that can disagree. Cards that have no description fall
+    /// back to what they hold, which for a text card is its text and for a web card its host.
+    ///
+    /// Refreshed wherever the description is, because a page that has navigated is a card that has
+    /// stopped being what it said it was.
+    func refreshAccessibility() {
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(cardDescription ?? accessibilityFallback)
+        setAccessibilityElement(true)
+    }
+
+    /// What to say for a card with nothing to add — overridden where the content knows better.
+    var accessibilityFallback: String { "Card" }
 
     /// What this card says about itself when the pointer rests on it, or nil for a card that says
     /// everything it has to say by being looked at.
@@ -343,6 +362,10 @@ final class CanvasTextNodeView: CanvasNodeView {
     private var text: String {
         if case .text(let value) = node.content { return value }
         return ""
+    }
+
+    override var accessibilityFallback: String {
+        text.isEmpty ? "Empty card" : canvasCardSummary(text)
     }
 
     override func contentChanged() {
