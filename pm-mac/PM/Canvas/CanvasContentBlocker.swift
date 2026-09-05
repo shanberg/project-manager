@@ -115,6 +115,7 @@ enum CanvasContentBlocker {
 
     /// Compile — or, normally, look up — every list the bundle ships, then prove they are in force.
     static func prepare() async {
+        CanvasAdvancedRules.prepare()
         await compileWhatWeHave()
         isReady = true
         for block in whenReady { block() }
@@ -209,12 +210,16 @@ enum CanvasContentBlocker {
         guard !names.isEmpty else { return }
         let configuration = WKWebViewConfiguration()
         for list in lists { configuration.userContentController.add(list) }
+        CanvasAdvancedRules.attach(to: configuration, for: canaryHost)
         let web = WKWebView(frame: .zero, configuration: configuration)
-        let divs = names.map { "<div id=\"pm-canary-\($0)\"></div>" }.joined()
+        let divs = (names + ["advanced"]).map { "<div id=\"pm-canary-\($0)\"></div>" }.joined()
         web.loadHTMLString("<!doctype html><meta charset=utf-8><body>\(divs)</body>",
                            baseURL: URL(string: "https://\(canaryHost)/"))
 
-        let probe = names
+        // "advanced" is not a rule list — it is the scriptlet and extended-CSS interpreter, which
+        // hides its own element through exactly the same mechanism and so can be asked the same way.
+        let asked = names + ["advanced"]
+        let probe = asked
             .map { "getComputedStyle(document.getElementById('pm-canary-\($0)')).display" }
             .joined(separator: "+','+")
 
@@ -222,14 +227,14 @@ enum CanvasContentBlocker {
             try? await Task.sleep(for: .milliseconds(250))
             guard let answer = (try? await web.evaluateJavaScript(probe)) as? String else { continue }
             let states = answer.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            guard states.count == names.count else { continue }
-            let inert = zip(names, states).filter { $0.1 != "none" }.map(\.0)
+            guard states.count == asked.count else { continue }
+            let inert = zip(asked, states).filter { $0.1 != "none" }.map(\.0)
             if inert.isEmpty {
-                Log.write("canvas blocking: verified \(names.count) list(s) in force")
+                Log.write("canvas blocking: verified \(asked.count) list(s) in force")
                 report(nil)
             } else {
                 Log.write("canvas blocking: NOT IN FORCE — \(inert.joined(separator: ", "))")
-                report(inert.count == names.count
+                report(inert.count == asked.count
                     ? "Ad and tracker blocking isn’t working. Web cards will show ads and cookie banners."
                     : "Some ad blocking isn’t working (\(inert.joined(separator: ", "))).")
             }

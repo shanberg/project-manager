@@ -57,9 +57,12 @@ total=0
 for entry in "${lists[@]}"; do
   name="${entry%%|*}"; url="${entry##*|}"
   curl -fsSL -o "$work/$name.txt" "$url"
-  "$converter" convert --safari-version 26.0 \
+  # --advanced-blocking also emits the rules a content blocker cannot express — scriptlets and
+  # extended CSS — which PM applies itself. See scripts/pack-advanced.py.
+  "$converter" convert --safari-version 26.0 --advanced-blocking true \
       --input-path "$work/$name.txt" \
-      --safari-rules-json-path "$work/$name.json" >/dev/null
+      --safari-rules-json-path "$work/$name.json" \
+      --advanced-blocking-rules-path "$work/$name.adv.txt" >/dev/null
 
   count=$(python3 "$here/scripts/pack-blocklist.py" "$work/$name.json" "$name" "$out")
   packed=$(du -h "$out/$name.json.deflate" | cut -f1 | tr -d ' ')
@@ -67,5 +70,10 @@ for entry in "${lists[@]}"; do
   printf "    %-14s %7s rules -> %s\n" "$name" "$count" "$packed"
 done
 
+mkdir -p "$here/Resources/AdvancedRules"
+cat "$work"/*.adv.txt > "$work/advanced.txt"
+python3 "$here/scripts/pack-advanced.py" "$work/advanced.txt" "$here/Resources/AdvancedRules"
+
 echo "==> $total rules across ${#lists[@]} lists in Resources/BlockLists"
-echo "    commit these, then check the launch log says: verified ${#lists[@]} list(s) in force"
+echo "    commit these, then check the launch log says: verified $(( ${#lists[@]} + 1 )) list(s) in force"
+echo "    (the ${#lists[@]} lists, plus the advanced-rules interpreter, which carries a canary too)"

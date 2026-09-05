@@ -257,6 +257,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // Ads, trackers and cookie banners. A rule list can only be handed to a web view as that view
         // is built, which is also why excusing a site rebuilds the page rather than reloading it.
         CanvasContentBlocker.attach(to: configuration, for: url.host())
+        CanvasAdvancedRules.attach(to: configuration, for: url.host())
         // A card is a clipping, not a browser: it shouldn't be able to *spontaneously* open windows.
         // A link you click is a different matter — see `createWebViewWith` below, which is what makes
         // a `target="_blank"` link navigate instead of silently doing nothing.

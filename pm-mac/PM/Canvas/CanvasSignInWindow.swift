@@ -45,6 +45,7 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
         // The same filtering the card gets. A sign-in page that behaves differently from the card it
         // was opened for is a debugging trap, and consent banners are, if anything, worse here.
         CanvasContentBlocker.attach(to: configuration, for: url.host())
+        CanvasAdvancedRules.attach(to: configuration, for: url.host())
         // The opposite of a card: here, a page that asks for a window is asking for a good reason.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         web = WKWebView(frame: .zero, configuration: configuration)
