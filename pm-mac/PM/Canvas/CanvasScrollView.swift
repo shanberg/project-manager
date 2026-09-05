@@ -45,9 +45,13 @@ final class CanvasScrollView: NSScrollView {
         automaticallyAdjustsContentInsets = false
         contentView.postsBoundsChangedNotifications = true
 
+        contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             self, selector: #selector(visibleRegionChanged),
             name: NSView.boundsDidChangeNotification, object: contentView)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(clipResized),
+            name: NSView.frameDidChangeNotification, object: contentView)
         NotificationCenter.default.addObserver(
             self, selector: #selector(zoomChanged),
             name: NSScrollView.didEndLiveMagnifyNotification, object: self)
@@ -56,6 +60,30 @@ final class CanvasScrollView: NSScrollView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit { NotificationCenter.default.removeObserver(self) }
+
+    /// The window changed size. A tiled view has to be laid out again for the shape it is now filling —
+    /// see `CanvasBoardView.retileForWindowSize`.
+    @objc private func clipResized() {
+        guard board.isTiled else { return }
+        board.retileForWindowSize()
+    }
+
+    /// A tiled view is a fixed view of a fixed set of cards, so the board underneath it does not move.
+    ///
+    /// Panning or zooming would slide the tiles out of the window they were laid out to fill, and the
+    /// only way back would be to leave and come in again. Every tiling window manager takes the same
+    /// position: while windows are tiled, the desktop is not something you scroll. Swallowed here rather
+    /// than by turning scrolling off, so a scroll wheel over an engaged card's own content still reaches
+    /// it — that view takes the event long before this one is asked.
+    override func scrollWheel(with event: NSEvent) {
+        guard !board.isTiled else { return }
+        super.scrollWheel(with: event)
+    }
+
+    override func magnify(with event: NSEvent) {
+        guard !board.isTiled else { return }
+        super.magnify(with: event)
+    }
 
     @objc private func visibleRegionChanged() {
         board.refreshNodeViews()

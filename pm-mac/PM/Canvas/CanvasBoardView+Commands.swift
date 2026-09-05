@@ -660,8 +660,12 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return !selection.isEmpty && !isTiled
         case #selector(paste(_:)):
             return NSPasteboard.general.types?.isEmpty == false
-        case #selector(selectAll(_:)), #selector(zoomIn(_:)), #selector(zoomOut(_:)),
+        case #selector(zoomIn(_:)), #selector(zoomOut(_:)),
              #selector(zoomActualSize(_:)), #selector(zoomToFit(_:)):
+            // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
+            // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.
+            return !isTiled
+        case #selector(selectAll(_:)):
             return true
         default:
             return true

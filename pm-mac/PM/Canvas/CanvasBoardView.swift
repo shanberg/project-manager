@@ -45,6 +45,8 @@ final class CanvasBoardView: NSView {
     /// See `CanvasLayout` and `CanvasTiling`.
     private(set) var layout: CanvasLayout = .document
 
+    /// The tilings you drilled in from, outermost first. Escape pops one at a time.
+    var tilingHistory: [CanvasTileSession] = []
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession?
     /// Told when a tiling is entered, left or rearranged, so the window can say what it is showing.

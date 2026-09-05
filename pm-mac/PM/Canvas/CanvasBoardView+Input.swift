@@ -193,7 +193,7 @@ extension CanvasBoardView {
                 view.beginEditing()
             }
         case .resizeSplit:
-            break
+            rememberMasterFraction()
         case .move(let from, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)

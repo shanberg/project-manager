@@ -159,13 +159,17 @@ struct CanvasControlCapsule: View {
             // The zoom percentage used to read in the window's subtitle, which a hidden title takes
             // with it. Quiet and monospaced so it can change under your eye without the row twitching
             // — the same treatment the project header's progress count gets.
-            Text("\(Int((model.zoom * 100).rounded()))%")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(width: 38, alignment: .trailing)
-                .padding(.trailing, 4)
-                .help("Zoom")
+            // Hidden while tiled: the tiles fill the window at whatever zoom they were laid out at, and
+            // a percentage you cannot change and did not choose is a number for its own sake.
+            if model.tiling == nil {
+                Text("\(Int((model.zoom * 100).rounded()))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: 38, alignment: .trailing)
+                    .padding(.trailing, 4)
+                    .help("Zoom")
+            }
             if model.mode == .edit {
                 // A word rather than a segmented control, and only in the mode that isn't the default.
                 // The board announces edit mode loudly enough by itself — every card grows the four
@@ -284,11 +288,15 @@ struct CanvasControlCapsule: View {
             }
             Toggle("Edit Mode", isOn: Binding(get: { model.mode == .edit },
                                               set: { model.setMode($0 ? .edit : .view) }))
+                .disabled(model.tiling != nil)
             Divider()
-            Button("Zoom In", action: model.zoomIn)
-            Button("Zoom Out", action: model.zoomOut)
-            Button("Actual Size", action: model.zoomActualSize)
-            Button("Zoom to Fit", action: model.zoomToFit)
+            Group {
+                Button("Zoom In", action: model.zoomIn)
+                Button("Zoom Out", action: model.zoomOut)
+                Button("Actual Size", action: model.zoomActualSize)
+                Button("Zoom to Fit", action: model.zoomToFit)
+            }
+            .disabled(model.tiling != nil)
         } label: {
             Image(systemName: "slider.horizontal.3")
         }

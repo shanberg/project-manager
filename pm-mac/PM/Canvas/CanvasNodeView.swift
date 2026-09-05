@@ -258,7 +258,10 @@ class CanvasNodeView: NSView {
     func refreshElevation() {
         let picked = board.selection.contains(node.id)
         let lift: (opacity: Float, radius: Double, drop: Double)
-        switch (board.mode, picked, isEngaged) {
+        // A tiled view answers with height whatever the mode is. The ring and the grips are gone there —
+        // a tile's size isn't yours to set — so height is all that is left to say which tile the arrows
+        // and Return are about, and a tiled board in edit mode would otherwise say nothing at all.
+        switch (board.isTiled ? .view : board.mode, picked, isEngaged) {
         case (.view, _, true): lift = (0.30, 17, 7)
         case (.view, true, _): lift = (0.22, 11, 4)
         default: lift = (0.13, 5, 1.5)

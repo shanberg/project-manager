@@ -10,8 +10,9 @@ struct CanvasTileSession: Equatable {
     /// board, so an arrangement preserves the relationships you built rather than scrambling them.
     var ids: [String]
     var arrangement: CanvasTiling.Arrangement
-    /// How much of the width the master tile takes, for `masterStack`. Dragged, not typed.
-    var masterFraction: Double = 0.62
+    /// How much of the width the master tile takes, for `masterStack`. Dragged, not typed, and
+    /// remembered — see `CanvasTiling.savedMasterFraction`.
+    var masterFraction: Double = CanvasTiling.savedMasterFraction
     /// The region being filled, in canvas coordinates: what was on screen when you entered.
     var area: CanvasRect
     /// What the board was looking at, so leaving can put it back exactly.

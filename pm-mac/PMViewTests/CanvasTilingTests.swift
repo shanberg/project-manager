@@ -111,7 +111,7 @@ final class CanvasTilingTests: XCTestCase {
     /// has to produce one tile filling the area whichever arrangement is up.
     func testOneCardFillsTheWindow() {
         for arrangement in CanvasTiling.Arrangement.allCases {
-            let tiles = CanvasTiling.frames(arrangement, count: 1, in: wide)
+            let tiles = CanvasTiling.frames(arrangement, count: 1, in: wide, masterFraction: 0.62)
             XCTAssertEqual(tiles.count, 1)
             XCTAssertLessThan(tiles[0].width, wide.width, "inset from the edges")
             XCTAssertGreaterThan(tiles[0].width, wide.width - 4 * CanvasTiling.gap)

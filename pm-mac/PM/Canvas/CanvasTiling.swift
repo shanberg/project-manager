@@ -27,6 +27,41 @@ enum CanvasTiling {
     /// The gap between tiles, and between the tiles and the window's edge, in canvas points at 100%.
     static let gap: Double = 14
 
+    // MARK: What you chose last time
+
+    /// The arrangement and the split you last set, remembered app-wide.
+    ///
+    /// App-wide rather than per board, and deliberately: this is a preference about how *you* like to
+    /// look at a set of cards, not a fact about any one canvas. Somebody who works master-and-stack
+    /// works that way on every board, and having to say so again on each one would be the app noticing
+    /// the answer and then asking the question anyway.
+    ///
+    /// Unset until you choose, so a first tiling still gets the count-based guess — three cards are
+    /// peers and a grid says so, while past four one of them is usually the one you are working in.
+    /// A guess is a good default and a bad thing to overrule a stated preference with, so the moment
+    /// there is a stated one it wins.
+    private static let arrangementKey = "PMCanvasTileArrangement"
+    private static let fractionKey = "PMCanvasTileMasterFraction"
+
+    static var savedArrangement: Arrangement? {
+        get {
+            UserDefaults.standard.string(forKey: arrangementKey).flatMap(Arrangement.init(rawValue:))
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue, forKey: arrangementKey)
+        }
+    }
+
+    /// How much of the width the master tile takes. Dragged rather than typed, and kept because a
+    /// divider you drag back to the same place every time is a setting you have already made.
+    static var savedMasterFraction: Double {
+        get {
+            let stored = UserDefaults.standard.double(forKey: fractionKey)
+            return stored > 0 ? min(0.85, max(0.3, stored)) : 0.62
+        }
+        set { UserDefaults.standard.set(min(0.85, max(0.3, newValue)), forKey: fractionKey) }
+    }
+
     /// The order cards tile in: reading order of where they actually sit on the board.
     ///
     /// This is what makes it a *canvas's* tiling rather than a generic one. The cards were placed on
@@ -56,7 +91,7 @@ enum CanvasTiling {
 
     /// The frames `count` tiles get inside `area`.
     static func frames(_ arrangement: Arrangement, count: Int, in area: CanvasRect,
-                       masterFraction: Double = 0.62) -> [CanvasRect] {
+                       masterFraction: Double) -> [CanvasRect] {
         guard count > 0 else { return [] }
         let inner = area.inset(by: -gap)
         guard inner.width > gap, inner.height > gap else { return Array(repeating: area, count: count) }

@@ -21,8 +21,20 @@ extension CanvasBoardView {
     // MARK: Entering and leaving
 
     /// ⌘Return. Fill the window with the selection, or with what is on screen when nothing is selected.
+    ///
+    /// Pressed *inside* a tiling it drills in rather than leaving: with one tile picked out of six, the
+    /// obvious next thing to want is that one filling the window, and Escape then comes back to the six
+    /// before it comes back to the board. That is the same command meaning the same thing at a third
+    /// scale — a card, a handful, the board — rather than a second key for going deeper.
     @objc func tileSelection(_ sender: Any?) {
-        if isTiled { return untile(animated: true) }
+        if let session = tiling {
+            let picked = selection.intersection(session.ids)
+            guard !picked.isEmpty, picked.count < session.ids.count else {
+                return untile(animated: true)
+            }
+            tilingHistory.append(session)
+            return tile(picked)
+        }
         var ids = selection.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
         // A frame is a container of cards, so tiling one means tiling what is in it. This is the
         // "frames are workspaces" reading, and it is the one command where it pays off immediately.
@@ -52,12 +64,19 @@ extension CanvasBoardView {
                               y: visible.minY + 54 / liveScale,
                               width: max(80, visible.width - 36 / liveScale),
                               height: max(80, visible.height - 72 / liveScale))
-        let session = CanvasTileSession(ids: CanvasTiling.order(cards),
-                                        arrangement: arrangement ?? preferredArrangement(for: cards.count),
-                                        area: area,
-                                        restoreVisible: visible)
+        let order = CanvasTiling.order(cards)
+        let session = CanvasTileSession(
+            ids: order,
+            arrangement: arrangement ?? CanvasTiling.savedArrangement
+                ?? preferredArrangement(for: cards.count),
+            area: area,
+            restoreVisible: tiling?.restoreVisible ?? visible)
         tiling = session
-        selection = selection.intersection(ids)
+        // Something has to be focused on the way in, or the arrows and Return have nothing to act on
+        // and the first thing you try does nothing. Whatever of the selection survived, else the first
+        // tile — which in master-and-stack is the master, the one you are most likely to mean.
+        let kept = selection.intersection(ids)
+        selection = kept.isEmpty ? [order[0]] : kept
         setLayout(session.layout, animated: true)
         onTilingChanged?()
     }
@@ -71,9 +90,16 @@ extension CanvasBoardView {
         count >= 4 ? .masterStack : .grid
     }
 
-    /// Escape. Put every card back where the board says it belongs.
+    /// Escape. Back out one level: to the tiling you drilled in from, or to the board.
     func untile(animated: Bool) {
         guard let session = tiling else { return }
+        if let previous = tilingHistory.popLast() {
+            tiling = previous
+            selection = selection.intersection(previous.ids)
+            setLayout(previous.layout, animated: animated)
+            onTilingChanged?()
+            return
+        }
         tiling = nil
         setLayout(.document, animated: animated)
         // Back to the region you were looking at, which a tiled view never moved but a fullscreen of one
@@ -86,6 +112,7 @@ extension CanvasBoardView {
     /// Swap the arrangement without leaving the tiling.
     func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
         guard var session = tiling, session.arrangement != arrangement else { return }
+        CanvasTiling.savedArrangement = arrangement
         session.arrangement = arrangement
         tiling = session
         setLayout(session.layout, animated: true)
@@ -112,6 +139,30 @@ extension CanvasBoardView {
     func setMasterFraction(_ fraction: Double) {
         guard var session = tiling, session.arrangement == .masterStack else { return }
         session.masterFraction = min(0.85, max(0.3, fraction))
+        tiling = session
+        setLayout(session.layout, animated: false)
+    }
+
+    /// Remember where the divider was left. On mouse-up rather than on every frame of the drag, which
+    /// would write to defaults at the rate the mouse reports.
+    func rememberMasterFraction() {
+        guard let tiling, tiling.arrangement == .masterStack else { return }
+        CanvasTiling.savedMasterFraction = tiling.masterFraction
+    }
+
+    /// The window changed size, so the region the tiles were laid out in is the wrong shape.
+    ///
+    /// Without this a tiled view stops filling the window the moment you resize it — the tiles keep the
+    /// canvas coordinates they were given, which were the window's at the time, and drift out of it. A
+    /// tiling manager's whole promise is that the windows fill the screen, and one that stopped when
+    /// you dragged a corner would be making the promise in past tense.
+    func retileForWindowSize() {
+        guard var session = tiling else { return }
+        let visible = canvasRect(visibleRect)
+        session.area = CanvasRect(x: visible.minX + 18 / liveScale,
+                                  y: visible.minY + 54 / liveScale,
+                                  width: max(80, visible.width - 36 / liveScale),
+                                  height: max(80, visible.height - 72 / liveScale))
         tiling = session
         setLayout(session.layout, animated: false)
     }
