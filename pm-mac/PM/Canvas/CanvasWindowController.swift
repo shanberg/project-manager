@@ -13,7 +13,6 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
                                     NSMenuItemValidation {
     let store: CanvasDocumentStore
     private let scroll: CanvasScrollView
-    private let bar: CanvasFloatingBar
     private let notice = CanvasNoticeBar()
     private let container = NSView()
 
@@ -103,7 +102,6 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
         let undo = UndoManager()
         store = try CanvasDocumentStore(url: url, undoManager: undo)
         scroll = CanvasScrollView(store: store)
-        bar = CanvasFloatingBar(scroll: scroll)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -126,21 +124,13 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
             // The mode can now be flipped from the menu as well as the toolbar, so the segmented
             // control follows the board rather than being the only thing that knows.
             modeControl?.selectedSegment = scroll.board.mode == .edit ? 1 : 0
-            bar.follow(board: scroll.board)
         }
 
         store.onChange = { [weak self] in self?.documentChanged() }
         store.onReloadedFromDisk = { [weak self] in self?.noteOutsideChange() }
         store.startWatching()
 
-        scroll.board.onSelectionChanged = { [weak self] _ in self?.selectionChanged() }
-        scroll.onZoomChanged = { [weak self] zoom in
-            self?.showZoom(zoom)
-            self?.bar.follow(board: self!.scroll.board)
-        }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(scrolled),
-            name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        scroll.onZoomChanged = { [weak self] zoom in self?.showZoom(zoom) }
         // Filtering is verified after launch, which is usually after this window exists.
         NotificationCenter.default.addObserver(
             self, selector: #selector(blockingHealthChanged),
@@ -167,7 +157,6 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
 
         container.addSubview(notice)
         container.addSubview(scroll)
-        scroll.addSubview(bar)
 
         NSLayoutConstraint.activate([
             notice.topAnchor.constraint(equalTo: container.topAnchor),
@@ -435,16 +424,7 @@ final class CanvasWindowController: NSWindowController, NSWindowDelegate, NSTool
 
     private func documentChanged() {
         scroll.board.documentChanged()
-        bar.follow(board: scroll.board)
         updateNotice()
-    }
-
-    private func selectionChanged() {
-        bar.follow(board: scroll.board)
-    }
-
-    @objc private func scrolled() {
-        bar.follow(board: scroll.board)
     }
 
     /// Where a document says what state it is in. The toolbar's own readout is still fed, for anyone

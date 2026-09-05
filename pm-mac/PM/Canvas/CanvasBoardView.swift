@@ -42,7 +42,21 @@ final class CanvasBoardView: NSView {
         }
     }
     var selection: Set<String> = [] { didSet { selectionChanged(from: oldValue) } }
-    var hovered: String?
+    /// The card under the pointer. The board carries its tooltip, because the card can't: an unengaged
+    /// card returns nil from `hitTest` and so never sees the mouse. See `CanvasNodeView.cardDescription`.
+    var hovered: String? { didSet { if hovered != oldValue { refreshHoverDescription() } } }
+
+    /// A card's answer changed while the pointer was on it — a page navigated, a page got older.
+    func descriptionChanged(for id: String) {
+        if hovered == id { refreshHoverDescription() }
+        if nodeViews[id]?.isEngaged == true { pageStateChanged() }
+    }
+
+    private func refreshHoverDescription() {
+        let description = hovered.flatMap { nodeViews[$0]?.cardDescription }
+        guard description != toolTip else { return }
+        toolTip = description
+    }
 
     /// What the pointer is currently doing. Nil between gestures.
     var gesture: Gesture?
@@ -328,13 +342,22 @@ final class CanvasBoardView: NSView {
     /// The spacing steps up as you zoom out so the dots stay roughly the same distance apart on screen
     /// — at 20% a 20pt grid is a 4pt grid, which is a texture rather than a grid — and below a point
     /// it's dropped entirely, because a dot per few pixels is just noise.
+    ///
+    /// **And it fades out as you zoom in**, which follows from what it is for. Its whole job is to
+    /// prove the board is moving while you cross it, and crossing the board is something you do zoomed
+    /// out. Once you are close enough to be reading a card, the card is what should be moving under
+    /// your eye and the ground behind it has nothing left to say — so past 100% it thins out, and by
+    /// 160% it is gone and a card sits on a plain surface.
     private func drawGrid(in dirty: NSRect) {
         var spacing: Double = 20
         while spacing * liveScale < 14 { spacing *= 4 }
         guard spacing * liveScale >= 14, spacing < 4000 else { return }
 
+        let presence = 1 - min(1, max(0, (liveScale - 1.0) / 0.6))
+        guard presence > 0.01 else { return }
+
         let radius = min(1.2, 1.0 / liveScale)
-        CanvasPalette.grid.setFill()
+        CanvasPalette.grid(presence).setFill()
         let path = NSBezierPath()
         var y = (Double(dirty.minY) / spacing).rounded(.down) * spacing
         while y <= Double(dirty.maxY) {
@@ -357,11 +380,11 @@ final class CanvasBoardView: NSView {
             let rect = viewRect(node.frame)
             guard rect.intersects(dirty.insetBy(dx: -40, dy: -40)) else { continue }
             let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
-            (CanvasPalette.color(node.color)?.withAlphaComponent(0.07) ?? CanvasPalette.groupFill).setFill()
+            CanvasPalette.groupFill.setFill()
             path.fill()
-            (CanvasPalette.color(node.color) ?? CanvasPalette.groupStroke).setStroke()
-            path.lineWidth = selection.contains(node.id) ? 3 / liveScale : 1.5 / liveScale
-            if selection.contains(node.id) { NSColor.controlAccentColor.setStroke() }
+            let picked = selection.contains(node.id)
+            (picked ? NSColor.controlAccentColor : CanvasPalette.groupStroke).setStroke()
+            path.lineWidth = (picked ? 3 : 1.5) / liveScale
             path.stroke()
 
             if case .group(let label, _, _) = node.content, let label, !label.isEmpty {
@@ -386,9 +409,9 @@ final class CanvasBoardView: NSView {
             let selected = selection.contains(edge.id)
             let under = hoveredEdge == edge.id
             let color = selected ? NSColor.controlAccentColor
-                : (under ? CanvasPalette.edge(edge.color).blended(withFraction: 0.35, of: .labelColor)
-                        ?? CanvasPalette.edge(edge.color)
-                   : CanvasPalette.edge(edge.color))
+                : (under ? CanvasPalette.edge.blended(withFraction: 0.35, of: .labelColor)
+                        ?? CanvasPalette.edge
+                   : CanvasPalette.edge)
             drawCurve(curve, color: color, width: (selected ? 3.5 : under ? 3.0 : 2.2) / liveScale,
                       startEnd: edge.resolvedFromEnd, endEnd: edge.resolvedToEnd, label: edge.label)
         }

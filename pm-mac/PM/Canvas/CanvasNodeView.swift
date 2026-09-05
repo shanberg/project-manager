@@ -50,7 +50,6 @@ class CanvasNodeView: NSView {
 
         clip.wantsLayer = true
         clip.layer?.masksToBounds = true
-        clip.layer?.cornerRadius = 8
         clip.layer?.cornerCurve = .continuous
         clip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clip)
@@ -90,17 +89,10 @@ class CanvasNodeView: NSView {
     /// it is a *live* thing, and a click on a live thing should reach it.
     var engagesOnClick: Bool { false }
 
-    /// A part of an engaged card that still belongs to the board — a web card's caption, which stays a
-    /// drag handle after the page underneath has started taking clicks.
-    var boardHandle: NSView?
-
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard isEngaged else { return nil }
         let local = convert(point, from: superview)
-        let handle = boardHandle?.superview == nil ? nil
-            : boardHandle.map { $0.convert($0.bounds, to: self) }
-        guard !canvasBoardKeeps(local, in: bounds, handle: handle, scale: board.liveScale)
-        else { return nil }
+        guard !canvasBoardKeeps(local, in: bounds, scale: board.liveScale) else { return nil }
         return super.hitTest(point)
     }
 
@@ -117,26 +109,45 @@ class CanvasNodeView: NSView {
 
     // MARK: Chrome
 
+    /// The card's corner, which grows a little with the card.
+    ///
+    /// One fixed radius does not read as one radius. At 8pt a 220pt card has a soft corner and a 900pt
+    /// card is very nearly square, so a board of cards at the sizes real boards use looks like several
+    /// different kinds of object rather than one kind at several sizes. Scaling it off the card's
+    /// shorter side fixes that; clamping it at both ends is what keeps a small card from becoming a
+    /// lozenge and a large one from becoming a stadium.
+    var cornerRadius: Double {
+        min(14, max(8, min(node.frame.width, node.frame.height) * 0.025))
+    }
+
     override func draw(_ dirty: NSRect) {
-        let radius = 8.0
+        let radius = cornerRadius
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
                                 xRadius: radius, yRadius: radius)
         CanvasPalette.card.setFill()
         path.fill()
-        if CanvasPalette.color(node.color) != nil {
-            CanvasPalette.wash(node.color).setFill()
-            path.fill()
-        }
-        CanvasPalette.border(node.color).setStroke()
-        path.lineWidth = CanvasPalette.color(node.color) != nil ? 1.6 : 1
+        CanvasPalette.cardBorder.setStroke()
+        path.lineWidth = 1
         path.stroke()
     }
 
-    override func updateLayer() {
-        layer?.cornerRadius = 8
-        // Redrawn each time so the shadow follows the card's own corner rather than its square frame,
-        // which is what a shadow on a masksToBounds-off layer would otherwise use.
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 8, cornerHeight: 8, transform: nil)
+    /// The corner and the shadow both follow the card's size, so both are set where a size change is
+    /// actually reported.
+    ///
+    /// In `layout` rather than `updateLayer`: a view that implements `draw(_:)` has `wantsUpdateLayer`
+    /// false, so AppKit never calls `updateLayer` at all and everything that was in it was being set
+    /// exactly never. The shadow came out right regardless — with no `shadowPath` the layer derives one
+    /// from the alpha of what was drawn into it, which is the rounded card — but the corner radius on
+    /// the clip did not, and it is the one that has to change now.
+    override func layout() {
+        super.layout()
+        let radius = cornerRadius
+        clip.layer?.cornerRadius = radius
+        layer?.cornerRadius = radius
+        // Given explicitly so the shadow follows the card's own corner rather than being inferred, and
+        // so it is right on the frame the card is resized to rather than the frame it was drawn at.
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius,
+                                   transform: nil)
     }
 
     // MARK: Lifecycle the board drives
@@ -149,7 +160,7 @@ class CanvasNodeView: NSView {
     func update(node: CanvasNode, scale: Double) {
         let wasSimplified = isSimplified
         self.scale = scale
-        let changed = node.content != self.node.content || node.color != self.node.color
+        let changed = node.content != self.node.content
         self.node = node
         if changed {
             contentChanged()
@@ -211,6 +222,17 @@ class CanvasNodeView: NSView {
 
     /// The card's own content changed — reload it.
     func contentChanged() {}
+
+    /// What this card says about itself when the pointer rests on it, or nil for a card that says
+    /// everything it has to say by being looked at.
+    ///
+    /// Cards carry no chrome: no strip naming the file, no capsule over the page saying how old it is.
+    /// The facts those carried are still worth having occasionally, and a tooltip is what macOS offers
+    /// for exactly that shape of fact — free until asked for, and asked for by lingering rather than by
+    /// clicking. Answered by the *board*, which is the view actually under the pointer: an unengaged
+    /// card returns nil from `hitTest`, so it never sees the mouse and could not own a tooltip if it
+    /// wanted one. See `CanvasBoardView.hovered`.
+    var cardDescription: String? { nil }
 
     /// Step into this card: a text card takes the caret, a web card takes its own scrolling.
     func beginEditing() {

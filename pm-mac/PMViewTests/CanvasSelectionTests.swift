@@ -195,64 +195,45 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertEqual(canvasDragSet(["a"], in: board()), ["a"])
     }
 
-    // MARK: Colour
-
-    func testObsidiansPresetsAndHexBothRead() {
-        XCTAssertEqual(CanvasPalette.color("1"), CanvasPalette.presets[0])
-        XCTAssertEqual(CanvasPalette.color("6"), CanvasPalette.presets[5])
-        XCTAssertNil(CanvasPalette.color(nil))
-        XCTAssertNil(CanvasPalette.color(""))
-        XCTAssertNil(CanvasPalette.color("9"), "not a preset, and not hex")
-
-        let teal = CanvasPalette.hex("#3ab7a2")
-        XCTAssertEqual(teal?.redComponent ?? 0, 0x3a / 255.0, accuracy: 0.002)
-        XCTAssertEqual(CanvasPalette.hex("#fff"), CanvasPalette.hex("#ffffff"))
-        XCTAssertEqual(CanvasPalette.hex("3ab7a2"), teal, "the hash is optional")
-        XCTAssertNil(CanvasPalette.hex("#nothex"))
-    }
-
     // MARK: What an engaged card hands to the board
 
     /// A 400×400 card, the size a link card actually is on the one board in the vault that has them.
     private let card = NSRect(x: 0, y: 0, width: 400, height: 400)
-    /// The caption strip across the top, which a web card offers as its handle.
-    private let caption = NSRect(x: 0, y: 0, width: 400, height: 20)
 
     func testTheMiddleOfAnEngagedCardBelongsToTheCard() {
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 200), in: card, handle: caption, scale: 1))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 200), in: card, scale: 1))
     }
 
     func testTheBorderBelongsToTheBoard() {
         for point in [NSPoint(x: 3, y: 200), NSPoint(x: 397, y: 200), NSPoint(x: 200, y: 397)] {
-            XCTAssertTrue(canvasBoardKeeps(point, in: card, handle: caption, scale: 1),
+            XCTAssertTrue(canvasBoardKeeps(point, in: card, scale: 1),
                           "\(point) is within a grip's reach of the edge")
         }
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 11, y: 200), in: card, handle: caption, scale: 1),
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 11, y: 200), in: card, scale: 1),
                        "past the band, and the page's business")
     }
 
-    func testTheCaptionBelongsToTheBoard() {
-        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, handle: caption, scale: 1))
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 30), in: card, handle: caption, scale: 1),
-                       "just under it is the page")
-    }
-
-    func testACardWithNoHandleGivesUpOnlyItsBorder() {
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, handle: nil, scale: 1),
-                       "a text card has no caption to drag it by")
+    /// Cards carry no headers now, so the band along the edge is the whole of what an engaged card
+    /// hands back — and it is the same answer for every kind of card. A web card used to give up its
+    /// caption strip as well, which is what made the top 20 points of it draggable; nothing does.
+    func testAnEngagedCardGivesUpOnlyItsBorder() {
+        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 200, y: 3), in: card, scale: 1),
+                      "the top edge, like every other edge")
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, scale: 1),
+                       "past the band there is no strip left to grab")
     }
 
     /// The band is a pointer's width on screen, so in card points it has to grow as you zoom out —
     /// otherwise the one thing you can still grab shrinks exactly when the cards get small.
     func testTheBorderStaysThickToThePointerAsYouZoomOut() {
-        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 15, y: 200), in: card, handle: nil, scale: 0.3),
+        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 15, y: 200), in: card, scale: 0.3),
                        "15 points in is 4.5 on screen at 30%")
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 30, y: 200), in: card, handle: nil, scale: 0.3))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 30, y: 200), in: card, scale: 0.3))
     }
 
     func testACardTooSmallToSpareItsBorderKeepsAllOfIt() {
         // At 8% the band alone would be 88 points on each side of a 120pt card — the whole card.
         let small = NSRect(x: 0, y: 0, width: 120, height: 120)
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 60, y: 60), in: small, handle: nil, scale: 0.08))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 60, y: 60), in: small, scale: 0.08))
     }
 }

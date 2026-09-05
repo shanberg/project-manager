@@ -274,6 +274,16 @@ extension CanvasBoardView {
             // into the card, and the method that opens the browser was never called by anything.
             add(menu, "Open in Browser", #selector(openLinkInBrowser))
             add(menu, "Copy Address", #selector(copyAddress))
+            menu.addItem(.separator())
+            // The two ways a card's address changes, and they are genuinely different errands. One is
+            // "I navigated somewhere better and the card should point here now", which needs no typing
+            // and is only offered when the page has actually gone somewhere else. The other is "this
+            // address is wrong", which is a text edit and is always available.
+            if (nodeViews[id] as? CanvasLinkNodeView)?.hasWandered == true {
+                add(menu, "Set as This Card\u{2019}s Address", #selector(adoptCurrentAddress))
+            }
+            add(menu, "Edit Address\u{2026}", #selector(editLinkAddress))
+            menu.addItem(.separator())
             // Where a page's navigation lives. Not in the card's header, which is a caption and has
             // no room to become a toolbar, and not on a swipe, which on a trackpad is indistinguishable
             // from scrolling a page sideways.
@@ -306,14 +316,11 @@ extension CanvasBoardView {
         add(menu, "Copy", #selector(copy(_:)))
         add(menu, "Duplicate", #selector(duplicate(_:)))
         menu.addItem(.separator())
-        menu.addItem(colourItem())
-        menu.addItem(.separator())
         add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected))
     }
 
     private func buildLineMenu(_ menu: NSMenu, id: String) {
         add(menu, "Reverse Direction", #selector(reverseSelectedLines))
-        menu.addItem(colourItem())
         menu.addItem(.separator())
         add(menu, "Delete Line", #selector(deleteSelected))
     }
@@ -333,19 +340,6 @@ extension CanvasBoardView {
         add(menu, "Select All", #selector(selectAll(_:)))
     }
 
-    private func colourItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Colour", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        for index in 0...CanvasPalette.presets.count {
-            let entry = submenu.addItem(withTitle: index == 0 ? "None" : "Colour \(index)",
-                                        action: #selector(setColourFromMenu(_:)), keyEquivalent: "")
-            entry.target = self
-            entry.tag = index
-        }
-        item.submenu = submenu
-        return item
-    }
-
     @discardableResult
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector) -> NSMenuItem {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
@@ -362,25 +356,46 @@ extension CanvasBoardView {
     /// the window; the contextual menu passes where you right-clicked, which is the whole reason to
     /// offer them there.
     func addLinkCard(at where_: CanvasPoint?) {
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
+        promptForAddress(title: "Add a link card",
+                         message: "The page is embedded on the board.",
+                         initial: "") { [weak self] text in
+            guard let self else { return }
+            let at = where_ ?? centreOfVisibleBoard
+            let node = CanvasNode(content: .link(url: text),
+                                  frame: CanvasRect(x: at.x - 200, y: at.y - 200,
+                                                    width: 400, height: 400))
+            store.change("Add Link") { $0.nodes.append(node) }
+            select([node.id])
+        }
+    }
+
+    /// Ask for a web address, and hand back a usable one or nothing at all.
+    ///
+    /// Shared by adding a card and editing one, so the two are the same box with different words in it
+    /// — including the part nobody thinks about until it is missing, which is that typing
+    /// `example.com` gets a scheme put on it rather than producing a card that will never load.
+    func promptForAddress(title: String, message: String, initial: String,
+                          then use: @escaping (String) -> Void) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
         field.placeholderString = "https://"
+        field.stringValue = initial
         let alert = NSAlert()
-        alert.messageText = "Add a link card"
-        alert.informativeText = "The page is embedded on the board."
+        alert.messageText = title
+        alert.informativeText = message
         alert.accessoryView = field
-        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: initial.isEmpty ? "Add" : "Change")
         alert.addButton(withTitle: "Cancel")
+        // Selected rather than merely present: editing an address is far more often replacing it than
+        // amending it, and a field you have to select before you can type is a field that has put the
+        // work back on you.
+        alert.window.initialFirstResponder = field
+        field.selectText(nil)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         var text = field.stringValue.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         if !text.contains("://") { text = "https://" + text }
-        let at = where_ ?? centreOfVisibleBoard
-        let node = CanvasNode(content: .link(url: text),
-                              frame: CanvasRect(x: at.x - 200, y: at.y - 200,
-                                                width: 400, height: 400))
-        store.change("Add Link") { $0.nodes.append(node) }
-        select([node.id])
+        use(text)
     }
 
     func addFileCard(at where_: CanvasPoint?) {
@@ -438,6 +453,24 @@ extension CanvasBoardView {
         }
         guard !urls.isEmpty else { return }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    /// Make the page the card is showing the address the card is for.
+    @objc private func adoptCurrentAddress() {
+        for id in selection { (nodeViews[id] as? CanvasLinkNodeView)?.adoptCurrentAddress() }
+    }
+
+    /// Retype a card's address.
+    ///
+    /// The same prompt `addLinkCard` puts up, prefilled and with the text selected, because they are
+    /// the same question asked at two moments and answering it should feel identical.
+    @objc private func editLinkAddress() {
+        guard let id = selection.first, let card = nodeViews[id] as? CanvasLinkNodeView else { return }
+        promptForAddress(title: "Edit Address",
+                         message: "Where should this card point?",
+                         initial: card.address) { [weak card] entered in
+            card?.setAddress(entered)
+        }
     }
 
     @objc private func openLinkInBrowser() {
@@ -522,19 +555,6 @@ extension CanvasBoardView {
                 doc.edges[index].toSide = edge.fromSide
                 doc.edges[index].fromEnd = edge.toEnd
                 doc.edges[index].toEnd = edge.fromEnd
-            }
-        }
-    }
-
-    @objc private func setColourFromMenu(_ sender: NSMenuItem) {
-        let token: String? = sender.tag == 0 ? nil : String(sender.tag)
-        let ids = selection
-        store.change("Change Colour") { doc in
-            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
-                doc.nodes[index].color = token
-            }
-            for index in doc.edges.indices where ids.contains(doc.edges[index].id) {
-                doc.edges[index].color = token
             }
         }
     }

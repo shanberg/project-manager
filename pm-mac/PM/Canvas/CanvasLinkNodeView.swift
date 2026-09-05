@@ -23,6 +23,13 @@ import PmLib
 /// at the moment the request started, so a card went blank for the second or two a real page takes and
 /// stayed blank forever if the page never came: the card lost its identity exactly when it was least
 /// able to say what it was.
+///
+/// **Nothing is drawn on top of the page.** No caption strip above it, no freshness capsule floating
+/// over it. A loaded page fills the card corner to corner, and everything a card used to say about
+/// itself in its own chrome is said somewhere that costs the page nothing: the host and the age on the
+/// tooltip, and — for the one card you have stepped into, which is the only card whose address can
+/// cost you anything — the live address in the window's own header, beside the controls that drive it.
+/// See `cardDescription` and `CanvasHeaderModel`.
 @MainActor
 final class CanvasLinkNodeView: CanvasNodeView {
     /// The card's body. Holds the placeholder always, and the page over it once there is one.
@@ -49,11 +56,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private var freezing = false
     /// When what the card is showing arrived — the moment the page finished, and still the answer
     /// after it has been frozen, because the picture is that page.
-    private var loadedAt: Date?
-    private var pill: NSView?
-    private var pillLabel: NSTextField?
-    /// The card's name, which follows whatever the page has navigated to — see `setTitle`.
-    private var caption: CanvasCardChip?
+    private(set) var loadedAt: Date?
     /// True once the page has been shown. A failure after this point leaves the page alone rather than
     /// yanking you back to the placeholder — you are reading something, and a subresource that 404s
     /// is not a reason to take the page away.
@@ -69,8 +72,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
-        setContent(chrome(over: face))
-        makePill()
+        setContent(face)
         showPlaceholder()
         reconsiderLoading(scale: scale)
     }
@@ -80,13 +82,22 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var address: String {
+    /// The address written on the board for this card. Where Home goes, and what the card is *for*.
+    var address: String {
         if case .link(let url) = node.content { return url }
         return ""
     }
 
-    private var url: URL? { URL(string: address) }
+    var url: URL? { URL(string: address) }
     private var host: String { url?.host()?.replacingOccurrences(of: "www.", with: "") ?? address }
+
+    /// Where the page actually is right now, which is not always where the board says it should be.
+    var liveURL: URL? { web?.url ?? url }
+
+    /// The host of whatever is on screen, for the window header to name.
+    var liveHost: String {
+        liveURL?.host()?.replacingOccurrences(of: "www.", with: "") ?? host
+    }
 
     override func update(node: CanvasNode, scale: Double) {
         // A changed address *is* a changed content, so the base already rebuilds through
@@ -104,6 +115,15 @@ final class CanvasLinkNodeView: CanvasNodeView {
     override func simplificationChanged() {}
 
     override func contentChanged() {
+        // The address changed to the page this card is already displaying — see `adoptCurrentAddress`.
+        // Nothing to rebuild; the card is already right, and rebuilding it would be the only thing the
+        // user could see going wrong.
+        if alreadyShowing {
+            alreadyShowing = false
+            describeYourself()
+            board.pageStateChanged()
+            return
+        }
         tearDownPage()
         loadedAt = nil
         timePassed()
@@ -300,10 +320,6 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // Under whatever is standing in for the page — the picture from the last time it ran, or the
         // placeholder. Waking up should not flash anything.
         fill(face, with: view, below: frozen ?? placeholder)
-        // And then the pill back on top. Inserting the page *below the placeholder* still puts it above
-        // everything added before the placeholder was, which is where the pill was built — so without
-        // this the page buries the one thing on the card that says how old the page is.
-        if let pill { face.addSubview(pill, positioned: .above, relativeTo: nil) }
         if isEngaged { window?.makeFirstResponder(view) }
         if frozen == nil { say("Loading…") }
         waitForIt()
@@ -322,21 +338,49 @@ final class CanvasLinkNodeView: CanvasNodeView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
     }
 
+    /// How long the placeholder takes to get out of the page's way.
+    ///
+    /// It used to be an instant `isHidden`, which on a card the size of a real one is a hard cut from
+    /// a centred globe to a full page — the one moment on the board where something appears out of
+    /// nothing. A fifth of a second of cross-fade is below the threshold at which it reads as an
+    /// animation and above the one at which it reads as a jump.
+    private static let revealDuration = 0.2
+
     private func revealPage() {
         giveUp?.cancel()
         giveUp = nil
         guard web != nil else { return }
+        let first = !revealed
         revealed = true
         loadedAt = Date()
-        placeholder?.isHidden = true
-        frozen?.removeFromSuperview()
-        frozen = nil
-        timePassed()
+        describeYourself()
+
+        let going = [placeholder, frozen].compactMap { $0 }
+        if first, !going.isEmpty {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.revealDuration
+                context.allowsImplicitAnimation = true
+                for view in going { view.animator().alphaValue = 0 }
+            } completionHandler: { [weak self] in
+                guard let self else { return }
+                // Hidden rather than removed, because the placeholder is the card's fallback: a page
+                // that later fails, or a card that is frozen and woken, comes back through it. Its
+                // alpha is put back at the same time, or it would come back invisible.
+                placeholder?.isHidden = true
+                placeholder?.alphaValue = 1
+                frozen?.removeFromSuperview()
+                frozen = nil
+            }
+        } else {
+            placeholder?.isHidden = true
+            placeholder?.alphaValue = 1
+            frozen?.removeFromSuperview()
+            frozen = nil
+        }
         board.pageStateChanged()
     }
 
     private func tearDownPage() {
-        caption?.setTitle(host, wandered: false)
         giveUp?.cancel()
         giveUp = nil
         web?.stopLoading()
@@ -363,79 +407,35 @@ final class CanvasLinkNodeView: CanvasNodeView {
         ])
     }
 
-    /// Card and header, built once. The chip names the *host*, not the page, so it doesn't need
-    /// rebuilding as you navigate within the site.
+    /// What the card says about itself when you linger on it.
     ///
-    /// The chip is also the card's `boardHandle` — the one strip an engaged card doesn't hand to the
-    /// page, so a card you are using is still a card you can pick up and move.
-    private func chrome(over body: NSView) -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.distribution = .fill
-
-        let chip = CanvasCardChip(title: host, symbol: "globe", warning: nil)
-        caption = chip
-        boardHandle = chip
-        stack.addArrangedSubview(chip)
-        chip.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        stack.addArrangedSubview(body)
-        body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        return stack
+    /// This is where the caption strip went, and the freshness capsule with it. Both were chrome drawn
+    /// on the card — one above the page, one over it — and both were saying things worth knowing
+    /// occasionally and not worth looking at continuously. A board of eleven web cards carried eleven
+    /// captions and eleven capsules permanently on screen so that you could, once in a while, want one
+    /// of them.
+    ///
+    /// A tooltip is the Mac's own answer to exactly that: it costs nothing until you ask, it takes no
+    /// space, and asking is lingering rather than clicking. The board owns the tooltip and reads this
+    /// from whichever card is under the pointer — a card doesn't hit-test until you step into it, so it
+    /// could not carry one itself. See `CanvasBoardView.hovered`.
+    override var cardDescription: String? {
+        var lines = [liveHost]
+        if let loadedAt { lines.append(canvasFreshnessLabel(for: loadedAt)) }
+        if hasWandered { lines.append("Not the address saved on this board \u{2014} " + address) }
+        return lines.joined(separator: "\n")
     }
 
-    /// The capsule across the top of the page saying how old it is.
-    ///
-    /// Over the page rather than in the caption, and centred: the caption is the card's name and is
-    /// read once, while this is a fact about the content that has to be checkable at a glance against
-    /// eleven other cards — a row of pills at the same height reads as a row, where the same words
-    /// tucked into eleven captions of different lengths do not.
-    ///
-    /// It gets out of the way when it has nothing to warn you about. A page that arrived a moment ago
-    /// is faint enough to be scenery; one that is an hour old comes up to full strength, because by
-    /// then it is the most important thing the card has to say about itself.
-    private func makePill() {
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 9.5, weight: .medium)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-
-        let capsule = NSView()
-        capsule.wantsLayer = true
-        capsule.layer?.cornerCurve = .continuous
-        capsule.layer?.cornerRadius = 8.5
-        capsule.layer?.backgroundColor = NSColor.controlBackgroundColor
-            .withAlphaComponent(0.88).cgColor
-        capsule.layer?.borderWidth = 1
-        capsule.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-        capsule.isHidden = true
-
-        label.translatesAutoresizingMaskIntoConstraints = false
-        capsule.addSubview(label)
-        capsule.translatesAutoresizingMaskIntoConstraints = false
-        face.addSubview(capsule)
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: capsule.topAnchor, constant: 2.5),
-            label.bottomAnchor.constraint(equalTo: capsule.bottomAnchor, constant: -2.5),
-            label.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -8),
-            capsule.heightAnchor.constraint(equalToConstant: 17),
-            capsule.centerXAnchor.constraint(equalTo: face.centerXAnchor),
-            capsule.topAnchor.constraint(equalTo: face.topAnchor, constant: 6),
-        ])
-        pill = capsule
-        pillLabel = label
+    /// Say it again, after anything that changes what it would say — the tooltip if the pointer is
+    /// here, and the window's header if this is the card you have stepped into.
+    private func describeYourself() {
+        board.descriptionChanged(for: node.id)
     }
 
-    /// Say the age again — on the board's heartbeat, and whenever a page arrives or is put away.
+    /// The age is a fact that changes with nothing happening, so the board's heartbeat is what keeps
+    /// whatever is showing it honest.
     override func timePassed() {
-        guard let pill, let pillLabel else { return }
-        guard let loadedAt, !isSimplified else { return pill.isHidden = true }
-        pill.isHidden = false
-        pillLabel.stringValue = canvasFreshnessLabel(for: loadedAt)
-        let age = Date().timeIntervalSince(loadedAt)
-        pill.animator().alphaValue = age < 5 * 60 ? 0.45 : age < 30 * 60 ? 0.75 : 1
+        describeYourself()
     }
 
     // MARK: Stepping in and out
@@ -498,6 +498,40 @@ final class CanvasLinkNodeView: CanvasNodeView {
         guard let url else { return }
         web?.load(URLRequest(url: url))
     }
+
+    /// Make where the page has got to the address this card is *for*.
+    ///
+    /// The counterpart of Home, and the reason a card is more than a bookmark: you follow a link out of
+    /// a dashboard tile, land somewhere you would rather the tile pointed at, and say so. Home takes
+    /// you back to the card's address; this makes where you are the card's address.
+    ///
+    /// **Without rebuilding the page.** Changing a card's content normally tears the web view down and
+    /// starts again, which is right when the address is genuinely different and absurd here — the page
+    /// being loaded would be the page already on screen, so the only visible effect of doing the honest
+    /// thing would be a flash and a lost scroll position. `contentChanged` is suppressed for exactly
+    /// the case where the new address is what the view is already showing.
+    func adoptCurrentAddress() {
+        guard let live = liveURL, live.absoluteString != address else { return }
+        setAddress(live.absoluteString)
+    }
+
+    /// Point this card somewhere else. Undoable, and named for what the Edit menu should say.
+    func setAddress(_ next: String) {
+        let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != address else { return }
+        // Set before the store's change lands, because the change comes back through `update(node:)`
+        // and then `contentChanged`, which is the teardown this exists to skip.
+        alreadyShowing = web?.url?.absoluteString == trimmed
+        let id = node.id
+        board.store.change("Change Address") { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            doc.nodes[index].content = .link(url: trimmed)
+        }
+    }
+
+    /// Set for the one turn in which a new address is being adopted from the page already on screen.
+    /// See `adoptCurrentAddress`.
+    private var alreadyShowing = false
 
     /// Load it again from the top — and if the card had given up, start over from the placeholder.
     func reload() {
@@ -562,12 +596,13 @@ final class CanvasLinkNodeView: CanvasNodeView {
 extension CanvasLinkNodeView: WKNavigationDelegate {
     /// Say what the card is actually showing, as soon as it starts showing it.
     ///
-    /// On `didCommit` rather than `didFinish`, because the page is on screen and can be typed into
-    /// from the moment it commits — a caption that only caught up once the page had finished loading
-    /// would be wrong for exactly the window in which being wrong costs something.
+    /// On `didCommit` rather than `didFinish`, because the page is on screen and can be typed into from
+    /// the moment it commits — a readout that only caught up once the page had finished loading would
+    /// be wrong for exactly the window in which being wrong costs something. That window is the whole
+    /// reason the address is shown at all: during a single sign-on you are handed between hosts, and a
+    /// password field is only safe to type into if you can see whose it is.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard let now = webView.url?.host()?.replacingOccurrences(of: "www.", with: "") else { return }
-        caption?.setTitle(now, wandered: now != host)
+        describeYourself()
         board.pageStateChanged()
     }
 

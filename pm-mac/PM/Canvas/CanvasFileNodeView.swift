@@ -5,12 +5,18 @@ import PmLib
 
 /// A card showing a file from the vault: a note, a picture, a PDF.
 ///
-/// The header strip is the part Obsidian doesn't have, and it is here because PM knows something
-/// Obsidian doesn't. A canvas stores a file's path from the vault root and never updates it, so when
-/// PM archives or renumbers a project every card pointing into it goes stale — in a real vault, nearly
-/// half of them had. `CanvasFileResolver` follows those to where the file actually went, and the strip
-/// is where that gets said: the card shows the file, and says plainly that it isn't where the canvas
-/// claims, with the repair one click away.
+/// **The card is the file's contents and nothing else.** It used to carry a header strip naming the
+/// file, which was doing two jobs. Identifying the card is the smaller one, and the note's own first
+/// heading usually does it better; what is left of it is on the tooltip, and zoomed out the filename
+/// becomes the card's whole content, because at that size the name genuinely is the most informative
+/// thing about it.
+///
+/// The larger job was saying that the file isn't where the canvas claims. A canvas stores a path from
+/// the vault root and never updates it, so when PM archives or renumbers a project every card pointing
+/// into it goes stale — in a real vault, nearly half of them had. `CanvasFileResolver` still follows
+/// those to where the file actually went, and the window says so once, at the top, with Repair Paths
+/// beside it — which is the better place for it anyway: it is a fact about the document rather than
+/// about any one card, and it was only ever readable on the cards you happened to scroll past.
 ///
 /// A card whose file is genuinely gone draws as missing **with the path it wanted**, rather than as an
 /// empty rectangle. The path is the only clue to what was there.
@@ -44,30 +50,24 @@ final class CanvasFileNodeView: CanvasNodeView {
             return
         }
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.distribution = .fill
-
-        let chip = CanvasCardChip(title: (path as NSString).lastPathComponent
-                                    + (subpath.map { " · " + $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) } ?? ""),
-                                  symbol: symbol(for: path),
-                                  warning: location.hasMoved ? movedNote : nil)
-        stack.addArrangedSubview(chip)
-        chip.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        let body = preview(for: location, path: path, subpath: subpath)
-        stack.addArrangedSubview(body)
-        body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        setContent(stack)
+        setContent(preview(for: location, path: path, subpath: subpath))
     }
 
-    /// What the strip says when PM had to go looking. Names the folder it landed in, because "moved"
-    /// on its own doesn't tell you whether the project was archived or renamed.
+    /// What the card says about itself when you linger on it: which file, which heading, and whether
+    /// PM had to go looking for it. See `CanvasNodeView.cardDescription`.
+    override var cardDescription: String? {
+        let (path, subpath) = stored
+        guard !path.isEmpty else { return nil }
+        var lines = [(path as NSString).lastPathComponent
+                        + (subpath.map { " \u{00B7} " + $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) } ?? "")]
+        if let moved = movedNote { lines.append(moved) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// What the card says when PM had to go looking. Names the folder it landed in, because "moved" on
+    /// its own doesn't tell you whether the project was archived or renamed.
     private var movedNote: String? {
-        guard case .moved(let url, _) = location else { return nil }
+        guard case .moved(let url, _) = board.store.resolver.resolve(stored.path) else { return nil }
         let parent = url.deletingLastPathComponent()
         let root = obsidianVaultRoot(for: url)
         let where_ = root.flatMap { CanvasFileResolver(canvas: url, vaultRoot: $0).storablePath(for: parent) }

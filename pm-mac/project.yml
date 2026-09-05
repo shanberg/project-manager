@@ -146,7 +146,6 @@ targets:
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Project/SessionBlocks.swift
-      - path: PM/Canvas/CanvasCardChip.swift
       - path: PM/Canvas/CanvasPageBudget.swift
       - path: PM/Canvas/CanvasWebSession.swift
       - path: PM/Canvas/CanvasColors.swift

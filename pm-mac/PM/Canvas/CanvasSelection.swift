@@ -12,7 +12,7 @@ import PmLib
 /// else; in `.edit` the affordances appear.
 ///
 /// **Selecting and moving work in both; shaping a card does not.** A selected card in view mode says
-/// so with a shadow and nothing else — no ring, no eight grips, no swatches — because on a dashboard
+/// so with a shadow and nothing else — no ring and no eight grips — because on a dashboard
 /// selection is a step on the way to *using* a card, not to redrawing it, and a board that answered
 /// every click with a full set of editing controls would be a board permanently mid-edit. Nudging a
 /// card, on the other hand, is not editing in the sense anyone means, so dragging stays.
@@ -25,8 +25,6 @@ enum CanvasMode: String {
     /// are one question: a grip you can drag but cannot see is worse than no grip.
     var showsResizeGrips: Bool { self == .edit }
 
-    /// Whether the selection bar offers the colour swatches.
-    var showsColourPicker: Bool { self == .edit }
 }
 
 /// One of the eight grips on a selected card.
@@ -257,11 +255,14 @@ func canvasDragSet(_ ids: Set<String>, in document: CanvasDocument) -> Set<Strin
 /// that is now swallowing every click, so the squares the overlay paints become decorations and the
 /// card can no longer be moved or resized without stepping out of it first.
 ///
-/// So the board keeps two things. The band along the card's edge, the same 7 points a grip already
-/// claims — measured on screen and divided by the zoom, so it stays the size of a pointer at any
-/// magnification — which makes the *whole* border a place to grab the card rather than only the eight
-/// spots you have to hunt for. And the card's handle, if it has one: a web card's caption, which is
-/// there to say what the card is and costs nothing to also make the thing you drag it by.
+/// So the board keeps the band along the card's edge, the same 7 points a grip already claims —
+/// measured on screen and divided by the zoom, so it stays the size of a pointer at any magnification.
+/// That makes the *whole* border a place to grab the card rather than only the eight spots you have to
+/// hunt for.
+///
+/// It used to keep a second thing: a web card's caption, which was a header and so also, for free, a
+/// drag handle. Cards have no headers now, so the band is the whole answer — and being the whole answer
+/// for every kind of card is an improvement on being one of two answers for one kind of card.
 ///
 /// A card too small to spare its border keeps all of it. A band is a handle, and a handle that leaves
 /// nothing behind it is not worth having — at 8% zoom the band alone would be 88 points, which on a
@@ -270,10 +271,8 @@ func canvasDragSet(_ ids: Set<String>, in document: CanvasDocument) -> Set<Strin
 /// - Parameters:
 ///   - point: In the card's own coordinates.
 ///   - bounds: The card's bounds.
-///   - handle: The handle's frame in the card's coordinates, if it has one.
 ///   - scale: The board's magnification.
-func canvasBoardKeeps(_ point: NSPoint, in bounds: NSRect, handle: NSRect?, scale: Double) -> Bool {
-    if let handle, handle.contains(point) { return true }
+func canvasBoardKeeps(_ point: NSPoint, in bounds: NSRect, scale: Double) -> Bool {
     let band = CanvasHitTester.handleReach / max(scale, 0.05)
     let inner = bounds.insetBy(dx: band, dy: band)
     guard inner.width > 40, inner.height > 40 else { return false }
