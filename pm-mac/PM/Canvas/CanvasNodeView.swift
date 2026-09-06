@@ -53,16 +53,29 @@ class CanvasNodeView: NSView {
         clip.layer?.cornerCurve = .continuous
         clip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clip)
+        // Inset by the hairline the card draws, so the content is clipped to the *inside* of the
+        // border rather than over it — and so the clip's corner can be concentric with the card's
+        // rather than a second curve of a different radius sitting on top of the first.
         NSLayoutConstraint.activate([
-            clip.topAnchor.constraint(equalTo: topAnchor),
-            clip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            clip.trailingAnchor.constraint(equalTo: trailingAnchor),
-            clip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            clip.topAnchor.constraint(equalTo: topAnchor, constant: CanvasNodeView.hairline),
+            clip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CanvasNodeView.hairline),
+            clip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CanvasNodeView.hairline),
+            clip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CanvasNodeView.hairline),
         ])
     }
 
     /// Holds the card's content and rounds it off. See the shadow note in `init`.
+    ///
+    /// **Every card's content goes in here** — see `setContent`. It is easy to think this view is
+    /// optional for cards whose content doesn't reach their corners, and for a rendered note or a
+    /// summary label it very nearly is. A web card is the case that proves it isn't: a page paints an
+    /// opaque background out to its own square edges, and a square white rectangle laid over a rounded
+    /// white card is invisible in light appearance and obvious in dark, which is exactly the kind of
+    /// bug that survives a long time.
     private let clip = NSView()
+
+    /// The card's border, and so the width the clip is inset by.
+    static let hairline: Double = 1
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -142,7 +155,9 @@ class CanvasNodeView: NSView {
     override func layout() {
         super.layout()
         let radius = cornerRadius
-        clip.layer?.cornerRadius = radius
+        // Concentric: a curve inset from another curve keeps a constant gap only when its radius is
+        // reduced by that inset. Equal radii would leave the border pinching shut at the corners.
+        clip.layer?.cornerRadius = max(0, radius - CanvasNodeView.hairline)
         layer?.cornerRadius = radius
         // Given explicitly so the shadow follows the card's own corner rather than being inferred, and
         // so it is right on the frame the card is resized to rather than the frame it was drawn at.
@@ -327,15 +342,24 @@ class CanvasNodeView: NSView {
     func engagementChanged() {}
 
     /// Put `view` in the card, filling it.
+    ///
+    /// Into `clip`, not into the card. This used to clear *all* of the card's subviews and add the
+    /// content beside them, which threw the clip away on the first call and left every card's content
+    /// unclipped for the rest of its life — invisible for content that stops short of the corners, and
+    /// a set of square corners on a rounded card for content that doesn't.
+    ///
+    /// `insets` are still measured from the card's own edge, as the call sites read them; the hairline
+    /// the clip is already inset by is taken off here.
     func setContent(_ view: NSView, insets: NSEdgeInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)) {
-        subviews.forEach { $0.removeFromSuperview() }
+        clip.subviews.forEach { $0.removeFromSuperview() }
+        let hairline = CanvasNodeView.hairline
         view.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(view)
+        clip.addSubview(view)
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: topAnchor, constant: insets.top),
-            view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: insets.left),
-            view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -insets.right),
-            view.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -insets.bottom),
+            view.topAnchor.constraint(equalTo: clip.topAnchor, constant: insets.top - hairline),
+            view.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: insets.left - hairline),
+            view.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -(insets.right - hairline)),
+            view.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -(insets.bottom - hairline)),
         ])
     }
 }
