@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 /// Whether this Mac has been asked to move things less, and what to do about it.
@@ -19,6 +20,17 @@ enum Motion {
 
     /// A duration, or none at all.
     static func duration(_ normal: Double) -> Double { isReduced ? 0 : normal }
+
+    /// A curve that runs past its target and settles back onto it.
+    ///
+    /// The nearest thing to a spring available where AppKit will only take a timing function — which is
+    /// anything animated through `animator()`, including a card's frame. The overshoot is small on
+    /// purpose: enough that a tile arriving in its slot reads as having *landed* rather than having
+    /// been placed, and not so much that six of them at once looks like a wobble.
+    ///
+    /// Reduce Motion is handled by the duration going to zero around it, which lands every card on its
+    /// mark in one frame and never runs the curve at all.
+    static var spring: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.3, 1.35, 0.5, 1) }
 
     /// A SwiftUI animation, or none — `nil` is what `withAnimation` and `.animation(_:value:)` take to
     /// mean "change immediately".

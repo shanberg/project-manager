@@ -17,7 +17,7 @@ import PmLib
 ///
 /// Selecting, moving and resizing work in both. A selected card in reading mode says so with a shadow
 /// and nothing else, because on a board selection is a step towards *using* a card.
-enum CanvasMode: String {
+enum CanvasMode: String, Codable {
     case view, connect
 
     var showsConnectionAnchors: Bool { self == .connect }
@@ -68,6 +68,27 @@ enum CanvasHandle: CaseIterable {
 
     /// One of the four corners, rather than the middle of a side.
     var isCorner: Bool { unit.x != 0.5 && unit.y != 0.5 }
+
+    /// The frame this grip produces when dragged *by* `delta` from where it was grabbed.
+    ///
+    /// By how far the pointer has moved rather than to where it now is, and that is what makes a grab
+    /// feel like a grab. An edge is a band several points wide, so it is almost never taken hold of at
+    /// its exact coordinate — and an edge placed at the pointer jumps by the difference on the first
+    /// mouse-moved event, before the drag has visibly begun. The same reason a Mac window's edge is
+    /// dragged this way.
+    ///
+    /// It is also the only formulation that works for a selection of several: the box's edge is
+    /// somewhere out past the card you actually grabbed, and "put the edge where the pointer is" would
+    /// snap the whole box to the pointer the moment you moved.
+    func resize(_ frame: CanvasRect, by delta: (dx: Double, dy: Double),
+                minimum: Double = 40) -> CanvasRect {
+        var left = frame.minX, top = frame.minY, right = frame.maxX, bottom = frame.maxY
+        if unit.x == 0 { left = min(left + delta.dx, right - minimum) }
+        if unit.x == 1 { right = max(right + delta.dx, left + minimum) }
+        if unit.y == 0 { top = min(top + delta.dy, bottom - minimum) }
+        if unit.y == 1 { bottom = max(bottom + delta.dy, top + minimum) }
+        return CanvasRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
 
     /// The frame this grip produces when dragged to `point`.
     ///
@@ -133,14 +154,41 @@ struct CanvasHitTester {
         // 1. Grips and dots, which sit *on and outside* a card's edge and would otherwise be
         //    unreachable — the card behind them would take every click.
         if mode.showsResizeGrips {
-            for id in interactive where selection.contains(id) {
-                guard let node = document.node(id: id) else { continue }
+            // Several cards selected are resized as one — see `CanvasGroupResize` — so the grips
+            // belong to the box around them rather than to each card. Eight per card would be eight
+            // offers to do something the board no longer does, and on a tight cluster they would
+            // overlap into a field of squares nobody could aim at.
+            if let box = selectionBox, let representative = selectedIDs.first {
                 for handle in CanvasHandle.allCases
-                where near(handle.point(in: frame(of: node)), point, Self.handleReach) {
-                    return .handle(id, handle)
+                where near(handle.point(in: box), point, Self.handleReach) {
+                    return .handle(representative, handle)
+                }
+            } else {
+                for id in interactive where selection.contains(id) {
+                    guard let node = document.node(id: id) else { continue }
+                    for handle in CanvasHandle.allCases
+                    where near(handle.point(in: frame(of: node)), point, Self.handleReach) {
+                        return .handle(id, handle)
+                    }
                 }
             }
         }
+        // The edge of a *selection*, which is a different edge from any one card's.
+        //
+        // In view mode there are no grips, so a card's edge band is the whole of how it is resized —
+        // and with several selected, the band that has to be offered is the one round the box, because
+        // that is the rectangle the drag acts on. Offering each selected card its own band instead
+        // looks reasonable and behaves terribly: grab the right edge of the left-hand card of a pair
+        // and the box's right edge is what moves, which is the other card, on the other side of the
+        // screen, and not the edge under your pointer.
+        //
+        // Before the cards, like the grips and for the same reason: half of this band lies over the
+        // outermost selected cards, which would otherwise take every click on it.
+        if layout.isDocument, let box = selectionBox, let representative = selectedIDs.first,
+           let handle = Self.edgeHandle(box, at: point, reach: Self.handleReach / scale) {
+            return .handle(representative, handle)
+        }
+
         if mode.showsConnectionAnchors {
             for id in anchorCandidates {
                 guard let node = document.node(id: id) else { continue }
@@ -210,6 +258,23 @@ struct CanvasHitTester {
         return .board
     }
 
+    /// Everything selected that is actually being drawn, in board order — groups included, since a
+    /// frame dragged along with three cards is part of what is being resized.
+    var selectedIDs: [String] {
+        document.nodes.filter { selection.contains($0.id) && layout.shows($0.id) }.map(\.id)
+    }
+
+    /// The box the grips sit on when several things are selected, or nil when one thing is — where the
+    /// grips stay on the card itself and this would be the same rectangle said less directly.
+    ///
+    /// Shared with `CanvasOverlayView`, so what is drawn and what is hit are one measurement rather
+    /// than two that agree until one of them is edited.
+    var selectionBox: CanvasRect? {
+        let frames = selectedIDs.compactMap { document.node(id: $0) }.map(frame(of:))
+        guard frames.count > 1 else { return nil }
+        return frames.dropFirst().reduce(frames[0]) { $0.union($1) }
+    }
+
     /// Where a connection dot sits: just outside the middle of a side, so it doesn't cover the card.
     func anchorPoint(_ frame: CanvasRect, _ side: CanvasSide) -> CanvasPoint {
         let base = anchor(of: frame, on: side)
@@ -235,8 +300,14 @@ struct CanvasHitTester {
     /// and that is the whole idiom being borrowed. In connect mode, only the selection: the grips are drawn
     /// there, an unselected card is a thing you are about to select, and a band on every card would
     /// make clicking one to select it a coin toss.
+    ///
+    /// Never a card that is one of several selected: those have already been answered for by the box's
+    /// own band, above, and a second band inside it would be a card offering to resize itself out of a
+    /// group it is being resized as part of.
     private var resizableByEdge: [String] {
-        mode.showsResizeGrips ? interactive.filter(selection.contains) : interactive
+        let base = mode.showsResizeGrips ? interactive.filter(selection.contains) : interactive
+        guard selectionBox != nil else { return base }
+        return base.filter { !selection.contains($0) }
     }
 
     /// Which part of a card's edge a point is on, or nil for its inside — or for a card with no inside

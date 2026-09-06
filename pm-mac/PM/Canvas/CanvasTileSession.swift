@@ -13,14 +13,29 @@ struct CanvasTileSession: Equatable {
     /// How much of the width the master tile takes, for `masterStack`. Dragged, not typed, and
     /// remembered — see `CanvasTiling.savedMasterFraction`.
     var masterFraction: Double = CanvasTiling.savedMasterFraction
+    /// How much room each tile takes along its run, for the ones that aren't simply sharing evenly.
+    ///
+    /// **Keyed by card, not by position**, which is what makes a size follow a card when the order
+    /// changes: reordering and swapping move ids about, and a size stored per slot would stay behind
+    /// and hand the moved card its new neighbour's width.
+    ///
+    /// Absent means `.even`, so a tiling nobody has dragged carries nothing at all.
+    var sizes: [String: CanvasTiling.Size] = [:]
+
     /// The region being filled, in canvas coordinates: what was on screen when you entered.
     var area: CanvasRect
     /// What the board was looking at, so leaving can put it back exactly.
     var restoreVisible: CanvasRect
+    /// The zoom the board was at. A tiling is laid out and shown at 100% whatever the board was at —
+    /// see `CanvasScrollView.setZoom` — and this is what leaving hands back.
+    var restoreZoom: Double = 1
+
+    /// What each tile is asking for, in the order they are laid out.
+    var run: [CanvasTiling.Size] { ids.map { sizes[$0] ?? .even } }
 
     /// The layout this session produces.
     var layout: CanvasLayout {
-        let frames = CanvasTiling.frames(arrangement, count: ids.count, in: area,
+        let frames = CanvasTiling.frames(arrangement, sizes: run, in: area,
                                          masterFraction: masterFraction)
         return CanvasLayout(frames: Dictionary(uniqueKeysWithValues: zip(ids, frames)),
                             visible: Set(ids))
@@ -35,6 +50,20 @@ struct CanvasTileSession: Equatable {
     mutating func swap(_ id: String, with other: String) {
         guard let a = ids.firstIndex(of: id), let b = ids.firstIndex(of: other), a != b else { return }
         ids.swapAt(a, b)
+    }
+
+    /// Take a tile out of the order and put it back at `index` — what the handlebar drags.
+    ///
+    /// Different from `swap`, and both are wanted. A swap is "these two change places", which is what
+    /// dragging a tile onto another means. This is "this one goes *there*", which is the operation you
+    /// need to build an order rather than to correct one, and the only one that can move a tile past
+    /// two others without disturbing their order.
+    mutating func move(_ id: String, to index: Int) {
+        guard let from = ids.firstIndex(of: id) else { return }
+        let to = min(max(0, index), ids.count - 1)
+        guard to != from else { return }
+        ids.remove(at: from)
+        ids.insert(id, at: to)
     }
 
     /// Make `id` the master tile, which is what promoting a window means in every manager that has a

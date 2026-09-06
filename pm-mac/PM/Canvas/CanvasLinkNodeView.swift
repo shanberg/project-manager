@@ -264,6 +264,31 @@ final class CanvasLinkNodeView: CanvasNodeView {
         revealed = false
     }
 
+    /// The card this zoom was built for. A page set at 11px is unreadable at any board zoom, because
+    /// the board scales the card's frame along with its text — and in a tiled view the frame is not
+    /// yours to change at all. See `CanvasCardZoom`.
+    override var zoomsItsContent: Bool { true }
+
+    override var scrollsItsContent: Bool { true }
+
+    /// The page itself. A `WKWebView` is not built out of an `NSScrollView` — the scrolling happens in
+    /// the web process — so the generic search would find nothing here, and the view that has to be
+    /// handed the wheel is the web view.
+    ///
+    /// Nil while the card is frozen, which is the honest answer: there is no page to scroll, only a
+    /// picture of one. The wheel goes back to the board, and the card wakes on its own terms — see
+    /// `setPageLive`.
+    override var contentScroller: NSView? {
+        guard scrollsItsContent, !isSimplified else { return nil }
+        return web
+    }
+
+    override func contentZoomChanged() { applyContentZoom() }
+
+    /// WebKit's own page zoom, which is what a browser's ⌘+ does: the page relays out at the new size
+    /// rather than being scaled as a picture, so text stays sharp and a column still fits the card.
+    private func applyContentZoom() { web?.pageZoom = contentZoom }
+
     private func say(_ text: String?, tooltip: String? = nil) {
         status?.stringValue = text ?? ""
         status?.isHidden = text == nil
@@ -306,6 +331,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
             view.load(URLRequest(url: url))
         }
         web = view
+        applyContentZoom()
         // The lists take about ten seconds to compile on the first launch after an update, and a
         // canvas restored at startup can open well inside that window. A card built before they were
         // ready gets one chance to notice and start again, rather than staying unfiltered until
@@ -482,11 +508,29 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     var canGoBack: Bool { web?.canGoBack ?? false }
     var canGoForward: Bool { web?.canGoForward ?? false }
+    /// Mid-navigation, for the header's Reload button to become a Stop.
+    var isLoading: Bool { web?.isLoading ?? false }
     /// True once the page has wandered off the address the board saved for this card.
     var hasWandered: Bool { web != nil && url != nil && web?.url != url }
 
     func goBack() { web?.goBack() }
     func goForward() { web?.goForward() }
+    func stopLoading() {
+        web?.stopLoading()
+        board.pageStateChanged()
+    }
+
+    /// Send the page to an address typed into the header's field.
+    ///
+    /// Navigation, not an edit: what the board has saved for this card is untouched, so this lands the
+    /// card in the same wandered state as clicking a link would, with Home and Pin beside the address to
+    /// resolve it. A card whose saved address quietly followed wherever you looked would be a board that
+    /// rewrites itself while you read it.
+    func go(to address: String) {
+        guard let url = URL(string: address) else { return }
+        web?.load(URLRequest(url: url))
+        board.pageStateChanged()
+    }
 
     /// Put the card back on its own address.
     ///
@@ -606,17 +650,27 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         board.pageStateChanged()
     }
 
+    /// The header's Stop button exists between here and `didFinish`, so both edges have to be reported.
+    /// A card mid-navigation is otherwise indistinguishable from one sitting still — it goes on drawing
+    /// the page it already had until the new one paints.
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        board.pageStateChanged()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         revealPage()
+        board.pageStateChanged()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         failed(error)
+        loadingEnded()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         failed(error)
+        loadingEnded()
     }
 
     /// Fall back to the placeholder, with the reason on it.
@@ -635,6 +689,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         placeholder?.isHidden = false
         say("Couldn't load", tooltip: ns.localizedDescription)
     }
+
+    /// A failure the card rides out — the page is still there — still ends the load, and the header is
+    /// showing a Stop button that has nothing left to stop.
+    private func loadingEnded() { board.pageStateChanged() }
 }
 
 // MARK: - Navigating

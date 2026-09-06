@@ -38,13 +38,21 @@ final class CanvasBoardView: NSView {
     var tileableRect: CanvasRect {
         let visible = canvasRect(visibleRect)
         let covered = scrollView?.safeAreaInsets ?? NSEdgeInsets()
-        let leading = Double(covered.left) / liveScale + 18 / liveScale
-        let trailing = Double(covered.right) / liveScale + 18 / liveScale
+        let leading = Double(covered.left) / liveScale
+        let trailing = Double(covered.right) / liveScale
+        let top = Self.headerClearance / liveScale
         return CanvasRect(x: visible.minX + leading,
-                          y: visible.minY + 54 / liveScale,
+                          y: visible.minY + top,
                           width: max(80, visible.width - leading - trailing),
-                          height: max(80, visible.height - 72 / liveScale))
+                          height: max(80, visible.height - top))
     }
+
+    /// Room at the top for the floating header, and nothing else.
+    ///
+    /// This used to add 18pt on three sides as well, which `CanvasTiling.frames` then inset again — two
+    /// margins asked the same question and answering it twice, for 32pt at the edges. The tiling owns
+    /// the whole answer now; see `CanvasTiling.edgeGap`, which is where to go if it wants adjusting.
+    private static let headerClearance: Double = 40
 
     /// The board's extent in canvas coordinates: everything on it, plus room to drag things outside it.
     /// The view's own size, and the origin every conversion subtracts.
@@ -80,8 +88,19 @@ final class CanvasBoardView: NSView {
 
     /// The tilings you drilled in from, outermost first. Escape pops one at a time.
     var tilingHistory: [CanvasTileSession] = []
+    /// The last tiling made on this board, kept after it was left — see `CanvasViewState.lastTiling`.
+    /// Tiling the same set of cards again picks this up rather than starting over.
+    var lastTiling: CanvasViewState.Tiling?
+
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
-    var tiling: CanvasTileSession?
+    var tiling: CanvasTileSession? {
+        didSet {
+            // Only the crossings, not every set. Dragging the master divider assigns this at the rate
+            // the mouse reports, and none of those frames change whether a tiling is up.
+            guard (oldValue == nil) != (tiling == nil) else { return }
+            scrollView?.canvasScroll?.showsScrollers(!isTiled)
+        }
+    }
     /// Told when a tiling is entered, left or rearranged, so the window can say what it is showing.
     var onTilingChanged: (() -> Void)?
 
@@ -106,26 +125,59 @@ final class CanvasBoardView: NSView {
     var gesture: Gesture?
     enum Gesture {
         case move(from: CanvasPoint, frames: [String: CanvasRect])
-        case resize(String, CanvasHandle, original: CanvasRect)
+        /// Dragging a grip or a card's edge. Carries the whole selection, not the card that was
+        /// grabbed: several cards resize as one, and one card is that with a set of size one. `box` is
+        /// what they occupied when the drag began — see `CanvasGroupResize`.
+        case resize(CanvasHandle, from: CanvasPoint, originals: [String: CanvasRect], box: CanvasRect)
         case marquee(from: CanvasPoint, additive: Bool, base: Set<String>)
         case connect(from: String, side: CanvasSide, to: CanvasPoint)
         /// Inside a tiled view: dragging one tile over another to change their places. `over` is the
         /// tile the drop would land on, so the overlay can say so before you let go.
         case swap(from: String, over: String?)
-        /// Inside a tiled view: dragging the divider between the master tile and the stack.
-        case resizeSplit
+        /// Inside a tiled view: dragging the boundary between two tiles. Carries the run's lengths as
+        /// they were when the drag began, so every frame is computed from the start of the gesture
+        /// rather than from the frame before it — which is what stops a slow drag accumulating drift.
+        case resizeTiles(CanvasTileDivider, from: CanvasPoint, lengths: [Double])
+        /// Inside a tiled view: dragging a tile's handlebar to move it along the order. `grab` is
+        /// where inside the tile the bar was taken hold of, so the card can follow the pointer from
+        /// the point it was picked up by rather than jumping its own corner under it.
+        case reorderTile(String, grab: CanvasPoint)
     }
 
     var nodeViews: [String: CanvasNodeView] = [:]
     let overlay = CanvasOverlayView()
+    /// The alignment guides, at the bottom of the stack — above the board's own drawing and below
+    /// every card. See `CanvasGuideView`.
+    let guideView = CanvasGuideView()
     var trackingArea: NSTrackingArea?
     /// Where the right-click that opened the context menu landed. Held because the menu is long
     /// dismissed by the time an item fires, and "Paste" from that menu means *there*.
     var menuPoint: CanvasPoint?
+    /// The boundary a right-click landed on, if it landed on one. Held for the same reason as
+    /// `menuPoint`: the menu is long dismissed by the time an item fires.
+    var menuDivider: CanvasTileDivider?
     /// Which match ⌘G steps to next.
     var findCursor = 0
+    /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
+    /// drag is running.
+    ///
+    /// Its own property rather than a `Gesture` case: the middle button is a separate stream of events
+    /// from the left one, so a pan can begin in the middle of a marquee or a card drag, and storing it
+    /// in `gesture` would throw that half-finished gesture away.
+    var panGrab: NSPoint?
     /// The line under the pointer, so it can say it is clickable before it is clicked.
     var hoveredEdge: String?
+
+    /// The card a scroll gesture was aimed at when it started, held for the rest of it.
+    ///
+    /// A flick's momentum keeps arriving after the fingers have left, and re-reading the pointer on
+    /// every one of those events would hand the tail of a gesture to whatever the pointer had since
+    /// drifted over. Weak, because a card can be thrown away mid-flick — a board that scrolls past it,
+    /// a tiling that hides it — and a dangling target would go on being scrolled.
+    weak var scrollLatch: NSView?
+    /// Set while an event is being handed to a card, so the one it hands back doesn't come straight
+    /// back down again. See `scrollWheel`.
+    var forwardingScroll = false
 
     /// The web card you have stepped into, if any. What the window's page controls act on — a board
     /// engages one card at a time, so there is never a question of which.
@@ -149,7 +201,12 @@ final class CanvasBoardView: NSView {
         self.scrollView = scrollView
         super.init(frame: .zero)
         wantsLayer = true
+        guideView.board = self
         overlay.board = self
+        // Order matters and is load-bearing. These two are the floor and the ceiling of the board's
+        // subviews: cards are inserted `.below` the overlay, which keeps them above the guides and
+        // below the grips for the life of the board without anything having to re-sort them.
+        addSubview(guideView)
         addSubview(overlay)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Canvas")
@@ -199,6 +256,7 @@ final class CanvasBoardView: NSView {
         content = next
         setFrameSize(NSSize(width: next.width, height: next.height))
         overlay.frame = NSRect(origin: .zero, size: frame.size)
+        guideView.frame = overlay.frame
 
         if let clip = scrollView?.contentView, shift != .zero {
             clip.setBoundsOrigin(NSPoint(x: clip.bounds.origin.x + shift.x,
@@ -269,13 +327,25 @@ final class CanvasBoardView: NSView {
         layoutNodeViews()
     }
 
-    private func layoutNodeViews() {
+    /// Put every card where the layout says, at once and without animation.
+    ///
+    /// Internal because a drag calls it directly: a card being carried is repositioned on every
+    /// mouse-moved event, and going through `setLayout` would be asking the board to reconsider a
+    /// layout that has not changed.
+    func layoutNodeViews() {
+        // The tiles' grips move with the tiles, and they are drawn a layer down from them.
+        refreshTileHandles()
+        if isTiled { guideView.needsDisplay = true }
         for (id, view) in nodeViews {
             guard let node = document.node(id: id) else { continue }
             // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
             // other thirty-seven and rebuild them on the way out — which for a board of web cards means
             // reloading every page you were watching, as the price of having glanced at six of them.
             view.isHidden = !layout.shows(id)
+            if let reordering, reordering.id == id {
+                view.frame = viewRect(reordering.frame)
+                continue
+            }
             let wanted = viewRect(layout.frame(of: node))
             if animatesLayout, view.frame != wanted, !view.isHidden {
                 view.animator().frame = wanted
@@ -284,6 +354,22 @@ final class CanvasBoardView: NSView {
             }
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
+        guideView.frame = overlay.frame
+    }
+
+    /// The tile being dragged by its handlebar, and where the pointer is holding it.
+    ///
+    /// A card under the hand is not where the arrangement says it is, and it is the one card that must
+    /// not animate — an animation is a card catching up with a decision, and this one is being carried.
+    /// See `layoutNodeViews`.
+    var reordering: (id: String, frame: CanvasRect)? {
+        didSet {
+            // Lifted over its neighbours while it is out of its slot. By layer rather than by moving
+            // the view in the hierarchy: re-adding a subview takes a web card out of the window for an
+            // instant, which is a page torn down and started again for the sake of a z-order.
+            if let old = oldValue?.id, old != reordering?.id { nodeViews[old]?.layer?.zPosition = 0 }
+            if let id = reordering?.id { nodeViews[id]?.layer?.zPosition = 1 }
+        }
     }
 
     /// Set while cards should slide to their new places rather than appear there — entering and leaving
@@ -307,9 +393,21 @@ final class CanvasBoardView: NSView {
             settlePageBudget()
             return
         }
+        settleIntoLayout()
+        overlay.needsDisplay = true
+        needsDisplay = true
+    }
+
+    /// Let every card slide to where the layout says it belongs.
+    ///
+    /// Its own method because a reorder ends without the layout changing at all: the order was applied
+    /// as you crossed, and what is left on mouse-up is one card that has been held away from a slot it
+    /// already owns. `setLayout` would decline that as a no-op.
+    func settleIntoLayout() {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Motion.duration(0.28)
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.duration = Motion.duration(0.3)
+            context.timingFunction = Motion.spring
+            context.allowsImplicitAnimation = true
             animatesLayout = true
             layoutNodeViews()
             animatesLayout = false
@@ -317,8 +415,6 @@ final class CanvasBoardView: NSView {
             self?.layoutNodeViews()
             self?.settlePageBudget()
         }
-        overlay.needsDisplay = true
-        needsDisplay = true
     }
 
     /// Zoom changed: cards that render differently at different sizes get told.
@@ -443,6 +539,27 @@ final class CanvasBoardView: NSView {
         for view in nodeViews.values where view.isPageCard { view.setPageLive(false) }
     }
 
+    // MARK: The grid
+
+    /// How present the dot grid is, 0…1. See `drawGrid`.
+    ///
+    /// Up in a couple of frames, because it has to be there by the time you have noticed the card is
+    /// moving; down slowly enough not to read as a blink between two quick drags.
+    private lazy var gridFade = CanvasFade(rise: 0.09, fall: 0.22) { [weak self] in
+        guard let self else { return }
+        setNeedsDisplay(visibleRect)
+    }
+    var gridPresence: Double { gridFade.presence }
+
+    /// Bring the grid up, or take it away.
+    ///
+    /// Never in a tiled view. The tiles are placed by the arrangement and snap to nothing, so a
+    /// lattice behind them would be a claim about a geometry they don't have — and there is nothing
+    /// to see through them anyway.
+    func showGrid(_ wanted: Bool) {
+        gridFade.set(wanted && !isTiled)
+    }
+
     // MARK: Drawing what isn't a card
 
     override func draw(_ dirty: NSRect) {
@@ -457,34 +574,50 @@ final class CanvasBoardView: NSView {
         drawEdges(in: dirty)
     }
 
-    /// The dot grid. It exists because a canvas has no edges and no content of its own: panning across
-    /// an empty region with nothing moving looks like a window that has stopped responding.
+    /// The dot grid — **while you are moving something, and not otherwise**.
+    ///
+    /// It used to be always on, which is what a canvas inherits from every canvas app that came before
+    /// it: a permanent texture that says "this is an infinite plane". That is a true thing to say once
+    /// and a strange thing to keep saying, and it was doing it underneath every card on the board, all
+    /// the time, in service of a fact you learn in the first second.
+    ///
+    /// So it earns its way back on by being about something. A drag snaps to a 10pt lattice, and the
+    /// grid *is* that lattice — it comes up when a card starts moving, says what the card is landing
+    /// on, and goes when the card stops. Which also makes it honest about the modifier: hold ⌥ to turn
+    /// snapping off and the grid goes with it, so the ground under a free drag is plainly free.
     ///
     /// The spacing steps up as you zoom out so the dots stay roughly the same distance apart on screen
-    /// — at 20% a 20pt grid is a 4pt grid, which is a texture rather than a grid — and below a point
-    /// it's dropped entirely, because a dot per few pixels is just noise.
+    /// — at 20% a 10pt grid is a 2pt grid, which is a texture rather than a grid. It doubles rather
+    /// than quadrupling, so every spacing it lands on is a real multiple of the snap and the dots you
+    /// see are dots a card can actually stop on.
     ///
-    /// **And it fades out as you zoom in**, which follows from what it is for. Its whole job is to
-    /// prove the board is moving while you cross it, and crossing the board is something you do zoomed
-    /// out. Once you are close enough to be reading a card, the card is what should be moving under
-    /// your eye and the ground behind it has nothing left to say — so past 100% it thins out, and by
-    /// 160% it is gone and a card sits on a plain surface.
+    /// **Nailed to the canvas, not to the view.** The dots are stepped off in *canvas* coordinates and
+    /// converted, rather than stepped off in the view's own. Those differ by `content.minX/minY`, which
+    /// is not a constant: the board grows whenever a card is dragged past its current extent, and its
+    /// origin moves when it does. A grid laid out in view coordinates therefore slid sideways under
+    /// the cards at the moment a drag reached the edge of the board — the one moment it is on screen —
+    /// by whatever the origin had shifted by.
+    ///
+    /// It was also, for the same reason, not the lattice it claims to be. Snapping rounds *canvas*
+    /// coordinates to a multiple of ten, so dots placed at multiples of ten in view coordinates sat
+    /// wherever `content.minX` modulo the spacing happened to put them, and a card snapped to a
+    /// position between two of the dots that were supposedly showing it where it could go.
     private func drawGrid(in dirty: NSRect) {
-        var spacing: Double = 20
-        while spacing * liveScale < 14 { spacing *= 4 }
-        guard spacing * liveScale >= 14, spacing < 4000 else { return }
+        guard gridPresence > 0.01 else { return }
+        var spacing = CanvasSnapping.grid
+        while spacing * liveScale < 14, spacing < 4000 { spacing *= 2 }
+        guard spacing < 4000 else { return }
 
-        let presence = 1 - min(1, max(0, (liveScale - 1.0) / 0.6))
-        guard presence > 0.01 else { return }
-
+        let region = canvasRect(dirty)
         let radius = min(1.2, 1.0 / liveScale)
-        CanvasPalette.grid(presence).setFill()
+        CanvasPalette.grid(gridPresence).setFill()
         let path = NSBezierPath()
-        var y = (Double(dirty.minY) / spacing).rounded(.down) * spacing
-        while y <= Double(dirty.maxY) {
-            var x = (Double(dirty.minX) / spacing).rounded(.down) * spacing
-            while x <= Double(dirty.maxX) {
-                path.appendOval(in: NSRect(x: x - radius, y: y - radius,
+        var y = (region.minY / spacing).rounded(.down) * spacing
+        while y <= region.maxY {
+            var x = (region.minX / spacing).rounded(.down) * spacing
+            while x <= region.maxX {
+                let at = viewPoint(CanvasPoint(x: x, y: y))
+                path.appendOval(in: NSRect(x: at.x - radius, y: at.y - radius,
                                            width: radius * 2, height: radius * 2))
                 x += spacing
             }

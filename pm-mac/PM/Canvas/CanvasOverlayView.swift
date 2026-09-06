@@ -4,6 +4,9 @@ import PmLib
 /// Everything drawn *over* the cards: selection grips, connection dots, the sweep rectangle, and the
 /// line being dragged out of a card.
 ///
+/// Not the alignment guides, which are the one piece of board chrome that belongs *under* the cards —
+/// see `CanvasGuideView`.
+///
 /// A view of its own rather than more drawing in the board, because these have to sit above the cards
 /// and the cards are real subviews — a board that drew its grips in `draw(_:)` would draw them
 /// underneath every card it had just built.
@@ -17,9 +20,6 @@ final class CanvasOverlayView: NSView {
     weak var board: CanvasBoardView?
     /// The sweep in progress, in canvas coordinates.
     var marquee: CanvasRect?
-    /// The alignment and size agreements found by the drag in progress.
-    var guides: [CanvasGuide] = []
-
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -28,10 +28,10 @@ final class CanvasOverlayView: NSView {
         let scale = board.liveScale
 
         drawConnectionAnchors(board, scale)
+        drawSelectionBounds(board, scale)
         drawGrips(board, scale)
         drawConnectionInFlight(board, scale)
         drawSwapInFlight(board, scale)
-        drawGuides(board, scale)
         drawMarquee(board, scale)
     }
 
@@ -54,77 +54,6 @@ final class CanvasOverlayView: NSView {
             path.lineWidth = 2 / scale
             path.stroke()
         }
-    }
-
-    /// The lines that say why a card stopped where it did.
-    ///
-    /// Pink rather than the accent colour, and deliberately: the accent already means "selected" on
-    /// this board — the ring, the grips, the connection dots — and a guide drawn in it would read as
-    /// another piece of the selection rather than as a passing hint about two cards agreeing. It is
-    /// the one colour on the board that means only this.
-    private func drawGuides(_ board: CanvasBoardView, _ scale: Double) {
-        guard !guides.isEmpty else { return }
-        let tint = NSColor.systemPink
-        tint.setStroke()
-        tint.setFill()
-
-        for guide in guides {
-            switch guide {
-            case .alignment(let axis, let position, let from, let to):
-                let path = NSBezierPath()
-                let start = axis == .vertical
-                    ? board.viewPoint(CanvasPoint(x: position, y: from))
-                    : board.viewPoint(CanvasPoint(x: from, y: position))
-                let end = axis == .vertical
-                    ? board.viewPoint(CanvasPoint(x: position, y: to))
-                    : board.viewPoint(CanvasPoint(x: to, y: position))
-                path.move(to: start)
-                path.line(to: end)
-                path.lineWidth = 1 / scale
-                path.stroke()
-
-            case .sameSize(let axis, let moving, let matched):
-                for rect in [moving, matched] { drawMeasure(rect, axis: axis, board: board, scale: scale) }
-            }
-        }
-    }
-
-    /// "These two are the same width" — a bar the length of the dimension that matched, with a tick at
-    /// each end, drawn just outside each card.
-    ///
-    /// A bar rather than a line through the cards, because the claim being made is about *length*, and
-    /// two bars of visibly equal length beside two cards is the only way to draw that so it can be
-    /// checked at a glance. A line at a coordinate would say "these edges agree", which is the other
-    /// guide's job and a different fact.
-    private func drawMeasure(_ rect: CanvasRect, axis: CanvasGuide.Axis,
-                             board: CanvasBoardView, scale: Double) {
-        let offset = 7 / scale
-        let tick = 4 / scale
-        let path = NSBezierPath()
-
-        if axis == .horizontal {
-            let y = board.viewPoint(CanvasPoint(x: rect.minX, y: rect.maxY)).y + offset
-            let left = board.viewPoint(CanvasPoint(x: rect.minX, y: 0)).x
-            let right = board.viewPoint(CanvasPoint(x: rect.maxX, y: 0)).x
-            path.move(to: NSPoint(x: left, y: y))
-            path.line(to: NSPoint(x: right, y: y))
-            for x in [left, right] {
-                path.move(to: NSPoint(x: x, y: y - tick))
-                path.line(to: NSPoint(x: x, y: y + tick))
-            }
-        } else {
-            let x = board.viewPoint(CanvasPoint(x: rect.maxX, y: rect.minY)).x + offset
-            let top = board.viewPoint(CanvasPoint(x: 0, y: rect.minY)).y
-            let bottom = board.viewPoint(CanvasPoint(x: 0, y: rect.maxY)).y
-            path.move(to: NSPoint(x: x, y: top))
-            path.line(to: NSPoint(x: x, y: bottom))
-            for y in [top, bottom] {
-                path.move(to: NSPoint(x: x - tick, y: y))
-                path.line(to: NSPoint(x: x + tick, y: y))
-            }
-        }
-        path.lineWidth = 1.5 / scale
-        path.stroke()
     }
 
     /// The four dots a line is dragged from. Only in connect mode — that is the whole point of the mode:
@@ -172,6 +101,10 @@ final class CanvasOverlayView: NSView {
         // either. Drawing a ring here as well would be the second answer to a question that only
         // wanted one.
         guard board.mode.showsResizeGrips else { return }
+        // Nil unless several things are selected, in which case it is what the grips sit on. Asked of
+        // the hit tester rather than measured here, so what is drawn and what is clickable are one
+        // number.
+        let box = board.hitTester.selectionBox
         for id in board.selection {
             guard let node = board.document.node(id: id), board.layout.shows(id) else { continue }
             let rect = board.viewRect(board.layout.frame(of: node))
@@ -196,19 +129,68 @@ final class CanvasOverlayView: NSView {
             NSColor.controlAccentColor.withAlphaComponent(0.55).setStroke()
             ring.stroke()
 
-            guard !node.isGroup else { continue }
-            let size = 5.5 / scale
-            for handle in CanvasHandle.allCases {
-                let p = handle.point(in: node.frame)
-                let at = board.viewPoint(p)
-                let box = NSRect(x: at.x - size / 2, y: at.y - size / 2, width: size, height: size)
-                let path = NSBezierPath(ovalIn: box)
-                NSColor.windowBackgroundColor.setFill()
-                path.fill()
-                NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
-                path.lineWidth = 1 / scale
-                path.stroke()
-            }
+            // With several selected the grips move out to the box around them — see below — so a card
+            // keeps only its ring, which is now saying "and this one" rather than "grab me here".
+            guard !node.isGroup, box == nil else { continue }
+            drawHandles(on: board.layout.frame(of: node), board: board, scale: scale)
+        }
+
+        // On the box itself, not on the band drawn outside it — the hit tester answers for the box,
+        // and grips drawn 5 points out from where they are caught is exactly the kind of near miss
+        // that makes a corner feel unreliable.
+        if let box { drawHandles(on: box, board: board, scale: scale) }
+    }
+
+    /// The box several selected cards are resized by.
+    ///
+    /// **Out of `drawGrips`, which is why it is here at all.** It used to be drawn inside that pass,
+    /// which returns early in view mode — so in view mode a multiple selection had no bounds drawn
+    /// around it whatsoever, while still being resizable by exactly those bounds. You could grab an
+    /// edge that was never shown to you.
+    ///
+    /// **The ghost's treatment, at half the weight.** A band standing off the thing it describes, in
+    /// the neutral, rather than an accent hairline — the same argument as `CanvasGuideView.drawSlot`,
+    /// and the same numbers, so the two marks are visibly the same family. Thinner because they are
+    /// not doing the same job: a guide is transient and has one instant to be noticed, and this is
+    /// persistent for as long as the selection is, which is the other end of the same trade.
+    ///
+    /// **Above the cards, where the guide is below them.** A guide marks where a card is *going* and a
+    /// card sliding over it should cover it. This marks what you have *got*, including the edge you
+    /// are about to grab, and a card lying over that would be hiding a control.
+    private func drawSelectionBounds(_ board: CanvasBoardView, _ scale: Double) {
+        // Nothing in a tiled view: a tile's bounds are the arrangement's, not yours, and a bracket
+        // around three of six tiles is a second grid drawn over the first.
+        guard !board.isTiled, let box = board.hitTester.selectionBox else { return }
+        let standoff = Self.boundsStandoff / scale
+        let rect = board.viewRect(box).insetBy(dx: -standoff, dy: -standoff)
+        // Concentric, by the same rule the ghost uses: a curve offset from another curve keeps an even
+        // gap only when its radius grows by the offset. On the common case — a box hugging two cards —
+        // this lands the band exactly parallel to the corner card's own curve.
+        let radius = CanvasNodeView.cornerRadius(for: box) + standoff
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        path.lineWidth = Self.boundsWidth / scale
+        CanvasPalette.guide(0.28).setStroke()
+        path.stroke()
+    }
+
+    /// How far the band stands off the selection, and how thick it is — in view points over the zoom,
+    /// so it is the same weight to the eye at 30% as at 200%. The standoff matches the ghost's exactly
+    /// and the width is half of it; see `drawSelectionBounds`.
+    private static let boundsStandoff: Double = 5
+    private static let boundsWidth: Double = 2.5
+
+    /// The eight squares, wherever they belong — on a card, or on the box around a selection.
+    private func drawHandles(on frame: CanvasRect, board: CanvasBoardView, scale: Double) {
+        let size = 5.5 / scale
+        for handle in CanvasHandle.allCases {
+            let at = board.viewPoint(handle.point(in: frame))
+            let box = NSRect(x: at.x - size / 2, y: at.y - size / 2, width: size, height: size)
+            let path = NSBezierPath(ovalIn: box)
+            NSColor.windowBackgroundColor.setFill()
+            path.fill()
+            NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+            path.lineWidth = 1 / scale
+            path.stroke()
         }
     }
 

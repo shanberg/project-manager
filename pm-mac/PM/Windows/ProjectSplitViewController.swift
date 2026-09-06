@@ -81,9 +81,17 @@ final class ProjectSplitViewController: NSSplitViewController {
         sidebarItem.minimumThickness = ProjectWindow.sidebarMinWidth
         sidebarItem.maximumThickness = ProjectWindow.sidebarMaxWidth
         sidebarItem.canCollapse = true
-        // Below the content's, so growing the window widens the task column and leaves the sidebar at
-        // the width the user set — the behaviour every other source-list app has.
-        sidebarItem.holdingPriority = .defaultLow - 1
+        // *Above* the content's. A split view resizes its lowest-priority pane first, so the pane you
+        // want to hold still is the one with the higher number — this was the wrong way round, and the
+        // sidebar was taking every point the window gained or lost. The sidebar's width is something
+        // the user set once, by dragging; resizing a window is not a request to change it.
+        sidebarItem.holdingPriority = .defaultLow + 1
+        // A sidebar collapses by resizing the *window* by default — show it and the window grows by
+        // its width. That is the same coupling from the other side, and it is intolerable for the
+        // auto-hide below, which runs mid-drag: the window would fight the edge the user is dragging.
+        // With this the window is left alone and the task column takes the space, so the only thing
+        // that ever moves a window edge is a hand on it (or `makeRoomForSidebar`, which is asked for).
+        sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
 
         contentItem = NSSplitViewItem(viewController: contentPane)
         contentItem.minimumThickness = ProjectWindow.minContentWidth
@@ -155,6 +163,30 @@ final class ProjectSplitViewController: NSSplitViewController {
                 self.canvasPane?.ignoresTrafficLights = !item.isCollapsed
             }
         }
+
+        // `queue: nil` so it runs synchronously inside the resize that posted it, rather than a turn of
+        // the run loop later — the whole point is to decide within the frame the window is being
+        // dragged through.
+        resizeObservation = NotificationCenter.default.addObserver(
+            forName: NSSplitView.didResizeSubviewsNotification, object: splitView, queue: nil
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // A divider index means a hand on the divider — the one thing that sets the sidebar's
+                // width. Everything else that resizes these subviews is the window changing size, and
+                // must not be mistaken for the user asking for a narrower sidebar.
+                if note.userInfo?["NSSplitViewDividerIndex"] != nil { self.recordSidebarWidth() }
+                self.syncSidebarForAvailableWidth()
+            }
+        }
+    }
+
+    /// Take the sidebar's current width as the width to hold it at.
+    private func recordSidebarWidth() {
+        guard !sidebarItem.isCollapsed else { return }
+        sidebarWidthAtRest = min(max(sidebarItem.viewController.view.frame.width,
+                                     ProjectWindow.sidebarMinWidth),
+                                 ProjectWindow.sidebarMaxWidth)
     }
 
     override func viewWillAppear() {
@@ -167,12 +199,82 @@ final class ProjectSplitViewController: NSSplitViewController {
             UserDefaults.standard.object(forKey: "NSSplitView Subview Frames \($0)") != nil
         } ?? false
         if !autosaved { splitView.setPosition(ProjectWindow.sidebarWidth, ofDividerAt: 0) }
+        // The restored width is a width the user dragged to, in some window, at some point — which is
+        // exactly what the auto-hide holds the sidebar at. Without this the window would open honouring
+        // the default instead of the sidebar in front of the user.
+        recordSidebarWidth()
     }
 
     private var didSeedDividerPosition = false
+
     /// Identifies the in-flight sidebar animation, so a completion handler that belongs to a toggle
     /// that's already been superseded can't clear `sidebarAnimating` out from under the current one.
     private var settleToken = 0
+
+    // MARK: Auto-hide
+
+    /// The width the user has put the sidebar at. Deliberately *not* re-read from the pane on every
+    /// layout: as a window narrows past what fits, the split view squeezes the sidebar before this
+    /// code gets a look in, and a threshold measured from the squeezed width would chase itself down
+    /// and never fire. It changes when the divider is dragged, and at no other time.
+    private var sidebarWidthAtRest = ProjectWindow.sidebarWidth
+
+    /// Whether the sidebar is hidden because the window ran out of room for it, rather than because
+    /// somebody asked for it to be hidden. Only the former comes back on its own.
+    private var sidebarHiddenForWidth = false
+
+    /// Watches the split view's own resizes — see `syncSidebarForAvailableWidth`.
+    private var resizeObservation: NSObjectProtocol?
+
+    /// The narrowest this window can be and still show the sidebar at its set width beside a task
+    /// column at *its* minimum.
+    private var widthNeededForSidebar: CGFloat {
+        sidebarWidthAtRest + splitView.dividerThickness + ProjectWindow.minContentWidth
+    }
+
+    /// Hide the sidebar when the window is too narrow to hold it beside a usable task column, and give
+    /// it back when the window is wide enough again.
+    ///
+    /// This is the *only* thing window width is allowed to do to the sidebar; short of vanishing, it
+    /// stays exactly the width the divider was left at.
+    private func syncSidebarForAvailableWidth() {
+        guard isViewLoaded, splitView.bounds.width > 0 else { return }
+        // A point of slack. Widths land on fractional points, and a sidebar that hides itself because
+        // the window came up half a point short is not what "too small" means.
+        let hasRoom = splitView.bounds.width + 1 >= widthNeededForSidebar
+        // Set directly rather than through the animator: this rides a live resize drag, and a slide
+        // that takes a quarter second to catch up with the window edge reads as lag, not animation.
+        if !hasRoom, !sidebarItem.isCollapsed {
+            sidebarHiddenForWidth = true
+            sidebarItem.isCollapsed = true
+        } else if hasRoom, sidebarHiddenForWidth, sidebarItem.isCollapsed {
+            sidebarHiddenForWidth = false
+            sidebarItem.isCollapsed = false
+        }
+    }
+
+    /// `viewWillLayout` catches the window's own resizes, but a point late: the split view has already
+    /// squeezed the sidebar by the time it runs, so the pane visibly narrows for a frame before it
+    /// goes. The notification fires as part of that same resize, which is why both are here.
+    override func viewWillLayout() {
+        super.viewWillLayout()
+        syncSidebarForAvailableWidth()
+    }
+
+    /// Widen the window enough to show the sidebar, for a window that hasn't the room.
+    ///
+    /// Asking for the sidebar in a narrow window has to mean something, and the two honest answers are
+    /// "squeeze the task column" — which its minimum forbids — and this one. Without it the pane would
+    /// appear and the next layout pass would auto-hide it straight back, so the toggle would look
+    /// broken in exactly the windows the auto-hide exists for.
+    private func makeRoomForSidebar() {
+        guard let window = view.window else { return }
+        let shortfall = widthNeededForSidebar - splitView.bounds.width
+        guard shortfall > 0 else { return }
+        var frame = window.frame
+        frame.size.width += shortfall
+        window.setFrame(window.constrainFrameRect(frame, to: window.screen), display: true)
+    }
 
     /// Rebuild the SwiftUI content — used on first load and whenever the window is retargeted at a
     /// different project.
@@ -281,12 +383,16 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// doesn't reach into the others. The persisted value is only the default a first window opens
     /// with, so the app comes back the way you left it.
     override func toggleSidebar(_ sender: Any?) {
+        // An explicit toggle outranks the auto-hide in both directions: showing it means the window
+        // makes room, and hiding it means it stays hidden however wide the window gets.
+        sidebarHiddenForWidth = false
+        if sidebarItem.isCollapsed { makeRoomForSidebar() }
+
         // Set before the animation starts, cleared once it's over: the sidebar only pins its layout and
         // clips while it's actually moving (see `ProjectSidebar`). The width it pins *to* is read here,
         // while the pane is still at rest — a collapsed item keeps its last width, so this is the width
         // the sidebar has now or is about to have again, in both directions.
-        state.sidebarRestingWidth = max(sidebarItem.viewController.view.frame.width,
-                                        ProjectWindow.sidebarMinWidth)
+        state.sidebarRestingWidth = sidebarWidthAtRest
         state.sidebarAnimating = true
 
         // Cleared by the animation's own completion, not by a timer set to outlast it. This used to be
@@ -307,6 +413,9 @@ final class ProjectSplitViewController: NSSplitViewController {
             MainActor.assumeIsolated {
                 guard let self, self.settleToken == token else { return }
                 self.state.sidebarAnimating = false
+                // A window that opened with the sidebar hidden has never seen the restored width, so
+                // the first time the pane appears is the first chance to learn it.
+                self.recordSidebarWidth()
             }
         }
         // `toggleSidebar` animates, so `isCollapsed` is already the new value but the animation is in
@@ -354,6 +463,8 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Before the release, so a collapse on the way down can't hand the retain straight back.
         collapseObservation?.invalidate()
         collapseObservation = nil
+        resizeObservation.map(NotificationCenter.default.removeObserver)
+        resizeObservation = nil
         // A board showing here holds the canvas document open, and the last holder is what saves it and
         // stops it polling the file. A window closing on a board must give that hold back.
         dropCanvas()

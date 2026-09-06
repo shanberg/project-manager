@@ -27,8 +27,9 @@ import PmLib
 /// the board hazardous to pan across. One click steps in, and from then on the card is a project.
 struct CanvasProjectNote: View {
     @ObservedObject var store: PMStore
-    /// Whether the card has been stepped into. Only the scrolling depends on it — everything else is
-    /// gated by the card refusing to hit-test at all until then (`CanvasNodeView.hitTest`).
+    /// Whether the card has been stepped into. Only the open editor depends on it — everything else is
+    /// gated by the card refusing to hit-test at all until then (`CanvasNodeView.hitTest`), and the
+    /// wheel reaches this scroll view either way (`CanvasBoardView.scrollWheel`).
     @ObservedObject var engagement: CanvasCardEngagement
     /// The notes file itself, so a relative image embed resolves against the folder it lives in.
     let noteURL: URL
@@ -56,9 +57,6 @@ struct CanvasProjectNote: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // A card you haven't stepped into doesn't take the pointer at all, so its scroll wheel belongs
-        // to the board. Stepping in is what makes a card taller than its frame readable.
-        .scrollDisabled(!engagement.isEngaged)
         // Stepping out closes whatever was open. An editor left standing on a card you have walked away
         // from is a text field with the keyboard nowhere near it, holding an edit that will never be
         // committed.

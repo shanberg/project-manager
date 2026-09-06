@@ -17,11 +17,19 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     /// Which way this window is rendering its project — its task list, or its board.
     ///
-    /// **Per window, not per project.** A window is in canvas mode or it isn't, and switching the
-    /// project in it keeps it there. Remembering the choice per project sounds friendlier and means the
-    /// window silently changes shape, and changes the width it is allowed to be, as you walk down the
-    /// sidebar.
+    /// **Per project, and remembered.** A window opened onto a project, and a window retargeted at one,
+    /// both come up the way that project was last looked at — see `ProjectRendererMemory`, which holds
+    /// the argument and what it costs.
     private var renderer: ProjectRenderer = .tasks
+
+    /// Set while a remembered canvas is waiting for its path.
+    ///
+    /// A project's canvas path arrives with the store's first read of its folder, so at the moment a
+    /// window is built every project looks like a project without a board. Switching to the canvas
+    /// renderer then would put the "no canvas yet" empty state on screen and take it away again a
+    /// moment later, which is a worse answer than the task list for the same fraction of a second.
+    /// `watchCanvasPath` picks this up when the path lands.
+    private var awaitsRememberedCanvas = false
 
     /// The project's canvas path arrives with the store's first read, and again whenever the project's
     /// folder is re-scanned. A window in canvas mode has to follow it: the path is nil for the moment
@@ -46,7 +54,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
         let window = TextFocusWindow(
             contentRect: NSRect(x: 0, y: 0,
-                                width: ProjectWindow.minContentWidth + ProjectWindow.sidebarWidth,
+                                width: ProjectWindow.minContentWidth + ProjectWindow.sidebarWidth
+                                    + ProjectWindow.sidebarDividerWidth,
                                 height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
@@ -164,9 +173,26 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // forces the theme frame to place its buttons, which is what makes them measurable this early.
         window.layoutIfNeeded()
         measureTitlebarButtons()
+
+        applyRememberedRenderer()
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    /// Open this window the way its project was last looked at.
+    ///
+    /// Called on the way up and again on every retarget, since a retarget is the same question asked
+    /// about a different project.
+    private func applyRememberedRenderer() {
+        guard ProjectRendererMemory.of(projectKey) == .canvas else {
+            awaitsRememberedCanvas = false
+            if renderer == .canvas { setRenderer(.tasks) }
+            return
+        }
+        guard store.canvasPath != nil else { return awaitsRememberedCanvas = true }
+        awaitsRememberedCanvas = false
+        setRenderer(.canvas)
+    }
 
     /// ⌘Z goes to whatever this window is showing. With a board up that is the canvas document's own
     /// stack, shared with the canvas's own window if it also has one open — which is the only coherent
@@ -229,11 +255,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.retarget(to: newStore, projectKey: newKey)
         applyTitle()
         pushFocusToDisk()
-        // A window in canvas mode stays in canvas mode across a switch — but the board it is showing is
-        // the *old* project's until it is pointed at the new one. The path arrives with the new store's
-        // first read, so `watchCanvasPath` runs this again when that lands rather than only here.
+        // The new project decides how it is shown, not the window — and the board a canvas project
+        // wants is the *new* one, whose path arrives with the new store's first read. So this can go
+        // either way here and `watchCanvasPath` finishes it when the path lands.
         watchCanvasPath()
-        if renderer == .canvas { setRenderer(.canvas) }
+        applyRememberedRenderer()
     }
 
     /// Put the sidebar's selection back on the project this window is actually showing. Used when a
@@ -278,11 +304,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in
-                guard let self, renderer == .canvas else { return }
+                guard let self, renderer == .canvas || awaitsRememberedCanvas else { return }
                 // On the next turn: this fires from inside the store's own publish, and re-entering the
                 // split view's child swap from there is a layout change during an update.
                 afterCurrentUpdate { [weak self] in
-                    guard let self, self.renderer == .canvas else { return }
+                    guard let self, self.renderer == .canvas || self.awaitsRememberedCanvas else {
+                        return
+                    }
+                    self.awaitsRememberedCanvas = false
                     self.setRenderer(.canvas)
                 }
             }
@@ -299,6 +328,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                              create: { [weak self] in self?.createAndShowCanvas() })
         }
         applyWidthLimits()
+        // What the split actually settled on, which is not always what was asked for: a canvas that
+        // won't parse falls back to the task list, and remembering the ask would send the window
+        // straight back into the same failure on every launch.
+        ProjectRendererMemory.remember(split.renderer, for: projectKey)
     }
 
     /// The empty state's button: make the board, then show it. The creating half is

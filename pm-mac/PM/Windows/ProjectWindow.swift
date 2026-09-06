@@ -38,6 +38,11 @@ enum ProjectWindow {
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 360
 
+    /// The gap between the two panes — `NSSplitView`'s thin divider. Named here so a window can open
+    /// exactly wide enough for a sidebar *and* a full-width task column rather than a point short of
+    /// it, which is the difference between a sidebar and a sidebar that hides itself on launch.
+    static let sidebarDividerWidth: CGFloat = 1
+
     /// `UserDefaults` key behind the sidebar toggle (an `@AppStorage` in the view, read directly by the
     /// window when it needs the value before any SwiftUI layout has run).
     static let sidebarDefaultsKey = "PMPanelSidebar"

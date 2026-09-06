@@ -81,18 +81,31 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.minX, 101)
     }
 
-    /// The guide reaches from the card being moved to the card it agreed with, and no further. A line
-    /// the width of the board would be true and useless — the point is to show *which* cards agree.
-    func testAGuideSpansOnlyTheCardsItConcerns() {
+    /// A guide names the cards that agree — the moving card first, then everything it matched. Each
+    /// of them gets a ghost drawn round it, so the whole rectangle is what has to come back, not a
+    /// summary of where the line would run.
+    func testAGuideNamesEveryCardInTheAgreement() {
         let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
                                          against: [rect(100, 0), rect(100, 3000)], reach: reach)
-        guard case .alignment(let axis, let position, let from, let to)? = result.guides.first else {
+        guard case .alignment(let axis, let position, let cards)? = result.guides.first else {
             return XCTFail("expected an alignment guide")
         }
         XCTAssertEqual(axis, .vertical)
         XCTAssertEqual(position, 100)
-        XCTAssertEqual(from, 0, "up to the topmost card that agrees")
-        XCTAssertEqual(to, 3100, "down to the bottom of the lowest one")
+        XCTAssertEqual(cards, [rect(100, 500),    // the card being moved, where it landed
+                               rect(100, 0),      // the one above it
+                               rect(100, 3000)])
+    }
+
+    /// A card that happens to lie between two that agree is not part of the agreement and gets no
+    /// stretch. The old single line ran straight past it and left you to work that out.
+    func testAGuideSkipsCardsThatDontAgree() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
+                                         against: [rect(100, 0), rect(340, 200)], reach: reach)
+        guard case .alignment(_, _, let cards)? = result.guides.first else {
+            return XCTFail("expected an alignment guide")
+        }
+        XCTAssertEqual(cards.count, 2, "the moving card and the one card that lines up with it")
     }
 
     // MARK: Resizing

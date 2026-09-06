@@ -243,6 +243,22 @@ extension CanvasBoardView {
         // Where a "Paste" or a "New Card" from this menu should land. Kept because the menu is
         // dismissed by the time the item fires, and by then the pointer has moved.
         menuPoint = where_
+        menuDivider = nil
+
+        // In a tiled view the arrangement's own chrome answers first — it is drawn in the gaps, where
+        // the board would otherwise offer you New Card and Paste, neither of which a tiled view can do.
+        if isTiled {
+            if let id = tileHandle(at: where_) {
+                selection = [id]
+                buildCardMenu(menu, id: id)
+                return menu
+            }
+            if let divider = tileDivider(at: where_) {
+                menuDivider = divider
+                buildDividerMenu(menu, divider)
+                return menu
+            }
+        }
 
         switch hitTester.hit(where_) {
         case .node(let id), .handle(let id, _), .anchor(let id, _):
@@ -332,6 +348,7 @@ extension CanvasBoardView {
             add(menu, "Rename Frame…", #selector(renameSelectedFrame))
         }
 
+        addTiling(menu)
         menu.addItem(.separator())
         add(menu, "Cut", #selector(cut(_:)))
         add(menu, "Copy", #selector(copy(_:)))
@@ -346,6 +363,84 @@ extension CanvasBoardView {
         add(menu, "Delete Line", #selector(deleteSelected))
     }
 
+    /// Right-clicking a boundary: what this divider can be told to do.
+    ///
+    /// **The boundary is the object here, not the card.** Dragging one is a continuous adjustment, and
+    /// everything a continuous adjustment cannot say belongs in a menu on the thing being adjusted:
+    /// hold this side still, put these back to even, lay them out the other way entirely. It is the
+    /// same argument as a right-click on a window divider anywhere else — the divider is a control, and
+    /// controls have menus.
+    private func buildDividerMenu(_ menu: NSMenu, _ divider: CanvasTileDivider) {
+        guard let tiling, let sides = tiles(of: divider) else { return }
+        let before = divider.isVertical ? "Left" : "Above"
+        let after = divider.isVertical ? "Right" : "Below"
+
+        // The master's boundary has a tile on one side and the whole stack on the other, and the stack
+        // is not a tile — pinning "the right-hand side" of it would mean pinning a column's width by
+        // way of one of the cards in it, which is not what the click said.
+        add(menu, pinTitle(sides.before, side: divider.isMasterSplit ? "Master" : before),
+            #selector(pinTileBeforeDivider(_:)))
+        if !divider.isMasterSplit {
+            add(menu, pinTitle(sides.after, side: after), #selector(pinTileAfterDivider(_:)))
+        }
+
+        menu.addItem(.separator())
+        add(menu, divider.isMasterSplit ? "Reset Split" : "Even Out These Tiles",
+            #selector(evenOutTiles(_:)))
+
+        menu.addItem(.separator())
+        let arrange = NSMenu()
+        for option in CanvasTiling.Arrangement.allCases {
+            let item = add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
+                                                                  : #selector(arrangeAsMasterStack(_:)))
+            item.state = tiling.arrangement == option ? .on : .off
+        }
+        let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
+        item.submenu = arrange
+    }
+
+    private func pinTitle(_ id: String, side: String) -> String {
+        "\(isTilePinned(id) ? "Unpin" : "Pin") \(side) Tile"
+    }
+
+    /// The two tiles a boundary separates.
+    func tiles(of divider: CanvasTileDivider) -> (before: String, after: String)? {
+        guard let tiling, divider.before + 1 < divider.run.count else { return nil }
+        return (tiling.ids[divider.run[divider.before]], tiling.ids[divider.run[divider.before + 1]])
+    }
+
+    @objc func pinTileBeforeDivider(_ sender: Any?) {
+        guard let divider = menuDivider, let sides = tiles(of: divider) else { return }
+        togglePinTile(sides.before)
+    }
+
+    @objc func pinTileAfterDivider(_ sender: Any?) {
+        guard let divider = menuDivider, let sides = tiles(of: divider) else { return }
+        togglePinTile(sides.after)
+    }
+
+    /// Put this run back to sharing equally — the way out of an arrangement you have over-adjusted,
+    /// and the only thing a drag genuinely cannot express.
+    @objc func evenOutTiles(_ sender: Any?) {
+        guard let divider = menuDivider, var session = tiling else { return }
+        if divider.isMasterSplit {
+            session.sizes[session.ids[0]] = nil
+            session.masterFraction = CanvasTiling.savedMasterFraction
+        } else {
+            for index in divider.run { session.sizes[session.ids[index]] = nil }
+        }
+        tiling = session
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+    }
+
+    @objc func arrangeAsGrid(_ sender: Any?) { chooseArrangement(.grid) }
+    @objc func arrangeAsMasterStack(_ sender: Any?) { chooseArrangement(.masterStack) }
+
+    private func chooseArrangement(_ arrangement: CanvasTiling.Arrangement) {
+        if isTiled { setArrangement(arrangement) } else { tile(tileTargets, arrangement: arrangement) }
+    }
+
     private func buildBoardMenu(_ menu: NSMenu) {
         add(menu, "New Card", #selector(newCardHere))
         add(menu, "New Frame", #selector(newFrameHere))
@@ -357,8 +452,34 @@ extension CanvasBoardView {
         menu.addItem(.separator())
         let paste = add(menu, "Paste", #selector(pasteHere))
         paste.isEnabled = NSPasteboard.general.types?.isEmpty == false
+        addTiling(menu)
         menu.addItem(.separator())
         add(menu, "Select All", #selector(selectAll(_:)))
+    }
+
+    /// ⌘Return, in the menu you get to by right-clicking.
+    ///
+    /// The command was reachable from the View menu and from a key you had to already know, and from
+    /// nowhere a pointer could find it — which for the board's largest gesture is the wrong way round.
+    /// Right-clicking a selection is where a Mac says "what can I do with these", and until now this
+    /// board's answer was cut, copy, duplicate, delete: four things you can do to a card's *contents*
+    /// and nothing about how you are looking at it.
+    ///
+    /// Carrying the key equivalent so the menu teaches it. A contextual menu draws one exactly as the
+    /// menu bar does, which makes this the cheapest possible way to hand somebody a shortcut they were
+    /// never going to find in the View menu.
+    private func addTiling(_ menu: NSMenu) {
+        // Its own separator rather than one from each caller, so that bailing out on an empty board
+        // leaves the menu with one divider rather than two stacked on each other.
+        guard isTiled || document.nodes.contains(where: { !$0.isGroup }) else { return }
+        menu.addItem(.separator())
+        let item = add(menu, tileCommandTitle, #selector(tileSelection(_:)))
+        item.keyEquivalent = "\r"
+        item.keyEquivalentModifierMask = [.command]
+        // The deliberate half of pinning, and the only half: a drag can change a pin but never make
+        // one, or a layout would stop responding to its window one adjustment at a time without
+        // anybody having asked for that. See `togglePinTile`.
+        if pinnableTile != nil { add(menu, pinTileTitle, #selector(togglePinTileSize(_:))) }
     }
 
     @discardableResult
@@ -394,7 +515,8 @@ extension CanvasBoardView {
     ///
     /// Shared by adding a card and editing one, so the two are the same box with different words in it
     /// — including the part nobody thinks about until it is missing, which is that typing
-    /// `example.com` gets a scheme put on it rather than producing a card that will never load.
+    /// `example.com` gets a scheme put on it rather than producing a card that will never load. That
+    /// part is `CanvasAddress.normalized`, shared further still with the header's address field.
     func promptForAddress(title: String, message: String, initial: String,
                           then use: @escaping (String) -> Void) {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
@@ -413,9 +535,7 @@ extension CanvasBoardView {
         field.selectText(nil)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        var text = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
-        if !text.contains("://") { text = "https://" + text }
+        guard let text = CanvasAddress.normalized(field.stringValue) else { return }
         use(text)
     }
 
@@ -653,9 +773,75 @@ extension CanvasBoardView {
 /// responder — so the menu items reach it directly, and `validateUserInterfaceItem` on the same object
 /// is what dims them in every window that isn't a canvas.
 extension CanvasBoardView: NSUserInterfaceValidations {
-    @objc func zoomIn(_ sender: Any?) { scrollView?.canvasScroll?.zoom(by: 1.25) }
-    @objc func zoomOut(_ sender: Any?) { scrollView?.canvasScroll?.zoom(by: 1 / 1.25) }
-    @objc func zoomActualSize(_ sender: Any?) { scrollView?.canvasScroll?.zoomToActualSize() }
+    /// ⌘+ / ⌘− / ⌘0. The board, unless you have stepped into a card that has a size of its own.
+    ///
+    /// Stepping into a card is saying "I am working in here now", and inside a web page or a card of
+    /// prose ⌘+ has a well-known meaning that is not "move the camera". It is also the only meaning
+    /// available in a tiled view, where the board's zoom is fixed at 100% and the card's frame belongs
+    /// to the arrangement — which is exactly where an 11px page is most likely to be in front of you.
+    @objc func zoomIn(_ sender: Any?) {
+        guard !zoomEngagedCard(by: 1) else { return }
+        scrollView?.canvasScroll?.zoom(by: 1.25)
+    }
+
+    @objc func zoomOut(_ sender: Any?) {
+        guard !zoomEngagedCard(by: -1) else { return }
+        scrollView?.canvasScroll?.zoom(by: 1 / 1.25)
+    }
+
+    @objc func zoomActualSize(_ sender: Any?) {
+        if let card = zoomableEngagedCard { return setContentZoom(CanvasCardZoom.normal, on: card) }
+        scrollView?.canvasScroll?.zoomToActualSize()
+    }
+
+    /// Hold this tile's size against the window, or let it go back to sharing. See `togglePinTile`.
+    @objc func togglePinTileSize(_ sender: Any?) {
+        guard let id = pinnableTile else { return NSSound.beep() }
+        togglePinTile(id)
+    }
+
+    /// The tile a pin would act on: one selected tile, in a tiled view that has a run to pin along.
+    var pinnableTile: String? {
+        guard let tiling, tiling.ids.count > 1, selection.count == 1, let id = selection.first,
+              tiling.ids.contains(id) else { return nil }
+        // A grid of rows *and* columns has no run: a width there belongs to a column, shared with
+        // tiles nobody selected. See `CanvasTiling.grid`.
+        if tiling.arrangement == .grid, gridRunIsHorizontal == nil { return nil }
+        return id
+    }
+
+    /// What the pin command is called: which way it goes, and which dimension it holds.
+    var pinTileTitle: String {
+        guard let id = pinnableTile else { return "Pin Tile Width" }
+        let dimension = tileRunIsVertical(id) ? "Height" : "Width"
+        return isTilePinned(id) ? "Unpin \(dimension)" : "Pin \(dimension)"
+    }
+
+    /// The card ⌘+ would act on: the one you are stepped into, if its kind has an answer.
+    var zoomableEngagedCard: CanvasNodeView? {
+        nodeViews.values.first { $0.isEngaged && $0.zoomsItsContent }
+    }
+
+    private func zoomEngagedCard(by direction: Int) -> Bool {
+        guard let card = zoomableEngagedCard else { return false }
+        let next = CanvasCardZoom.stepped(card.contentZoom, by: direction)
+        guard next != card.contentZoom else { return true }  // at the end of the ladder; not the board's
+        setContentZoom(next, on: card)
+        return true
+    }
+
+    /// Written to the document, so it is still there tomorrow — see `CanvasCardZoom`.
+    ///
+    /// Quietly, though. It saves but registers no undo: a zoom is how you are looking at a card rather
+    /// than an edit to it, and four presses of ⌘+ should not put four steps on the stack between you
+    /// and the last thing you actually changed.
+    private func setContentZoom(_ zoom: Double, on card: CanvasNodeView) {
+        let id = card.node.id
+        store.changeQuietly { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            CanvasCardZoom.set(zoom, on: &doc.nodes[index])
+        }
+    }
     @objc func zoomToFit(_ sender: Any?) { scrollView?.canvasScroll?.zoomToFit() }
 
     @objc func toggleConnectMode(_ sender: Any?) { mode = mode == .connect ? .view : .connect }
@@ -679,8 +865,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // The one command that says what it will do rather than being dimmed when it can't: with a
             // selection it tiles that, with none it tiles what you can see, and once tiled it is the way
             // back out. Only a board with nothing on it has nothing for it to mean.
-            (item as? NSMenuItem)?.title = isTiled ? "Leave Tiled View"
-                : selection.isEmpty ? "Fill Window with Visible Cards" : "Fill Window with Selection"
+            (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
         case #selector(setTileArrangement(_:)):
             (item as? NSMenuItem).map { entry in
@@ -708,8 +893,14 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return !selection.isEmpty && !isTiled
         case #selector(paste(_:)):
             return NSPasteboard.general.types?.isEmpty == false
-        case #selector(zoomIn(_:)), #selector(zoomOut(_:)),
-             #selector(zoomActualSize(_:)), #selector(zoomToFit(_:)):
+        case #selector(togglePinTileSize(_:)):
+            (item as? NSMenuItem)?.title = pinTileTitle
+            return pinnableTile != nil
+        case #selector(zoomIn(_:)), #selector(zoomOut(_:)), #selector(zoomActualSize(_:)):
+            // Live while a zoomable card is engaged even in a tiled view, because there they mean the
+            // card and not the board — see `zoomIn`.
+            return !isTiled || zoomableEngagedCard != nil
+        case #selector(zoomToFit(_:)):
             // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
             // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.
             return !isTiled

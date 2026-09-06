@@ -142,6 +142,13 @@ enum HeaderMetrics {
     static let iconSize: CGFloat = 12
     /// Between items that belong together.
     static let gap: CGFloat = 2
+    /// Between two groups inside one capsule — a run of buttons and the words they drive. A
+    /// divider says "different scope"; this says "same scope, different job", and the page capsule needs
+    /// the quieter of the two: back/forward/reload and the address are one control between them.
+    static let groupGap: CGFloat = 10
+    /// Between two capsules in the same header. Wider than anything inside one, because the gap is the
+    /// only thing saying they are two.
+    static let capsuleGap: CGFloat = 10
     /// Inside a run of text, so words don't sit against the item beside them.
     static let textInset: CGFloat = 6
     /// The capsule's own inset around its row.
@@ -183,6 +190,17 @@ struct HeaderCapsule<Content: View>: View {
             .headerBacking(chrome, in: Capsule())
             // A click on a control is a click on that control, not the start of a window drag.
             .background(WindowDragExcluder())
+    }
+}
+
+/// The air between two groups of items inside one capsule.
+///
+/// A spacer rather than a divider, and sized so the total gap is `groupGap` rather than `groupGap` plus
+/// the row's own spacing on each side — otherwise the one number here is not the number on screen.
+struct HeaderGap: View {
+    var body: some View {
+        Color.clear
+            .frame(width: max(0, HeaderMetrics.groupGap - HeaderMetrics.gap * 2), height: 1)
     }
 }
 

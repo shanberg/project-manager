@@ -30,19 +30,35 @@ enum CanvasPalette {
     /// the things that are.
     static let edge = NSColor.tertiaryLabelColor
 
-    /// The card surface itself, and the board it sits on.
+    /// The card surface itself.
     static let card = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 1, alpha: 1)
     }
-    static let board = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(white: 0.086, alpha: 1) : NSColor(srgbRed: 0.937, green: 0.941, blue: 0.953, alpha: 1)
-    }
+
+    /// The board a card sits on.
+    ///
+    /// **The board is the window's own background.** It used to be a pair of hand-picked greys — a
+    /// blue-tinted 0.937 in light, a near-black 0.086 in dark — inherited from Obsidian, where a canvas
+    /// is a document with a look of its own. Here it isn't: a canvas is a pane in a PM window, sitting
+    /// beside a sidebar and under a header that are painted in the system's colours, and a board that
+    /// brought its own greys with it was the one surface in the app with an opinion. `windowBackground`
+    /// also comes with things a constant cannot: it follows Increase Contrast, it follows a tinted
+    /// appearance, and it will follow whatever the next macOS decides a window is painted with.
+    ///
+    /// It leaves a card the same colour as the board it sits on in light appearance, which sounds like
+    /// a mistake and is the arrangement Freeform and Notes both ship. A card is told from the board by
+    /// its shadow — see `CanvasNodeView.refreshElevation` — which is a truer account of what a card is
+    /// anyway: a piece of paper on a desk, not a lighter rectangle.
+    static let board = NSColor.windowBackgroundColor
+
     /// The dot grid, at `presence` of its full strength.
     ///
-    /// Present at all, rather than a flat board, because a canvas has no edges and no content of its
-    /// own — without a texture that moves, panning an empty region looks like a window that has frozen.
-    /// Faded by the caller as you zoom in, which is when that stops being true: see
-    /// `CanvasBoardView.drawGrid`.
+    /// Only drawn while something is being dragged or resized, and only while that drag is snapping —
+    /// it is the lattice the card is landing on rather than a permanent texture. See
+    /// `CanvasBoardView.drawGrid`, which owns the argument.
+    ///
+    /// Slightly stronger than it was, because it is now transient and has to register in the first
+    /// tenth of a second rather than sit quietly under a board you are reading.
     ///
     /// A function rather than a colour and a `withAlphaComponent` at the call site, because the alpha
     /// isn't the same in both appearances and reading a component off a dynamic colour resolves it
@@ -50,10 +66,24 @@ enum CanvasPalette {
     /// view's.
     static func grid(_ presence: Double) -> NSColor {
         NSColor(name: nil) { appearance in
-            appearance.isDark ? NSColor(white: 1, alpha: 0.08 * presence)
-                              : NSColor(white: 0, alpha: 0.10 * presence)
+            appearance.isDark ? NSColor(white: 1, alpha: 0.13 * presence)
+                              : NSColor(white: 0, alpha: 0.14 * presence)
         }
     }
+    /// The alignment ghosts, at `alpha`.
+    ///
+    /// Neutral, not the accent. A guide drawn in the accent is a blue line on a board where blue
+    /// already means "selected", and at the weight a guide needs to be seen it reads as a second, more
+    /// urgent selection — the eye goes to it instead of to the card you are placing. What is wanted
+    /// here is the opposite of urgent: the soft grey-on-light, white-on-dark outline the desktop puts
+    /// round a widget you are dragging, which you read without looking at.
+    static func guide(_ alpha: Double) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(white: 1, alpha: alpha)
+                              : NSColor(white: 0, alpha: alpha * 0.85)
+        }
+    }
+
     /// A group's frame and the fill inside it.
     static let groupStroke = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor(white: 1, alpha: 0.22) : NSColor(white: 0, alpha: 0.20)

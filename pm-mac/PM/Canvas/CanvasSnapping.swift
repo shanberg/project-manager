@@ -8,9 +8,13 @@ import PmLib
 enum CanvasGuide: Equatable {
     enum Axis { case vertical, horizontal }
 
-    /// Two or more cards line up here. Drawn at `position` on `axis`, spanning `from`…`to` along the
-    /// other axis so it reaches from the card being moved to the card it matched and no further.
-    case alignment(axis: Axis, position: Double, from: Double, to: Double)
+    /// Two or more cards line up here, at `position` on `axis`.
+    ///
+    /// `cards` is every card in the agreement — the moving set's box first, then each card it matched.
+    /// Whole rectangles rather than the stretch each one covers, because what gets drawn is a ghost
+    /// around the card itself, and a ghost needs the card's corners as much as its edges. A line
+    /// states a coordinate; what is worth saying is *which cards* agree on it.
+    case alignment(axis: Axis, position: Double, cards: [CanvasRect])
 
     /// These two are now the same width (or height). Drawn as a measured bar over each.
     case sameSize(axis: Axis, moving: CanvasRect, matched: CanvasRect)
@@ -212,9 +216,11 @@ enum CanvasSnapping {
         on ? (value / grid).rounded() * grid - value : 0
     }
 
-    /// A guide line long enough to reach from the moving card to the furthest card it agrees with, and
-    /// no longer. A line drawn the width of the board would be true and useless — the point of drawing
-    /// it is to show *which* cards are in agreement.
+    /// The cards in agreement at `position`.
+    ///
+    /// The moving set first, then the cards it matched, in board order. A guide drawn the width of the
+    /// board would be true and useless — the point of drawing it is to show *which* cards are in
+    /// agreement, and naming them is that fact rather than a summary of it.
     private static func guide(axis: CanvasGuide.Axis,
                               at position: Double,
                               moving: CanvasRect,
@@ -225,12 +231,6 @@ enum CanvasSnapping {
                 : [other.minY, other.midY, other.maxY]
             return candidates.contains { abs($0 - position) < 0.001 }
         }
-        var low = axis == .vertical ? moving.minY : moving.minX
-        var high = axis == .vertical ? moving.maxY : moving.maxX
-        for other in matched {
-            low = min(low, axis == .vertical ? other.minY : other.minX)
-            high = max(high, axis == .vertical ? other.maxY : other.maxX)
-        }
-        return .alignment(axis: axis, position: position, from: low, to: high)
+        return .alignment(axis: axis, position: position, cards: [moving] + matched)
     }
 }

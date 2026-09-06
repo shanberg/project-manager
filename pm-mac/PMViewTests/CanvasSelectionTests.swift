@@ -162,6 +162,23 @@ final class CanvasSelectionTests: XCTestCase {
                        rect(0, 100, 300, 200), "a left grip doesn't move y")
     }
 
+    /// A drag moves an edge by how far the pointer went, not to where the pointer is. An edge is a
+    /// band several points wide and is almost never taken hold of at its exact coordinate — placing it
+    /// at the pointer makes it jump by the difference on the first mouse-moved event.
+    func testAnEdgeFollowsTheDistanceDraggedNotThePointer() {
+        let frame = rect(100, 100, 200, 200)
+        XCTAssertEqual(CanvasHandle.right.resize(frame, by: (dx: 50, dy: 999)),
+                       rect(100, 100, 250, 200), "a right edge ignores dy entirely")
+        XCTAssertEqual(CanvasHandle.topLeft.resize(frame, by: (dx: -20, dy: -10)),
+                       rect(80, 90, 220, 210))
+    }
+
+    func testADeltaResizeCannotInvertEither() {
+        let squashed = CanvasHandle.left.resize(rect(100, 100, 200, 200), by: (dx: 5000, dy: 0))
+        XCTAssertEqual(squashed.width, 40)
+        XCTAssertEqual(squashed.maxX, 300, "the edge that wasn't grabbed stayed put")
+    }
+
     /// Dragging a grip through the opposite edge stops at a minimum rather than inverting. A negative
     /// width is a card Obsidian draws as nothing — the file would look fine and the board would have a
     /// hole in it.
@@ -171,6 +188,50 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertEqual(squashed.width, 40)
         XCTAssertEqual(squashed.minX, 100)
         XCTAssertGreaterThan(CanvasHandle.top.resize(frame, to: at(200, 9999)).height, 0)
+    }
+
+    // MARK: Resizing several at once
+
+    /// `a` and `b` together occupy 40…400 across and 40…180 down.
+    private var boxOfAAndB: CanvasRect { rect(40, 40, 360, 140) }
+
+    func testSeveralSelectedHaveABoxAndOneDoesNot() {
+        XCTAssertEqual(tester(selection: ["a", "b"]).selectionBox, boxOfAAndB)
+        XCTAssertNil(tester(selection: ["a"]).selectionBox,
+                     "one card is resized by its own edge; the box would be the same rectangle said twice")
+    }
+
+    /// The band that answers for a multiple selection is the one round the box — including where it
+    /// runs through open board that belongs to no card at all.
+    func testTheSelectionsOwnEdgeIsWhatIsGrabbed() {
+        let t = tester(selection: ["a", "b"])
+        XCTAssertEqual(t.hit(at(40, 170)), .handle("a", .left),
+                       "the box's left edge, at a height where neither card reaches")
+        XCTAssertEqual(t.hit(at(400, 180)), .handle("a", .bottomRight))
+        XCTAssertEqual(tester().hit(at(40, 170)), .board, "and it is only there because they're selected")
+    }
+
+    /// The edge *inside* the selection is nobody's handle. Dragging it would move the box's far edge,
+    /// which is not the edge under the pointer — so it isn't offered.
+    func testASelectedCardsInnerEdgeIsNotAHandle() {
+        let t = tester(selection: ["a", "b"])
+        // a's right edge, well inside the box.
+        guard case .handle = t.hit(at(240, 100)) else { return }
+        XCTFail("an edge inside the selection should not offer a resize")
+    }
+
+    /// A card that isn't in the selection keeps its own edge band — it is still a card you can grab,
+    /// and grabbing it selects it alone.
+    func testAnUnselectedCardKeepsItsOwnEdge() {
+        XCTAssertEqual(tester(selection: ["a", "b"]).hit(at(1000, 90)), .handle("far", .left))
+    }
+
+    /// In connect mode the eight grips move out to the box too, rather than eight per card.
+    func testTheGripsMoveOutToTheBox() {
+        let t = tester(mode: .connect, selection: ["a", "b"])
+        XCTAssertEqual(t.hit(CanvasHandle.right.point(in: boxOfAAndB)), .handle("a", .right))
+        XCTAssertEqual(t.hit(at(240, 90)), .node("b"),
+                       "a's own right-middle grip is gone; b is lying over that point")
     }
 
     // MARK: Sweeping and dragging

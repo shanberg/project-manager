@@ -45,14 +45,14 @@ final class CanvasTilingTests: XCTestCase {
     /// The column count follows the area's proportions rather than being ceil(sqrt(n)): six tiles in a
     /// wide window want three across, and the same six in a tall one want two.
     func testTheGridFollowsTheShapeOfTheWindow() {
-        let across = Set(CanvasTiling.grid(count: 6, in: wide).map(\.minX)).count
-        let down = Set(CanvasTiling.grid(count: 6, in: tall).map(\.minX)).count
+        let across = Set(CanvasTiling.grid(sizes: even(6), in: wide).map(\.minX)).count
+        let down = Set(CanvasTiling.grid(sizes: even(6), in: tall).map(\.minX)).count
         XCTAssertEqual(across, 3)
         XCTAssertEqual(down, 2)
     }
 
     func testTilesStayInsideTheAreaAndDoNotOverlap() {
-        let tiles = CanvasTiling.grid(count: 7, in: wide)
+        let tiles = CanvasTiling.grid(sizes: even(7), in: wide)
         for tile in tiles {
             XCTAssertGreaterThanOrEqual(tile.minX, wide.minX - 0.5)
             XCTAssertLessThanOrEqual(tile.maxX, wide.maxX + 0.5)
@@ -71,7 +71,7 @@ final class CanvasTilingTests: XCTestCase {
     /// Asserting the tile was the first version of this test and it was wrong about the feature.
     func testAShortLastRowIsCentred() {
         for count in [5, 7, 10] {
-            let tiles = CanvasTiling.grid(count: count, in: wide)
+            let tiles = CanvasTiling.grid(sizes: even(count), in: wide)
             let lastRowY = tiles.last!.minY
             let lastRow = tiles.filter { abs($0.minY - lastRowY) < 0.5 }
             guard lastRow.count < tiles.filter({ abs($0.minY - tiles[0].minY) < 0.5 }).count else {
@@ -85,7 +85,7 @@ final class CanvasTilingTests: XCTestCase {
     // MARK: Master and stack
 
     func testTheMasterTakesItsShareAndTheStackTakesTheRest() {
-        let tiles = CanvasTiling.masterStack(count: 4, in: wide, fraction: 0.6)
+        let tiles = CanvasTiling.masterStack(sizes: even(4), in: wide, fraction: 0.6)
         XCTAssertEqual(tiles[0].height, wide.height, accuracy: 0.5, "the master is full height")
         XCTAssertEqual(tiles[0].width, (wide.width - CanvasTiling.gap) * 0.6, accuracy: 0.5)
         for tile in tiles.dropFirst() {
@@ -100,7 +100,7 @@ final class CanvasTilingTests: XCTestCase {
     /// divider can be thrown at the window's edge and the arrangement has to survive it.
     func testTheSplitIsClamped() {
         for fraction in [-2.0, 0.0, 1.0, 5.0] {
-            let tiles = CanvasTiling.masterStack(count: 3, in: wide, fraction: fraction)
+            let tiles = CanvasTiling.masterStack(sizes: even(3), in: wide, fraction: fraction)
             for tile in tiles { XCTAssertGreaterThan(tile.width, 1, "fraction \(fraction)") }
         }
     }
@@ -111,11 +111,146 @@ final class CanvasTilingTests: XCTestCase {
     /// has to produce one tile filling the area whichever arrangement is up.
     func testOneCardFillsTheWindow() {
         for arrangement in CanvasTiling.Arrangement.allCases {
-            let tiles = CanvasTiling.frames(arrangement, count: 1, in: wide, masterFraction: 0.62)
+            let tiles = CanvasTiling.frames(arrangement, sizes: even(1), in: wide, masterFraction: 0.62)
             XCTAssertEqual(tiles.count, 1)
             XCTAssertLessThan(tiles[0].width, wide.width, "inset from the edges")
             XCTAssertGreaterThan(tiles[0].width, wide.width - 4 * CanvasTiling.gap)
         }
+    }
+
+    // MARK: What the command is called
+
+    /// The wording the View menu, the contextual menu and the header button all share. Worth pinning
+    /// down because it is the only part of the command a person reads before committing to it, and
+    /// because the version it replaces got the most consequential case wrong.
+    func testAnUntiledBoardOffersToTileWhatIsSelected() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 6, selected: true),
+                       "Fill Window with These 6 Cards")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 1, selected: true),
+                       "Fill Window with This Card")
+    }
+
+    /// The count is the *target* count, not the selection's: selecting one frame that holds nine cards
+    /// says nine. That is the whole reason the number is in the title.
+    func testAFrameIsCountedByWhatIsInside() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 9, selected: true),
+                       "Fill Window with These 9 Cards")
+    }
+
+    /// Nothing selected falls back to the visible region, which is deliberately not counted — the
+    /// number would change under you as you scrolled.
+    func testNothingSelectedNamesTheVisibleCardsWithoutCountingThem() {
+        for targets in [0, 1, 40] {
+            XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0,
+                                                     targets: targets, selected: false),
+                           "Fill Window with Visible Cards")
+        }
+    }
+
+    /// Inside a tiling with some of the tiles picked, ⌘Return drills in — and now says so. It used to
+    /// say "Leave Tiled View" here, which was the menu promising the opposite of what would happen.
+    func testPickingSomeOfTheTilesOffersToDrillIn() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 2, targets: 0, selected: true),
+                       "Fill Window with These 2 Tiles")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 1, targets: 0, selected: true),
+                       "Fill Window with This Tile")
+    }
+
+    /// All of them, or none of them, is not a narrowing — so the command is the way back out, and both
+    /// of those have to say so.
+    func testTakingAllOrNoneOfTheTilesIsTheWayOut() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 6, targets: 0, selected: true),
+                       "Leave Tiled View")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 0, targets: 0, selected: false),
+                       "Leave Tiled View")
+    }
+
+    /// A tiling of one is already as far in as it goes.
+    func testAFullscreenTileCanOnlyBeLeft() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 1, picked: 1, targets: 0, selected: true),
+                       "Leave Tiled View")
+    }
+
+    // MARK: Pinning one and stretching the rest
+
+    /// The case the whole mechanism exists for: one tile holds a width, the others absorb the window.
+    func testAPinnedTileKeepsItsLengthAndTheRestShareWhatIsLeft() {
+        let lengths = CanvasTiling.run([.pinned(300), .even, .even], across: 1000)
+        XCTAssertEqual(lengths[0], 300)
+        XCTAssertEqual(lengths[1], 350)
+        XCTAssertEqual(lengths[2], 350)
+    }
+
+    /// The same run in a window 200pt narrower: every point of that comes off the flexible tiles.
+    func testTheWindowsChangeComesOffTheFlexibleTilesOnly() {
+        let lengths = CanvasTiling.run([.pinned(300), .even, .even], across: 800)
+        XCTAssertEqual(lengths[0], 300, "the pin didn't move")
+        XCTAssertEqual(lengths[1], 250)
+        XCTAssertEqual(lengths[2], 250)
+    }
+
+    /// Only the ratio of the weights means anything, which is what lets a drag write lengths straight
+    /// in as weights without renormalising anything else.
+    func testWeightsAreShares() {
+        XCTAssertEqual(CanvasTiling.run([.flexible(300), .flexible(100)], across: 800), [600, 200])
+        XCTAssertEqual(CanvasTiling.run([.flexible(3), .flexible(1)], across: 800), [600, 200],
+                       "the same run, said with smaller numbers")
+    }
+
+    /// A pin is a request, and a request that would push tiles out of the window has to lose. The
+    /// flexible tiles keep the minimum and the pin gives up the difference.
+    func testAPinYieldsRatherThanOverflowingTheWindow() {
+        let lengths = CanvasTiling.run([.pinned(600), .even, .even], across: 500)
+        XCTAssertEqual(lengths.reduce(0, +), 500, accuracy: 0.001, "nothing hangs off the edge")
+        XCTAssertLessThan(lengths[0], 600, "the pin was overruled")
+        XCTAssertEqual(lengths[1], CanvasTiling.minimumTile)
+        XCTAssertEqual(lengths[2], CanvasTiling.minimumTile)
+    }
+
+    /// Squeezed past the point where even the minimums fit, everything shares — rather than the first
+    /// tiles taking all of it and the last ones getting nothing.
+    func testAWindowTooSmallForAnyoneSharesEvenly() {
+        let lengths = CanvasTiling.run([.pinned(600), .even, .even], across: 90)
+        XCTAssertEqual(lengths.reduce(0, +), 90, accuracy: 0.001)
+        for length in lengths { XCTAssertEqual(length, 30, accuracy: 0.001) }
+    }
+
+    /// Two or three cards side by side is a grid of one row — which is a run, and gets the sizes. It is
+    /// the commonest tiling there is and the one where pinning is most obviously wanted.
+    func testAGridOfOneRowIsARun() {
+        let tiles = CanvasTiling.grid(sizes: [.pinned(300), .even], in: wide)
+        XCTAssertEqual(tiles[0].width, 300)
+        XCTAssertEqual(tiles[0].maxX + CanvasTiling.gap, tiles[1].minX, accuracy: 0.001)
+        XCTAssertEqual(tiles[1].maxX, wide.maxX, accuracy: 0.001)
+    }
+
+    /// A grid of rows *and* columns has no run to pin along: a width there is a column's, shared with
+    /// tiles nobody selected. So the sizes are ignored rather than half-honoured.
+    func testARealGridIgnoresSizes() {
+        let even = CanvasTiling.grid(sizes: even(6), in: wide)
+        let asked = CanvasTiling.grid(sizes: [.pinned(200), .even, .even, .even, .even, .even], in: wide)
+        XCTAssertEqual(asked.map(\.width), even.map(\.width))
+    }
+
+    /// The stack is a vertical run, so pinning a tile there holds its height.
+    func testPinningInTheStackHoldsAHeight() {
+        let tiles = CanvasTiling.masterStack(sizes: [.even, .pinned(120), .even], in: wide, fraction: 0.6)
+        XCTAssertEqual(tiles[1].height, 120)
+        XCTAssertEqual(tiles[2].maxY, wide.maxY, accuracy: 0.001)
+    }
+
+    /// A pinned master is a width in points rather than a fraction of the window — the fraction is what
+    /// an *unpinned* master falls back to, which is what the divider has always meant.
+    func testAPinnedMasterIgnoresTheFraction() {
+        for fraction in [0.3, 0.62, 0.85] {
+            let tiles = CanvasTiling.masterStack(sizes: [.pinned(420), .even, .even],
+                                                 in: wide, fraction: fraction)
+            XCTAssertEqual(tiles[0].width, 420)
+        }
+    }
+
+    private func even(_ count: Int) -> [CanvasTiling.Size] {
+        Array(repeating: .even, count: count)
     }
 
     private func pairs(_ tiles: [CanvasRect]) -> [(CanvasRect, CanvasRect)] {

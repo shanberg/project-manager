@@ -34,15 +34,21 @@ extension CanvasBoardView {
 
         switch hitTester.hit(where_) {
         case .handle(let id, let handle):
-            guard let node = document.node(id: id) else { return }
+            guard document.node(id: id) != nil else { return }
             // Grabbing a card's edge picks it, the way clicking a window's edge brings it forward. In
             // connect mode this is already true — the band is only offered on the selection — but in view
             // mode the edge belongs to whatever card is under it, and a drag there that left the
             // selection alone would be the one gesture on the board that acts on something it hasn't
             // said it is acting on.
+            //
+            // Grabbing the edge of a card that is *already* in a selection of several resizes the whole
+            // selection, which is the other half of the same rule: the gesture acts on what the board
+            // says is selected, and quietly dropping five of six cards because you took hold of the
+            // sixth would be the board changing the subject.
             if !selection.contains(id) { selection = [id] }
-            store.beginInteraction("Resize Card")
-            gesture = .resize(id, handle, original: node.frame)
+            guard let resizing = framesOfResizeSet(), let box = resizing.box else { return }
+            store.beginInteraction(resizing.frames.count > 1 ? "Resize Cards" : "Resize Card")
+            gesture = .resize(handle, from: where_, originals: resizing.frames, box: box)
 
         case .anchor(let id, let side):
             gesture = .connect(from: id, side: side, to: where_)
@@ -71,12 +77,22 @@ extension CanvasBoardView {
     /// A press inside a tiled view.
     ///
     /// There is no free space to move a card into and nothing to sweep or wire together, so the whole
-    /// vocabulary is: pick a tile, drag it onto another to swap them, or drag the divider between the
-    /// master and the stack. A press on the background leaves the tiling, which is the tiled equivalent
-    /// of clicking the desktop.
+    /// vocabulary is: pick a tile, drag its handlebar to move it along the order, drag it onto another
+    /// to swap the two, or drag a boundary to change how the room is divided. A press on the background
+    /// leaves the tiling, which is the tiled equivalent of clicking the desktop.
+    ///
+    /// The handlebar is asked first because it is drawn *inside* a tile, so a hit test on the card
+    /// would answer for it; the boundary is asked next because it lies in the gap, where the card's own
+    /// band would otherwise catch it.
     private func tiledMouseDown(at where_: CanvasPoint, extending: Bool) {
-        if let divider = tiledDivider, abs(where_.x - divider) <= 9 / liveScale {
-            gesture = .resizeSplit
+        if let id = tileHandle(at: where_), let frame = tiling?.layout.frames[id] {
+            selection = [id]
+            gesture = .reorderTile(id, grab: CanvasPoint(x: where_.x - frame.minX,
+                                                         y: where_.y - frame.minY))
+            return
+        }
+        if let divider = tileDivider(at: where_) {
+            gesture = .resizeTiles(divider, from: where_, lengths: lengths(of: divider))
             return
         }
         switch hitTester.hit(where_) {
@@ -88,12 +104,22 @@ extension CanvasBoardView {
         }
     }
 
-    /// Where the master tile ends, in canvas coordinates — the divider you drag. Nil in a grid, which
-    /// has no split to resize, and nil for a single tile.
-    var tiledDivider: Double? {
-        guard let tiling, tiling.arrangement == .masterStack, tiling.ids.count > 1,
-              let master = tiling.layout.frames[tiling.ids[0]] else { return nil }
-        return master.maxX + CanvasTiling.gap / 2
+    /// How long each tile in a boundary's run is right now, along the axis that run flows in.
+    ///
+    /// Measured off the laid-out frames rather than recomputed from the sizes, so a drag starts from
+    /// what is on screen — including a run whose pins have been squeezed by a window too small to
+    /// honour them. Dragging from the numbers that were *asked for* rather than the ones you can see
+    /// would make the tile jump on the first pixel of the gesture.
+    private func lengths(of divider: CanvasTileDivider) -> [Double] {
+        guard let tiling else { return [] }
+        if divider.isMasterSplit {
+            guard let master = tiling.layout.frames[tiling.ids[0]] else { return [] }
+            return [master.width, tiling.area.inset(by: -CanvasTiling.edgeGap).width
+                        - CanvasTiling.gap - master.width]
+        }
+        return divider.run.compactMap { index in
+            tiling.layout.frames[tiling.ids[index]].map { divider.isVertical ? $0.width : $0.height }
+        }
     }
 
     // MARK: Dragging
@@ -114,10 +140,26 @@ extension CanvasBoardView {
                 overlay.needsDisplay = true
             }
 
-        case .resizeSplit:
-            guard let tiling else { break }
-            let fraction = (now.x - tiling.area.minX) / max(1, tiling.area.width)
-            setMasterFraction(fraction)
+        case .resizeTiles(let divider, let from, let lengths):
+            dragTileDivider(divider, from: from, to: now, lengths: lengths)
+
+        case .reorderTile(let id, let grab):
+            // The card comes with you. Held off its slot rather than animating into each new one: what
+            // is being dragged is the card, and a card that stayed in the grid while the pointer moved
+            // would be a gesture you have to take on trust.
+            if let frame = tiling?.layout.frames[id] {
+                reordering = (id, CanvasRect(x: now.x - grab.x, y: now.y - grab.y,
+                                             width: frame.width, height: frame.height))
+                layoutNodeViews()
+            }
+            // The tile under the pointer decides where this one goes. Applied as you cross rather than
+            // on the drop, so the arrangement rearranges itself under your hand and the order you are
+            // making is the one you can see. Stable by construction: once the move has happened the
+            // dragged tile *is* the tile under the pointer, so nothing more fires until you cross into
+            // another one.
+            guard case .node(let over) = hitTester.hit(now), over != id,
+                  let index = tiling?.ids.firstIndex(of: over) else { break }
+            moveInTiling(id, to: index)
 
         case .move(let from, let frames):
             let wanted = (dx: now.x - from.x, dy: now.y - from.y)
@@ -129,7 +171,8 @@ extension CanvasBoardView {
                                            reach: snapReach(event),
                                            snapsToGrid: snapsToGrid(event))
             let dx = snap.frame.minX - box.minX, dy = snap.frame.minY - box.minY
-            overlay.guides = snap.guides
+            guideView.guides = snap.guides
+            showGrid(snapsToGrid(event))
             store.change("Move Card") { doc in
                 for index in doc.nodes.indices {
                     guard let original = frames[doc.nodes[index].id] else { continue }
@@ -138,15 +181,24 @@ extension CanvasBoardView {
                 }
             }
 
-        case .resize(let id, let handle, let original):
-            let snap = CanvasSnapping.resize(handle.resize(original, to: now), handle: handle,
-                                             against: snapCandidates(excluding: [id]),
+        case .resize(let handle, let from, let originals, let box):
+            // The box is snapped, and then the cards are fitted into whatever box that produced. Doing
+            // it the other way round — snapping each card and taking the box of the results — would
+            // give a selection of six six chances to catch on something, and a box that jumped between
+            // them as you dragged.
+            let wanted = handle.resize(box, by: (dx: now.x - from.x, dy: now.y - from.y))
+            let snap = CanvasSnapping.resize(wanted, handle: handle,
+                                             against: snapCandidates(excluding: Set(originals.keys)),
                                              reach: snapReach(event),
                                              snapsToGrid: snapsToGrid(event))
-            overlay.guides = snap.guides
-            store.change("Resize Card") { doc in
-                guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
-                doc.nodes[index].frame = snap.frame
+            guideView.guides = snap.guides
+            showGrid(snapsToGrid(event))
+            let settled = CanvasGroupResize.frames(originals, from: box, to: snap.frame)
+            store.change(originals.count > 1 ? "Resize Cards" : "Resize Card") { doc in
+                for index in doc.nodes.indices {
+                    guard let frame = settled[doc.nodes[index].id] else { continue }
+                    doc.nodes[index].frame = frame
+                }
             }
 
         case .marquee(let from, let additive, let base):
@@ -164,7 +216,14 @@ extension CanvasBoardView {
         case nil:
             break
         }
-        autoscroll(with: event)
+        // **Not while tiled.** Autoscroll exists so that dragging a card toward the edge of the window
+        // takes you further across the board — which is the right answer when the window is a porthole
+        // onto a plane, and the wrong one when it is the thing being filled. A tiled view has no
+        // elsewhere: the tiles were laid out for this window at this scroll position, and scrolling
+        // during a drag slides the whole arrangement out from under the pointer while leaving it
+        // exactly where it was in canvas coordinates. Two systems, and only one of them is a scroll
+        // area — see `CanvasScrollView.scrollWheel`, which declines the same thing from the other side.
+        if !isTiled { autoscroll(with: event) }
     }
 
     // MARK: Releasing
@@ -173,8 +232,9 @@ extension CanvasBoardView {
         defer {
             gesture = nil
             overlay.marquee = nil
-            overlay.guides = []
+            guideView.guides = []
             overlay.needsDisplay = true
+            showGrid(false)
         }
         switch gesture {
         case .swap(let from, let over):
@@ -192,8 +252,13 @@ extension CanvasBoardView {
             } else if let view = nodeViews[from], view.engagesOnClick, !view.isEngaged {
                 view.beginEditing()
             }
-        case .resizeSplit:
-            rememberMasterFraction()
+        case .resizeTiles(let divider, _, _):
+            if divider.isMasterSplit { rememberMasterFraction() }
+
+        case .reorderTile:
+            // Let go: the card springs back into the slot it has already been given.
+            reordering = nil
+            settleIntoLayout()
         case .move(let from, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)
@@ -282,6 +347,115 @@ extension CanvasBoardView {
         return frames
     }
 
+    /// What a resize acts on: the selection itself, and the box around it.
+    ///
+    /// The selection rather than `canvasDragSet` — a frame *carries* what it holds when it is dragged,
+    /// because that is what makes it a group, but resizing a frame is changing how much board it
+    /// claims, and dragging its corner has never been a request to scale the cards inside it. Obsidian
+    /// agrees, and so does every other tool with a container that isn't a layout.
+    private func framesOfResizeSet() -> (frames: [String: CanvasRect], box: CanvasRect?)? {
+        var frames: [String: CanvasRect] = [:]
+        for id in selection { frames[id] = document.node(id: id)?.frame }
+        guard !frames.isEmpty else { return nil }
+        let box = frames.values.dropFirst().reduce(frames.values.first) { $0?.union($1) }
+        return (frames, box)
+    }
+
+    // MARK: Panning
+
+    /// Middle-drag pans the board.
+    ///
+    /// The gesture the board was missing for anyone on a mouse. A trackpad pans with two fingers, and
+    /// that is what the scroll view already does; a wheel pans one axis at a time and needs ⇧ for the
+    /// other, which is not a way to cross a board. Middle-drag is what every other canvas — Figma,
+    /// Blender, a browser's PDF view — offers instead, and it costs no key and no mode.
+    ///
+    /// Nothing to pan in a tiled view: the tiles were laid out to fill the window, which is the same
+    /// reason scrolling is swallowed there. See `CanvasScrollView.scrollWheel`.
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2, !isTiled else { return super.otherMouseDown(with: event) }
+        window?.makeFirstResponder(self)
+        panGrab = convert(event.locationInWindow, from: nil)
+        NSCursor.closedHand.push()
+    }
+
+    /// Keep the point you grabbed under the pointer.
+    ///
+    /// Stated as "put the grabbed point back" rather than "scroll by however far the mouse moved". The
+    /// two agree — `convert` has already divided by the magnification, so a pan moves the board at the
+    /// pointer's speed at every zoom — but only this one corrects itself. Each event is worked out from
+    /// where the board actually is, so a scroll the clip view clamped at the edge of the content, or a
+    /// content origin that moved underneath the gesture, leaves no accumulated drift: the board is
+    /// stuck to the pointer rather than following it.
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let grab = panGrab else { return super.otherMouseDragged(with: event) }
+        let now = convert(event.locationInWindow, from: nil)
+        let origin = visibleRect.origin
+        scroll(NSPoint(x: origin.x + grab.x - now.x, y: origin.y + grab.y - now.y))
+        // The scrollers don't follow a `scroll(_:)` on their own, and the board's own reaction to the
+        // new region — building the cards that came into view, and deciding which pages are worth
+        // running — rides on the bounds change this posts.
+        scrollView.map { $0.reflectScrolledClipView($0.contentView) }
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard panGrab != nil else { return super.otherMouseUp(with: event) }
+        panGrab = nil
+        NSCursor.pop()
+        refreshCursor()
+    }
+
+    // MARK: Scrolling a card
+
+    /// A wheel over a card scrolls that card, whether or not you have stepped into it.
+    ///
+    /// The card cannot take this event itself. An unengaged card returns nil from `hitTest`, so AppKit
+    /// never offers it anything and the wheel arrives *here*, at the board, on its way up to the scroll
+    /// view — which is the one place that knows both what is under the pointer and what that card has
+    /// to scroll. So the board hands it down.
+    ///
+    /// Only what the pointer is on. Nothing chains: a wheel over a card that has nothing more to show
+    /// stops there rather than starting to pan the board underneath it, because the card's own scroll
+    /// view is what runs out and rubber-bands. A card with nothing to scroll at all passes the event
+    /// back up and the board moves, which is the same board it has always been.
+    override func scrollWheel(with event: NSEvent) {
+        guard !forwardingScroll else { return super.scrollWheel(with: event) }
+        // A new gesture picks a card; the rest of that gesture — its `.changed` events and the
+        // momentum after them — stays with the one it picked. A wheel on a mouse has no phases at all
+        // and so is a fresh aim every tick, which is right: there is no gesture to stay inside of.
+        if event.phase.contains(.began) || (event.phase.isEmpty && event.momentumPhase.isEmpty) {
+            scrollLatch = scrollTarget(for: event)
+        }
+        guard let target = scrollLatch else { return super.scrollWheel(with: event) }
+        forwardingScroll = true
+        target.scrollWheel(with: event)
+        forwardingScroll = false
+    }
+
+    /// What a wheel at this point should scroll, or nil for the board itself.
+    private func scrollTarget(for event: NSEvent) -> NSView? {
+        // ⌘ is the board's: it zooms, here as in every other canvas. A card that took it would zoom
+        // nothing and scroll instead, which is the wrong answer given twice.
+        guard !event.modifierFlags.contains(.command) else { return nil }
+        return card(under: canvasPoint(convert(event.locationInWindow, from: nil)))?.contentScroller
+    }
+
+    /// The card drawn under a point, topmost first.
+    ///
+    /// In the document's order rather than the subviews' — cards are added to the board as they scroll
+    /// into view, so the subview order is the order you happened to meet them in and says nothing about
+    /// which one is on top. `CanvasHitTester` reads the board the same way, and this is deliberately
+    /// only the card's *face*: a grip or an edge band sits on top of a card for a click, but a wheel
+    /// has no use for either and a ring of dead points inside a selected card would be inexplicable.
+    func card(under point: CanvasPoint) -> CanvasNodeView? {
+        for node in document.nodes.reversed()
+        where !node.isGroup && layout.shows(node.id)
+            && layout.frame(of: node).contains(x: point.x, y: point.y) {
+            return nodeViews[node.id]
+        }
+        return nil
+    }
+
     // MARK: Hovering
 
     override func updateTrackingAreas() {
@@ -297,16 +471,23 @@ extension CanvasBoardView {
 
     override func mouseMoved(with event: NSEvent) {
         let where_ = point(event)
-        let under: String?
+        var under: String?
         var line: String?
         switch hitTester.hit(where_) {
         case .node(let id), .handle(let id, _), .anchor(let id, _): under = id
         case .edge(let id): under = nil; line = id
         case .board: under = nil
         }
+        // A tile's grip is outside the tile, so reaching for it means leaving the card — and a grip
+        // that vanished on the way to being grabbed would be a control you can see and cannot use.
+        // The pointer being on the bar counts as being on the tile it belongs to.
+        if isTiled, let id = tileHandle(at: where_) { under = id }
         if under != hovered {
             hovered = under
+            // A tiled view repaints too: the handlebar appears on the tile under the pointer, and it
+            // is drawn a layer below the cards.
             if mode.showsConnectionAnchors { overlay.needsDisplay = true }
+            if isTiled { refreshTileHandles() }
         }
         // A line is a thin thing to aim at, so it says when the pointer has found it. Only the two
         // curves involved are redrawn rather than the whole board — this runs on every mouse-moved
@@ -351,10 +532,13 @@ extension CanvasBoardView {
         guard !pointerIsInsideACard else { return }
         guard let position = window?.mouseLocationOutsideOfEventStream else { return }
         let where_ = canvasPoint(convert(position, from: nil))
-        if let divider = tiledDivider, abs(where_.x - divider) <= 9 / liveScale {
-            return NSCursor.resizeLeftRight.set()
+        if isTiled {
+            if tileHandle(at: where_) != nil { return NSCursor.openHand.set() }
+            if let divider = tileDivider(at: where_) {
+                return (divider.isVertical ? NSCursor.resizeLeftRight : .resizeUpDown).set()
+            }
+            return NSCursor.arrow.set()
         }
-        if isTiled { return NSCursor.arrow.set() }
         switch hitTester.hit(where_) {
         case .handle(_, let handle): cursor(for: handle).set()
         case .anchor: NSCursor.crosshair.set()
@@ -379,6 +563,16 @@ extension CanvasBoardView {
 
     // MARK: Keys
 
+    /// Escape backs out one step at a time, the way it does everywhere: out of a tiled view first, and
+    /// only then out of a selection.
+    ///
+    /// Here rather than only in `keyDown` because Escape reaches the board two ways. A page card hands
+    /// the key to WebKit, which sends it back as this command rather than as a key event, and a card
+    /// that isn't engaged passes it up to us.
+    override func cancelOperation(_ sender: Any?) {
+        if isTiled { untile(animated: true) } else { selection = [] }
+    }
+
     override func keyDown(with event: NSEvent) {
         switch event.specialKey {
         case .delete, .deleteForward:
@@ -392,9 +586,7 @@ extension CanvasBoardView {
         case .downArrow: arrow(.down, event)
         default:
             if event.charactersIgnoringModifiers == "\u{1b}" {
-                // Escape backs out one step at a time, the way it does everywhere: out of a tiled view
-                // first, and only then out of a selection.
-                if isTiled { untile(animated: true) } else { selection = [] }
+                cancelOperation(nil)
             } else if event.charactersIgnoringModifiers == "\r", let only = selection.first {
                 beginEditing(only)
             } else {
@@ -534,15 +726,9 @@ extension CanvasBoardView {
         guard selection != previous else { return }
         for id in previous.union(selection) { nodeViews[id]?.selectionChanged() }
         overlay.needsDisplay = true
+        // A selected tile shows its handlebar, and that is drawn under the cards.
+        if isTiled { refreshTileHandles() }
         onSelectionChanged?(selection)
-    }
-
-    /// The rectangle the floating bar should sit above: everything selected, in view coordinates.
-    var selectionBounds: NSRect? {
-        let frames = selection.compactMap { document.node(id: $0)?.frame }
-        guard var box = frames.first else { return nil }
-        for frame in frames.dropFirst() { box = box.union(frame) }
-        return viewRect(box)
     }
 
     func select(_ ids: Set<String>) { selection = ids }

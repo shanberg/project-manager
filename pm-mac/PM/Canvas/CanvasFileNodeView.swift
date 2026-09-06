@@ -111,6 +111,16 @@ final class CanvasFileNodeView: CanvasNodeView {
         projectFolder(ofNotesPath: stored.path).map { ($0 as NSString).lastPathComponent }
     }
 
+    /// Prose scrolls; a picture and a PDF preview do not.
+    ///
+    /// The PDF is deliberate rather than an omission — a PDF card is one page scaled to fit, with no
+    /// scrolling by design (see `preview`), so there is nothing under the pointer to travel through.
+    override var scrollsItsContent: Bool { isProse(stored.path) }
+
+    private func isProse(_ path: String) -> Bool {
+        ["md", "markdown", "txt"].contains((path as NSString).pathExtension.lowercased())
+    }
+
     private func isPicture(_ path: String) -> Bool {
         ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"]
             .contains((path as NSString).pathExtension.lowercased())
@@ -170,8 +180,7 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .padding(.horizontal, 11)
                         .padding(.vertical, 9)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollDisabled(true))
+                })
 
         default:
             let label = NSTextField(labelWithString: url.lastPathComponent)

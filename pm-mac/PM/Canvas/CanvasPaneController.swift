@@ -26,7 +26,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// commands in the options menu — a project window adds the switch back to its task list.
     let header = CanvasHeaderModel()
     private var pill: NSHostingView<CanvasTitlePill>!
-    private var capsule: NSHostingView<CanvasControlCapsule>!
+    private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
     private var pillLeading: NSLayoutConstraint!
 
     /// How far the header's leading edge starts in from the pane's own edge.
@@ -48,7 +48,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
+            header.arrangement = scroll.board.tiling?.arrangement
+            refreshTileCommand()
+            rememberViewState()
         }
+        // The header's tiling button says what it is about to do — "Fill Window with These 6 Cards" —
+        // so it has to hear about the selection. Nothing was listening to this before; the board fired
+        // it into an unset closure.
+        scroll.board.onSelectionChanged = { [weak self] _ in self?.refreshTileCommand() }
         // The pane's own width, which is what the capsule has to fit inside — not the window's, since a
         // project window's sidebar takes a bite out of it.
         container.postsFrameChangedNotifications = true
@@ -60,6 +67,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             // The mode is flipped from the View menu and from the header's options, so the header
             // follows the board rather than being the only thing that knows.
             header.mode = scroll.board.mode
+            rememberViewState()
         }
         store.addWatcher(self,
                          changed: { [weak self] in self?.documentChanged() },
@@ -119,11 +127,55 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard let self else { return }
             scroll.zoomToFit()
             showZoom(scroll.magnification)
+            restoreViewState()
             view.window?.makeFirstResponder(scroll.board)
         }
     }
 
     private var hasFitted = false
+
+    // MARK: How you were looking at this board
+
+    /// What is worth remembering about the way this board is being looked at. See `CanvasViewState`.
+    private var viewState: CanvasViewState {
+        CanvasViewState(mode: scroll.board.mode,
+                        tiling: scroll.board.tiling.map(scroll.board.memory(of:)),
+                        // Kept whether or not one is up: an arrangement you left is one you built.
+                        lastTiling: scroll.board.tilingMemory)
+    }
+
+    /// Put back what was up last time this board was open.
+    ///
+    /// After the fit rather than before it, and that is not just an ordering detail: a tiling is laid
+    /// out in the region the window can show, so tiling a board whose scroller has not been sized yet
+    /// lays the tiles out for a window of no width. The fit is already deferred for the same reason.
+    ///
+    /// Nothing here consults the board's *contents*, so a document that has changed since — under
+    /// Obsidian, or under another window on the same file — restores what still exists and drops the
+    /// rest. See `CanvasBoardView.restoreTiling`.
+    private func restoreViewState() {
+        guard !hasRestoredViewState else { return }
+        hasRestoredViewState = true
+        let remembered = CanvasViewMemory.of(store.url)
+        scroll.board.mode = remembered.mode
+        // The arrangement comes back even when the board was left untiled, so the next ⌘Return on the
+        // same cards picks up where you left off rather than starting over.
+        scroll.board.lastTiling = remembered.lastTiling
+        if let tiling = remembered.tiling { scroll.board.restoreTiling(tiling) }
+    }
+
+    /// Written on every change rather than on the way out, because there is no reliable way out: a
+    /// window closing, the app quitting, a project window switching back to its task list and a crash
+    /// are four different paths and only three of them run code.
+    ///
+    /// Silent until the restore has happened, so the empty state a board starts in cannot overwrite
+    /// the state being restored into it.
+    private func rememberViewState() {
+        guard hasRestoredViewState else { return }
+        CanvasViewMemory.remember(viewState, for: store.url)
+    }
+
+    private var hasRestoredViewState = false
 
     /// Take the keyboard, for an owner that has just put this pane on screen.
     func focusBoard() { view.window?.makeFirstResponder(scroll.board) }
@@ -196,13 +248,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// The board, edge to edge, with the window's chrome floating over it.
     ///
     /// Nothing in this window is a bar. The board fills the content view — under the titlebar, out to
-    /// every edge — and the pill, the capsule and the notice banner are laid over it. The pill and the
-    /// capsule are **separate hosting views sized to their own contents** rather than one strip across
-    /// the top: a strip would hit-test its whole width and swallow every click in the band where the
-    /// cards you are reading actually are.
+    /// every edge — and the pill, the trailing chrome and the notice banner are laid over it. The pill
+    /// and the chrome are **separate hosting views sized to their own contents** rather than one strip
+    /// across the top: a strip would hit-test its whole width and swallow every click in the band where
+    /// the cards you are reading actually are.
+    ///
+    /// The trailing view is one hosting view holding both capsules — the board's controls and, when
+    /// there is one, the live page's. That pairing is `CanvasHeaderTrailingChrome`'s business rather
+    /// than this method's, so the page capsule appearing cannot shift the control capsule off the
+    /// window's edge.
     private func buildContent() {
         pill = NSHostingView(rootView: CanvasTitlePill(model: header))
-        capsule = NSHostingView(rootView: CanvasControlCapsule(model: header))
+        capsule = NSHostingView(rootView: CanvasHeaderTrailingChrome(model: header))
         // The hosting view is the size SwiftUI says it is, so each view's frame is the pill or the
         // capsule and not a rectangle of window around it. Set one at a time because the two are
         // different generic types and an array of them is an array of `NSView`.
@@ -311,11 +368,22 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageBack = { [weak self] in self?.engagedCard?.goBack() }
         header.pageForward = { [weak self] in self?.engagedCard?.goForward() }
         header.pageReload = { [weak self] in self?.engagedCard?.reload() }
+        header.pageStop = { [weak self] in self?.engagedCard?.stopLoading() }
+        header.pageGo = { [weak self] address in self?.engagedCard?.go(to: address) }
         header.pageHome = { [weak self] in self?.engagedCard?.goHome() }
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
         header.leaveTiling = { [weak self] in self?.scroll.board.untile(animated: true) }
+        header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
+        header.setArrangement = { [weak self] arrangement in
+            guard let self else { return }
+            // The same "choosing an arrangement is a request to tile" rule the View menu follows —
+            // otherwise these two items are settings for a state you have to already be in to reach
+            // them. See `setTileArrangement`.
+            if scroll.board.isTiled { scroll.board.setArrangement(arrangement) }
+            else { scroll.board.tile(scroll.board.tileTargets, arrangement: arrangement) }
+        }
         header.findCommitted = { [weak self] in
             guard let self else { return }
             view.window?.makeFirstResponder(scroll.board)
@@ -324,7 +392,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     // MARK: Driving the page inside a card
 
-    /// Back, forward, reload, home — and the address the page is actually on.
+    /// Back, forward, reload — and the address the page is actually on, which you can type into.
     ///
     /// In the window's chrome rather than on the card, and that is now the *only* place they could be:
     /// a card has no chrome to put them in. It was the right answer before that was true. On the card
@@ -345,10 +413,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         }
         header.page = CanvasHeaderModel.Page(
             host: card.liveHost,
+            liveAddress: card.liveURL?.absoluteString ?? card.address,
             savedAddress: card.address,
             wandered: card.hasWandered,
             canGoBack: card.canGoBack,
             canGoForward: card.canGoForward,
+            isLoading: card.isLoading,
             age: card.loadedAt.map { canvasFreshnessLabel(for: $0) })
     }
 
@@ -426,6 +496,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.lastEditedProject = nil
         scroll.board.documentChanged()
         updateNotice()
+        // A frame tiles what is inside it, so what the tiling button promises can change without the
+        // selection changing at all.
+        refreshTileCommand()
+    }
+
+    /// Keep the header's tiling button saying what it would actually do.
+    ///
+    /// Driven from the three things that change the answer — the selection, the document, and whether
+    /// a tiling is up. Deliberately not from scrolling: the wording only counts a *selection*, exactly
+    /// so this doesn't have to run at the rate a trackpad reports. See `CanvasTiling.commandTitle`.
+    private func refreshTileCommand() {
+        header.tileTitle = scroll.board.tileCommandTitle
     }
 
     // MARK: Undo, on a board that can hold two kinds of document

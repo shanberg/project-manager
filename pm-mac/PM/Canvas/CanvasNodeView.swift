@@ -15,6 +15,10 @@ import PmLib
 /// you step into it: a text card being edited needs the caret, and a web card you have stepped into
 /// needs its own clicks and its own scrolling. Clicking outside, or Escape, steps back out.
 ///
+/// **The wheel is the exception.** A card you haven't stepped into still scrolls when the pointer is
+/// over it, because reading is not stepping in — the board hands the event down instead, since a card
+/// that refuses to hit-test can never be sent one by AppKit. See `scrollsItsContent`.
+///
 /// An engaged card doesn't take *every* click, though. The band along its edge and its `boardHandle`
 /// stay the board's, so a card you have stepped into is still a card — one you can move and resize
 /// without stepping out of it first.
@@ -32,6 +36,19 @@ class CanvasNodeView: NSView {
 
     /// True once you have stepped into this card, which is when it starts taking its own clicks.
     private(set) var isEngaged = false
+
+    /// Whether ⌘+ and ⌘− mean this card's content while you are stepped into it, rather than the board.
+    ///
+    /// Off by default, so a kind of card that has no answer to "how large is your text" leaves the two
+    /// keys doing what they have always done. See `CanvasCardZoom`.
+    var zoomsItsContent: Bool { false }
+
+    /// How large this card's content is set, from the document.
+    var contentZoom: Double { CanvasCardZoom.of(node) }
+
+    /// The zoom changed — re-render at it. Called for a change from anywhere, including an undo and
+    /// another window on the same file.
+    func contentZoomChanged() {}
 
     init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         self.node = node
@@ -102,6 +119,36 @@ class CanvasNodeView: NSView {
     /// it is a *live* thing, and a click on a live thing should reach it.
     var engagesOnClick: Bool { false }
 
+    /// Whether the pointer resting over this card scrolls its content, without stepping in first.
+    ///
+    /// Off by default, and on for the cards whose content can be longer than the card is tall. It is
+    /// the same rule the Mac applies to windows — the wheel goes to what is under the pointer, not to
+    /// what is focused — and on a board it matters more, because a board is a *set* of things you are
+    /// reading side by side and stepping into one to read it is a mode you then have to leave.
+    var scrollsItsContent: Bool { false }
+
+    /// The view a wheel over this card should be handed to, or nil when the card has nothing to scroll
+    /// and the wheel is the board's. See `CanvasBoardView.scrollWheel`.
+    ///
+    /// Never while the board is zoomed out past reading: a simplified card is showing its name rather
+    /// than its content, and a name has no length to travel through.
+    var contentScroller: NSView? {
+        guard scrollsItsContent, !isSimplified else { return nil }
+        return CanvasNodeView.scroller(in: self)
+    }
+
+    /// The first scroll view inside a card. For the cards built out of SwiftUI this is the real
+    /// `NSScrollView` that backs their `ScrollView` — searched for rather than held, because the whole
+    /// of a card's content is rebuilt whenever what it is showing changes, and a reference kept across
+    /// that is a reference to the view that used to be there.
+    static func scroller(in view: NSView) -> NSScrollView? {
+        if let scroller = view as? NSScrollView { return scroller }
+        for sub in view.subviews {
+            if let found = scroller(in: sub) { return found }
+        }
+        return nil
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard isEngaged else { return nil }
         let local = convert(point, from: superview)
@@ -114,8 +161,17 @@ class CanvasNodeView: NSView {
     /// The last resort rather than the mechanism: a text card's editor takes Escape itself, and this is
     /// what catches the case where the thing you stepped into doesn't — a web page, which will happily
     /// ignore the key and let it walk up the responder chain to here.
+    ///
+    /// A card that isn't engaged passes the key on rather than calling `super`: `cancelOperation:` is
+    /// only *declared* on the standard key-binding protocol, and `NSView` doesn't implement it, so a
+    /// `super` call is an unrecognized selector that takes the app down. It reaches this branch for
+    /// real — a page keeps first responder for the moment between the board disengaging the card and
+    /// WebKit handing the key back.
     override func cancelOperation(_ sender: Any?) {
-        guard isEngaged else { return super.cancelOperation(sender) }
+        guard isEngaged else {
+            nextResponder?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+            return
+        }
         engage(false)
         window?.makeFirstResponder(board)
     }
@@ -129,8 +185,13 @@ class CanvasNodeView: NSView {
     /// different kinds of object rather than one kind at several sizes. Scaling it off the card's
     /// shorter side fixes that; clamping it at both ends is what keeps a small card from becoming a
     /// lozenge and a large one from becoming a stadium.
-    var cornerRadius: Double {
-        min(14, max(8, min(node.frame.width, node.frame.height) * 0.025))
+    var cornerRadius: Double { CanvasNodeView.cornerRadius(for: node.frame) }
+
+    /// The same rule, asked of a frame rather than of a card — the overlay draws ghosts around cards
+    /// it has only the geometry of, and a ghost traced at a different radius than the card under it is
+    /// visibly not that card's outline.
+    static func cornerRadius(for frame: CanvasRect) -> Double {
+        min(14, max(8, min(frame.width, frame.height) * 0.025))
     }
 
     override func draw(_ dirty: NSRect) {
@@ -176,9 +237,13 @@ class CanvasNodeView: NSView {
         let wasSimplified = isSimplified
         self.scale = scale
         let changed = node.content != self.node.content
+        let rezoomed = CanvasCardZoom.of(node) != contentZoom
         self.node = node
         if changed {
+            // A rebuild sets the zoom on the way through, so there is nothing further to do for it.
             contentChanged()
+        } else if rezoomed {
+            contentZoomChanged()
         } else if wasSimplified != isSimplified {
             simplificationChanged()
         }
@@ -398,6 +463,17 @@ final class CanvasTextNodeView: CanvasNodeView {
         showRendered()
     }
 
+    override var scrollsItsContent: Bool { true }
+
+    /// A card of prose is set at one size whatever size the card is, so "make this bigger" has nowhere
+    /// else to go — resizing the card rewraps the same 13pt text into a larger rectangle. See
+    /// `CanvasCardZoom`.
+    override var zoomsItsContent: Bool { true }
+
+    /// Rebuilt rather than adjusted: the face is handed to SwiftUI when the view is made, and the whole
+    /// card is one hosting view whose only input is the text and the font.
+    override func contentZoomChanged() { contentChanged() }
+
     /// Whether the card had nothing in it when you opened it. See `engagementChanged`.
     private var openedEmpty = false
 
@@ -432,14 +508,13 @@ final class CanvasTextNodeView: CanvasNodeView {
         let view = NSHostingView(rootView:
             ScrollView(.vertical) {
                 RenderedNote(prose: text,
-                             font: .systemFont(ofSize: 13),
+                             font: .systemFont(ofSize: 13 * contentZoom),
                              noteURL: board.store.url,
                              maxImageHeight: 400)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollDisabled(true)
         )
         view.setAccessibilityLabel(text.isEmpty ? "Empty card" : text)
         hosting = view
@@ -449,7 +524,7 @@ final class CanvasTextNodeView: CanvasNodeView {
     private func showEditor() {
         let id = node.id
         let view = NSHostingView(rootView:
-            CanvasTextEditing(text: text) { [weak self] edited in
+            CanvasTextEditing(text: text, zoom: contentZoom) { [weak self] edited in
                 self?.board.store.change("Edit Card") { doc in
                     guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
                     doc.nodes[index].content = .text(edited)
@@ -475,25 +550,32 @@ final class CanvasTextNodeView: CanvasNodeView {
 /// source of truth.
 private struct CanvasTextEditing: View {
     @State private var text: String
+    let zoom: Double
     let onChange: (String) -> Void
     let onDone: () -> Void
     let onOpenProject: (String) -> Void
 
     init(text: String,
+         zoom: Double,
          onChange: @escaping (String) -> Void,
          onDone: @escaping () -> Void,
          onOpenProject: @escaping (String) -> Void) {
         _text = State(initialValue: text)
+        self.zoom = zoom
         self.onChange = onChange
         self.onDone = onDone
         self.onOpenProject = onOpenProject
     }
 
     var body: some View {
-        MarkdownTextEditor(onOpenProject: onOpenProject,
-                           text: $text,
-                           onSubmit: onDone,
-                           onCancel: onDone)
-            .onChange(of: text) { _, edited in onChange(edited) }
+        var editor = MarkdownTextEditor(onOpenProject: onOpenProject,
+                                        text: $text,
+                                        onSubmit: onDone,
+                                        onCancel: onDone)
+        // The same zoom the rendered card is showing. A card whose prose grew when you zoomed it and
+        // shrank back the moment you stepped in to edit it would be zooming the picture of the text
+        // rather than the text.
+        editor.baseFont = NSFont.monospacedSystemFont(ofSize: 13 * zoom, weight: .regular)
+        return editor.onChange(of: text) { _, edited in onChange(edited) }
     }
 }

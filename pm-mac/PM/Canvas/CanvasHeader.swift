@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The canvas window's chrome: a pill naming the board at the leading edge, a capsule of controls at
-/// the trailing one, and nothing at all in between.
+/// The canvas window's chrome: a pill naming the board at the leading edge, the controls at the trailing
+/// one, and nothing at all in between.
 ///
 /// This replaces an `NSToolbar` carrying a View/Edit segmented control, an Add pull-down, a search
 /// field and — while a web card was engaged — four browser buttons. All of it was permanently occupying
@@ -13,10 +13,10 @@ import SwiftUI
 /// material, same measured clearance under the traffic lights. A canvas is a document window in the same
 /// app and should not be a second idea of what a window looks like.
 ///
-/// **Two views rather than one strip**, and that is what makes the band usable. A single header view
-/// spanning the window would hit-test its whole width and swallow every click in the top 48 points of
-/// the board — including on the cards up there. A pill and a capsule that each hug their own contents
-/// leave the space between them as what it looks like: board.
+/// **Views that hug their contents rather than one strip**, and that is what makes the band usable. A
+/// single header view spanning the window would hit-test its whole width and swallow every click in the
+/// top 48 points of the board — including on the cards up there. A pill at one end and the capsules at
+/// the other leave the space between them as what it looks like: board.
 @MainActor
 final class CanvasHeaderModel: ObservableObject {
     /// The board's name — the canvas file, without its extension.
@@ -33,28 +33,40 @@ final class CanvasHeaderModel: ObservableObject {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     @Published var tiling: (long: String, short: String)?
+    /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
+    /// contextual menu use. See `CanvasTiling.commandTitle`.
+    ///
+    /// Published rather than asked for on demand because it depends on the selection, and the button
+    /// that carries it has a tooltip that has to be right before you click rather than after.
+    /// Defaulted to the empty-selection wording rather than a placeholder, because that is the true
+    /// answer for a board nobody has clicked yet — the state this starts in.
+    @Published var tileTitle = "Fill Window with Visible Cards"
+    /// The arrangement in force, or nil when the board is showing itself.
+    @Published var arrangement: CanvasTiling.Arrangement?
     @Published var titlebar = TitlebarButtonMetrics.unmeasured
     /// How much of the window the controls can spend. See `CanvasHeaderModel.Room`.
     @Published var room = Room.full
 
-    /// How much room the capsule has, and therefore what it can afford to say.
+    /// How much room the header's controls have, and therefore what they can afford to say.
     ///
-    /// The capsule grew: it can hold the live page's host and four buttons, the tiled view's count and
-    /// its way out, a find field, the zoom, the word "Editing", and three controls. All of that at once
-    /// on a narrow window runs into the title pill, and the pill is the piece that gives way — so the
-    /// window ends up naming the board it is showing with two letters and an ellipsis.
+    /// The trailing chrome grew: a page capsule holding an address and up to five buttons, then the
+    /// board's own capsule with a find field, the zoom, the word "Connecting", and four controls. All of
+    /// that at once on a narrow window runs into the title pill, and the pill is the piece that gives
+    /// way — so the window ends up naming the board it is showing with two letters and an ellipsis.
     ///
     /// The fix is an order of precedence rather than more space: state you are *in* outlasts state you
-    /// can *read elsewhere*. The page group and the find field are things you asked for a moment ago and
-    /// are acting on now. The zoom is a number the board itself shows you by being at that zoom. So the
-    /// zoom goes first, then the mode label, then the host's words — its buttons stay, because they are
-    /// the only way to drive the page. What never goes: the renderer switch, Add, and the options menu.
+    /// can *read elsewhere*. The page and the find field are things you asked for a moment ago and are
+    /// acting on now. The zoom is a number the board itself shows you by being at that zoom. So the zoom
+    /// goes first, then the mode label, and the address field narrows rather than leaving — an address
+    /// bar with no address in it is not an address bar, and it is the only place a card can tell you
+    /// whose password field you are looking at. What never goes: the renderer switch, Add, and the
+    /// options menu.
     ///
-    /// The tiled count is measured here too, but it isn't in this capsule any more — it belongs to the
-    /// pill, which is where "what am I looking at" is answered. It shortens to a bare fraction rather
-    /// than leaving, because the pill has a title to compress before it needs to drop anything.
+    /// The tiled count is measured here too, but it isn't in the control capsule any more — it belongs
+    /// to the pill, which is where "what am I looking at" is answered. It shortens to a bare fraction
+    /// rather than leaving, because the pill has a title to compress before it needs to drop anything.
     ///
-    /// Breakpoints on the window rather than a fitting pass, because the capsule is in a hosting view
+    /// Breakpoints on the window rather than a fitting pass, because the chrome is in a hosting view
     /// sized to its own contents and would report that it fits at any width. Deliberate numbers beat a
     /// measurement that cannot fail.
     enum Room {
@@ -70,8 +82,15 @@ final class CanvasHeaderModel: ObservableObject {
 
         var showsZoom: Bool { self == .full }
         var showsModeLabel: Bool { self == .full }
-        var showsPageHost: Bool { self != .minimal }
-        var hostWidth: CGFloat { self == .full ? 220 : 120 }
+        /// How wide the address field is allowed to get. Enough for a real host at every width — a
+        /// truncated middle still shows you the end of the domain, which is the half that matters.
+        var addressWidth: CGFloat {
+            switch self {
+            case .full: return 240
+            case .tight: return 150
+            case .minimal: return 104
+            }
+        }
         var findWidth: CGFloat { self == .full ? 170 : 120 }
         /// The tiled readout in full ("6 of 43 cards") or short ("6/43").
         var showsLongTilingSummary: Bool { self == .full }
@@ -86,11 +105,18 @@ final class CanvasHeaderModel: ObservableObject {
     /// frame, next to the controls that drive it, which is where a browser puts it too.
     struct Page: Equatable {
         var host: String
+        /// Where the page actually is, in full — what the address field puts under your cursor when you
+        /// click into it. The host is what it *shows*; a host is not something you can edit back into an
+        /// address, so both are needed.
+        var liveAddress: String
         /// The address written on the board, shown when the page has left it.
         var savedAddress: String
         var wandered: Bool
         var canGoBack: Bool
         var canGoForward: Bool
+        /// Mid-navigation. Turns Reload into Stop, which is the only feedback a live page gives you
+        /// that anything is happening at all — a card is drawn as its old page until the new one paints.
+        var isLoading: Bool
         /// How old what you are looking at is, when the card knows.
         var age: String?
     }
@@ -128,13 +154,18 @@ final class CanvasHeaderModel: ObservableObject {
     var pageBack: () -> Void = {}
     var pageForward: () -> Void = {}
     var pageReload: () -> Void = {}
+    var pageStop: () -> Void = {}
     var pageHome: () -> Void = {}
     var pageAdoptAddress: () -> Void = {}
-    var pageEditAddress: () -> Void = {}
+    /// Send the page to an address typed into the header's field. Navigation only — it does not touch
+    /// what the board has saved for the card, which is what Pin is for.
+    var pageGo: (String) -> Void = { _ in }
     var findChanged: (String) -> Void = { _ in }
     var findClosed: () -> Void = {}
     var findCommitted: () -> Void = {}
     var leaveTiling: () -> Void = {}
+    var tile: () -> Void = {}
+    var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
 }
 
 // MARK: - The pill
@@ -198,12 +229,16 @@ struct CanvasTitlePill: View {
 
 // MARK: - The capsule
 
-/// Everything you do to the board, and — while you are inside a web card — everything you do to its
-/// page.
+/// Everything you do to the board.
 ///
-/// Reading order is what is live, then how you are looking at it, then what you can add: the page group
-/// (only when there is a page), the zoom, find, add, and the view options that hold the mode and the
-/// rest of the zoom commands.
+/// Reading order is how you are looking at it, then what you can do to it: the zoom, the mode, tile,
+/// find, add, and the view options that hold the mode and the rest of the zoom commands.
+///
+/// The page you have stepped into used to be in here too, as a group of items behind a divider. It is
+/// its own capsule now — see `CanvasPageCapsule` — for two reasons. Everything left in this capsule acts
+/// on the board, and a hairline is too quiet a way to say that five of the items didn't. And the group
+/// appeared and disappeared *inside* the row, so stepping into a card slid Add and the options menu
+/// sideways under a pointer already on its way to one of them.
 struct CanvasControlCapsule: View {
     @ObservedObject var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
@@ -215,10 +250,6 @@ struct CanvasControlCapsule: View {
         HeaderCapsule(chrome: chrome) {
             if model.showsRendererSwitch {
                 RendererSwitch(renderer: .canvas) { model.setRenderer($0) }
-                HeaderDivider()
-            }
-            if let page = model.page {
-                pageGroup(page)
                 HeaderDivider()
             }
             if model.find.isShowing {
@@ -247,6 +278,18 @@ struct CanvasControlCapsule: View {
                     .headerCaption()
                     .help("Cards are showing the dots you drag lines from")
             }
+            // The way *in* to a tiled view, and until now the only thing this feature had no way in
+            // from. The window carried one piece of tiling chrome — the ✕ in the pill — which is to
+            // say the only control on screen was the one that leaves, and you cannot learn a feature
+            // exists from its dismiss button.
+            //
+            // Permanent rather than appearing with a selection, which was the obvious objection and
+            // turns out not to apply: with nothing selected ⌘Return tiles what is on screen, so on any
+            // board with a card on it this button is live and means something. There is no state where
+            // it would sit dimmed, and so no reason to make the row twitch by hiding it. It keeps its
+            // place at every width for the same reason Add and the options menu do — it is a command,
+            // not a readout, and the readout is the pill's job.
+            HeaderSymbolButton(symbol: "rectangle.split.2x2", help: model.tileTitle, action: model.tile)
             HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
                 model.find.isShowing = true
                 model.find.focusToken &+= 1
@@ -256,51 +299,8 @@ struct CanvasControlCapsule: View {
         }
         .onHover { hovering = $0 }
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.page)
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.find.isShowing)
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
-        .modifier(TitlebarDrop(model: model))
-    }
-
-    // MARK: The page you have stepped into
-
-    @ViewBuilder private func pageGroup(_ page: CanvasHeaderModel.Page) -> some View {
-        // The host's words are the first thing in this group to go, and its buttons are the last: the
-        // buttons are the only way to drive the page, while the address is also on the page itself. It
-        // holds on longer than anything else that is only informative, though — a wandered card is the
-        // one thing here that can cost you something.
-        if model.room.showsPageHost || page.wandered {
-            Text(page.host)
-                .foregroundStyle(page.wandered ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: model.room.hostWidth)
-                .headerCaption()
-                .help(pageHelp(page))
-        }
-        HeaderSymbolButton(symbol: "chevron.left", help: "Back",
-                           enabled: page.canGoBack, action: model.pageBack)
-        HeaderSymbolButton(symbol: "chevron.right", help: "Forward",
-                           enabled: page.canGoForward, action: model.pageForward)
-        HeaderSymbolButton(symbol: "arrow.clockwise", help: "Reload", action: model.pageReload)
-        HeaderSymbolButton(symbol: "house", help: "Back to this card\u{2019}s address",
-                           enabled: page.wandered, action: model.pageHome)
-        if page.wandered {
-            // Only once the page has actually gone somewhere else — on a card sitting on its own
-            // address this would be an offer to change nothing.
-            HeaderSymbolButton(symbol: "pin", help: "Set as this card\u{2019}s address",
-                               action: model.pageAdoptAddress)
-        }
-    }
-
-    private func pageHelp(_ page: CanvasHeaderModel.Page) -> String {
-        var lines: [String] = []
-        if page.wandered {
-            lines.append("This card has navigated away from the address saved on the board.")
-            lines.append("Saved: " + page.savedAddress)
-        }
-        if let age = page.age { lines.append("Loaded " + age) }
-        return lines.isEmpty ? page.host : lines.joined(separator: "\n")
     }
 
     // MARK: Find
@@ -351,6 +351,17 @@ struct CanvasControlCapsule: View {
 
     private var optionsMenu: some View {
         Menu {
+            // This menu is called View options and holds the mode and the four zooms, all of which it
+            // turns off while tiled — so the one view option big enough to disable the others was the
+            // one thing not in it. First, because it is the largest of them.
+            Button(model.tileTitle, action: model.tile)
+            Menu("Arrange Tiles") {
+                ForEach(CanvasTiling.Arrangement.allCases, id: \.self) { arrangement in
+                    Toggle(arrangement.title, isOn: Binding(get: { model.arrangement == arrangement },
+                                                            set: { _ in model.setArrangement(arrangement) }))
+                }
+            }
+            Divider()
             Toggle("Connect Cards", isOn: Binding(get: { model.mode == .connect },
                                                   set: { model.setMode($0 ? .connect : .view) }))
                 .disabled(model.tiling != nil)
@@ -376,10 +387,15 @@ struct CanvasControlCapsule: View {
 /// Drops a piece of header chrome to sit level with the traffic lights, wherever the system has put
 /// them.
 ///
-/// Centred on the piece's own measured height rather than on half a line: the pill and the capsule are
+/// Centred on the piece's own measured height rather than on half a line: the pill and the capsules are
 /// not the same height, and a fixed drop levels whichever one it was written for and hangs the other
 /// below the buttons.
-private struct TitlebarDrop: ViewModifier {
+///
+/// **Applied once per hosting view, never to a piece inside one.** The trailing view holds two capsules
+/// in a row, and a drop on one of them is padding that only that capsule carries — which is not a piece
+/// sitting lower, it is a row whose two halves disagree about where the top of the row is. The pill has
+/// its own because it is its own view, and taller.
+struct TitlebarDrop: ViewModifier {
     @ObservedObject var model: CanvasHeaderModel
     @State private var height: CGFloat = 28
 

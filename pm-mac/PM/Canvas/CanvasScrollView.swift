@@ -73,16 +73,78 @@ final class CanvasScrollView: NSScrollView {
     /// Panning or zooming would slide the tiles out of the window they were laid out to fill, and the
     /// only way back would be to leave and come in again. Every tiling window manager takes the same
     /// position: while windows are tiled, the desktop is not something you scroll. Swallowed here rather
-    /// than by turning scrolling off, so a scroll wheel over an engaged card's own content still reaches
-    /// it — that view takes the event long before this one is asked.
+    /// than by turning scrolling off, so a wheel over a card's own content still reaches it — an engaged
+    /// card takes the event long before this view is asked, and an unengaged one is handed it by the
+    /// board on the way past (`CanvasBoardView.scrollWheel`). Tiled or not, a card scrolls.
     override func scrollWheel(with event: NSEvent) {
         guard !board.isTiled else { return }
+        guard !event.modifierFlags.contains(.command) else { return zoom(with: event) }
         super.scrollWheel(with: event)
+    }
+
+    /// ⌘ and the wheel zooms, about the pointer.
+    ///
+    /// Written out rather than inherited: `allowsMagnification` buys the pinch and the double-tap and
+    /// nothing else, so on a mouse there was no way to zoom a board at all short of the menu. Every
+    /// canvas a person arrives here from — Obsidian's, Figma's, a browser's PDF view — puts it on
+    /// ⌘-wheel, and the board already swallows the modifier so no card takes it first.
+    ///
+    /// About the pointer, not the middle of the window, which is the whole difference between zooming
+    /// and zooming *in on something*: the card you are pointing at stays under the pointer, so you can
+    /// go from the whole board to one card in a single gesture without chasing it back into the window.
+    private func zoom(with event: NSEvent) {
+        // A notch of a wheel is a step; a trackpad reports a distance, and about a finger's width of it
+        // is worth the same step. Multiplied rather than added, because zoom is a ratio — 10% of the
+        // way in from 20% and from 200% have to feel like the same gesture.
+        let steps = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / 40 : event.scrollingDeltaY
+        guard steps != 0 else { return }
+        let wanted = min(max(magnification * pow(1.15, steps), Self.minimumZoom), Self.maximumZoom)
+        guard wanted != magnification else { return }
+        setMagnification(wanted, centeredAt: board.convert(event.locationInWindow, from: nil))
+        onZoomChanged?(magnification)
+        settleZoom()
+    }
+
+    private var zoomSettle: DispatchWorkItem?
+
+    /// Re-render the cards for the zoom you stopped at.
+    ///
+    /// Deferred for the same reason AppKit defers it during a pinch — and this is the one place the
+    /// difference matters, because a wheel has no "end of gesture" to hang it on. Magnification alone
+    /// is free: the cards are subviews of the board, so the scroll view scales them where they stand.
+    /// What costs is deciding which of them are worth building and how much detail each should draw,
+    /// and that is a question about the zoom you settled on rather than every one you passed through.
+    private func settleZoom() {
+        zoomSettle?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            board.magnificationChanged()
+            board.settlePageBudget()
+        }
+        zoomSettle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
     override func magnify(with event: NSEvent) {
         guard !board.isTiled else { return }
         super.magnify(with: event)
+    }
+
+    /// Whether the scrollers exist at all — off while tiled.
+    ///
+    /// `autohidesScrollers` is not enough, because it answers "does the content fit", and the board
+    /// under a tiling is still the whole board: several screens wide, with the tiles laid over the part
+    /// of it you happen to be at. So by that test the content does *not* fit and the scrollers are
+    /// entitled to appear — and overlay scrollers flash themselves whenever the clip view resizes,
+    /// which is to say on every frame of a window drag.
+    ///
+    /// What they flash is doubly wrong. They are the controls for a gesture that is deliberately
+    /// swallowed here (see `scrollWheel`), so they mark a range you cannot move through; and they mark
+    /// it against the board's extent rather than the tiling's, which has no extent — the tiles are
+    /// exactly the window. Removing them says the true thing: while tiled, there is nowhere else.
+    func showsScrollers(_ shows: Bool) {
+        hasVerticalScroller = shows
+        hasHorizontalScroller = shows
     }
 
     @objc private func visibleRegionChanged() {
@@ -123,9 +185,16 @@ final class CanvasScrollView: NSScrollView {
         onZoomChanged?(magnification)
     }
 
-    func zoomToActualSize() {
+    func zoomToActualSize() { setZoom(1) }
+
+    /// Go to a particular zoom, about the middle of what you can see.
+    ///
+    /// Public because a tiled view sets it: tiles are laid out to fill the window, and a board at 40%
+    /// would fill it with cards whose text is at 40% — a fullscreen card you still cannot read. Entering
+    /// a tiling puts the board at 100% and leaving puts it back; see `CanvasBoardView.tile`.
+    func setZoom(_ zoom: CGFloat) {
         let centre = NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY)
-        setMagnification(1, centeredAt: centre)
+        setMagnification(min(max(zoom, Self.minimumZoom), Self.maximumZoom), centeredAt: centre)
         board.magnificationChanged()
         onZoomChanged?(magnification)
     }
