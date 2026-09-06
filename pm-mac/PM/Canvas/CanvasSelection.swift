@@ -66,6 +66,9 @@ enum CanvasHandle: CaseIterable {
         CanvasPoint(x: frame.minX + unit.x * frame.width, y: frame.minY + unit.y * frame.height)
     }
 
+    /// One of the four corners, rather than the middle of a side.
+    var isCorner: Bool { unit.x != 0.5 && unit.y != 0.5 }
+
     /// The frame this grip produces when dragged to `point`.
     ///
     /// Each grip moves only the edges it touches, and a card dragged through itself comes back the
@@ -148,12 +151,27 @@ struct CanvasHitTester {
             }
         }
 
-        // 2. Cards, front to back. Groups are drawn behind everything and are handled below, so a card
-        //    inside a frame is always reachable.
+        // 2. Cards, front to back — and each one is asked about its edge before its face, because the
+        //    band is *on* the card and the face would otherwise take every point of it.
+        //
+        //    One pass rather than a pass for edges and a pass for faces, and that ordering is the whole
+        //    of it: two passes would hand a buried card's corner to the pointer while a card lying on
+        //    top of that corner sat under it, visibly, doing nothing.
+        //
+        //    Groups are drawn behind everything and are handled below, so a card inside a frame is
+        //    always reachable.
+        let resizable = Set(resizableByEdge)
         for id in interactive.reversed() {
-            guard let node = document.node(id: id), frame(of: node).contains(x: point.x, y: point.y)
-            else { continue }
-            return .node(id)
+            guard let node = document.node(id: id) else { continue }
+            let where_ = frame(of: node)
+            // Not in a tiled view. A tile's size is the arrangement's to decide — there is a divider
+            // for that — and an edge that resized one tile into another would be an offer the layout
+            // cannot keep.
+            if layout.isDocument, resizable.contains(id),
+               let handle = Self.edgeHandle(where_, at: point, reach: Self.handleReach / scale) {
+                return .handle(id, handle)
+            }
+            if where_.contains(x: point.x, y: point.y) { return .node(id) }
         }
 
         // A tiled view draws neither lines nor frames — see `CanvasBoardView.draw` — so it must not hit
@@ -171,7 +189,21 @@ struct CanvasHitTester {
         //    Not their interior: a frame is drawn *around* other cards and usually has a lot of empty
         //    board inside it, and a group that swallowed clicks there would make the space inside a
         //    frame the one place you couldn't start a marquee or clear a selection.
+        //
+        //    A selected frame gives up its four *corners* to a resize and keeps its straight edges for
+        //    moving. Those edges are the only part of a frame a click can reach, so handing them over
+        //    too would leave it undraggable; corners are what's left, and they are enough to make a
+        //    frame resizable — which it has not been since the grips stopped being drawn on it, all
+        //    the while the board went on claiming a frame was resized by its own edges. Selected
+        //    first, because a frame is large and mostly empty, and four bands out in open board would
+        //    eat marquees begun near them.
         for node in document.nodes.reversed() where node.isGroup {
+            if selection.contains(node.id),
+               let handle = Self.edgeHandle(node.frame, at: point,
+                                            reach: Self.groupBorderReach / scale),
+               handle.isCorner {
+                return .handle(node.id, handle)
+            }
             if onFrame(node.frame, point) || inLabel(node, point) { return .node(node.id) }
         }
 

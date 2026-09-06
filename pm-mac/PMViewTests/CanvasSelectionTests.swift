@@ -88,13 +88,16 @@ final class CanvasSelectionTests: XCTestCase {
                        .handle("a", .bottomRight))
     }
 
-    /// A grip you can drag but cannot see is worse than no grip, so view mode — which draws none —
-    /// must not answer with one either.
-    func testViewModeOffersNoGripsToDrag() {
-        XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(40, 40)), .node("a"),
-                       "the corner of a selected card is the card, and dragging it moves it")
-        // And with no grip in the way, an overlapping corner belongs to whichever card is actually on
-        // top there — which is the point: in view mode the board reads as cards, not as controls.
+    /// View mode draws no grips, but it does resize: the band on the card's own edge answers instead,
+    /// which is why the corner reads as a corner here without anything being drawn on it.
+    func testViewModeResizesFromTheEdgeWithNoGripDrawn() {
+        XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
+    }
+
+    /// A corner buried under another card is not a corner you can aim at, so it does not answer. The
+    /// board is read front to back and each card is asked about its edge *and* its face before the
+    /// next one is asked anything.
+    func testACornerUnderAnotherCardBelongsToTheCardOnTop() {
         XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(240, 140)), .node("b"))
     }
 
@@ -229,6 +232,55 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertNil(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 88))
         XCTAssertEqual(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 7), .left,
                        "the same card is resizable once the pointer is a pointer again")
+    }
+
+    // MARK: The band, as the board actually reads it
+
+    /// `edgeHandle` was right for a year and unreachable for all of it: nothing asked it. These are the
+    /// assertions that say a pointer on a card's edge gets a resize, which is what makes the cursor
+    /// change and the drag happen.
+
+    func testAnEdgeBeatsTheCardFaceBehindIt() {
+        XCTAssertEqual(tester().hit(at(40, 90)), .handle("a", .left))
+        XCTAssertEqual(tester().hit(at(40, 40)), .handle("a", .topLeft))
+        XCTAssertEqual(tester().hit(at(140, 90)), .node("a"), "the inside is still the card")
+    }
+
+    /// No selecting first. A Mac window does not need to be focused before you can grab its edge, and
+    /// that is the whole of the idiom being borrowed.
+    func testAnUnselectedCardHandsOverItsEdge() {
+        XCTAssertEqual(tester(selection: []).hit(at(40, 90)), .handle("a", .left))
+    }
+
+    /// Where two cards overlap, the band belongs to the one drawn in front — otherwise the edge you can
+    /// see does nothing and an edge buried under it resizes.
+    func testTheBandGoesToTheCardInFront() {
+        XCTAssertEqual(tester().hit(at(205, 90)), .handle("b", .left),
+                       "b's left edge, over a's face")
+    }
+
+    /// Connect mode draws grips on the selection and offers the band only there, so that clicking an
+    /// unselected card to select it isn't a coin toss against a resize.
+    func testConnectModeOffersTheBandOnlyOnTheSelection() {
+        XCTAssertEqual(tester(mode: .connect).hit(at(40, 90)), .node("a"))
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(40, 90)), .handle("a", .left))
+    }
+
+    /// A tile's size is the arrangement's to set. The divider is the only thing you drag there.
+    func testATiledViewOffersNoEdges() {
+        var tiled = tester()
+        tiled.layout = CanvasLayout(frames: ["a": rect(40, 40, 200, 100)], visible: ["a"])
+        XCTAssertEqual(tiled.hit(at(40, 90)), .node("a"))
+    }
+
+    /// A frame gets its corners once selected. Its straight edges stay a move, because they are the
+    /// only part of a frame a click can reach and it would otherwise become undraggable.
+    func testASelectedFrameResizesFromItsCorners() {
+        XCTAssertEqual(tester(selection: ["frame"]).hit(at(0, 0)), .handle("frame", .topLeft))
+        XCTAssertEqual(tester(selection: ["frame"]).hit(at(400, 0)), .node("frame"),
+                       "the top edge still moves it")
+        XCTAssertEqual(tester().hit(at(0, 0)), .node("frame"),
+                       "an unselected frame keeps all four corners as a way to pick it up")
     }
 
     // MARK: What an engaged card hands to the board
