@@ -38,6 +38,11 @@ enum ProjectWindow {
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 360
 
+    /// The gap between the two panes — `NSSplitView`'s thin divider. Named here so a window can open
+    /// exactly wide enough for a sidebar *and* a full-width task column rather than a point short of
+    /// it, which is the difference between a sidebar and a sidebar that hides itself on launch.
+    static let sidebarDividerWidth: CGFloat = 1
+
     /// `UserDefaults` key behind the sidebar toggle (an `@AppStorage` in the view, read directly by the
     /// window when it needs the value before any SwiftUI layout has run).
     static let sidebarDefaultsKey = "PMPanelSidebar"
@@ -72,9 +77,6 @@ enum ProjectWindow {
     /// Max height as a Tarot-card proportion of the focus panel's width (~2.75×4.75), for its auto-fit.
     /// Content beyond this scrolls inside the card; below it, the panel fits exactly.
     static let maxHeightRatio: CGFloat = 4.75 / 2.75
-
-    /// Groups this app's windows for `NSWindow` tabbing, so ⌘T and the tab bar's `+` work.
-    static let tabbingIdentifier = "PMProject"
 
     /// Marks a window as one of ours, for the few places that need to tell a project window from a
     /// settings window or a system panel.

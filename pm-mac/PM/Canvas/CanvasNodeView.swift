@@ -9,11 +9,17 @@ import PmLib
 /// grips and the ring live in the overlay, above every card, so a selected card that overlaps another
 /// still shows its whole ring.
 ///
-/// **A card doesn't take clicks.** `hitTest` returns nil while `isEngaged` is false, so the pointer
-/// falls through to the board, which is the one place a click is interpreted — otherwise every card
-/// would need its own copy of "is this a drag, a selection, or a resize?". A card becomes engaged when
-/// you step into it: a text card being edited needs the caret, and a web card you have stepped into
-/// needs its own clicks and its own scrolling. Clicking outside, or Escape, steps back out.
+/// **A card doesn't take clicks.** `hitTest` returns nil while the card isn't taking its own, so the
+/// pointer falls through to the board, which is the one place a click is interpreted — otherwise every
+/// card would need its own copy of "is this a drag, a selection, or a resize?". A card becomes engaged
+/// when you step into it: a text card being edited needs the caret, and a web card you have stepped
+/// into needs its own clicks and its own scrolling. Clicking outside, or Escape, steps back out.
+///
+/// **A tiled view hands that to every tile at once** — see `takesItsOwnClicks`.
+///
+/// **The wheel is the exception.** A card you haven't stepped into still scrolls when the pointer is
+/// over it, because reading is not stepping in — the board hands the event down instead, since a card
+/// that refuses to hit-test can never be sent one by AppKit. See `scrollsItsContent`.
 ///
 /// An engaged card doesn't take *every* click, though. The band along its edge and its `boardHandle`
 /// stay the board's, so a card you have stepped into is still a card — one you can move and resize
@@ -33,6 +39,19 @@ class CanvasNodeView: NSView {
     /// True once you have stepped into this card, which is when it starts taking its own clicks.
     private(set) var isEngaged = false
 
+    /// Whether ⌘+ and ⌘− mean this card's content while you are stepped into it, rather than the board.
+    ///
+    /// Off by default, so a kind of card that has no answer to "how large is your text" leaves the two
+    /// keys doing what they have always done. See `CanvasCardZoom`.
+    var zoomsItsContent: Bool { false }
+
+    /// How large this card's content is set, from the document.
+    var contentZoom: Double { CanvasCardZoom.of(node) }
+
+    /// The zoom changed — re-render at it. Called for a change from anywhere, including an undo and
+    /// another window on the same file.
+    func contentZoomChanged() {}
+
     init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         self.node = node
         self.board = board
@@ -50,20 +69,32 @@ class CanvasNodeView: NSView {
 
         clip.wantsLayer = true
         clip.layer?.masksToBounds = true
-        clip.layer?.cornerRadius = 8
         clip.layer?.cornerCurve = .continuous
         clip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clip)
+        // Inset by the hairline the card draws, so the content is clipped to the *inside* of the
+        // border rather than over it — and so the clip's corner can be concentric with the card's
+        // rather than a second curve of a different radius sitting on top of the first.
         NSLayoutConstraint.activate([
-            clip.topAnchor.constraint(equalTo: topAnchor),
-            clip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            clip.trailingAnchor.constraint(equalTo: trailingAnchor),
-            clip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            clip.topAnchor.constraint(equalTo: topAnchor, constant: CanvasNodeView.hairline),
+            clip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CanvasNodeView.hairline),
+            clip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CanvasNodeView.hairline),
+            clip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CanvasNodeView.hairline),
         ])
     }
 
     /// Holds the card's content and rounds it off. See the shadow note in `init`.
+    ///
+    /// **Every card's content goes in here** — see `setContent`. It is easy to think this view is
+    /// optional for cards whose content doesn't reach their corners, and for a rendered note or a
+    /// summary label it very nearly is. A web card is the case that proves it isn't: a page paints an
+    /// opaque background out to its own square edges, and a square white rectangle laid over a rounded
+    /// white card is invisible in light appearance and obvious in dark, which is exactly the kind of
+    /// bug that survives a long time.
     private let clip = NSView()
+
+    /// The card's border, and so the width the clip is inset by.
+    static let hairline: Double = 1
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -90,17 +121,62 @@ class CanvasNodeView: NSView {
     /// it is a *live* thing, and a click on a live thing should reach it.
     var engagesOnClick: Bool { false }
 
-    /// A part of an engaged card that still belongs to the board — a web card's caption, which stays a
-    /// drag handle after the page underneath has started taking clicks.
-    var boardHandle: NSView?
+    /// Whether the pointer resting over this card scrolls its content, without stepping in first.
+    ///
+    /// Off by default, and on for the cards whose content can be longer than the card is tall. It is
+    /// the same rule the Mac applies to windows — the wheel goes to what is under the pointer, not to
+    /// what is focused — and on a board it matters more, because a board is a *set* of things you are
+    /// reading side by side and stepping into one to read it is a mode you then have to leave.
+    var scrollsItsContent: Bool { false }
+
+    /// The view a wheel over this card should be handed to, or nil when the card has nothing to scroll
+    /// and the wheel is the board's. See `CanvasBoardView.scrollWheel`.
+    ///
+    /// Never while the board is zoomed out past reading: a simplified card is showing its name rather
+    /// than its content, and a name has no length to travel through.
+    var contentScroller: NSView? {
+        guard scrollsItsContent, !isSimplified else { return nil }
+        return CanvasNodeView.scroller(in: self)
+    }
+
+    /// The first scroll view inside a card. For the cards built out of SwiftUI this is the real
+    /// `NSScrollView` that backs their `ScrollView` — searched for rather than held, because the whole
+    /// of a card's content is rebuilt whenever what it is showing changes, and a reference kept across
+    /// that is a reference to the view that used to be there.
+    static func scroller(in view: NSView) -> NSScrollView? {
+        if let scroller = view as? NSScrollView { return scroller }
+        for sub in view.subviews {
+            if let found = scroller(in: sub) { return found }
+        }
+        return nil
+    }
+
+    /// Whether a click inside this card reaches what is in it, rather than falling through to the
+    /// board.
+    ///
+    /// On a board you earn it by stepping in, and the cost of that is the point: a board is mostly
+    /// panned across and rearranged, and cards that each took their own clicks would make every one of
+    /// those gestures a gamble on what was under the pointer.
+    ///
+    /// **A tiled view has none of that.** There is nothing to pan to, nothing to drag a card into, and
+    /// no question of which card a click was meant for — the tiles are laid out edge to edge with a gap
+    /// between them, and a click inside one is a click on that one. What is left is a window showing
+    /// several live things at once, which is the whole reason to tile: a page you can scroll, a task
+    /// you can tick, a link you can follow, in whichever tile you happen to be looking at. Making that
+    /// wait for a click that "focuses" the tile first is a click charged for nothing, and it means only
+    /// ever one live tile among several — see `CanvasPageBudget.liveWhileTiled`, which is the same
+    /// sentence about renderers rather than about clicks.
+    ///
+    /// The board keeps what it needs either way. `canvasBoardKeeps` reserves the band along each tile's
+    /// edge, the boundaries lie in the gaps, and the handlebar sits outside the tile it belongs to — so
+    /// selecting, swapping, reordering and resizing are all still the board's, and none of them was
+    /// ever aimed at the middle of a tile.
+    var takesItsOwnClicks: Bool { isEngaged || board.isTiled }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard isEngaged else { return nil }
+        guard takesItsOwnClicks else { return nil }
         let local = convert(point, from: superview)
-        let handle = boardHandle?.superview == nil ? nil
-            : boardHandle.map { $0.convert($0.bounds, to: self) }
-        guard !canvasBoardKeeps(local, in: bounds, handle: handle, scale: board.liveScale)
-        else { return nil }
+        guard !canvasBoardKeeps(local, in: bounds, scale: board.liveScale) else { return nil }
         return super.hitTest(point)
     }
 
@@ -109,34 +185,69 @@ class CanvasNodeView: NSView {
     /// The last resort rather than the mechanism: a text card's editor takes Escape itself, and this is
     /// what catches the case where the thing you stepped into doesn't — a web page, which will happily
     /// ignore the key and let it walk up the responder chain to here.
+    ///
+    /// A card that isn't engaged passes the key on rather than calling `super`: `cancelOperation:` is
+    /// only *declared* on the standard key-binding protocol, and `NSView` doesn't implement it, so a
+    /// `super` call is an unrecognized selector that takes the app down. It reaches this branch for
+    /// real — a page keeps first responder for the moment between the board disengaging the card and
+    /// WebKit handing the key back.
     override func cancelOperation(_ sender: Any?) {
-        guard isEngaged else { return super.cancelOperation(sender) }
+        guard isEngaged else {
+            nextResponder?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+            return
+        }
         engage(false)
         window?.makeFirstResponder(board)
     }
 
     // MARK: Chrome
 
+    /// The card's corner, which grows a little with the card.
+    ///
+    /// One fixed radius does not read as one radius. At 8pt a 220pt card has a soft corner and a 900pt
+    /// card is very nearly square, so a board of cards at the sizes real boards use looks like several
+    /// different kinds of object rather than one kind at several sizes. Scaling it off the card's
+    /// shorter side fixes that; clamping it at both ends is what keeps a small card from becoming a
+    /// lozenge and a large one from becoming a stadium.
+    var cornerRadius: Double { CanvasNodeView.cornerRadius(for: node.frame) }
+
+    /// The same rule, asked of a frame rather than of a card — the overlay draws ghosts around cards
+    /// it has only the geometry of, and a ghost traced at a different radius than the card under it is
+    /// visibly not that card's outline.
+    static func cornerRadius(for frame: CanvasRect) -> Double {
+        min(14, max(8, min(frame.width, frame.height) * 0.025))
+    }
+
     override func draw(_ dirty: NSRect) {
-        let radius = 8.0
+        let radius = cornerRadius
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
                                 xRadius: radius, yRadius: radius)
         CanvasPalette.card.setFill()
         path.fill()
-        if CanvasPalette.color(node.color) != nil {
-            CanvasPalette.wash(node.color).setFill()
-            path.fill()
-        }
-        CanvasPalette.border(node.color).setStroke()
-        path.lineWidth = CanvasPalette.color(node.color) != nil ? 1.6 : 1
+        CanvasPalette.cardBorder.setStroke()
+        path.lineWidth = 1
         path.stroke()
     }
 
-    override func updateLayer() {
-        layer?.cornerRadius = 8
-        // Redrawn each time so the shadow follows the card's own corner rather than its square frame,
-        // which is what a shadow on a masksToBounds-off layer would otherwise use.
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 8, cornerHeight: 8, transform: nil)
+    /// The corner and the shadow both follow the card's size, so both are set where a size change is
+    /// actually reported.
+    ///
+    /// In `layout` rather than `updateLayer`: a view that implements `draw(_:)` has `wantsUpdateLayer`
+    /// false, so AppKit never calls `updateLayer` at all and everything that was in it was being set
+    /// exactly never. The shadow came out right regardless — with no `shadowPath` the layer derives one
+    /// from the alpha of what was drawn into it, which is the rounded card — but the corner radius on
+    /// the clip did not, and it is the one that has to change now.
+    override func layout() {
+        super.layout()
+        let radius = cornerRadius
+        // Concentric: a curve inset from another curve keeps a constant gap only when its radius is
+        // reduced by that inset. Equal radii would leave the border pinching shut at the corners.
+        clip.layer?.cornerRadius = max(0, radius - CanvasNodeView.hairline)
+        layer?.cornerRadius = radius
+        // Given explicitly so the shadow follows the card's own corner rather than being inferred, and
+        // so it is right on the frame the card is resized to rather than the frame it was drawn at.
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius,
+                                   transform: nil)
     }
 
     // MARK: Lifecycle the board drives
@@ -149,13 +260,18 @@ class CanvasNodeView: NSView {
     func update(node: CanvasNode, scale: Double) {
         let wasSimplified = isSimplified
         self.scale = scale
-        let changed = node.content != self.node.content || node.color != self.node.color
+        let changed = node.content != self.node.content
+        let rezoomed = CanvasCardZoom.of(node) != contentZoom
         self.node = node
         if changed {
+            // A rebuild sets the zoom on the way through, so there is nothing further to do for it.
             contentChanged()
+        } else if rezoomed {
+            contentZoomChanged()
         } else if wasSimplified != isSimplified {
             simplificationChanged()
         }
+        refreshAccessibility()
         needsDisplay = true
     }
 
@@ -212,6 +328,35 @@ class CanvasNodeView: NSView {
     /// The card's own content changed — reload it.
     func contentChanged() {}
 
+    /// Say what this card is, to VoiceOver.
+    ///
+    /// A board is a field of unlabelled rectangles otherwise. The description a card already writes for
+    /// its tooltip is the same sentence VoiceOver wants — what the card is and anything unusual about it
+    /// — so there is one answer rather than two that can disagree. Cards that have no description fall
+    /// back to what they hold, which for a text card is its text and for a web card its host.
+    ///
+    /// Refreshed wherever the description is, because a page that has navigated is a card that has
+    /// stopped being what it said it was.
+    func refreshAccessibility() {
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(cardDescription ?? accessibilityFallback)
+        setAccessibilityElement(true)
+    }
+
+    /// What to say for a card with nothing to add — overridden where the content knows better.
+    var accessibilityFallback: String { "Card" }
+
+    /// What this card says about itself when the pointer rests on it, or nil for a card that says
+    /// everything it has to say by being looked at.
+    ///
+    /// Cards carry no chrome: no strip naming the file, no capsule over the page saying how old it is.
+    /// The facts those carried are still worth having occasionally, and a tooltip is what macOS offers
+    /// for exactly that shape of fact — free until asked for, and asked for by lingering rather than by
+    /// clicking. Answered by the *board*, which is the view actually under the pointer: an unengaged
+    /// card returns nil from `hitTest`, so it never sees the mouse and could not own a tooltip if it
+    /// wanted one. See `CanvasBoardView.hovered`.
+    var cardDescription: String? { nil }
+
     /// Step into this card: a text card takes the caret, a web card takes its own scrolling.
     func beginEditing() {
         engage(true)
@@ -236,7 +381,10 @@ class CanvasNodeView: NSView {
     func refreshElevation() {
         let picked = board.selection.contains(node.id)
         let lift: (opacity: Float, radius: Double, drop: Double)
-        switch (board.mode, picked, isEngaged) {
+        // A tiled view answers with height whatever the mode is. The ring and the grips are gone there —
+        // a tile's size isn't yours to set — so height is all that is left to say which tile the arrows
+        // and Return are about, and a tiled board in connect mode would otherwise say nothing at all.
+        switch (board.isTiled ? .view : board.mode, picked, isEngaged) {
         case (.view, _, true): lift = (0.30, 17, 7)
         case (.view, true, _): lift = (0.22, 11, 4)
         default: lift = (0.13, 5, 1.5)
@@ -283,15 +431,24 @@ class CanvasNodeView: NSView {
     func engagementChanged() {}
 
     /// Put `view` in the card, filling it.
+    ///
+    /// Into `clip`, not into the card. This used to clear *all* of the card's subviews and add the
+    /// content beside them, which threw the clip away on the first call and left every card's content
+    /// unclipped for the rest of its life — invisible for content that stops short of the corners, and
+    /// a set of square corners on a rounded card for content that doesn't.
+    ///
+    /// `insets` are still measured from the card's own edge, as the call sites read them; the hairline
+    /// the clip is already inset by is taken off here.
     func setContent(_ view: NSView, insets: NSEdgeInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)) {
-        subviews.forEach { $0.removeFromSuperview() }
+        clip.subviews.forEach { $0.removeFromSuperview() }
+        let hairline = CanvasNodeView.hairline
         view.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(view)
+        clip.addSubview(view)
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: topAnchor, constant: insets.top),
-            view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: insets.left),
-            view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -insets.right),
-            view.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -insets.bottom),
+            view.topAnchor.constraint(equalTo: clip.topAnchor, constant: insets.top - hairline),
+            view.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: insets.left - hairline),
+            view.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -(insets.right - hairline)),
+            view.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -(insets.bottom - hairline)),
         ])
     }
 }
@@ -320,11 +477,26 @@ final class CanvasTextNodeView: CanvasNodeView {
         return ""
     }
 
+    override var accessibilityFallback: String {
+        text.isEmpty ? "Empty card" : canvasCardSummary(text)
+    }
+
     override func contentChanged() {
         if isEngaged { return showEditor() }
         if isSimplified { return setContent(summaryView(canvasCardSummary(text))) }
         showRendered()
     }
+
+    override var scrollsItsContent: Bool { true }
+
+    /// A card of prose is set at one size whatever size the card is, so "make this bigger" has nowhere
+    /// else to go — resizing the card rewraps the same 13pt text into a larger rectangle. See
+    /// `CanvasCardZoom`.
+    override var zoomsItsContent: Bool { true }
+
+    /// Rebuilt rather than adjusted: the face is handed to SwiftUI when the view is made, and the whole
+    /// card is one hosting view whose only input is the text and the font.
+    override func contentZoomChanged() { contentChanged() }
 
     /// Whether the card had nothing in it when you opened it. See `engagementChanged`.
     private var openedEmpty = false
@@ -360,14 +532,13 @@ final class CanvasTextNodeView: CanvasNodeView {
         let view = NSHostingView(rootView:
             ScrollView(.vertical) {
                 RenderedNote(prose: text,
-                             font: .systemFont(ofSize: 13),
+                             font: .systemFont(ofSize: 13 * contentZoom),
                              noteURL: board.store.url,
                              maxImageHeight: 400)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollDisabled(true)
         )
         view.setAccessibilityLabel(text.isEmpty ? "Empty card" : text)
         hosting = view
@@ -377,7 +548,7 @@ final class CanvasTextNodeView: CanvasNodeView {
     private func showEditor() {
         let id = node.id
         let view = NSHostingView(rootView:
-            CanvasTextEditing(text: text) { [weak self] edited in
+            CanvasTextEditing(text: text, zoom: contentZoom) { [weak self] edited in
                 self?.board.store.change("Edit Card") { doc in
                     guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
                     doc.nodes[index].content = .text(edited)
@@ -403,25 +574,32 @@ final class CanvasTextNodeView: CanvasNodeView {
 /// source of truth.
 private struct CanvasTextEditing: View {
     @State private var text: String
+    let zoom: Double
     let onChange: (String) -> Void
     let onDone: () -> Void
     let onOpenProject: (String) -> Void
 
     init(text: String,
+         zoom: Double,
          onChange: @escaping (String) -> Void,
          onDone: @escaping () -> Void,
          onOpenProject: @escaping (String) -> Void) {
         _text = State(initialValue: text)
+        self.zoom = zoom
         self.onChange = onChange
         self.onDone = onDone
         self.onOpenProject = onOpenProject
     }
 
     var body: some View {
-        MarkdownTextEditor(onOpenProject: onOpenProject,
-                           text: $text,
-                           onSubmit: onDone,
-                           onCancel: onDone)
-            .onChange(of: text) { _, edited in onChange(edited) }
+        var editor = MarkdownTextEditor(onOpenProject: onOpenProject,
+                                        text: $text,
+                                        onSubmit: onDone,
+                                        onCancel: onDone)
+        // The same zoom the rendered card is showing. A card whose prose grew when you zoomed it and
+        // shrank back the moment you stepped in to edit it would be zooming the picture of the text
+        // rather than the text.
+        editor.baseFont = NSFont.monospacedSystemFont(ofSize: 13 * zoom, weight: .regular)
+        return editor.onChange(of: text) { _, edited in onChange(edited) }
     }
 }

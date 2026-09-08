@@ -1128,6 +1128,10 @@ struct ProjectView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
             projectPill
+            // The window's tabs, in the same place the board's header puts them, so the bar doesn't
+            // move when you use it — the argument `RendererSwitch` makes about itself, and the reason
+            // both headers render this one view. Nothing at all while there is a single tab.
+            ProjectTabBarHost(model: state.tabs)
             Spacer(minLength: 12)
             headerControls
         }
@@ -1175,8 +1179,8 @@ struct ProjectView: View {
         return projectTitle
             // Enough inset that the title sits *in* the pill rather than against its edges — a capsule
             // this tight on its text reads as a tag, not as chrome.
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
+            .padding(.vertical, HeaderMetrics.pillInset.vertical)
             .headerBacking(headerChrome, in: Capsule())
             .contentShape(Capsule())
             .onTapGesture { if live { setDetails(!detailsExpanded) } }
@@ -1195,18 +1199,24 @@ struct ProjectView: View {
     /// the strip any more, the capsule is also what keeps the progress count legible over whatever has
     /// scrolled underneath it.
     ///
-    /// Reading order is what you're doing, then how you're looking at it, then where else it lives:
-    /// count, add, add, view options, canvas, open.
+    /// Reading order is what you're looking at, then what you're doing, then how you're looking at it,
+    /// then where else it lives: the renderer switch, count, add, add, view options, open.
+    ///
+    /// The switch leads because it answers the first question — which of this project's two faces am I
+    /// on — and because it has to sit in the same place here as it does in the board's header, or using
+    /// it would move it.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
-            HStack(spacing: 2) {
+            HeaderCapsule(chrome: headerChrome) {
+                if store.projectPath != nil {
+                    rendererSwitch
+                    HeaderDivider()
+                }
                 let p = store.progress
                 if p.total > 0 {
                     Text("\(p.done)/\(p.total)")
-                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .padding(.horizontal, 4)
+                        .headerCaption()
                 }
                 if store.projectName != nil {
                     addTaskButton
@@ -1214,14 +1224,9 @@ struct ProjectView: View {
                     viewOptionsMenu
                 }
                 if store.projectPath != nil {
-                    canvasButton
                     openButton
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .headerBacking(headerChrome, in: Capsule())
-            .background(WindowDragExcluder())
         }
     }
 
@@ -1249,20 +1254,11 @@ struct ProjectView: View {
         }
     }
 
-    /// One control in the trailing capsule: a symbol at the size and weight the others use, in a hit
-    /// area big enough to click without aiming. Shared so the buttons can't drift apart.
+    /// One control in the trailing capsule. `HeaderSymbolButton` now, shared with the canvas window's
+    /// header — these were the same code written twice and were already a point apart.
     private func headerButton(symbol: String, help: String,
                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(Text(help))
+        HeaderSymbolButton(symbol: symbol, help: help, action: action)
     }
 
     /// Whether the trailing capsule has anything to hold. With no project focused it doesn't, and an
@@ -1303,9 +1299,9 @@ struct ProjectView: View {
             viewOptionsMenuContent
         } label: {
             Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
                 .foregroundStyle(isViewCustomized ? Color.accentColor : Color.secondary)
-                .frame(width: 20, height: 18)
+                .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
@@ -1353,11 +1349,14 @@ struct ProjectView: View {
     /// discover by accident on somebody else's project. Clicking with nothing there makes it, which is
     /// the same bargain the notes file has always had — you get the document by asking for it, not by
     /// deciding to create it first. The tooltip says which of the two is about to happen.
-    private var canvasButton: some View {
-        headerButton(symbol: "rectangle.3.group",
-                     help: store.canvasPath == nil ? "Create the project canvas" : "Open the project canvas") {
-            CanvasWindowController.openProjectCanvas(for: store)
-        }
+    /// Tasks or canvas, in this window. The board's own header carries the same control — see
+    /// `RendererSwitch`.
+    ///
+    /// It used to be a one-way button that opened a new window on the board, which put two doors on one
+    /// room: ⌥⌘C already showed the same canvas in the window you were in. Opening the board in a window
+    /// of its own is still ⇧⌘C, which now says so in its name.
+    private var rendererSwitch: some View {
+        RendererSwitch(renderer: .tasks) { state.setRenderer($0) }
     }
 
     /// Opens the project in Obsidian, or in Finder while ⌥ is held (icon swaps to match), mirroring
@@ -1374,11 +1373,11 @@ struct ProjectView: View {
                     Image(nsImage: appIcon).resizable().frame(width: 15, height: 15)
                 } else {
                     Image(systemName: finder ? "folder" : "book.closed")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 20, height: 18)
+            .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2198,78 +2197,6 @@ extension EnvironmentValues {
     }
 }
 
-/// The three states the project header's chrome moves through, and the one place that decides which
-/// is which.
-///
-/// Modelled on the Messages conversation header, where the toolbar is not a permanent fixture: it's
-/// absent in a background window, present once the window is active, and lit while the pointer is in
-/// it. Two inputs, three states — hover wins over the window's state, so reaching for a control in a
-/// window you haven't clicked into yet still shows you what you're reaching for.
-///
-/// One type rather than a pair of booleans read at each call site, because the pill and the capsule
-/// have to agree: two pieces of glass in the same strip disagreeing about whether they exist is worse
-/// than either choice made consistently.
-private enum HeaderChrome: Equatable {
-    /// Another window has the focus. No glass at all, and the content behind it recedes.
-    case dormant
-    /// This window is active, the pointer is elsewhere. Backed, at rest.
-    case resting
-    /// The pointer is in the header strip. Backed at full strength.
-    case engaged
-
-    init(active: ControlActiveState, hovering: Bool) {
-        if hovering {
-            self = .engaged
-        } else if active == .inactive {
-            self = .dormant
-        } else {
-            self = .resting
-        }
-    }
-
-    /// How strongly the backing renders, 0–1.
-    ///
-    /// Nothing here goes to zero. An earlier pass had the dormant state drop its backing entirely, on
-    /// the theory that a background window's chrome should get out of the way — but there's no bar
-    /// behind this header any more, so "nothing" meant the task rows scrolled up into the title and
-    /// made it unreadable. Receding is a job for less contrast, not for none, and the floor is set by
-    /// what stays legible rather than by how quiet it would be nice to be.
-    var backingStrength: Double {
-        switch self {
-        case .dormant: return 0.7
-        case .resting: return 0.85
-        case .engaged: return 1
-        }
-    }
-
-    /// How strongly the *content* renders. Dimmed in a background window, but only slightly: this is
-    /// the same legibility problem from the other side, and text at half strength over a half-strength
-    /// backing is no easier to read than text over nothing.
-    var contentOpacity: Double { self == .dormant ? 0.85 : 1 }
-}
-
-extension View {
-    /// Backs a piece of header chrome at the strength its state calls for. One modifier for all four
-    /// pieces (both headers' pills, the trailing capsule, the back button), so they can't drift apart.
-    ///
-    /// A plain material, not Liquid Glass, after trying both. `glassEffect` has no intensity control —
-    /// its two variants are `.regular` and `.clear`, and `.clear` is the *media* variant, brighter and
-    /// more present over a plain window rather than quieter. The only way to turn glass down is to
-    /// fade the layer, which means putting it in a background so the title above keeps its own
-    /// opacity — and glass in a background inside a `GlassEffectContainer` renders over its sibling
-    /// content, which hid the very titles it was supposed to be backing.
-    ///
-    /// A material has the dial built in and composites the ordinary way, which is the whole
-    /// requirement here: this chrome exists to hold a title legible over scrolling rows, at a weight
-    /// that changes with the window's state. Liquid Glass is still in the app where it earns its keep
-    /// — the focus panel, a floating HUD over other apps' windows (see `GlassBackground`).
-    fileprivate func headerBacking(_ chrome: HeaderChrome, in shape: some Shape) -> some View {
-        background {
-            shape.fill(.regularMaterial).opacity(chrome.backingStrength)
-        }
-    }
-}
-
 /// The material behind a full-width strip that stands in the window's titlebar band — the find bar and
 /// the delete confirmation in the task column, and the whole header of the session-note takeover — so
 /// the strip reads as a bar rather than as bare window background with text floating in it.
@@ -2695,153 +2622,6 @@ private final class DragEndSentinel {
 /// red for work that had already been finished, which is the one thing red must never mean here. The
 /// date stays, because "3d ago" beside a finished task is how you tell a late finish from a punctual
 /// one; only the urgency comes off it.
-private struct DueChipStyle {
-    var text: Color
-    var stroke: Color
-    var fill: Color
-    var weight: Font.Weight
-    var dashed: Bool
-
-    init(due: String, own: Bool, done: Bool) {
-        // A completed task's date is a record rather than a deadline, so it reads at the quietest step
-        // of the scale — no tint, no fill, no extra weight — while keeping the dashed border that says
-        // whose date it is.
-        let state: DueState = done ? .later : DueState(due: due, own: own)
-        let tint: Color
-        switch state {
-        case .overdue: tint = Color(nsColor: .systemRed)
-        case .soon: tint = Color(nsColor: .systemOrange)
-        case .later, .inherited: tint = .secondary
-        }
-        text = tint
-        stroke = tint
-        dashed = !own
-        if own, state == .overdue {
-            fill = tint.opacity(0.16)
-            weight = .semibold
-        } else if own, state == .soon {
-            fill = tint.opacity(0.10)
-            weight = .medium
-        } else {
-            fill = .clear
-            weight = .regular
-        }
-    }
-
-    private init(text: Color, stroke: Color, fill: Color, weight: Font.Weight, dashed: Bool) {
-        self.text = text; self.stroke = stroke; self.fill = fill
-        self.weight = weight; self.dashed = dashed
-    }
-
-    /// The "＋date" affordance on a task with no date at all — a control, so it stays quiet.
-    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear,
-                                    weight: .regular, dashed: true)
-}
-
-private struct DueChip: View {
-    let todo: Todo
-    let isEditing: Bool
-    /// Reveal the empty-state "＋date" affordance (true while hovering the row). A real own/inherited
-    /// date is content, not a control, so it stays visible regardless.
-    let reveal: Bool
-    /// Apply a due date — nil clears it. Whatever the row's date commands apply to, this applies to.
-    let onPick: (String?) -> Void
-    /// Open the precise picker, for a date the presets haven't got.
-    let onPickCustom: () -> Void
-
-    /// The date this chip is showing, and whether the task owns it or inherited it from an ancestor.
-    private var shown: (raw: String, own: Bool)? {
-        if let own = todo.dueDate { return (own, true) }
-        if let inherited = todo.effectiveDueDate { return (inherited, false) }
-        return nil
-    }
-
-    private var hasDate: Bool { shown != nil }
-    private var showing: Bool { hasDate || reveal || isEditing }
-
-    var body: some View {
-        // Always laid out so hovering only toggles opacity, never the row's height. A real own/
-        // inherited date is content (always visible); the empty-state "＋date" is a control that
-        // fades in on hover/edit but keeps reserving its space.
-        Menu {
-            menuItems
-        } label: {
-            if let shown {
-                chip(RelativeDue.short(shown.raw),
-                     style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
-            } else {
-                chip("＋date", style: .empty)
-            }
-        }
-        // `.button` + `.plain`, not `.borderlessButton`. The borderless style presents the label
-        // through a pop-up-button control, which paints it in the control's own label colour — so the
-        // chip's whole severity scale collapsed to plain text the moment it stopped being a `Button`.
-        // The button style routes the label through `PlainButtonStyle` instead, which renders it as
-        // written, exactly as the row's other plain buttons are rendered.
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(helpText)
-        .opacity(showing ? 1 : 0)
-        .allowsHitTesting(showing)
-    }
-
-    /// The relative answers first, a calendar for anything else, and a way out.
-    ///
-    /// A menu, because that's what a chip is on this platform — you click the date pill in Reminders
-    /// and get choices, not a stepper. It also puts the editor in the same language as the badge that
-    /// opens it: the badge says "in 2w", so the menu says "Next Week", not 09/03/2026.
-    ///
-    /// Every item routes through `onPick`, which is the row's `onSetDue` — so a date chosen on a row
-    /// inside a multi-selection lands on the whole selection, exactly as the context menu's version
-    /// does. There's no separate single-row path to fall out of step.
-    @ViewBuilder private var menuItems: some View {
-        ForEach(DueSuggestion.options()) { option in
-            Button { onPick(DueFormat.string(option.date)) } label: {
-                Text(option.title) + Text("   \(option.hint)").foregroundStyle(.secondary)
-            }
-        }
-        Divider()
-        Button("Pick a Date…", action: onPickCustom)
-        if todo.dueDate != nil {
-            Divider()
-            Button("Clear Due Date") { onPick(nil) }
-        }
-    }
-
-    /// The tooltip: the exact date the badge is a summary of, plus what clicking does.
-    ///
-    /// The badge says "in 2w" now, which is faster to read and useless for deciding whether that
-    /// clears a deadline — so the date it stands for has to be one hover away. See `RelativeDue.full`.
-    private var helpText: String {
-        if let own = todo.dueDate {
-            return "Due \(RelativeDue.full(own))  ·  click to edit"
-        }
-        if let eff = todo.effectiveDueDate {
-            return "Inherited due \(RelativeDue.full(eff))  ·  click to set this task's own"
-        }
-        return "Set due date"
-    }
-
-    private func chip(_ text: String, style: DueChipStyle) -> some View {
-        Text(text)
-            .font(.caption2.weight(style.weight))
-            // A relative badge rewrites itself as the days tick down, and "in 2d" → "in 3d" shouldn't
-            // shift the row's layout to do it.
-            .monospacedDigit()
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 4).fill(style.fill))
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(style.stroke,
-                                  style: StrokeStyle(lineWidth: 1, dash: style.dashed ? [3] : []))
-            )
-            .foregroundStyle(style.text)
-    }
-}
-
 // MARK: Session header + note editor
 
 /// A revealed session's first-class row: its date/label line, and a context menu for renaming, adding

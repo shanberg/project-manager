@@ -1,22 +1,42 @@
 import AppKit
+import Combine
 import SwiftUI
 import PDFKit
 import PmLib
 
 /// A card showing a file from the vault: a note, a picture, a PDF.
 ///
-/// The header strip is the part Obsidian doesn't have, and it is here because PM knows something
-/// Obsidian doesn't. A canvas stores a file's path from the vault root and never updates it, so when
-/// PM archives or renumbers a project every card pointing into it goes stale — in a real vault, nearly
-/// half of them had. `CanvasFileResolver` follows those to where the file actually went, and the strip
-/// is where that gets said: the card shows the file, and says plainly that it isn't where the canvas
-/// claims, with the repair one click away.
+/// **The card is the file's contents and nothing else.** It used to carry a header strip naming the
+/// file, which was doing two jobs. Identifying the card is the smaller one, and the note's own first
+/// heading usually does it better; what is left of it is on the tooltip, and zoomed out the filename
+/// becomes the card's whole content, because at that size the name genuinely is the most informative
+/// thing about it.
+///
+/// The larger job was saying that the file isn't where the canvas claims. A canvas stores a path from
+/// the vault root and never updates it, so when PM archives or renumbers a project every card pointing
+/// into it goes stale — in a real vault, nearly half of them had. `CanvasFileResolver` still follows
+/// those to where the file actually went, and the window says so once, at the top, with Repair Paths
+/// beside it — which is the better place for it anyway: it is a fact about the document rather than
+/// about any one card, and it was only ever readable on the cards you happened to scroll past.
 ///
 /// A card whose file is genuinely gone draws as missing **with the path it wanted**, rather than as an
 /// empty rectangle. The path is the only clue to what was there.
 @MainActor
 final class CanvasFileNodeView: CanvasNodeView {
     private var location: CanvasFileLocation = .missing
+
+    /// The project this card shows, when it shows one — its store, and the key the registry knows it
+    /// by so the hold can be given back. Shared with the project window (`StoreRegistry`), so a task
+    /// ticked here is ticked there, with no second copy of the document to keep in step.
+    private var projectStore: PMStore?
+    private var projectStoreKey: String?
+    /// Published to this card's SwiftUI content, which starts scrolling and stops holding an open
+    /// editor as you step in and out.
+    private let engagement = CanvasCardEngagement()
+    /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
+    /// here, from the project's own window, or from anywhere else holding the same store.
+    private var projectEdits: AnyCancellable?
+    private var lastUndoDepth = 0
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -33,45 +53,72 @@ final class CanvasFileNodeView: CanvasNodeView {
     override func contentChanged() {
         let (path, subpath) = stored
         location = board.store.resolver.resolve(path)
+        // The card may have been pointed somewhere else entirely. A hold on the project it used to show
+        // is a project kept open for a card that has stopped showing it.
+        if projectStoreKey != nil,
+           projectStoreKey != location.url.flatMap(CanvasProjectSource.projectKey(for:)) {
+            releaseProject()
+        }
 
         // Zoomed out, a note renders as a grey texture and a PDF page as a grey rectangle, and both
         // cost a full layout to produce. The filename is what you are actually reading at this size.
         // Pictures are the exception and keep rendering: an image is *more* legible small than any
         // text, and at this zoom it is usually the only thing on the board you can identify.
         if isSimplified, !isPicture(path) {
-            let name = (path as NSString).deletingPathExtension as NSString
-            setContent(summaryView(name.lastPathComponent, symbol: symbol(for: path)))
+            setContent(summaryView(shortName(for: path), symbol: symbol(for: path)))
             return
         }
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.distribution = .fill
-
-        let chip = CanvasCardChip(title: (path as NSString).lastPathComponent
-                                    + (subpath.map { " · " + $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) } ?? ""),
-                                  symbol: symbol(for: path),
-                                  warning: location.hasMoved ? movedNote : nil)
-        stack.addArrangedSubview(chip)
-        chip.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        let body = preview(for: location, path: path, subpath: subpath)
-        stack.addArrangedSubview(body)
-        body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        setContent(stack)
+        setContent(preview(for: location, path: path, subpath: subpath))
     }
 
-    /// What the strip says when PM had to go looking. Names the folder it landed in, because "moved"
-    /// on its own doesn't tell you whether the project was archived or renamed.
+    /// What the card says about itself when you linger on it: which file, which heading, and whether
+    /// PM had to go looking for it. See `CanvasNodeView.cardDescription`.
+    override var cardDescription: String? {
+        let (path, subpath) = stored
+        guard !path.isEmpty else { return nil }
+        var lines = [(path as NSString).lastPathComponent
+                        + (subpath.map { " \u{00B7} " + $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) } ?? "")]
+        if let moved = movedNote { lines.append(moved) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// What the card says when PM had to go looking. Names the folder it landed in, because "moved" on
+    /// its own doesn't tell you whether the project was archived or renamed.
     private var movedNote: String? {
-        guard case .moved(let url, _) = location else { return nil }
+        guard case .moved(let url, _) = board.store.resolver.resolve(stored.path) else { return nil }
         let parent = url.deletingLastPathComponent()
         let root = obsidianVaultRoot(for: url)
         let where_ = root.flatMap { CanvasFileResolver(canvas: url, vaultRoot: $0).storablePath(for: parent) }
         return "moved to " + (where_ ?? parent.lastPathComponent)
+    }
+
+    /// What the card is called when the board is too far out to read it.
+    ///
+    /// A project's notes file is named for the project, so the `Notes - ` prefix is the one part of the
+    /// filename that says nothing — and at this zoom the card is one line of text, which makes eight
+    /// wasted characters a third of it. Every board of projects otherwise reads as a row of cards all
+    /// starting with the same word.
+    private func shortName(for path: String) -> String {
+        let name = ((path as NSString).deletingPathExtension as NSString).lastPathComponent
+        guard projectFolder(ofNotesPath: path) != nil, name.hasPrefix("Notes - ") else { return name }
+        return String(name.dropFirst("Notes - ".count))
+    }
+
+    /// The project this card's file belongs to, if it is a project's notes. What the menu's Open
+    /// Project acts on.
+    var projectFolderName: String? {
+        projectFolder(ofNotesPath: stored.path).map { ($0 as NSString).lastPathComponent }
+    }
+
+    /// Prose scrolls; a picture and a PDF preview do not.
+    ///
+    /// The PDF is deliberate rather than an omission — a PDF card is one page scaled to fit, with no
+    /// scrolling by design (see `preview`), so there is nothing under the pointer to travel through.
+    override var scrollsItsContent: Bool { isProse(stored.path) }
+
+    private func isProse(_ path: String) -> Bool {
+        ["md", "markdown", "txt"].contains((path as NSString).pathExtension.lowercased())
     }
 
     private func isPicture(_ path: String) -> Bool {
@@ -113,6 +160,15 @@ final class CanvasFileNodeView: CanvasNodeView {
             return view
 
         case "md", "markdown", "txt":
+            // A project's notes are a project, not a markdown file — see `CanvasProjectNote`. Only for
+            // the whole document: a `#Heading` subpath is a request for one part of the file, and the
+            // task list is not a part of a file, so a card pointing into one falls through to prose.
+            if subpath == nil, let store = projectStore(for: url) {
+                return NSHostingView(rootView:
+                    CanvasProjectNote(store: store, engagement: engagement, noteURL: url) { folder in
+                        WindowManager.shared.open(named: folder)
+                    })
+            }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
             return NSHostingView(rootView:
@@ -124,8 +180,7 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .padding(.horizontal, 11)
                         .padding(.vertical, 9)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollDisabled(true))
+                })
 
         default:
             let label = NSTextField(labelWithString: url.lastPathComponent)
@@ -134,6 +189,73 @@ final class CanvasFileNodeView: CanvasNodeView {
             label.alignment = .center
             return label
         }
+    }
+
+    /// The project's store, taken from the registry the first time this card asks and held until the
+    /// card goes away.
+    ///
+    /// Retained rather than fetched per render, because acquiring is what triggers the project's first
+    /// read: asking again on every rebuild would be a reload per zoom threshold crossed.
+    private func projectStore(for url: URL) -> PMStore? {
+        if let projectStore { return projectStore }
+        guard let key = CanvasProjectSource.projectKey(for: url) else { return nil }
+        let store = StoreRegistry.shared.acquire(key)
+        projectStore = store
+        projectStoreKey = key
+        // Every mutation pushes a snapshot, so the stack growing *is* an edit — whoever made it, and
+        // whichever surface they made it on. Watching that rather than wrapping each call site is what
+        // catches the ones made through `TaskMenu`, which talks to the store directly.
+        lastUndoDepth = store.undoStack.count
+        projectEdits = store.$undoStack
+            .sink { [weak self, weak store] stack in
+                guard let self, let store else { return }
+                defer { lastUndoDepth = stack.count }
+                guard stack.count > lastUndoDepth else { return }
+                board.lastEditedProject = store
+            }
+        return store
+    }
+
+    /// Whether this card shows a project rather than a file.
+    ///
+    /// Asked of the path, not of whether the store happens to be held. A card zoomed out past reading
+    /// draws a summary and never acquires a store, and what a click on it means should not depend on
+    /// how far out the board happens to be.
+    var isProjectCard: Bool {
+        guard stored.subpath == nil, let url = location.url else { return false }
+        return CanvasProjectSource.projectKey(for: url) != nil
+    }
+
+    /// A card showing a project takes its own clicks, the way a web card does — you tick a box, retype
+    /// a task, set a date. Everything else on a board is read, so everything else waits for a
+    /// double-click.
+    override var engagesOnClick: Bool { isProjectCard && !isSimplified }
+
+    override func engagementChanged() {
+        engagement.isEngaged = isEngaged
+        if isEngaged {
+            // The keyboard has to reach the text fields inside. A hosting view takes it on behalf of
+            // whatever SwiftUI has focused.
+            if let content = subviews.first { window?.makeFirstResponder(content) }
+        } else if let content = subviews.first,
+                  (window?.firstResponder as? NSView)?.isDescendant(of: content) == true {
+            window?.makeFirstResponder(board)
+        }
+    }
+
+    /// Scrolled off the board: give the project's store back. The registry drops it when the last
+    /// holder does, and a board of forty project cards would otherwise hold forty projects open for as
+    /// long as the window lived.
+    override func prepareForRemoval() {
+        releaseProject()
+    }
+
+    private func releaseProject() {
+        projectEdits = nil
+        if board.lastEditedProject === projectStore { board.lastEditedProject = nil }
+        StoreRegistry.shared.release(projectStoreKey)
+        projectStore = nil
+        projectStoreKey = nil
     }
 
     private func missingView(_ path: String) -> NSView {
@@ -193,13 +315,36 @@ final class CanvasFileNodeView: CanvasNodeView {
 
     // MARK: Opening
 
-    override func beginEditing() { open() }
+    /// What "work on this card" means, which is not the same thing for every file.
+    ///
+    /// For nearly all of them it means opening the document, because PM does not edit pictures, PDFs or
+    /// somebody's markdown — the card is a view of a file that belongs to another app. For a project it
+    /// means the opposite: the card *is* the project, editable in place (see `CanvasProjectNote`), and
+    /// handing it to Obsidian would be walking past the thing you clicked on to open its source.
+    ///
+    /// This is what a single click reaches on a project card, through `engagesOnClick` — so getting it
+    /// wrong meant a click on a project launching Obsidian, which is the one place a click on it should
+    /// never go.
+    override func beginEditing() {
+        guard isProjectCard else { return open() }
+        // Too far out to read, let alone edit. "Open this" then means the project window, which is
+        // where a project you cannot see on the board is actually usable — still the project, still
+        // not Obsidian.
+        guard !isSimplified else {
+            board.goToProject(self)
+            return
+        }
+        engage(true)
+    }
 
-    /// Open the file where it belongs: a note in Obsidian, anything else in whatever owns it.
+    /// Open the file where it belongs: a note in Obsidian, anything else in whatever owns it. What the
+    /// card's own menu item does, on any card including a project's.
     ///
     /// A note goes to Obsidian rather than to a text editor because that is where it is written, and
     /// the canvas it is on is an Obsidian document — jumping to a different app to read a note that
     /// lives in the vault would be PM asserting an ownership it doesn't have.
+    func openInOwningApp() { open() }
+
     private func open() {
         guard let url = location.url else { return }
         if ["md", "markdown"].contains(url.pathExtension.lowercased()) {

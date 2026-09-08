@@ -146,17 +146,29 @@ targets:
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Project/SessionBlocks.swift
-      - path: PM/Canvas/CanvasCardChip.swift
       - path: PM/Canvas/CanvasPageBudget.swift
       - path: PM/Canvas/CanvasWebSession.swift
       - path: PM/Canvas/CanvasColors.swift
       - path: PM/Canvas/CanvasBlockPolicy.swift
+      - path: PM/Canvas/CanvasAddress.swift
       - path: PM/Canvas/CanvasSelection.swift
       - path: PM/Canvas/CanvasSnapping.swift
+      - path: PM/Canvas/CanvasGroupResize.swift
+      - path: PM/Canvas/CanvasTiling.swift
+      - path: PM/Canvas/CanvasTileSession.swift
+      - path: PM/Canvas/CanvasViewState.swift
+      - path: PM/Canvas/CanvasArrangements.swift
+      - path: PM/Canvas/CanvasCardZoom.swift
+      - path: PM/Canvas/CanvasPageTitles.swift
+      - path: PM/Canvas/CanvasCardSession.swift
+      - path: PM/Canvas/CanvasProjectNoteCard.swift
+      - path: PM/Canvas/CanvasNavigation.swift
+      - path: PM/Canvas/CanvasLayout.swift
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Task/CompletingTextField.swift
       - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift
+      - path: PM/Project/ProjectTab.swift
       - path: PM/QuickBar/ProjectSearch.swift
     dependencies:
       - package: PmLib

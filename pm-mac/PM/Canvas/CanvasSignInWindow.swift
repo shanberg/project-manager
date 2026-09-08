@@ -31,17 +31,20 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
     /// Told when the window closes, so the card that asked can pick the session up.
     private var onFinish: (() -> Void)?
 
-    static func present(for url: URL, onFinish: @escaping () -> Void) {
-        let controller = CanvasSignInWindow(url: url, onFinish: onFinish)
+    /// - Parameter profile: the card's session, so signing in lands in the jar that card reads. Nil is
+    ///   the shared one — see `CanvasCardSession`. A window that signed in to the shared session on
+    ///   behalf of a card on a profile would report success and change nothing the card can see.
+    static func present(for url: URL, profile: String? = nil, onFinish: @escaping () -> Void) {
+        let controller = CanvasSignInWindow(url: url, profile: profile, onFinish: onFinish)
         open.insert(controller)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private init(url: URL, onFinish: (() -> Void)?) {
+    private init(url: URL, profile: String?, onFinish: (() -> Void)?) {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = CanvasWebSession.store
+        configuration.websiteDataStore = CanvasWebSession.store(named: profile)
         // The same filtering the card gets. A sign-in page that behaves differently from the card it
         // was opened for is a debugging trap, and consent banners are, if anything, worse here.
         CanvasContentBlocker.attach(to: configuration, for: url.host())

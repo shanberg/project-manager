@@ -22,7 +22,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     private var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
     private var sidebarHosting: NSHostingController<ProjectSidebar>!
-    private var contentHosting: NSHostingController<ProjectView>!
+    /// The container the content column's two renderers take turns in — see
+    /// `ProjectContentPaneController`.
+    private let contentPane = ProjectContentPaneController()
 
     /// Whether this controller is currently holding the shared project scan open. It owns that retain
     /// rather than the sidebar view, because a collapsed split item keeps its view mounted — the view
@@ -46,11 +48,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         super.viewDidLoad()
 
         sidebarHosting = NSHostingController(rootView: ProjectSidebar(store: store, state: state))
-        contentHosting = NSHostingController(rootView: makeContentView())
-        // The content fills whatever frame the split gives it. Left on the default
-        // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal size,
-        // which fights the user's own window size on every content change.
-        contentHosting.sizingOptions = []
+        wireTabModel()
         // The sidebar keeps `.minSize`, and this is the whole reason its collapse animation looks like
         // a sidebar rather than a glitch: while a split item animates, AppKit sizes the pane's content
         // view to its *fitting* width and slides it in from behind the divider. A hosting view with no
@@ -59,21 +57,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         // width SwiftUI asks for (see `ProjectSidebar`'s frozen layout), and the whole sidebar slides.
         sidebarHosting.sizingOptions = [.minSize]
 
-        // Contain the content column's push transitions (the session-note takeover slides in from the
-        // trailing edge while the task list slides out the leading one) to the pane. The column used to
-        // do this itself with a SwiftUI `.clipped()`, which meant its scrolling task list sat inside a
-        // clip layer permanently for the sake of a quarter-second animation. A layer mask on the pane
-        // that hosts it is free — the hosting view is layer-backed regardless — and the pane's edge is
-        // the boundary the transition should respect anyway.
-        contentHosting.view.wantsLayer = true
-        contentHosting.view.layer?.masksToBounds = true
-
         // An `NSHostingView` reports its SwiftUI ideal size as an intrinsic size and defends it with
         // the default (500) hugging and compression-resistance priorities — which outrank the split
         // view's own dragging constraints, so the divider simply won't move. Standing both panes down
         // to `.defaultLow` hands the width decision back to the split view, which is what makes the
         // divider draggable and what lets the sidebar honour its min/max thicknesses.
-        for view in [sidebarHosting.view, contentHosting.view] {
+        for view in [sidebarHosting.view, contentPane.view] {
             view.setContentHuggingPriority(.defaultLow, for: .horizontal)
             view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
@@ -82,11 +71,19 @@ final class ProjectSplitViewController: NSSplitViewController {
         sidebarItem.minimumThickness = ProjectWindow.sidebarMinWidth
         sidebarItem.maximumThickness = ProjectWindow.sidebarMaxWidth
         sidebarItem.canCollapse = true
-        // Below the content's, so growing the window widens the task column and leaves the sidebar at
-        // the width the user set — the behaviour every other source-list app has.
-        sidebarItem.holdingPriority = .defaultLow - 1
+        // *Above* the content's. A split view resizes its lowest-priority pane first, so the pane you
+        // want to hold still is the one with the higher number — this was the wrong way round, and the
+        // sidebar was taking every point the window gained or lost. The sidebar's width is something
+        // the user set once, by dragging; resizing a window is not a request to change it.
+        sidebarItem.holdingPriority = .defaultLow + 1
+        // A sidebar collapses by resizing the *window* by default — show it and the window grows by
+        // its width. That is the same coupling from the other side, and it is intolerable for the
+        // auto-hide below, which runs mid-drag: the window would fight the edge the user is dragging.
+        // With this the window is left alone and the task column takes the space, so the only thing
+        // that ever moves a window edge is a hand on it (or `makeRoomForSidebar`, which is asked for).
+        sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
 
-        contentItem = NSSplitViewItem(viewController: contentHosting)
+        contentItem = NSSplitViewItem(viewController: contentPane)
         contentItem.minimumThickness = ProjectWindow.minContentWidth
         contentItem.canCollapse = false
         contentItem.holdingPriority = .defaultLow
@@ -151,8 +148,35 @@ final class ProjectSplitViewController: NSSplitViewController {
                 guard let self else { return }
                 self.state.sidebarVisible = !item.isCollapsed
                 self.syncProjectScan()
+                // With the sidebar showing, the traffic lights sit over *it* and a board in the content
+                // column needs no inset of its own — the same rule the task column's header follows.
+                self.canvasPane?.ignoresTrafficLights = !item.isCollapsed
             }
         }
+
+        // `queue: nil` so it runs synchronously inside the resize that posted it, rather than a turn of
+        // the run loop later — the whole point is to decide within the frame the window is being
+        // dragged through.
+        resizeObservation = NotificationCenter.default.addObserver(
+            forName: NSSplitView.didResizeSubviewsNotification, object: splitView, queue: nil
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // A divider index means a hand on the divider — the one thing that sets the sidebar's
+                // width. Everything else that resizes these subviews is the window changing size, and
+                // must not be mistaken for the user asking for a narrower sidebar.
+                if note.userInfo?["NSSplitViewDividerIndex"] != nil { self.recordSidebarWidth() }
+                self.syncSidebarForAvailableWidth()
+            }
+        }
+    }
+
+    /// Take the sidebar's current width as the width to hold it at.
+    private func recordSidebarWidth() {
+        guard !sidebarItem.isCollapsed else { return }
+        sidebarWidthAtRest = min(max(sidebarItem.viewController.view.frame.width,
+                                     ProjectWindow.sidebarMinWidth),
+                                 ProjectWindow.sidebarMaxWidth)
     }
 
     override func viewWillAppear() {
@@ -165,18 +189,295 @@ final class ProjectSplitViewController: NSSplitViewController {
             UserDefaults.standard.object(forKey: "NSSplitView Subview Frames \($0)") != nil
         } ?? false
         if !autosaved { splitView.setPosition(ProjectWindow.sidebarWidth, ofDividerAt: 0) }
+        // The restored width is a width the user dragged to, in some window, at some point — which is
+        // exactly what the auto-hide holds the sidebar at. Without this the window would open honouring
+        // the default instead of the sidebar in front of the user.
+        recordSidebarWidth()
     }
 
     private var didSeedDividerPosition = false
+
     /// Identifies the in-flight sidebar animation, so a completion handler that belongs to a toggle
     /// that's already been superseded can't clear `sidebarAnimating` out from under the current one.
     private var settleToken = 0
+
+    // MARK: Auto-hide
+
+    /// The width the user has put the sidebar at. Deliberately *not* re-read from the pane on every
+    /// layout: as a window narrows past what fits, the split view squeezes the sidebar before this
+    /// code gets a look in, and a threshold measured from the squeezed width would chase itself down
+    /// and never fire. It changes when the divider is dragged, and at no other time.
+    private var sidebarWidthAtRest = ProjectWindow.sidebarWidth
+
+    /// Whether the sidebar is hidden because the window ran out of room for it, rather than because
+    /// somebody asked for it to be hidden. Only the former comes back on its own.
+    private var sidebarHiddenForWidth = false
+
+    /// Watches the split view's own resizes — see `syncSidebarForAvailableWidth`.
+    private var resizeObservation: NSObjectProtocol?
+
+    /// The narrowest this window can be and still show the sidebar at its set width beside a task
+    /// column at *its* minimum.
+    private var widthNeededForSidebar: CGFloat {
+        sidebarWidthAtRest + splitView.dividerThickness + ProjectWindow.minContentWidth
+    }
+
+    /// Hide the sidebar when the window is too narrow to hold it beside a usable task column, and give
+    /// it back when the window is wide enough again.
+    ///
+    /// This is the *only* thing window width is allowed to do to the sidebar; short of vanishing, it
+    /// stays exactly the width the divider was left at.
+    private func syncSidebarForAvailableWidth() {
+        guard isViewLoaded, splitView.bounds.width > 0 else { return }
+        // A point of slack. Widths land on fractional points, and a sidebar that hides itself because
+        // the window came up half a point short is not what "too small" means.
+        let hasRoom = splitView.bounds.width + 1 >= widthNeededForSidebar
+        // Set directly rather than through the animator: this rides a live resize drag, and a slide
+        // that takes a quarter second to catch up with the window edge reads as lag, not animation.
+        if !hasRoom, !sidebarItem.isCollapsed {
+            sidebarHiddenForWidth = true
+            sidebarItem.isCollapsed = true
+        } else if hasRoom, sidebarHiddenForWidth, sidebarItem.isCollapsed {
+            sidebarHiddenForWidth = false
+            sidebarItem.isCollapsed = false
+        }
+    }
+
+    /// `viewWillLayout` catches the window's own resizes, but a point late: the split view has already
+    /// squeezed the sidebar by the time it runs, so the pane visibly narrows for a frame before it
+    /// goes. The notification fires as part of that same resize, which is why both are here.
+    override func viewWillLayout() {
+        super.viewWillLayout()
+        syncSidebarForAvailableWidth()
+    }
+
+    /// Widen the window enough to show the sidebar, for a window that hasn't the room.
+    ///
+    /// Asking for the sidebar in a narrow window has to mean something, and the two honest answers are
+    /// "squeeze the task column" — which its minimum forbids — and this one. Without it the pane would
+    /// appear and the next layout pass would auto-hide it straight back, so the toggle would look
+    /// broken in exactly the windows the auto-hide exists for.
+    private func makeRoomForSidebar() {
+        guard let window = view.window else { return }
+        let shortfall = widthNeededForSidebar - splitView.bounds.width
+        guard shortfall > 0 else { return }
+        var frame = window.frame
+        frame.size.width += shortfall
+        window.setFrame(window.constrainFrameRect(frame, to: window.screen), display: true)
+    }
 
     /// Rebuild the SwiftUI content — used on first load and whenever the window is retargeted at a
     /// different project.
     private func makeContentView() -> ProjectView {
         ProjectView(store: store, state: state)
     }
+
+    // MARK: What the column shows
+
+    /// This window's tabs. One on the notes is what the window has always been; the rest is new.
+    private(set) var tabs = ProjectTabSet()
+    /// What both headers draw the bar from. See `ProjectTabModel`.
+    let tabModel = ProjectTabModel()
+
+    /// Where the project's board is, what to call it, and what to do when it hasn't got one.
+    ///
+    /// A closure rather than arguments, because a tab is switched from inside this controller — a click
+    /// on the bar — and there is nobody to pass them in at that moment. The window supplies it; the
+    /// store belongs to the window.
+    var canvasSource: () -> (url: URL?, name: String?, create: () -> Void) = { (nil, nil, {}) }
+
+    /// Which renderer is up. Read by the window for its menu checkmark and its width cap.
+    var renderer: ProjectRenderer { tabs.selected.view.isBoard ? .canvas : .tasks }
+
+    /// The board the window is showing, if it is showing one.
+    var canvasPane: CanvasPaneController? { contentPane.current as? CanvasPaneController }
+
+    // MARK: Driving the tabs
+
+    /// Show this set of tabs. `canvasPending` says the project's board is still being looked for, so a
+    /// board tab has to hold still rather than answer — see `ProjectWindowController`.
+    func setTabs(_ next: ProjectTabSet, canvasPending pending: Bool = false) {
+        // A pane built while the board was still being looked for is a placeholder, and `applySelectedTab`
+        // would find it in the cache and show it again for good. Dropped the moment the waiting ends.
+        if canvasPending, !pending { contentPane.dropAll() }
+        canvasPending = pending
+        tabs = next
+        applySelectedTab()
+    }
+
+    /// Set while a board tab has nothing to show *yet* — as opposed to nothing to show.
+    private var canvasPending = false
+
+    private func wireTabModel() {
+        tabModel.select = { [weak self] id in
+            guard let self, id != tabs.selectedID else { return }
+            tabs.select(id)
+            applySelectedTab()
+        }
+        tabModel.close = { [weak self] id in
+            guard let self, tabs.close(id) else { return }
+            // After the switch, not before: the pane being torn down may be the one on screen, and a
+            // window with nothing in it for one turn of the run loop flickers.
+            applySelectedTab()
+            contentPane.drop(tab: id)
+        }
+        tabModel.openNotes = { [weak self] in self?.openTab(.notes) }
+        tabModel.openBoard = { [weak self] in self?.openTab(.board(.whole)) }
+        tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
+        tabModel.openArrangement = { [weak self] name in self?.openTab(.board(.arrangement(name))) }
+        tabModel.leaveTiling = { [weak self] in self?.canvasPane?.leaveTiling() }
+    }
+
+    func openTab(_ view: ProjectTabView) {
+        tabs.open(view)
+        applySelectedTab()
+    }
+
+    /// Show this tab in the same tab, rather than in a new one — what the renderer switch does.
+    func replaceSelected(with view: ProjectTabView) {
+        guard tabs.selected.view != view else { return }
+        // The old content goes: a tab that has become the notes is not holding a board any more, and
+        // keeping one mounted for a tab that no longer names it is a renderer nobody can reach.
+        contentPane.drop(tab: tabs.selectedID)
+        tabs.replaceSelected(with: view)
+        applySelectedTab()
+    }
+
+    /// ⌃⇥ / ⌃⇧⇥.
+    func cycleTabs(by step: Int) {
+        guard tabs.tabs.count > 1 else { return }
+        tabs.selectNext(by: step)
+        applySelectedTab()
+    }
+
+    /// Build (or reveal) the content for the tab that is up, and tell everyone what changed.
+    func applySelectedTab() {
+        let tab = tabs.selected
+        if let existing = contentPane.content(for: tab.id) {
+            contentPane.show(existing, for: tab.id)
+        } else {
+            contentPane.show(makeContent(for: tab), for: tab.id)
+        }
+        canvasPane?.focusBoard()
+        refreshTabModel()
+        onRendererChanged?()
+    }
+
+    /// The controller a tab needs, made fresh.
+    private func makeContent(for tab: ProjectTab) -> NSViewController {
+        switch tab.view {
+        case .notes:
+            let hosting = NSHostingController(rootView: makeContentView())
+            // The content fills whatever frame the split gives it. Left on the default
+            // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal
+            // size, which fights the user's own window size on every content change.
+            hosting.sizingOptions = []
+            hosting.view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            hosting.view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return hosting
+        case .board(let focus):
+            if let board = makeBoard(focus) { return board }
+            // **Nothing to show yet is not nothing to show.** A project's canvas path arrives with its
+            // first read of the folder, so for a moment after a switch every project looks like a
+            // project without a board. Answering then — with the empty state, or by falling back to the
+            // notes, which is what the window used to do — puts a whole view on screen and takes it
+            // away again, and the switch reads as having gone somewhere it didn't. So the tab holds
+            // still until the looking is over; it is measured in milliseconds and there is nothing
+            // worth saying inside it.
+            return canvasPending ? ProjectWaitingPaneController() : makeCanvasEmptyState()
+        }
+    }
+
+    private func makeBoard(_ focus: CanvasFocus) -> CanvasPaneController? {
+        let source = canvasSource()
+        guard let url = source.url, let store = try? CanvasStoreRegistry.store(for: url) else {
+            // A canvas that won't parse, or a project without one. The empty state is the honest
+            // answer for the second; for the first, File ▸ Open Canvas reports the error properly.
+            return nil
+        }
+        let pane = CanvasPaneController(store: store)
+        pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
+        pane.ignoresTrafficLights = !sidebarItem.isCollapsed
+        pane.focus = focus
+        // The same switch the task list's header carries, so the way back is where the way here was.
+        pane.header.showsRendererSwitch = true
+        pane.header.setRenderer = { [weak self] next in
+            guard next == .tasks else { return }
+            self?.replaceSelected(with: .notes)
+        }
+        pane.tabModel = tabModel
+        pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
+        return pane
+    }
+
+    private func makeCanvasEmptyState() -> NSViewController {
+        let source = canvasSource()
+        let empty = NSHostingController(rootView: ProjectCanvasEmptyState(
+            projectName: source.name,
+            create: source.create,
+            showTasks: { [weak self] in self?.replaceSelected(with: .notes) }))
+        empty.sizingOptions = []
+        return empty
+    }
+
+    /// Say what the bar should now draw. The names of pinned tabs come from the board's own document —
+    /// a frame's label is the frame's, not the tab's — so a frame renamed in Obsidian renames the tab
+    /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
+    func refreshTabModel() {
+        let board = canvasPane
+        tabModel.items = tabs.tabs.map { tab in
+            // Its own board, not the one on screen: a tab tiled in the background still says so, and
+            // asking the visible pane for every tab's state would put one tab's tiling on all of them.
+            let detail = (contentPane.content(for: tab.id) as? CanvasPaneController)?
+                .tilingSummary?.short
+            switch tab.view {
+            case .notes:
+                return ProjectTabItem(id: tab.id, name: "Notes", symbol: "list.bullet")
+            case .board(.whole):
+                return ProjectTabItem(id: tab.id, name: "Canvas", symbol: "rectangle.3.group",
+                                      detail: detail)
+            case .board(.frame(let node)):
+                return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
+                                      symbol: "square.dashed", detail: detail)
+            case .board(.arrangement(let name)):
+                return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
+                                      detail: detail)
+            }
+        }
+        // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes
+        // it back when the bar goes away — for every board in the window, not only the visible one,
+        // since a background tab's pill is what you see the instant you switch to it.
+        for tab in tabs.tabs {
+            (contentPane.content(for: tab.id) as? CanvasPaneController)?
+                .header.showsTilingSummary = !tabs.showsBar
+        }
+        tabModel.selectedID = tabs.selectedID
+        tabModel.frames = board?.frames() ?? []
+        tabModel.arrangements = board?.arrangementNames() ?? []
+    }
+
+    /// Back to the task list — View ▸ Show Canvas turning itself off, and the empty state's button.
+    func showTasks() { replaceSelected(with: .notes) }
+
+    /// Show the project's board in the tab that is up.
+    func showCanvas() { replaceSelected(with: .board(.whole)) }
+
+    /// The project's board has appeared (or moved) since a tab was built. Rebuild any tab that is
+    /// showing the empty state, so making a canvas from it lands on the board rather than leaving the
+    /// window on the page that offered to make one.
+    func canvasPathChanged() {
+        guard tabs.selected.view.isBoard, !(contentPane.current is CanvasPaneController) else { return }
+        contentPane.drop(tab: tabs.selectedID)
+        applySelectedTab()
+    }
+
+    /// Told when the column changes what it is showing, so the window can re-apply its width cap and
+    /// its menus can re-validate.
+    var onRendererChanged: (() -> Void)?
+
+    /// The board's undo stack while one is showing, so ⌘Z in this window reaches the board rather than
+    /// the task list — and, because the store is shared, undoes in the canvas's own window too.
+    var undoManagerForContent: UndoManager? { canvasPane?.store.undoManager }
 
     // MARK: Retargeting
 
@@ -187,7 +488,11 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard newStore !== store else { return }
         store = newStore
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
-        contentHosting.rootView = makeContentView()
+        // Every tab was a view of the *old* project, so none of them survive. The window follows this
+        // with the new project's own remembered tabs; rebuilding here as well is what keeps the column
+        // from being empty for the turn of the run loop in between.
+        contentPane.dropAll()
+        applySelectedTab()
         // The sidebar's selection *is* the window's project (see `ProjectSidebar`), so a switch moves
         // it — including a switch that came from somewhere else entirely, like Open Recent. Written
         // after the sidebar has been rebound to the new store, so the change is read against the
@@ -207,12 +512,16 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// doesn't reach into the others. The persisted value is only the default a first window opens
     /// with, so the app comes back the way you left it.
     override func toggleSidebar(_ sender: Any?) {
+        // An explicit toggle outranks the auto-hide in both directions: showing it means the window
+        // makes room, and hiding it means it stays hidden however wide the window gets.
+        sidebarHiddenForWidth = false
+        if sidebarItem.isCollapsed { makeRoomForSidebar() }
+
         // Set before the animation starts, cleared once it's over: the sidebar only pins its layout and
         // clips while it's actually moving (see `ProjectSidebar`). The width it pins *to* is read here,
         // while the pane is still at rest — a collapsed item keeps its last width, so this is the width
         // the sidebar has now or is about to have again, in both directions.
-        state.sidebarRestingWidth = max(sidebarItem.viewController.view.frame.width,
-                                        ProjectWindow.sidebarMinWidth)
+        state.sidebarRestingWidth = sidebarWidthAtRest
         state.sidebarAnimating = true
 
         // Cleared by the animation's own completion, not by a timer set to outlast it. This used to be
@@ -233,6 +542,9 @@ final class ProjectSplitViewController: NSSplitViewController {
             MainActor.assumeIsolated {
                 guard let self, self.settleToken == token else { return }
                 self.state.sidebarAnimating = false
+                // A window that opened with the sidebar hidden has never seen the restored width, so
+                // the first time the pane appears is the first chance to learn it.
+                self.recordSidebarWidth()
             }
         }
         // `toggleSidebar` animates, so `isCollapsed` is already the new value but the animation is in
@@ -280,6 +592,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Before the release, so a collapse on the way down can't hand the retain straight back.
         collapseObservation?.invalidate()
         collapseObservation = nil
+        resizeObservation.map(NotificationCenter.default.removeObserver)
+        resizeObservation = nil
+        // A board showing here holds the canvas document open, and the last holder is what saves it and
+        // stops it polling the file. A window closing on a board must give that hold back — for every
+        // tab that has one, not only the one on screen.
+        contentPane.dropAll()
         if holdsProjectScan {
             holdsProjectScan = false
             ProjectIndex.shared.release()

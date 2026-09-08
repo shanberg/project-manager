@@ -23,6 +23,13 @@ import PmLib
 /// at the moment the request started, so a card went blank for the second or two a real page takes and
 /// stayed blank forever if the page never came: the card lost its identity exactly when it was least
 /// able to say what it was.
+///
+/// **Nothing is drawn on top of the page.** No caption strip above it, no freshness capsule floating
+/// over it. A loaded page fills the card corner to corner, and everything a card used to say about
+/// itself in its own chrome is said somewhere that costs the page nothing: the host and the age on the
+/// tooltip, and — for the one card you have stepped into, which is the only card whose address can
+/// cost you anything — the live address in the window's own header, beside the controls that drive it.
+/// See `cardDescription` and `CanvasHeaderModel`.
 @MainActor
 final class CanvasLinkNodeView: CanvasNodeView {
     /// The card's body. Holds the placeholder always, and the page over it once there is one.
@@ -31,8 +38,22 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private var placeholder: NSView?
     /// The picture of the page that stands in for it while it is paused. See `freeze`.
     private var frozen: NSImageView?
+    /// The placeholder's two lines of identity: what the page calls itself, and whose page it is. The
+    /// second is hidden until there is a name above it to tell it apart from.
+    private var nameLabel: NSTextField?
+    private var siteLabel: NSTextField?
     /// The line under the host: what the card is doing, or why it isn't doing it.
     private var status: NSTextField?
+    /// Told when the page renames itself. See `titleChanged`.
+    private var titleWatch: NSKeyValueObservation?
+    /// Whether a title arriving now is a name for *this card's* address.
+    ///
+    /// True from the moment the card sends the page to its own address, and false again as soon as you
+    /// navigate — a page you followed a link to is not what the card is for, and naming the card after
+    /// it would mean a board that renames its own cards while you read from them. A redirect chain the
+    /// card started is still the card's own navigation and keeps the flag; see `decidePolicyFor`,
+    /// which exists to tell those two apart.
+    private var capturingTitle = false
     /// Whether this card would run a page if the board let it. The board answers — see
     /// `CanvasPageBudget`.
     private var wanted = false
@@ -49,11 +70,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private var freezing = false
     /// When what the card is showing arrived — the moment the page finished, and still the answer
     /// after it has been frozen, because the picture is that page.
-    private var loadedAt: Date?
-    private var pill: NSView?
-    private var pillLabel: NSTextField?
-    /// The card's name, which follows whatever the page has navigated to — see `setTitle`.
-    private var caption: CanvasCardChip?
+    private(set) var loadedAt: Date?
     /// True once the page has been shown. A failure after this point leaves the page alone rather than
     /// yanking you back to the placeholder — you are reading something, and a subresource that 404s
     /// is not a reason to take the page away.
@@ -69,8 +86,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
-        setContent(chrome(over: face))
-        makePill()
+        setContent(face)
         showPlaceholder()
         reconsiderLoading(scale: scale)
     }
@@ -80,19 +96,65 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var address: String {
+    /// The address written on the board for this card. Where Home goes, and what the card is *for*.
+    var address: String {
         if case .link(let url) = node.content { return url }
         return ""
     }
 
-    private var url: URL? { URL(string: address) }
+    var url: URL? { URL(string: address) }
     private var host: String { url?.host()?.replacingOccurrences(of: "www.", with: "") ?? address }
 
+    /// Where the page actually is right now, which is not always where the board says it should be.
+    var liveURL: URL? { web?.url ?? url }
+
+    /// The host of whatever is on screen, for the window header to name.
+    var liveHost: String {
+        liveURL?.host()?.replacingOccurrences(of: "www.", with: "") ?? host
+    }
+
+    /// What the page at this card's address calls itself, if it has ever been loaded — here or on any
+    /// other board. See `CanvasPageTitles`.
+    var savedTitle: String? { CanvasPageTitles.of(address) }
+
+    /// The name of whatever is actually on screen.
+    ///
+    /// The running page's own title first, and deliberately: a card you have followed a link out of is
+    /// showing something else, and what the tooltip owes you is the name of the thing in front of you
+    /// rather than the name of the thing the board meant to put there. The remembered one is the
+    /// answer for every card that isn't running, which is most of them.
+    var liveTitle: String? {
+        if let title = web?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
+           let live = liveURL?.absoluteString, CanvasPageTitles.adds(title, to: live) {
+            return title
+        }
+        return savedTitle
+    }
+
+    /// The browser session this card uses, or nil for the one every card shares.
+    var profile: String? { CanvasCardSession.of(node) }
+
+    /// Whether this card's page may start playing by itself, and whether it may be heard.
+    var autoplays: Bool { CanvasCardMedia.autoplays(node) }
+    var isMuted: Bool { CanvasCardMedia.isMuted(node) }
+
     override func update(node: CanvasNode, scale: Double) {
+        // Changing which jar a card drinks from is a different page in every sense that matters —
+        // signed in as somebody else, or signed in at all — and it lives in `extra`, where the base
+        // class has no reason to look. Nothing else would notice it.
+        let rejarred = CanvasCardSession.of(node) != profile
+        // Mute is the one card setting you reach for *while the page is doing the thing* — a video is
+        // playing and you would rather it wasn't — so it is deliberately not in the list above. It is
+        // thrown on the running page instead of rebuilding it, which is the difference between muting
+        // what you are watching and losing it. Autoplay needs nothing at all here: it governs whether a
+        // page may start by itself, which is only asked as a page loads, so it lands next time this one
+        // does. See `CanvasCardMedia`.
+        let quieted = CanvasCardMedia.isMuted(node) != isMuted
         // A changed address *is* a changed content, so the base already rebuilds through
         // `contentChanged`. Doing it again here — which is what this used to do — started the page,
         // tore it down and started it a second time.
         super.update(node: node, scale: scale)
+        if rejarred { contentChanged() } else if quieted { applyMuting() }
         // The zoom, on the other hand, reaches us nowhere else: `simplificationChanged` is deliberately
         // a no-op for a web card, so this is the line that notices you have zoomed in far enough.
         reconsiderLoading(scale: scale)
@@ -104,6 +166,16 @@ final class CanvasLinkNodeView: CanvasNodeView {
     override func simplificationChanged() {}
 
     override func contentChanged() {
+        // The address changed to the page this card is already displaying — see `adoptCurrentAddress`.
+        // Nothing to rebuild; the card is already right, and rebuilding it would be the only thing the
+        // user could see going wrong.
+        if alreadyShowing {
+            alreadyShowing = false
+            refreshName()
+            describeYourself()
+            board.pageStateChanged()
+            return
+        }
         tearDownPage()
         loadedAt = nil
         timePassed()
@@ -213,10 +285,23 @@ final class CanvasLinkNodeView: CanvasNodeView {
             }
         }
 
-        let title = NSTextField(labelWithString: host)
-        title.font = .systemFont(ofSize: 13, weight: .medium)
-        title.alignment = .center
-        title.lineBreakMode = .byTruncatingTail
+        // What the page calls itself, over whose page it is. A card that has never loaded has only the
+        // host, and then the host is the name — one line rather than a name-shaped gap above it.
+        let name = NSTextField(labelWithString: savedTitle ?? host)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.alignment = .center
+        name.maximumNumberOfLines = 2
+        name.lineBreakMode = .byTruncatingTail
+        name.cell?.truncatesLastVisibleLine = true
+        nameLabel = name
+
+        let site = NSTextField(labelWithString: host)
+        site.font = .systemFont(ofSize: 11)
+        site.textColor = .secondaryLabelColor
+        site.alignment = .center
+        site.lineBreakMode = .byTruncatingTail
+        site.isHidden = savedTitle == nil
+        siteLabel = site
 
         let note = NSTextField(labelWithString: "")
         note.font = .systemFont(ofSize: 10.5)
@@ -227,8 +312,12 @@ final class CanvasLinkNodeView: CanvasNodeView {
         status = note
 
         stack.addArrangedSubview(icon)
-        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(name)
+        stack.addArrangedSubview(site)
         stack.addArrangedSubview(note)
+        // The name and the host are one fact in two lines; the status is a different one. Tightened
+        // between the first two so they read as a pair rather than as three evenly spaced things.
+        stack.setCustomSpacing(2, after: name)
 
         let container = NSView()
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -244,6 +333,99 @@ final class CanvasLinkNodeView: CanvasNodeView {
         revealed = false
     }
 
+    /// The card this zoom was built for. A page set at 11px is unreadable at any board zoom, because
+    /// the board scales the card's frame along with its text — and in a tiled view the frame is not
+    /// yours to change at all. See `CanvasCardZoom`.
+    override var zoomsItsContent: Bool { true }
+
+    override var scrollsItsContent: Bool { true }
+
+    /// The page itself. A `WKWebView` is not built out of an `NSScrollView` — the scrolling happens in
+    /// the web process — so the generic search would find nothing here, and the view that has to be
+    /// handed the wheel is the web view.
+    ///
+    /// Nil while the card is frozen, which is the honest answer: there is no page to scroll, only a
+    /// picture of one. The wheel goes back to the board, and the card wakes on its own terms — see
+    /// `setPageLive`.
+    override var contentScroller: NSView? {
+        guard scrollsItsContent, !isSimplified else { return nil }
+        return web
+    }
+
+    override func contentZoomChanged() { applyContentZoom() }
+
+    /// WebKit's own page zoom, which is what a browser's ⌘+ does: the page relays out at the new size
+    /// rather than being scaled as a picture, so text stays sharp and a column still fits the card.
+    private func applyContentZoom() { web?.pageZoom = contentZoom }
+
+    // MARK: What is injected into the page
+
+    /// Everything this card asks WebKit to run inside the page, in one place.
+    ///
+    /// One call rather than two at the point of use, because a user script cannot be taken back out of
+    /// a page once it is there and `removeAllUserScripts` is the only eraser WebKit has — so changing
+    /// any of them means putting all of them back. Keeping the set in a single function is what makes
+    /// that safe to do; adding a script anywhere else would silently lose it at the next toggle.
+    private func installScripts(in configuration: WKWebViewConfiguration, for host: String?) {
+        CanvasAdvancedRules.attach(to: configuration, for: host)
+        CanvasCardMedia.installScript(muted: isMuted, to: configuration)
+    }
+
+    /// Mute or unmute the page that is already on screen, and set the switch for the pages after it.
+    ///
+    /// Two halves because the two questions are answered in different places. The running page — every
+    /// frame of it, including the cross-origin iframe a YouTube card actually consists of — is reached
+    /// through the switch already inside it. A page loaded later gets the setting at document start
+    /// from a fresh user script, which is why the scripts are reinstalled here: without that, following
+    /// a link inside a card you had muted would bring the sound back.
+    private func applyMuting() {
+        guard let web else { return }
+        reinstallScripts()
+        CanvasCardMedia.tell(web, muted: isMuted)
+    }
+
+    private func reinstallScripts() {
+        guard let web else { return }
+        web.configuration.userContentController.removeAllUserScripts()
+        installScripts(in: web.configuration, for: (web.url ?? url)?.host())
+    }
+
+    // MARK: What the page calls itself
+
+    /// Watch the page's name, which arrives after the page does and can change again without a
+    /// navigation.
+    ///
+    /// KVO rather than reading `title` when the load finishes, which is the obvious version and is
+    /// wrong for exactly the pages a dashboard is made of: at the moment an app-shell page finishes
+    /// loading it is still called "Loading…", or called nothing at all, and its real name lands a beat
+    /// later when the script that fetches the ticket has run.
+    private func watchTitle(of view: WKWebView) {
+        titleWatch = view.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
+            MainActor.assumeIsolated { self?.titleChanged(view.title) }
+        }
+    }
+
+    /// The page named itself. Keep it if it is this card's own page, and say it wherever it shows.
+    private func titleChanged(_ title: String?) {
+        guard let title, !title.isEmpty else { return }
+        if capturingTitle { CanvasPageTitles.remember(title, for: address) }
+        refreshName()
+        describeYourself()
+    }
+
+    /// Put the card's name on the placeholder, after it has arrived or changed.
+    ///
+    /// The placeholder is nearly always behind a loaded page by the time this runs, and is kept right
+    /// anyway: it is what the card comes back to when the page is frozen without a snapshot, when a
+    /// load fails, and when the board is zoomed out past the point of running pages at all. A name that
+    /// only reached cards which happened to be nameless at the moment they loaded would be missing from
+    /// the cards that have been used most.
+    private func refreshName() {
+        let name = savedTitle
+        nameLabel?.stringValue = name ?? host
+        siteLabel?.isHidden = name == nil
+    }
+
     private func say(_ text: String?, tooltip: String? = nil) {
         status?.stringValue = text ?? ""
         status?.isHidden = text == nil
@@ -252,16 +434,24 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     private func showPage(_ url: URL) {
         let configuration = WKWebViewConfiguration()
-        // Every card, on every board, and the sign-in window too. Signing in once is signing in.
-        configuration.websiteDataStore = CanvasWebSession.store
+        // Every card, on every board, and the sign-in window too — unless this card has been put on a
+        // profile of its own, which is how one board holds two accounts. See `CanvasCardSession`.
+        configuration.websiteDataStore = CanvasWebSession.store(named: profile)
         // Ads, trackers and cookie banners. A rule list can only be handed to a web view as that view
         // is built, which is also why excusing a site rebuilds the page rather than reloading it.
         CanvasContentBlocker.attach(to: configuration, for: url.host())
-        CanvasAdvancedRules.attach(to: configuration, for: url.host())
         // A card is a clipping, not a browser: it shouldn't be able to *spontaneously* open windows.
         // A link you click is a different matter — see `createWebViewWith` below, which is what makes
         // a `target="_blank"` link navigate instead of silently doing nothing.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // The rules interpreter, and the mute switch. Both are user scripts, and both go in through the
+        // one call that knows the whole set — because changing the mute setting later means replacing
+        // the lot. See `reinstallScripts`.
+        installScripts(in: configuration, for: url.host())
+        // Nothing plays because you looked at it, unless this card says otherwise. Decided here because
+        // it is a property of the configuration rather than of the page — which is also why turning it
+        // on doesn't start anything: it is the policy the *next* page will load under.
+        configuration.mediaTypesRequiringUserActionForPlayback = autoplays ? [] : .all
         // Nothing is shown until the page has laid out anyway, because the placeholder is over it —
         // this just spares the card a half-painted frame at the moment of the reveal.
         configuration.suppressesIncrementalRendering = true
@@ -286,6 +476,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
             view.load(URLRequest(url: url))
         }
         web = view
+        // A page sent to the card's own address is a page whose name is the card's name. One that has
+        // been restored to wherever you had navigated to before the card was frozen is not.
+        capturingTitle = url == self.url
+        watchTitle(of: view)
+        applyContentZoom()
         // The lists take about ten seconds to compile on the first launch after an update, and a
         // canvas restored at startup can open well inside that window. A card built before they were
         // ready gets one chance to notice and start again, rather than staying unfiltered until
@@ -300,10 +495,6 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // Under whatever is standing in for the page — the picture from the last time it ran, or the
         // placeholder. Waking up should not flash anything.
         fill(face, with: view, below: frozen ?? placeholder)
-        // And then the pill back on top. Inserting the page *below the placeholder* still puts it above
-        // everything added before the placeholder was, which is where the pill was built — so without
-        // this the page buries the one thing on the card that says how old the page is.
-        if let pill { face.addSubview(pill, positioned: .above, relativeTo: nil) }
         if isEngaged { window?.makeFirstResponder(view) }
         if frozen == nil { say("Loading…") }
         waitForIt()
@@ -322,23 +513,56 @@ final class CanvasLinkNodeView: CanvasNodeView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
     }
 
+    /// How long the placeholder takes to get out of the page's way.
+    ///
+    /// It used to be an instant `isHidden`, which on a card the size of a real one is a hard cut from
+    /// a centred globe to a full page — the one moment on the board where something appears out of
+    /// nothing. A fifth of a second of cross-fade is below the threshold at which it reads as an
+    /// animation and above the one at which it reads as a jump.
+    private static let revealDuration = 0.2
+
     private func revealPage() {
         giveUp?.cancel()
         giveUp = nil
         guard web != nil else { return }
+        let first = !revealed
         revealed = true
         loadedAt = Date()
-        placeholder?.isHidden = true
-        frozen?.removeFromSuperview()
-        frozen = nil
-        timePassed()
+        describeYourself()
+
+        let going = [placeholder, frozen].compactMap { $0 }
+        if first, !going.isEmpty {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Motion.duration(Self.revealDuration)
+                context.allowsImplicitAnimation = true
+                for view in going { view.animator().alphaValue = 0 }
+            } completionHandler: { [weak self] in
+                guard let self else { return }
+                // Hidden rather than removed, because the placeholder is the card's fallback: a page
+                // that later fails, or a card that is frozen and woken, comes back through it. Its
+                // alpha is put back at the same time, or it would come back invisible.
+                placeholder?.isHidden = true
+                placeholder?.alphaValue = 1
+                frozen?.removeFromSuperview()
+                frozen = nil
+            }
+        } else {
+            placeholder?.isHidden = true
+            placeholder?.alphaValue = 1
+            frozen?.removeFromSuperview()
+            frozen = nil
+        }
         board.pageStateChanged()
     }
 
     private func tearDownPage() {
-        caption?.setTitle(host, wandered: false)
         giveUp?.cancel()
         giveUp = nil
+        // Before the view goes: an observation outliving what it observes is the one way this can
+        // crash, and a page being torn down is about to report a title of nothing.
+        titleWatch?.invalidate()
+        titleWatch = nil
+        capturingTitle = false
         web?.stopLoading()
         web?.navigationDelegate = nil
         web?.uiDelegate = nil
@@ -363,79 +587,40 @@ final class CanvasLinkNodeView: CanvasNodeView {
         ])
     }
 
-    /// Card and header, built once. The chip names the *host*, not the page, so it doesn't need
-    /// rebuilding as you navigate within the site.
+    /// What the card says about itself when you linger on it.
     ///
-    /// The chip is also the card's `boardHandle` — the one strip an engaged card doesn't hand to the
-    /// page, so a card you are using is still a card you can pick up and move.
-    private func chrome(over body: NSView) -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.distribution = .fill
-
-        let chip = CanvasCardChip(title: host, symbol: "globe", warning: nil)
-        caption = chip
-        boardHandle = chip
-        stack.addArrangedSubview(chip)
-        chip.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        stack.addArrangedSubview(body)
-        body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        return stack
+    /// This is where the caption strip went, and the freshness capsule with it. Both were chrome drawn
+    /// on the card — one above the page, one over it — and both were saying things worth knowing
+    /// occasionally and not worth looking at continuously. A board of eleven web cards carried eleven
+    /// captions and eleven capsules permanently on screen so that you could, once in a while, want one
+    /// of them.
+    ///
+    /// A tooltip is the Mac's own answer to exactly that: it costs nothing until you ask, it takes no
+    /// space, and asking is lingering rather than clicking. The board owns the tooltip and reads this
+    /// from whichever card is under the pointer — a card doesn't hit-test until you step into it, so it
+    /// could not carry one itself. See `CanvasBoardView.hovered`.
+    override var cardDescription: String? {
+        // The name first and the host under it, which is the order the placeholder puts them in and the
+        // order the question is actually asked: what is this, then whose is it. A card whose page has
+        // never loaded anywhere has only the second half, and says only that.
+        var lines: [String] = []
+        if let liveTitle { lines.append(liveTitle) }
+        lines.append(liveHost)
+        if let loadedAt { lines.append(canvasFreshnessLabel(for: loadedAt)) }
+        if hasWandered { lines.append("Not the address saved on this board \u{2014} " + address) }
+        return lines.joined(separator: "\n")
     }
 
-    /// The capsule across the top of the page saying how old it is.
-    ///
-    /// Over the page rather than in the caption, and centred: the caption is the card's name and is
-    /// read once, while this is a fact about the content that has to be checkable at a glance against
-    /// eleven other cards — a row of pills at the same height reads as a row, where the same words
-    /// tucked into eleven captions of different lengths do not.
-    ///
-    /// It gets out of the way when it has nothing to warn you about. A page that arrived a moment ago
-    /// is faint enough to be scenery; one that is an hour old comes up to full strength, because by
-    /// then it is the most important thing the card has to say about itself.
-    private func makePill() {
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 9.5, weight: .medium)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-
-        let capsule = NSView()
-        capsule.wantsLayer = true
-        capsule.layer?.cornerCurve = .continuous
-        capsule.layer?.cornerRadius = 8.5
-        capsule.layer?.backgroundColor = NSColor.controlBackgroundColor
-            .withAlphaComponent(0.88).cgColor
-        capsule.layer?.borderWidth = 1
-        capsule.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-        capsule.isHidden = true
-
-        label.translatesAutoresizingMaskIntoConstraints = false
-        capsule.addSubview(label)
-        capsule.translatesAutoresizingMaskIntoConstraints = false
-        face.addSubview(capsule)
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: capsule.topAnchor, constant: 2.5),
-            label.bottomAnchor.constraint(equalTo: capsule.bottomAnchor, constant: -2.5),
-            label.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -8),
-            capsule.heightAnchor.constraint(equalToConstant: 17),
-            capsule.centerXAnchor.constraint(equalTo: face.centerXAnchor),
-            capsule.topAnchor.constraint(equalTo: face.topAnchor, constant: 6),
-        ])
-        pill = capsule
-        pillLabel = label
+    /// Say it again, after anything that changes what it would say — the tooltip if the pointer is
+    /// here, and the window's header if this is the card you have stepped into.
+    private func describeYourself() {
+        board.descriptionChanged(for: node.id)
     }
 
-    /// Say the age again — on the board's heartbeat, and whenever a page arrives or is put away.
+    /// The age is a fact that changes with nothing happening, so the board's heartbeat is what keeps
+    /// whatever is showing it honest.
     override func timePassed() {
-        guard let pill, let pillLabel else { return }
-        guard let loadedAt, !isSimplified else { return pill.isHidden = true }
-        pill.isHidden = false
-        pillLabel.stringValue = canvasFreshnessLabel(for: loadedAt)
-        let age = Date().timeIntervalSince(loadedAt)
-        pill.animator().alphaValue = age < 5 * 60 ? 0.45 : age < 30 * 60 ? 0.75 : 1
+        describeYourself()
     }
 
     // MARK: Stepping in and out
@@ -466,6 +651,12 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// web page that is no longer listening for them.
     override func engagementChanged() {
         if isEngaged {
+            // Stepping in is where a card stops adopting names. Clicking a link is the only way a page
+            // goes somewhere the card didn't send it, and a click is only possible from in here — so
+            // this is the earliest honest moment to stop, and it is the one that covers the case
+            // `decidePolicyFor` cannot see: a site that navigates itself in script, where the URL is
+            // rewritten with no navigation for a delegate to be asked about at all.
+            capturingTitle = false
             if let web { window?.makeFirstResponder(web) }
         } else if let web, (window?.firstResponder as? NSView)?.isDescendant(of: web) == true {
             window?.makeFirstResponder(board)
@@ -482,11 +673,29 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     var canGoBack: Bool { web?.canGoBack ?? false }
     var canGoForward: Bool { web?.canGoForward ?? false }
+    /// Mid-navigation, for the header's Reload button to become a Stop.
+    var isLoading: Bool { web?.isLoading ?? false }
     /// True once the page has wandered off the address the board saved for this card.
     var hasWandered: Bool { web != nil && url != nil && web?.url != url }
 
     func goBack() { web?.goBack() }
     func goForward() { web?.goForward() }
+    func stopLoading() {
+        web?.stopLoading()
+        board.pageStateChanged()
+    }
+
+    /// Send the page to an address typed into the header's field.
+    ///
+    /// Navigation, not an edit: what the board has saved for this card is untouched, so this lands the
+    /// card in the same wandered state as clicking a link would, with Home and Pin beside the address to
+    /// resolve it. A card whose saved address quietly followed wherever you looked would be a board that
+    /// rewrites itself while you read it.
+    func go(to address: String) {
+        guard let url = URL(string: address) else { return }
+        web?.load(URLRequest(url: url))
+        board.pageStateChanged()
+    }
 
     /// Put the card back on its own address.
     ///
@@ -496,12 +705,86 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// somewhere I did not mean to be" is a different question from "what was I looking at before".
     func goHome() {
         guard let url else { return }
+        // Back on its own address, so the page about to arrive is the card's own page again and its
+        // name is the card's name. The one way out of the state stepping in put the card into.
+        capturingTitle = true
         web?.load(URLRequest(url: url))
     }
+
+    /// Make where the page has got to the address this card is *for*.
+    ///
+    /// The counterpart of Home, and the reason a card is more than a bookmark: you follow a link out of
+    /// a dashboard tile, land somewhere you would rather the tile pointed at, and say so. Home takes
+    /// you back to the card's address; this makes where you are the card's address.
+    ///
+    /// **Without rebuilding the page.** Changing a card's content normally tears the web view down and
+    /// starts again, which is right when the address is genuinely different and absurd here — the page
+    /// being loaded would be the page already on screen, so the only visible effect of doing the honest
+    /// thing would be a flash and a lost scroll position. `contentChanged` is suppressed for exactly
+    /// the case where the new address is what the view is already showing.
+    func adoptCurrentAddress() {
+        guard let live = liveURL, live.absoluteString != address else { return }
+        // The page on screen is what the card is for now, so its name is the card's name — and it is
+        // in hand already. Remembered before the address changes, or the card would sit nameless until
+        // the next time something loaded it, having been looking at the answer the whole time.
+        if let title = web?.title { CanvasPageTitles.remember(title, for: live.absoluteString) }
+        setAddress(live.absoluteString)
+        capturingTitle = true
+    }
+
+    /// Point this card somewhere else. Undoable, and named for what the Edit menu should say.
+    func setAddress(_ next: String) {
+        let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != address else { return }
+        // Set before the store's change lands, because the change comes back through `update(node:)`
+        // and then `contentChanged`, which is the teardown this exists to skip.
+        alreadyShowing = web?.url?.absoluteString == trimmed
+        let id = node.id
+        board.store.change("Change Address") { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            doc.nodes[index].content = .link(url: trimmed)
+        }
+    }
+
+    /// Set for the one turn in which a new address is being adopted from the page already on screen.
+    /// See `adoptCurrentAddress`.
+    private var alreadyShowing = false
 
     /// Load it again from the top — and if the card had given up, start over from the placeholder.
     func reload() {
         if let web, revealed { web.reload() } else { contentChanged() }
+    }
+
+    // MARK: Searching it, and keeping it fresh
+
+    /// Look for `query` in the page, and say whether it was there.
+    ///
+    /// ⌘F on a board means "which card", and inside a page it has to mean "where on this page" — those
+    /// are the same question asked at two scales, which is the argument ⌘+ and ⌘− already make on this
+    /// board. WebKit's own find is used rather than a script injected into the page: it highlights, it
+    /// scrolls the match into view, and it works on a page whose content security policy would refuse
+    /// anything PM injected.
+    func find(_ query: String, forward: Bool = true, then say: @escaping (Bool) -> Void) {
+        guard let web, !query.isEmpty else { return say(false) }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = !forward
+        configuration.caseSensitive = false
+        configuration.wraps = true
+        web.find(query, configuration: configuration) { result in
+            MainActor.assumeIsolated { say(result.matchFound) }
+        }
+    }
+
+    /// Load it again if what is on screen is older than `interval`.
+    ///
+    /// The board asks, on its heartbeat — see `CanvasBoardView.refreshStalePages`. Only a card that is
+    /// actually running is asked, so a refresh cadence never wakes a frozen renderer, and never a card
+    /// you are inside: reloading the page under somebody's hands, mid-scroll or mid-form, is the one
+    /// way an automatic refresh can cost you something.
+    func reloadIfStale(after interval: TimeInterval) {
+        guard let loadedAt, web != nil, !isEngaged, !isLoading,
+              Date().timeIntervalSince(loadedAt) >= interval else { return }
+        web?.reload()
     }
 
     /// Open the page in the browser — what the card's menu offers, and where a page you actually want
@@ -540,8 +823,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// confirmation that anything happened.
     func signOut() {
         let site = url?.host() ?? host
+        let jar = CanvasWebSession.store(named: profile)
         Task { @MainActor in
-            await CanvasWebSession.forget(host: site)
+            await CanvasWebSession.forget(host: site, in: jar)
             reload()
         }
     }
@@ -549,7 +833,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// Sign in to this card's site in a window you can actually use — see `CanvasSignInWindow`.
     func signIn() {
         guard let url else { return }
-        CanvasSignInWindow.present(for: url) { [weak self] in
+        // Into this card's jar, which is the only one signing in to it would help.
+        CanvasSignInWindow.present(for: url, profile: profile) { [weak self] in
             // Whatever the session picked up is in the shared jar now, so the quickest way to see it
             // is to ask the card for the page again.
             self?.reload()
@@ -560,28 +845,165 @@ final class CanvasLinkNodeView: CanvasNodeView {
 // MARK: - Loading
 
 extension CanvasLinkNodeView: WKNavigationDelegate {
+    /// Notice when the page is being sent somewhere the card didn't send it.
+    ///
+    /// **Nothing is refused here.** Every navigation is allowed, exactly as it was when this method did
+    /// not exist — what it is for is `capturingTitle`. A card is named after the page it is *for*, and
+    /// a link followed out of that page is a different page; a redirect the card's own load ran into is
+    /// not, and arrives as `.other`. So the question this asks is who navigated rather than where the
+    /// page ended up, which is the only form of the question a redirect chain answers correctly.
+    ///
+    /// Stepping into a card stops the capture too, and has to: a site that navigates itself in script
+    /// rewrites the URL with no navigation for a delegate to be asked about. This catches the case
+    /// stepping in cannot — Back and Forward, which the card's menu offers without stepping in at all.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let clicked = navigationAction.navigationType == .linkActivated
+        switch navigationAction.navigationType {
+        case .linkActivated, .formSubmitted, .formResubmitted, .backForward: capturingTitle = false
+        default: break
+        }
+
+        // ⌘-click: the link becomes a card of its own, beside this one and joined to it.
+        if clicked, navigationAction.modifierFlags.contains(.command),
+           let target = navigationAction.request.url, isWeb(target) {
+            board.addLinkCard(target.absoluteString, beside: node.id)
+            return decisionHandler(.cancel)
+        }
+
+        // A link the page has asked to be downloaded rather than shown — `download` on the anchor.
+        if navigationAction.shouldPerformDownload { return decisionHandler(.download) }
+
+        guard let target = navigationAction.request.url, !isWeb(target) else {
+            return decisionHandler(.allow)
+        }
+        decisionHandler(.cancel)
+        handOff(target, clicked: clicked)
+    }
+
+    /// Whether this is a page a card can show. Everything else belongs to some other app, or to nobody.
+    private func isWeb(_ url: URL) -> Bool {
+        ["http", "https", "about", "data", "blob"].contains(url.scheme?.lowercased() ?? "")
+    }
+
+    /// A link that isn't a web page: `mailto:`, `slack://`, `zoom://`, a vault's own `obsidian://`.
+    ///
+    /// **A click hands it to the system; a page redirecting itself does not.** Clicking a `mailto:` and
+    /// getting Mail is what every browser does and what you meant by clicking it. A page navigating
+    /// *itself* to an app scheme is the "open in our app" interstitial, and honouring that would be a
+    /// board that launches applications while you read it — so it is refused, out loud, which is also
+    /// the honest answer for a scheme nothing on this Mac can open. Both used to be silence.
+    private func handOff(_ url: URL, clicked: Bool) {
+        let scheme = (url.scheme ?? "link") + ":"
+        guard clicked else {
+            return board.report("This page tried to open a \(scheme) link on its own. PM didn't.")
+        }
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+            return board.report("Nothing on this Mac opens \(scheme) links.")
+        }
+        NSWorkspace.shared.open(url)
+        board.report("Opened in " + FileManager.default.displayName(atPath: app.path) + ".")
+    }
+
+    /// A response that is a file rather than a page — an export, a zip, a signed PDF.
+    ///
+    /// **Two tests, and the obvious one is not enough.** `canShowMIMEType` catches a zip; it does not
+    /// catch a CSV, because WebKit can perfectly well *display* `text/csv` and will, as a wall of
+    /// commas inside the card. What the server actually said is `Content-Disposition: attachment`,
+    /// which is that header's entire purpose — this is a file, not a page — and it is what the Export
+    /// button on a dashboard relies on. Measured, not assumed: a `text/csv` export came back
+    /// `canShowMIMEType == true`.
+    ///
+    /// With neither test the response was rendered or dropped and nothing was saved anywhere, which is
+    /// the silence `CanvasDownload` exists to end.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        decisionHandler(isFile(navigationResponse) ? .download : .allow)
+    }
+
+    private func isFile(_ response: WKNavigationResponse) -> Bool {
+        guard response.canShowMIMEType else { return true }
+        let disposition = (response.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition")?
+            .trimmingCharacters(in: .whitespaces).lowercased()
+        return disposition?.hasPrefix("attachment") ?? false
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
+                 didBecome download: WKDownload) {
+        take(download)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse,
+                 didBecome download: WKDownload) {
+        take(download)
+    }
+
+    private func take(_ download: WKDownload) {
+        CanvasDownload.take(download) { [weak self] message, file in
+            self?.board.report(message, reveal: file)
+        }
+        // A navigation that turned into a download leaves the card mid-load, with a Stop button in the
+        // header and no navigation left for it to stop.
+        board.pageStateChanged()
+    }
+
+    /// A site asking who you are. Basic, digest and NTLM get a panel; anything else gets the system's
+    /// own answer.
+    ///
+    /// **A certificate is deliberately not ours to wave through.** Answering a server-trust challenge
+    /// here would be PM deciding on your behalf that an expired or self-signed certificate is fine, in
+    /// a card with no address bar of its own. `performDefaultHandling` leaves that where it belongs.
+    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition,
+                                               URLCredential?) -> Void) {
+        let asks = [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest,
+                    NSURLAuthenticationMethodNTLM]
+        guard asks.contains(challenge.protectionSpace.authenticationMethod),
+              challenge.previousFailureCount < 3 else {
+            return completionHandler(.performDefaultHandling, nil)
+        }
+        CanvasWebDialogs.signIn(to: challenge.protectionSpace.host,
+                                realm: challenge.protectionSpace.realm,
+                                in: window) { credential in
+            if let credential { completionHandler(.useCredential, credential) }
+            else { completionHandler(.cancelAuthenticationChallenge, nil) }
+        }
+    }
+
     /// Say what the card is actually showing, as soon as it starts showing it.
     ///
-    /// On `didCommit` rather than `didFinish`, because the page is on screen and can be typed into
-    /// from the moment it commits — a caption that only caught up once the page had finished loading
-    /// would be wrong for exactly the window in which being wrong costs something.
+    /// On `didCommit` rather than `didFinish`, because the page is on screen and can be typed into from
+    /// the moment it commits — a readout that only caught up once the page had finished loading would
+    /// be wrong for exactly the window in which being wrong costs something. That window is the whole
+    /// reason the address is shown at all: during a single sign-on you are handed between hosts, and a
+    /// password field is only safe to type into if you can see whose it is.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard let now = webView.url?.host()?.replacingOccurrences(of: "www.", with: "") else { return }
-        caption?.setTitle(now, wandered: now != host)
+        describeYourself()
+        board.pageStateChanged()
+    }
+
+    /// The header's Stop button exists between here and `didFinish`, so both edges have to be reported.
+    /// A card mid-navigation is otherwise indistinguishable from one sitting still — it goes on drawing
+    /// the page it already had until the new one paints.
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         board.pageStateChanged()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         revealPage()
+        board.pageStateChanged()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         failed(error)
+        loadingEnded()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         failed(error)
+        loadingEnded()
     }
 
     /// Fall back to the placeholder, with the reason on it.
@@ -600,6 +1022,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         placeholder?.isHidden = false
         say("Couldn't load", tooltip: ns.localizedDescription)
     }
+
+    /// A failure the card rides out — the page is still there — still ends the load, and the header is
+    /// showing a Stop button that has nothing left to stop.
+    private func loadingEnded() { board.pageStateChanged() }
 }
 
 // MARK: - Navigating
@@ -614,7 +1040,63 @@ extension CanvasLinkNodeView: WKUIDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url { webView.load(URLRequest(url: url)) }
+        guard let url = navigationAction.request.url else { return nil }
+        // ⌘-click reaches here too, and means the same thing it means on an ordinary link: this one
+        // goes on the board. Without it, the gesture would work on half the links of a real site and
+        // not the other half, for a reason nobody could see.
+        if navigationAction.modifierFlags.contains(.command) {
+            board.addLinkCard(url.absoluteString, beside: node.id)
+        } else {
+            capturingTitle = false
+            webView.load(URLRequest(url: url))
+        }
         return nil
+    }
+
+    // MARK: What a page is allowed to put up
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping () -> Void) {
+        CanvasWebDialogs.alert(message, from: frame.securityOrigin.host, in: window,
+                               then: completionHandler)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        CanvasWebDialogs.confirm(message, from: frame.securityOrigin.host, in: window,
+                                 then: completionHandler)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?, initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (String?) -> Void) {
+        CanvasWebDialogs.prompt(prompt, initial: defaultText ?? "", from: frame.securityOrigin.host,
+                                in: window, then: completionHandler)
+    }
+
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping ([URL]?) -> Void) {
+        CanvasWebDialogs.chooseFiles(parameters, in: window, then: completionHandler)
+    }
+
+    /// The camera and the microphone, which a card does not get.
+    ///
+    /// **Refused deliberately, and said out loud.** This is the one answer in the file that stays no:
+    /// a clipping on a board is not where a call belongs, granting it would mean the app carrying
+    /// camera and microphone permissions for the life of every window, and a page that can turn on a
+    /// camera from inside a document you opened is a larger claim than a canvas should make. What
+    /// changes is that it is now a refusal rather than a dead button — the request was denied without
+    /// asking and without saying, which looked exactly like a broken page.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let wants = type == .camera ? "the camera" : type == .microphone ? "the microphone"
+                                                                        : "the camera and microphone"
+        board.report("\(origin.host) asked for \(wants). Web cards don't get it — open it in your "
+            + "browser.")
+        decisionHandler(.deny)
     }
 }

@@ -48,6 +48,12 @@ final class ProjectViewState: ObservableObject {
     /// main menu can't be relied on to win the race by itself.
     @Published var isEditingText = false
 
+    /// The window's tabs, so the task column's header can draw the same bar the board's does.
+    ///
+    /// Handed in rather than published, because it is an object the window owns for the window's whole
+    /// life: what changes is inside it, and the views that draw it observe it directly.
+    var tabs = ProjectTabModel()
+
     /// Open a project — the sidebar's double-click and Return. Supplied by the window, which decides
     /// whether that means retargeting this window or opening another one.
     var openProject: (_ projectKey: String, _ inNewWindow: Bool) -> Void = { _, _ in }
@@ -65,6 +71,11 @@ final class ProjectViewState: ObservableObject {
     /// Show/hide the sidebar. Supplied by the window: collapsing is the split view's job, so the
     /// header's toggle and the View menu's ⌥⌘S both end up in the same place.
     var toggleSidebar: () -> Void = {}
+
+    /// Render this window's project as its board or as its task list — View ▸ Show Canvas, and the
+    /// header's renderer switch. Supplied by the window, which owns the renderer and the size limits
+    /// that go with it.
+    var setRenderer: (ProjectRenderer) -> Void = { _ in }
 
     /// How far in from this window's leading edge its close/minimise/zoom buttons reach, plus a
     /// margin. Whichever pane is leftmost insets its header by this so the two never overlap.

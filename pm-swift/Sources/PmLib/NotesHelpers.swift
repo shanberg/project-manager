@@ -58,6 +58,24 @@ public func getNotesPath(projectPath: String) -> String {
     return (projectPath as NSString).appendingPathComponent("docs/Notes - \(title).md")
 }
 
+/// The project folder a notes file belongs to, or nil if this isn't one of PM's notes files.
+///
+/// The shape is the convention `getNotesPath` writes and `resolveNotesPath` reads back:
+/// `<folder>/docs/Notes - <title>.md`. Asked by anything that has a path and wants to know whether it
+/// is looking at a project — a canvas card, for one, which renders a project's notes as the project
+/// rather than as markdown when it is.
+///
+/// Deliberately a name test rather than a lookup. It answers about a file that may not exist, costs no
+/// I/O, and cannot disagree with itself between two callers.
+public func projectFolder(ofNotesPath path: String) -> String? {
+    let name = (path as NSString).lastPathComponent
+    guard name.hasPrefix("Notes - "), name.hasSuffix(".md") else { return nil }
+    let docs = (path as NSString).deletingLastPathComponent
+    guard (docs as NSString).lastPathComponent == "docs" else { return nil }
+    let folder = (docs as NSString).deletingLastPathComponent
+    return folder.isEmpty ? nil : folder
+}
+
 /// Resolve the path to the project's notes file (canonical or single/first matching Notes - *.md in docs/).
 /// Returns nil if no notes file exists; throws on I/O errors (e.g. permission denied listing docs/).
 public func resolveNotesPath(projectPath: String) throws -> String? {

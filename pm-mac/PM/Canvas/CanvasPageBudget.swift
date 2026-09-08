@@ -84,4 +84,22 @@ enum CanvasPageBudget {
         for card in onScreen + justLeft where chosen.count < budget { chosen.insert(card.id) }
         return chosen
     }
+
+    /// Which cards run in a tiled view: all of them, and never mind the budget.
+    ///
+    /// The budget exists because a board is larger than the window and most of what is on it is not
+    /// being looked at — so it is a guess, made from distance and from how long ago you last saw a
+    /// card, about which pages you would miss. A tiling answers that question outright. You named the
+    /// cards; the window is showing every one of them, in full, at once, because that is what tiling
+    /// *is*. There is nothing here for the guess to do, and getting it wrong costs more than usual: a
+    /// frozen tile is a page that has stopped updating and a click that lands on a picture of a page,
+    /// in the one view whose whole purpose is several live things side by side.
+    ///
+    /// The tiling is its own bound, which is why this can afford to have none. A tiling is what fits
+    /// the window at a size worth reading — a handful of cards, not the forty on the board — and the
+    /// ones it put away are frozen the moment it goes up, which is a *harder* cut than the budget
+    /// makes: off screen normally buys you `offFrameGrace`, and a card a tiling hid gets nothing.
+    static func liveWhileTiled(among cards: [Candidate]) -> Set<String> {
+        Set(cards.filter { $0.wantsPage && ($0.isVisible || $0.isEngaged) }.map(\.id))
+    }
 }

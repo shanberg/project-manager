@@ -59,6 +59,15 @@ final class PMStore: ObservableObject {
     /// one rather than hiding itself. Re-resolved on every load so a canvas created in Obsidian while
     /// PM is open turns up without a restart.
     @Published private(set) var canvasPath: String?
+    /// Whether that answer has been *looked for* yet on this project.
+    ///
+    /// Nil `canvasPath` means two different things — "nobody has looked" and "looked, there isn't one"
+    /// — and until this existed nothing could tell them apart, because resolution is an async hop off
+    /// the load (see `refreshCanvasPath`). A window opening a project it remembers as a board has to:
+    /// the first is worth holding still for a moment, the second is the empty state that offers to make
+    /// one. See `ProjectWindowController.applyRememberedRenderer`, which flashed the task list for
+    /// exactly as long as it could not ask this question.
+    @Published private(set) var hasResolvedCanvasPath = false
     @Published private(set) var notes: ProjectNotes?
     @Published private(set) var todos: [Todo] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
@@ -270,6 +279,8 @@ final class PMStore: ObservableObject {
             projectPath = nil
             notesPath = nil
             canvasPath = nil
+            // Nothing to look for and nothing to wait on: there is no project here.
+            hasResolvedCanvasPath = true
             notes = nil
             todos = []
             lastEditedAt = nil
@@ -323,6 +334,9 @@ final class PMStore: ObservableObject {
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
                     if projectChanged { self.undoStack.removeAll(); self.redoStack.removeAll() }
+                    // A different project's board is a different question, and the old answer must not
+                    // be read as this one's while the new one is being looked for.
+                    if projectChanged { self.hasResolvedCanvasPath = false }
                     self.projectKey = key
                     self.projectName = name
                     self.notesPath = path
@@ -375,6 +389,9 @@ final class PMStore: ObservableObject {
             Task { @MainActor in
                 guard let self, self.projectPath == projectPath else { return }
                 self.canvasPath = resolved
+                // After the path, so anything watching both sees the answer before it is told the
+                // looking is over.
+                self.hasResolvedCanvasPath = true
             }
         }
     }

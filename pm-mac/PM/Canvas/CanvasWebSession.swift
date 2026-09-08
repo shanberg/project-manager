@@ -77,12 +77,72 @@ enum CanvasWebSession {
             + "and \(carried.count) of \(WKWebsiteDataStore.allWebsiteDataTypes().count - 1) storage types")
     }
 
+    // MARK: Profiles
+
+    /// The jar a card drinks from, by name.
+    ///
+    /// **The shared session is still the default and still the right one.** Signing in is something you
+    /// do to a site, and twelve cards on one tracker should mean one sign-in — that argument is above
+    /// and none of it has changed. What it does not survive is the second account: work and personal
+    /// mail, two tenants of the same tool, a client's staging box beside your own. Those are not one
+    /// person's session, and no amount of sharing makes them one.
+    ///
+    /// So a card may name a profile, and a named profile is its own persistent store: its own cookies,
+    /// its own local storage, its own idea of who you are. `nil` is the shared jar every card has always
+    /// used. `ephemeralName` is the one reserved name — a store that is never written to disk and is
+    /// gone when PM quits.
+    ///
+    /// Identifiers are kept rather than derived from the name, because a `WKWebsiteDataStore` is found
+    /// by UUID and a name is something you can rename. Renaming is out of scope and would be, at worst,
+    /// a new empty jar; losing the map would be every named profile signed out at once, which is why the
+    /// map is written before the store is ever used.
+    static let ephemeralName = "Private"
+
+    static func store(named name: String?) -> WKWebsiteDataStore {
+        guard let name, !name.isEmpty else { return store }
+        guard name != ephemeralName else { return ephemeral }
+        if let existing = profiles[name] { return existing }
+        let made = WKWebsiteDataStore(forIdentifier: identifier(for: name))
+        profiles[name] = made
+        return made
+    }
+
+    /// One ephemeral store for every private card, made once per launch.
+    ///
+    /// Per card would be the stricter reading and the wrong one: two private cards on one board are
+    /// nearly always two views of the same signed-out session, and making each its own would mean
+    /// signing in twice to look at one site twice. A profile is a jar; this one is a jar with a hole in
+    /// the bottom.
+    private static let ephemeral = WKWebsiteDataStore.nonPersistent()
+
+    /// The persistent stores this launch has handed out, so a name is one store rather than one per ask.
+    /// A second `WKWebsiteDataStore(forIdentifier:)` on the same UUID is a second object over the same
+    /// files, which is how a cookie written by one card fails to be seen by the next.
+    private static var profiles: [String: WKWebsiteDataStore] = [:]
+
+    /// Every named profile in use, for the menu that offers them.
+    static var profileNames: [String] {
+        let named = (UserDefaults.standard.dictionary(forKey: profilesKey) as? [String: String] ?? [:])
+        return named.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private static let profilesKey = "PMCanvasWebProfiles"
+
+    private static func identifier(for name: String) -> UUID {
+        var map = UserDefaults.standard.dictionary(forKey: profilesKey) as? [String: String] ?? [:]
+        if let saved = map[name], let existing = UUID(uuidString: saved) { return existing }
+        let made = UUID()
+        map[name] = made.uuidString
+        UserDefaults.standard.set(map, forKey: profilesKey)
+        return made
+    }
+
     /// Everything one site has stored — its cookies, and the local storage a modern login also uses.
     ///
     /// Matched on the registrable domain, which is what WebKit files a record under: signing out of
     /// `jira.example.com` signs you out of `example.com`, because that is where the session cookie
     /// lives and pretending otherwise would leave you signed in with no way to say so.
-    static func forget(host: String) async {
+    static func forget(host: String, in store: WKWebsiteDataStore = CanvasWebSession.store) async {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types).filter {
             host == $0.displayName || host.hasSuffix("." + $0.displayName)
@@ -92,10 +152,19 @@ enum CanvasWebSession {
         Log.write("canvas web session: signed out of \(records.count) record(s)")
     }
 
-    /// Every site, and the old default store too, so nothing is left behind from before the move.
+    /// Every site, in every jar — the shared one, every named profile, and the old default store, so
+    /// nothing is left behind from before the move.
+    ///
+    /// **Named profiles included, and they have to be.** The item says "all sites" and is the answer to
+    /// handing the machine over; a signed-in second account left behind because it was in a different
+    /// jar would be the one thing this promised to take care of.
     static func forgetEverything() async {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         await store.removeData(ofTypes: types, modifiedSince: .distantPast)
+        for name in profileNames {
+            await store(named: name).removeData(ofTypes: types, modifiedSince: .distantPast)
+        }
+        await ephemeral.removeData(ofTypes: types, modifiedSince: .distantPast)
         await WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast)
         Log.write("canvas web session: signed out everywhere")
     }

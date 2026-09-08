@@ -100,6 +100,11 @@ enum MainMenu {
         // one opens somewhere to write.
         track(.quickNote,
               add(menu, "Write a Session Note…", #selector(AppDelegate.quickNote), target: target, key: ""))
+        // Three groups, not one run of nine. Above: the things you put *into* a project. Here: the
+        // containers themselves. Below: the windows you look at them through. The order inside each
+        // group is the one the comments above argue for; the separators only say where one errand
+        // stops and the next begins, which nine consecutive "new"s could not.
+        menu.addItem(.separator())
         add(menu, "New Project…", #selector(AppDelegate.newProject), target: target, key: "n",
             modifiers: [.command, .control])
         // Directly under New Project, and without a shortcut of its own: it's the same errand for the
@@ -108,9 +113,13 @@ enum MainMenu {
         // Under New Area because it makes the same thing by the other route: one starts a folder, the
         // other takes on a folder you already keep.
         add(menu, "Take On a Folder…", #selector(AppDelegate.adoptArea), target: target, key: "")
+        menu.addItem(.separator())
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
             modifiers: [.command, .option])
-        add(menu, "New Tab", #selector(ProjectWindowController.newWindowForTab(_:)), target: nil, key: "t")
+        // Beside New Window, and still ⌘T. What changed is what a tab *is*: another view of the
+        // project this window is showing — its notes, its board, a frame on that board, an arrangement
+        // of it — rather than another project in a native window tab. See `ProjectTab`.
+        add(menu, "New Tab", #selector(ProjectWindowController.newProjectTab(_:)), target: nil, key: "t")
         menu.addItem(.separator())
 
         let recents = NSMenu(title: "Open Recent")
@@ -126,8 +135,13 @@ enum MainMenu {
         add(menu, "All Projects…", #selector(AppDelegate.browseAllProjects), target: target, key: "o")
         // The project's own board, above the file-picker version, because it's the one you want
         // nearly every time — going looking for a canvas is the rarer errand of the two.
-        add(menu, "Project Canvas", #selector(AppDelegate.projectCanvas), target: target, key: "c",
-            modifiers: [.command, .shift])
+        //
+        // Named for the window it makes. View ▸ Show Canvas puts the same board in the window you are
+        // already in, and the two commands are a keystroke apart; before, both were called some form of
+        // "canvas" and nothing in either name said which one you were about to get. Whether a command
+        // makes a window is the whole of what distinguishes them, so it is what the names say.
+        add(menu, "Open Project Canvas in New Window", #selector(AppDelegate.projectCanvas),
+            target: target, key: "c", modifiers: [.command, .shift])
         // ⇧⌘O rather than the ⌘O a document app would use: in PM, "open" already means a project, and
         // a canvas is a document you reach *from* a project far more often than you go looking for one.
         add(menu, "Open Canvas…", #selector(AppDelegate.openCanvas), target: target, key: "o",
@@ -159,10 +173,11 @@ enum MainMenu {
         menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         // Answered by a canvas board and by nothing else, so it stays dim everywhere it means nothing.
-        // Here rather than in a canvas-only menu because ⌘D belongs in Edit wherever it appears.
+        // Here rather than in a canvas-only menu because ⌘D belongs in Edit wherever it appears — and
+        // above Select All, which every Mac app puts last in this group.
         menu.addItem(withTitle: "Duplicate", action: Selector(("duplicate:")), keyEquivalent: "d")
+        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())
         item.submenu = menu
@@ -248,18 +263,128 @@ enum MainMenu {
         menu.addItem(.separator())
     }
 
-    /// The board's mode, as a checkmark.
+    /// Filling the window with a card, or with a handful of them.
     ///
-    /// A checked item rather than two — "View Mode" and "Edit Mode" as a radio pair would be the same
-    /// fact written twice, and this is a switch, not a choice between destinations. Routed to the board
-    /// like the zoom items, so it is dim in a project window and its checkmark reflects the board in
-    /// front of you rather than a global setting.
+    /// One command at both ends: with one card selected ⌘Return is "show me this properly", which
+    /// otherwise means zooming in and hunting for it, and with six it is a tiled view of the six.
+    /// Fullscreen and tile are the same idea at different counts, and one key for both is what makes it
+    /// worth learning. Escape backs out.
     ///
-    /// ⇧⌘E, because plain ⌘E is Use Selection for Find, which every Mac text app has and this app has
-    /// too — see the Find submenu.
+    /// ⌘Return rather than a letter because it is the "open this, big" gesture the Finder, Mail and
+    /// Photos all use, and because it reads as an intensifier of Return, which on this board steps into
+    /// a card.
+    private static func canvasTilingItems(_ menu: NSMenu) {
+        let tile = menu.addItem(withTitle: "Fill Window with Selection",
+                                action: #selector(CanvasBoardView.tileSelection(_:)),
+                                keyEquivalent: "\r")
+        tile.keyEquivalentModifierMask = [.command]
+        let arrange = NSMenu(title: "Arrange Tiles")
+        for arrangement in CanvasTiling.Arrangement.allCases {
+            let entry = arrange.addItem(withTitle: arrangement.title,
+                                        action: #selector(CanvasBoardView.setTileArrangement(_:)),
+                                        keyEquivalent: "")
+            entry.representedObject = arrangement.rawValue
+        }
+        let arrangeItem = menu.addItem(withTitle: "Arrange Tiles", action: nil, keyEquivalent: "")
+        arrangeItem.submenu = arrange
+        // Keep the tiling that is up, so a tab can open straight into it. Routed to the board like
+        // everything else here, and dim wherever there are no tabs to pin one to.
+        menu.addItem(withTitle: "Save Arrangement\u{2026}",
+                     action: #selector(CanvasBoardView.saveTilingAsArrangement(_:)),
+                     keyEquivalent: "")
+
+        // Frames as workspaces. A frame is already a named container of cards, which is what a
+        // workspace is, so ⌃1…9 is the tiling manager's own gesture arriving on a thing the board
+        // already had. Nine, because that is how many a row of number keys holds and how many every
+        // manager that does this offers.
+        let frames = NSMenu(title: "Go to Frame")
+        for index in 0..<9 {
+            let entry = frames.addItem(withTitle: "Frame \(index + 1)",
+                                       action: #selector(CanvasBoardView.goToWorkspace(_:)),
+                                       keyEquivalent: "\(index + 1)")
+            entry.keyEquivalentModifierMask = [.control]
+            entry.tag = index
+        }
+        let framesItem = menu.addItem(withTitle: "Go to Frame", action: nil, keyEquivalent: "")
+        framesItem.submenu = frames
+        menu.addItem(.separator())
+    }
+
+    /// A web card's page: where it goes, and how often it goes back for more.
+    ///
+    /// **Every one of these existed only in a contextual menu or in a capsule that appears once you
+    /// have already stepped into a card.** On a Mac, ⌘R meaning nothing while you are looking at a page
+    /// is a genuine surprise — and the keys are the whole point of the submenu, since the items
+    /// themselves were reachable. Back and Forward take ⌘[ and ⌘], Reload takes ⌘R and Open Address
+    /// takes ⌘L, which is what every browser on the machine uses and none of which this app had spoken
+    /// for.
+    ///
+    /// A submenu rather than a top-level Page menu: a page is one kind of card's content, and a menu
+    /// bar that grew a whole heading for it would be claiming the app is a browser. Routed to the
+    /// board, like the zoom and tiling items above, so all of it is dim in a project window showing a
+    /// task list.
+    private static func canvasPageItems(_ menu: NSMenu) {
+        let page = NSMenu(title: "Page")
+        let back = page.addItem(withTitle: "Back", action: #selector(CanvasBoardView.pageBack(_:)),
+                                keyEquivalent: "[")
+        back.keyEquivalentModifierMask = [.command]
+        let forward = page.addItem(withTitle: "Forward",
+                                   action: #selector(CanvasBoardView.pageForward(_:)),
+                                   keyEquivalent: "]")
+        forward.keyEquivalentModifierMask = [.command]
+        page.addItem(withTitle: "Reload Page", action: #selector(CanvasBoardView.pageReload(_:)),
+                     keyEquivalent: "r")
+        // The button a browser doesn't have: back to the address the *board* saved for this card,
+        // which is a different question from "what was I looking at before".
+        page.addItem(withTitle: "Back to Card\u{2019}s Address",
+                     action: #selector(CanvasBoardView.pageHome(_:)), keyEquivalent: "")
+        page.addItem(.separator())
+        page.addItem(withTitle: "Open Address\u{2026}",
+                     action: #selector(CanvasBoardView.pageOpenAddress(_:)), keyEquivalent: "l")
+        page.addItem(withTitle: "Open in Browser",
+                     action: #selector(CanvasBoardView.pageOpenInBrowser(_:)), keyEquivalent: "")
+        page.addItem(.separator())
+
+        // How stale you are willing to let a board get. Here rather than on a card, because it is a
+        // property of the board — a dashboard refreshes or it doesn't.
+        let refresh = NSMenu(title: "Refresh Pages")
+        let never = refresh.addItem(withTitle: "Never",
+                                    action: #selector(CanvasBoardView.setPageRefresh(_:)),
+                                    keyEquivalent: "")
+        never.representedObject = 0.0
+        refresh.addItem(.separator())
+        for seconds in CanvasBoardView.refreshChoices {
+            let minutes = Int(seconds / 60)
+            let entry = refresh.addItem(withTitle: minutes == 1 ? "Every Minute"
+                                                                : "Every \(minutes) Minutes",
+                                        action: #selector(CanvasBoardView.setPageRefresh(_:)),
+                                        keyEquivalent: "")
+            entry.representedObject = seconds
+        }
+        let refreshItem = page.addItem(withTitle: "Refresh Pages", action: nil, keyEquivalent: "")
+        refreshItem.submenu = refresh
+
+        let item = menu.addItem(withTitle: "Page", action: nil, keyEquivalent: "")
+        item.submenu = page
+    }
+
+    /// The board's one remaining mode, as a checkmark.
+    ///
+    /// Named for what it does rather than for a whole category of activity. It used to be "Edit Mode"
+    /// and to gate colour, resizing, the ring and the grips as well as the connection dots; everything
+    /// but the dots has since left, so the name was promising a great deal more than the switch
+    /// delivered. See `CanvasMode`.
+    ///
+    /// A checked item rather than two — "View Mode" and "Connect Mode" as a radio pair would be the
+    /// same fact written twice, and this is a switch, not a choice between destinations. Routed to the
+    /// board like the zoom items, so it is dim in a project window and its checkmark reflects the board
+    /// in front of you rather than a global setting.
+    ///
+    /// ⇧⌘E kept, though the name has changed: it is in people's hands, and the two commands are the
+    /// same switch.
     private static func canvasModeItem(_ menu: NSMenu) {
-        let item = menu.addItem(withTitle: "Edit Mode",
-                                action: #selector(CanvasBoardView.toggleEditMode(_:)),
+        let item = menu.addItem(withTitle: "Connect Cards",
+                                action: #selector(CanvasBoardView.toggleConnectMode(_:)),
                                 keyEquivalent: "e")
         item.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(.separator())
@@ -293,19 +418,50 @@ enum MainMenu {
             modifiers: [.command, .control])
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
+        // Render the project window's content column as the project's board instead of its task list.
+        // Routed to the window rather than the app, because it is a property of the window you are in —
+        // and so it is dim in a canvas window, which is already a board and has nothing to switch.
+        //
+        // ⌥⌘C, not the ⇧⌘C on File ▸ Project Canvas: that one opens the board in a window of its own,
+        // and the two are genuinely different requests. Both can be up at once, on one shared document.
+        add(menu, "Show Canvas", #selector(ProjectWindowController.toggleCanvasRenderer(_:)),
+            target: nil, key: "c", modifiers: [.command, .option])
+        menu.addItem(.separator())
+        // A project window's tabs: the notes, the board, a frame on it, an arrangement of it — several
+        // views of one project side by side. Routed to the window, like Show Canvas above and for the
+        // same reason: it is a property of the window you are in, and a canvas window has none.
+        //
+        // New Tab itself is in the File menu beside New Window, where a Mac app puts it. These three
+        // are here because they are about the window in front of you rather than about making
+        // something. ⌃⇥ and ⌃⇧⇥ are the standard pair and are free now that project windows have
+        // turned native tabbing off — see `ProjectWindowController`.
+        add(menu, "Close Tab", #selector(ProjectWindowController.closeProjectTab(_:)),
+            target: nil, key: "")
+        add(menu, "Next Tab", #selector(ProjectWindowController.selectNextProjectTab(_:)),
+            target: nil, key: "\t", modifiers: [.control])
+        add(menu, "Previous Tab", #selector(ProjectWindowController.selectPreviousProjectTab(_:)),
+            target: nil, key: "\t", modifiers: [.control, .shift])
+        menu.addItem(.separator())
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
         // window's split view controller, so it animates and persists in one place.
-        // Zoom, answered only by a canvas window — dim in a project window, where there is nothing to
-        // zoom. ⌘= as well as ⌘+ because the plus is a shifted equals on most layouts and AppKit
-        // matches the literal character.
-        canvasZoomItems(menu)
-        canvasModeItem(menu)
         add(menu, "Show Projects", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
             key: "s", modifiers: [.command, .option])
         // With the other two "show me this" checkmarks rather than in the sidebar's arrange menu: it's
         // how the whole app writes a project's name, not how one list is arranged. See `ProjectCodes`.
         add(menu, "Show Project Codes", #selector(AppDelegate.toggleProjectCodes), target: target, key: "")
-        menu.addItem(.separator())
+
+        // Everything a canvas answers and a project window doesn't, in one block at the foot of the
+        // menu. It sits below the "Show" toggles rather than among them because in a project window
+        // the whole block is dim, and a run of grey items reads as the end of a menu rather than as a
+        // hole punched through the middle of it. Each of the three draws its own separators, so the
+        // block delimits itself — do not add another before Appearance.
+        //
+        // Zoom is answered only by a canvas window. ⌘= as well as ⌘+ because the plus is a shifted
+        // equals on most layouts and AppKit matches the literal character.
+        canvasZoomItems(menu)
+        canvasTilingItems(menu)
+        canvasPageItems(menu)
+        canvasModeItem(menu)
 
         let appearance = NSMenu(title: "Appearance")
         let appearanceItem = menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "")

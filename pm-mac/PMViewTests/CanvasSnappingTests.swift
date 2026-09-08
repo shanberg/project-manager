@@ -54,7 +54,19 @@ final class CanvasSnappingTests: XCTestCase {
         let result = CanvasSnapping.move(rect(0, 0), by: (dx: 103, dy: 0),
                                          against: [rect(4000, 4000)], reach: reach)
         XCTAssertEqual(result.frame.minX, 100, "rounded to the 10pt grid")
-        XCTAssertTrue(result.guides.isEmpty, "a grid snap has nothing to point at")
+        XCTAssertEqual(result.guides, [.grid(rect(100, 0))],
+                       "and says so — a card clicking to a lattice nobody mentioned reads as a refusal")
+    }
+
+    /// The grid mark is the fallback's mark: it only appears when the lattice is the whole
+    /// explanation, because a card that found a real agreement was not placed by the lattice.
+    func testTheGridSaysNothingWhenSomethingElseExplainedIt() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 103, dy: 0),
+                                         against: [rect(100, 0)], reach: reach)
+        XCTAssertEqual(result.guides.count, 1)
+        guard case .alignment? = result.guides.first else {
+            return XCTFail("expected the alignment reading and nothing else")
+        }
     }
 
     /// Alignment beats the grid where both apply. Snapping to another card is a much stronger
@@ -81,18 +93,31 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.minX, 101)
     }
 
-    /// The guide reaches from the card being moved to the card it agreed with, and no further. A line
-    /// the width of the board would be true and useless — the point is to show *which* cards agree.
-    func testAGuideSpansOnlyTheCardsItConcerns() {
+    /// A guide names the cards that agree — the moving card first, then everything it matched. Each
+    /// of them gets a ghost drawn round it, so the whole rectangle is what has to come back, not a
+    /// summary of where the line would run.
+    func testAGuideNamesEveryCardInTheAgreement() {
         let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
                                          against: [rect(100, 0), rect(100, 3000)], reach: reach)
-        guard case .alignment(let axis, let position, let from, let to)? = result.guides.first else {
+        guard case .alignment(let axis, let position, let cards)? = result.guides.first else {
             return XCTFail("expected an alignment guide")
         }
         XCTAssertEqual(axis, .vertical)
         XCTAssertEqual(position, 100)
-        XCTAssertEqual(from, 0, "up to the topmost card that agrees")
-        XCTAssertEqual(to, 3100, "down to the bottom of the lowest one")
+        XCTAssertEqual(cards, [rect(100, 500),    // the card being moved, where it landed
+                               rect(100, 0),      // the one above it
+                               rect(100, 3000)])
+    }
+
+    /// A card that happens to lie between two that agree is not part of the agreement and gets no
+    /// stretch. The old single line ran straight past it and left you to work that out.
+    func testAGuideSkipsCardsThatDontAgree() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
+                                         against: [rect(100, 0), rect(340, 200)], reach: reach)
+        guard case .alignment(_, _, let cards)? = result.guides.first else {
+            return XCTFail("expected an alignment guide")
+        }
+        XCTAssertEqual(cards.count, 2, "the moving card and the one card that lines up with it")
     }
 
     // MARK: Resizing
@@ -114,12 +139,40 @@ final class CanvasSnappingTests: XCTestCase {
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.width, 340)
 
-        guard case .sameSize(let axis, let moving, let matched)? = result.guides.first else {
+        guard case .sameSize(let axes, let cards)? = result.guides.first else {
             return XCTFail("expected a same-size guide")
         }
-        XCTAssertEqual(axis, .horizontal)
-        XCTAssertEqual(moving.width, 340)
-        XCTAssertEqual(matched.width, 340)
+        XCTAssertEqual(axes, [.horizontal], "the width, and only the width — the heights differ")
+        XCTAssertEqual(cards.map(\.width), [340, 340])
+    }
+
+    /// The claim worth telling apart from the others: dragging a corner until a card is another's
+    /// width *and* its height has made it the same shape, which is one fact rather than two.
+    func testMatchingBothDimensionsIsOneClaim() {
+        let result = CanvasSnapping.resize(rect(0, 0, 337, 197), handle: .bottomRight,
+                                           against: [rect(900, 900, 340, 200)],
+                                           reach: reach, snapsToGrid: false)
+        XCTAssertEqual(result.frame.width, 340)
+        XCTAssertEqual(result.frame.height, 200)
+        XCTAssertEqual(result.guides.count, 1, "one claim, not the same claim twice")
+        guard case .sameSize(let axes, let cards)? = result.guides.first else {
+            return XCTFail("expected a same-size guide")
+        }
+        XCTAssertEqual(axes, [.horizontal, .vertical])
+        XCTAssertEqual(cards, [rect(0, 0, 340, 200), rect(900, 900, 340, 200)])
+    }
+
+    /// A dimension that was already right counts towards the shape. Only the axis the grip drags can
+    /// snap, so a card already the right height and dragged to the right width would otherwise be
+    /// reported as a width match while sitting there being visibly congruent.
+    func testADimensionThatWasAlreadyRightCountsTowardsTheShape() {
+        let result = CanvasSnapping.resize(rect(0, 0, 337, 200), handle: .right,
+                                           against: [rect(900, 900, 340, 200)],
+                                           reach: reach, snapsToGrid: false)
+        guard case .sameSize(let axes, _)? = result.guides.first else {
+            return XCTFail("expected a same-size guide")
+        }
+        XCTAssertEqual(axes, [.horizontal, .vertical])
     }
 
     func testAHeightSnapsToAnotherCardsHeight() {
@@ -127,10 +180,10 @@ final class CanvasSnappingTests: XCTestCase {
                                            against: [rect(900, 900, 80, 460)],
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.height, 460)
-        guard case .sameSize(let axis, _, _)? = result.guides.first else {
+        guard case .sameSize(let axes, _)? = result.guides.first else {
             return XCTFail("expected a same-size guide")
         }
-        XCTAssertEqual(axis, .vertical)
+        XCTAssertEqual(axes, [.vertical])
     }
 
     /// Dragging a *left* grip to match a width grows the card leftward — the right edge is the one
@@ -181,5 +234,21 @@ final class CanvasSnappingTests: XCTestCase {
         let result = CanvasSnapping.resize(rect(0, 0, 203, 100), handle: .right,
                                            against: [], reach: reach)
         XCTAssertEqual(result.frame.width, 200)
+        XCTAssertEqual(result.guides, [.grid(rect(0, 0, 200, 100))])
+    }
+
+    /// A guide describes the card as it ended up, not as it was halfway through being resized. Built
+    /// axis by axis, the width guide carried the height the card had before the other grip's edge had
+    /// moved — and that rectangle is what gets drawn.
+    func testASizeGuideDescribesTheFinishedCard() {
+        let result = CanvasSnapping.resize(rect(0, 0, 337, 337), handle: .bottomRight,
+                                           against: [rect(900, 900, 340, 80)],
+                                           reach: reach, snapsToGrid: true)
+        XCTAssertEqual(result.frame.width, 340)
+        XCTAssertEqual(result.frame.height, 340, "rounded to the grid, since no height matched")
+        guard case .sameSize(_, let cards)? = result.guides.first else {
+            return XCTFail("expected a same-size guide")
+        }
+        XCTAssertEqual(cards.first, rect(0, 0, 340, 340))
     }
 }

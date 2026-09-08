@@ -78,23 +78,26 @@ final class CanvasSelectionTests: XCTestCase {
     // MARK: Grips
 
     func testGripsBelongToTheSelectionOnly() {
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
-        XCTAssertEqual(tester(mode: .edit).hit(at(40, 40)), .node("a"),
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
+        XCTAssertEqual(tester(mode: .connect).hit(at(40, 40)), .node("a"),
                        "unselected: it's just the card")
     }
 
     func testAGripBeatsTheCardUnderneath() {
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(at(240, 140)),
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(240, 140)),
                        .handle("a", .bottomRight))
     }
 
-    /// A grip you can drag but cannot see is worse than no grip, so view mode — which draws none —
-    /// must not answer with one either.
-    func testViewModeOffersNoGripsToDrag() {
-        XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(40, 40)), .node("a"),
-                       "the corner of a selected card is the card, and dragging it moves it")
-        // And with no grip in the way, an overlapping corner belongs to whichever card is actually on
-        // top there — which is the point: in view mode the board reads as cards, not as controls.
+    /// View mode draws no grips, but it does resize: the band on the card's own edge answers instead,
+    /// which is why the corner reads as a corner here without anything being drawn on it.
+    func testViewModeResizesFromTheEdgeWithNoGripDrawn() {
+        XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(40, 40)), .handle("a", .topLeft))
+    }
+
+    /// A corner buried under another card is not a corner you can aim at, so it does not answer. The
+    /// board is read front to back and each card is asked about its edge *and* its face before the
+    /// next one is asked anything.
+    func testACornerUnderAnotherCardBelongsToTheCardOnTop() {
         XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(at(240, 140)), .node("b"))
     }
 
@@ -102,17 +105,17 @@ final class CanvasSelectionTests: XCTestCase {
     /// a board has the most cards on it and the pointer has the least room.
     func testGripsStayTheSameSizeToThePointerAtAnyZoom() {
         // 20 canvas units from the corner is 6 view points at 30% — inside the 7pt reach.
-        XCTAssertEqual(tester(scale: 0.3, mode: .edit, selection: ["a"]).hit(at(60, 60)),
+        XCTAssertEqual(tester(scale: 0.3, mode: .connect, selection: ["a"]).hit(at(60, 60)),
                        .handle("a", .topLeft))
         // The same canvas distance at 100% is 20 view points — well outside it.
-        XCTAssertEqual(tester(scale: 1, mode: .edit, selection: ["a"]).hit(at(60, 60)), .node("a"))
+        XCTAssertEqual(tester(scale: 1, mode: .connect, selection: ["a"]).hit(at(60, 60)), .node("a"))
     }
 
     // MARK: Connection dots
 
     func testDotsAreOnlyThereInEditMode() {
         let point = at(240 + CanvasHitTester.anchorOffset, 90)
-        XCTAssertEqual(tester(mode: .edit, selection: ["a"]).hit(point), .anchor("a", .right))
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(point), .anchor("a", .right))
         XCTAssertEqual(tester(mode: .view, selection: ["a"]).hit(point), .node("b"),
                        "in view mode the board is cards and lines and nothing else")
     }
@@ -121,8 +124,8 @@ final class CanvasSelectionTests: XCTestCase {
     /// otherwise wiring two cards together is click, then drag, for every line.
     func testTheHoveredCardOffersDotsInEditMode() {
         let point = at(40 - CanvasHitTester.anchorOffset, 90)
-        XCTAssertEqual(tester(mode: .edit, hovered: "a").hit(point), .anchor("a", .left))
-        XCTAssertEqual(tester(mode: .edit).hit(point), .board, "nothing hovered, nothing offered")
+        XCTAssertEqual(tester(mode: .connect, hovered: "a").hit(point), .anchor("a", .left))
+        XCTAssertEqual(tester(mode: .connect).hit(point), .board, "nothing hovered, nothing offered")
     }
 
     // MARK: Lines
@@ -159,6 +162,23 @@ final class CanvasSelectionTests: XCTestCase {
                        rect(0, 100, 300, 200), "a left grip doesn't move y")
     }
 
+    /// A drag moves an edge by how far the pointer went, not to where the pointer is. An edge is a
+    /// band several points wide and is almost never taken hold of at its exact coordinate — placing it
+    /// at the pointer makes it jump by the difference on the first mouse-moved event.
+    func testAnEdgeFollowsTheDistanceDraggedNotThePointer() {
+        let frame = rect(100, 100, 200, 200)
+        XCTAssertEqual(CanvasHandle.right.resize(frame, by: (dx: 50, dy: 999)),
+                       rect(100, 100, 250, 200), "a right edge ignores dy entirely")
+        XCTAssertEqual(CanvasHandle.topLeft.resize(frame, by: (dx: -20, dy: -10)),
+                       rect(80, 90, 220, 210))
+    }
+
+    func testADeltaResizeCannotInvertEither() {
+        let squashed = CanvasHandle.left.resize(rect(100, 100, 200, 200), by: (dx: 5000, dy: 0))
+        XCTAssertEqual(squashed.width, 40)
+        XCTAssertEqual(squashed.maxX, 300, "the edge that wasn't grabbed stayed put")
+    }
+
     /// Dragging a grip through the opposite edge stops at a minimum rather than inverting. A negative
     /// width is a card Obsidian draws as nothing — the file would look fine and the board would have a
     /// hole in it.
@@ -168,6 +188,50 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertEqual(squashed.width, 40)
         XCTAssertEqual(squashed.minX, 100)
         XCTAssertGreaterThan(CanvasHandle.top.resize(frame, to: at(200, 9999)).height, 0)
+    }
+
+    // MARK: Resizing several at once
+
+    /// `a` and `b` together occupy 40…400 across and 40…180 down.
+    private var boxOfAAndB: CanvasRect { rect(40, 40, 360, 140) }
+
+    func testSeveralSelectedHaveABoxAndOneDoesNot() {
+        XCTAssertEqual(tester(selection: ["a", "b"]).selectionBox, boxOfAAndB)
+        XCTAssertNil(tester(selection: ["a"]).selectionBox,
+                     "one card is resized by its own edge; the box would be the same rectangle said twice")
+    }
+
+    /// The band that answers for a multiple selection is the one round the box — including where it
+    /// runs through open board that belongs to no card at all.
+    func testTheSelectionsOwnEdgeIsWhatIsGrabbed() {
+        let t = tester(selection: ["a", "b"])
+        XCTAssertEqual(t.hit(at(40, 170)), .handle("a", .left),
+                       "the box's left edge, at a height where neither card reaches")
+        XCTAssertEqual(t.hit(at(400, 180)), .handle("a", .bottomRight))
+        XCTAssertEqual(tester().hit(at(40, 170)), .board, "and it is only there because they're selected")
+    }
+
+    /// The edge *inside* the selection is nobody's handle. Dragging it would move the box's far edge,
+    /// which is not the edge under the pointer — so it isn't offered.
+    func testASelectedCardsInnerEdgeIsNotAHandle() {
+        let t = tester(selection: ["a", "b"])
+        // a's right edge, well inside the box.
+        guard case .handle = t.hit(at(240, 100)) else { return }
+        XCTFail("an edge inside the selection should not offer a resize")
+    }
+
+    /// A card that isn't in the selection keeps its own edge band — it is still a card you can grab,
+    /// and grabbing it selects it alone.
+    func testAnUnselectedCardKeepsItsOwnEdge() {
+        XCTAssertEqual(tester(selection: ["a", "b"]).hit(at(1000, 90)), .handle("far", .left))
+    }
+
+    /// In connect mode the eight grips move out to the box too, rather than eight per card.
+    func testTheGripsMoveOutToTheBox() {
+        let t = tester(mode: .connect, selection: ["a", "b"])
+        XCTAssertEqual(t.hit(CanvasHandle.right.point(in: boxOfAAndB)), .handle("a", .right))
+        XCTAssertEqual(t.hit(at(240, 90)), .node("b"),
+                       "a's own right-middle grip is gone; b is lying over that point")
     }
 
     // MARK: Sweeping and dragging
@@ -195,64 +259,130 @@ final class CanvasSelectionTests: XCTestCase {
         XCTAssertEqual(canvasDragSet(["a"], in: board()), ["a"])
     }
 
-    // MARK: Colour
+    // MARK: Resizing by the edge
 
-    func testObsidiansPresetsAndHexBothRead() {
-        XCTAssertEqual(CanvasPalette.color("1"), CanvasPalette.presets[0])
-        XCTAssertEqual(CanvasPalette.color("6"), CanvasPalette.presets[5])
-        XCTAssertNil(CanvasPalette.color(nil))
-        XCTAssertNil(CanvasPalette.color(""))
-        XCTAssertNil(CanvasPalette.color("9"), "not a preset, and not hex")
+    /// A card is resized by its edge in either mode — the Mac window idiom — so the band has to say
+    /// which edge, hand corners to corners, and leave the inside alone.
+    private let box = CanvasRect(x: 100, y: 100, width: 400, height: 300)
 
-        let teal = CanvasPalette.hex("#3ab7a2")
-        XCTAssertEqual(teal?.redComponent ?? 0, 0x3a / 255.0, accuracy: 0.002)
-        XCTAssertEqual(CanvasPalette.hex("#fff"), CanvasPalette.hex("#ffffff"))
-        XCTAssertEqual(CanvasPalette.hex("3ab7a2"), teal, "the hash is optional")
-        XCTAssertNil(CanvasPalette.hex("#nothex"))
+    private func edge(_ x: Double, _ y: Double, reach: Double = 7) -> CanvasHandle? {
+        CanvasHitTester.edgeHandle(box, at: CanvasPoint(x: x, y: y), reach: reach)
+    }
+
+    func testEachEdgeAndCornerAnswersForItself() {
+        XCTAssertEqual(edge(300, 102), .top)
+        XCTAssertEqual(edge(300, 398), .bottom)
+        XCTAssertEqual(edge(102, 250), .left)
+        XCTAssertEqual(edge(498, 250), .right)
+        XCTAssertEqual(edge(102, 102), .topLeft)
+        XCTAssertEqual(edge(498, 102), .topRight)
+        XCTAssertEqual(edge(102, 398), .bottomLeft)
+        XCTAssertEqual(edge(498, 398), .bottomRight)
+    }
+
+    func testTheBandStraddlesTheEdge() {
+        XCTAssertEqual(edge(300, 95), .top, "just outside is still the edge")
+        XCTAssertNil(edge(300, 90), "further out is the board")
+        XCTAssertNil(edge(300, 250), "the middle is the card")
+    }
+
+    /// At 8% zoom the band is 88 points a side, which on a small card is the whole card. Resizing it
+    /// there would cost you moving it and stepping into it, which is the worse trade.
+    func testACardTooSmallToSpareItsEdgesKeepsThem() {
+        let small = CanvasRect(x: 0, y: 0, width: 120, height: 120)
+        XCTAssertNil(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 88))
+        XCTAssertEqual(CanvasHitTester.edgeHandle(small, at: CanvasPoint(x: 2, y: 60), reach: 7), .left,
+                       "the same card is resizable once the pointer is a pointer again")
+    }
+
+    // MARK: The band, as the board actually reads it
+
+    /// `edgeHandle` was right for a year and unreachable for all of it: nothing asked it. These are the
+    /// assertions that say a pointer on a card's edge gets a resize, which is what makes the cursor
+    /// change and the drag happen.
+
+    func testAnEdgeBeatsTheCardFaceBehindIt() {
+        XCTAssertEqual(tester().hit(at(40, 90)), .handle("a", .left))
+        XCTAssertEqual(tester().hit(at(40, 40)), .handle("a", .topLeft))
+        XCTAssertEqual(tester().hit(at(140, 90)), .node("a"), "the inside is still the card")
+    }
+
+    /// No selecting first. A Mac window does not need to be focused before you can grab its edge, and
+    /// that is the whole of the idiom being borrowed.
+    func testAnUnselectedCardHandsOverItsEdge() {
+        XCTAssertEqual(tester(selection: []).hit(at(40, 90)), .handle("a", .left))
+    }
+
+    /// Where two cards overlap, the band belongs to the one drawn in front — otherwise the edge you can
+    /// see does nothing and an edge buried under it resizes.
+    func testTheBandGoesToTheCardInFront() {
+        XCTAssertEqual(tester().hit(at(205, 90)), .handle("b", .left),
+                       "b's left edge, over a's face")
+    }
+
+    /// Connect mode draws grips on the selection and offers the band only there, so that clicking an
+    /// unselected card to select it isn't a coin toss against a resize.
+    func testConnectModeOffersTheBandOnlyOnTheSelection() {
+        XCTAssertEqual(tester(mode: .connect).hit(at(40, 90)), .node("a"))
+        XCTAssertEqual(tester(mode: .connect, selection: ["a"]).hit(at(40, 90)), .handle("a", .left))
+    }
+
+    /// A tile's size is the arrangement's to set. The divider is the only thing you drag there.
+    func testATiledViewOffersNoEdges() {
+        var tiled = tester()
+        tiled.layout = CanvasLayout(frames: ["a": rect(40, 40, 200, 100)], visible: ["a"])
+        XCTAssertEqual(tiled.hit(at(40, 90)), .node("a"))
+    }
+
+    /// A frame gets its corners once selected. Its straight edges stay a move, because they are the
+    /// only part of a frame a click can reach and it would otherwise become undraggable.
+    func testASelectedFrameResizesFromItsCorners() {
+        XCTAssertEqual(tester(selection: ["frame"]).hit(at(0, 0)), .handle("frame", .topLeft))
+        XCTAssertEqual(tester(selection: ["frame"]).hit(at(400, 0)), .node("frame"),
+                       "the top edge still moves it")
+        XCTAssertEqual(tester().hit(at(0, 0)), .node("frame"),
+                       "an unselected frame keeps all four corners as a way to pick it up")
     }
 
     // MARK: What an engaged card hands to the board
 
     /// A 400×400 card, the size a link card actually is on the one board in the vault that has them.
     private let card = NSRect(x: 0, y: 0, width: 400, height: 400)
-    /// The caption strip across the top, which a web card offers as its handle.
-    private let caption = NSRect(x: 0, y: 0, width: 400, height: 20)
 
     func testTheMiddleOfAnEngagedCardBelongsToTheCard() {
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 200), in: card, handle: caption, scale: 1))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 200), in: card, scale: 1))
     }
 
     func testTheBorderBelongsToTheBoard() {
         for point in [NSPoint(x: 3, y: 200), NSPoint(x: 397, y: 200), NSPoint(x: 200, y: 397)] {
-            XCTAssertTrue(canvasBoardKeeps(point, in: card, handle: caption, scale: 1),
+            XCTAssertTrue(canvasBoardKeeps(point, in: card, scale: 1),
                           "\(point) is within a grip's reach of the edge")
         }
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 11, y: 200), in: card, handle: caption, scale: 1),
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 11, y: 200), in: card, scale: 1),
                        "past the band, and the page's business")
     }
 
-    func testTheCaptionBelongsToTheBoard() {
-        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, handle: caption, scale: 1))
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 30), in: card, handle: caption, scale: 1),
-                       "just under it is the page")
-    }
-
-    func testACardWithNoHandleGivesUpOnlyItsBorder() {
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, handle: nil, scale: 1),
-                       "a text card has no caption to drag it by")
+    /// Cards carry no headers now, so the band along the edge is the whole of what an engaged card
+    /// hands back — and it is the same answer for every kind of card. A web card used to give up its
+    /// caption strip as well, which is what made the top 20 points of it draggable; nothing does.
+    func testAnEngagedCardGivesUpOnlyItsBorder() {
+        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 200, y: 3), in: card, scale: 1),
+                      "the top edge, like every other edge")
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 200, y: 10), in: card, scale: 1),
+                       "past the band there is no strip left to grab")
     }
 
     /// The band is a pointer's width on screen, so in card points it has to grow as you zoom out —
     /// otherwise the one thing you can still grab shrinks exactly when the cards get small.
     func testTheBorderStaysThickToThePointerAsYouZoomOut() {
-        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 15, y: 200), in: card, handle: nil, scale: 0.3),
+        XCTAssertTrue(canvasBoardKeeps(NSPoint(x: 15, y: 200), in: card, scale: 0.3),
                        "15 points in is 4.5 on screen at 30%")
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 30, y: 200), in: card, handle: nil, scale: 0.3))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 30, y: 200), in: card, scale: 0.3))
     }
 
     func testACardTooSmallToSpareItsBorderKeepsAllOfIt() {
         // At 8% the band alone would be 88 points on each side of a 120pt card — the whole card.
         let small = NSRect(x: 0, y: 0, width: 120, height: 120)
-        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 60, y: 60), in: small, handle: nil, scale: 0.08))
+        XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 60, y: 60), in: small, scale: 0.08))
     }
 }

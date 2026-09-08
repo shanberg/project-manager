@@ -1,19 +1,43 @@
 import Foundation
 import PmLib
 
-/// A line the board draws to say why a card stopped where it did.
+/// What the board draws to say why a card stopped where it did.
 ///
 /// A snap without a guide is a card that mysteriously refuses to go where you put it. The guide is not
 /// decoration — it is the explanation, and it names which other card was responsible.
+///
+/// **Three claims, because they read differently to the eye and are worth telling apart.** Two cards
+/// that agree on an edge are in a row or a column; two cards that are exactly the same width are a
+/// set; two cards that are the same size in *both* dimensions are the same shape, which is the
+/// strongest thing a snap ever says. And landing on the grid is a claim too — the weakest one, and the
+/// one that used to be silent, so a card clicking to a lattice nobody had mentioned looked like a card
+/// refusing to go where you put it. Each is drawn as a different amount of the same mark; see
+/// `CanvasGuideView`.
 enum CanvasGuide: Equatable {
     enum Axis { case vertical, horizontal }
 
-    /// Two or more cards line up here. Drawn at `position` on `axis`, spanning `from`…`to` along the
-    /// other axis so it reaches from the card being moved to the card it matched and no further.
-    case alignment(axis: Axis, position: Double, from: Double, to: Double)
+    /// Two or more cards line up here, at `position` on `axis`.
+    ///
+    /// `cards` is every card in the agreement — the moving set's box first, then each card it matched.
+    /// Whole rectangles rather than the stretch each one covers, because what gets drawn is a ghost
+    /// around the card itself, and a ghost needs the card's corners as much as its edges. A line
+    /// states a coordinate; what is worth saying is *which cards* agree on it.
+    case alignment(axis: Axis, position: Double, cards: [CanvasRect])
 
-    /// These two are now the same width (or height). Drawn as a measured bar over each.
-    case sameSize(axis: Axis, moving: CanvasRect, matched: CanvasRect)
+    /// These cards are the same size along `axes` — `.horizontal` meaning the same width, `.vertical`
+    /// the same height, and **both meaning the same size and so the same aspect ratio**.
+    ///
+    /// One case rather than one per dimension, because "the same width *and* the same height" is not
+    /// two facts that happen to be true at once: it is a different and much stronger claim, and the
+    /// only one of them worth drawing as a whole shape.
+    case sameSize(axes: [Axis], cards: [CanvasRect])
+
+    /// Nothing on the board explained it; the card is where the 10pt lattice put it.
+    ///
+    /// Only ever emitted when there is no other guide, because the grid is the fallback rather than
+    /// the rule — a card that found a real agreement was not placed by the lattice, whatever the
+    /// lattice would also have said.
+    case grid(CanvasRect)
 }
 
 /// What a drag or a resize settled on.
@@ -76,6 +100,11 @@ enum CanvasSnapping {
         if let vertical {
             guides.append(guide(axis: .horizontal, at: vertical.target, moving: settled, others: others))
         }
+        // Nothing on the board had anything to say, so the lattice is the whole explanation — and
+        // saying so is the point: this is the case where a card visibly clicks and nothing on screen
+        // admits to it. Emitted whether or not the grid actually had to move the card, because a mark
+        // that blinked out every time you crossed an exact multiple of ten would be worse than none.
+        if guides.isEmpty, snapsToGrid { guides.append(.grid(settled)) }
         return CanvasSnapResult(frame: settled, guides: guides)
     }
 
@@ -93,7 +122,12 @@ enum CanvasSnapping {
                        reach: Double,
                        snapsToGrid: Bool = true) -> CanvasSnapResult {
         var left = frame.minX, right = frame.maxX, top = frame.minY, bottom = frame.maxY
-        var guides: [CanvasGuide] = []
+        // What each axis decided, kept rather than drawn, because a guide describes the card and the
+        // card is not finished until both axes and the minimum-size clamp have had their turn. Built
+        // as we went, the width guide was drawn around a rectangle with the *old* height in it.
+        var aligned: [(axis: CanvasGuide.Axis, position: Double)] = []
+        var sizedAxes: [CanvasGuide.Axis] = []
+        var landedOnGrid = false
 
         if handle.unit.x != 0.5 {
             let movingRight = handle.unit.x == 1
@@ -105,23 +139,12 @@ enum CanvasSnapping {
                                  among: edges.map { ($0, false) } + sizes.map { ($0, true) },
                                  reach: reach) {
                 if movingRight { right = hit.target } else { left = hit.target }
-                if hit.isSize {
-                    let width = abs(right - left)
-                    if let matched = others.first(where: { abs($0.width - width) < 0.001 }) {
-                        guides.append(.sameSize(axis: .horizontal,
-                                                moving: CanvasRect(x: left, y: top,
-                                                                   width: right - left, height: bottom - top),
-                                                matched: matched))
-                    }
-                } else {
-                    guides.append(guide(axis: .vertical, at: hit.target,
-                                        moving: CanvasRect(x: left, y: top,
-                                                           width: right - left, height: bottom - top),
-                                        others: others))
-                }
+                if hit.isSize { sizedAxes.append(.horizontal) }
+                else { aligned.append((.vertical, hit.target)) }
             } else if snapsToGrid {
                 if movingRight { right = (right / grid).rounded() * grid }
                 else { left = (left / grid).rounded() * grid }
+                landedOnGrid = true
             }
         }
 
@@ -135,23 +158,12 @@ enum CanvasSnapping {
                                  among: edges.map { ($0, false) } + sizes.map { ($0, true) },
                                  reach: reach) {
                 if movingBottom { bottom = hit.target } else { top = hit.target }
-                if hit.isSize {
-                    let height = abs(bottom - top)
-                    if let matched = others.first(where: { abs($0.height - height) < 0.001 }) {
-                        guides.append(.sameSize(axis: .vertical,
-                                                moving: CanvasRect(x: left, y: top,
-                                                                   width: right - left, height: bottom - top),
-                                                matched: matched))
-                    }
-                } else {
-                    guides.append(guide(axis: .horizontal, at: hit.target,
-                                        moving: CanvasRect(x: left, y: top,
-                                                           width: right - left, height: bottom - top),
-                                        others: others))
-                }
+                if hit.isSize { sizedAxes.append(.vertical) }
+                else { aligned.append((.horizontal, hit.target)) }
             } else if snapsToGrid {
                 if movingBottom { bottom = (bottom / grid).rounded() * grid }
                 else { top = (top / grid).rounded() * grid }
+                landedOnGrid = true
             }
         }
 
@@ -165,9 +177,41 @@ enum CanvasSnapping {
             if handle.unit.y == 1 { bottom = top + minimum } else { top = bottom - minimum }
         }
 
-        return CanvasSnapResult(frame: CanvasRect(x: left, y: top,
-                                                  width: right - left, height: bottom - top),
-                                guides: guides)
+        let settled = CanvasRect(x: left, y: top, width: right - left, height: bottom - top)
+        var guides = aligned.map { guide(axis: $0.axis, at: $0.position, moving: settled, others: others) }
+        guides += sizeGuides(sizedAxes, moving: settled, others: others)
+        if guides.isEmpty, landedOnGrid { guides.append(.grid(settled)) }
+        return CanvasSnapResult(frame: settled, guides: guides)
+    }
+
+    /// What the size matches add up to, once the card has finished being resized.
+    ///
+    /// **The two axes are looked at together, and a card matching on both is one claim.** Dragging a
+    /// corner until a card is exactly another's width and exactly its height has made it the same
+    /// shape, which is a stronger and more useful thing to be told than the same fact twice.
+    ///
+    /// **A dimension that was already right counts.** Only the axis the grip is dragging can *snap*,
+    /// so a card that was already the right height and has just been dragged to the right width would
+    /// otherwise be reported as a width match while sitting there being visibly congruent. The snap is
+    /// what starts the sentence; the settled rectangle is what finishes it.
+    ///
+    /// The matched card is the first of that size on the board, which is the same arbitrary choice the
+    /// snap itself made. Naming every card of that width would light up half a board of cards that all
+    /// came out of the same template.
+    private static func sizeGuides(_ axes: [CanvasGuide.Axis],
+                                   moving: CanvasRect,
+                                   others: [CanvasRect]) -> [CanvasGuide] {
+        guard !axes.isEmpty else { return [] }
+        let sameWidth = { (other: CanvasRect) in abs(other.width - moving.width) < 0.001 }
+        let sameHeight = { (other: CanvasRect) in abs(other.height - moving.height) < 0.001 }
+
+        if let twin = others.first(where: { sameWidth($0) && sameHeight($0) }) {
+            return [.sameSize(axes: [.horizontal, .vertical], cards: [moving, twin])]
+        }
+        return axes.compactMap { axis in
+            let matched = others.first(where: axis == .horizontal ? sameWidth : sameHeight)
+            return matched.map { .sameSize(axes: [axis], cards: [moving, $0]) }
+        }
     }
 
     // MARK: -
@@ -212,9 +256,11 @@ enum CanvasSnapping {
         on ? (value / grid).rounded() * grid - value : 0
     }
 
-    /// A guide line long enough to reach from the moving card to the furthest card it agrees with, and
-    /// no longer. A line drawn the width of the board would be true and useless — the point of drawing
-    /// it is to show *which* cards are in agreement.
+    /// The cards in agreement at `position`.
+    ///
+    /// The moving set first, then the cards it matched, in board order. A guide drawn the width of the
+    /// board would be true and useless — the point of drawing it is to show *which* cards are in
+    /// agreement, and naming them is that fact rather than a summary of it.
     private static func guide(axis: CanvasGuide.Axis,
                               at position: Double,
                               moving: CanvasRect,
@@ -225,12 +271,6 @@ enum CanvasSnapping {
                 : [other.minY, other.midY, other.maxY]
             return candidates.contains { abs($0 - position) < 0.001 }
         }
-        var low = axis == .vertical ? moving.minY : moving.minX
-        var high = axis == .vertical ? moving.maxY : moving.maxX
-        for other in matched {
-            low = min(low, axis == .vertical ? other.minY : other.minX)
-            high = max(high, axis == .vertical ? other.maxY : other.maxX)
-        }
-        return .alignment(axis: axis, position: position, from: low, to: high)
+        return .alignment(axis: axis, position: position, cards: [moving] + matched)
     }
 }
