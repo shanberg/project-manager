@@ -309,34 +309,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// The Dock menu mirrors the menubar's core actions, so the app is useful from the Dock without
+    /// The Dock menu mirrors the menu bar's core actions, so the app is useful from the Dock without
     /// opening a window first.
+    ///
+    /// Built from `PMCommand` and dispatched through `PMCommandRunner`, like the menu bar and the
+    /// dropdown. It was the one surface outside the table: it hand-wrote its four titles, called two
+    /// private selectors of its own that went at `PMStore` directly rather than through the runner,
+    /// and asked nothing about availability — so Dive In was live with nothing to dive into, and
+    /// "Open Window" was the table's "Open Project Window" under a name only this menu used.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
-        if let focused = store.focusedTodo {
-            let complete = NSMenuItem(title: "Complete: \(focused.text.prefix(40))",
-                                      action: #selector(completeFocusedTask), keyEquivalent: "")
-            complete.target = self
-            menu.addItem(complete)
+        // Manual enablement, deliberately. The Dock draws this menu while PM may not be the active
+        // app, so there is no responder chain to validate against and AppKit never asks
+        // `validateMenuItem` about it. With autoenabling left on, every item is simply live.
+        menu.autoenablesItems = false
+        let context = PMCommand.Context(store: store)
+
+        // Named with the task rather than with the table's "Complete Focused Task". This is the one
+        // surface opened while the app's windows are shut, so it is the one that has to say *which*
+        // task — the dropdown does the same, from the same truncation.
+        if let focused = store.focusedTodo, PMCommand.complete.isAvailable(in: context) {
+            menu.addItem(dockItem("Complete: \(focused.text.prefix(40))", runs: .complete))
         }
-        let diveIn = NSMenuItem(title: "Dive In", action: #selector(diveIn), keyEquivalent: "")
-        diveIn.target = self
-        menu.addItem(diveIn)
+        menu.addItem(dockItem(PMCommand.diveIn.title, runs: .diveIn,
+                              enabled: PMCommand.diveIn.isAvailable(in: context)))
         menu.addItem(.separator())
-        let panel = NSMenuItem(title: "Show Focus Panel", action: #selector(showFocusPanel), keyEquivalent: "")
+        // Not a `PMCommand`: the panel is a window of the app's, not an act on a project. `show` and
+        // not the View menu's toggle — you opened this menu to summon it, and a Dock item that
+        // sometimes put it away would be a coin toss from here, where you cannot see whether it's up.
+        let panel = NSMenuItem(title: "Show Focus Panel", action: #selector(showFocusPanel),
+                               keyEquivalent: "")
         panel.target = self
         menu.addItem(panel)
-        let open = NSMenuItem(title: "Open Window", action: #selector(newWindow), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
+        // The one item deliberately not asked about availability. `PMCommand.openWindow` reports
+        // itself unavailable without a focused project, which is the right answer in a Task or Project
+        // menu and the wrong one here: with no project *and* no window, this is how you get either.
+        // The dropdown's no-project branch offers the same item, live, for the same reason.
+        menu.addItem(dockItem(PMCommand.openWindow.title, runs: .openWindow))
         return menu
     }
 
-    @objc private func completeFocusedTask() {
-        if let focused = store.focusedTodo { store.complete(focused) }
+    /// One Dock item, riding the same `representedObject` the menu bar's items ride and answered by
+    /// the same `runCommand(_:)`.
+    private func dockItem(_ title: String, runs command: PMCommand, enabled: Bool = true) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(runCommand(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = command.rawValue
+        item.isEnabled = enabled
+        return item
     }
-
-    @objc private func diveIn() { store.diveIn() }
 
     @objc private func showFocusPanel() { FocusPanelController.shared.show() }
 

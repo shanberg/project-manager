@@ -110,13 +110,20 @@ final class CanvasNoticeBar: NSView {
         path.stroke()
     }
 
-    func show(message: String, kind: Kind, actionTitle: String?) {
+    /// Put something up. Each button is shown only if it has been given a title, which is what lets one
+    /// banner carry a warning with two actions on it and a one-line report with none.
+    ///
+    /// The two used to be one switch — the reveal button appeared whenever the action button did — and
+    /// that was fine while there was one caller. It is wrong the moment a notice wants to say "Saved
+    /// report.csv to Downloads" and offer only Show in Finder.
+    func show(message: String, kind: Kind, actionTitle: String?, revealTitle: String? = nil) {
         self.kind = kind
         label.stringValue = message
         label.textColor = kind == .warning ? .labelColor : .secondaryLabelColor
         actionButton.isHidden = actionTitle == nil
-        revealButton.isHidden = actionTitle == nil
+        revealButton.isHidden = revealTitle == nil
         if let actionTitle { actionButton.title = actionTitle }
+        if let revealTitle { revealButton.title = revealTitle }
         isHidden = false
         needsDisplay = true
     }

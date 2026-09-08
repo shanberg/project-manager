@@ -48,6 +48,12 @@ final class ProjectViewState: ObservableObject {
     /// main menu can't be relied on to win the race by itself.
     @Published var isEditingText = false
 
+    /// The window's tabs, so the task column's header can draw the same bar the board's does.
+    ///
+    /// Handed in rather than published, because it is an object the window owns for the window's whole
+    /// life: what changes is inside it, and the views that draw it observe it directly.
+    var tabs = ProjectTabModel()
+
     /// Open a project — the sidebar's double-click and Return. Supplied by the window, which decides
     /// whether that means retargeting this window or opening another one.
     var openProject: (_ projectKey: String, _ inNewWindow: Bool) -> Void = { _, _ in }

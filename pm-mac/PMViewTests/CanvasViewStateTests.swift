@@ -36,6 +36,19 @@ final class CanvasViewStateTests: XCTestCase {
         XCTAssertEqual(back.tiling?.masterFraction, 0.44)
     }
 
+    /// The sizes are the other half of an arrangement, and they were the half that went missing: a
+    /// stack dragged into unequal heights got written down only if something *else* about the tiling
+    /// changed afterwards. See `CanvasBoardView.rememberTileSizes`.
+    func testTheSizesComeBackToo() {
+        let sizes: [String: CanvasTiling.Size] = ["a": .pinned(320), "b": .flexible(2)]
+        CanvasViewMemory.remember(
+            CanvasViewState(tiling: .init(ids: ["a", "b"], arrangement: .masterStack,
+                                          masterFraction: 0.5, sizes: sizes)),
+            for: url)
+        XCTAssertEqual(CanvasViewMemory.of(url).tiling?.sizes, sizes,
+                       "a pin is a length and a share is a weight, and neither survives as the other")
+    }
+
     /// Leaving a tiling has to clear the memory of it, or every window on that board would open tiled
     /// forever after the one time you tiled it.
     func testLeavingATilingForgetsIt() {

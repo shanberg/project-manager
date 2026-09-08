@@ -943,11 +943,20 @@ private struct ProjectMenu: View {
 
     var body: some View {
         if let only = targets.first, !isMulti {
+            // "Go to", not "Open" — this retargets the window you are already in, which is what the
+            // canvas card menu, File ▸ Go to Project…, a task's "Go to <project>" and the Waiting list
+            // all call the same act. This item was the one place it was called opening, which left the
+            // app with two verbs for one thing and the odd one out on the surface people use most.
+            //
+            // Named by kind, like Rename below: an area is not a project, and the menu already knows
+            // which one it was opened on.
             Button { onActivate(only) } label: {
-                Label("Open Project", systemImage: "arrow.right.circle")
+                Label("Go to \(only.kind.displayName)", systemImage: "arrow.right.circle")
             }
+            // The other verb, because this one really does open something: a window that wasn't there.
             Button { onOpenInNewWindow(only) } label: {
-                Label("Open in New Window", systemImage: "macwindow.badge.plus")
+                Label("Open \(only.kind.displayName) in New Window",
+                      systemImage: "macwindow.badge.plus")
             }
             Divider()
         }

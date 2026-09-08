@@ -21,11 +21,14 @@ import SwiftUI
 final class CanvasHeaderModel: ObservableObject {
     /// The board's name — the canvas file, without its extension.
     @Published var title = ""
-    @Published var zoom: Double = 1
     @Published var mode: CanvasMode = .view
     /// The web card you have stepped into, if any.
     @Published var page: Page?
     @Published var find = Find()
+    /// Bumped by ⌘L to put the keyboard in the address field with the address selected, the way a
+    /// browser does. A token rather than a flag, for the reason `Find.focusToken` is one: pressing it
+    /// again while the field is already open has to mean something.
+    @Published var addressFocusToken = 0
     /// What a tiled view is showing, long and short — "6 of 43 cards" and "6/43". Nil when the board is
     /// showing itself.
     ///
@@ -50,17 +53,16 @@ final class CanvasHeaderModel: ObservableObject {
     /// How much room the header's controls have, and therefore what they can afford to say.
     ///
     /// The trailing chrome grew: a page capsule holding an address and up to five buttons, then the
-    /// board's own capsule with a find field, the zoom, the word "Connecting", and four controls. All of
-    /// that at once on a narrow window runs into the title pill, and the pill is the piece that gives
-    /// way — so the window ends up naming the board it is showing with two letters and an ellipsis.
+    /// board's own capsule with a find field, the word "Connecting", and four controls. All of that at
+    /// once on a narrow window runs into the title pill, and the pill is the piece that gives way — so
+    /// the window ends up naming the board it is showing with two letters and an ellipsis.
     ///
     /// The fix is an order of precedence rather than more space: state you are *in* outlasts state you
     /// can *read elsewhere*. The page and the find field are things you asked for a moment ago and are
-    /// acting on now. The zoom is a number the board itself shows you by being at that zoom. So the zoom
-    /// goes first, then the mode label, and the address field narrows rather than leaving — an address
-    /// bar with no address in it is not an address bar, and it is the only place a card can tell you
-    /// whose password field you are looking at. What never goes: the renderer switch, Add, and the
-    /// options menu.
+    /// acting on now. So the mode label goes first, and the address field narrows rather than leaving —
+    /// an address bar with no address in it is not an address bar, and it is the only place a card can
+    /// tell you whose password field you are looking at. What never goes: the renderer switch, Add, and
+    /// the options menu.
     ///
     /// The tiled count is measured here too, but it isn't in the control capsule any more — it belongs
     /// to the pill, which is where "what am I looking at" is answered. It shortens to a bare fraction
@@ -80,7 +82,6 @@ final class CanvasHeaderModel: ObservableObject {
             }
         }
 
-        var showsZoom: Bool { self == .full }
         var showsModeLabel: Bool { self == .full }
         /// How wide the address field is allowed to get. Enough for a real host at every width — a
         /// truncated middle still shows you the end of the domain, which is the half that matters.
@@ -138,6 +139,16 @@ final class CanvasHeaderModel: ObservableObject {
     /// It was a lone button here and a different lone button there, each findable only once you were
     /// already on the other side of it and neither saying there was another side.
     @Published var showsRendererSwitch = false
+    /// Whether the pill wears the tiled readout.
+    ///
+    /// Off in a window whose tab bar is showing, where the tab holding this board wears it instead —
+    /// see `ProjectTabItem.detail`. One fact in one place: the pill speaks for the window, and with
+    /// several tabs up "6 of 43 cards" is true of exactly one of them.
+    @Published var showsTilingSummary = true
+    /// Whether the `+` offers the project's own note — true only on a project's board that hasn't got
+    /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
+    /// question (`CanvasBoardView.offersProjectNoteCard`).
+    @Published var offersProjectNote = false
     var setRenderer: (ProjectRenderer) -> Void = { _ in }
 
     // MARK: What the controls do. Supplied by the window controller.
@@ -146,6 +157,7 @@ final class CanvasHeaderModel: ObservableObject {
     var addFrame: () -> Void = {}
     var addLink: () -> Void = {}
     var addFile: () -> Void = {}
+    var addProjectNote: () -> Void = {}
     var setMode: (CanvasMode) -> Void = { _ in }
     var zoomIn: () -> Void = {}
     var zoomOut: () -> Void = {}
@@ -191,7 +203,7 @@ struct CanvasTitlePill: View {
             // glyphs. No amount of equal padding makes those siblings. The pill answers "what am I
             // looking at", and "6 of 43 cards" is precisely an answer to that — while the ✕ is the
             // Finder's own idiom for leaving a temporary, filtered state.
-            if let tiling = model.tiling {
+            if let tiling = model.tiling, model.showsTilingSummary {
                 Text(verbatim: "·")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -221,8 +233,11 @@ struct CanvasTitlePill: View {
         .onHover { hovering = $0 }
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.tiling?.long)
+        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.showsTilingSummary)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(model.tiling.map { "\(model.title), tiled, \($0.long)" } ?? model.title))
+        .accessibilityLabel(Text(model.showsTilingSummary
+            ? (model.tiling.map { "\(model.title), tiled, \($0.long)" } ?? model.title)
+            : model.title))
         .modifier(TitlebarDrop(model: model))
     }
 }
@@ -231,8 +246,8 @@ struct CanvasTitlePill: View {
 
 /// Everything you do to the board.
 ///
-/// Reading order is how you are looking at it, then what you can do to it: the zoom, the mode, tile,
-/// find, add, and the view options that hold the mode and the rest of the zoom commands.
+/// Reading order is how you are looking at it, then what you can do to it: the mode, tile, find, add,
+/// and the view options that hold the mode and the zoom commands.
 ///
 /// The page you have stepped into used to be in here too, as a group of items behind a divider. It is
 /// its own capsule now — see `CanvasPageCapsule` — for two reasons. Everything left in this capsule acts
@@ -255,18 +270,6 @@ struct CanvasControlCapsule: View {
             if model.find.isShowing {
                 findField
                 HeaderDivider()
-            }
-            // The zoom percentage used to read in the window's subtitle, which a hidden title takes
-            // with it. Quiet and monospaced so it can change under your eye without the row twitching
-            // — the same treatment the project header's progress count gets.
-            // Hidden while tiled: the tiles fill the window at whatever zoom they were laid out at, and
-            // a percentage you cannot change and did not choose is a number for its own sake.
-            if model.tiling == nil, model.room.showsZoom {
-                Text("\(Int((model.zoom * 100).rounded()))%")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 34, alignment: .trailing)
-                    .headerCaption()
-                    .help("Zoom")
             }
             if model.mode == .connect, model.room.showsModeLabel {
                 // A word rather than a segmented control, and only in the mode that isn't the default.
@@ -336,10 +339,17 @@ struct CanvasControlCapsule: View {
 
     private var addMenu: some View {
         Menu {
-            Button("Card", action: model.addCard)
-            Button("Frame", action: model.addFrame)
-            Button("Link\u{2026}", action: model.addLink)
-            Button("File\u{2026}", action: model.addFile)
+            // The board's right-click menu offers the same four; both read their names from
+            // `CanvasAddCommand` so the two can't drift into "Card" here and "New Card" there again.
+            Button(CanvasAddCommand.card.title, action: model.addCard)
+            Button(CanvasAddCommand.frame.title, action: model.addFrame)
+            Button(CanvasAddCommand.link.title, action: model.addLink)
+            Button(CanvasAddCommand.file.title, action: model.addFile)
+            // Conditional, and the board's right-click menu makes the same test — the item is the board
+            // saying something is missing, so it has nothing to say once it is back.
+            if model.offersProjectNote {
+                Button(CanvasAddCommand.projectNote.title, action: model.addProjectNote)
+            }
         } label: {
             Image(systemName: "plus")
         }

@@ -249,7 +249,11 @@ extension CanvasBoardView {
         // the board would otherwise offer you New Card and Paste, neither of which a tiled view can do.
         if isTiled {
             if let id = tileHandle(at: where_) {
-                selection = [id]
+                // The same rule the board's own path below follows, and it was the one line that
+                // didn't: right-clicking one of four selected tiles has to leave the four selected, or
+                // every command in the menu quietly means one card. A tiled view is where a bulk
+                // command — reload these six — is most likely to be what you wanted.
+                if !selection.contains(id) { selection = [id] }
                 buildCardMenu(menu, id: id)
                 return menu
             }
@@ -309,8 +313,14 @@ extension CanvasBoardView {
         case .link:
             // Not `openSelected`, which is "step into the card" — this item said Browser and stepped
             // into the card, and the method that opens the browser was never called by anything.
-            add(menu, "Open in Browser", #selector(openLinkInBrowser))
-            add(menu, "Copy Address", #selector(copyAddress))
+            //
+            // Every one of these already acted on the whole selection and every one of them was named
+            // as though it acted on one card, so a right-click on four selected cards said "Reload"
+            // and reloaded four. The count is said out loud for the same reason "Fill Window with
+            // These 6 Cards" says it: the hazard of a bulk command is doing more than you meant, and
+            // that is worth knowing before you commit rather than after.
+            add(menu, many("Open in Browser", "Open %d in Browser"), #selector(openLinkInBrowser))
+            add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             menu.addItem(.separator())
             // The two ways a card's address changes, and they are genuinely different errands. One is
             // "I navigated somewhere better and the card should point here now", which needs no typing
@@ -325,36 +335,109 @@ extension CanvasBoardView {
             // no room to become a toolbar, and not on a swipe, which on a trackpad is indistinguishable
             // from scrolling a page sideways.
             if (nodeViews[id] as? CanvasLinkNodeView)?.canGoBack == true {
-                add(menu, "Back", #selector(goBackInLink))
+                add(menu, many("Back", "Back on %d Cards"), #selector(goBackInLink))
             }
-            add(menu, "Reload", #selector(reloadLink))
+            add(menu, many("Reload", "Reload %d Cards"), #selector(reloadLink))
             if let card = nodeViews[id] as? CanvasLinkNodeView {
                 menu.addItem(.separator())
-                add(menu, "Sign In to \(card.siteName)…", #selector(signInToLink))
+                // These three are per *site*, not per card, so they count sites: four cards on one
+                // tracker are one sign-in, and naming the site is more use than naming the number
+                // whenever there is only one of it.
+                let sites = selectedSites()
+                let site = sites.count == 1 ? sites[0] : "\(sites.count) Sites"
+                add(menu, "Sign In to \(site)…", #selector(signInToLink))
                 // Signing in is per site, so signing out is too — and it reaches every card on every
                 // board that shows that site, because they were all one session to begin with.
-                add(menu, "Sign Out of \(card.siteName)", #selector(signOutOfLink))
+                add(menu, "Sign Out of \(site)", #selector(signOutOfLink))
                 add(menu, "Sign Out of All Sites…", #selector(signOutEverywhere))
                 menu.addItem(.separator())
                 // Per site, because that is the granularity at which blocking breaks a page: when a
                 // card comes up empty the question is always "is it this site?", and the answer has to
                 // be one click away from the card that is wrong.
-                let filtering = add(menu, "Block Ads on \(card.siteName)", #selector(toggleLinkFiltering))
+                let filtering = add(menu, "Block Ads on \(site)", #selector(toggleLinkFiltering))
                 filtering.state = card.isFiltered ? .on : .off
+                // Per card, unlike the three above: what a page is allowed to play is a fact about
+                // this card on this board — one embed you want running and the eleven beside it you
+                // don't — rather than about the site it happens to be on. See `CanvasCardMedia`.
+                let count = selectedLinkCards.count
+                let autoplay = add(menu, CanvasCardMedia.autoplayTitle(count), #selector(toggleAutoplay))
+                autoplay.state = selectedLinkCards.allSatisfy(\.autoplays) ? .on : .off
+                let muted = add(menu, CanvasCardMedia.muteTitle(count), #selector(toggleMuted))
+                muted.state = selectedLinkCards.allSatisfy(\.isMuted) ? .on : .off
+                addSessionMenu(menu, card: card)
             }
         case .text:
-            add(menu, "Edit", #selector(editSelected))
+            // Named for what it edits, like every sibling in this switch — "Edit Address…" on a link,
+            // "Rename Frame…" below. A bare "Edit" was the only item in the menu that made you work
+            // out its object from where you had clicked, and it sat two lines above "Edit Address…",
+            // which does not.
+            add(menu, "Edit Text\u{2026}", #selector(editSelected))
         case .group:
             add(menu, "Rename Frame…", #selector(renameSelectedFrame))
         }
 
         addTiling(menu)
         menu.addItem(.separator())
-        add(menu, "Cut", #selector(cut(_:)))
-        add(menu, "Copy", #selector(copy(_:)))
-        add(menu, "Duplicate", #selector(duplicate(_:)))
+        // All four carry their keys, for the reason Fill Window does — see `addTiling`. A contextual
+        // menu draws a key equivalent exactly as the menu bar does, and it is the one place a person
+        // is already looking when they wonder what else they can do to a card. Teaching one shortcut
+        // here and hiding the four beneath it was the odd arrangement: these are the commands somebody
+        // uses often enough to want the key for.
+        //
+        // Display, not dispatch. Only the main menu is searched for key equivalents, so nothing here
+        // claims a keystroke — which is what makes a bare ⌫ safe to print on Delete.
+        key(add(menu, "Cut", #selector(cut(_:))), "x")
+        key(add(menu, "Copy", #selector(copy(_:))), "c")
+        key(add(menu, "Duplicate", #selector(duplicate(_:))), "d")
         menu.addItem(.separator())
-        add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected))
+        key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
+            "\u{8}", modifiers: [])
+    }
+
+    /// The link cards in the selection — what every command in the link block above acts on.
+    private var selectedLinkCards: [CanvasLinkNodeView] {
+        selection.compactMap { nodeViews[$0] as? CanvasLinkNodeView }
+    }
+
+    /// A menu item's title, singular or with the count in it. `%d` in `plural` is where the number goes.
+    ///
+    /// One card is named without a number — "Reload", not "Reload 1 Card" — because the number is only
+    /// worth saying when it might be more than you meant.
+    private func many(_ single: String, _ plural: String) -> String {
+        let count = selectedLinkCards.count
+        return count > 1 ? plural.replacingOccurrences(of: "%d", with: "\(count)") : single
+    }
+
+    /// The distinct sites the selected link cards show, in the order the cards sit in the file.
+    private func selectedSites() -> [String] {
+        var seen: Set<String> = []
+        return selectedLinkCards.map(\.siteName).filter { seen.insert($0).inserted }
+    }
+
+    /// Which browser session this card uses.
+    ///
+    /// Deliberately the last thing on a card's menu and deliberately a submenu: the shared session is
+    /// right for nearly every card ever made, and this is the escape hatch for the case it cannot
+    /// express — the second account. See `CanvasCardSession`.
+    private func addSessionMenu(_ menu: NSMenu, card: CanvasLinkNodeView) {
+        let sessions = NSMenu(title: "Session")
+        let shared = add(sessions, "Shared", #selector(useSharedSession))
+        shared.state = card.profile == nil ? .on : .off
+        sessions.addItem(.separator())
+        for name in CanvasWebSession.profileNames {
+            let entry = add(sessions, name, #selector(useNamedSession))
+            entry.representedObject = name
+            entry.state = card.profile == name ? .on : .off
+        }
+        // Never written to disk, gone when PM quits — the card you open a link in when you would
+        // rather the jar didn't remember it.
+        let private_ = add(sessions, CanvasWebSession.ephemeralName, #selector(usePrivateSession))
+        private_.state = card.profile == CanvasWebSession.ephemeralName ? .on : .off
+        sessions.addItem(.separator())
+        add(sessions, "New Session\u{2026}", #selector(useNewSession))
+
+        let item = menu.addItem(withTitle: "Session", action: nil, keyEquivalent: "")
+        item.submenu = sessions
     }
 
     private func buildLineMenu(_ menu: NSMenu, id: String) {
@@ -397,6 +480,11 @@ extension CanvasBoardView {
         }
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
+        // Only where there are tabs to pin one to. An arrangement saved in a canvas window would be a
+        // thing you can make and never reach.
+        if onSaveArrangement != nil {
+            add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
+        }
     }
 
     private func pinTitle(_ id: String, side: String) -> String {
@@ -442,16 +530,23 @@ extension CanvasBoardView {
     }
 
     private func buildBoardMenu(_ menu: NSMenu) {
-        add(menu, "New Card", #selector(newCardHere))
-        add(menu, "New Frame", #selector(newFrameHere))
-        // The same four the toolbar's Add offers. Here so that Add is a convenience rather than the
-        // only door — the toolbar is customisable now, and a command reachable from one removable
-        // button is a command that can be removed.
-        add(menu, "New Link…", #selector(newLinkHere))
-        add(menu, "New File…", #selector(newFileHere))
+        // The same four the toolbar's Add offers, under the same four names — see `CanvasAddCommand`.
+        // Here so that Add is a convenience rather than the only door: the toolbar is customisable now,
+        // and a command reachable from one removable button is a command that can be removed.
+        add(menu, CanvasAddCommand.card.title, #selector(newCardHere))
+        add(menu, CanvasAddCommand.frame.title, #selector(newFrameHere))
+        add(menu, CanvasAddCommand.link.title, #selector(newLinkHere))
+        add(menu, CanvasAddCommand.file.title, #selector(newFileHere))
+        // Fifth, and only sometimes: the one document this board is *about*, when it has been deleted
+        // off it. See `CanvasProjectNoteCard`.
+        if offersProjectNoteCard {
+            add(menu, CanvasAddCommand.projectNote.title, #selector(newProjectNoteHere))
+        }
         menu.addItem(.separator())
-        let paste = add(menu, "Paste", #selector(pasteHere))
-        paste.isEnabled = NSPasteboard.general.types?.isEmpty == false
+        // Enabled or not is `validateUserInterfaceItem`'s answer, not one set here: this menu
+        // autoenables, so anything written onto `isEnabled` at build time is overwritten before the
+        // menu is drawn. Setting it here was how Paste came to be live over an empty pasteboard.
+        add(menu, "Paste", #selector(pasteHere))
         addTiling(menu)
         menu.addItem(.separator())
         add(menu, "Select All", #selector(selectAll(_:)))
@@ -487,6 +582,14 @@ extension CanvasBoardView {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
         item.target = self
         return item
+    }
+
+    /// Print a shortcut beside an item. Nothing in a contextual menu is searched for key equivalents,
+    /// so this only ever draws one — the keystroke itself is claimed by the menu bar or by `keyDown`.
+    private func key(_ item: NSMenuItem, _ equivalent: String,
+                     modifiers: NSEvent.ModifierFlags = [.command]) {
+        item.keyEquivalent = equivalent
+        item.keyEquivalentModifierMask = modifiers
     }
 
     // MARK: What the menu items do
@@ -557,6 +660,25 @@ extension CanvasBoardView {
 
     @objc private func newLinkHere() { addLinkCard(at: menuPoint) }
     @objc private func newFileHere() { addFileCard(at: menuPoint) }
+    @objc private func newProjectNoteHere() { addProjectNoteCard(at: menuPoint) }
+
+    /// Put the project's note back on its board.
+    ///
+    /// Selected afterwards, the way every other add command leaves its card, but not opened for
+    /// editing: this card is a whole document that arrives with its own contents, and there is nothing
+    /// waiting to be typed. A new *text* card is an empty rectangle and would be pointless without the
+    /// caret in it.
+    ///
+    /// Nothing happens on a board that hasn't got a project, which is the same answer the menu gives
+    /// by not offering the item — but this is reachable from the header too, and a command whose
+    /// enabled state is computed in one place and acted on in another has to check twice.
+    func addProjectNoteCard(at where_: CanvasPoint?) {
+        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url) else { return }
+        let node = CanvasProjectNoteCard.node(for: notes, at: where_ ?? centreOfVisibleBoard,
+                                              resolver: store.resolver)
+        store.change("Add Project Note") { $0.nodes.append(node) }
+        select([node.id])
+    }
 
     @objc private func newCardHere() {
         let at = menuPoint ?? centreOfVisibleBoard
@@ -700,6 +822,131 @@ extension CanvasBoardView {
         }
     }
 
+    // MARK: Which jar a card drinks from
+
+    @objc private func useSharedSession() { setSession(nil) }
+    @objc private func usePrivateSession() { setSession(CanvasWebSession.ephemeralName) }
+
+    @objc private func useNamedSession(_ sender: Any?) {
+        guard let name = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        setSession(name)
+    }
+
+    /// A profile named on the spot, which is the only way a first one ever gets made.
+    @objc private func useNewSession() {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        field.placeholderString = "Work"
+        let alert = NSAlert()
+        alert.messageText = "Name this session"
+        alert.informativeText = "Cards on the same session share their sign-ins. Cards on different "
+            + "sessions can be signed in to the same site as different people."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Use")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != CanvasWebSession.ephemeralName else { return }
+        setSession(name)
+    }
+
+    /// Let these cards' pages start on their own — or stop letting them.
+    ///
+    /// Off unless every selected card is already on, which is the rule a checkmark on a mixed
+    /// selection has to follow: the box is unticked, so ticking it turns them all on.
+    @objc func toggleAutoplay(_ sender: Any?) {
+        let cards = selectedLinkCards
+        guard !cards.isEmpty else { return }
+        let on = !cards.allSatisfy(\.autoplays)
+        setMedia(cards, actionName: on ? "Autoplay Media" : "Stop Autoplaying") { node in
+            CanvasCardMedia.setAutoplay(on, on: &node)
+        }
+    }
+
+    /// Hold these cards silent — or let them be heard again.
+    @objc func toggleMuted(_ sender: Any?) {
+        let cards = selectedLinkCards
+        guard !cards.isEmpty else { return }
+        let on = !cards.allSatisfy(\.isMuted)
+        setMedia(cards, actionName: on ? "Mute Card" : "Unmute Card") { node in
+            CanvasCardMedia.setMuted(on, on: &node)
+        }
+    }
+
+    /// Write a media setting to every one of these cards, as one undoable change — the same shape as
+    /// `setSession`, and undoable for the same reason: it is an edit to the document.
+    private func setMedia(_ cards: [CanvasLinkNodeView], actionName: String,
+                          _ change: (inout CanvasNode) -> Void) {
+        let ids = Set(cards.map(\.node.id))
+        store.change(actionName) { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                change(&doc.nodes[index])
+            }
+        }
+    }
+
+    /// Put every selected link card on `name`. Undoable, because it is an edit to the document — and
+    /// one whose effect is a card signed in as somebody else, which is worth being able to take back.
+    private func setSession(_ name: String?) {
+        let ids = Set(selectedLinkCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.change(name == nil ? "Use Shared Session" : "Change Session") { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                CanvasCardSession.set(name, on: &doc.nodes[index])
+            }
+        }
+    }
+
+    // MARK: A link that becomes a card
+
+    /// Put `address` on the board next to the card it came out of, joined to it by a line.
+    ///
+    /// ⌘-clicking a link inside a card lands here. A browser answers that gesture with a tab you then
+    /// have to go and find; a board can answer it with the page itself, in the place it belongs, still
+    /// attached to where it came from — which is the thing a canvas can do that a window full of tabs
+    /// cannot, and a fortnight later the line is what says where this came from.
+    ///
+    /// Placed to the right and nudged down past anything already there, rather than dropped on top of
+    /// a card that was in the way.
+    func addLinkCard(_ address: String, beside id: String) {
+        guard let source = document.node(id: id), let normalized = CanvasAddress.normalized(address)
+        else { return }
+        let frame = freeFrame(rightOf: source.frame)
+        let node = CanvasNode(content: .link(url: normalized), frame: frame)
+        // From the source's right to the new card's left: the direction you read the board in, and the
+        // direction the page was actually followed in.
+        let edge = CanvasEdge(fromNode: id, fromSide: .right, toNode: node.id, toSide: .left)
+        store.change("Add Link") { doc in
+            doc.nodes.append(node)
+            doc.edges.append(edge)
+        }
+        // A tiled view shows a handful of named cards and the new one is not among them, so it would
+        // otherwise arrive invisibly. The board is still the thing being added to; say so rather than
+        // refusing a deliberate gesture.
+        if isTiled {
+            report("Added a card to the board, behind this tiled view.")
+        } else {
+            select([node.id])
+            (scrollView as? CanvasScrollView)?.reveal(node.id)
+        }
+    }
+
+    /// The first empty spot to the right of `frame`, at the same size.
+    private func freeFrame(rightOf frame: CanvasRect) -> CanvasRect {
+        let gap = 40.0
+        var candidate = CanvasRect(x: frame.maxX + gap, y: frame.minY,
+                                   width: frame.width, height: frame.height)
+        // Nine tries and then take what you get: a board dense enough to defeat this is one where any
+        // answer is a compromise, and a card you can see and drag beats a search that never ends.
+        for _ in 0..<9 {
+            let clash = document.nodes.contains { !$0.isGroup && $0.frame.intersects(candidate) }
+            guard clash else { return candidate }
+            candidate = CanvasRect(x: candidate.x, y: candidate.maxY + gap,
+                                   width: candidate.width, height: candidate.height)
+        }
+        return candidate
+    }
+
     @objc private func reloadLink() {
         for id in selection { (nodeViews[id] as? CanvasLinkNodeView)?.reload() }
     }
@@ -742,6 +989,40 @@ extension CanvasBoardView {
                 doc.edges[index].toEnd = edge.fromEnd
             }
         }
+    }
+
+    /// Open the selected frame as a tab of its own — see `ProjectTab`.
+    @objc private func openSelectedFrameInTab() {
+        guard let id = selection.first, document.node(id: id)?.isGroup == true else { return }
+        onOpenInTab?(.frame(id))
+    }
+
+    /// Keep the tiling that is up, under a name, so a tab can be pinned to it.
+    ///
+    /// Named on the way in rather than saved anonymously and renamed later: the name is the whole of an
+    /// arrangement's identity — there is nothing else to point at — so there is no version of this that
+    /// can be deferred.
+    @objc func saveTilingAsArrangement(_ sender: Any?) {
+        guard onSaveArrangement != nil else { return }
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        field.stringValue = suggestedArrangementName
+        let alert = NSAlert()
+        alert.messageText = "Name this arrangement"
+        alert.informativeText = "Kept for this board, so a tab can open straight into it."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        onSaveArrangement?(name)
+    }
+
+    /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
+    /// description of what you are keeping and a name you would never have to think of.
+    private var suggestedArrangementName: String {
+        guard let tiling else { return "Arrangement" }
+        return "\(tiling.arrangement.title), \(tiling.ids.count)"
     }
 
     @objc private func renameSelectedFrame() {
@@ -842,6 +1123,43 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             CanvasCardZoom.set(zoom, on: &doc.nodes[index])
         }
     }
+    // MARK: The page commands, from the menu bar
+
+    /// What a Page command acts on: the card you are inside, or everything selected.
+    ///
+    /// The same rule the zoom commands already follow — inside a card they mean the card — extended to
+    /// the case a board has that a browser doesn't: several pages selected at once. Reload on four
+    /// selected cards reloads four, which is the bulk gesture the contextual menu has always had and
+    /// the menu bar never offered.
+    private var pageTargets: [CanvasLinkNodeView] {
+        if let engaged = engagedPageCard as? CanvasLinkNodeView { return [engaged] }
+        return selectedLinkCards
+    }
+
+    @objc func pageBack(_ sender: Any?) { pageTargets.forEach { $0.goBack() } }
+    @objc func pageForward(_ sender: Any?) { pageTargets.forEach { $0.goForward() } }
+    @objc func pageReload(_ sender: Any?) { pageTargets.forEach { $0.reload() } }
+    @objc func pageHome(_ sender: Any?) { pageTargets.forEach { $0.goHome() } }
+    @objc func pageOpenInBrowser(_ sender: Any?) { pageTargets.forEach { $0.openInBrowser() } }
+
+    /// ⌘L. The address of the card you are inside, ready to be typed over.
+    ///
+    /// It puts the keyboard in the header's field rather than opening a box, because that field *is*
+    /// this window's address bar and ⌘L has meant "go to the address bar" for thirty years. On a card
+    /// you have merely selected there is no address bar up, and the honest equivalent is the edit —
+    /// which is a different act, and is named differently on the menu.
+    @objc func pageOpenAddress(_ sender: Any?) {
+        if engagedPageCard is CanvasLinkNodeView { onFocusAddress?() }
+        else if selectedLinkCards.count == 1 { editLinkAddress() }
+    }
+
+    /// How often this board reloads its pages. The item carries the interval in seconds, or 0 for
+    /// never — see `CanvasBoardView.refreshChoices`.
+    @objc func setPageRefresh(_ sender: Any?) {
+        guard let seconds = (sender as? NSMenuItem)?.representedObject as? Double else { return }
+        refreshInterval = seconds > 0 ? seconds : nil
+    }
+
     @objc func zoomToFit(_ sender: Any?) { scrollView?.canvasScroll?.zoomToFit() }
 
     @objc func toggleConnectMode(_ sender: Any?) { mode = mode == .connect ? .view : .connect }
@@ -867,6 +1185,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // back out. Only a board with nothing on it has nothing for it to mean.
             (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
+        case #selector(saveTilingAsArrangement(_:)):
+            // Somewhere to keep it, and something to keep: a canvas window has no tabs to pin one to,
+            // and a board that has never been tiled has no arrangement.
+            return onSaveArrangement != nil && tilingMemory != nil
         case #selector(setTileArrangement(_:)):
             (item as? NSMenuItem).map { entry in
                 entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue
@@ -891,8 +1213,18 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Not while tiled: a tiled view is a way of looking, and cutting a card out of one would be
             // editing the board through a lens that has moved everything.
             return !selection.isEmpty && !isTiled
-        case #selector(paste(_:)):
-            return NSPasteboard.general.types?.isEmpty == false
+        case #selector(paste(_:)), #selector(pasteHere):
+            // `pasteHere` is the board menu's own item and was answered by nothing, so it fell to the
+            // `default` below and was live over an empty pasteboard. It is the same question as
+            // `paste(_:)` and gets the same answer.
+            return !isTiled && NSPasteboard.general.types?.isEmpty == false
+        case #selector(newCardHere), #selector(newFrameHere), #selector(newLinkHere),
+             #selector(newFileHere):
+            // Dim while tiled, for the reason cut and copy are: a tiled view is a way of looking, and
+            // a card added through it would land at a point on a board the lens has moved out from
+            // under you. Reachable at all only because a right-click on a gap that isn't a divider
+            // falls through to the board's menu.
+            return !isTiled
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
             return pinnableTile != nil
@@ -904,6 +1236,31 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
             // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.
             return !isTiled
+        case #selector(pageBack(_:)):
+            return pageTargets.contains { $0.canGoBack }
+        case #selector(pageForward(_:)):
+            return pageTargets.contains { $0.canGoForward }
+        case #selector(pageReload(_:)):
+            // Named for what it will do to how many, like the tiling command above it.
+            (item as? NSMenuItem)?.title = pageTargets.count > 1 ? "Reload \(pageTargets.count) Pages"
+                                                                 : "Reload Page"
+            return !pageTargets.isEmpty
+        case #selector(pageHome(_:)):
+            // Only when there is somewhere to go back to: a card sitting on its own address is already
+            // home, and an item that is always live and usually does nothing teaches nothing.
+            return pageTargets.contains { $0.hasWandered }
+        case #selector(pageOpenInBrowser(_:)):
+            return !pageTargets.isEmpty
+        case #selector(pageOpenAddress(_:)):
+            return engagedPageCard is CanvasLinkNodeView || selectedLinkCards.count == 1
+        case #selector(setPageRefresh(_:)):
+            (item as? NSMenuItem).map { entry in
+                let seconds = entry.representedObject as? Double ?? 0
+                entry.state = (seconds > 0 ? seconds : nil) == refreshInterval ? .on : .off
+            }
+            // A board with no web cards on it has nothing to refresh, and says so rather than keeping
+            // a setting nothing will ever read.
+            return document.nodes.contains { if case .link = $0.content { return true }; return false }
         case #selector(selectAll(_:)):
             return true
         default:
@@ -929,13 +1286,22 @@ extension CanvasBoardView {
     /// Searches what a card *says* rather than what it stores where the two differ: a file card
     /// matches on its path, so "Flexcompute" finds it, and on its basename, so "Notes.md" does too. A
     /// board of 117 cards is several screens, and the alternative to this is panning until you spot it.
+    ///
+    /// A web card matches on its address **and on the name of the page at it**, which is the half a
+    /// person actually remembers. Eleven cards reading `jira.example.com/browse/PM-4127` are eleven
+    /// cards nobody can search; the same eleven are findable the moment "billing" matches the one
+    /// called "Billing rollover fails on renewal". The name comes from `CanvasPageTitles`, so it is
+    /// there for cards that have never been loaded in this window — which are most of them, on a board
+    /// you have just opened.
     func matches(_ query: String) -> [String] {
         let needle = query.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else { return [] }
         return document.nodes.filter { node in
             switch node.content {
             case .text(let text): return text.localizedCaseInsensitiveContains(needle)
-            case .link(let url): return url.localizedCaseInsensitiveContains(needle)
+            case .link(let url):
+                return url.localizedCaseInsensitiveContains(needle)
+                    || CanvasPageTitles.of(url)?.localizedCaseInsensitiveContains(needle) == true
             case .file(let path, let subpath):
                 return path.localizedCaseInsensitiveContains(needle)
                     || (subpath?.localizedCaseInsensitiveContains(needle) ?? false)

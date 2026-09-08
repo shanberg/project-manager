@@ -114,42 +114,90 @@ final class CanvasGuideView: NSView {
 
     /// What says why a card stopped where it did.
     ///
-    /// **A slot outlined on the canvas.** Not a line ruled across the board at the coordinate two
-    /// cards agreed on, and not a glow traced along the cards' own borders either. Both of those draw
-    /// on the subject — they make the cards look different — and a card that changes appearance while
-    /// you are placing it is a card you have to re-read at the moment you are trying to position it.
+    /// **A band on the canvas.** Not a line ruled across the board at the coordinate two cards agreed
+    /// on, and not a glow traced along the cards' own borders either. Both of those draw on the
+    /// subject — they make the cards look different — and a card that changes appearance while you are
+    /// placing it is a card you have to re-read at the moment you are trying to position it. What the
+    /// desktop does instead, and what this does, is draw in the space *between* things: a band standing
+    /// off the slot it is describing, on the board, touching nothing.
     ///
-    /// What the desktop does instead, and what this now does, is draw in the space *between* things: a
-    /// band standing off the slot it is describing, on the board, touching nothing. The card is
-    /// untouched and still exactly as legible as it was, and the outline is unmistakably about
-    /// position because position is the only thing it occupies.
+    /// **One mark, and how much of it is drawn is the claim.** The band is a loop concentric with the
+    /// card; a claim about one dimension is that loop with the runs that don't span it left out, and a
+    /// grid landing is the loop's four corners and nothing else. So the marks are the same breadth, the
+    /// same weight and the same neutral tone wherever they appear, and what tells them apart is shape —
+    /// which the eye reads without being asked to compare anything.
     ///
-    /// One band per slot — the moving set's own, and each card it lined up with — and nothing else.
-    /// No connector between them and no brighter stroke along the edge that matched: those were the
-    /// last of the line-drawing idea, and a second mark competing with the band is the thing that
-    /// stopped the band reading as a band.
+    /// - a **closed loop** round every card in the agreement: they line up, or — round exactly two —
+    ///   they are the same size in both dimensions and so the same shape. The strongest mark, for the
+    ///   two strongest claims, and when it is congruence the two loops are congruent, which *is* the
+    ///   proof.
+    /// - **two runs**, top and bottom or left and right: the same width, or the same height. What
+    ///   survives is the pair of runs that span the dimension being claimed, so two cards of equal
+    ///   width wear two pairs of equal bars.
+    /// - **four corners**: the lattice, which is the weakest claim and used to be no claim at all. A
+    ///   card clicking to a 10pt grid nobody had mentioned looked like a card refusing to go where you
+    ///   put it.
+    ///
+    /// This replaced a ruled bar with a tick at each end for the size cases — a hairline measurement
+    /// drawing, in a different visual language from everything else the board draws, saying its fact in
+    /// a way you had to stop and read rather than see.
     ///
     /// Neutral rather than accent, and dissolved rather than switched: see `CanvasPalette.guide` and
     /// `CanvasFade`, which each own half of the argument.
     private func drawGuides(_ board: CanvasBoardView, _ scale: Double) {
         guard guideFade.isVisible, !drawnGuides.isEmpty else { return }
         let presence = guideFade.presence
-
-        // Every slot in any agreement, once. A drag that matched on both axes names the same card in
-        // two guides, and outlining it twice would draw it at double weight for no reason the eye can
-        // read.
-        var slots: [CanvasRect] = []
-        for guide in drawnGuides {
-            guard case .alignment(_, _, let cards) = guide else { continue }
-            for card in cards where !slots.contains(card) { slots.append(card) }
+        for mark in marks(of: drawnGuides) {
+            draw(mark.slot, showing: mark.band, board: board, scale: scale, presence: presence)
         }
-        for slot in slots { drawSlot(slot, board: board, scale: scale, presence: presence) }
+    }
 
-        for guide in drawnGuides {
-            guard case .sameSize(let axis, let moving, let matched) = guide else { continue }
-            CanvasPalette.guide(0.32 * presence).setStroke()
-            for rect in [moving, matched] { drawMeasure(rect, axis: axis, board: board, scale: scale) }
+    /// How much of the band to draw.
+    private enum Band: Equatable {
+        case loop
+        /// The two runs spanning `axis` — `.horizontal` being the top and bottom, which are the ones
+        /// that carry a width.
+        case runs(CanvasGuide.Axis)
+        case corners
+
+        /// Which mark wins when a card is in more than one agreement at once. A card that is both
+        /// lined up with something and the same width as something else gets the loop: it is the
+        /// larger claim, and stroking both would draw the same band at double weight for a reason
+        /// nobody could see.
+        var weight: Int {
+            switch self {
+            case .loop: return 2
+            case .runs: return 1
+            case .corners: return 0
+            }
         }
+    }
+
+    /// Every slot to mark and what to draw round it — each slot once, at its strongest claim.
+    ///
+    /// A drag that matched on both axes names the same card in two guides, and outlining it twice
+    /// would draw it at double weight for no reason the eye can read.
+    private func marks(of guides: [CanvasGuide]) -> [(slot: CanvasRect, band: Band)] {
+        var marks: [(slot: CanvasRect, band: Band)] = []
+        func note(_ slot: CanvasRect, _ band: Band) {
+            guard let index = marks.firstIndex(where: { $0.slot == slot }) else {
+                return marks.append((slot, band))
+            }
+            if band.weight > marks[index].band.weight { marks[index].band = band }
+        }
+        for guide in guides {
+            switch guide {
+            case .alignment(_, _, let cards):
+                for card in cards { note(card, .loop) }
+            case .sameSize(let axes, let cards):
+                // Both dimensions is the whole shape, and the whole loop says so.
+                let band: Band = axes.count > 1 ? .loop : .runs(axes[0])
+                for card in cards { note(card, band) }
+            case .grid(let card):
+                note(card, .corners)
+            }
+        }
+        return marks
     }
 
     /// How far the band stands off the slot, and how thick it is — both in **view points over the
@@ -160,57 +208,59 @@ final class CanvasGuideView: NSView {
     private static let slotStandoff: Double = 5
     private static let slotWidth: Double = 5
 
-    /// One slot: a band on the board around it, not on it.
-    private func drawSlot(_ slot: CanvasRect, board: CanvasBoardView,
-                          scale: Double, presence: Double) {
+    /// One slot: a band on the board around it, not on it — or as much of that band as the claim is
+    /// entitled to.
+    ///
+    /// **The partial bands are the whole band, clipped**, rather than paths of their own. It is the one
+    /// construction that cannot drift: a run and a corner are literally arcs of the loop the card would
+    /// have worn, at the same standoff and the same radius, so a board showing all three kinds at once
+    /// shows one family of marks rather than three drawings that were meant to match.
+    private func draw(_ slot: CanvasRect, showing band: Band, board: CanvasBoardView,
+                      scale: Double, presence: Double) {
         let standoff = Self.slotStandoff / scale
         let rect = board.viewRect(slot).insetBy(dx: -standoff, dy: -standoff)
         // Concentric with the card it stands off from: a curve offset from another curve keeps an even
         // gap only when its radius grows by the offset. Left at the card's own radius the band would
         // pinch tight at the corners and bulge along the sides.
         let radius = CanvasNodeView.cornerRadius(for: slot) + standoff
+        let width = Self.slotWidth / scale
         let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-        path.lineWidth = Self.slotWidth / scale
+        path.lineWidth = width
         CanvasPalette.guide(0.30 * presence).setStroke()
-        path.stroke()
-    }
 
-    /// "These two are the same width" — a bar the length of the dimension that matched, with a tick at
-    /// each end, drawn just outside each card.
-    ///
-    /// A bar rather than a line through the cards, because the claim being made is about *length*, and
-    /// two bars of visibly equal length beside two cards is the only way to draw that so it can be
-    /// checked at a glance. A line at a coordinate would say "these edges agree", which is the other
-    /// guide's job and a different fact.
-    private func drawMeasure(_ rect: CanvasRect, axis: CanvasGuide.Axis,
-                             board: CanvasBoardView, scale: Double) {
-        let offset = 7 / scale
-        let tick = 4 / scale
-        let path = NSBezierPath()
-
-        if axis == .horizontal {
-            let y = board.viewPoint(CanvasPoint(x: rect.minX, y: rect.maxY)).y + offset
-            let left = board.viewPoint(CanvasPoint(x: rect.minX, y: 0)).x
-            let right = board.viewPoint(CanvasPoint(x: rect.maxX, y: 0)).x
-            path.move(to: NSPoint(x: left, y: y))
-            path.line(to: NSPoint(x: right, y: y))
-            for x in [left, right] {
-                path.move(to: NSPoint(x: x, y: y - tick))
-                path.line(to: NSPoint(x: x, y: y + tick))
-            }
-        } else {
-            let x = board.viewPoint(CanvasPoint(x: rect.maxX, y: rect.minY)).x + offset
-            let top = board.viewPoint(CanvasPoint(x: 0, y: rect.minY)).y
-            let bottom = board.viewPoint(CanvasPoint(x: 0, y: rect.maxY)).y
-            path.move(to: NSPoint(x: x, y: top))
-            path.line(to: NSPoint(x: x, y: bottom))
-            for y in [top, bottom] {
-                path.move(to: NSPoint(x: x - tick, y: y))
-                path.line(to: NSPoint(x: x + tick, y: y))
-            }
+        // How deep a window has to be to hold a corner: the arc plus the half-stroke that overhangs it.
+        let corner = radius + width
+        let windows: [NSRect]
+        switch band {
+        case .loop:
+            return path.stroke()
+        case .runs(.horizontal):
+            // The top and bottom of the loop, each cut where its corners stop turning. What is left
+            // spans the card's width, which is the dimension being claimed.
+            windows = [NSRect(x: rect.minX - width, y: rect.minY - width,
+                              width: rect.width + width * 2, height: corner),
+                       NSRect(x: rect.minX - width, y: rect.maxY - radius,
+                              width: rect.width + width * 2, height: corner)]
+        case .runs(.vertical):
+            windows = [NSRect(x: rect.minX - width, y: rect.minY - width,
+                              width: corner, height: rect.height + width * 2),
+                       NSRect(x: rect.maxX - radius, y: rect.minY - width,
+                              width: corner, height: rect.height + width * 2)]
+        case .corners:
+            windows = [NSRect(x: rect.minX - width, y: rect.minY - width,
+                              width: corner, height: corner),
+                       NSRect(x: rect.maxX - radius, y: rect.minY - width,
+                              width: corner, height: corner),
+                       NSRect(x: rect.minX - width, y: rect.maxY - radius,
+                              width: corner, height: corner),
+                       NSRect(x: rect.maxX - radius, y: rect.maxY - radius,
+                              width: corner, height: corner)]
         }
-        path.lineWidth = 1.5 / scale
-        path.stroke()
+        for window in windows {
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: window).setClip()
+            path.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
-
 }

@@ -10,6 +10,13 @@ struct CanvasViewState: Codable, Equatable {
     var mode: CanvasMode = .view
     /// The tiling that was up, if one was.
     var tiling: Tiling?
+    /// How often this board reloads its pages, in seconds, or nil for never.
+    ///
+    /// A way of looking rather than a fact about the document, which is what puts it here and not in
+    /// the `.canvas`: a cadence is a per-machine choice about a board you are watching, and Obsidian
+    /// opening the same file has no use for it. Optional so a state written before cadences existed
+    /// still decodes.
+    var refreshInterval: TimeInterval?
     /// The last one made on this board, kept after leaving it.
     ///
     /// **Leaving a tiled view is not throwing the arrangement away.** The order you dragged the tiles

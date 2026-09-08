@@ -14,11 +14,8 @@ final class WindowManager {
     // MARK: Opening
 
     /// Bring up a window for `projectKey`, or focus the one already showing it.
-    ///
-    /// Pass `asTabOf` to have the new window join that window's tab group rather than stand alone —
-    /// AppKit only tabs windows you explicitly add, even when they share a tabbing identifier.
     @discardableResult
-    func open(projectKey: String?, asTabOf sibling: ProjectWindowController? = nil) -> ProjectWindowController {
+    func open(projectKey: String?) -> ProjectWindowController {
         if let existing = controllers.first(where: { $0.projectKey == projectKey }) {
             existing.show()
             return existing
@@ -27,20 +24,14 @@ final class WindowManager {
         controllers.append(controller)
         Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
         rememberOpenProjects()
-        if let host = sibling?.window, let new = controller.window {
-            host.addTabbedWindow(new, ordered: .above)
-            new.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        } else {
-            // Every project window is the same window type at the same remembered frame, so a second
-            // one would open exactly on top of the first. Step it off the frontmost window the way
-            // AppKit cascades any other new window.
-            if let front = frontmost?.window, let new = controller.window,
-               front !== new, front.isVisible {
-                new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
-            }
-            controller.show()
+        // Every project window is the same window type at the same remembered frame, so a second one
+        // would open exactly on top of the first. Step it off the frontmost window the way AppKit
+        // cascades any other new window.
+        if let front = frontmost?.window, let new = controller.window,
+           front !== new, front.isVisible {
+            new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
         }
+        controller.show()
         return controller
     }
 
@@ -59,14 +50,6 @@ final class WindowManager {
         guard let key = ProjectIndex.shared.projectKey(forFolder: folder) else { return false }
         open(projectKey: key)
         return true
-    }
-
-    /// The project ⌘T should open: the most recently edited one that doesn't already have a window.
-    /// A tab on the project you're already in would just be a duplicate, so "New Tab" means "another
-    /// project alongside this one".
-    var nextUnopenedProjectKey: String? {
-        let open = Set(controllers.compactMap(\.projectKey))
-        return ProjectIndex.shared.recents.first { !open.contains($0.projectKey) }?.projectKey
     }
 
     /// Show `projectKey` in `controller` — the sidebar's plain double-click / Return. If another window

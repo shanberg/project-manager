@@ -26,11 +26,20 @@ extension CanvasBoardView {
     /// obvious next thing to want is that one filling the window, and Escape then comes back to the six
     /// before it comes back to the board. That is the same command meaning the same thing at a third
     /// scale — a card, a handful, the board — rather than a second key for going deeper.
+    ///
+    /// With nothing left to narrow to — one tile, or all of them picked — it is the way out, and it
+    /// goes all the way out. See `leaveTiling`, and `CanvasTiling.commandTitle`, which has been calling
+    /// this case "Leave Tiled View" the whole time.
     @objc func tileSelection(_ sender: Any?) {
         if let session = tiling {
             let picked = selection.intersection(session.ids)
             guard !picked.isEmpty, picked.count < session.ids.count else {
-                return untile(animated: true)
+                // Nothing left to drill into, so this is the other end of the command: the board.
+                // Not `untile`, which unwinds one level — from a card you had drilled into, that
+                // handed you back the tiling you came from, and the next press drilled straight into
+                // it again. ⌘↩ alternated between the two forever with the card still filling the
+                // window, which is the one way out of a tiling that has to work.
+                return leaveTiling(animated: true)
             }
             tilingHistory.append(session)
             return tile(picked)
@@ -181,6 +190,9 @@ extension CanvasBoardView {
     }
 
     /// Escape. Back out one level: to the tiling you drilled in from, or to the board.
+    ///
+    /// One level is Escape's whole meaning and it is the only caller that wants it. Anything that means
+    /// "leave the tiled view" wants `leaveTiling`.
     func untile(animated: Bool) {
         guard let session = tiling else { return }
         if let previous = tilingHistory.popLast() {
@@ -206,6 +218,29 @@ extension CanvasBoardView {
         setLayout(.document, animated: animated)
         announceTiling()
         onTilingChanged?()
+    }
+
+    /// Leave the tiled view altogether, however deep into it you have drilled.
+    ///
+    /// **Escape unwinds; everything else leaves.** The drill-in is a stack and backing out of it one
+    /// level at a time is exactly what Escape is for — see `untile`. Every other way out means the
+    /// board and says so: ⌘↩ is one command at both ends, the header's ✕ is labelled "leave the
+    /// tiled view", and stepping to a frame is a request to go and look at somewhere else. All four
+    /// used to call `untile`, so all four stopped one short.
+    ///
+    /// **What is kept is the arrangement you built, not the card you left through.** The order you
+    /// dragged the tiles into and the widths you set are the deliberate work; a fullscreen card you
+    /// drilled into to read is not something to hand back the next time you tile those cards. So the
+    /// stack's root becomes the session `untile` remembers — see `CanvasViewState.lastTiling`.
+    func leaveTiling(animated: Bool) {
+        guard tiling != nil else { return }
+        if let root = tilingHistory.first {
+            tilingHistory.removeAll()
+            // Assigned rather than laid out: nothing is drawn from it, and `untile` is about to
+            // replace the layout wholesale. This is only about which session it keeps.
+            tiling = root
+        }
+        untile(animated: animated)
     }
 
     /// Swap the arrangement without leaving the tiling.
@@ -339,14 +374,28 @@ extension CanvasBoardView {
         setLayout(session.layout, animated: false)
     }
 
-    /// Remember where the divider was left. On mouse-up rather than on every frame of the drag, which
-    /// would write to defaults at the rate the mouse reports.
-    func rememberMasterFraction() {
-        guard let tiling, tiling.arrangement == .masterStack else { return }
-        CanvasTiling.savedMasterFraction = tiling.masterFraction
-        // On mouse-up, not on every frame of the drag: this is the point at which the divider is where
-        // you meant to leave it, and it is the same point at which the board's own memory of the tiling
-        // wants writing.
+    /// Let go of a boundary. Where you dragged it to is part of the arrangement now, so it gets written
+    /// down — see `CanvasPaneController.rememberViewState`, which listens on `onTilingChanged` precisely
+    /// because there is no reliable moment on the way out to write on instead.
+    ///
+    /// **Every boundary, not only the master's.** Only the master split used to reach this, and it
+    /// reached it by accident: it has a second, app-wide preference to write as well as a layout, and it
+    /// fired the notification on its way past. Every other divider — the stack's, a single-run grid's —
+    /// changed `sizes` in memory and told nobody. Those widths then lasted exactly as long as the tiling
+    /// did: leaving wrote them on the way past, but quitting or closing the window while still tiled,
+    /// which is the ordinary way to stop looking at a board, wrote the state as it was before the drag.
+    /// The master split kept its position and the stack beside it came back even, which is a board that
+    /// remembers half of what you did to it.
+    ///
+    /// On mouse-up rather than on every frame of the drag, which would write to defaults at the rate the
+    /// mouse reports.
+    func rememberTileSizes(_ divider: CanvasTileDivider) {
+        guard let tiling else { return }
+        // The one boundary with a preference behind it as well as a layout: a divider you drag back to
+        // the same place on every board is a setting you have already made.
+        if divider.isMasterSplit, tiling.arrangement == .masterStack {
+            CanvasTiling.savedMasterFraction = tiling.masterFraction
+        }
         onTilingChanged?()
     }
 
@@ -386,7 +435,7 @@ extension CanvasBoardView {
         let frames = workspaces
         guard index < frames.count else { return NSSound.beep() }
         let frame = frames[index]
-        if isTiled { untile(animated: false) }
+        if isTiled { leaveTiling(animated: false) }
         selection = canvasCardsInside(frame.frame, of: document)
         scrollView?.canvasScroll?.zoom(toFit: frame.frame.inset(by: 60))
     }
@@ -414,4 +463,39 @@ func canvasCardsInside(_ frame: CanvasRect, of document: CanvasDocument) -> Set<
     Set(document.nodes.filter { node in
         !node.isGroup && frame.contains(x: node.frame.midX, y: node.frame.midY)
     }.map(\.id))
+}
+
+// MARK: - Frames a tab can be pinned to
+
+@MainActor
+extension CanvasBoardView {
+    /// A frame's name, or nil when there is no such frame any more.
+    ///
+    /// Nil is the interesting answer: a tab pinned to a frame somebody has since deleted in Obsidian
+    /// should say so rather than disappear, because a tab vanishing out of the bar is alarming in a way
+    /// that a tab reading "Frame" is not.
+    func frameLabel(_ id: String) -> String? {
+        guard let node = document.node(id: id), node.isGroup,
+              case .group(let label, _, _) = node.content else { return nil }
+        return (label?.isEmpty == false) ? label : "Untitled Frame"
+    }
+
+    /// Every frame on the board, in reading order, as (id, name) — what the add menu offers.
+    var frameChoices: [(id: String, name: String)] {
+        workspaces.map { node in
+            var name = "Untitled Frame"
+            if case .group(let label, _, _) = node.content, let label, !label.isEmpty { name = label }
+            return (node.id, name)
+        }
+    }
+
+    /// Show a frame: fit it in the window and select what is in it. The same act as ⌃1…9, addressed by
+    /// id rather than by position, because a tab holds the frame rather than the slot it happened to
+    /// be in when the tab was made.
+    func goTo(frame id: String) {
+        guard let node = document.node(id: id), node.isGroup else { return }
+        if isTiled { leaveTiling(animated: false) }
+        selection = canvasCardsInside(node.frame, of: document)
+        scrollView?.canvasScroll?.zoom(toFit: node.frame.inset(by: 60))
+    }
 }

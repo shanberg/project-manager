@@ -78,9 +78,6 @@ enum ProjectWindow {
     /// Content beyond this scrolls inside the card; below it, the panel fits exactly.
     static let maxHeightRatio: CGFloat = 4.75 / 2.75
 
-    /// Groups this app's windows for `NSWindow` tabbing, so ⌘T and the tab bar's `+` work.
-    static let tabbingIdentifier = "PMProject"
-
     /// Marks a window as one of ours, for the few places that need to tell a project window from a
     /// settings window or a system panel.
     static let windowIdentifier = "PMProjectWindow"

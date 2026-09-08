@@ -122,11 +122,20 @@ struct WaitingView: View {
         .contentShape(Rectangle())
         .onTapGesture { model.open(hit) }
         .contextMenu {
-            Button("Go to \(ProjectCodes.display(hit.projectFolder))") { model.open(hit) }
+            // The same two commands `TaskMenu` offers, under the same names and the same symbols.
+            // They were plain `Button`s here while their twins two files over were `Label`s, which is
+            // the one difference a person would actually see between a task's menu in the project
+            // window and the same task's menu in this list.
+            Button { model.open(hit) } label: {
+                Label("Go to \(ProjectCodes.display(hit.projectFolder))",
+                      systemImage: "arrow.turn.down.right")
+            }
             // Only where there's a token to remove. A row that inherits its wait has nothing on its
             // own line to clear, and offering the command anyway would be offering a no-op.
             if hit.waiting != nil {
-                Button("Stop Waiting") { model.stopWaiting([hit]) }
+                Button { model.stopWaiting([hit]) } label: {
+                    Label("Stop Waiting", systemImage: "clock.badge.xmark")
+                }
             }
         }
     }

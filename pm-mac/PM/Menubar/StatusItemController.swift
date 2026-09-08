@@ -323,7 +323,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let links = linkItems()
         if !links.isEmpty, let sub = item.submenu {
             sub.addItem(.separator())
-            sub.addItem(disabledItem("Links"))
+            sub.addItem(sectionHeaderItem("Links"))
             links.forEach { sub.addItem($0) }
         }
         return item
@@ -431,17 +431,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return order.map { (context: $0, todos: map[$0] ?? []) }
     }
 
+    /// A heading, said the way AppKit says one.
+    ///
+    /// The alternative this replaced — a plain item with its action nulled and `isEnabled` off — draws
+    /// close enough to fool you and is a different thing underneath: VoiceOver reads it as a command
+    /// you are not allowed to run, and it takes the highlight rules of an item rather than a header's.
+    /// The dropdown used the real API for its task-context headings and the disabled-item trick for
+    /// "Links", eighty lines apart in the same menu.
+    ///
+    /// No availability fork: the deployment target is macOS 26 and this arrived in 14.
+    private func sectionHeaderItem(_ title: String) -> NSMenuItem {
+        NSMenuItem.sectionHeader(title: title)
+    }
+
     private func contextHeaderItem(_ context: String, overdue: Int) -> NSMenuItem {
-        let title = context.isEmpty ? "Tasks" : context
-        let item: NSMenuItem
-        if #available(macOS 14.0, *) {
-            item = NSMenuItem.sectionHeader(title: title)
-        } else {
-            item = disabledItem(title)
-        }
-        if overdue > 0, #available(macOS 14.0, *) {
-            item.badge = NSMenuItemBadge(string: "\(overdue) overdue")
-        }
+        let item = sectionHeaderItem(context.isEmpty ? "Tasks" : context)
+        if overdue > 0 { item.badge = NSMenuItemBadge(string: "\(overdue) overdue") }
         return item
     }
 

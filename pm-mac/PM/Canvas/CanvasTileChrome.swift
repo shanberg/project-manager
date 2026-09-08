@@ -151,7 +151,7 @@ extension CanvasBoardView {
     /// the one being dragged — which is the same tile, but stops the grip blinking out at the moment
     /// the pointer leaves the tile it belongs to and enters the gap the bar sits in.
     func showsTileHandle(_ id: String) -> Bool {
-        if case .reorderTile(let moving, _)? = gesture { return moving == id }
+        if case .reorderTile(let moving, _, _)? = gesture { return moving == id }
         return hovered == id || selection.contains(id)
     }
 

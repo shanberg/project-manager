@@ -88,7 +88,8 @@ extension CanvasBoardView {
         if let id = tileHandle(at: where_), let frame = tiling?.layout.frames[id] {
             selection = [id]
             gesture = .reorderTile(id, grab: CanvasPoint(x: where_.x - frame.minX,
-                                                         y: where_.y - frame.minY))
+                                                         y: where_.y - frame.minY),
+                                   displaced: nil)
             return
         }
         if let divider = tileDivider(at: where_) {
@@ -143,22 +144,28 @@ extension CanvasBoardView {
         case .resizeTiles(let divider, let from, let lengths):
             dragTileDivider(divider, from: from, to: now, lengths: lengths)
 
-        case .reorderTile(let id, let grab):
+        case .reorderTile(let id, let grab, let displaced):
             // The card comes with you. Held off its slot rather than animating into each new one: what
             // is being dragged is the card, and a card that stayed in the grid while the pointer moved
-            // would be a gesture you have to take on trust.
+            // would be a gesture you have to take on trust. Only this card moves on this event — see
+            // `layoutCarriedCard`, and the tiles it deliberately leaves in flight.
             if let frame = tiling?.layout.frames[id] {
                 reordering = (id, CanvasRect(x: now.x - grab.x, y: now.y - grab.y,
                                              width: frame.width, height: frame.height))
-                layoutNodeViews()
+                layoutCarriedCard()
             }
             // The tile under the pointer decides where this one goes. Applied as you cross rather than
             // on the drop, so the arrangement rearranges itself under your hand and the order you are
-            // making is the one you can see. Stable by construction: once the move has happened the
-            // dragged tile *is* the tile under the pointer, so nothing more fires until you cross into
-            // another one.
-            guard case .node(let over) = hitTester.hit(now), over != id,
-                  let index = tiling?.ids.firstIndex(of: over) else { break }
+            // making is the one you can see — but only once per crossing, which is
+            // `CanvasTileSession.reorder`'s whole subject and the reason a drag held still over the
+            // middle of the window no longer flickers.
+            var over: String?
+            if case .node(let hit) = hitTester.hit(now) { over = hit }
+            let step = CanvasTileSession.reorder(carrying: id, over: over, displaced: displaced)
+            if step.displaced != displaced {
+                gesture = .reorderTile(id, grab: grab, displaced: step.displaced)
+            }
+            guard let onto = step.displace, let index = tiling?.ids.firstIndex(of: onto) else { break }
             moveInTiling(id, to: index)
 
         case .move(let from, let frames):
@@ -202,8 +209,21 @@ extension CanvasBoardView {
             }
 
         case .marquee(let from, let additive, let base):
-            let rect = CanvasRect(x: min(from.x, now.x), y: min(from.y, now.y),
-                                  width: abs(now.x - from.x), height: abs(now.y - from.y))
+            // **⌥ sweeps from the centre.** The press is the middle of the rectangle rather than one
+            // of its corners, which is the modifier every drawing tool gives a dragged-out shape — and
+            // it earns its place on a selection for the case a corner cannot reach: a cluster in the
+            // middle of a crowded board, where every corner you could start from is inside another
+            // card and starting there would drag *it* instead. Read on every event, so pressing and
+            // releasing ⌥ mid-sweep re-anchors the rectangle under your hand.
+            //
+            // No collision with ⌥'s other meaning: a sweep does not snap, so there is nothing here for
+            // it to turn off. ⇧ is spoken for on the way down — it is what makes the sweep additive.
+            let reach = (dx: abs(now.x - from.x), dy: abs(now.y - from.y))
+            let rect = event.modifierFlags.contains(.option)
+                ? CanvasRect(x: from.x - reach.dx, y: from.y - reach.dy,
+                             width: reach.dx * 2, height: reach.dy * 2)
+                : CanvasRect(x: min(from.x, now.x), y: min(from.y, now.y),
+                             width: reach.dx, height: reach.dy)
             let swept = canvasMarqueeSelection(rect, in: document)
             selection = additive ? base.union(swept) : swept
             overlay.marquee = rect
@@ -223,7 +243,14 @@ extension CanvasBoardView {
         // during a drag slides the whole arrangement out from under the pointer while leaving it
         // exactly where it was in canvas coordinates. Two systems, and only one of them is a scroll
         // area — see `CanvasScrollView.scrollWheel`, which declines the same thing from the other side.
-        if !isTiled { autoscroll(with: event) }
+        //
+        // **And not while resizing.** Every other gesture is carrying something across the board, and
+        // the board scrolling under it is how you carry it somewhere off screen. A resize is the one
+        // gesture anchored to what it is *not* moving — the opposite edge, which is the thing you are
+        // sizing against — so panning while it runs drags that anchor out from under the card and the
+        // edge you are holding stops corresponding to the pointer at all. A card sized against the
+        // window's edge is exactly where you notice it, which is exactly where autoscroll fires.
+        if !isTiled, gesture?.pansTheBoard == true { autoscroll(with: event) }
     }
 
     // MARK: Releasing
@@ -253,7 +280,7 @@ extension CanvasBoardView {
                 view.beginEditing()
             }
         case .resizeTiles(let divider, _, _):
-            if divider.isMasterSplit { rememberMasterFraction() }
+            rememberTileSizes(divider)
 
         case .reorderTile:
             // Let go: the card springs back into the slot it has already been given.
@@ -409,10 +436,11 @@ extension CanvasBoardView {
 
     /// A wheel over a card scrolls that card, whether or not you have stepped into it.
     ///
-    /// The card cannot take this event itself. An unengaged card returns nil from `hitTest`, so AppKit
-    /// never offers it anything and the wheel arrives *here*, at the board, on its way up to the scroll
-    /// view — which is the one place that knows both what is under the pointer and what that card has
-    /// to scroll. So the board hands it down.
+    /// The card cannot take this event itself. A card that isn't taking its own clicks returns nil from
+    /// `hitTest`, so AppKit never offers it anything and the wheel arrives *here*, at the board, on its
+    /// way up to the scroll view — which is the one place that knows both what is under the pointer and
+    /// what that card has to scroll. So the board hands it down. (A tiled view never comes through
+    /// here: its tiles hit-test, so the wheel reaches them the ordinary way.)
     ///
     /// Only what the pointer is on. Nothing chains: a wheel over a card that has nothing more to show
     /// stops there rather than starting to pan the board underneath it, because the card's own scroll
@@ -507,17 +535,25 @@ extension CanvasBoardView {
     override func mouseExited(with event: NSEvent) {
         hovered = nil
         overlay.needsDisplay = true
+        // Off the board altogether, straight from a card — the sidebar, the header, another window.
+        // The same handover as `refreshCursor` makes between two tiles, and needed here for the same
+        // reason: whatever the card set is still the screen's cursor, and out here there is no page
+        // coming along behind to replace it.
+        if cursorOwner != nil {
+            cursorOwner = nil
+            NSCursor.arrow.set()
+        }
     }
 
-    /// True when the pointer is over the part of a card that takes its own input.
+    /// The card the pointer is inside, in the sense that the card is taking its own input there.
     ///
     /// `hitTest` already encodes the whole rule — the edge band and the drag handle stay the board's,
     /// the controls and the page are the card's — so asking it is both correct and impossible to get
     /// out of step with.
-    private var pointerIsInsideACard: Bool {
-        guard let position = window?.mouseLocationOutsideOfEventStream else { return false }
+    private var cardUnderPointer: String? {
+        guard let position = window?.mouseLocationOutsideOfEventStream else { return nil }
         let local = convert(position, from: nil)
-        return nodeViews.values.contains { $0.isEngaged && $0.hitTest(local) != nil }
+        return nodeViews.first { $0.value.takesItsOwnClicks && $0.value.hitTest(local) != nil }?.key
     }
 
     /// The pointer over the board, and only over the board.
@@ -528,8 +564,29 @@ extension CanvasBoardView {
     /// can drag this card" — while the page underneath set its own arrow, pointer or I-beam on the very
     /// same events. Two cursors set in alternation at the rate the mouse reports is exactly what a
     /// flickering pointer is.
+    ///
+    /// **Handing it over is not the same as never taking it back.** A cursor on macOS is one setting
+    /// for the whole screen, held by whoever set it last, and a card that sets one keeps it until
+    /// something else sets another. A playing video is the case that shows this: YouTube hides the
+    /// pointer over a player nobody has moved for a few seconds, which is the page's business and
+    /// right — but the invisible pointer it set is the *screen's* now, and it followed the pointer out
+    /// of that tile and into the next one, where the page had no reason to send a cursor of its own
+    /// and so nothing put it back. A pointer that vanishes over a video and is still missing over the
+    /// tile beside it reads as the app having lost it.
+    ///
+    /// The gap between two tiles cannot be relied on to fix that. It is nine points wide; a pointer
+    /// moved at any speed crosses it between two mouse-moved reports, and the board never gets the
+    /// event in which it was over the gap and would have set a cursor. So the board watches for the
+    /// pointer *changing hands* instead, and takes the cursor back at that moment — once, and then
+    /// leaves the new card to it, which is what the page's next mouse-moved does with a page that has
+    /// anything to say about the matter.
     func refreshCursor() {
-        guard !pointerIsInsideACard else { return }
+        let owner = cardUnderPointer
+        defer { cursorOwner = owner }
+        if owner != nil {
+            if cursorOwner != nil && cursorOwner != owner { NSCursor.arrow.set() }
+            return
+        }
         guard let position = window?.mouseLocationOutsideOfEventStream else { return }
         let where_ = canvasPoint(convert(position, from: nil))
         if isTiled {

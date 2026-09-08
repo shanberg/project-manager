@@ -249,6 +249,76 @@ final class CanvasTilingTests: XCTestCase {
         }
     }
 
+    // MARK: Reordering under the hand
+
+    /// A row wide enough to be laid out as one run, with the tiles at deliberately unequal widths —
+    /// which is what a dragged divider leaves behind, and what makes the geometry below move.
+    private func unevenRow() -> CanvasTileSession {
+        CanvasTileSession(ids: ["a", "b", "c"], arrangement: .grid,
+                          sizes: ["a": .flexible(4), "b": .flexible(1), "c": .flexible(1)],
+                          area: CanvasRect(x: 0, y: 0, width: 1800, height: 300),
+                          restoreVisible: .init(x: 0, y: 0, width: 1800, height: 300))
+    }
+
+    /// The bug this rule exists for: a tile's width travels with the card, so moving a tile onto a
+    /// wide one re-lays the row out and leaves that same wide tile under a pointer that has not moved.
+    /// Asked again on the next event, the drag displaces it again — and the board flickers between two
+    /// orders for as long as you hold still.
+    func testMovingATileCanLeaveTheSameTileUnderThePointer() {
+        var session = unevenRow()
+        let middle = CanvasPoint(x: 900, y: 150)
+        XCTAssertEqual(tile(under: middle, in: session), "a", "the wide tile fills the middle")
+
+        session.move("c", to: 0)
+        XCTAssertEqual(tile(under: middle, in: session), "a",
+                       "the row was re-laid out and 'a' is still there — which is the whole trouble")
+    }
+
+    /// So the drag remembers what it has already moved against, and holding still changes nothing.
+    func testADragHoldingStillMovesOnce() {
+        var session = unevenRow()
+        var displaced: String?
+        let middle = CanvasPoint(x: 900, y: 150)
+
+        let moves = (0..<30).filter { _ in step(&session, carrying: "c", at: middle, displaced: &displaced) }
+        XCTAssertEqual(moves.count, 1, "one crossing is one move, however long the pointer rests there")
+        XCTAssertEqual(session.ids, ["c", "a", "b"])
+    }
+
+    /// And leaving the tile — for the gap, or for the card in your hand — is what earns it back, so a
+    /// drag that goes on crossing goes on rearranging.
+    func testCrossingAgainMovesAgain() {
+        var session = unevenRow()
+        var displaced: String?
+        _ = step(&session, carrying: "c", at: CanvasPoint(x: 900, y: 150), displaced: &displaced)
+        XCTAssertEqual(session.ids, ["c", "a", "b"])
+
+        // Out over the tile in your hand, then back onto the wide one.
+        _ = step(&session, carrying: "c", at: CanvasPoint(x: 100, y: 150), displaced: &displaced)
+        XCTAssertNil(displaced, "the carried tile is not something to move onto")
+        XCTAssertTrue(step(&session, carrying: "c", at: CanvasPoint(x: 900, y: 150),
+                           displaced: &displaced))
+        XCTAssertEqual(session.ids, ["a", "c", "b"], "the second crossing moved it on")
+    }
+
+    /// One event of a handlebar drag, as `CanvasBoardView+Input` runs it: what is under the pointer,
+    /// the rule, and the move. Answers whether the order changed.
+    private func step(_ session: inout CanvasTileSession, carrying id: String, at point: CanvasPoint,
+                      displaced: inout String?) -> Bool {
+        let over = tile(under: point, in: session)
+        let next = CanvasTileSession.reorder(carrying: id, over: over, displaced: displaced)
+        displaced = next.displaced
+        guard let onto = next.displace, let index = session.ids.firstIndex(of: onto) else { return false }
+        session.move(id, to: index)
+        return true
+    }
+
+    /// The tile drawn under a point — the hit tester's answer inside a tiling, which is containment
+    /// and nothing else.
+    private func tile(under point: CanvasPoint, in session: CanvasTileSession) -> String? {
+        session.layout.frames.first { $0.value.contains(x: point.x, y: point.y) }?.key
+    }
+
     private func even(_ count: Int) -> [CanvasTiling.Size] {
         Array(repeating: .even, count: count)
     }

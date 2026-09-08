@@ -20,12 +20,13 @@ final class CanvasScrollView: NSScrollView {
     static let minimumZoom: CGFloat = 0.08
     static let maximumZoom: CGFloat = 3
 
-    var onZoomChanged: ((CGFloat) -> Void)?
-
     init(store: CanvasDocumentStore) {
         super.init(frame: .zero)
         board = CanvasBoardView(store: store, scrollView: self)
 
+        // Before anything reads `contentView` below, and before the board goes in: replacing the clip
+        // resets the scroll position, so it has to be the first thing that happens.
+        contentView = CanvasClipView()
         documentView = board
         hasVerticalScroller = true
         hasHorizontalScroller = true
@@ -101,7 +102,6 @@ final class CanvasScrollView: NSScrollView {
         let wanted = min(max(magnification * pow(1.15, steps), Self.minimumZoom), Self.maximumZoom)
         guard wanted != magnification else { return }
         setMagnification(wanted, centeredAt: board.convert(event.locationInWindow, from: nil))
-        onZoomChanged?(magnification)
         settleZoom()
     }
 
@@ -157,7 +157,6 @@ final class CanvasScrollView: NSScrollView {
     @objc private func zoomChanged() {
         board.magnificationChanged()
         board.settlePageBudget()
-        onZoomChanged?(magnification)
     }
 
     // MARK: Zooming on purpose
@@ -169,7 +168,6 @@ final class CanvasScrollView: NSScrollView {
         setMagnification(min(max(magnification * factor, Self.minimumZoom), Self.maximumZoom),
                          centeredAt: centre)
         board.magnificationChanged()
-        onZoomChanged?(magnification)
     }
 
     /// Fit a particular region in the window — a frame you have stepped to, rather than the whole board.
@@ -182,7 +180,6 @@ final class CanvasScrollView: NSScrollView {
         magnification = wanted
         board.magnificationChanged()
         centre(on: CanvasPoint(x: rect.midX, y: rect.midY))
-        onZoomChanged?(magnification)
     }
 
     func zoomToActualSize() { setZoom(1) }
@@ -196,7 +193,6 @@ final class CanvasScrollView: NSScrollView {
         let centre = NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY)
         setMagnification(min(max(zoom, Self.minimumZoom), Self.maximumZoom), centeredAt: centre)
         board.magnificationChanged()
-        onZoomChanged?(magnification)
     }
 
     /// Fit the whole board in the window — ⌘0, and what a window does when it opens.
@@ -214,7 +210,6 @@ final class CanvasScrollView: NSScrollView {
         magnification = max(scale, Self.minimumZoom)
         centre(on: CanvasPoint(x: padded.midX, y: padded.midY))
         board.magnificationChanged()
-        onZoomChanged?(magnification)
     }
 
     /// Put a point on the board in the middle of the window — how ⌘F frames what it found.
@@ -232,8 +227,36 @@ final class CanvasScrollView: NSScrollView {
         if magnification < 0.5 {
             magnification = 0.75
             board.magnificationChanged()
-            onZoomChanged?(magnification)
         }
         centre(on: CanvasPoint(x: node.frame.midX, y: node.frame.midY))
+    }
+}
+
+/// The clip a board scrolls inside, for the one thing `NSClipView` will not do by itself: let you pan
+/// a board that fits.
+///
+/// A scroll view scrolls what overflows. So a board with three cards on it, or any board at all zoomed
+/// far enough out that the whole of it fits in the window, is nailed in place — you can look at it and
+/// you cannot move it, which is the one thing an infinite plane must never do. Panning is how you make
+/// room to think: pushing what is there off to one side to work in the space beside it is a move, not a
+/// consequence of the content having grown.
+///
+/// So position is free, and only *losing* the board is prevented. The board keeps a wide margin around
+/// its cards already — see `CanvasBoardView.margin` — so this is a long way out before it bites, and
+/// what it guarantees is that some of the board is always in the window to scroll back from.
+@MainActor
+final class CanvasClipView: NSClipView {
+    /// How much of the board has to stay in the window, in the clip's own units. A sliver is enough:
+    /// it is a way back, not a view.
+    private static let keep: CGFloat = 120
+
+    override func constrainBoundsRect(_ proposed: NSRect) -> NSRect {
+        guard let board = documentView?.frame else { return super.constrainBoundsRect(proposed) }
+        var rect = proposed
+        // The furthest the window can travel in each direction: until only `keep` of the board is left
+        // at the trailing edge, and until only `keep` is left at the leading one.
+        rect.origin.x = min(max(rect.minX, board.minX - rect.width + Self.keep), board.maxX - Self.keep)
+        rect.origin.y = min(max(rect.minY, board.minY - rect.height + Self.keep), board.maxY - Self.keep)
+        return rect
     }
 }

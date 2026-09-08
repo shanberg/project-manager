@@ -27,6 +27,31 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     let header = CanvasHeaderModel()
     private var pill: NSHostingView<CanvasTitlePill>!
     private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
+    /// The window's tabs, when this board is a tab in a project window. Nil in a canvas window of its
+    /// own, which has no tabs to draw.
+    private var tabBar: NSHostingView<CanvasTabBar>!
+    /// Which part of the board this pane is pinned to. `.whole` is a plain board and behaves exactly as
+    /// one; the other two are a tab that was opened *at* something.
+    var focus: CanvasFocus = .whole
+    var tabModel: ProjectTabModel? {
+        didSet {
+            tabBar?.rootView = CanvasTabBar(model: header, tabs: tabModel ?? ProjectTabModel())
+            // The board's own menus reach the window's tabs through these. Nil in a canvas window,
+            // where the items they drive don't appear at all.
+            scroll.board.onOpenInTab = tabModel.map { model in
+                { focus in
+                    switch focus {
+                    case .whole: model.openBoard()
+                    case .frame(let id): model.openFrame(id)
+                    case .arrangement(let name): model.openArrangement(name)
+                    }
+                }
+            }
+            scroll.board.onSaveArrangement = tabModel == nil ? nil : { [weak self] name in
+                self?.saveArrangement(as: name)
+            }
+        }
+    }
     private var pillLeading: NSLayoutConstraint!
 
     /// How far the header's leading edge starts in from the pane's own edge.
@@ -51,6 +76,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             header.arrangement = scroll.board.tiling?.arrangement
             refreshTileCommand()
             rememberViewState()
+            // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
+            onTilingChanged?()
         }
         // The header's tiling button says what it is about to do — "Fill Window with These 6 Cards" —
         // so it has to hear about the selection. Nothing was listening to this before; the board fired
@@ -62,6 +89,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         NotificationCenter.default.addObserver(self, selector: #selector(paneResized),
                                                name: NSView.frameDidChangeNotification,
                                                object: container)
+        // Something happened that the board itself cannot show: a file downloaded, a link handed to
+        // another app, a page refused the camera. The notice bar is where this window says things the
+        // board can't, and it is the only surface a card can reach.
+        scroll.board.onReport = { [weak self] message, file in
+            self?.say(message, reveal: file)
+        }
+        scroll.board.onFocusAddress = { [weak self] in
+            self?.header.addressFocusToken &+= 1
+        }
+        scroll.board.onRefreshIntervalChanged = { [weak self] in self?.rememberViewState() }
         scroll.board.onModeChanged = { [weak self] in
             guard let self else { return }
             // The mode is flipped from the View menu and from the header's options, so the header
@@ -72,12 +109,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         store.addWatcher(self,
                          changed: { [weak self] in self?.documentChanged() },
                          reloaded: { [weak self] in self?.noteOutsideChange() })
-        scroll.onZoomChanged = { [weak self] zoom in self?.showZoom(zoom) }
         // Filtering is verified after launch, which is usually after this pane exists.
         NotificationCenter.default.addObserver(
             self, selector: #selector(blockingHealthChanged),
             name: CanvasContentBlocker.healthChanged, object: nil)
         notice.onDismissedByUser = { [weak self] in self?.hidBlockingNotice = true }
+        // Asked once here because the document is already in the store: a board that opens without its
+        // project note has to offer it from the first time the `+` is pulled down, not from the first
+        // edit.
+        refreshProjectNoteOffer()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -112,7 +152,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         CanvasStoreRegistry.release(store)
     }
 
-    // MARK: Appearing
+    // MARK: Appearing, and being switched away from
+
 
     override func viewDidAppear() {
         super.viewDidAppear()
@@ -126,8 +167,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             scroll.zoomToFit()
-            showZoom(scroll.magnification)
             restoreViewState()
+            applyFocus()
             view.window?.makeFirstResponder(scroll.board)
         }
     }
@@ -140,6 +181,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private var viewState: CanvasViewState {
         CanvasViewState(mode: scroll.board.mode,
                         tiling: scroll.board.tiling.map(scroll.board.memory(of:)),
+                        refreshInterval: scroll.board.refreshInterval,
                         // Kept whether or not one is up: an arrangement you left is one you built.
                         lastTiling: scroll.board.tilingMemory)
     }
@@ -154,10 +196,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Obsidian, or under another window on the same file — restores what still exists and drops the
     /// rest. See `CanvasBoardView.restoreTiling`.
     private func restoreViewState() {
-        guard !hasRestoredViewState else { return }
+        // A pane that was opened *at* something takes its state from what it was opened at, not from
+        // how the board was last left. This is also what keeps two tabs on one canvas from fighting
+        // over the single row `CanvasViewMemory` keeps per file: only the plain one writes to it.
+        guard focus == .whole, !hasRestoredViewState else { return }
         hasRestoredViewState = true
         let remembered = CanvasViewMemory.of(store.url)
         scroll.board.mode = remembered.mode
+        scroll.board.refreshInterval = remembered.refreshInterval
         // The arrangement comes back even when the board was left untiled, so the next ⌘Return on the
         // same cards picks up where you left off rather than starting over.
         scroll.board.lastTiling = remembered.lastTiling
@@ -171,11 +217,64 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Silent until the restore has happened, so the empty state a board starts in cannot overwrite
     /// the state being restored into it.
     private func rememberViewState() {
-        guard hasRestoredViewState else { return }
+        guard focus == .whole, hasRestoredViewState else { return }
         CanvasViewMemory.remember(viewState, for: store.url)
     }
 
     private var hasRestoredViewState = false
+
+    /// Put the board where this tab says it should be.
+    ///
+    /// After the fit, for the reason `restoreViewState` is after it: an arrangement is laid out in the
+    /// region the window can show, and a frame is fitted to the window, so both need a window with a
+    /// width. A pin that no longer resolves — a frame deleted, an arrangement removed — leaves the
+    /// board on the whole canvas rather than on nothing, which is the same answer `restoreTiling` gives
+    /// for cards that have gone.
+    private func applyFocus() {
+        switch focus {
+        case .whole:
+            break
+        case .frame(let id):
+            scroll.board.goTo(frame: id)
+        case .arrangement(let name):
+            guard let tiling = CanvasArrangements.tiling(named: name, of: store.url) else { return }
+            scroll.board.restoreTiling(tiling)
+        }
+    }
+
+    // MARK: What the window's tabs need from a board
+
+    /// Leave the tiled view — the tab chip's readout, standing in for the pill's ✕ where the pill has
+    /// given the readout up. Same act as Escape and as ⌘↩ on a tiled board.
+    func leaveTiling() { header.leaveTiling() }
+
+    /// Told when this board tiles or untiles, so the tab holding it can re-title itself.
+    var onTilingChanged: (() -> Void)?
+
+    /// What a tiled view here is showing, long and short — what the tab puts after its name.
+    var tilingSummary: (long: String, short: String)? { header.tiling }
+
+    /// The name to put on a tab pinned to this frame.
+    func frameName(_ id: String) -> String? { scroll.board.frameLabel(id) }
+
+    /// Every frame the add menu could offer, in reading order.
+    func frames() -> [ProjectTabItem] {
+        scroll.board.frameChoices.map { ProjectTabItem(id: $0.id, name: $0.name, symbol: "square.dashed") }
+    }
+
+    /// Every arrangement saved for this board.
+    func arrangementNames() -> [String] { CanvasArrangements.names(of: store.url) }
+
+    /// Keep the tiling that is up under `name`, for a tab to be pinned to.
+    func saveArrangement(as name: String) {
+        guard let tiling = scroll.board.tilingMemory else { return }
+        CanvasArrangements.save(tiling, as: name, for: store.url)
+        tabModel?.arrangements = arrangementNames()
+    }
+
+    /// Whether there is an arrangement to save at all — a board that has never been tiled has nothing
+    /// to keep, and the command that offers to keep it should say so by being dim.
+    var hasArrangementToSave: Bool { scroll.board.tilingMemory != nil }
 
     /// Take the keyboard, for an owner that has just put this pane on screen.
     func focusBoard() { view.window?.makeFirstResponder(scroll.board) }
@@ -263,8 +362,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // The hosting view is the size SwiftUI says it is, so each view's frame is the pill or the
         // capsule and not a rectangle of window around it. Set one at a time because the two are
         // different generic types and an array of them is an array of `NSView`.
+        tabBar = NSHostingView(rootView: CanvasTabBar(model: header, tabs: tabModel ?? ProjectTabModel()))
         pill.sizingOptions = [.intrinsicContentSize]
         capsule.sizingOptions = [.intrinsicContentSize]
+        tabBar.sizingOptions = [.intrinsicContentSize]
         // And no safe area, which is the difference between this header sitting *in* the titlebar band
         // and sitting below it. The window has a full-size content view, so AppKit reports the titlebar
         // and toolbar as a top safe area inset — correct for content that should stay clear of the
@@ -273,8 +374,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // and then taking its own drop on top: about 66 points of droop for a 14-point offset.
         pill.safeAreaRegions = []
         capsule.safeAreaRegions = []
+        tabBar.safeAreaRegions = []
         pill.translatesAutoresizingMaskIntoConstraints = false
         capsule.translatesAutoresizingMaskIntoConstraints = false
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
 
         container.translatesAutoresizingMaskIntoConstraints = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -283,6 +386,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         container.addSubview(scroll)
         container.addSubview(notice)
         container.addSubview(pill)
+        container.addSubview(tabBar)
         container.addSubview(capsule)
 
         // Held so the leading inset can follow the traffic lights, which move with the titlebar's
@@ -311,6 +415,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             capsule.topAnchor.constraint(equalTo: container.topAnchor),
             capsule.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor,
                                               constant: -14),
+            // Between the two, which is the space this header deliberately leaves empty — and the bar
+            // is the one thing that has earned it, because it answers the same question the pill does.
+            // Its own island, sized to its contents: a strip across the band would hit-test the whole
+            // width and swallow clicks on the cards up there. See `ProjectTabBar`.
+            tabBar.topAnchor.constraint(equalTo: container.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: pill.trailingAnchor,
+                                            constant: HeaderMetrics.capsuleGap),
+            tabBar.trailingAnchor.constraint(lessThanOrEqualTo: capsule.leadingAnchor,
+                                             constant: -HeaderMetrics.capsuleGap),
             // The pill gives way first when the window is too narrow to hold both — the controls have a
             // floor and the title has a truncation.
             pill.trailingAnchor.constraint(lessThanOrEqualTo: capsule.leadingAnchor, constant: -12),
@@ -324,9 +437,22 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
                                              constant: -14),
         ])
         pill.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The bar gives way before the pill does: a tab chip has a truncation of its own and the
+        // project's name does not repeat anywhere else in the column.
+        tabBar.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        tabBar.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
         notice.onRepairAll = { [weak self] in self?.repairAllPaths() }
-        notice.onReveal = { [weak self] in self?.selectMovedCards() }
+        notice.onReveal = { [weak self] in
+            guard let self else { return }
+            // What Reveal means depends on what is up: a downloaded file to show in the Finder, or the
+            // cards whose files have moved. One button, because there is only ever one notice.
+            if let file = event?.file {
+                NSWorkspace.shared.activateFileViewerSelecting([file])
+            } else {
+                selectMovedCards()
+            }
+        }
     }
 
     /// Keep the header level with, and clear of, the window's own buttons.
@@ -360,6 +486,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.addFrame = { [weak self] in self?.addFrame() }
         header.addLink = { [weak self] in self?.scroll.board.addLinkCard(at: nil) }
         header.addFile = { [weak self] in self?.scroll.board.addFileCard(at: nil) }
+        header.addProjectNote = { [weak self] in self?.scroll.board.addProjectNoteCard(at: nil) }
         header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
         header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
         header.zoomOut = { [weak self] in self?.scroll.zoom(by: 1 / 1.25) }
@@ -374,7 +501,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
-        header.leaveTiling = { [weak self] in self?.scroll.board.untile(animated: true) }
+        header.leaveTiling = { [weak self] in self?.scroll.board.leaveTiling(animated: true) }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
@@ -431,7 +558,40 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// The count goes in the field's own trailing edge; only the empty result gets the banner, because
     /// that is the one outcome where the board itself shows you nothing and would otherwise look like a
     /// board that had simply lost your selection.
+    /// The card ⌘F is searching inside, if you are inside one.
+    ///
+    /// **Find follows what you are in**, which is the rule ⌘+ and ⌘− already follow on this board: on
+    /// the board they mean the board, inside a card they mean the card. ⌘F searching the *board* while
+    /// the keyboard is in a web page was the one command that ignored where you were — and the board's
+    /// find cannot see a page's text at all, so the answer it gave was always "nothing matches" for
+    /// words that were plainly on the screen.
+    private var searchTarget: CanvasLinkNodeView? {
+        scroll.board.engagedPageCard as? CanvasLinkNodeView
+    }
+
     private func search(_ query: String) {
+        if let page = searchTarget {
+            guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+                header.find.summary = ""
+                notice.dismiss()
+                updateNotice()
+                return
+            }
+            // WebKit says whether it found one, not how many — so the field says nothing rather than a
+            // count it would have to invent, and the banner carries the only outcome worth a sentence.
+            page.find(query) { [weak self] found in
+                guard let self else { return }
+                header.find.summary = ""
+                if found {
+                    notice.dismiss()
+                    updateNotice()
+                } else {
+                    notice.show(message: "Nothing on this page matches \u{201C}\(query)\u{201D}.",
+                                kind: .informational, actionTitle: nil)
+                }
+            }
+            return
+        }
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             scroll.board.select([])
             header.find.summary = ""
@@ -471,7 +631,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             header.find.isShowing = true
             header.find.focusToken &+= 1
         case .nextMatch, .previousMatch:
-            scroll.board.findNext(lastQuery)
+            // Inside a page, "again" walks the page's own matches — forwards or back, which the board's
+            // own find has never offered because a set of matching cards has no direction to walk in.
+            if let page = searchTarget {
+                page.find(lastQuery, forward: action == .nextMatch) { _ in }
+            } else {
+                scroll.board.findNext(lastQuery)
+            }
         default:
             break
         }
@@ -499,6 +665,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // A frame tiles what is inside it, so what the tiling button promises can change without the
         // selection changing at all.
         refreshTileCommand()
+        refreshProjectNoteOffer()
+    }
+
+    /// Keep the `+` menu's fifth item in step with the board.
+    ///
+    /// From the document rather than from the menu opening, because a SwiftUI `Menu` builds its
+    /// content from published state and cannot ask a question at the moment it is pulled down. Cheap
+    /// enough to do on every change — see `CanvasProjectNoteCard.isOn`, which was written for exactly
+    /// this call being on the drag path.
+    private func refreshProjectNoteOffer() {
+        let offers = scroll.board.offersProjectNoteCard
+        if header.offersProjectNote != offers { header.offersProjectNote = offers }
     }
 
     /// Keep the header's tiling button saying what it would actually do.
@@ -548,12 +726,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         return can
     }
 
-    /// The header's quiet percentage. It used to read in the window's subtitle, which a hidden title
-    /// takes with it.
-    private func showZoom(_ zoom: CGFloat) {
-        header.zoom = Double(zoom)
-    }
-
     private func noteOutsideChange() {
         notice.show(message: "This canvas changed in another app. PM reloaded it.",
                     kind: .informational, actionTitle: nil)
@@ -574,14 +746,44 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// nagging rather than informing.
     private var hidBlockingNotice = false
 
+    /// Something that just happened, and the file to show for it. Cleared on a timer.
+    ///
+    /// **First in the notice bar, ahead of both standing warnings.** The other two are conditions —
+    /// cards point at moved files, filtering isn't in force — which are equally true a minute from now.
+    /// This is an event, it is the consequence of something you did a second ago, and if it waits its
+    /// turn behind a condition it is not a report of anything.
+    private var event: (message: String, file: URL?)?
+    private var eventClock: Timer?
+
+    /// How long a report stays up. Long enough to read a sentence and reach the button on it, short
+    /// enough that the standing warning underneath is not hidden for the rest of the session.
+    private static let eventLifetime: TimeInterval = 9
+
+    private func say(_ message: String, reveal file: URL?) {
+        event = (message, file)
+        eventClock?.invalidate()
+        eventClock = Timer.scheduledTimer(withTimeInterval: Self.eventLifetime, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                self.event = nil
+                self.updateNotice()
+            }
+        }
+        updateNotice()
+    }
+
     private func updateNotice() {
+        if let event {
+            return notice.show(message: event.message, kind: .informational, actionTitle: nil,
+                               revealTitle: event.file == nil ? nil : "Show in Finder")
+        }
         let moved = movedCards.count
         if moved > 0 {
             return notice.show(message: moved == 1
                                    ? "1 card points at a file that has moved. PM is showing it from where it is now."
                                    : "\(moved) cards point at files that have moved. PM is showing them from where they are now.",
                                kind: .warning,
-                               actionTitle: "Repair Paths")
+                               actionTitle: "Repair Paths",
+                               revealTitle: "Show Them")
         }
         // Second, because the moved-file warning is about *this* canvas and can be acted on, while
         // this one is about the app. It is still worth the space: a filtering failure looks exactly
@@ -689,4 +891,19 @@ private final class CanvasPaneContainer: NSView {
         covered = now
         onCoveredRegionChange?()
     }
+}
+
+
+// MARK: - Being one tab among several
+
+extension CanvasPaneController: ProjectTabContent {
+    /// Brought forward again. The page budget is settled on a timer and on scrolling, and a tab you
+    /// switched away from ten minutes ago has had neither — so without this a board comes back with
+    /// every card frozen until something happens to it.
+    func paneBecameVisible() {
+        scroll.board.settlePageBudget()
+        focusBoard()
+    }
+
+    func paneWillClose() { teardown() }
 }

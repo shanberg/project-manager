@@ -9,11 +9,13 @@ import PmLib
 /// grips and the ring live in the overlay, above every card, so a selected card that overlaps another
 /// still shows its whole ring.
 ///
-/// **A card doesn't take clicks.** `hitTest` returns nil while `isEngaged` is false, so the pointer
-/// falls through to the board, which is the one place a click is interpreted — otherwise every card
-/// would need its own copy of "is this a drag, a selection, or a resize?". A card becomes engaged when
-/// you step into it: a text card being edited needs the caret, and a web card you have stepped into
-/// needs its own clicks and its own scrolling. Clicking outside, or Escape, steps back out.
+/// **A card doesn't take clicks.** `hitTest` returns nil while the card isn't taking its own, so the
+/// pointer falls through to the board, which is the one place a click is interpreted — otherwise every
+/// card would need its own copy of "is this a drag, a selection, or a resize?". A card becomes engaged
+/// when you step into it: a text card being edited needs the caret, and a web card you have stepped
+/// into needs its own clicks and its own scrolling. Clicking outside, or Escape, steps back out.
+///
+/// **A tiled view hands that to every tile at once** — see `takesItsOwnClicks`.
 ///
 /// **The wheel is the exception.** A card you haven't stepped into still scrolls when the pointer is
 /// over it, because reading is not stepping in — the board hands the event down instead, since a card
@@ -149,8 +151,30 @@ class CanvasNodeView: NSView {
         return nil
     }
 
+    /// Whether a click inside this card reaches what is in it, rather than falling through to the
+    /// board.
+    ///
+    /// On a board you earn it by stepping in, and the cost of that is the point: a board is mostly
+    /// panned across and rearranged, and cards that each took their own clicks would make every one of
+    /// those gestures a gamble on what was under the pointer.
+    ///
+    /// **A tiled view has none of that.** There is nothing to pan to, nothing to drag a card into, and
+    /// no question of which card a click was meant for — the tiles are laid out edge to edge with a gap
+    /// between them, and a click inside one is a click on that one. What is left is a window showing
+    /// several live things at once, which is the whole reason to tile: a page you can scroll, a task
+    /// you can tick, a link you can follow, in whichever tile you happen to be looking at. Making that
+    /// wait for a click that "focuses" the tile first is a click charged for nothing, and it means only
+    /// ever one live tile among several — see `CanvasPageBudget.liveWhileTiled`, which is the same
+    /// sentence about renderers rather than about clicks.
+    ///
+    /// The board keeps what it needs either way. `canvasBoardKeeps` reserves the band along each tile's
+    /// edge, the boundaries lie in the gaps, and the handlebar sits outside the tile it belongs to — so
+    /// selecting, swapping, reordering and resizing are all still the board's, and none of them was
+    /// ever aimed at the middle of a tile.
+    var takesItsOwnClicks: Bool { isEngaged || board.isTiled }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard isEngaged else { return nil }
+        guard takesItsOwnClicks else { return nil }
         let local = convert(point, from: superview)
         guard !canvasBoardKeeps(local, in: bounds, scale: board.liveScale) else { return nil }
         return super.hitTest(point)

@@ -25,10 +25,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Set while a remembered canvas is waiting for its path.
     ///
     /// A project's canvas path arrives with the store's first read of its folder, so at the moment a
-    /// window is built every project looks like a project without a board. Switching to the canvas
-    /// renderer then would put the "no canvas yet" empty state on screen and take it away again a
-    /// moment later, which is a worse answer than the task list for the same fraction of a second.
-    /// `watchCanvasPath` picks this up when the path lands.
+    /// window is built every project looks like a project without a board. Answering then would put
+    /// the "no canvas yet" empty state on screen and take it away again a moment later, offering to
+    /// make a canvas the project already has. The board tab shows an empty pane for that moment
+    /// instead — see `ProjectSplitViewController.setTabs` — and `watchCanvasPath` finishes the job
+    /// when the path lands.
     private var awaitsRememberedCanvas = false
 
     /// The project's canvas path arrives with the store's first read, and again whenever the project's
@@ -77,8 +78,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // honest affordance for a window with a maximum. (Full-height is still free: only width is
         // capped, so zoom takes the whole screen vertically.)
         window.collectionBehavior.insert(.fullScreenNone)
-        window.tabbingIdentifier = ProjectWindow.tabbingIdentifier
-        window.tabbingMode = .automatic
+        // **No native window tabs.** A project window has tabs of its own now — the notes, the board,
+        // a frame on it, an arrangement of it — and AppKit's would sit in a bar directly above them
+        // meaning something else entirely: another *project* beside this one. Two tab bars in one
+        // window, one nested in the other, each with its own idea of what a tab is. Opening a second
+        // project is still File ▸ New Window and the sidebar, which is what it always was.
+        window.tabbingMode = .disallowed
         // An empty toolbar, purely for its geometry. A window with one gets the taller unified titlebar
         // and the lower, further-inset traffic lights that go with it — the proportions every current
         // Mac app has. Without a toolbar you get the compact titlebar, with the buttons tucked hard
@@ -114,11 +119,27 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
         state.setRenderer = { [weak self] next in self?.setRenderer(next) }
+        state.tabs = split.tabModel
+        // The split switches tabs on its own — a click on the bar — so it asks for the project's board
+        // rather than being handed it. The store is the window's.
+        //
+        // `self.store` and `self.window` in full, and that is not a style choice: this closure is
+        // written inside `init`, where the bare names `store` and `window` are the initialiser's own
+        // parameter and local. Spelled that way the closure answers for the project the window was
+        // *opened* on for the rest of its life, so retargeting to a project with no canvas and then
+        // switching to the board handed back the previous project's file.
+        split.canvasSource = { [weak self] in
+            guard let self else { return (nil, nil, {}) }
+            return (self.store.canvasPath.map { URL(fileURLWithPath: $0) },
+                    self.window?.title,
+                    { [weak self] in self?.createAndShowCanvas() })
+        }
         watchCanvasPath()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
             renderer = split.renderer
             applyWidthLimits()
+            ProjectTabMemory.remember(split.tabs, for: projectKey)
         }
         // Publish "a field has the keyboard" into the shared state, which is what stands the window's
         // own ⌘A / ⌘C / ⌘Z / ⌘⌫ down while you're typing — see `ProjectViewState.isEditingText`.
@@ -184,14 +205,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Called on the way up and again on every retarget, since a retarget is the same question asked
     /// about a different project.
     private func applyRememberedRenderer() {
-        guard ProjectRendererMemory.of(projectKey) == .canvas else {
-            awaitsRememberedCanvas = false
-            if renderer == .canvas { setRenderer(.tasks) }
-            return
-        }
-        guard store.canvasPath != nil else { return awaitsRememberedCanvas = true }
-        awaitsRememberedCanvas = false
-        setRenderer(.canvas)
+        // The tabs this project was last looked at through, seeded — for a project that has never had
+        // any — from what the old one-renderer memory said. See `ProjectTabMemory`.
+        let seed: ProjectTabView = ProjectRendererMemory.of(projectKey) == .canvas
+            ? .board(.whole) : .notes
+        let remembered = ProjectTabMemory.of(projectKey, seed: seed)
+        // A board that isn't there yet is worth waiting for rather than falling back from: the store
+        // learns the canvas path asynchronously, and answering in the meantime would either offer to
+        // make a canvas the project already has or — as this did until the store could tell "nobody
+        // has looked" from "there isn't one" — put the whole task list on screen for the fraction of a
+        // second before the board arrived. The tabs are right either way; it is only the pane inside
+        // the board tab that has to hold still. See `ProjectSplitViewController.setTabs`.
+        let pending = remembered.tabs.contains { $0.view.isBoard } && !store.hasResolvedCanvasPath
+        awaitsRememberedCanvas = pending
+        split.setTabs(remembered, canvasPending: pending)
     }
 
     /// ⌘Z goes to whatever this window is showing. With a board up that is the canvas document's own
@@ -300,8 +327,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     private func watchCanvasPath() {
-        canvasPathWatch = store.$canvasPath
-            .removeDuplicates()
+        // Both halves of the answer: where the board is, and whether that has been looked for at all.
+        // A project with no board publishes nil over nil, which is no change to see — so a window
+        // watching only the path would wait on it for ever. See `PMStore.hasResolvedCanvasPath`.
+        canvasPathWatch = Publishers.CombineLatest(store.$canvasPath.removeDuplicates(),
+                                                   store.$hasResolvedCanvasPath.removeDuplicates())
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self, renderer == .canvas || awaitsRememberedCanvas else { return }
@@ -312,27 +342,43 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                         return
                     }
                     self.awaitsRememberedCanvas = false
-                    self.setRenderer(.canvas)
+                    self.applyRememberedRenderer()
+                    self.split.canvasPathChanged()
                 }
             }
     }
 
+    /// The renderer switch: change what the tab you are in is showing, rather than opening one.
+    ///
+    /// A tab is a slot. Pressing Tasks while looking at a board turns *this* view into the notes,
+    /// exactly as following a link in a browser tab changes what that tab holds — and opening another
+    /// view alongside it is a different gesture with its own command.
     func setRenderer(_ next: ProjectRenderer) {
-        renderer = next
-        switch next {
-        case .tasks:
-            split.showTasks()
-        case .canvas:
-            split.showCanvas(at: store.canvasPath.map { URL(fileURLWithPath: $0) },
-                             projectName: window?.title,
-                             create: { [weak self] in self?.createAndShowCanvas() })
-        }
+        split.replaceSelected(with: next == .canvas ? .board(.whole) : .notes)
+        renderer = split.renderer
         applyWidthLimits()
-        // What the split actually settled on, which is not always what was asked for: a canvas that
-        // won't parse falls back to the task list, and remembering the ask would send the window
-        // straight back into the same failure on every launch.
+        // What the split actually settled on, which is not always what was asked for: a project with
+        // no canvas lands on the empty state, and both memories should record the ask rather than a
+        // failure that would send the window straight back into it on every launch.
         ProjectRendererMemory.remember(split.renderer, for: projectKey)
+        ProjectTabMemory.remember(split.tabs, for: projectKey)
     }
+
+    // MARK: Tabs
+
+    /// View ▸ New Tab. Another view of this project beside the one you are in — the notes if you
+    /// are on a board, the board if you are on the notes, which is the tab you most likely wanted and
+    /// the one you can change with the switch if it wasn't.
+    @objc func newProjectTab(_ sender: Any?) {
+        split.openTab(renderer == .canvas ? .notes : .board(.whole))
+    }
+
+    @objc func closeProjectTab(_ sender: Any?) {
+        split.tabModel.close(split.tabs.selectedID)
+    }
+
+    @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
+    @objc func selectPreviousProjectTab(_ sender: Any?) { split.cycleTabs(by: -1) }
 
     /// The empty state's button: make the board, then show it. The creating half is
     /// `PMStore.openableCanvasPath`, which is the app's one place that decides where a project's canvas
@@ -433,14 +479,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         onClose?(self)
     }
 
-    /// ⌘T and the tab bar's `+`. A tab on the project this window already shows would be a duplicate,
-    /// so New Tab means "another project alongside this one": the most recent one that isn't open yet,
-    /// added to this window's tab group.
-    @objc override func newWindowForTab(_ sender: Any?) {
-        guard let key = WindowManager.shared.nextUnopenedProjectKey else { return }
-        WindowManager.shared.open(projectKey: key, asTabOf: self)
-    }
-
     // MARK: Menu commands answered by this window
 
     /// File ▸ New Task. The content opens its inline add editor; the window can't do it directly, so it
@@ -495,12 +533,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             }
         case #selector(newTask(_:)), #selector(newSession(_:)):
             return store.projectName != nil
-        case #selector(newWindowForTab(_:)):
-            // Nothing to open if every project is already on screen.
-            return WindowManager.shared.nextUnopenedProjectKey != nil
         case #selector(toggleCanvasRenderer(_:)):
             item.state = renderer == .canvas ? .on : .off
             return store.projectName != nil
+        case #selector(newProjectTab(_:)):
+            return store.projectName != nil
+        case #selector(closeProjectTab(_:)), #selector(selectNextProjectTab(_:)),
+             #selector(selectPreviousProjectTab(_:)):
+            // Dim at one tab: the last tab never closes, and there is nothing to cycle between.
+            return split.tabs.tabs.count > 1
         default:
             return true
         }

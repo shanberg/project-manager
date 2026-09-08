@@ -91,6 +91,24 @@ final class CanvasPageBudgetTests: XCTestCase {
         XCTAssertTrue(CanvasPageBudget.live(among: cards).isEmpty)
     }
 
+    /// A tiling is a set of cards you named, all on screen at once. The budget's guess about which of
+    /// them you would miss has nothing left to decide, and a frozen tile is a picture of a page in a
+    /// view whose whole purpose is several live ones.
+    func testATiledViewRunsEveryTile() {
+        let tiles = (0..<12).map { card("tile\($0)", distance: Double($0) * 100) }
+        XCTAssertEqual(CanvasPageBudget.liveWhileTiled(among: tiles).count, 12,
+                       "twelve tiles, twelve pages — the budget does not apply here")
+    }
+
+    /// The other half of the same rule: a tiling hides everything it didn't take, and what it hid is
+    /// frozen at once rather than keeping its page for `offFrameGrace` the way scrolling away would.
+    func testATilingFreezesTheCardsItPutAway() {
+        let live = CanvasPageBudget.liveWhileTiled(among: [card("tiled", distance: 0),
+                                                           card("hidden", distance: 0, visible: false,
+                                                                goneFor: 1)])
+        XCTAssertEqual(live, ["tiled"])
+    }
+
     /// Two cards the same distance from the middle must not swap places on every scroll — each swap
     /// would be a renderer killed and a renderer started.
     func testTheAnswerIsStableWhenTwoCardsTie() {

@@ -66,6 +66,27 @@ struct CanvasTileSession: Equatable {
         ids.insert(id, at: to)
     }
 
+    /// What a handlebar drag should do now that the pointer is over `over` — see
+    /// `CanvasBoardView+Input`, which owns the gesture, and `moveInTiling`, which owns the move.
+    ///
+    /// `displaced` is the tile this drag has already moved against, and the answer carries the next
+    /// one, so the gesture holds nothing it did not get from here.
+    ///
+    /// **One crossing, one move, and that is the whole of the rule.** A move re-lays the arrangement
+    /// out, and a tile's length travels with the card rather than staying with the slot — so the tile
+    /// just displaced can perfectly well still be the one under a pointer that has not moved. Asked
+    /// again on the next event it displaces it again, and again, sixty times a second, which is a
+    /// board flickering under a hand holding still. The pointer has to *leave* that tile — for another
+    /// one, for the gap between them, or for the card in your hand — before the order changes again.
+    static func reorder(carrying id: String, over: String?, displaced: String?)
+        -> (displace: String?, displaced: String?) {
+        // The card in your hand is not a tile to move it onto, and neither is nothing at all. Both
+        // clear the memory, because leaving a tile is what earns the right to come back to it.
+        let over = over == id ? nil : over
+        guard over != displaced else { return (nil, displaced) }
+        return (over, over)
+    }
+
     /// Make `id` the master tile, which is what promoting a window means in every manager that has a
     /// master. A no-op in a grid, where no tile is special.
     mutating func promote(_ id: String) {

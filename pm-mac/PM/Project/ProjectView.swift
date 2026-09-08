@@ -1128,6 +1128,10 @@ struct ProjectView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
             projectPill
+            // The window's tabs, in the same place the board's header puts them, so the bar doesn't
+            // move when you use it — the argument `RendererSwitch` makes about itself, and the reason
+            // both headers render this one view. Nothing at all while there is a single tab.
+            ProjectTabBarHost(model: state.tabs)
             Spacer(minLength: 12)
             headerControls
         }

@@ -22,14 +22,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     private var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
     private var sidebarHosting: NSHostingController<ProjectSidebar>!
-    private var contentHosting: NSHostingController<ProjectView>!
     /// The container the content column's two renderers take turns in — see
     /// `ProjectContentPaneController`.
     private let contentPane = ProjectContentPaneController()
-    /// The board, while this window is rendering one. Nil when it is showing tasks.
-    private(set) var canvasPane: CanvasPaneController?
-    /// The stand-in for a project that hasn't got a canvas yet.
-    private var canvasEmptyState: NSHostingController<ProjectCanvasEmptyState>?
 
     /// Whether this controller is currently holding the shared project scan open. It owns that retain
     /// rather than the sidebar view, because a collapsed split item keeps its view mounted — the view
@@ -53,12 +48,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         super.viewDidLoad()
 
         sidebarHosting = NSHostingController(rootView: ProjectSidebar(store: store, state: state))
-        contentHosting = NSHostingController(rootView: makeContentView())
-        contentPane.show(contentHosting)
-        // The content fills whatever frame the split gives it. Left on the default
-        // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal size,
-        // which fights the user's own window size on every content change.
-        contentHosting.sizingOptions = []
+        wireTabModel()
         // The sidebar keeps `.minSize`, and this is the whole reason its collapse animation looks like
         // a sidebar rather than a glitch: while a split item animates, AppKit sizes the pane's content
         // view to its *fitting* width and slides it in from behind the divider. A hosting view with no
@@ -284,71 +274,206 @@ final class ProjectSplitViewController: NSSplitViewController {
 
     // MARK: What the column shows
 
-    /// Which renderer is up. Read by the window for its menu checkmark and its width cap.
-    private(set) var renderer: ProjectRenderer = .tasks
+    /// This window's tabs. One on the notes is what the window has always been; the rest is new.
+    private(set) var tabs = ProjectTabSet()
+    /// What both headers draw the bar from. See `ProjectTabModel`.
+    let tabModel = ProjectTabModel()
 
-    /// Show the project's board in the content column.
+    /// Where the project's board is, what to call it, and what to do when it hasn't got one.
     ///
-    /// `url` nil means the project hasn't got a canvas — an empty state offering to make one, rather
-    /// than making one, because switching a view shouldn't write to somebody's vault.
-    func showCanvas(at url: URL?, projectName: String?,
-                    create: @escaping () -> Void) {
-        renderer = .canvas
-        guard let url else {
-            dropCanvas()
-            let empty = NSHostingController(rootView: ProjectCanvasEmptyState(
-                projectName: projectName,
-                create: create,
-                showTasks: { [weak self] in self?.showTasks() }))
-            empty.sizingOptions = []
-            canvasEmptyState = empty
-            contentPane.show(empty)
-            return
+    /// A closure rather than arguments, because a tab is switched from inside this controller — a click
+    /// on the bar — and there is nobody to pass them in at that moment. The window supplies it; the
+    /// store belongs to the window.
+    var canvasSource: () -> (url: URL?, name: String?, create: () -> Void) = { (nil, nil, {}) }
+
+    /// Which renderer is up. Read by the window for its menu checkmark and its width cap.
+    var renderer: ProjectRenderer { tabs.selected.view.isBoard ? .canvas : .tasks }
+
+    /// The board the window is showing, if it is showing one.
+    var canvasPane: CanvasPaneController? { contentPane.current as? CanvasPaneController }
+
+    // MARK: Driving the tabs
+
+    /// Show this set of tabs. `canvasPending` says the project's board is still being looked for, so a
+    /// board tab has to hold still rather than answer — see `ProjectWindowController`.
+    func setTabs(_ next: ProjectTabSet, canvasPending pending: Bool = false) {
+        // A pane built while the board was still being looked for is a placeholder, and `applySelectedTab`
+        // would find it in the cache and show it again for good. Dropped the moment the waiting ends.
+        if canvasPending, !pending { contentPane.dropAll() }
+        canvasPending = pending
+        tabs = next
+        applySelectedTab()
+    }
+
+    /// Set while a board tab has nothing to show *yet* — as opposed to nothing to show.
+    private var canvasPending = false
+
+    private func wireTabModel() {
+        tabModel.select = { [weak self] id in
+            guard let self, id != tabs.selectedID else { return }
+            tabs.select(id)
+            applySelectedTab()
         }
-        // Already on this board — a retarget that landed back on the same project, most often.
-        if let existing = canvasPane, existing.store.url.standardizedFileURL == url.standardizedFileURL {
-            existing.title_ = projectName ?? existing.title_
-            return
+        tabModel.close = { [weak self] id in
+            guard let self, tabs.close(id) else { return }
+            // After the switch, not before: the pane being torn down may be the one on screen, and a
+            // window with nothing in it for one turn of the run loop flickers.
+            applySelectedTab()
+            contentPane.drop(tab: id)
         }
-        dropCanvas()
-        guard let store = try? CanvasStoreRegistry.store(for: url) else {
-            // A canvas that won't parse. Falling back to the task list is the honest answer: the window
-            // still shows the project, and File ▸ Open Canvas reports the error properly.
-            renderer = .tasks
-            contentPane.show(contentHosting)
-            return
+        tabModel.openNotes = { [weak self] in self?.openTab(.notes) }
+        tabModel.openBoard = { [weak self] in self?.openTab(.board(.whole)) }
+        tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
+        tabModel.openArrangement = { [weak self] name in self?.openTab(.board(.arrangement(name))) }
+        tabModel.leaveTiling = { [weak self] in self?.canvasPane?.leaveTiling() }
+    }
+
+    func openTab(_ view: ProjectTabView) {
+        tabs.open(view)
+        applySelectedTab()
+    }
+
+    /// Show this tab in the same tab, rather than in a new one — what the renderer switch does.
+    func replaceSelected(with view: ProjectTabView) {
+        guard tabs.selected.view != view else { return }
+        // The old content goes: a tab that has become the notes is not holding a board any more, and
+        // keeping one mounted for a tab that no longer names it is a renderer nobody can reach.
+        contentPane.drop(tab: tabs.selectedID)
+        tabs.replaceSelected(with: view)
+        applySelectedTab()
+    }
+
+    /// ⌃⇥ / ⌃⇧⇥.
+    func cycleTabs(by step: Int) {
+        guard tabs.tabs.count > 1 else { return }
+        tabs.selectNext(by: step)
+        applySelectedTab()
+    }
+
+    /// Build (or reveal) the content for the tab that is up, and tell everyone what changed.
+    func applySelectedTab() {
+        let tab = tabs.selected
+        if let existing = contentPane.content(for: tab.id) {
+            contentPane.show(existing, for: tab.id)
+        } else {
+            contentPane.show(makeContent(for: tab), for: tab.id)
+        }
+        canvasPane?.focusBoard()
+        refreshTabModel()
+        onRendererChanged?()
+    }
+
+    /// The controller a tab needs, made fresh.
+    private func makeContent(for tab: ProjectTab) -> NSViewController {
+        switch tab.view {
+        case .notes:
+            let hosting = NSHostingController(rootView: makeContentView())
+            // The content fills whatever frame the split gives it. Left on the default
+            // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal
+            // size, which fights the user's own window size on every content change.
+            hosting.sizingOptions = []
+            hosting.view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            hosting.view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return hosting
+        case .board(let focus):
+            if let board = makeBoard(focus) { return board }
+            // **Nothing to show yet is not nothing to show.** A project's canvas path arrives with its
+            // first read of the folder, so for a moment after a switch every project looks like a
+            // project without a board. Answering then — with the empty state, or by falling back to the
+            // notes, which is what the window used to do — puts a whole view on screen and takes it
+            // away again, and the switch reads as having gone somewhere it didn't. So the tab holds
+            // still until the looking is over; it is measured in milliseconds and there is nothing
+            // worth saying inside it.
+            return canvasPending ? ProjectWaitingPaneController() : makeCanvasEmptyState()
+        }
+    }
+
+    private func makeBoard(_ focus: CanvasFocus) -> CanvasPaneController? {
+        let source = canvasSource()
+        guard let url = source.url, let store = try? CanvasStoreRegistry.store(for: url) else {
+            // A canvas that won't parse, or a project without one. The empty state is the honest
+            // answer for the second; for the first, File ▸ Open Canvas reports the error properly.
+            return nil
         }
         let pane = CanvasPaneController(store: store)
-        pane.title_ = projectName ?? url.deletingPathExtension().lastPathComponent
+        pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
+        pane.focus = focus
         // The same switch the task list's header carries, so the way back is where the way here was.
         pane.header.showsRendererSwitch = true
         pane.header.setRenderer = { [weak self] next in
             guard next == .tasks else { return }
-            self?.showTasks()
+            self?.replaceSelected(with: .notes)
         }
-        canvasPane = pane
-        contentPane.show(pane)
-        pane.focusBoard()
+        pane.tabModel = tabModel
+        pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
+        return pane
     }
 
-    /// Back to the task list.
-    func showTasks() {
-        renderer = .tasks
-        dropCanvas()
-        contentPane.show(contentHosting)
-        onRendererChanged?()
+    private func makeCanvasEmptyState() -> NSViewController {
+        let source = canvasSource()
+        let empty = NSHostingController(rootView: ProjectCanvasEmptyState(
+            projectName: source.name,
+            create: source.create,
+            showTasks: { [weak self] in self?.replaceSelected(with: .notes) }))
+        empty.sizingOptions = []
+        return empty
+    }
+
+    /// Say what the bar should now draw. The names of pinned tabs come from the board's own document —
+    /// a frame's label is the frame's, not the tab's — so a frame renamed in Obsidian renames the tab
+    /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
+    func refreshTabModel() {
+        let board = canvasPane
+        tabModel.items = tabs.tabs.map { tab in
+            // Its own board, not the one on screen: a tab tiled in the background still says so, and
+            // asking the visible pane for every tab's state would put one tab's tiling on all of them.
+            let detail = (contentPane.content(for: tab.id) as? CanvasPaneController)?
+                .tilingSummary?.short
+            switch tab.view {
+            case .notes:
+                return ProjectTabItem(id: tab.id, name: "Notes", symbol: "list.bullet")
+            case .board(.whole):
+                return ProjectTabItem(id: tab.id, name: "Canvas", symbol: "rectangle.3.group",
+                                      detail: detail)
+            case .board(.frame(let node)):
+                return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
+                                      symbol: "square.dashed", detail: detail)
+            case .board(.arrangement(let name)):
+                return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
+                                      detail: detail)
+            }
+        }
+        // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes
+        // it back when the bar goes away — for every board in the window, not only the visible one,
+        // since a background tab's pill is what you see the instant you switch to it.
+        for tab in tabs.tabs {
+            (contentPane.content(for: tab.id) as? CanvasPaneController)?
+                .header.showsTilingSummary = !tabs.showsBar
+        }
+        tabModel.selectedID = tabs.selectedID
+        tabModel.frames = board?.frames() ?? []
+        tabModel.arrangements = board?.arrangementNames() ?? []
+    }
+
+    /// Back to the task list — View ▸ Show Canvas turning itself off, and the empty state's button.
+    func showTasks() { replaceSelected(with: .notes) }
+
+    /// Show the project's board in the tab that is up.
+    func showCanvas() { replaceSelected(with: .board(.whole)) }
+
+    /// The project's board has appeared (or moved) since a tab was built. Rebuild any tab that is
+    /// showing the empty state, so making a canvas from it lands on the board rather than leaving the
+    /// window on the page that offered to make one.
+    func canvasPathChanged() {
+        guard tabs.selected.view.isBoard, !(contentPane.current is CanvasPaneController) else { return }
+        contentPane.drop(tab: tabs.selectedID)
+        applySelectedTab()
     }
 
     /// Told when the column changes what it is showing, so the window can re-apply its width cap and
     /// its menus can re-validate.
     var onRendererChanged: (() -> Void)?
-
-    private func dropCanvas() {
-        canvasPane?.teardown()
-        canvasPane = nil
-        canvasEmptyState = nil
-    }
 
     /// The board's undo stack while one is showing, so ⌘Z in this window reaches the board rather than
     /// the task list — and, because the store is shared, undoes in the canvas's own window too.
@@ -363,7 +488,11 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard newStore !== store else { return }
         store = newStore
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
-        contentHosting.rootView = makeContentView()
+        // Every tab was a view of the *old* project, so none of them survive. The window follows this
+        // with the new project's own remembered tabs; rebuilding here as well is what keeps the column
+        // from being empty for the turn of the run loop in between.
+        contentPane.dropAll()
+        applySelectedTab()
         // The sidebar's selection *is* the window's project (see `ProjectSidebar`), so a switch moves
         // it — including a switch that came from somewhere else entirely, like Open Recent. Written
         // after the sidebar has been rebound to the new store, so the change is read against the
@@ -466,8 +595,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         resizeObservation.map(NotificationCenter.default.removeObserver)
         resizeObservation = nil
         // A board showing here holds the canvas document open, and the last holder is what saves it and
-        // stops it polling the file. A window closing on a board must give that hold back.
-        dropCanvas()
+        // stops it polling the file. A window closing on a board must give that hold back — for every
+        // tab that has one, not only the one on screen.
+        contentPane.dropAll()
         if holdsProjectScan {
             holdsProjectScan = false
             ProjectIndex.shared.release()

@@ -65,7 +65,8 @@ struct CanvasPageCapsule: View {
             }
 
             HeaderGap()
-            CanvasAddressField(page: page, width: model.room.addressWidth, go: model.pageGo)
+            CanvasAddressField(page: page, width: model.room.addressWidth,
+                               openToken: model.addressFocusToken, go: model.pageGo)
 
             // Home and Pin are the two answers to "this card is not on its own address", and there is
             // no such question when it is. Home was permanently present and permanently dimmed before —
@@ -109,6 +110,8 @@ struct CanvasPageCapsule: View {
 private struct CanvasAddressField: View {
     let page: CanvasHeaderModel.Page
     let width: CGFloat
+    /// ⌘L, counted. See `CanvasHeaderModel.addressFocusToken`.
+    let openToken: Int
     let go: (String) -> Void
 
     @State private var editing = false
@@ -136,15 +139,20 @@ private struct CanvasAddressField: View {
         .onHover { hovering = $0 }
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: page.wandered)
         .animation(Motion.animation(.easeOut(duration: 0.12)), value: hovering)
+        // ⌘L lands here: the same thing clicking the chip does, so there is one way in and one state
+        // to be in afterwards.
+        .onChange(of: openToken) { _, _ in openForEditing() }
+    }
+
+    private func openForEditing() {
+        draft = page.liveAddress
+        editing = true
+        focusToken &+= 1
     }
 
     /// What it looks like when you are only reading it.
     private var chip: some View {
-        Button {
-            draft = page.liveAddress
-            editing = true
-            focusToken &+= 1
-        } label: {
+        Button(action: openForEditing) {
             Text(page.host)
                 .font(.caption)
                 .foregroundStyle(page.wandered ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
@@ -281,5 +289,24 @@ private struct CanvasAddressTextField: NSViewRepresentable {
             }
             parent.onCancel()
         }
+    }
+}
+
+// MARK: - The window's tabs, in this header
+
+/// The project window's tab bar as the board's header carries it.
+///
+/// A wrapper for one reason: the drop that puts a piece of this header level with the traffic lights is
+/// the canvas header's own (`TitlebarDrop`, which reads measured button metrics off `CanvasHeaderModel`),
+/// while the bar itself has to be the same view the task column renders and so cannot know about any of
+/// that. The task column's header gets its clearance from `TitlebarClearance` on the strip as a whole
+/// and needs no wrapper at all.
+struct CanvasTabBar: View {
+    @ObservedObject var model: CanvasHeaderModel
+    @ObservedObject var tabs: ProjectTabModel
+
+    var body: some View {
+        ProjectTabBarHost(model: tabs)
+            .modifier(TitlebarDrop(model: model))
     }
 }

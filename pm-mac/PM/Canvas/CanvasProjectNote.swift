@@ -28,8 +28,9 @@ import PmLib
 struct CanvasProjectNote: View {
     @ObservedObject var store: PMStore
     /// Whether the card has been stepped into. Only the open editor depends on it — everything else is
-    /// gated by the card refusing to hit-test at all until then (`CanvasNodeView.hitTest`), and the
-    /// wheel reaches this scroll view either way (`CanvasBoardView.scrollWheel`).
+    /// gated by the card refusing to hit-test at all until then (`CanvasNodeView.takesItsOwnClicks`,
+    /// which a tiled view grants outright), and the wheel reaches this scroll view either way
+    /// (`CanvasBoardView.scrollWheel`).
     @ObservedObject var engagement: CanvasCardEngagement
     /// The notes file itself, so a relative image embed resolves against the folder it lives in.
     let noteURL: URL
