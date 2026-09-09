@@ -947,6 +947,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         }
     }
 
+    /// The stack ⌘Z acts on in this pane: the editor of the card you are typing in, and otherwise the
+    /// canvas document. See `CanvasBoardView.engagedCardUndoManager`.
+    var undoManagerForContent: UndoManager { scroll.board.engagedCardUndoManager ?? store.undoManager }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == Selector(("undo:")) { return validateUndo(item, redoing: false) }
         if item.action == Selector(("redo:")) { return validateUndo(item, redoing: true) }
@@ -1020,6 +1024,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// can say which one it is about to act on: "Undo Complete Task" and "Undo Move Card" are the
     /// difference between a command you can trust and one you have to try.
     private func validateUndo(_ item: NSMenuItem, redoing: Bool) -> Bool {
+        // The card you are typing in comes first — while its editor is open, ⌘Z is that editor's, and
+        // the menu has to say so or the key it is the shortcut for never arrives. See
+        // `undoManagerForContent`.
+        if let editing = scroll.board.engagedCardUndoManager {
+            item.title = redoing ? editing.redoMenuItemTitle : editing.undoMenuItemTitle
+            return redoing ? editing.canRedo : editing.canUndo
+        }
         if let project = scroll.board.lastEditedProject, redoing ? project.canRedo : project.canUndo {
             item.title = redoing ? "Redo" : "Undo"
             return true

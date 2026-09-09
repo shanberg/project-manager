@@ -380,9 +380,13 @@ final class ProjectSplitViewController: NSSplitViewController {
     func applySelectedTab() {
         let tab = tabs.selected
         if let existing = contentPane.content(for: tab.id) {
+            Log.write("SEL applySelectedTab tab=\(tab.id.prefix(8)) view=\(tab.view) CACHED \(type(of: existing))")
             contentPane.show(existing, for: tab.id)
         } else {
-            contentPane.show(makeContent(for: tab), for: tab.id)
+            let made = makeContent(for: tab)
+            Log.write("SEL applySelectedTab tab=\(tab.id.prefix(8)) view=\(tab.view) MADE \(type(of: made))"
+                        + " canvasSource=\(canvasSource().url?.path ?? "nil")")
+            contentPane.show(made, for: tab.id)
         }
         canvasPane?.focusBoard()
         refreshTabModel()
@@ -766,7 +770,10 @@ final class ProjectSplitViewController: NSSplitViewController {
 
     /// The board's undo stack while one is showing, so ⌘Z in this window reaches the board rather than
     /// the task list — and, because the store is shared, undoes in the canvas's own window too.
-    var undoManagerForContent: UndoManager? { canvasPane?.store.undoManager }
+    ///
+    /// Asked of the pane rather than of its store, because a card you are typing in answers first: an
+    /// open editor's ⌘Z is its own typing, not the document's. See `CanvasPaneController`.
+    var undoManagerForContent: UndoManager? { canvasPane?.undoManagerForContent }
 
     // MARK: Retargeting
 
@@ -774,7 +781,11 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// shared per project (see `StoreRegistry`), so rebinding one would quietly change the project for
     /// every other holder of it.
     func retarget(to newStore: PMStore, projectKey: String?) {
-        guard newStore !== store else { return }
+        guard newStore !== store else {
+            Log.write("SEL split.retarget REFUSED, same store object for \(projectKey ?? "nil")")
+            return
+        }
+        Log.write("SEL split.retarget -> \(projectKey ?? "nil")")
         store = newStore
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
         // Every tab was a view of the *old* project, so none of them survive. The window follows this

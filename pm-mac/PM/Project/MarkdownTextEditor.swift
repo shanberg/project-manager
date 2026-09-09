@@ -221,6 +221,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
         return (advance * (78 + gutterAdvances)).rounded()
     }()
 
+    /// The undo stack this editor's edits go on, for a host that has to say.
+    ///
+    /// `nil` — the default, and what a note in a window wants — leaves the answer to AppKit, which
+    /// walks the responder chain to the window's. A host hands one in when its own ⌘Z means something
+    /// else while this editor is open: a canvas card is a session inside a document whose stack is
+    /// about cards, and typing in it must not put a hundred steps on that. See
+    /// `CanvasTextNodeView.editingUndo`.
+    var undoManager: UndoManager?
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -413,6 +422,17 @@ struct MarkdownTextEditor: NSViewRepresentable {
                         self.parent.onScroll?(scrollView.documentVisibleRect.minY)
                     }
                 }
+        }
+
+        /// The stack `NSTextView` registers its typing on, and the one the responder chain finds for
+        /// ⌘Z while this view has the caret. See `MarkdownTextEditor.undoManager`.
+        ///
+        /// The window's own manager is spelled out rather than left to AppKit: a delegate that answers
+        /// this question answers it for good, and a `nil` from here is documented as "no undo manager"
+        /// in one reading and "use the window's" in another. A note in a window must not have its undo
+        /// turned off by a host that simply had no opinion.
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            parent.undoManager ?? view.window?.undoManager
         }
 
         func textDidChange(_ notification: Notification) {

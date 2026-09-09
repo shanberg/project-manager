@@ -231,6 +231,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // above — so what decides whether this has to be asked again is only whether the path is known.
         let pending = !store.hasResolvedCanvasPath
         awaitsRememberedCanvas = pending
+        Log.write("SEL applyRememberedRenderer key=\(projectKey ?? "nil") pending=\(pending)"
+                    + " canvasPath=\(store.canvasPath ?? "nil") tabs=\(remembered.tabs.count)")
         split.setTabs(remembered, canvasPending: pending)
     }
 
@@ -288,7 +290,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// the title follows, and the new project becomes the global focus since this window is the one in
     /// front. The window itself doesn't move: what it's showing changed, not which window it is.
     func retarget(to newStore: PMStore, projectKey newKey: String?) {
-        guard newKey != projectKey else { return }
+        guard newKey != projectKey else {
+            Log.write("SEL controller.retarget REFUSED, already on \(newKey ?? "nil")")
+            return
+        }
+        Log.write("SEL controller.retarget \(projectKey ?? "nil") -> \(newKey ?? "nil")")
         projectKey = newKey
         store = newStore
         // The window has a project now, so it is a project's window: whatever file it was opened on is

@@ -1040,6 +1040,11 @@ extension CanvasLinkNodeView: WKUIDelegate {
     /// here, and a web view with no UI delegate drops the navigation on the floor. On a real site that
     /// is a large share of the links on the page, and a card where half the links are dead reads as a
     /// picture of a website rather than a website.
+    ///
+    /// The exception is a *popup* — a window a script asked for by name and size, which is what every
+    /// "Continue with Google" on the web is. Flattening one of those into a navigation here is what
+    /// left a sign-in dead on a blank page; see `CanvasWebPopup`, which is also where the two are told
+    /// apart.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
@@ -1049,6 +1054,8 @@ extension CanvasLinkNodeView: WKUIDelegate {
         // not the other half, for a reason nobody could see.
         if navigationAction.modifierFlags.contains(.command) {
             board.addLinkCard(url.absoluteString, beside: node.id)
+        } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
+            return CanvasWebPopup.present(with: configuration, features: windowFeatures, over: window)
         } else {
             capturingTitle = false
             webView.load(URLRequest(url: url))

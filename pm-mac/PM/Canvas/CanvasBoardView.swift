@@ -280,6 +280,29 @@ final class CanvasBoardView: NSView {
         nodeViews.values.first { $0.isEngaged && $0.isPageCard }
     }
 
+    /// The editor inside the text card you have stepped into, when the board is still holding the
+    /// keys — the last line of defence against a keystroke being beeped away.
+    ///
+    /// A card's editor takes first responder a runloop turn after the card opens, so a key pressed in
+    /// that turn arrives at the board rather than at the text view that is plainly ready for it. The
+    /// board's answer to a key it doesn't recognise is `super`, and `NSResponder`'s answer is a beep
+    /// and a lost character. Nil once the editor holds focus, because then the board never sees the
+    /// key at all. See `keyDown`.
+    var strandedCardEditor: NSTextView? {
+        guard let card = nodeViews.values.first(where: { $0.isEngaged && $0 is CanvasTextNodeView })
+        else { return nil }
+        return card.firstTextView
+    }
+
+    /// The undo stack of the card you are typing in, if you are typing in one.
+    ///
+    /// While a card's editor is open, ⌘Z means that editor — the way it does in every text field on
+    /// the Mac — rather than the board the card is standing on. What the board gets is one step for
+    /// the whole session, when you step out. See `CanvasTextNodeView.editingUndo`.
+    var engagedCardUndoManager: UndoManager? {
+        nodeViews.values.compactMap { $0 as? CanvasTextNodeView }.first { $0.isEngaged }?.editingUndo
+    }
+
     /// The project card you have stepped into, if any — the board's current project.
     ///
     /// **Aimed, where `lastEditedProject` remembers.** Undo takes the more recently edited of the two
@@ -958,5 +981,19 @@ final class CanvasBoardView: NSView {
         NSBezierPath(roundedRect: box, xRadius: 4 / liveScale, yRadius: 4 / liveScale).fill()
         text.draw(at: NSPoint(x: mid.x - measured.width / 2, y: mid.y - measured.height / 2),
                   withAttributes: attributes)
+    }
+}
+
+private extension NSView {
+    /// The first text view in this view's subtree, in drawing order.
+    ///
+    /// A card's editor is built by SwiftUI inside a hosting view, so the board has no reference to it
+    /// and no protocol to ask for one — the view tree is the only place the answer is written down.
+    var firstTextView: NSTextView? {
+        if let text = self as? NSTextView { return text }
+        for subview in subviews {
+            if let found = subview.firstTextView { return found }
+        }
+        return nil
     }
 }

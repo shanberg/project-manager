@@ -149,6 +149,8 @@ targets:
       - path: PM/Canvas/CanvasPageBudget.swift
       - path: PM/Canvas/CanvasPanBounds.swift
       - path: PM/Canvas/CanvasWebSession.swift
+      - path: PM/Canvas/CanvasWebPopup.swift
+      - path: PM/Canvas/CanvasWebDialogs.swift
       - path: PM/Canvas/CanvasColors.swift
       - path: PM/Canvas/CanvasBlockPolicy.swift
       - path: PM/Canvas/CanvasAddress.swift

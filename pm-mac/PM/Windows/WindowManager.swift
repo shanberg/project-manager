@@ -127,6 +127,7 @@ final class WindowManager {
     /// editing in both is coherent rather than a race.
     func retarget(_ controller: ProjectWindowController, to projectKey: String) {
         let previous = controller.projectKey
+        Log.write("SEL WindowManager.retarget \(previous ?? "nil") -> \(projectKey)")
         let store = StoreRegistry.shared.acquire(projectKey)
         controller.retarget(to: store, projectKey: projectKey)
         StoreRegistry.shared.release(previous)

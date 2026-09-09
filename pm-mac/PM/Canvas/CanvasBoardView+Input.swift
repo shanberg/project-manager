@@ -662,8 +662,21 @@ extension CanvasBoardView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Before anything else: a project card you are standing in is a list, and a list answers three
-        // of these keys. See `projectCardTakes`.
+        // A key typed into a card you are standing in belongs to that card, whether or not its editor
+        // has got round to taking first responder — see `strandedCardEditor`. First, because every
+        // answer below it is the board's answer to a key that was never the board's: ⌫ would delete
+        // the card you are typing in, ↓ would nudge it across the document, and anything else would
+        // reach `super` to be beeped at and dropped.
+        //
+        // Escape is the exception, and stays the board's. It means the same thing here as it does in
+        // the editor — step back out — and the board is where that is written down.
+        if event.charactersIgnoringModifiers != "\u{1b}", let editor = strandedCardEditor {
+            window?.makeFirstResponder(editor)
+            editor.keyDown(with: event)
+            return
+        }
+        // A project card you are standing in is a list, and a list answers three of these keys. See
+        // `projectCardTakes`.
         if projectCardTakes(event) { return }
         switch event.specialKey {
         case .delete, .deleteForward:

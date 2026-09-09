@@ -12,11 +12,12 @@ import WebKit
 ///   the few pages genuinely designed for a full window: an email field, a password field, a consent
 ///   screen, a device-approval prompt, sometimes a QR code. Doing that inside a dashboard tile is
 ///   miserable in a way that no amount of page zoom fixes.
-/// - **Cards deliberately refuse to open windows.** A card answers `createWebViewWith` by loading the
-///   link in place, which is what makes ordinary `target="_blank"` links work instead of silently
-///   doing nothing. Single sign-on is the one flow where that is the wrong answer: an identity
-///   provider opened in a popup often talks back to the window that opened it, and flattening that
-///   into one navigation can leave the handshake with nowhere to land.
+/// - **A card flattens a new window into a navigation.** That is what makes ordinary
+///   `target="_blank"` links work instead of silently doing nothing, and it is right for a link.
+///   Single sign-on is where it was wrong — an identity provider opened in a popup talks back to the
+///   window that opened it — and a card now hands a real popup a sheet of its own rather than
+///   flattening it; see `CanvasWebPopup`. This window is the other half of the same problem: not the
+///   popup a page asks for mid-click, but the page you went looking for a sign-in on.
 ///
 /// So sign-in gets its own window, on the same store, with the opposite popup rule — here a request
 /// for a window gets a window. Whatever the session picks up lands in the same jar the cards read, so
@@ -83,14 +84,18 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
         window?.subtitle = webView.url?.host() ?? ""
     }
 
-    /// An identity provider that wants a window gets one, and it is the same kind of window — so a
-    /// popup that opens a further popup still works.
+    /// An identity provider that wants a window gets one, on a sheet over this one.
+    ///
+    /// **It has to be WebKit's web view, not another like it.** This used to open a second sign-in
+    /// window around a configuration of its own and return nil, which reads as the same thing and is
+    /// not: `window.open` returned null to the page that called it, and the page that opened had no
+    /// `window.opener` to answer through. An OAuth popup is a conversation between two windows, so
+    /// both ends went missing at once and the flow died on a blank callback page — the same failure a
+    /// card had, by a different route. `CanvasWebPopup` returns the view WebKit handed us.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard let url = navigationAction.request.url else { return nil }
-        Self.present(for: url, onFinish: {})
-        return nil
+        CanvasWebPopup.present(with: configuration, features: windowFeatures, over: window)
     }
 }
 

@@ -266,7 +266,7 @@ class CanvasNodeView: NSView {
     func update(node: CanvasNode, scale: Double) {
         let wasSimplified = isSimplified
         self.scale = scale
-        let changed = node.content != self.node.content
+        let changed = node.content != self.node.content && !isOwnEdit(node.content)
         let rezoomed = CanvasCardZoom.of(node) != contentZoom
         self.node = node
         if changed {
@@ -280,6 +280,15 @@ class CanvasNodeView: NSView {
         refreshAccessibility()
         needsDisplay = true
     }
+
+    /// Whether content arriving from the document is this card's own edit coming back.
+    ///
+    /// The store tells its watchers inside `change`, so a card that writes what you type into the
+    /// document is handed that text straight back — as a node whose content is genuinely different
+    /// from the one this view was built with. For every card that didn't make the edit that is the
+    /// truth and a rebuild is right. For the card you are typing in it is a rebuild of the view the
+    /// keystroke was typed into, which is a very different thing. See `CanvasTextNodeView.isOwnEdit`.
+    func isOwnEdit(_ content: CanvasContent) -> Bool { false }
 
     /// The board crossed `CanvasDetail.simplifiedBelow` in one direction or the other.
     ///
@@ -496,6 +505,7 @@ final class CanvasTextNodeView: CanvasNodeView {
     }
 
     override func contentChanged() {
+        reported = nil
         if isEngaged { return showEditor() }
         if isSimplified { return setContent(summaryView(canvasCardSummary(text))) }
         showRendered()
@@ -515,14 +525,65 @@ final class CanvasTextNodeView: CanvasNodeView {
     /// Whether the card had nothing in it when you opened it. See `engagementChanged`.
     private var openedEmpty = false
 
+    /// The text this card has written into the document since its view was last built — what tells
+    /// its own edit apart from somebody else's when the document reports one.
+    ///
+    /// **Every keystroke came back as a change and rebuilt the editor.** The editor reports each edit
+    /// into the store, the store tells the board, and the board hands this card a node whose text is
+    /// not the text the card was built with — so `contentChanged` built a *new* editor, once per
+    /// character. A new `NSTextView` is handed the whole string, which leaves the caret after it, and
+    /// takes first responder a runloop turn later (`MarkdownTextEditor.Coordinator.claimFocus`). So
+    /// typing anywhere but the end threw the caret to the end after one character, and a keystroke
+    /// that landed in the turn before focus came back reached the board instead, where it was beeped
+    /// away and lost. Neither is something typing may ever do.
+    ///
+    /// A change that *isn't* this — an edit from Obsidian, an undo, another window on the same file —
+    /// still rebuilds, because the editor has no other way to hear about it. Which is why this is
+    /// cleared by every rebuild: what is on screen then came from the document, and a card holding a
+    /// stale claim about what it wrote would ignore an outside edit that happened to arrive back at
+    /// the same text.
+    private var reported: String?
+
+    override func isOwnEdit(_ content: CanvasContent) -> Bool {
+        guard case .text(let value) = content else { return false }
+        return value == reported
+    }
+
+    /// ⌘Z while you are typing in this card, which is the editor's own stack and not the board's.
+    ///
+    /// **A text view registers its undo where the responder chain says**, and the chain says the
+    /// window, and this window says the canvas document — so every keystroke used to land on the
+    /// stack that ⌘Z uses to take back a card you moved, twice over: once as the text view's own
+    /// typing undo and once as a whole-document snapshot named "Edit Card". Undoing then replaced the
+    /// document, which rebuilt the editor, which left every typing undo still on the stack pointing at
+    /// a text view that no longer existed.
+    ///
+    /// One stack per editor rather than per session, because these registrations belong to the text
+    /// view they were made in: an editor rebuilt underneath you — an outside edit, an undo of
+    /// something else — is a new text view, and the old stack is so much dead weight.
+    ///
+    /// What the *document* gets is one step for the whole session, registered when you step out. See
+    /// `CanvasDocumentStore.registerEdit`.
+    private(set) var editingUndo: UndoManager?
+
+    /// The card's text as it stood when you stepped into it — the other half of that one step.
+    private var editBaseline: String?
+
     override func engagementChanged() {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if isEngaged {
             openedEmpty = empty
+            editBaseline = text
             contentChanged()
             window?.makeFirstResponder(hosting)
             return
         }
+
+        // Stepping out ends the editing session: the editor's stack goes with the editor, and what it
+        // did becomes one step the document can undo. See `editingUndo`.
+        let baseline = editBaseline
+        editBaseline = nil
+        editingUndo = nil
 
         // A card you opened empty, typed nothing into, and clicked away from was never a card —
         // otherwise a board accumulates an empty rectangle every time a double-click lands somewhere
@@ -538,6 +599,9 @@ final class CanvasTextNodeView: CanvasNodeView {
                 doc.edges.removeAll { $0.fromNode == id || $0.toNode == id }
             }
             return
+        }
+        if let baseline {
+            board.store.registerEdit(restoring: .text(baseline), of: node.id, actionName: "Edit Card")
         }
         contentChanged()
     }
@@ -561,9 +625,15 @@ final class CanvasTextNodeView: CanvasNodeView {
 
     private func showEditor() {
         let id = node.id
+        let undo = UndoManager()
+        editingUndo = undo
         let view = NSHostingView(rootView:
-            CanvasTextEditing(text: text, zoom: contentZoom) { [weak self] edited in
-                self?.board.store.change("Edit Card") { doc in
+            CanvasTextEditing(text: text, zoom: contentZoom, undoManager: undo) { [weak self] edited in
+                // Before the change, not after: the store notifies inside `change`, so the answer has
+                // to be in place by the time it comes back to us. See `reported`.
+                self?.reported = edited
+                // Quietly: a keystroke is a step in the editor, not in the document — see `editingUndo`.
+                self?.board.store.changeQuietly { doc in
                     guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
                     doc.nodes[index].content = .text(edited)
                 }
@@ -589,17 +659,20 @@ final class CanvasTextNodeView: CanvasNodeView {
 private struct CanvasTextEditing: View {
     @State private var text: String
     let zoom: Double
+    let undoManager: UndoManager
     let onChange: (String) -> Void
     let onDone: () -> Void
     let onOpenProject: (String) -> Void
 
     init(text: String,
          zoom: Double,
+         undoManager: UndoManager,
          onChange: @escaping (String) -> Void,
          onDone: @escaping () -> Void,
          onOpenProject: @escaping (String) -> Void) {
         _text = State(initialValue: text)
         self.zoom = zoom
+        self.undoManager = undoManager
         self.onChange = onChange
         self.onDone = onDone
         self.onOpenProject = onOpenProject
@@ -614,6 +687,8 @@ private struct CanvasTextEditing: View {
         // shrank back the moment you stepped in to edit it would be zooming the picture of the text
         // rather than the text.
         editor.baseFont = NSFont.monospacedSystemFont(ofSize: 13 * zoom, weight: .regular)
+        // The card's stack, not the window's — see `CanvasTextNodeView.editingUndo`.
+        editor.undoManager = undoManager
         return editor.onChange(of: text) { _, edited in onChange(edited) }
     }
 }

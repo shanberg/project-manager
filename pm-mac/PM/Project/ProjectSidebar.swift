@@ -142,6 +142,54 @@ private struct ProjectGroup: Identifiable {
 /// it's the only thing that can see the sidebar collapse — so a hidden sidebar costs nothing. The row for
 /// the current project takes its progress from the live store rather than the cached scan, so completing
 /// a task updates its ring immediately.
+/// What moved the list's selection, recorded at the moment it moved.
+///
+/// **`NSApp.currentEvent` answers "what is being dispatched *now*", and the only moment that is the
+/// gesture is the write itself.** The table moves its selection from inside the click, so the binding's
+/// setter — which AppKit calls from there — reads the click. `selectionChanged` runs later, on SwiftUI's
+/// own update pass, and by then the current event is whatever has come along since: a mouse-moved, a
+/// cursor update, an `.appKitDefined`. Asked there, a click answered "not a click", took the keyboard's
+/// settle delay, and could then be dropped by anything that touched the selection inside those 200ms —
+/// which is a row you clicked that did nothing.
+///
+/// A class so the binding's setter can write it and `selectionChanged` read it back, and one-shot so a
+/// selection moved by something other than a gesture — the window retargeting, Escape collapsing a
+/// multiple, the seed on open — can't inherit the last one.
+@MainActor
+final class SidebarSelectionGesture {
+    /// A pointer gesture is a decision made at once; a keystroke is a walk that hasn't settled.
+    ///
+    /// Drags count as pointer: a table moves its selection on the mouse-down and AppKit goes on
+    /// dispatching the drag that follows, so a click with a pixel of travel in it is still a click.
+    /// So do the right and other buttons — pressing one on a row that isn't selected moves the
+    /// selection, and that is no less a decision for being made with a different finger.
+    struct Move {
+        let isPointer: Bool
+        let modifiers: NSEvent.ModifierFlags
+    }
+
+    private var pending: Move?
+
+    func record(_ event: NSEvent?) {
+        pending = Move(isPointer: event.map { Self.isPointer($0.type) } ?? false,
+                       modifiers: event?.modifierFlags ?? [])
+    }
+
+    /// What moved the selection, cleared as it's read.
+    func take() -> Move? { defer { pending = nil }; return pending }
+
+    private static func isPointer(_ type: NSEvent.EventType) -> Bool {
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 struct ProjectSidebar: View {
     @ObservedObject var store: PMStore
     /// The state shared with the task column across the split: the project selection (so the window's
@@ -168,6 +216,9 @@ struct ProjectSidebar: View {
     /// `selectionChanged`: a walk down the list shouldn't switch to every project it passes through.
     @State private var switchTask: Task<Void, Never>?
 
+    /// How the selection was last moved, taken down as it moved. See `SidebarSelectionGesture`.
+    @State private var gesture = SidebarSelectionGesture()
+
     var body: some View {
         list
             // A source list opens with its current item selected. Nothing else seeds this: the window
@@ -178,7 +229,7 @@ struct ProjectSidebar: View {
             // first read lands, so the seed above can arrive too early to have anything to select.
             .onChange(of: store.projectKey) { _ in seedSelection() }
             .onChange(of: state.projectSelection) { keys in selectionChanged(to: keys) }
-            .onDisappear { switchTask?.cancel() }
+            .onDisappear { if switchTask != nil { Log.write("SEL onDisappear cancels pending switch") }; switchTask?.cancel() }
         // While the pane is animating open or shut, lay out at the width it rests at and clip to
         // whatever width it currently has.
         //
@@ -232,7 +283,7 @@ struct ProjectSidebar: View {
     /// The one bit of the window own dressing kept on top: the scroll background is dropped, since the
     /// split view's sidebar item already draws the material behind this and two would stack.
     private var list: some View {
-        List(selection: $state.projectSelection) {
+        List(selection: selection) {
             // The Up Next band, as the list's first section rather than a `VStack` above the list.
             //
             // Inside, a card is an ordinary list item: it gets selection, arrow keys, type-select,
@@ -350,6 +401,20 @@ struct ProjectSidebar: View {
         }
     }
 
+    /// The list's selection, with the gesture that moved it taken down on the way through.
+    ///
+    /// The wrapper exists only for that recording — the value it reads and writes is
+    /// `state.projectSelection` and nothing else. The setter is where AppKit's own selection change
+    /// arrives, which is the one place in this file that runs inside the click; see
+    /// `SidebarSelectionGesture` for why asking later doesn't work.
+    private var selection: Binding<Set<String>> {
+        Binding(get: { state.projectSelection },
+                set: { keys in
+                    gesture.record(NSApp.currentEvent)
+                    state.projectSelection = keys
+                })
+    }
+
     /// Select the window's project when nothing is selected. Never overrides a selection that's
     /// already there: that one is the user's, and it may be a multiple.
     private func seedSelection() {
@@ -372,34 +437,56 @@ struct ProjectSidebar: View {
     /// New windows are on ⌥ rather than the ⌘ they used to be on, because ⌘-click is how AppKit
     /// extends a list selection and the two can't both have it.
     private func selectionChanged(to keys: Set<String>) {
+        if switchTask != nil { Log.write("SEL cancelling pending switch") }
         switchTask?.cancel()
         switchTask = nil
         // Empty (a click below the last row) or multiple: nothing to switch to.
-        guard keys.count == 1, let key = keys.first else { return }
+        guard keys.count == 1, let key = keys.first else {
+            Log.write("SEL changed -> \(keys.sorted()) : not a single selection, no switch")
+            return
+        }
 
-        // `NSApp.currentEvent` is the event being dispatched, so this runs against the click or
-        // keystroke that moved the selection — the same read `openProject` has always made.
-        let event = NSApp.currentEvent
-        let fromMouse = event.map { $0.type == .leftMouseDown || $0.type == .leftMouseUp } ?? false
+        // What moved the selection, as taken down when it moved rather than read back now — by now
+        // `NSApp.currentEvent` is whatever has been dispatched since. See `SidebarSelectionGesture`.
+        //
+        // Nothing recorded means the selection was moved by the app rather than by a gesture, and that
+        // takes the settle path: the switch it would make is the one the window has already made, so
+        // the 200ms costs nothing and the alternative — treating an unattributed move as a click —
+        // would switch on writes that aren't decisions.
+        let move = gesture.take()
+        let fromPointer = move?.isPointer ?? false
+        Log.write("SEL changed -> \(key) pointer=\(fromPointer) recorded=\(move != nil)"
+                    + " store.projectKey=\(store.projectKey ?? "nil")")
 
-        if fromMouse, event?.modifierFlags.contains(.option) == true {
+        if fromPointer, move?.modifiers.contains(.option) == true {
             // The click moved the list's selection on its way to here, but this window isn't going
             // anywhere — put the selection back on the project it's actually showing.
             state.projectSelection = store.projectKey.map { [$0] } ?? []
             state.openProject(key, true)
             return
         }
-        guard key != store.projectKey else { return }
-        guard !fromMouse else {
+        guard key != store.projectKey else {
+            Log.write("SEL already on \(key), no switch")
+            return
+        }
+        guard !fromPointer else {
+            Log.write("SEL switching now (pointer) -> \(key)")
             state.openProject(key, false)
             return
         }
+        Log.write("SEL deferring switch 200ms -> \(key)")
         // Arrow keys walk the list, and a walk shouldn't leave ten projects in the recents list and
         // ten writes to `focused.json` behind it — switching is what records both. A click is a
         // decision and switches at once; a keystroke waits for the selection to settle.
         switchTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 200_000_000)
-            guard !Task.isCancelled, state.projectSelection == keys, key != store.projectKey else { return }
+            guard !Task.isCancelled, state.projectSelection == keys, key != store.projectKey else {
+                Log.write("SEL deferred switch DROPPED -> \(key)"
+                            + " cancelled=\(Task.isCancelled) selection=\(state.projectSelection.sorted())"
+                            + " store.projectKey=\(store.projectKey ?? "nil")")
+                return
+            }
+            Log.write("SEL switching now (deferred) -> \(key)")
             state.openProject(key, false)
         }
     }
@@ -414,7 +501,11 @@ struct ProjectSidebar: View {
     /// decides what that means; the sidebar just asks.
     private func openProject(_ entry: PMStore.ProjectEntry, inNewWindow: Bool) {
         let newWindow = inNewWindow || NSEvent.modifierFlags.contains(.option)
-        guard newWindow || entry.projectKey != store.projectKey else { return }
+        Log.write("SEL openProject \(entry.projectKey) newWindow=\(newWindow)")
+        guard newWindow || entry.projectKey != store.projectKey else {
+            Log.write("SEL openProject declined, already on it")
+            return
+        }
         state.openProject(entry.projectKey, newWindow)
     }
 
