@@ -30,6 +30,7 @@
 		1B498FA1CFBB8E8ACFA09821 /* CanvasPageBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78CE3055A350C714EB9865C /* CanvasPageBudget.swift */; };
 		1B552F102655404937D55CDC /* WaitingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC72D30EB9E944089C22D2F /* WaitingWindowController.swift */; };
 		1E225131408952F0B85493FE /* MouseMonitors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E52B44B7F4AC0E0782F167C /* MouseMonitors.swift */; };
+		2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A683751482352094B3CF8AC6 /* SidebarClickTests.swift */; };
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		2231B6FEB34E5F1D03FEB8EE /* CanvasSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01DF3405ADA2611E2DE1123 /* CanvasSummary.swift */; };
 		2371DC5BCADB7D6D25C25E5F /* TaskDeleteConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */; };
@@ -369,6 +370,7 @@
 		A01DF3405ADA2611E2DE1123 /* CanvasSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSummary.swift; sourceTree = "<group>"; };
 		A1194C6651E612383D6AC476 /* PMCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMCommand.swift; sourceTree = "<group>"; };
 		A47DED434745E9CA5BD2AA89 /* CanvasScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasScrollView.swift; sourceTree = "<group>"; };
+		A683751482352094B3CF8AC6 /* SidebarClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarClickTests.swift; sourceTree = "<group>"; };
 		A6B61A6C245FCE56ACBFE8E9 /* ProjectsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSettings.swift; sourceTree = "<group>"; };
 		A784A258FC2E6B376A42C5AD /* CanvasTilingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTilingTests.swift; sourceTree = "<group>"; };
 		A78CE3055A350C714EB9865C /* CanvasPageBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageBudget.swift; sourceTree = "<group>"; };
@@ -793,6 +795,7 @@
 				7D42338655D7420AC0088307 /* ProjectTroubleTests.swift */,
 				1098BA96510C73BFB050E6B1 /* RowSelectionTests.swift */,
 				57FE97DA6867B5C37159607B /* SessionBlocksTests.swift */,
+				A683751482352094B3CF8AC6 /* SidebarClickTests.swift */,
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
 				52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */,
 				4D0994A8009F7E1F0FCCF13F /* TokenDrawingTests.swift */,
@@ -1159,6 +1162,7 @@
 				940BFF30D009C93EE0A102CE /* RowSelectionTests.swift in Sources */,
 				8FF818DB758A9E27ECC9A3A6 /* SessionBlocks.swift in Sources */,
 				5DAA840B013EE45FDD2AE38E /* SessionBlocksTests.swift in Sources */,
+				2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */,
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				8A0D5F773B09992201E04086 /* TaskFieldCompletionTests.swift in Sources */,
 				0FAD7CF6F384B7406B86113E /* TokenDrawingTests.swift in Sources */,
@@ -1224,7 +1228,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.31.0;
+				MARKETING_VERSION = 0.32.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1371,7 +1375,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.31.0;
+				MARKETING_VERSION = 0.32.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

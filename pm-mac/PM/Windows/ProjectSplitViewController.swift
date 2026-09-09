@@ -380,12 +380,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     func applySelectedTab() {
         let tab = tabs.selected
         if let existing = contentPane.content(for: tab.id) {
-            Log.write("SEL applySelectedTab tab=\(tab.id.prefix(8)) view=\(tab.view) CACHED \(type(of: existing))")
             contentPane.show(existing, for: tab.id)
         } else {
             let made = makeContent(for: tab)
-            Log.write("SEL applySelectedTab tab=\(tab.id.prefix(8)) view=\(tab.view) MADE \(type(of: made))"
-                        + " canvasSource=\(canvasSource().url?.path ?? "nil")")
             contentPane.show(made, for: tab.id)
         }
         canvasPane?.focusBoard()
@@ -781,11 +778,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// shared per project (see `StoreRegistry`), so rebinding one would quietly change the project for
     /// every other holder of it.
     func retarget(to newStore: PMStore, projectKey: String?) {
-        guard newStore !== store else {
-            Log.write("SEL split.retarget REFUSED, same store object for \(projectKey ?? "nil")")
-            return
-        }
-        Log.write("SEL split.retarget -> \(projectKey ?? "nil")")
+        guard newStore !== store else { return }
         store = newStore
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
         // Every tab was a view of the *old* project, so none of them survive. The window follows this
