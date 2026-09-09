@@ -23,7 +23,9 @@ adds tasks, and reads and edits the brief; the brief's fields commit as you leav
 well as on a card; and a card is set to draw the brief, the notes, the tasks, finished work, and either
 every sitting or the latest. The arguments now live where the code is — `CanvasProjectNote`,
 `SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
-kept here is the shape of the whole, because **§7 and §7b are not built** and lean on it.
+kept here is the shape of the whole. **§7 and §7b are built too** — the words go to the right things,
+and a workspace has a name you can see, a list you can switch from, and no Save. What is left of this
+page is item 10, duplicating one, which §7b's live adjustment is what makes worth having.
 
 ## 1. What a project card can and cannot do today
 
@@ -242,7 +244,7 @@ frame is a good way to *choose* the cards a workspace is made of. ⌘Return on a
 is inside it, which is "make a workspace out of this region" — the two concepts meeting at the one
 point where they should.
 
-## 7b. Making a workspace visible
+## 7b. Making a workspace visible — **built**
 
 §7 settled what a workspace *is*. What was still missing is anywhere to see one, and reading the code
 for it turns up four complaints with one cause between them.
@@ -321,6 +323,23 @@ also every browser's shortcut for selecting a tab, and this app has tabs. [Backl
 17](canvas-backlog.md) says decide the navigation grammar before adding a single key, and spending
 ⌘1…9 here would be spending it on the losing side of a question that is already open. ⌃1…9 stays with
 frames.
+
+### What shipped, and the two things it decided on the way
+
+The readout is `CanvasTitlePill.workspaceMenu`, the list also lives in View ▸ Workspace (nine slots
+retitled on validation, exactly as Go to Frame does it), and the write-through is
+`CanvasPaneController.keepNamedWorkspaceUpToDate`. Two rules were settled by building it:
+
+**Naming and renaming are one command.** A workspace that has a name cannot be named again, so the item
+retitles itself to "Rename …" — `tileCommandTitle`'s pattern. The alternative was letting Name run on a
+named workspace, where it would leave the old one behind and put you in a second one: a duplicate,
+arrived at by picking the wrong item. Duplicating deserves to be asked for, which is item 10.
+
+**Renaming and deleting break a tab pinned to the old name**, and that is accepted rather than fixed.
+The name is the whole of a workspace's identity — there is nothing underneath to keep pointing at — so
+a pin that no longer resolves lands on the whole board, which is what `applyFocus` has always done for
+a frame deleted in Obsidian. Following the pins would mean reaching into every window's stored tabs to
+rewrite a string, for a case the existing fallback already handles quietly.
 
 ## 8. What this does to the backlog
 

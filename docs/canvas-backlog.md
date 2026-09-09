@@ -156,36 +156,21 @@ Where it lives: the tile's contextual menu, beside promote and pin. Not on the h
 and does nothing else, deliberately, and every other tile command has moved off it and into the two
 menus.
 
-### 9. Saved arrangements — **they are workspaces; see [canvas-workspaces.md](canvas-workspaces.md)**
+### 10. Duplicate a workspace — **the ordinary way to make one, and the last of §7b**
 
-Worth writing down because it looks like a gap and isn't. Arrangements are saved per board, by name,
-in defaults rather than in the `.canvas` — [CanvasArrangements](../pm-mac/PM/Canvas/CanvasArrangements.swift),
-with the whole lifetime argument set out there — and a tab can be pinned to one
-(`CanvasFocus.arrangement`).
-
-So the request "save tile layouts to the project, in app persistence rather than project data" is done,
-exactly as asked. What was open was whether the rest is a real gap or only discoverability, and the
-answer is **both, with one cause**: a workspace is the only major object in this app with no
-representation of itself on screen, which is why saving one produces no visible change, why nothing
-says which one you are in, and why `CanvasArrangements.remove` has sat there with no callers. §7b names
-the home — the title pill's tiled readout stops being a readout and becomes the workspace, showing its
-name and opening the list.
-
-The two stores turn out to be the definition rather than an implementation detail. **A workspace is
-ephemeral unless named**: the one that is up lives in the volatile `CanvasViewMemory`, and naming it
-promotes it into this file. That is not save-as bolted on the side — the two were built apart, with
-different lifetimes, for exactly this reason.
-
-### 10. Duplicate the current arrangement — **now the ordinary way to make a workspace**
-
-Small, and only worth stating because of what it is *for*: you have built a six-tile view and want a
-variant of it. Today that means building the variant from scratch.
+Small, and only worth stating because of what it is *for*: you have built a six-tile workspace and want
+a variant of it. Today that means building the variant from scratch.
 
 Sketch: "Duplicate Workspace" in the workspace menu, seeding the name from the one that is up
 ("Dashboard copy"), then the copy is what your adjustments land on. Under
 [canvas-workspaces.md](canvas-workspaces.md) §7 this stops being a convenience: if a workspace is what
-a tab shows, duplicating one is how the second one gets made — and under §7b it is also the answer to
-"I want to try something without wrecking this one", since a named workspace is now adjusted live.
+a tab shows, duplicating one is how the second one gets made.
+
+Two things that shipped with 9 make it the one thing still missing. A named workspace is adjusted
+**live**, so "I want to try something without wrecking this one" now has no answer except this. And
+Name This Workspace… deliberately stopped doing it by accident: on a named workspace it renames rather
+than leaving the old one behind and putting you in a second, because arriving at a duplicate by picking
+the wrong item is not the same as asking for one.
 
 ### 11. BSP layouts
 
@@ -265,17 +250,14 @@ for one act. Decide whether the Figma set replaces the ⌘ set or joins it befor
 
 ## Priority
 
-**First — designed and waiting to be built:** 9 → 10, in that order: a workspace's home in the window,
-and duplicating one. The argument is written down in [canvas-workspaces.md](canvas-workspaces.md) §7
-and §7b, and nothing in either is waiting on a decision — 9's home is the title pill's tiled readout,
-which stops being a readout and becomes the workspace, and how a named workspace behaves when you
-adjust it is settled (live, with ⌘↩ the one act that starts a fresh one).
+**First — designed and waiting to be built:** 10, duplicating a workspace, which is all that is left of
+[canvas-workspaces.md](canvas-workspaces.md). Nothing there is waiting on a decision.
 
-The rename that used to lead this list is done: frames are frames again, a saved tiling is a
+That page is otherwise built. A card you have stepped into is the project and draws as much or as
+little of it as you set; the words go to the right things — frames are frames, a saved tiling is a
 **workspace**, and `CanvasTiling.Arrangement` keeps *arrangement* by being the only one of the three
-that was using the word correctly. The card half of that page is built too — a card you have stepped
-into is the project, and it draws as much or as little of it as you set — so what is left is the half
-about looking at several cards at once.
+using it correctly; and a workspace now has a name you can see in the pill, a list you can switch from,
+and no Save, because a named one is adjusted live.
 
 **Beside it — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
 

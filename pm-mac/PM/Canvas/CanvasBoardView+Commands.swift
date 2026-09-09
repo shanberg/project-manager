@@ -1323,19 +1323,62 @@ extension CanvasBoardView {
     /// Named on the way in rather than kept anonymously and named later: the name is the whole of a
     /// workspace's identity — there is nothing else to point at — so there is no version of this that
     /// can be deferred.
+    /// **One command, retitled**, on `tileCommandTitle`'s pattern: a workspace that already has a name
+    /// cannot be named again, and what you want from the item there is to change the name it has. The
+    /// alternative was letting this run on a named workspace, where it would quietly leave the old one
+    /// behind and put you in a second — which is a duplicate, and duplicating deserves to be asked for
+    /// rather than arrived at by picking the wrong item.
     @objc func saveTilingAsWorkspace(_ sender: Any?) {
+        guard workspaceName == nil else { return renameWorkspace(sender) }
+        guard let name = askForWorkspaceName(titled: "Name this workspace",
+                                             seed: suggestedWorkspaceName)
+        else { return }
+        onSaveWorkspace(name)
+    }
+
+    /// Rename the workspace that is up.
+    ///
+    /// A remove and a save rather than a key change, because the name *is* the identity: there is
+    /// nothing underneath to keep pointing at. That is also why a tab pinned to the old name stops
+    /// resolving — and it lands on the board's whole canvas rather than on nothing, which is what
+    /// `CanvasPaneController.applyFocus` has always done for a pin that has gone. The same is true of
+    /// Delete, and it is the one cost of a thing whose whole identity is a string.
+    @objc func renameWorkspace(_ sender: Any?) {
+        guard let old = workspaceName,
+              let name = askForWorkspaceName(titled: "Rename “\(old)”", seed: old), name != old
+        else { return }
+        onRemoveWorkspace(old)
+        onSaveWorkspace(name)
+    }
+
+    /// Forget a named workspace. The tiling stays up — you are still looking at exactly what you were
+    /// looking at, it has simply stopped being a thing with a name, which is what deleting one means.
+    @objc func deleteWorkspace(_ sender: Any?) {
+        let name = (sender as? NSMenuItem)?.representedObject as? String ?? workspaceName
+        guard let name else { return }
+        onRemoveWorkspace(name)
+    }
+
+    /// Switch to a named workspace — the menu's own act, and the reason the list is worth having.
+    @objc func goToWorkspace(_ sender: Any?) {
+        guard let name = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        onGoToWorkspace(name)
+    }
+
+    /// One field, one alert. Named on the way in for both of the commands above, because a workspace
+    /// with no name is not a kept workspace at all.
+    private func askForWorkspaceName(titled title: String, seed: String) -> String? {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
-        field.stringValue = suggestedWorkspaceName
+        field.stringValue = seed
         let alert = NSAlert()
-        alert.messageText = "Name this workspace"
+        alert.messageText = title
         alert.informativeText = "Kept for this board, so a tab can open straight into it."
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        onSaveWorkspace(name)
+        return name.isEmpty ? nil : name
     }
 
     /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
@@ -1510,8 +1553,33 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
         case #selector(saveTilingAsWorkspace(_:)):
-            // Something to keep: a board that has never been tiled has no arrangement.
+            // Named for what it will actually do — see the command, which is one act under two words.
+            (item as? NSMenuItem)?.title = workspaceName.map { "Rename “\($0)”\u{2026}" }
+                ?? "Name This Workspace\u{2026}"
+            // Something to keep: a board that has never been tiled has no workspace to name.
             return tilingMemory != nil
+        case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)):
+            // Both act on the workspace you are in, so both want one with a name. Retitled with it,
+            // because "Delete Workspace" under a list of five is a fair question to have answered.
+            if let entry = item as? NSMenuItem, entry.action == #selector(deleteWorkspace(_:)) {
+                entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Workspace"
+            }
+            return workspaceName != nil
+        case #selector(goToWorkspace(_:)):
+            guard let entry = item as? NSMenuItem else { return false }
+            let names = workspaceNames()
+            guard entry.tag < names.count else {
+                // Past the end: named for its slot, dim, and pointing at nothing — the same answer
+                // "Go to Frame" gives, so nine empty rows never look like nine broken commands.
+                entry.title = "Workspace \(entry.tag + 1)"
+                entry.representedObject = nil
+                entry.state = .off
+                return false
+            }
+            entry.title = names[entry.tag]
+            entry.representedObject = names[entry.tag]
+            entry.state = names[entry.tag] == workspaceName ? .on : .off
+            return true
         case #selector(setTileArrangement(_:)):
             (item as? NSMenuItem).map { entry in
                 entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue

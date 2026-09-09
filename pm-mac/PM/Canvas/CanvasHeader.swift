@@ -36,6 +36,15 @@ final class CanvasHeaderModel: ObservableObject {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     @Published var tiling: (long: String, short: String)?
+    /// The name of the workspace that is up, or nil while it is an unnamed one.
+    ///
+    /// **What the readout says instead of the count, when there is one.** The two never compete: the
+    /// count answers "how much of the board am I seeing", which matters most immediately after an ad-hoc
+    /// ⌘Return — exactly when there is no name — so the readout ends up saying which *kind* of workspace
+    /// you are in by which of the two it is showing. The count is still in the tooltip.
+    @Published var workspace: String?
+    /// Every named workspace on this board, for the readout's menu.
+    @Published var workspaces: [String] = []
     /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
     /// contextual menu use. See `CanvasTiling.commandTitle`.
     ///
@@ -178,6 +187,10 @@ final class CanvasHeaderModel: ObservableObject {
     var leaveTiling: () -> Void = {}
     var tile: () -> Void = {}
     var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
+    var goToWorkspace: (String) -> Void = { _ in }
+    var nameWorkspace: () -> Void = {}
+    var renameWorkspace: () -> Void = {}
+    var deleteWorkspace: () -> Void = {}
 }
 
 // MARK: - The pill
@@ -207,12 +220,7 @@ struct CanvasTitlePill: View {
                 Text(verbatim: "·")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Text(model.room.showsLongTilingSummary ? tiling.long : tiling.short)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
+                workspaceMenu(tiling)
                 Button(action: model.leaveTiling) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .semibold))
@@ -236,9 +244,60 @@ struct CanvasTitlePill: View {
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.showsTilingSummary)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(model.showsTilingSummary
-            ? (model.tiling.map { "\(model.title), tiled, \($0.long)" } ?? model.title)
+            ? (model.tiling.map { "\(model.title), tiled, \(model.workspace ?? $0.long)" }
+                ?? model.title)
             : model.title))
         .modifier(TitlebarDrop(model: model))
+    }
+
+    /// **The workspace, where the readout used to be.**
+    ///
+    /// This slot already answered "what am I looking at" for a tiled board, and a workspace is the
+    /// honest answer to it — the count was what the pill said while the thing it was describing had no
+    /// name to give. So a named workspace says its name, an unnamed one keeps the count, and the count
+    /// is in the tooltip either way.
+    ///
+    /// A menu rather than a label, because the list belongs where the answer is: naming one is the only
+    /// visible confirmation that naming did anything, and switching between them should not mean
+    /// opening a tab. The ✕ beside it is already a control, so this region was interactive before this.
+    @ViewBuilder private func workspaceMenu(_ tiling: (long: String, short: String)) -> some View {
+        Menu {
+            // The unnamed one is listed only while you are in it, ticked and inert: it is where you
+            // are, and there is nowhere to go — an unnamed workspace is the one that is up or it is
+            // nothing at all. Drawing it is how "ephemeral unless named" stops being merely true and
+            // becomes something you can see, with the count beside it saying what it is made of.
+            if model.workspace == nil {
+                Toggle("Untitled · \(tiling.short)", isOn: .constant(true)).disabled(true)
+            }
+            if !model.workspaces.isEmpty {
+                Divider()
+                // Ticked where you are, so the list says where you are as well as where you could go.
+                // Toggles rather than a Picker, following the arrangement options in this same header.
+                ForEach(model.workspaces, id: \.self) { name in
+                    Toggle(name, isOn: Binding(get: { name == model.workspace },
+                                               set: { _ in model.goToWorkspace(name) }))
+                }
+            }
+            Divider()
+            if model.workspace == nil {
+                Button("Name This Workspace…", action: model.nameWorkspace)
+            } else {
+                Button("Rename…", action: model.renameWorkspace)
+                Button("Delete", action: model.deleteWorkspace)
+            }
+        } label: {
+            Text(model.workspace
+                 ?? (model.room.showsLongTilingSummary ? tiling.long : tiling.short))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .layoutPriority(1)
+        .help(model.workspace.map { "\($0) — \(tiling.long)" } ?? tiling.long)
     }
 }
 

@@ -91,12 +91,25 @@ final class CanvasBoardView: NSView {
     /// The last tiling made on this board, kept after it was left — see `CanvasViewState.lastTiling`.
     /// Tiling the same set of cards again picks this up rather than starting over.
     var lastTiling: CanvasViewState.Tiling?
+    /// The name of the workspace that is up, or nil while it is an unnamed one.
+    ///
+    /// Read by everything that says *which* workspace you are in — the pill, the tab chip, the tick in
+    /// the workspace menu — and by the write-through that keeps a named one up to date as you adjust
+    /// it. See `CanvasViewState.workspaceName`, and `tile(_:)` for the one act that clears it.
+    var workspaceName: String?
 
     /// Open part of this board as a tab of the window it is in — see `CanvasPaneController.tabModel`,
     /// which says why these are no longer optional.
     var onOpenInTab: (CanvasFocus) -> Void = { _ in }
     /// Keep the tiling that is up under a name.
     var onSaveWorkspace: (String) -> Void = { _ in }
+    /// Forget a named workspace, leaving whatever is up on screen alone.
+    var onRemoveWorkspace: (String) -> Void = { _ in }
+    /// Switch to a named workspace. Routed out to the pane because the names live in a store the board
+    /// has no url to read — the board knows cards, the pane knows which document they are in.
+    var onGoToWorkspace: (String) -> Void = { _ in }
+    /// The board's named workspaces, for the menus that list them.
+    var workspaceNames: () -> [String] = { [] }
 
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {

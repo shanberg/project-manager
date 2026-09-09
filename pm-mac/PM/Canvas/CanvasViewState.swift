@@ -10,6 +10,17 @@ struct CanvasViewState: Codable, Equatable {
     var mode: CanvasMode = .view
     /// The tiling that was up, if one was.
     var tiling: Tiling?
+    /// Which named workspace `tiling` *is*, or nil for an unnamed one.
+    ///
+    /// **The one field the whole of §7b rides on.** Without it a board can be in a workspace and have
+    /// no way to say which, so naming one produces no visible change, the menu has nothing to tick, and
+    /// an adjustment has nowhere to be written back to. `CanvasFocus.workspace(_:)` is not this: that is
+    /// a tab *pinned* to a workspace, and a board tiled ad hoc in a whole-board tab has no tab-level
+    /// place to record what it is in.
+    ///
+    /// Optional so a state written before workspaces had names still decodes — as an unnamed one, which
+    /// is exactly what it was.
+    var workspaceName: String?
     /// How often this board reloads its pages, in seconds, or nil for never.
     ///
     /// A way of looking rather than a fact about the document, which is what puts it here and not in

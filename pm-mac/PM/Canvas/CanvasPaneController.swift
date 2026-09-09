@@ -65,15 +65,20 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             }
         }
         scroll.board.onSaveWorkspace = { [weak self] name in self?.saveWorkspace(as: name) }
+        scroll.board.onRemoveWorkspace = { [weak self] name in self?.removeWorkspace(name) }
+        scroll.board.onGoToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
+        scroll.board.workspaceNames = { [weak self] in self?.workspaceNames() ?? [] }
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
+            header.workspace = scroll.board.workspaceName
             header.arrangement = scroll.board.tiling?.arrangement
             refreshTileCommand()
             rememberViewState()
+            keepNamedWorkspaceUpToDate()
             // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
             onTilingChanged?()
         }
@@ -198,6 +203,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private var viewState: CanvasViewState {
         CanvasViewState(mode: scroll.board.mode,
                         tiling: scroll.board.tiling.map(scroll.board.memory(of:)),
+                        workspaceName: scroll.board.workspaceName,
                         refreshInterval: scroll.board.refreshInterval,
                         // Kept whether or not one is up: a workspace you left is one you built.
                         lastTiling: scroll.board.tilingMemory)
@@ -224,7 +230,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // The arrangement comes back even when the board was left untiled, so the next ⌘Return on the
         // same cards picks up where you left off rather than starting over.
         scroll.board.lastTiling = remembered.lastTiling
-        if let tiling = remembered.tiling { scroll.board.restoreTiling(tiling) }
+        // Set before the restore as well as by it, because the two can come apart: a board left
+        // *untiled* still carries the name of the workspace it was in, so that the next ⌘Return on the
+        // same cards resumes it by name and not merely by layout. See `tile(_:)`.
+        scroll.board.workspaceName = remembered.workspaceName
+        if let tiling = remembered.tiling {
+            scroll.board.restoreTiling(tiling, named: remembered.workspaceName)
+        }
     }
 
     /// Written on every change rather than on the way out, because there is no reliable way out: a
@@ -254,8 +266,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         case .frame(let id):
             scroll.board.goTo(frame: id)
         case .workspace(let name):
-            guard let tiling = CanvasWorkspaces.tiling(named: name, of: store.url) else { return }
-            scroll.board.restoreTiling(tiling)
+            goToWorkspace(named: name)
         }
     }
 
@@ -283,11 +294,62 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Every named workspace on this board.
     func workspaceNames() -> [String] { CanvasWorkspaces.names(of: store.url) }
 
+    /// The name of the workspace the board is in, for whoever is drawing it.
+    var workspaceName: String? { scroll.board.workspaceName }
+
     /// Name the workspace that is up, which is what promotes it out of `CanvasViewMemory` and keeps it.
+    ///
+    /// The board is told its own name last, and that is the visible half of the act: until now naming
+    /// a workspace changed nothing you could see, which is most of why it read as not having worked.
     func saveWorkspace(as name: String) {
         guard let tiling = scroll.board.tilingMemory else { return }
         CanvasWorkspaces.save(tiling, as: name, for: store.url)
+        scroll.board.workspaceName = name
+        workspacesChanged()
+    }
+
+    /// Forget one. What is on screen is untouched — a deleted workspace is a workspace that has stopped
+    /// having a name, not a tiling that has stopped existing — so the board keeps its tiles and loses
+    /// only the name, and only if it was in the one that went.
+    func removeWorkspace(_ name: String) {
+        CanvasWorkspaces.remove(name, for: store.url)
+        if scroll.board.workspaceName == name { scroll.board.workspaceName = nil }
+        workspacesChanged()
+    }
+
+    /// Switch to one.
+    ///
+    /// Silent about a name that is not there any more, which is the same answer `applyFocus` gives: a
+    /// workspace deleted in another window is a stale menu, not a reason to do something drastic.
+    func goToWorkspace(named name: String) {
+        guard let tiling = CanvasWorkspaces.tiling(named: name, of: store.url) else { return }
+        scroll.board.restoreTiling(tiling, named: name)
+    }
+
+    /// **The write-through, and the whole of "adjusting one is not saving one".**
+    ///
+    /// A named workspace is live: drag a tile, pin a width, promote a master, and it lands on the
+    /// workspace as you do it. No Save, no dirty mark, no Revert — the same decision `DetailsEditor`
+    /// made for the brief, for the same reason (docs/canvas-workspaces.md §7b).
+    ///
+    /// **Only at the root of the tiling**, which is the guard that makes the rest safe. Drilling into
+    /// one tile of a six-tile workspace is a temporary narrowing that Escape unwinds; writing it
+    /// through would reduce the workspace to that one tile, permanently and with nothing to undo it
+    /// with. `leaveTiling` already reasons this way about what is worth keeping — it remembers the
+    /// root of the drill-in stack rather than the tile you left through.
+    private func keepNamedWorkspaceUpToDate() {
+        guard let name = scroll.board.workspaceName,
+              scroll.board.tilingHistory.isEmpty,
+              let tiling = scroll.board.tilingMemory
+        else { return }
+        CanvasWorkspaces.save(tiling, as: name, for: store.url)
+    }
+
+    /// The set of names changed, so every list of them has to.
+    private func workspacesChanged() {
         tabModel.workspaces = workspaceNames()
+        header.workspaces = workspaceNames()
+        header.workspace = scroll.board.workspaceName
     }
 
     /// Whether there is a workspace to name at all — a board that has never been tiled has nothing
@@ -546,6 +608,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.findClosed = { [weak self] in self?.closeFind() }
         header.leaveTiling = { [weak self] in self?.scroll.board.leaveTiling(animated: true) }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
+        // The readout's menu. Routed through the board's own commands rather than to the store
+        // directly, so the pill and the View menu are the same three acts and not two spellings of
+        // them — `renameWorkspace` in particular has a rule about the old name that lives there.
+        header.goToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
+        header.nameWorkspace = { [weak self] in self?.scroll.board.saveTilingAsWorkspace(nil) }
+        header.renameWorkspace = { [weak self] in self?.scroll.board.renameWorkspace(nil) }
+        header.deleteWorkspace = { [weak self] in self?.scroll.board.deleteWorkspace(nil) }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —

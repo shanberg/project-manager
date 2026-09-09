@@ -93,6 +93,21 @@ extension CanvasBoardView {
         // dragged into, the widths, the pin. Matched on the set rather than the order, because the
         // order is one of the things being remembered.
         let remembered = lastTiling.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
+        // **Which workspace this is now, and the one place a named one is left.**
+        //
+        // ⌘Return does not mean "adjust this"; it means "these cards, now" — it is the act that made
+        // the workspace in the first place, and it is the only tiling command that replaces the set
+        // wholesale rather than editing it. So it starts a fresh, unnamed workspace and leaves the
+        // named one exactly as it was. That carve-out is what makes writing an adjustment straight back
+        // to a named workspace safe enough to do without a Save (docs/canvas-workspaces.md §7b), since
+        // a tiling has no undo to fall back on.
+        //
+        // Two things are not that act, and both keep the name. `remembered` applying means these are
+        // the same cards as the workspace you just left, so you are resuming it rather than building
+        // another. A non-empty history means you are drilling *into* the one you are already in, which
+        // Escape unwinds — and a drill-in that renamed the board's workspace to nothing would strand
+        // you, one press from a tiling with no name and nowhere to put it back.
+        if remembered == nil, tilingHistory.isEmpty { workspaceName = nil }
         // **At 100%, whatever the board was at.** A tiling fills the window with cards, and on a board
         // zoomed out to 40% — where you nearly always are when you decide to fill the window with
         // something — it would fill it with cards whose text is at 40%. Filling the window is a request
@@ -132,9 +147,13 @@ extension CanvasBoardView {
     ///
     /// Cards that have gone since are dropped rather than treated as a reason to give up — a board you
     /// deleted one card from is still the board you were looking at.
-    func restoreTiling(_ remembered: CanvasViewState.Tiling) {
+    func restoreTiling(_ remembered: CanvasViewState.Tiling, named name: String? = nil) {
         let live = remembered.ids.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
         guard !live.isEmpty else { return }
+        workspaceName = name
+        // Whatever you were drilled into belonged to the workspace being replaced. Left behind, Escape
+        // would hand you back a narrowing of a workspace you are no longer in.
+        tilingHistory.removeAll()
         // The zoom a tiling is shown at, and the fitted zoom to hand back on the way out — the same
         // two `tile` sets, arrived at the same way round. See there for why.
         let restoreZoom = Double(scrollView?.magnification ?? 1)

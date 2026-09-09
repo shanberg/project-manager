@@ -427,8 +427,11 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.items = tabs.tabs.map { tab in
             // Its own board, not the one on screen: a tab tiled in the background still says so, and
             // asking the visible pane for every tab's state would put one tab's tiling on all of them.
-            let detail = (contentPane.content(for: tab.id) as? CanvasPaneController)?
-                .tilingSummary?.short
+            let pane = contentPane.content(for: tab.id) as? CanvasPaneController
+            let count = pane?.tilingSummary?.short
+            // The chip is where the readout went when the bar appeared, so it takes the pill's rule
+            // with it: the workspace's name when it has one, the count when it hasn't.
+            let detail = pane?.tilingSummary == nil ? nil : (pane?.workspaceName ?? count)
             switch tab.view {
             case .notes:
                 return ProjectTabItem(id: tab.id, name: "Notes", symbol: "list.bullet")
@@ -439,8 +442,10 @@ final class ProjectSplitViewController: NSSplitViewController {
                 return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
                                       symbol: "square.dashed", detail: detail)
             case .board(.workspace(let name)):
+                // The chip already *is* the workspace's name, so the count goes back to being the
+                // detail — "Dashboard · Dashboard" says nothing twice.
                 return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
-                                      detail: detail)
+                                      detail: count)
             }
         }
         // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes

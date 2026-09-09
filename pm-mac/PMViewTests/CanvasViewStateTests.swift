@@ -60,6 +60,52 @@ final class CanvasViewStateTests: XCTestCase {
         XCTAssertNil(stored())
     }
 
+    // MARK: Which workspace a board is in
+
+    /// A board can be *in* a named workspace, and the name has to come back with the tiling or the
+    /// window reopens unable to say which one it is showing — which is the whole of what §7b fixes.
+    func testTheWorkspaceNameComesBackWithTheTiling() {
+        CanvasViewMemory.remember(
+            CanvasViewState(tiling: .init(ids: ["a", "b"], arrangement: .grid, masterFraction: 0.5),
+                            workspaceName: "Dashboard"),
+            for: url)
+        XCTAssertEqual(CanvasViewMemory.of(url).workspaceName, "Dashboard")
+    }
+
+    /// The two come apart on purpose: a board left *untiled* still remembers the workspace it was in,
+    /// so the next ⌘Return on the same cards resumes that workspace by name rather than starting an
+    /// unnamed one with the same layout. See `CanvasBoardView.tile(_:)`.
+    func testTheNameOutlivesTheTiling() {
+        CanvasViewMemory.remember(
+            CanvasViewState(workspaceName: "Dashboard",
+                            lastTiling: .init(ids: ["a", "b"], arrangement: .grid,
+                                              masterFraction: 0.5)),
+            for: url)
+        let back = CanvasViewMemory.of(url)
+        XCTAssertNil(back.tiling, "not tiled")
+        XCTAssertEqual(back.workspaceName, "Dashboard", "and still in Dashboard")
+    }
+
+    /// An unnamed workspace is the ordinary case, and it must stay indistinguishable from a board that
+    /// predates workspaces having names — both are simply not in a named one.
+    func testAnUnnamedWorkspaceStoresNoName() {
+        CanvasViewMemory.remember(
+            CanvasViewState(tiling: .init(ids: ["a"], arrangement: .grid, masterFraction: 0.5)),
+            for: url)
+        XCTAssertNil(CanvasViewMemory.of(url).workspaceName)
+    }
+
+    /// The literal bytes a build before §7b wrote. It decodes as an unnamed workspace, which is exactly
+    /// what it was — the field is optional for this reason and not for tidiness.
+    func testAStateWrittenBeforeNamesDecodesAsUnnamed() throws {
+        let old = Data(#"""
+        {"mode":"view","tiling":{"ids":["a","b"],"arrangement":"grid","masterFraction":0.5}}
+        """#.utf8)
+        let state = try JSONDecoder().decode(CanvasViewState.self, from: old)
+        XCTAssertEqual(state.tiling?.ids, ["a", "b"])
+        XCTAssertNil(state.workspaceName)
+    }
+
     private func stored() -> Any? {
         (UserDefaults.standard.dictionary(forKey: "PMCanvasViewState"))?[url.path]
     }
