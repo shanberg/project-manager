@@ -84,17 +84,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.titleVisibility = .hidden
         window.contentMinSize = NSSize(width: ProjectWindow.minContentWidth,
                                        height: ProjectWindow.minWindowHeight)
-        // A ceiling on width, none on height. A task list gains from every extra row it can show and
-        // nothing from being stretched sideways across a large display, so the window stops widening
-        // where the content stops benefiting — see `ProjectWindow.maxWindowContentWidth`.
-        window.contentMaxSize = NSSize(width: ProjectWindow.maxWindowContentWidth,
-                                       height: .greatestFiniteMagnitude)
-        // No full screen, because there's nothing for it to do: a window that can't pass 1120pt wide
-        // would sit pinned at that width in the middle of an otherwise empty display. With
-        // `.fullScreenNone` the green button reverts to plain zoom — grow to the maximum — which is the
-        // honest affordance for a window with a maximum. (Full-height is still free: only width is
-        // capped, so zoom takes the whole screen vertically.)
-        window.collectionBehavior.insert(.fullScreenNone)
+        // **No ceiling, and full screen is allowed.** There used to be both, and both were arguments
+        // about a task list: one gains from every extra row it can show and nothing from being
+        // stretched sideways, so the window stopped widening at 1120pt and the green button reverted
+        // to plain zoom. Every tab is a board now — the notes are the project's card tiled alone — and
+        // a board is a plane where every point of width is more of it you can see.
+        //
+        // The cap did not merely stop being useful, it started doing harm: it was re-applied whenever
+        // a tab changed what it was showing, so zooming out of the notes pulled the window in under
+        // your hands. Resizing somebody's window is a thing to do when they ask, and leaving the tiled
+        // view is not asking.
         // **No native window tabs.** A project window has tabs of its own now — the notes, the board,
         // a frame on it, an arrangement of it — and AppKit's would sit in a bar directly above them
         // meaning something else entirely: another *project* beside this one. Two tab bars in one
@@ -158,7 +157,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
             renderer = split.renderer
-            applyWidthLimits()
             ProjectTabMemory.remember(split.tabs, for: projectKey)
         }
         // One remembered frame for project windows, not one per project. A window is a window: it has
@@ -181,16 +179,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         if remembersFrame {
             window.setFrameAutosaveName("PMProject")
             window.setFrameUsingName("PMProject")
-            // A frame saved before the cap existed — or under a taller titlebar — can be wider than
-            // the cap allows. `setFrameUsingName` restores it verbatim rather than constraining it, so
-            // the first window after an upgrade would open wider than the user could ever drag it.
-            let capped = window.frameRect(forContentRect:
-                NSRect(x: 0, y: 0, width: ProjectWindow.maxWindowContentWidth, height: 100)).width
-            if window.frame.width > capped {
-                var frame = window.frame
-                frame.size.width = capped
-                window.setFrame(frame, display: false)
-            }
         }
 
         applyTitle()
@@ -440,7 +428,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func setRenderer(_ next: ProjectRenderer) {
         split.replaceSelected(with: next == .canvas ? .board(.whole) : .notes)
         renderer = split.renderer
-        applyWidthLimits()
         // What the split actually settled on, which is not always what was asked for: a project with
         // no canvas lands on the empty state, and both memories should record the ask rather than a
         // failure that would send the window straight back into it on every launch.
@@ -463,38 +450,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
     @objc func selectPreviousProjectTab(_ sender: Any?) { split.cycleTabs(by: -1) }
-
-    /// The window's size limits, which are not the same for the two renderers.
-    ///
-    /// A task list gains from every extra row it can show and nothing from being stretched sideways, so
-    /// a window showing one stops widening at `maxWindowContentWidth` and declines full screen — the
-    /// green button reverting to plain zoom is the honest affordance for a window with a maximum. A
-    /// board is the opposite: it is a plane, and every point of width is more of it you can see. So the
-    /// cap and the full-screen refusal are lifted for a canvas and re-applied on the way back — and on
-    /// the way back the window is pulled in if it has outgrown the cap in the meantime, since a window
-    /// wider than its own maximum is one the user can never restore by dragging.
-    private func applyWidthLimits() {
-        guard let window else { return }
-        switch renderer {
-        case .canvas:
-            window.contentMaxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
-                                           height: CGFloat.greatestFiniteMagnitude)
-            window.collectionBehavior.remove(.fullScreenNone)
-        case .tasks:
-            window.contentMaxSize = NSSize(width: ProjectWindow.maxWindowContentWidth,
-                                           height: .greatestFiniteMagnitude)
-            if !window.styleMask.contains(.fullScreen) {
-                window.collectionBehavior.insert(.fullScreenNone)
-                let capped = window.frameRect(forContentRect:
-                    NSRect(x: 0, y: 0, width: ProjectWindow.maxWindowContentWidth, height: 100)).width
-                if window.frame.width > capped {
-                    var frame = window.frame
-                    frame.size.width = capped
-                    window.setFrame(frame, display: true, animate: true)
-                }
-            }
-        }
-    }
 
     // MARK: Sidebar
 

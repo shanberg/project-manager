@@ -693,6 +693,19 @@ lines of text, and `ProjectTroublePaneController` draws them centred with no chr
 tab bar: everything a header offers acts on a board, and there is no board — a window that draws its
 full furniture around a failure is claiming to be working.
 
+### The window's width cap went with it
+
+The cap was the last thing in the window still arguing about a task list: a list gains from every extra
+row it can show and nothing from being stretched sideways, so the window stopped widening at 1120pt and
+refused full screen — the green button reverting to plain zoom being the honest affordance for a window
+with a maximum.
+
+Every tab is a board now, and a board is a plane where every point of width is more of it you can see.
+So the cap was not merely obsolete, it had turned harmful: it was re-applied whenever a tab changed what
+it was showing, which meant **zooming out of the notes pulled the window in under your hands**. Resizing
+somebody's window is a thing to do when they ask, and leaving the tiled view is not asking. Gone, along
+with `maxWindowContentWidth`, `maxListWidth`, and the `.fullScreenNone` that came with them.
+
 ### The cold start is not a message at all
 
 The last of the three was the best one to reconsider rather than port. ⌘N with nothing focused used to

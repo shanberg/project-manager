@@ -13,8 +13,8 @@ import SwiftUI
 /// edge while the pane kept going. Inside, each piece takes the cap where the cap belongs (the text)
 /// and the bar spans the pane.
 struct ReadableWidth: ViewModifier {
-    /// How wide this content is allowed to get. Rows and the header that leads them take
-    /// `maxListWidth`; prose takes the narrower `maxContentWidth` it defaults to.
+    /// How wide this content is allowed to get. Prose takes the `maxContentWidth` it defaults to;
+    /// anything that is rows to be scanned rather than paragraphs to be read passes its own.
     var cap: CGFloat = ProjectWindow.maxContentWidth
 
     /// The pane's width, measured once by whoever owns it and handed down.

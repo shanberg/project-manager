@@ -4,7 +4,7 @@ import AppKit
 /// These used to be statics on the panel controller, back when there was exactly one window and it was
 /// a panel.
 enum ProjectWindow {
-    /// The narrowest the task column goes. The layout is drawn for a column about this wide.
+    /// The narrowest a project window's content pane goes — the width its layout is drawn for.
     static let minContentWidth: CGFloat = 420
 
     /// The widest *prose* goes: the session-note editor, and anything else that is paragraphs to be
@@ -12,34 +12,13 @@ enum ProjectWindow {
     /// text much longer than this is measurably harder to read, which is the whole reason for a cap.
     static let maxContentWidth: CGFloat = 700
 
-    /// The widest a project window's *content* gets — sidebar and task column together. This is the
-    /// app's answer to "how big should this window be allowed to be", and it's deliberately answered
-    /// on the window rather than inside it.
-    ///
-    /// Capping the column inside an unbounded window is the arrangement that doesn't work: past the
-    /// cap the rows stop tracking the window's right edge and the extra width becomes a stranded band
-    /// of nothing, which is neither a wider list nor a narrower window. Capping the window means the
-    /// content always fills what's there, and "don't stretch a task list across a 6K display" is
-    /// enforced once, in the one place a user can actually see it — the resize handle stops.
-    ///
-    /// With the sidebar showing this leaves the column a little under 900pt; hidden, it gets the
-    /// sidebar's share too. Both are comfortable widths for a list of short lines with a due chip
-    /// pinned right.
-    static let maxWindowContentWidth: CGFloat = 1120
-
-    /// The widest the task column goes. Equal to the window's cap by construction — that *is* the
-    /// widest column a capped window can produce, with the sidebar hidden — so in a normal window this
-    /// never bites and the rows track the right edge at every size. It stands as the backstop for a
-    /// window that somehow escapes the cap.
-    static let maxListWidth: CGFloat = maxWindowContentWidth
-
     /// The sidebar's default width, and the range the divider can be dragged through.
     static let sidebarWidth: CGFloat = 224
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 360
 
     /// The gap between the two panes — `NSSplitView`'s thin divider. Named here so a window can open
-    /// exactly wide enough for a sidebar *and* a full-width task column rather than a point short of
+    /// exactly wide enough for a sidebar *and* a full content pane rather than a point short of
     /// it, which is the difference between a sidebar and a sidebar that hides itself on launch.
     static let sidebarDividerWidth: CGFloat = 1
 
@@ -65,7 +44,7 @@ enum ProjectWindow {
     /// Smallest window the content stays usable in.
     static let minWindowHeight: CGFloat = 320
 
-    /// The focus panel's fixed width. Narrower than the task column's floor on purpose: it holds one
+    /// The focus panel's fixed width. Narrower than a project window's floor on purpose: it holds one
     /// task, a breadcrumb and a "next" line, and at the project window's width those would read as a
     /// mostly-empty row rather than a card.
     static let focusPanelWidth: CGFloat = 380
