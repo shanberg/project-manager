@@ -139,6 +139,12 @@ struct ProjectTabBar<AddMenu: View>: View {
             Button("Close Tab") { close(item.id) }.disabled(items.count == 1)
         }
         .onHover { hovering = $0 ? item.id : (hovering == item.id ? nil : hovering) }
+        // **The current tab holds its name longest.** When the row has to give something up, the chips
+        // you are not looking at give it up first; a row where every name shortens together is a row
+        // where the one you are in has stopped saying which it is. On the chip rather than inside the
+        // button's label, because this is the child of the bar's own row and only a child of that row
+        // has any say in how it is shared.
+        .layoutPriority(current ? 1 : 0)
         .help(item.name)
         .accessibilityLabel(Text(item.name))
         .accessibilityAddTraits(current ? [.isButton, .isSelected] : .isButton)
@@ -163,7 +169,15 @@ struct ProjectTabBar<AddMenu: View>: View {
         .foregroundStyle(current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         .padding(.horizontal, HeaderMetrics.textInset)
         .frame(height: HeaderMetrics.itemHeight)
-        .frame(maxWidth: 168)
+        // **A chip is as wide as its name.** There used to be a flat 168pt ceiling here, which
+        // truncated "Detective Depictions" in a window with room for three more of it — a cap that
+        // fired on the name's length rather than on the room available, which is the one thing a cap
+        // in a header should never do. The room is what decides now: the bar sizes to its contents and
+        // is squeezed against the trailing controls when there is not enough (see
+        // `CanvasPaneController`, where it is the thing that gives way), and only then does a label
+        // truncate.
+        //
+        // The current tab holds its name longest — see the layout priority on `chip`.
         .contentShape(Rectangle())
         .background {
             if current {

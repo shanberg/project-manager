@@ -403,7 +403,14 @@ The first chips carried three things: a glyph, the name, and a `6/43` badge. Two
   rehoused: `Leave Tiled View` is now an item on the chip's menu, on the current tab only, since it
   acts on the board that is up.
 
-What is left is a name, which is what a tab is. Two things follow from a row of names:
+What is left is a name, which is what a tab is — **all of it**, whenever there is room. A flat 168pt
+ceiling on a chip used to truncate "Detective Depictions" in a window with space for three more of it,
+which is a cap firing on the name's length rather than on the room available. The room decides now: the
+bar sizes to its contents, is the thing that gives way when the header runs out (`CanvasPaneController`
+sets that priority), and only then does a label shorten — the current tab last, since a row where every
+name shortens together is a row where the one you are in has stopped saying which it is.
+
+Two things follow from a row of names:
 
 - **Drag one along the row.** `ProjectTabSet.move` was written for this and tested before there was
   anything to call it — "that one goes *there*", the same operation spelled the same way as
