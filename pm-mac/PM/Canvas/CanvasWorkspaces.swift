@@ -28,6 +28,15 @@ import Foundation
 /// **The defaults key keeps its old spelling on purpose.** `PMCanvasArrangements` is private to this
 /// file and is read by nothing else, so renaming it would buy a tidier string at the cost of every
 /// workspace anybody has already saved.
+///
+/// **There is no "last used" row here, and there was.** It existed because leaving a tiled view
+/// un-pins the tab from its workspace, so the stored tab selection was thought unable to answer "which
+/// workspace was I in". §7g made that false in the same act that created the need: leaving a workspace
+/// now *keeps its chip*, so the row still holds the workspace, and the selection honestly records that
+/// you were looking at the whole board when you closed the window. A second store answering the same
+/// question could only disagree with the first, and it did — it reopened you into a workspace you had
+/// deliberately zoomed out of hours earlier. A tab is where a workspace lives; the selection is which
+/// one you were in. See docs/canvas-workspaces.md §7h.
 enum CanvasWorkspaces {
     /// Everything saved for this board.
     static func of(_ url: URL) -> [String: CanvasViewState.Tiling] {
@@ -59,27 +68,13 @@ enum CanvasWorkspaces {
         write(all, for: url)
     }
 
-    /// The workspace this board was most recently in, if it still exists.
+    /// Whether this name is already somebody's.
     ///
-    /// **Validated on the way out rather than kept tidy on the way in.** A name here is a note about
-    /// where you were, not a second claim about what exists — so a workspace deleted (or renamed) in
-    /// another window leaves a stale row that answers nil, instead of every delete having to remember
-    /// to come here too.
-    ///
-    /// What it is for: a project opens on the workspace you were last using, even when the tab you left
-    /// selected was something else. Leaving a tiled view un-pins that tab from its workspace (see
-    /// `ProjectTabView.following`), so the tab selection alone cannot answer "which workspace was I in"
-    /// once you have zoomed out of one.
-    static func lastUsed(of url: URL) -> String? {
-        guard let name = used()[key(url)], of(url)[name] != nil else { return nil }
-        return name
-    }
-
-    static func markUsed(_ name: String, of url: URL) {
-        var rows = used()
-        guard rows[key(url)] != name else { return }
-        rows[key(url)] = name
-        UserDefaults.standard.set(rows, forKey: lastUsedKey)
+    /// Asked before a name is *acquired* — named, renamed into, duplicated as — because `save` below
+    /// replaces, and the workspace it would replace is not the one you are looking at. See
+    /// `WorkspaceNamePrompt.confirmReplacing`.
+    static func exists(_ name: String, of url: URL) -> Bool {
+        of(url)[name] != nil
     }
 
     static func remove(_ name: String, for url: URL) {
@@ -95,14 +90,9 @@ enum CanvasWorkspaces {
     }
 
     private static let defaultsKey = "PMCanvasWorkspaces"
-    private static let lastUsedKey = "PMCanvasWorkspaceLastUsed"
 
     private static func stored() -> [String: Data] {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: Data] ?? [:]
-    }
-
-    private static func used() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: lastUsedKey) as? [String: String] ?? [:]
     }
 
     /// The path, standardized — the same key `CanvasViewMemory` uses, so one board is one row in both.

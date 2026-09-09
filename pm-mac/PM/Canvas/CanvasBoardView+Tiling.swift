@@ -39,14 +39,56 @@ extension CanvasBoardView {
                 // handed you back the tiling you came from, and the next press drilled straight into
                 // it again. ⌘↩ alternated between the two forever with the card still filling the
                 // window, which is the one way out of a tiling that has to work.
-                return leaveTiling(animated: true)
+                //
+                // **A change of tab, not a change to the board.** The tiles stay exactly as they are;
+                // the window shows its canvas. See `onGoToCanvas`.
+                return onGoToCanvas()
             }
             tilingHistory.append(session)
             return tile(picked)
         }
         let ids = tileTargets
         guard !ids.isEmpty else { return NSSound.beep() }
+        // **The tiling this is about to make is a workspace, so it wants a tab.** Offered to the window
+        // before it is laid out here, because the window is what keeps a workspace and what holds the
+        // tabs — and because the pane that ends up showing it is the workspace's own, not this one.
+        // See `onTileAsWorkspace`. A board with no window to ask tiles itself, as it always did.
+        guard !offerAsWorkspace(ids) else { return }
         tile(ids)
+    }
+
+    /// What tiling these cards would produce, without producing it.
+    ///
+    /// Split out of `tile(_:)` so a workspace can be *made* before a board is laid out into it — the
+    /// window keeps the workspace and opens its tab, and the pane that tab builds restores it. Every
+    /// choice here is `tile(_:)`'s, made in the same order and for the same reasons; what is missing is
+    /// the part that depends on the window, which is where the tiles physically land.
+    func plannedTiling(for ids: Set<String>,
+                       arrangement: CanvasTiling.Arrangement? = nil) -> CanvasViewState.Tiling? {
+        let cards = document.nodes.filter { ids.contains($0.id) && !$0.isGroup }
+            .map { (id: $0.id, frame: $0.frame) }
+        guard !cards.isEmpty else { return nil }
+        // The same cards as last time means the same arrangement as last time: the order they were
+        // dragged into, the widths, the pin. Matched on the set rather than the order, because the
+        // order is one of the things being remembered.
+        let remembered = lastTiling.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
+        return CanvasViewState.Tiling(
+            ids: remembered?.ids ?? CanvasTiling.order(cards),
+            arrangement: arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
+                ?? preferredArrangement(for: cards.count),
+            masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction,
+            sizes: remembered?.sizes)
+    }
+
+    /// Hand this tiling to the window as a workspace, and say whether it took it. Only from a board
+    /// that is not already tiled — inside a tiling, ⌘↩ is a drill-in and belongs to the workspace you
+    /// are already in.
+    func offerAsWorkspace(_ ids: Set<String>,
+                          arrangement: CanvasTiling.Arrangement? = nil) -> Bool {
+        guard tiling == nil, let plan = plannedTiling(for: ids, arrangement: arrangement) else {
+            return false
+        }
+        return onTileAsWorkspace(plan)
     }
 
     /// The cards ⌘Return would fill the window with, given what is selected right now.
@@ -93,31 +135,16 @@ extension CanvasBoardView {
         // dragged into, the widths, the pin. Matched on the set rather than the order, because the
         // order is one of the things being remembered.
         let remembered = lastTiling.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
-        // **Which workspace this is now, and the one place a named one is left.**
+        // **This does not decide which workspace you are in any more, and it used to.** ⌘↩ went
+        // straight through here and cleared `workspaceName` on the way, which is what made an untitled
+        // workspace: a set of tiles with nothing pointing at it. There is no such thing now (§7i), and
+        // the decision moved one step earlier — `tileSelection` offers the tiling to the window, which
+        // names it and opens its tab, and the pane that tab builds arrives here through
+        // `restoreTiling` with the name already in hand.
         //
-        // ⌘Return does not mean "adjust this"; it means "these cards, now" — it is the act that made
-        // the workspace in the first place, and it is the only tiling command that replaces the set
-        // wholesale rather than editing it. So it starts a fresh, unnamed workspace and leaves the
-        // named one exactly as it was. That carve-out is what makes writing an adjustment straight back
-        // to a named workspace safe enough to do without a Save (docs/canvas-workspaces.md §7b), since
-        // a tiling has no undo to fall back on.
-        //
-        // Two things are not that act, and both keep the name. `remembered` applying means these are
-        // the same cards as the workspace you just left, so you are resuming it rather than building
-        // another. A non-empty history means you are drilling *into* the one you are already in, which
-        // Escape unwinds — and a drill-in that renamed the board's workspace to nothing would strand
-        // you, one press from a tiling with no name and nowhere to put it back.
-        //
-        // **What is left behind keeps a tab**, rather than only a line in a menu. The workspace you
-        // were in still exists in the durable store and is still one click away — and now the click is
-        // on a chip beside this one, because the window is where the workspaces you have open live
-        // (docs/canvas-workspaces.md §7c). It is the pane in front of you that becomes the fresh
-        // Untitled one, since that is the pane holding the selection this command just acted on.
-        if remembered == nil, tilingHistory.isEmpty {
-            let left = workspaceName
-            workspaceName = nil
-            left.map(onLeftWorkspace)
-        }
+        // What reaches this now is the two tilings that are not workspaces: the project-note view
+        // (`CanvasPaneController.goToProjectNote`), and any board with no window around it to keep a
+        // workspace for it.
         // **At 100%, whatever the board was at.** A tiling fills the window with cards, and on a board
         // zoomed out to 40% — where you nearly always are when you decide to fill the window with
         // something — it would fill it with cards whose text is at 40%. Filling the window is a request

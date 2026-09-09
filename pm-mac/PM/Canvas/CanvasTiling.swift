@@ -25,7 +25,13 @@ enum CanvasTiling {
     }
 
     /// The gap between two tiles, in canvas points at 100%.
-    static let gap: Double = 9
+    ///
+    /// **Deliberately about half what a board's cards get.** A card is paper on a desk and needs room
+    /// to read as a separate sheet; a tile is a pane let into the ground, and panes that are held far
+    /// apart stop reading as one arrangement. See `CanvasPalette.tileGround`, which is the other half
+    /// of the same argument — the ground goes darker so the gap can go narrower without the tiles
+    /// running together.
+    static let gap: Double = 4
 
     /// The margin around the whole arrangement, which is deliberately wider than the gap between tiles.
     ///
@@ -33,9 +39,103 @@ enum CanvasTiling {
     /// each tile contributes half of it — while the margin at the window's edge is the tile's alone and
     /// has a hard frame on the other side of it. Set them equal and the outside reads as about half the
     /// inside, which is the tightness that made "one number" look right in the arithmetic and wrong on
-    /// the screen. Half again the gap is the ratio that landed; both were then taken to two thirds of
-    /// what they were, which is the tightness that reads right without the tiles touching.
-    static let edgeGap: Double = 13
+    /// the screen. Half again the gap is the ratio that landed, and it is the ratio these still hold:
+    /// both came down together when tiles stopped being cards laid out in rows.
+    static let edgeGap: Double = 6
+
+    // MARK: The shape of a tile
+
+    /// A tile's corner where it meets another tile, and where it meets the frame.
+    ///
+    /// **Two radii, because a tiling has two kinds of corner.** The outside of the arrangement is an
+    /// edge you can see past — it wants the softer curve, the one a window has. Everything inside is a
+    /// seam between two panes, and a seam drawn at the same radius reads as two rounded rectangles
+    /// that happen to be adjacent rather than as one thing divided. Tightening only the inside is what
+    /// makes a tiling read as a single object with cuts in it.
+    ///
+    /// Both are fixed, unlike `CanvasNodeView.cornerRadius(for:)`, which scales with the card. A card's
+    /// radius scales because cards come at every size and one number cannot look like one number across
+    /// all of them. Tiles are all sized by the same arrangement in the same window, so they are already
+    /// of a piece, and a radius that varied between them would be the only thing on screen suggesting
+    /// they weren't.
+    static let innerRadius: Double = 5
+    static let outerRadius: Double = 9
+
+    /// Which of a tile's corners are corners of the tile space itself.
+    ///
+    /// **Both directions, not either.** A corner goes wide only where it sits at the frame horizontally
+    /// *and* vertically. The looser rule — either edge is enough — rounds the master's top-right away
+    /// from the divider it is supposed to run parallel with, and softens seams that are the whole
+    /// argument for having two radii. Under this rule every tile in a grid gets exactly one wide
+    /// corner, the one facing out, and the four of them together trace the outline of the arrangement.
+    struct Corners: Equatable {
+        var topLeft: Bool
+        var topRight: Bool
+        var bottomRight: Bool
+        var bottomLeft: Bool
+
+        /// A tile that is the whole of the space — the only tile up, or a card on a board.
+        static let all = Corners(topLeft: true, topRight: true, bottomRight: true, bottomLeft: true)
+
+        /// The radii these corners get, given the two numbers.
+        func radii(inner: Double, outer: Double) -> Radii {
+            Radii(topLeft: topLeft ? outer : inner, topRight: topRight ? outer : inner,
+                  bottomRight: bottomRight ? outer : inner, bottomLeft: bottomLeft ? outer : inner)
+        }
+    }
+
+    /// The corners `tile` has, laid out in `area` — which is the region the tiles were placed in, so
+    /// `space(of:)` rather than the session's own `area`.
+    static func corners(of tile: CanvasRect, in area: CanvasRect) -> Corners {
+        // Generous, because these are floating-point ends of a division: a run of three tiles sharing a
+        // height lands on the last tile's bottom edge through two roundings.
+        let slack = 0.5
+        let left = abs(tile.minX - area.minX) < slack
+        let right = abs(tile.maxX - area.maxX) < slack
+        let top = abs(tile.minY - area.minY) < slack
+        let bottom = abs(tile.maxY - area.maxY) < slack
+        return Corners(topLeft: top && left, topRight: top && right,
+                       bottomRight: bottom && right, bottomLeft: bottom && left)
+    }
+
+    /// The radius each corner of a tile is drawn at — what `Corners` becomes once the two numbers are
+    /// filled in. Carried as four values rather than a flag and a pair, because everything downstream
+    /// of here wants the corner it is drawing, not the rule that decided it.
+    struct Radii: Equatable {
+        var topLeft: Double
+        var topRight: Double
+        var bottomRight: Double
+        var bottomLeft: Double
+
+        static func uniform(_ radius: Double) -> Radii {
+            Radii(topLeft: radius, topRight: radius, bottomRight: radius, bottomLeft: radius)
+        }
+
+        /// True when this is really one radius — a card, or a tile with nothing outer about it. The
+        /// cheap path: a layer can round itself, and only a mixed set needs a shape to be cut from.
+        var isUniform: Bool {
+            topLeft == topRight && topRight == bottomRight && bottomRight == bottomLeft
+        }
+
+        /// The same corners, `distance` further in. A curve inset from another curve stays parallel to
+        /// it only when its radius drops by the inset; equal radii pinch shut at the corners. Used for
+        /// the clip inside the hairline — see `CanvasNodeView.layout`.
+        func inset(by distance: Double) -> Radii {
+            Radii(topLeft: max(0, topLeft - distance), topRight: max(0, topRight - distance),
+                  bottomRight: max(0, bottomRight - distance), bottomLeft: max(0, bottomLeft - distance))
+        }
+
+        /// The same rule outward, for a ring drawn around the thing rather than inside it.
+        func grown(by distance: Double) -> Radii { inset(by: -distance) }
+    }
+
+    /// The room the tiles themselves get: what was on screen, less the margin at the frame.
+    ///
+    /// Named and shared because two things have to agree about it — `frames` places tiles inside it,
+    /// and `corners(of:in:)` decides what is an outer corner by comparing against it. A second copy of
+    /// `inset(by: -edgeGap)` is a second answer, and the symptom would be a tiling whose outer corners
+    /// were all tight.
+    static func space(of area: CanvasRect) -> CanvasRect { area.inset(by: -edgeGap) }
 
     // MARK: What you chose last time
 
@@ -79,7 +179,7 @@ enum CanvasTiling {
     /// Here rather than on the board because it is a decision about wording, it is pure arithmetic on
     /// four counts, and three places now have to say it: the View menu, the contextual menu and the
     /// header button. Three copies of a sentence is three chances for the board to promise one thing in
-    /// one menu and something else in another — which it already did, by saying "Leave Tiled View" for
+    /// one menu and something else in another — which it already did, by saying "Show Canvas" for
     /// a ⌘Return that was about to drill in.
     ///
     /// It says the count out loud — "These 6 Cards" rather than "Selection" — because the command's
@@ -97,7 +197,7 @@ enum CanvasTiling {
         if let tiled {
             // All of the tiles, or none of them, is not a narrowing — so ⌘Return is the way back out,
             // and the menu has to admit that rather than offering to fill the window again.
-            guard picked > 0, picked < tiled else { return "Leave Tiled View" }
+            guard picked > 0, picked < tiled else { return "Show Canvas" }
             return picked == 1 ? "Fill Window with This Tile"
                                : "Fill Window with These \(picked) Tiles"
         }
@@ -217,7 +317,7 @@ enum CanvasTiling {
                        masterFraction: Double) -> [CanvasRect] {
         let count = sizes.count
         guard count > 0 else { return [] }
-        let inner = area.inset(by: -edgeGap)
+        let inner = space(of: area)
         guard inner.width > gap, inner.height > gap else { return Array(repeating: area, count: count) }
         guard count > 1 else { return [inner] }
 

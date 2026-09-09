@@ -72,6 +72,24 @@ extension View {
             shape.fill(.regularMaterial).opacity(chrome.backingStrength)
         }
     }
+
+    /// The same, or nothing at all — for the one thing the glass is *for* not being true.
+    ///
+    /// The backing exists to hold a control legible over content that scrolls or pans beneath it, and
+    /// a tiled board is not that content: the tiles are panels with their own edges, laid on a plain
+    /// ground, and the header sits over the ground. Glass there is a second separation drawn on top of
+    /// one that has already happened, which reads as two panels disagreeing about which is in front.
+    ///
+    /// Routed through the modifier above rather than written out at the call site, because the two
+    /// headers drifted apart twice in a day the last time a piece of this was a convention.
+    @ViewBuilder
+    func headerBacking(_ chrome: HeaderChrome, in shape: some Shape, showing: Bool) -> some View {
+        if showing {
+            headerBacking(chrome, in: shape)
+        } else {
+            self
+        }
+    }
 }
 
 /// Where a window's traffic lights are, for a header that runs up into the titlebar to sit level with
@@ -180,6 +198,10 @@ extension View {
 /// cannot drift.
 struct HeaderCapsule<Content: View>: View {
     let chrome: HeaderChrome
+    /// Whether the row wears its glass. Off over a tiled board — see `headerBacking(_:in:showing:)`.
+    /// The inset stays either way: it is what keeps the items off the window's edge, and it is not the
+    /// backing's padding even though the backing is what makes it visible.
+    var backed = true
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -187,7 +209,7 @@ struct HeaderCapsule<Content: View>: View {
             .opacity(chrome.contentOpacity)
             .padding(.horizontal, HeaderMetrics.capsuleInset.horizontal)
             .padding(.vertical, HeaderMetrics.capsuleInset.vertical)
-            .headerBacking(chrome, in: Capsule())
+            .headerBacking(chrome, in: Capsule(), showing: backed)
             // A click on a control is a click on that control, not the start of a window drag.
             .background(WindowDragExcluder())
     }

@@ -149,7 +149,14 @@ enum MainMenu {
             modifiers: [.command, .shift])
         menu.addItem(.separator())
 
+        // ⌘W is the tab you are in, and the window once that was the last one — see
+        // `TextFocusWindow.performClose`, which is where the narrowing happens, since a second item
+        // with the same key would never be reached past this one.
         menu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        // The window in one keystroke, whatever it is holding — the pair every Mac app with tabs
+        // offers, and the reason ⌘W is safe to narrow.
+        add(menu, "Close Window", #selector(ProjectWindowController.closeProjectWindow(_:)),
+            target: nil, key: "w", modifiers: [.command, .shift])
         let closeAll = menu.addItem(withTitle: "Close All Windows",
                                     action: #selector(AppDelegate.closeAllWindows), keyEquivalent: "w")
         closeAll.keyEquivalentModifierMask = [.command, .option]
@@ -304,8 +311,8 @@ enum MainMenu {
         menu.addItem(withTitle: "Remove from Tiled View",
                      action: #selector(CanvasBoardView.removeTile(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Leave Tiled View",
-                     action: #selector(CanvasBoardView.leaveTilingCommand(_:)),
+        menu.addItem(withTitle: "Show Canvas",
+                     action: #selector(CanvasBoardView.goToCanvasCommand(_:)),
                      keyEquivalent: "")
 
         // **The workspace's home that a menu bar can be read through.**
@@ -333,10 +340,10 @@ enum MainMenu {
             entry.tag = index
         }
         workspaces.addItem(.separator())
-        // One item for naming, which retitles itself to "Rename …" once the workspace has a name —
-        // there is no second act there, only a second word for it. See `saveTilingAsWorkspace`.
-        workspaces.addItem(withTitle: "Name This Workspace\u{2026}",
-                           action: #selector(CanvasBoardView.saveTilingAsWorkspace(_:)),
+        // Rename, with no Name beside it: a workspace is made named (docs/canvas-workspaces.md §7i),
+        // so there is never one in front of you waiting to be given a name.
+        workspaces.addItem(withTitle: "Rename Workspace\u{2026}",
+                           action: #selector(CanvasBoardView.renameWorkspace(_:)),
                            keyEquivalent: "")
         // Directly under it, because it is the item you wanted when Name would have been wrong: on a
         // named workspace Name renames, and making a second one is this.
@@ -354,9 +361,10 @@ enum MainMenu {
         // many a row of number keys holds and how many every manager that does this offers.
         //
         // ⌃ and not ⌘, and this is the one place the two words are told apart by a modifier: a frame is
-        // somewhere on the board, a workspace is a way of looking at it. ⌘1…9 is left unspent, because
-        // it is also every browser's key for selecting a tab and this app has tabs — see backlog 17,
-        // which says settle the navigation grammar before spending a single key.
+        // somewhere on the board, a workspace is a way of looking at it. ⌘1…9 went to the tabs, which
+        // is what it was being held for: backlog 17 said settle the navigation grammar first, and §7c
+        // settled it when it decided a tab is where an open workspace lives — "go to workspace n" and
+        // "go to tab n" stopped being two claimants on one key. See View ▸ Go to Tab.
         let frames = NSMenu(title: "Go to Frame")
         for index in 0..<9 {
             let entry = frames.addItem(withTitle: "Frame \(index + 1)",
@@ -456,14 +464,13 @@ enum MainMenu {
         let item = NSMenuItem()
         let menu = NSMenu(title: "View")
 
-        for (index, mode) in [TasksMode.incomplete, .all].enumerated() {
-            let entry = add(menu, mode.menuTitle, #selector(AppDelegate.setTasksMode(_:)),
-                            target: target, key: "\(index + 1)")
-            entry.representedObject = mode.rawValue
-        }
-        menu.addItem(.separator())
-        // The focus panel is a window, not a view mode — but this is where you'd look for it, next to
-        // the list filters it replaced.
+        // **Incomplete / All and Show Notes used to head this menu, on ⌘1, ⌘2 and no key.** All three
+        // were switches on the task column, and the column went (§7f) — their defaults keys had no
+        // reader left anywhere in the app, so the items toggled a checkmark and changed nothing. Two of
+        // them were also sitting on ⌘1 and ⌘2 while the tiling work was carefully leaving ⌘1…9 unspent
+        // for the tabs, which is a reservation kept by nobody. Go to Tab has them now.
+        //
+        // The focus panel is a window, not a view mode — but this is where you'd look for it.
         // No key equivalent here: this item mirrors the *global* shortcut, which is rebindable, so
         // `syncGlobalShortcuts()` fills it in and keeps it current.
         track(.toggleFocusPanel,
@@ -477,7 +484,6 @@ enum MainMenu {
         add(menu, "Show Waiting", #selector(AppDelegate.toggleWaiting), target: target, key: "w",
             modifiers: [.command, .control])
         menu.addItem(.separator())
-        add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // Render the project window's content column as the project's board instead of its task list.
         // Routed to the window rather than the app, because it is a property of the window you are in.
         //
@@ -494,12 +500,29 @@ enum MainMenu {
         // are here because they are about the window in front of you rather than about making
         // something. ⌃⇥ and ⌃⇧⇥ are the standard pair and are free now that project windows have
         // turned native tabbing off — see `ProjectWindowController`.
+        // No key on Close Tab: ⌘W is already it, claimed by File ▸ Close and narrowed to the tab by
+        // the window itself. Printing ⌘W here as well would be two items promising one keystroke.
         add(menu, "Close Tab", #selector(ProjectWindowController.closeProjectTab(_:)),
             target: nil, key: "")
         add(menu, "Next Tab", #selector(ProjectWindowController.selectNextProjectTab(_:)),
             target: nil, key: "\t", modifiers: [.control])
         add(menu, "Previous Tab", #selector(ProjectWindowController.selectPreviousProjectTab(_:)),
             target: nil, key: "\t", modifiers: [.control, .shift])
+        // ⌘1…⌘9, which every browser on this Mac spends on exactly this. Nine slots retitled on
+        // validation, the way Go to Frame does it; ⌘9 is the last tab however long the row is. See
+        // `ProjectWindowController.selectProjectTabByIndex` for why the reservation on these keys is
+        // over.
+        let goToTab = NSMenu(title: "Go to Tab")
+        for index in 0..<9 {
+            let entry = goToTab.addItem(
+                withTitle: index == 8 ? "Last Tab" : "Tab \(index + 1)",
+                action: #selector(ProjectWindowController.selectProjectTabByIndex(_:)),
+                keyEquivalent: "\(index + 1)")
+            entry.keyEquivalentModifierMask = [.command]
+            entry.tag = index
+        }
+        let goToTabItem = menu.addItem(withTitle: "Go to Tab", action: nil, keyEquivalent: "")
+        goToTabItem.submenu = goToTab
         menu.addItem(.separator())
         // ⌥⌘S is the Finder/Mail "Show Sidebar" shortcut. `toggleSidebar:` is answered by the front
         // window's split view controller, so it animates and persists in one place.
@@ -610,15 +633,6 @@ enum MainMenu {
         if !key.isEmpty { item.keyEquivalentModifierMask = modifiers }
         item.target = target
         return item
-    }
-}
-
-extension TasksMode {
-    var menuTitle: String {
-        switch self {
-        case .incomplete: return "Incomplete Tasks"
-        case .all: return "All Tasks"
-        }
     }
 }
 

@@ -209,17 +209,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         let seed: ProjectTabView = ProjectRendererMemory.of(projectKey) == .canvas
             ? .board(.whole) : .notes
         var remembered = ProjectTabMemory.of(projectKey, seed: seed)
-        // **The workspaces this project has, not only the ones this window was left holding.** A
-        // workspace you named is work you kept, and it should be along the top when you come back —
-        // including the ones you had zoomed out of before closing the window, which lose their chip on
-        // the way out (`ProjectTabView.following`) and so would otherwise be invisible until you went
-        // looking in a menu. And the one you were last in is the one that comes up.
+        // **The row is the project's workspaces**, in the order this window was left holding them, plus
+        // any that have appeared since — a workspace you named is work you kept, and it should be along
+        // the top when you come back. See `ProjectTabSet.include(workspaces:)`.
+        //
+        // **And the selection is left exactly where storage put it**, with one carry-over below for the
+        // rows that predate the selection being able to answer. This used to ask a second store which
+        // workspace you were last in and go there, on every open; overriding a stored selection that
+        // way meant a project you had spent the evening in the notes of reopened in a workspace you had
+        // deliberately left hours earlier (§7h).
         //
         // Only when the path is already known: a project whose board is still being looked for gets
         // this a moment later, from `watchCanvasPath`, which re-runs the whole of this.
         if let url = store.canvasPath.map({ URL(fileURLWithPath: $0) }) {
-            remembered.include(workspaces: CanvasWorkspaces.names(of: url),
-                               selecting: CanvasWorkspaces.lastUsed(of: url))
+            remembered.include(workspaces: CanvasWorkspaces.names(of: url))
+            // **A window closed before §7i knew which workspace it was in, and its tabs did not.** Back
+            // then a board could be in "Main" while the tab holding it said `.whole`, so the selection
+            // this row restores lands on the canvas and loses the thing you were working in. The board's
+            // own memory is the only record of it; it is read once, cleared, and never written again —
+            // see `CanvasViewMemory.takeWorkspaceName(of:)`.
+            if let name = CanvasViewMemory.takeWorkspaceName(of: url),
+               remembered.selected.view.isCanvas,
+               let tab = remembered.first(showing: .board(.workspace(name))) {
+                remembered.select(tab.id)
+            }
         }
         // A board that isn't there yet is worth waiting for rather than falling back from: the store
         // learns the canvas path asynchronously, and answering in the meantime would either offer to
@@ -434,13 +447,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             }
     }
 
-    /// The renderer switch: change what the tab you are in is showing, rather than opening one.
+    /// The renderer switch, as the two places that still call it mean it: go to the canvas, or go to
+    /// the notes.
     ///
-    /// A tab is a slot. Pressing Tasks while looking at a board turns *this* view into the notes,
-    /// exactly as following a link in a browser tab changes what that tab holds — and opening another
-    /// view alongside it is a different gesture with its own command.
+    /// It used to change what the tab you were in was *showing*, a tab being a slot. The canvas is not
+    /// a slot any more — it is the row's fixed point (§7i) — so both halves are now a switch to a tab
+    /// rather than an edit to one, which is also the plainer reading of what the caller wanted.
     func setRenderer(_ next: ProjectRenderer) {
-        split.replaceSelected(with: next == .canvas ? .board(.whole) : .notes)
+        if next == .canvas { split.showCanvas() } else { split.showTasks() }
         renderer = split.renderer
         // What the split actually settled on, which is not always what was asked for: a project with
         // no canvas lands on the empty state, and both memories should record the ask rather than a
@@ -459,11 +473,60 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     @objc func closeProjectTab(_ sender: Any?) {
-        split.tabModel.close(split.tabs.selectedID)
+        _ = closeSelectedProjectTab()
     }
 
     @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
     @objc func selectPreviousProjectTab(_ sender: Any?) { split.cycleTabs(by: -1) }
+
+    /// ⌘1…⌘9. Go to a tab by position, with ⌘9 meaning the last one however many there are.
+    ///
+    /// **These keys were being held for exactly this and were not free.** Backlog 17 said settle the
+    /// navigation grammar before spending one, and the grammar is settled: §7c decided that a tab is
+    /// where an open workspace lives, so "go to workspace *n*" and "go to tab *n*" stopped being two
+    /// claimants on one key and became one act. Meanwhile ⌘1 and ⌘2 had quietly been spent anyway — on
+    /// View ▸ Incomplete/All, whose only reader left with the task column (§7f), so the reservation was
+    /// being kept by two items that did nothing.
+    ///
+    /// ⌘9 is the last tab rather than the ninth, which is what every browser on this Mac does and the
+    /// only sensible thing for a row §7g can make longer than nine.
+    ///
+    /// ⌃1…9 still goes to a frame, and the modifier is still what tells the two words apart: a frame is
+    /// somewhere on the board, a workspace is a way of looking at it.
+    @objc func selectProjectTabByIndex(_ sender: Any?) {
+        guard let slot = (sender as? NSMenuItem)?.tag else { return }
+        split.selectTab(at: slot == 8 ? .max : slot)
+    }
+
+    /// ⇧⌘W. The window, when ⌘W has come to mean the tab in it — see `TextFocusWindow.performClose`.
+    /// Not `window?.performClose`, which is the override this exists to get past.
+    @objc func closeProjectWindow(_ sender: Any?) {
+        (window as? TextFocusWindow)?.performCloseIgnoringTabs(sender)
+    }
+
+    /// Close the tab that is up, and say whether there was one to close.
+    ///
+    /// False at one tab, because the last tab never closes — closing it is closing the window, which is
+    /// exactly what ⌘W falls through to. See `TextFocusWindow.performClose`.
+    /// **⌘W means the smallest thing you are inside.**
+    ///
+    /// Three answers, and they are one rule read at three depths. A tab with a Close — the notes, a
+    /// frame — closes. A workspace has no Close (`ProjectTabSet.close`), and what you mean by shutting
+    /// one is "I am done looking at this", which is the canvas: so ⌘W steps out to it, and the
+    /// workspace is exactly where you left it when you come back. On the canvas there is nothing left
+    /// inside the window, so this answers false and ⌘W means what it means everywhere else on this Mac.
+    ///
+    /// - Returns: whether the key was spent here. False sends it on to `NSWindow.performClose`.
+    func closeSelectedProjectTab() -> Bool {
+        let selected = split.tabs.selected
+        if split.tabs.closable(selected) {
+            split.tabModel.close(selected.id)
+            return true
+        }
+        guard !selected.view.isCanvas else { return false }
+        split.goToCanvas()
+        return true
+    }
 
     // MARK: Sidebar
 
@@ -553,10 +616,34 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             return store.projectName != nil
         case #selector(newProjectTab(_:)):
             return store.projectName != nil
-        case #selector(closeProjectTab(_:)), #selector(selectNextProjectTab(_:)),
-             #selector(selectPreviousProjectTab(_:)):
-            // Dim at one tab: the last tab never closes, and there is nothing to cycle between.
+        case #selector(closeProjectTab(_:)):
+            // Retitled rather than dimmed, on `tileCommandTitle`'s pattern: on a workspace this key
+            // steps out to the canvas, and a menu item that says "Close Tab" while doing that is the
+            // menu promising something else. Dim only on the canvas, where there is nothing to leave.
+            let selected = split.tabs.selected
+            (item as? NSMenuItem)?.title = split.tabs.closable(selected) ? "Close Tab" : "Show Canvas"
+            return !selected.view.isCanvas
+        case #selector(selectNextProjectTab(_:)), #selector(selectPreviousProjectTab(_:)):
+            // Dim at one tab, where there is nothing to cycle between.
             return split.tabs.tabs.count > 1
+        case #selector(closeProjectWindow(_:)):
+            return true
+        case #selector(selectProjectTabByIndex(_:)):
+            // Nine slots retitled on validation, exactly as Go to Frame does it — a menu bar is built
+            // once and the row it names changes under it. ⌘9 is the last tab however long the row is,
+            // and says so rather than repeating the name of whichever tab that currently is.
+            guard let entry = item as? NSMenuItem else { return false }
+            let names = split.tabModel.items
+            let last = entry.tag == 8
+            let index = last ? names.count - 1 : entry.tag
+            guard names.count > 1, index >= 0, index < names.count else {
+                entry.title = last ? "Last Tab" : "Tab \(entry.tag + 1)"
+                entry.state = .off
+                return false
+            }
+            entry.title = last ? "Last Tab" : names[index].name
+            entry.state = names[index].id == split.tabModel.selectedID ? .on : .off
+            return true
         default:
             return true
         }
@@ -586,6 +673,25 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 /// ahead of it in the chain — which is the rule the flag was imitating. See
 /// docs/canvas-workspaces.md §7e.
 final class TextFocusWindow: NSWindow {
+    /// **⌘W closes the tab you are in; the window goes when that was the last one.**
+    ///
+    /// Which is what every Mac app with tabs does, and what this one did not: File ▸ Close is
+    /// `performClose:`, answered by the window itself before anything of ours is asked, so ⌘W took a
+    /// window of six workspaces with no question. View ▸ Close Tab existed and had no key at all, so
+    /// there was no keystroke for the narrower act and a hazardous one for the wider.
+    ///
+    /// Here rather than on a second menu item with the same key equivalent: the main menu is searched
+    /// in order, File comes before View, and its Close would have won every time. ⇧⌘W is the window,
+    /// through `performCloseIgnoringTabs`.
+    override func performClose(_ sender: Any?) {
+        guard let controller = windowController as? ProjectWindowController,
+              controller.closeSelectedProjectTab()
+        else { return super.performClose(sender) }
+    }
+
+    /// The window itself, whatever its tabs are doing — File ▸ Close Window, ⇧⌘W.
+    func performCloseIgnoringTabs(_ sender: Any?) { super.performClose(sender) }
+
     /// The token-aware field editor, made on first use and then shared — one per window, which is what
     /// a field editor is.
     private lazy var tokenEditor = TokenFieldEditor()

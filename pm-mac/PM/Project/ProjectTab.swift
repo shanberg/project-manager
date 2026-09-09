@@ -26,7 +26,7 @@ struct ProjectTab: Codable, Equatable, Identifiable {
 }
 
 /// What a tab shows.
-enum ProjectTabView: Codable, Equatable {
+enum ProjectTabView: Codable, Equatable, Hashable {
     /// The project's notes and tasks — the window's original shape, and still the default.
     case notes
     /// The project's board, whole or narrowed to a part of it.
@@ -34,35 +34,23 @@ enum ProjectTabView: Codable, Equatable {
 
     var isBoard: Bool { if case .board = self { return true }; return false }
 
-    /// What a tab *becomes*, given what its board is now showing. Nil to leave it where it is.
+    /// The workspace this is a view of, or nil for the three tabs that are not one.
     ///
-    /// **This is the renderer switch.** Notes and board were two shapes with a two-position control
-    /// between them; they are one board at two scales, so travelling between them is the board's own
-    /// vocabulary — leave the tiled view to come out (⌘−, the readout's ✕, ⌘↩), tile the project's own
-    /// card to go back in — and the tab renames itself on arrival rather than being *told* by a button
-    /// which of two things it is. Nothing else has to know how you got there, which is the whole gain:
-    /// a workspace of exactly the project's card is the notes however it was built.
-    ///
-    /// Only the three views with no identity of their own move. A frame tab stays on its frame and a
-    /// named workspace stays on its name — both point at something that goes on existing whatever is
-    /// tiled at the moment, and both should reopen at it.
-    ///
-    /// Here rather than beside the caller so it can be tested without a board, a store or a window;
-    /// see `ProjectSplitViewController.reconcileTabsWithTheirBoards`, which supplies the two facts.
-    func following(workspaceName: String?, showingProjectNoteAlone: Bool) -> ProjectTabView? {
-        switch self {
-        case .notes, .board(.note), .board(.whole):
-            // Naming outranks the rest: a workspace made out of one of these is a workspace, and it is
-            // the only thing here worth keeping a pin on.
-            if let workspaceName { return .board(.workspace(workspaceName)) }
-            return showingProjectNoteAlone ? .notes : .board(.whole)
-        case .board(.frame):
-            return workspaceName.map { .board(.workspace($0)) }
-        case .board(.workspace(let pinned)):
-            guard workspaceName != pinned else { return nil }
-            return .board(workspaceName.map(CanvasFocus.workspace) ?? .whole)
-        }
+    /// **Total over workspaces, because every workspace has a name.** It used to be able to answer nil
+    /// for a board that was tiled — the untitled workspace — and that case is gone: a set of tiles is a
+    /// workspace, a workspace has a name, and the name is what a tab points at. See
+    /// `ProjectTabSet.include(workspaces:)`.
+    var workspaceName: String? {
+        if case .board(.workspace(let name)) = self { return name }
+        return nil
     }
+
+    /// The canvas: the board itself, untiled.
+    ///
+    /// **Every window has exactly one of these and it is always the first tab** — see
+    /// `ProjectTabSet`. It is the view a workspace is a narrowing *of*, so it is the one tab that
+    /// cannot be closed, cannot be dragged out of first place, and is never tiled.
+    var isCanvas: Bool { self == .board(.whole) }
 }
 
 /// Which part of a board a tab is pinned to.
@@ -75,8 +63,9 @@ enum ProjectTabView: Codable, Equatable {
 /// A frame has a position and lives in the `.canvas`; a workspace has no position at all and never
 /// touches the file. What they have in common is being a named set of cards, and that is the entire
 /// overlap.
-enum CanvasFocus: Codable, Equatable {
-    /// The whole board, as the file describes it.
+enum CanvasFocus: Codable, Equatable, Hashable {
+    /// The whole board, as the file describes it — **the canvas**, and the one focus that is never
+    /// tiled. Every window has exactly one tab on it, first in the row. See `ProjectTabView.isCanvas`.
     case whole
     /// A frame, by node id. The id rather than the label, because a frame you rename is the same frame
     /// and a tab pointed at it should follow rather than break.
@@ -120,21 +109,48 @@ struct ProjectTabSet: Codable, Equatable {
     /// The tab showing. Held as an id rather than an index for the reason `ProjectTab.id` exists.
     private(set) var selectedID: String
 
-    /// A window that has never been given tabs: one, showing `view`.
+    /// A window that has never been given tabs: the canvas, plus `view` if that is something else.
     init(_ view: ProjectTabView = .notes) {
+        let canvas = ProjectTab(.board(.whole))
+        tabs = [canvas]
+        selectedID = canvas.id
+        guard !view.isCanvas else { return }
         let tab = ProjectTab(view)
-        tabs = [tab]
+        tabs.append(tab)
         selectedID = tab.id
     }
 
-    /// Rebuilt from storage. A stored set that has somehow lost its tabs, or whose selection names a
-    /// tab that isn't there, is repaired rather than trusted — a window with no tab is a window with
-    /// nothing in it, and there is no version of that worth showing somebody.
+    /// Rebuilt from storage, and **made to hold the canvas** — which a row written before the canvas
+    /// was permanent will not.
+    ///
+    /// A stored set that has lost its tabs, or whose selection names a tab that isn't there, is
+    /// repaired rather than trusted: a window with no tab is a window with nothing in it, and there is
+    /// no version of that worth showing somebody.
     init(tabs: [ProjectTab], selectedID: String?) {
-        guard !tabs.isEmpty else { self = ProjectTabSet(); return }
         self.tabs = tabs
-        self.selectedID = tabs.contains { $0.id == selectedID } ? selectedID! : tabs[0].id
+        self.selectedID = selectedID ?? ""
+        seatTheCanvas()
+        self.selectedID = self.tabs.contains { $0.id == selectedID } ? selectedID! : self.tabs[0].id
     }
+
+    /// Put the canvas at the head of the row, making one if there isn't one.
+    ///
+    /// **The invariant, in one place.** Every mutation that could break it — a restore from a row
+    /// written before this, a drag, a close — comes back through here rather than each re-deriving what
+    /// "first" means. A second canvas tab is dropped for §7c's reason: two chips on one thing are two
+    /// names for it.
+    private mutating func seatTheCanvas() {
+        var canvas: ProjectTab?
+        tabs = tabs.filter { tab in
+            guard tab.view.isCanvas else { return true }
+            canvas = canvas ?? tab
+            return false
+        }
+        tabs.insert(canvas ?? ProjectTab(.board(.whole)), at: 0)
+    }
+
+    /// The canvas tab, which every window has.
+    var canvasID: String { tabs[0].id }
 
     var selected: ProjectTab { tabs.first { $0.id == selectedID } ?? tabs[0] }
     var selectedIndex: Int { tabs.firstIndex { $0.id == selectedID } ?? 0 }
@@ -163,56 +179,66 @@ struct ProjectTabSet: Codable, Equatable {
         return tab
     }
 
-    /// Show `view` in the tab that is up, rather than in a new one.
+    /// **The row is the project's workspaces.** Put a chip on every one that hasn't got a chip, and
+    /// take the chip off any that has stopped existing.
     ///
-    /// What the renderer switch does. A tab is a slot, not a fixed thing: pressing Tasks while looking
-    /// at a board turns *this* view into the notes, exactly as following a link in a browser tab
-    /// changes what that tab holds. Opening another is a different gesture and has its own.
-    mutating func replaceSelected(with view: ProjectTabView) {
-        guard let index = tabs.firstIndex(where: { $0.id == selectedID }) else { return }
-        tabs[index].view = view
-    }
-
-    /// Open `view` *behind* the tab that is up, without going to it.
+    /// A tab is where a workspace lives (docs/canvas-workspaces.md §7c), and once every workspace has a
+    /// name that stops being a rule about the ones you happened to leave open and becomes the whole
+    /// correspondence: a workspace *is* a chip and a chip is a workspace. There is nothing left for a
+    /// "you closed this one" list to record, which is why the one that used to be here is gone — a
+    /// workspace you do not want is deleted, from the chip's own menu, and deleting it takes the chip.
     ///
-    /// **What ⌘Return does with the workspace it leaves.** Starting a fresh unnamed workspace does not
-    /// discard the named one you were in — it is still in the durable store, and under
-    /// docs/canvas-workspaces.md §7c the honest place for a workspace that still exists is a chip. So
-    /// the one being left keeps a tab and the fresh one keeps the pane, which is the only way round
-    /// that works: the pane in front of you is the one holding the selection ⌘Return acted on.
-    ///
-    /// Before rather than after, so the row reads in the order the two were made.
-    mutating func openBehind(_ view: ProjectTabView) {
-        openBehind(view, of: selectedID)
-    }
-
-    /// The same, behind a named tab rather than behind the one that is up — for a pane that left a
-    /// workspace while you were looking at something else.
-    mutating func openBehind(_ view: ProjectTabView, of id: String) {
-        let index = tabs.firstIndex { $0.id == id } ?? selectedIndex
-        tabs.insert(ProjectTab(view), at: index)
-    }
-
-    /// Put a chip on the row for every workspace that exists and hasn't got one, and go to `active`.
-    ///
-    /// **The row is the project's workspaces, not only the ones you happened to leave open.** A tab is
-    /// where an open workspace lives (docs/canvas-workspaces.md §7c), and that was the whole story
-    /// while a workspace could only be reached by making one. It is the wrong story on the way *in*: a
-    /// workspace you built last week, and then zoomed out of before closing the window, exists and has
-    /// no chip, so opening the project shows you none of the work you named.
-    ///
-    /// **Existing tabs keep their places and their order.** The row can be dragged into an order
-    /// (§7c) and that order is the user's; newcomers land after it, in the alphabetical order
+    /// **Existing tabs keep their places and their order.** The row can be dragged into an order (§7c)
+    /// and that order is the user's; newcomers land after it, in the alphabetical order
     /// `CanvasWorkspaces.names` hands over — which is the order you would look one up in.
-    ///
-    /// `active` is the workspace to select, if it has a tab. Nil, or a name with no chip, leaves the
-    /// selection where storage put it.
-    mutating func include(workspaces names: [String], selecting active: String? = nil) {
+    mutating func include(workspaces names: [String]) {
+        let known = Set(names)
         for name in names where first(showing: .board(.workspace(name))) == nil {
             tabs.append(ProjectTab(.board(.workspace(name))))
         }
-        guard let active, let tab = first(showing: .board(.workspace(active))) else { return }
-        selectedID = tab.id
+        // A workspace deleted in another window leaves a chip pointing at nothing. Dropped here rather
+        // than left to resolve as the whole board, which would be a second canvas chip.
+        drop { $0.view.workspaceName.map { !known.contains($0) } ?? false }
+    }
+
+    /// Take out every tab this says yes to, keeping the window on something.
+    mutating func drop(where doomed: (ProjectTab) -> Bool) {
+        let index = selectedIndex
+        tabs.removeAll(where: doomed)
+        seatTheCanvas()
+        guard !tabs.contains(where: { $0.id == selectedID }) else { return }
+        selectedID = tabs[min(index, tabs.count - 1)].id
+    }
+
+    /// Keep the first chip on each view and close the rest, reporting the ids that went.
+    ///
+    /// **Two chips on one thing are two names for it** (§7c), and `openTab` has always refused to make
+    /// a second. `retarget` cannot refuse in the same way — it is how a tab *follows* its board, and
+    /// the collision only appears afterwards: rename "Review" to "Dashboard" while Dashboard has a chip
+    /// and both chips now say Dashboard; delete a workspace two tabs were in and both land on the whole
+    /// board and both say Canvas. So the passes that retarget in bulk sweep up behind themselves here,
+    /// rather than every one of them re-deriving what a duplicate is.
+    ///
+    /// The survivor is the leftmost, because the row has an order and it is the user's (§7c) — the
+    /// chip that has been sitting in that place is the one they know. A selection on a chip that goes
+    /// moves to the survivor, so the window is still showing what it was showing.
+    @discardableResult
+    mutating func collapseDuplicates() -> [String] {
+        var survivors: [ProjectTabView: String] = [:]
+        var kept: [ProjectTab] = []
+        var closed: [String] = []
+        for tab in tabs {
+            if let survivor = survivors[tab.view] {
+                closed.append(tab.id)
+                if tab.id == selectedID { selectedID = survivor }
+            } else {
+                survivors[tab.view] = tab.id
+                kept.append(tab)
+            }
+        }
+        guard !closed.isEmpty else { return [] }
+        tabs = kept
+        return closed
     }
 
     /// The first tab showing exactly this, if one is open.
@@ -227,9 +253,10 @@ struct ProjectTabSet: Codable, Equatable {
 
     /// Point an existing tab at something else, leaving the row and the selection alone.
     ///
-    /// Not `replaceSelected`: this is how a tab *follows* the board it is holding — you named the
-    /// workspace it was showing, or ⌘Return took it out of one — rather than how a tab is sent
-    /// somewhere. See `ProjectSplitViewController.reconcileTabsWithTheirBoards`.
+    /// **One caller, and it is a rename.** A tab used to *follow* the board it was holding, which is
+    /// what this was for; §7i settled that a tab is what it is and the window changes tabs instead. A
+    /// workspace renamed is the one act where the thing a chip points at genuinely becomes something
+    /// else without the chip having moved — see `ProjectSplitViewController.renameWorkspace(named:to:)`.
     mutating func retarget(_ id: String, to view: ProjectTabView) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].view != view else {
             return
@@ -237,24 +264,43 @@ struct ProjectTabSet: Codable, Equatable {
         tabs[index].view = view
     }
 
-    /// Close a tab. The last one never closes — closing it is closing the window, which is the window's
-    /// decision and not this type's.
+    /// Close a tab, and say whether there was one to close.
+    ///
+    /// **Two kinds of tab refuse.** The canvas is the view every other one is a narrowing of, so a
+    /// window without it is a window with no way back to its own board. And a workspace's chip *is* the
+    /// workspace (docs/canvas-workspaces.md §7i): closing one would leave a named thing in the store
+    /// with nowhere to be, which is the state a "you closed this one" list used to exist to paper over.
+    /// The way to be rid of a workspace is Delete, on its own menu, and Delete takes the chip with it.
     ///
     /// Closing the tab you are looking at selects **the one to its right**, falling back to the left at
     /// the end of the row. Right rather than left because the tabs to the right are the ones you opened
     /// from here, so it is the direction you were travelling.
     @discardableResult
     mutating func close(_ id: String) -> Bool {
-        guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        guard let index = tabs.firstIndex(where: { $0.id == id }), closable(tabs[index]) else {
+            return false
+        }
         tabs.remove(at: index)
         guard id == selectedID else { return true }
         selectedID = tabs[min(index, tabs.count - 1)].id
         return true
     }
 
+    /// Whether this tab has a Close at all — see `close`.
+    func closable(_ tab: ProjectTab) -> Bool {
+        !tab.view.isCanvas && tab.view.workspaceName == nil
+    }
+
     mutating func select(_ id: String) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         selectedID = id
+    }
+
+    /// Go to the tab at `index`, or to the last one when the row is shorter than that. ⌘1…⌘9, where
+    /// ⌘9 asks for `Int.max` and means the last however many there are.
+    mutating func select(at index: Int) {
+        guard !tabs.isEmpty else { return }
+        selectedID = tabs[min(max(0, index), tabs.count - 1)].id
     }
 
     /// ⌃⇥ and ⌃⇧⇥. Wraps, because a row of tabs has no end you should be stopped at.
@@ -268,9 +314,13 @@ struct ProjectTabSet: Codable, Equatable {
     ///
     /// The same operation, spelled the same way, as `CanvasTileSession.move`: this is "that one goes
     /// *there*", which is what builds an order, rather than a swap, which only corrects one.
+    ///
+    /// **The canvas holds its place at both ends** — it cannot be dragged, and nothing can be dropped
+    /// in front of it. It is the row's fixed point, and a row whose fixed point moves is a row with two
+    /// firsts.
     mutating func move(_ id: String, to index: Int) {
-        guard let from = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let to = min(max(0, index), tabs.count - 1)
+        guard let from = tabs.firstIndex(where: { $0.id == id }), from != 0 else { return }
+        let to = min(max(1, index), tabs.count - 1)
         guard to != from else { return }
         let tab = tabs.remove(at: from)
         tabs.insert(tab, at: to)
@@ -306,17 +356,21 @@ enum ProjectTabMemory {
     static func remember(_ set: ProjectTabSet, for projectKey: String?) {
         guard let projectKey else { return }
         var all = stored()
-        // One tab on the notes is the default, so a project back in its plain shape is stored as
+        // The canvas and the notes is the default, so a project back in its plain shape is stored as
         // nothing at all rather than as a row saying "the usual".
-        if set.tabs.count == 1, set.tabs[0].view == .notes {
+        if set.tabs.count == 2, set.tabs[1].view == .notes {
             all[projectKey] = nil
         } else {
-            all[projectKey] = try? JSONEncoder().encode(Stored(tabs: set.tabs,
-                                                               selectedID: set.selectedID))
+            all[projectKey] = try? JSONEncoder().encode(
+                Stored(tabs: set.tabs, selectedID: set.selectedID))
         }
         UserDefaults.standard.set(all, forKey: defaultsKey)
     }
 
+    /// **Decodes rows written before the canvas was permanent and before `dismissed` went**, both by
+    /// ignoring what it does not know: a stored `dismissed` array is simply not read any more, and a
+    /// row with no canvas tab in it is given one by `ProjectTabSet.init(tabs:selectedID:)`. Neither is
+    /// worth a migration — the first is a list nothing can act on now, and the second is one insert.
     private struct Stored: Codable {
         var tabs: [ProjectTab]
         var selectedID: String

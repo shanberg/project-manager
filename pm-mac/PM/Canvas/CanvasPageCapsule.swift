@@ -49,7 +49,8 @@ struct CanvasPageCapsule: View {
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        HeaderCapsule(chrome: chrome) {
+        // Bare over a tiled board, with the board's own capsule — see `CanvasControlCapsule`.
+        HeaderCapsule(chrome: chrome, backed: model.tiling == nil) {
             HeaderSymbolButton(symbol: "chevron.left", help: "Back",
                                enabled: page.canGoBack, action: model.pageBack)
             HeaderSymbolButton(symbol: "chevron.right", help: "Forward",

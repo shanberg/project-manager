@@ -84,6 +84,24 @@ enum CanvasViewMemory {
         return state
     }
 
+    /// **The workspace this board was left in, read once and forgotten.**
+    ///
+    /// A carry-over, not a store. Before §7i a board could be *in* a named workspace while its tab said
+    /// `.whole`, so the one place that recorded which workspace you were in was this row — and the tab
+    /// selection, which is where §7i puts the answer, has nothing to say about a window closed before
+    /// then. So a row written by the old code is read for its name on the way in and cleared in the
+    /// same act, which is what keeps this from becoming the second store answering "which workspace was
+    /// I in" that §7h took a whole section to remove. Nothing writes the field any more; every board
+    /// answers nil exactly once and nil for ever after.
+    static func takeWorkspaceName(of url: URL) -> String? {
+        var state = of(url)
+        guard let name = state.workspaceName else { return nil }
+        state.workspaceName = nil
+        state.tiling = nil
+        remember(state, for: url)
+        return name
+    }
+
     static func remember(_ state: CanvasViewState, for url: URL) {
         var all = stored()
         let key = key(url)

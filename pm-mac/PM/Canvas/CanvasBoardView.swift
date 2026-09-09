@@ -91,21 +91,29 @@ final class CanvasBoardView: NSView {
     /// The last tiling made on this board, kept after it was left — see `CanvasViewState.lastTiling`.
     /// Tiling the same set of cards again picks this up rather than starting over.
     var lastTiling: CanvasViewState.Tiling?
-    /// The name of the workspace that is up, or nil while it is an unnamed one.
+    /// The name of the workspace that is up, or nil while this board is not in one.
     ///
-    /// Read by everything that says *which* workspace you are in — the pill, the tab chip, the tick in
-    /// the workspace menu — and by the write-through that keeps a named one up to date as you adjust
-    /// it. See `CanvasViewState.workspaceName`, and `tile(_:)` for the one act that clears it.
+    /// Read by the write-through that keeps a workspace level with the screen as you adjust it. **Never
+    /// nil while `tiling` is set, in a board inside a window**: every set of tiles is a workspace and
+    /// every workspace has a name (docs/canvas-workspaces.md §7i), so the nil case is a board that is
+    /// not tiled — or one of the two tilings that are not workspaces, the project-note view and a board
+    /// with no window around it to keep a workspace for it.
     var workspaceName: String?
 
-    /// **The workspace on screen has stopped being the one you were in, and that one still exists.**
+    /// **⌘↩ on a board that is not tiled: this tiling is a workspace, so it wants a tab.**
     ///
-    /// Sent with the name being left, by the two acts that leave a named workspace behind rather than
-    /// changing it: ⌘Return, which starts a fresh unnamed one (`tile(_:)`), and duplicating. The window
-    /// answers by giving the one being left a tab of its own, so it stays on screen a click away
-    /// instead of only in a menu — docs/canvas-workspaces.md §7c. A board with no window around it
-    /// drops it, which is right: there is nowhere for a second view to go.
-    var onLeftWorkspace: (String) -> Void = { _ in }
+    /// Handed the tiling it is about to lay out, before it lays it out. The window names it, keeps it,
+    /// and opens it in a tab of its own — see `ProjectSplitViewController.tileAsWorkspace`. Answering
+    /// true means it has been dealt with and this board should stay as it is; false is a board with no
+    /// window to keep anything, which tiles itself and stays unnamed.
+    var onTileAsWorkspace: (CanvasViewState.Tiling) -> Bool = { _ in false }
+
+    /// **Show the canvas** — ⌘−, and ⌘↩ with nothing left to narrow.
+    ///
+    /// A workspace is a place, and the canvas is another place, so leaving one is going to the other
+    /// rather than undoing anything. The board keeps its tiles; the window changes tabs. See
+    /// `ProjectSplitViewController.goToCanvas`.
+    var onGoToCanvas: () -> Void = {}
 
     /// Open part of this board as a tab of the window it is in — see `CanvasPaneController.tabModel`,
     /// which says why these are no longer optional.
@@ -135,6 +143,18 @@ final class CanvasBoardView: NSView {
             guard (oldValue == nil) != (tiling == nil) else { return }
             scrollView?.canvasScroll?.showsScrollers(!isTiled)
             watchTileClicks(isTiled)
+            // The ground goes with the mode — see `ground`. The scroll view paints the same colour
+            // behind an elastic overscroll, so it has to be told too or a rubber-banded tiling flashes
+            // the board's grey at the edges.
+            scrollView?.backgroundColor = ground
+            needsDisplay = true
+            // Every card changes vocabulary at once: height and a card's hairline on the way out, a
+            // tile's near-invisible edge and its two radii on the way in.
+            for view in nodeViews.values {
+                view.refreshElevation()
+                view.needsDisplay = true
+                view.needsLayout = true
+            }
         }
     }
 
@@ -512,6 +532,10 @@ final class CanvasBoardView: NSView {
             // other thirty-seven and rebuild them on the way out — which for a board of web cards means
             // reloading every page you were watching, as the price of having glanced at six of them.
             view.isHidden = !layout.shows(id)
+            // The arrangement may have handed this tile different corners — a tile moved from the end
+            // of a stack into the middle keeps its size and loses two of them. Cheap when it hasn't,
+            // which is every frame of a card being dragged around a board.
+            view.refreshChrome()
             if let reordering, reordering.id == id {
                 view.frame = viewRect(reordering.frame)
                 continue
@@ -813,8 +837,12 @@ final class CanvasBoardView: NSView {
 
     // MARK: Drawing what isn't a card
 
+    /// What this board is painted with. A tiling sits on a deeper ground than a board does, which is
+    /// what buys the near-invisible tile edge and the four-point gap — see `CanvasPalette.tileGround`.
+    var ground: NSColor { isTiled ? CanvasPalette.tileGround : CanvasPalette.board }
+
     override func draw(_ dirty: NSRect) {
-        CanvasPalette.board.setFill()
+        ground.setFill()
         dirty.fill()
         drawGrid(in: dirty)
         // Frames and lines are statements about where cards are, and a tiled view has moved them. A line

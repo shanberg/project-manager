@@ -104,16 +104,6 @@ extension AppDelegate: NSMenuItemValidation {
 
     // MARK: View
 
-    @objc func setTasksMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String else { return }
-        UserDefaults.standard.set(raw, forKey: "PMPanelTasksMode")
-    }
-
-    @objc func toggleNotes() {
-        let key = "PMPanelDetailsExpanded"
-        UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
-    }
-
     /// Show or hide the focus panel — the same toggle as ⌃⌥P and `pmpanel://toggle`, so the menu item
     /// and the global shortcut can't drift apart.
     @objc func toggleFocusPanel() {
@@ -157,10 +147,6 @@ extension AppDelegate: NSMenuItemValidation {
     /// chain validate themselves there.
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(setTasksMode(_:)):
-            let current = UserDefaults.standard.string(forKey: "PMPanelTasksMode") ?? TasksMode.incomplete.rawValue
-            item.state = (item.representedObject as? String) == current ? .on : .off
-            return store.projectName != nil
         case #selector(setColorMode(_:)):
             let current = UserDefaults.standard.string(forKey: "PMPanelColorMode") ?? AppColorMode.system.rawValue
             item.state = (item.representedObject as? String) == current ? .on : .off
@@ -170,9 +156,6 @@ extension AppDelegate: NSMenuItemValidation {
             // away from it, and a title that only updates when the menu opens would read as stale.
             item.state = FocusPanelController.shared.isVisible ? .on : .off
             return true
-        case #selector(toggleNotes):
-            item.state = UserDefaults.standard.bool(forKey: "PMPanelDetailsExpanded") ? .on : .off
-            return store.projectName != nil
         case #selector(toggleProjectCodes):
             item.state = ProjectCodes.areShown ? .on : .off
             return true

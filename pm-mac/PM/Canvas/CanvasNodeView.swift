@@ -91,7 +91,25 @@ class CanvasNodeView: NSView {
     /// opaque background out to its own square edges, and a square white rectangle laid over a rounded
     /// white card is invisible in light appearance and obvious in dark, which is exactly the kind of
     /// bug that survives a long time.
-    private let clip = NSView()
+    private let clip = FlippedClipView()
+
+    /// The clip, flipped like everything else in a card.
+    ///
+    /// **It has to agree with `CanvasNodeView` about which way is up**, and until it was masked it
+    /// never had to: a `cornerRadius` is the same number at all four corners, so nothing in a card
+    /// noticed that this one view disagreed with its parent. A path does notice. AppKit puts an
+    /// unflipped view inside a flipped one by setting `isGeometryFlipped` on its backing layer, which
+    /// takes the mask's geometry with it — so a shape written with `minY` as the top arrived with its
+    /// top and bottom corners swapped, and the master tile wore its soft outer corner against the
+    /// divider instead of at the frame.
+    ///
+    /// Flipping the view rather than mirroring the path, because one convention through the whole card
+    /// is a thing you can hold; two, with a flip somewhere in the middle, is the bug waiting to be
+    /// reintroduced by the next person to draw into this view. Its content is positioned by
+    /// constraints — see `setContent` — which don't care either way.
+    private final class FlippedClipView: NSView {
+        override var isFlipped: Bool { true }
+    }
 
     /// The card's border, and so the width the clip is inset by.
     static let hairline: Double = 1
@@ -224,15 +242,78 @@ class CanvasNodeView: NSView {
         min(14, max(8, min(frame.width, frame.height) * 0.025))
     }
 
+    /// The corners this view is drawn with: one radius on a board, two in a tiled view.
+    ///
+    /// Asked of the board rather than stored, because the answer changes when the *arrangement* changes
+    /// and not when this card does — a tile dragged from the end of a stack to the middle keeps
+    /// everything about itself and loses two outer corners.
+    var chromeRadii: CanvasTiling.Radii {
+        guard board.isTiled, let corners = board.tileCorners(node.id) else {
+            return .uniform(cornerRadius)
+        }
+        return corners.radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+    }
+
+    /// The hairline this view wears. See `CanvasPalette.tileBorderKey` for why a tiled view says
+    /// "this one" with its edge where a board says it with height.
+    private var chromeBorder: NSColor {
+        guard board.isTiled else { return CanvasPalette.cardBorder }
+        let key = isEngaged || board.selection.contains(node.id)
+        return key ? CanvasPalette.tileBorderKey : CanvasPalette.tileBorder
+    }
+
+    /// The corners this view was last told to wear, so an arrangement that reshaped one tile doesn't
+    /// repaint the other five.
+    private var drawnRadii: CanvasTiling.Radii?
+
+    /// The layout changed and may have changed this view's shape with it. Called for every card on
+    /// every pass of `CanvasBoardView.layoutNodeViews`, so the cheap answer has to be the common one.
+    func refreshChrome() {
+        let radii = chromeRadii
+        guard radii != drawnRadii else { return }
+        drawnRadii = radii
+        needsLayout = true
+        needsDisplay = true
+    }
+
     override func draw(_ dirty: NSRect) {
-        let radius = cornerRadius
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-                                xRadius: radius, yRadius: radius)
+        let path = CanvasNodeView.path(in: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                       radii: chromeRadii.inset(by: 0.5))
         CanvasPalette.card.setFill()
         path.fill()
-        CanvasPalette.cardBorder.setStroke()
+        chromeBorder.setStroke()
         path.lineWidth = 1
         path.stroke()
+    }
+
+    /// A rounded rectangle whose four corners can differ.
+    ///
+    /// `NSBezierPath(roundedRect:xRadius:yRadius:)` takes one radius, and `CALayer` takes one radius
+    /// and a set of corners to apply it to, so neither can draw a tile that is tight against its
+    /// neighbours and soft at the frame. Tangent arcs can: each one is "come in along this edge, turn
+    /// towards the next corner with this radius", which is the corner as it is actually specified.
+    ///
+    /// **Clockwise from the top left, in a flipped view** — every caller here draws in one, so `minY`
+    /// is the top and `Radii.topLeft` belongs to `(minX, minY)`.
+    static func path(in rect: NSRect, radii: CanvasTiling.Radii) -> NSBezierPath {
+        let path = NSBezierPath()
+        let topLeft = NSPoint(x: rect.minX, y: rect.minY)
+        let topRight = NSPoint(x: rect.maxX, y: rect.minY)
+        let bottomRight = NSPoint(x: rect.maxX, y: rect.maxY)
+        let bottomLeft = NSPoint(x: rect.minX, y: rect.maxY)
+        // A radius larger than half the side it turns on would overshoot the corner after it; AppKit
+        // clamps silently and the shape stops being symmetric. A tile squeezed to `minimumTile` is
+        // 64pt and the largest radius here is 9, so this only ever bites on a degenerate frame.
+        let limit = min(rect.width, rect.height) / 2
+        func hold(_ radius: Double) -> CGFloat { CGFloat(max(0, min(radius, limit))) }
+
+        path.move(to: NSPoint(x: rect.minX + hold(radii.topLeft), y: rect.minY))
+        path.appendArc(from: topRight, to: bottomRight, radius: hold(radii.topRight))
+        path.appendArc(from: bottomRight, to: bottomLeft, radius: hold(radii.bottomRight))
+        path.appendArc(from: bottomLeft, to: topLeft, radius: hold(radii.bottomLeft))
+        path.appendArc(from: topLeft, to: topRight, radius: hold(radii.topLeft))
+        path.close()
+        return path
     }
 
     /// The corner and the shadow both follow the card's size, so both are set where a size change is
@@ -245,16 +326,40 @@ class CanvasNodeView: NSView {
     /// the clip did not, and it is the one that has to change now.
     override func layout() {
         super.layout()
-        let radius = cornerRadius
         // Concentric: a curve inset from another curve keeps a constant gap only when its radius is
         // reduced by that inset. Equal radii would leave the border pinching shut at the corners.
-        clip.layer?.cornerRadius = max(0, radius - CanvasNodeView.hairline)
-        layer?.cornerRadius = radius
+        let radii = chromeRadii
+        let inside = radii.inset(by: CanvasNodeView.hairline)
+
+        if radii.isUniform {
+            // A card, and the cheap path: the layer rounds itself, keeps `.continuous` — which a mask
+            // cut from a path cannot have — and costs nothing to resize.
+            clip.layer?.mask = nil
+            clipMask = nil
+            clip.layer?.cornerRadius = inside.topLeft
+        } else {
+            // A tile with a seam on one side and the frame on the other. `cornerRadius` is one number
+            // and `maskedCorners` only turns that one number on and off, so the only way to hold two
+            // radii at once is to cut the shape out of the clip.
+            clip.layer?.cornerRadius = 0
+            let mask = clipMask ?? CAShapeLayer()
+            clipMask = mask
+            mask.frame = clip.bounds
+            mask.path = CanvasNodeView.path(in: clip.bounds, radii: inside).cgPath
+            if clip.layer?.mask !== mask { clip.layer?.mask = mask }
+        }
+
+        // Inert while `masksToBounds` is false and `shadowPath` is explicit — both true here — but kept
+        // in step so nothing that starts reading it later finds a stale number.
+        layer?.cornerRadius = radii.topLeft
         // Given explicitly so the shadow follows the card's own corner rather than being inferred, and
         // so it is right on the frame the card is resized to rather than the frame it was drawn at.
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius,
-                                   transform: nil)
+        layer?.shadowPath = CanvasNodeView.path(in: bounds, radii: radii).cgPath
     }
+
+    /// The shape cut out of `clip` when the four corners don't agree. Held so a resize can move one
+    /// layer rather than build one — `layout` runs on every frame of a divider drag.
+    private var clipMask: CAShapeLayer?
 
     // MARK: Lifecycle the board drives
 
@@ -396,10 +501,20 @@ class CanvasNodeView: NSView {
     func refreshElevation() {
         let picked = board.selection.contains(node.id)
         let lift: (opacity: Float, radius: Double, drop: Double)
-        // A tiled view answers with height whatever the mode is. The ring and the grips are gone there —
-        // a tile's size isn't yours to set — so height is all that is left to say which tile the arrows
-        // and Return are about, and a tiled board in connect mode would otherwise say nothing at all.
-        switch (board.isTiled ? .view : board.mode, picked, isEngaged) {
+        // **A tiled view has no height at all**, and that is the mode's whole claim: a tile is a pane
+        // let into the ground rather than paper on it, and paper is the only thing that casts a shadow.
+        // It used to answer with height whatever the mode was, on the grounds that the ring and the
+        // grips are gone in a tiling — a tile's size isn't yours to set — so height was all that was
+        // left to say which tile the arrows and Return are about. The edge says it now, which is a
+        // thing a pane can do; see `CanvasPalette.tileBorderKey`.
+        //
+        // Redrawn as well as re-lifted, because in a tiling the answer is *in* the drawing.
+        if board.isTiled {
+            layer?.shadowOpacity = 0
+            needsDisplay = true
+            return
+        }
+        switch (board.mode, picked, isEngaged) {
         case (.view, _, true): lift = (0.30, 17, 7)
         case (.view, true, _): lift = (0.22, 11, 4)
         default: lift = (0.13, 5, 1.5)

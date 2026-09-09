@@ -274,15 +274,15 @@ extension CanvasBoardView {
         // beside.
         if isTiled {
             // The boundary first, and that is not a new precedence — it has always been asked before
-            // the card, because `dividerReach` is as wide as the whole gap and so laps 4.5pt onto the
-            // tiles either side of it. A right-click in that strip is about the pair, not about one.
+            // the card, because `dividerReach` is wider than the gap and so laps onto the tiles either
+            // side of it. A right-click in that strip is about the pair, not about one.
             if let divider = tileDivider(at: where_) {
                 menuDivider = divider
                 buildDividerMenu(menu, divider)
                 return menu
             }
             // **Any part of a tile, not only its handlebar.** The tile block used to hang off the
-            // handlebar alone — a 3.5pt bar out in the gap, which you had to know was a menu before you
+            // handlebar alone — a hairline bar out in the gap, which you had to know was a menu before you
             // could find the menu. The handlebar's whole job is the drag; every command a tile has is
             // here, on the tile itself, and in the View menu. Asked of the card first and the bar
             // second, so the gap the bar sits in still answers for the tile it belongs to.
@@ -441,6 +441,11 @@ extension CanvasBoardView {
             add(menu, "Edit Text\u{2026}", #selector(editSelected))
         case .group:
             add(menu, "Rename Frame…", #selector(renameSelectedFrame))
+            // **The second way to get a second tab**, and it had no menu item: this command has existed
+            // since tabs did, is named in two places as one of the two ways a tab gets made, and had
+            // no callers anywhere in the app. A frame is a named region of the board, which is the
+            // thing you most want beside the board — see `ProjectTab`.
+            add(menu, "Open Frame in New Tab", #selector(openSelectedFrameInTab))
         }
 
         if includingTiling { addTiling(menu) }
@@ -586,7 +591,7 @@ extension CanvasBoardView {
         }
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
-        add(menu, "Name This Workspace\u{2026}", #selector(saveTilingAsWorkspace(_:)))
+        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
     }
 
     /// What a right-click on a *tile* can say about the tile, as opposed to about the card in it.
@@ -629,7 +634,7 @@ extension CanvasBoardView {
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
 
-        add(menu, "Name This Workspace\u{2026}", #selector(saveTilingAsWorkspace(_:)))
+        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
 
         menu.addItem(.separator())
         add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
@@ -678,7 +683,12 @@ extension CanvasBoardView {
         removeFromTiling(id)
     }
 
-    @objc func leaveTilingCommand(_ sender: Any?) { leaveTiling(animated: true) }
+    /// **Show the canvas** — the way out of a tiled view, wherever a menu offers one.
+    ///
+    /// It untiled the board and it does not any more. A workspace is a place the window can be in
+    /// (docs/canvas-workspaces.md §7i), so leaving it is going to the other place — the canvas tab —
+    /// and the tiles stay exactly as they are behind you.
+    @objc func goToCanvasCommand(_ sender: Any?) { onGoToCanvas() }
 
     private func pinTitle(_ id: String, side: String) -> String {
         "\(isTilePinned(id) ? "Unpin" : "Pin") \(side) Tile"
@@ -781,8 +791,8 @@ extension CanvasBoardView {
     ///
     /// Skipped when ⌘↩ *is* already the way out, so the menu never says it twice.
     private func addLeaveTiling(_ menu: NSMenu) {
-        guard isTiled, tileCommandTitle != "Leave Tiled View" else { return }
-        add(menu, "Leave Tiled View", #selector(leaveTilingCommand(_:)))
+        guard isTiled, tileCommandTitle != "Show Canvas" else { return }
+        add(menu, "Show Canvas", #selector(goToCanvasCommand(_:)))
     }
 
     @discardableResult
@@ -1332,32 +1342,9 @@ extension CanvasBoardView {
     }
 
     /// Open the selected frame as a tab of its own — see `ProjectTab`.
-    @objc private func openSelectedFrameInTab() {
+    @objc func openSelectedFrameInTab() {
         guard let id = selection.first, document.node(id: id)?.isGroup == true else { return }
         onOpenInTab(.frame(id))
-    }
-
-    /// Give the workspace that is up a name, which is what keeps it.
-    ///
-    /// **Not a save, and the wording says so.** A tiling is already a workspace the moment it exists —
-    /// it is just an unnamed one, living in the volatile `CanvasViewMemory`. Naming it promotes it into
-    /// `CanvasWorkspaces`, which is the durable store; nothing is copied and there is no second thing
-    /// afterwards. That is the whole of "ephemeral unless named" (docs/canvas-workspaces.md §7).
-    ///
-    /// Named on the way in rather than kept anonymously and named later: the name is the whole of a
-    /// workspace's identity — there is nothing else to point at — so there is no version of this that
-    /// can be deferred.
-    /// **One command, retitled**, on `tileCommandTitle`'s pattern: a workspace that already has a name
-    /// cannot be named again, and what you want from the item there is to change the name it has. The
-    /// alternative was letting this run on a named workspace, where it would quietly leave the old one
-    /// behind and put you in a second — which is a duplicate, and duplicating deserves to be asked for
-    /// rather than arrived at by picking the wrong item.
-    @objc func saveTilingAsWorkspace(_ sender: Any?) {
-        guard workspaceName == nil else { return renameWorkspace(sender) }
-        guard let name = askForWorkspaceName(titled: "Name this workspace",
-                                             seed: suggestedWorkspaceName)
-        else { return }
-        onSaveWorkspace(name)
     }
 
     /// Rename the workspace that is up.
@@ -1404,22 +1391,6 @@ extension CanvasBoardView {
         onDuplicateWorkspace(name)
     }
 
-    /// One field, one alert — see `WorkspaceNamePrompt`, which the window shares.
-    private func askForWorkspaceName(titled title: String, seed: String) -> String? {
-        WorkspaceNamePrompt.run(titled: title, seed: seed)
-    }
-
-    /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
-    /// description of what you are keeping and a name you would never have to think of.
-    ///
-    /// The *arrangement* — grid or master-and-stack — because that is the one word here that still
-    /// means the layout algorithm and nothing else. It is the third thing that used to wear "workspace"
-    /// in this menu, and it kept its own name by being the only one that was already using it correctly.
-    private var suggestedWorkspaceName: String {
-        guard let tiling else { return "Workspace" }
-        return "\(tiling.arrangement.title), \(tiling.ids.count)"
-    }
-
     @objc private func renameSelectedFrame() {
         guard let id = selection.first,
               case .group(let label, let background, let style)? = document.node(id: id)?.content
@@ -1460,15 +1431,24 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         scrollView?.canvasScroll?.zoom(by: 1.25)
     }
 
-    /// **And out of the notes, to the board.**
+    /// **And out of any workspace, to the board.**
     ///
     /// A project's notes are its own card tiled alone, so the thing one step further out from them is
     /// the board — which is exactly what ⌘− means everywhere else, said about a workspace instead of a
-    /// plane. It costs nothing to say it here: the card is a file card and does not zoom its content,
-    /// and a tiled board's own zoom is fixed, so this was the one view where the key did nothing at all.
+    /// plane. That argument was written for the note view and was never about the note view: a tiling
+    /// of six cards is a workspace too, and the board is one step further out from it in exactly the
+    /// same sense.
+    ///
+    /// It costs nothing to say it for all of them, because a tiled board's own zoom is fixed — so this
+    /// was every tiled view where the key did nothing at all, not just one of them. And it buys the
+    /// thing a tiled view most needed: **a way out that is always a keystroke.** ⌘↩ is the way out only
+    /// when there is nothing left to narrow to, which stops being true the moment you click a tile
+    /// (a click selects it, so ⌘↩ then means "fill the window with this one"); Escape unwinds the
+    /// drill-in and deliberately stops at the root; and the pill's ✕ needs a pointer. See `untile`
+    /// and `leaveTiling`.
     @objc func zoomOut(_ sender: Any?) {
         guard !zoomEngagedCard(by: -1) else { return }
-        guard !isProjectNoteView else { return leaveTiling(animated: true) }
+        guard !isTiled else { return onGoToCanvas() }
         scrollView?.canvasScroll?.zoom(by: 1 / 1.25)
     }
 
@@ -1587,12 +1567,6 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // back out. Only a board with nothing on it has nothing for it to mean.
             (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
-        case #selector(saveTilingAsWorkspace(_:)):
-            // Named for what it will actually do — see the command, which is one act under two words.
-            (item as? NSMenuItem)?.title = workspaceName.map { "Rename “\($0)”\u{2026}" }
-                ?? "Name This Workspace\u{2026}"
-            // Something to keep: a board that has never been tiled has no workspace to name.
-            return tilingMemory != nil && !isProjectNoteView
         case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)),
              #selector(duplicateWorkspace(_:)):
             // All three act on the workspace you are in, so all three want one with a name. Retitled
@@ -1688,7 +1662,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // item out altogether: a grid has no master, and the master is already the master.
             guard let id = focusedTile, tiling?.arrangement == .masterStack else { return false }
             return tiling?.ids.first != id
-        case #selector(leaveTilingCommand(_:)):
+        case #selector(goToCanvasCommand(_:)):
             return isTiled
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
@@ -1698,9 +1672,9 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // card and not the board — see `zoomIn`.
             return !isTiled || zoomableEngagedCard != nil
         case #selector(zoomOut(_:)):
-            // And one more place: the note view, where zooming out of a workspace of one card is the
-            // board. See `zoomOut`.
-            return !isTiled || zoomableEngagedCard != nil || isProjectNoteView
+            // Live everywhere, unlike its siblings: in a tiled view zooming out of a workspace is the
+            // board, which is the one thing ⌘− can always mean here. See `zoomOut`.
+            return true
         case #selector(zoomToFit(_:)):
             // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
             // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.

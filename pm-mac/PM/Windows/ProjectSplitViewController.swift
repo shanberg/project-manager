@@ -330,14 +330,12 @@ final class ProjectSplitViewController: NSSplitViewController {
             onRendererChanged?()
         }
         tabModel.openNotes = { [weak self] in self?.openTab(.notes) }
-        tabModel.openBoard = { [weak self] in self?.openTab(.board(.whole)) }
+        tabModel.openBoard = { [weak self] in self?.goToCanvas() }
         tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
         tabModel.openWorkspace = { [weak self] name in self?.openTab(.board(.workspace(name))) }
-        tabModel.leaveTiling = { [weak self] in self?.canvasPane?.leaveTiling() }
+        tabModel.goToCanvas = { [weak self] in self?.goToCanvas() }
+        tabModel.tileAsWorkspace = { [weak self] tiling in self?.tileAsWorkspace(tiling) ?? false }
         tabModel.selectWorkspace = { [weak self] name in self?.selectWorkspace(name) ?? false }
-        tabModel.nameWorkspace = { [weak self] id in
-            (self?.contentPane.content(for: id) as? CanvasPaneController)?.nameWorkspace()
-        }
         tabModel.renameWorkspace = { [weak self] name in self?.renameWorkspace(named: name) }
         tabModel.duplicateWorkspace = { [weak self] name in self?.duplicateWorkspace(named: name) }
         tabModel.deleteWorkspace = { [weak self] name in self?.deleteWorkspace(named: name) }
@@ -359,20 +357,17 @@ final class ProjectSplitViewController: NSSplitViewController {
         applySelectedTab()
     }
 
-    /// Show this tab in the same tab, rather than in a new one — what the renderer switch does.
-    func replaceSelected(with view: ProjectTabView) {
-        guard tabs.selected.view != view else { return }
-        // The old content goes: a tab that has become the notes is not holding a board any more, and
-        // keeping one mounted for a tab that no longer names it is a renderer nobody can reach.
-        contentPane.drop(tab: tabs.selectedID)
-        tabs.replaceSelected(with: view)
-        applySelectedTab()
-    }
-
     /// ⌃⇥ / ⌃⇧⇥.
     func cycleTabs(by step: Int) {
         guard tabs.tabs.count > 1 else { return }
         tabs.selectNext(by: step)
+        applySelectedTab()
+    }
+
+    /// ⌘1…⌘9 — see `ProjectWindowController.selectProjectTabByIndex`. `.max` is "the last one".
+    func selectTab(at index: Int) {
+        guard tabs.tabs.count > 1 else { return }
+        tabs.select(at: index)
         applySelectedTab()
     }
 
@@ -470,15 +465,6 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
         pane.focus = focus
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
-        // ⌘Return started a fresh workspace, or a duplicate did — either way the named one it left is
-        // still in the store and now keeps a chip, so it is a click away instead of a menu away. The
-        // pane in front of you is the one that becomes the new thing, because it is the one holding
-        // the selection the command acted on; the tab for what it left is made behind it.
-        pane.onLeftWorkspace = { [weak self] name in
-            guard let self else { return }
-            tabs.openBehind(.board(.workspace(name)))
-            refreshTabModel()
-        }
         return pane
     }
 
@@ -533,115 +519,71 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// a frame's label is the frame's, not the tab's — so a frame renamed in Obsidian renames the tab
     /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
     func refreshTabModel() {
-        let selectedChanged = reconcileTabsWithTheirBoards()
-        // Which workspace this board was most recently in, so opening the project comes back to it.
-        // Here because this is the one funnel both ways of arriving in a workspace pass through —
-        // clicking its chip, and naming the one you just built.
-        if case .board(.workspace(let name)) = tabs.selected.view, let url = canvasSource().url {
-            CanvasWorkspaces.markUsed(name, of: url)
-        }
         let board = canvasPane
         tabModel.items = tabs.tabs.map { tab in
-            // Its own board, not the one on screen: a tab tiled in the background still says so, and
-            // asking the visible pane for every tab's state would put one tab's tiling on all of them.
-            let pane = contentPane.content(for: tab.id) as? CanvasPaneController
-            let isTiled = pane?.tilingSummary != nil
             switch tab.view {
-            case .notes:
-                return ProjectTabItem(id: tab.id, name: "Notes")
             case .board(.whole):
-                // Tiled and unnamed is the *untitled workspace*, and the chip says so in the words the
-                // menu uses — which is how "ephemeral unless named" stops being merely true and
-                // becomes something on screen. Untiled, it is the board, and the board is not a
-                // workspace: a workspace is a set of tiles (docs/canvas-workspaces.md §7).
-                guard isTiled else {
-                    return ProjectTabItem(id: tab.id, name: "Canvas")
-                }
-                return ProjectTabItem(id: tab.id, name: "Untitled", isWorkspace: true)
-            case .board(.note):
-                // Nothing opens one — `onOpenInTab` sends the note to a `.notes` tab, which is what a
-                // notes tab is. Drawn the same either way, so a stored tab from some future that does
-                // open one still says what it is.
+                // The canvas, drawn as a glyph. It has no name because it is not one of the places —
+                // it is the board the places are places *in*. See `ProjectTabItem.isCanvas`.
+                return ProjectTabItem(id: tab.id, name: "Canvas", isCanvas: true, closable: false)
+            case .notes, .board(.note):
+                // Nothing opens a `.note` tab — `onOpenInTab` sends the note to a `.notes` tab, which
+                // is what a notes tab is. Drawn the same either way, so a stored tab from some future
+                // that does open one still says what it is.
                 return ProjectTabItem(id: tab.id, name: "Notes")
             case .board(.frame(let node)):
-                // A frame you have tiled is an unnamed workspace made out of it, so the chip offers to
-                // name it — while still saying which frame you are in, because that is where you are.
-                return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
-                                      isWorkspace: isTiled)
+                return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame")
             case .board(.workspace(let name)):
-                return ProjectTabItem(id: tab.id, name: name, isWorkspace: true, workspaceName: name)
+                // A workspace's chip is the workspace (§7i), so it does not close — the way to be rid
+                // of one is Delete, on this chip's own menu.
+                return ProjectTabItem(id: tab.id, name: name, workspaceName: name, closable: false)
             }
-        }
-        // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes
-        // it back when the bar goes away — for every board in the window, not only the visible one,
-        // since a background tab's pill is what you see the instant you switch to it.
-        for tab in tabs.tabs {
-            guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController else { continue }
-            // **On the notes too, now.** It was off there because "1/43" read as a fact about how the
-            // app draws your notes rather than about the project, and because its ✕ would have left a
-            // tab called "Notes" showing the whole board. The second objection is what the first one
-            // rested on, and it went with the switch: leaving *renames the chip*, so the readout is no
-            // longer a stray control — it is the only thing on screen saying this project has a board
-            // and the way out to it, which is exactly the pair the switch used to be.
-            pane.header.showsTilingSummary = !tabs.showsBar
-            // And the list in its readout's menu, which another tab's chip may have just changed.
-            pane.refreshWorkspaceLists()
         }
         tabModel.selectedID = tabs.selectedID
         tabModel.frames = board?.frames() ?? []
-        tabModel.workspaces = board?.workspaceNames() ?? []
-        // Last, and only when it happened: the tab in front of you became something else without
-        // anybody switching to it — you zoomed out of your notes — so the window has a different width
-        // limit to apply and a different row to store.
-        if selectedChanged { onRendererChanged?() }
     }
 
     // MARK: The workspaces this window has open
 
-    /// **A tab follows the board it is holding.**
+    /// **Show the canvas** — the pill's ✕, ⌘−, and ⌘↩ with nothing left to narrow.
     ///
-    /// There used to be two ways to be in "Dashboard" and they drew differently: a tab *pinned* to it,
-    /// and a plain board tab that had switched to it from the readout's menu — `Dashboard · 6/43` in
-    /// one chip and `Canvas · Dashboard` in another, for the same six cards on the same board. Two
-    /// spellings of one fact is the shape of fault §7b diagnosed one layer down, so this is the same
-    /// fix applied again: the pane is the answer, and the tab is made to agree with it
-    /// (docs/canvas-workspaces.md §7c).
+    /// A tab stopped following its board here, and this is what replaced it. The old rule was that a
+    /// tab *became* whatever its pane was showing: zoom out of Dashboard and the chip renamed itself to
+    /// Canvas, while a second chip was inserted behind it so the workspace you had just left did not
+    /// vanish from the window. Three things moved for one gesture, which is where the reflow came from.
     ///
-    /// **It is also what the renderer switch used to be.** Notes and board were two shapes with a
-    /// control between them; they are one board at two scales, so travelling between them is the
-    /// board's own vocabulary — leave the tiled view to come out, tile the project's own card to go
-    /// back in — and the chip renames itself on arrival. There is nothing left for a switch to do that
-    /// this does not do from wherever you happen to be standing.
+    /// Now nothing moves. A workspace tab is its workspace for as long as the workspace exists (§7i),
+    /// so leaving one is not an edit to anything — it is going to a different tab, and the canvas is a
+    /// tab. The pane you were in keeps its tiles, so coming back to its chip is instant and exact.
+    func goToCanvas() {
+        guard tabs.selectedID != tabs.canvasID else { return }
+        tabs.select(tabs.canvasID)
+        applySelectedTab()
+    }
+
+    /// **⌘Return, on a board that is not tiled.** Keep this tiling as a workspace and open it.
     ///
-    /// A tab with no pane yet is left alone: it has not been looked at, so its pin *is* its truth.
+    /// Every set of tiles is a workspace and every workspace has a name (§7i), so there is no state
+    /// this could produce that is "tiled, but not yet anything" — the act that makes the tiling is the
+    /// act that makes the workspace. The name is assigned rather than asked for, because ⌘Return is the
+    /// board's fastest gesture and a modal in front of it would be a modal in front of fullscreening a
+    /// card. It is renameable in place from its chip the moment it exists.
     ///
-    /// - Returns: whether the tab that is *up* changed, which is the window's cue to re-read the
-    ///   renderer. It has to be told: the notes and the board size a window differently and are
-    ///   remembered differently, and a tab that changed by itself never went through `applySelectedTab`.
-    @discardableResult
-    private func reconcileTabsWithTheirBoards() -> Bool {
-        var selectedChanged = false
-        for tab in tabs.tabs {
-            guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController, pane.isSettled,
-                  let next = tab.view.following(workspaceName: pane.workspaceName,
-                                                showingProjectNoteAlone: pane.isShowingProjectNoteAlone),
-                  next != tab.view
-            else { continue }
-            // **A workspace that is being left keeps its chip**, which is §7c's rule for ⌘Return
-            // applied to the other way out. Zooming out of Dashboard un-pins this tab from it, and the
-            // workspace still exists — so it stays a click away in the bar rather than dropping to a
-            // menu. Guarded on there not being one already, which is what makes it idempotent beside
-            // `onLeftWorkspace`, whose ⌘Return path gets here second.
-            if case .board(.workspace(let left)) = tab.view,
-               tabs.tabs.filter({ $0.view == tab.view }).count == 1,
-               let url = canvasSource().url, CanvasWorkspaces.tiling(named: left, of: url) != nil {
-                tabs.openBehind(tab.view, of: tab.id)
-            }
-            tabs.retarget(tab.id, to: next)
-            pane.focus = if case .board(let focus) = next { focus } else { .note }
-            selectedChanged = selectedChanged || tab.id == tabs.selectedID
-        }
-        return selectedChanged
+    /// **The same cards resume the same workspace rather than making a second.** Otherwise every
+    /// ⌘Return on the six cards you always tile would leave another Workspace 7 behind and the row
+    /// would fill with copies of one thing. This is the job the volatile untitled workspace used to do,
+    /// done by the store instead, and it is what makes retiring that one affordable.
+    ///
+    /// - Returns: whether the window took it. False leaves the board to tile itself, which is the right
+    ///   answer for a board with no canvas file to keep a workspace in.
+    func tileAsWorkspace(_ tiling: CanvasViewState.Tiling) -> Bool {
+        guard let url = canvasSource().url else { return false }
+        let wanted = Set(tiling.ids)
+        let existing = CanvasWorkspaces.of(url).first { Set($0.value.ids) == wanted }?.key
+        let name = existing ?? WorkspaceNamePrompt.freshName(avoiding: CanvasWorkspaces.names(of: url))
+        if existing == nil { CanvasWorkspaces.save(tiling, as: name, for: url) }
+        openTab(.board(.workspace(name)))
+        return true
     }
 
     /// Go to the tab already showing this workspace. False when none is, which is the caller's cue to
@@ -656,16 +598,13 @@ final class ProjectSplitViewController: NSSplitViewController {
 
     /// A chip's label, typed into rather than picked from a menu.
     ///
-    /// What that means is what the chip was: a named workspace is renamed, and an unnamed one is being
-    /// named — the same fork `WorkspaceCommands` draws, arrived at by typing. Nothing else in the bar
-    /// has an editable label, so nothing else reaches here.
+    /// Only a workspace chip has an editable label — the canvas has no name, and the other two are
+    /// named after what they show rather than by you — so this is always a rename. It used to fork: a
+    /// chip could be a workspace *without* a name, and typing into that one was naming it. §7i retired
+    /// the state, and the fork with it.
     func renameTab(_ id: String, to name: String) {
-        guard let tab = tabs.tabs.first(where: { $0.id == id }) else { return }
-        if case .board(.workspace(let old)) = tab.view {
-            renameWorkspace(named: old, to: name)
-        } else {
-            (contentPane.content(for: id) as? CanvasPaneController)?.saveWorkspace(as: name)
-        }
+        guard let old = tabs.tabs.first(where: { $0.id == id })?.view.workspaceName else { return }
+        renameWorkspace(named: old, to: name)
     }
 
     /// Rename a workspace, **and carry its chips across with it**.
@@ -691,6 +630,10 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard old != new, let url = canvasSource().url,
               let tiling = CanvasWorkspaces.tiling(named: old, of: url)
         else { return }
+        // Renaming *onto* a name is replacing what has it — the save below does not ask, because for
+        // the live write-through it must not. See `WorkspaceNamePrompt.confirmReplacing`.
+        guard !CanvasWorkspaces.exists(new, of: url) || WorkspaceNamePrompt.confirmReplacing(new)
+        else { return }
         CanvasWorkspaces.save(tiling, as: new, for: url)
         CanvasWorkspaces.remove(old, for: url)
         for tab in tabs.tabs where tab.view == .board(.workspace(old)) {
@@ -699,7 +642,21 @@ final class ProjectSplitViewController: NSSplitViewController {
             pane?.focus = .workspace(new)
             pane?.workspaceRenamed(from: old, to: new)
         }
+        // A rename onto a name that had a chip of its own has just made two chips saying it.
+        closeDuplicateTabs()
         refreshTabModel()
+    }
+
+    /// Sweep up after a pass that retargeted tabs in bulk — see `ProjectTabSet.collapseDuplicates`.
+    ///
+    /// The panes go after the switch rather than before it, which is the order `tabModel.close` uses
+    /// and for the same reason: the one being torn down may be the one on screen, and a window with
+    /// nothing in it for a turn of the run loop flickers.
+    private func closeDuplicateTabs() {
+        let closed = tabs.collapseDuplicates()
+        guard !closed.isEmpty else { return }
+        applySelectedTab()
+        for id in closed { contentPane.drop(tab: id) }
     }
 
     /// Copy a workspace and open the copy — backlog item 10, and the last of §7b.
@@ -724,30 +681,42 @@ final class ProjectSplitViewController: NSSplitViewController {
             titled: "Duplicate “\(old)”",
             seed: WorkspaceNamePrompt.copyName(of: old, avoiding: taken)), new != old
         else { return }
+        // The seed counts past the copies that exist; what is typed over it need not.
+        guard !taken.contains(new) || WorkspaceNamePrompt.confirmReplacing(new) else { return }
         CanvasWorkspaces.save(tiling, as: new, for: url)
         openTab(.board(.workspace(new)))
     }
 
-    /// Forget a workspace. What is on screen is untouched — a deleted workspace is one that has
-    /// stopped having a name, not a tiling that has stopped existing — so a tab that was in it keeps
-    /// its tiles and becomes the untitled workspace it now is.
+    /// Forget a workspace, **and take its chip with it**.
+    ///
+    /// Delete is the only verb here that removes a workspace, and since §7i it is the only one that
+    /// removes a chip: the row is the list of workspaces, so a chip that outlived its workspace would
+    /// be a chip the next refresh puts back. What is on the board is untouched — the cards are where
+    /// they were, and the tiles were a view rather than a thing being destroyed.
+    ///
+    /// **Asked about first**, which it was not for most of this feature's life. The paragraph above is
+    /// the whole reason it felt safe to ship without a question, and it is only half the story: the
+    /// tiles survive, and the *workspace* — the thing you named so it would be there next month — does
+    /// not, with no undo to reach for. See `WorkspaceNamePrompt.confirmDelete`.
     func deleteWorkspace(named name: String) {
-        guard let url = canvasSource().url else { return }
+        guard let url = canvasSource().url, WorkspaceNamePrompt.confirmDelete(name) else { return }
         CanvasWorkspaces.remove(name, for: url)
-        for tab in tabs.tabs where tab.view == .board(.workspace(name)) {
-            tabs.retarget(tab.id, to: .board(.whole))
-            let pane = contentPane.content(for: tab.id) as? CanvasPaneController
-            pane?.focus = .whole
-            pane?.workspaceDeleted(name)
-        }
+        let doomed = tabs.tabs.filter { $0.view == .board(.workspace(name)) }.map(\.id)
+        tabs.drop { $0.view == .board(.workspace(name)) }
+        // After the switch, not before: the pane being torn down may be the one on screen, and a
+        // window with nothing in it for one turn of the run loop flickers.
+        applySelectedTab()
+        for id in doomed { contentPane.drop(tab: id) }
         refreshTabModel()
     }
 
-    /// Back to the notes — View ▸ Show Canvas turning itself off.
-    func showTasks() { replaceSelected(with: .notes) }
+    /// Back to the notes — View ▸ Show Canvas turning itself off. A tab of its own rather than a
+    /// replacement: the canvas tab cannot become something else, and the notes already have a chip if
+    /// they are open at all.
+    func showTasks() { openTab(.notes) }
 
-    /// Show the project's board in the tab that is up.
-    func showCanvas() { replaceSelected(with: .board(.whole)) }
+    /// Show the project's board, which is the canvas tab every window has.
+    func showCanvas() { goToCanvas() }
 
     /// The project's board has appeared (or moved) since a tab was built. Rebuild the tab that is
     /// waiting on it, so a canvas that has just been made lands on screen rather than leaving the

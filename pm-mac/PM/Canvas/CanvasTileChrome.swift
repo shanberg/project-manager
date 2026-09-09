@@ -29,7 +29,13 @@ struct CanvasTileDivider: Equatable {
 extension CanvasBoardView {
 
     /// How close the pointer has to be to a boundary, in view points.
-    static let dividerReach: Double = 9
+    ///
+    /// **Half the gap, plus a fixed lap onto the tiles either side.** It used to be a flat 9, which was
+    /// the whole of a 9pt gap and lapped 4.5pt onto each neighbour — generous, and deliberately so: a
+    /// boundary is a line with no width and has to be catchable anyway. Left flat when the gap came
+    /// down to 4 it would have lapped 7pt onto each tile instead, which is a strip along every tile
+    /// edge that resizes rather than picks. The lap is the number worth holding still; the gap is not.
+    static var dividerReach: Double { CanvasTiling.gap / 2 + 4.5 }
 
     /// Every boundary in the current tiled view.
     ///
@@ -163,6 +169,20 @@ extension CanvasBoardView {
         tileHandleView.shownTileHandles = tiling.map { Set($0.ids.filter(showsTileHandle)) } ?? []
     }
 
+    /// The corners this tile has at the frame of the tile space.
+    ///
+    /// Here with the dividers and the handlebars because it is the same kind of fact — where a tile
+    /// sits in the arrangement — and because the same three files have to agree about it. What the two
+    /// radii are, and why there are two, is `CanvasTiling.Corners`; who draws them is
+    /// `CanvasNodeView.chromeRadii` and `CanvasOverlayView.drawSwapInFlight`.
+    ///
+    /// Nil when nothing is tiled or this card isn't in the tiling, which is the caller's cue to use the
+    /// card's own one radius.
+    func tileCorners(_ id: String) -> CanvasTiling.Corners? {
+        guard let tiling, let frame = tiling.layout.frames[id] else { return nil }
+        return CanvasTiling.corners(of: frame, in: CanvasTiling.space(of: tiling.area))
+    }
+
     /// The tile whose handlebar is under the pointer.
     func tileHandle(at point: CanvasPoint) -> String? {
         guard let tiling else { return nil }
@@ -175,8 +195,14 @@ extension CanvasBoardView {
     /// The bar's own size, and how far outside it a press still counts — all in view points over the
     /// zoom, like the rest of the board's chrome.
     static let handleLength: Double = 28
-    static let handleThickness: Double = 3.5
-    /// How far outside the tile's edge the bar sits — roughly centred in the 9pt gap.
-    static let handleOffset: Double = 3
+    static let handleThickness: Double = 2.5
+    /// How far outside the tile's edge the bar sits — centred in the gap, and derived from it rather
+    /// than typed.
+    ///
+    /// The bar has to fit *entirely* in the gap, or it draws over the tile next door, which is the one
+    /// thing `tileHandle` exists to prevent. A typed 3 was roughly centred in a 9pt gap and would sit
+    /// half on the neighbour in a 4pt one, so the number that stays fixed is the bar's thickness and
+    /// this follows from it.
+    static var handleOffset: Double { max(0.5, (CanvasTiling.gap - handleThickness) / 2) }
     static let handleReach: Double = 9
 }

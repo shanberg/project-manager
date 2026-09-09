@@ -12,10 +12,96 @@ import PmLib
 final class CanvasTilingTests: XCTestCase {
     private let wide = CanvasRect(x: 0, y: 0, width: 1200, height: 600)
     private let tall = CanvasRect(x: 0, y: 0, width: 600, height: 1200)
+    /// Square, so four tiles land as two rows of two — `grid` picks its column count from the shape of
+    /// the window, and on `wide` the same four become three across and one centred underneath.
+    private let square = CanvasRect(x: 0, y: 0, width: 800, height: 800)
 
     private func card(_ id: String, _ x: Double, _ y: Double,
                       _ w: Double = 200, _ h: Double = 150) -> (id: String, frame: CanvasRect) {
         (id, CanvasRect(x: x, y: y, width: w, height: h))
+    }
+
+    // MARK: The shape of a tile
+
+    /// The rule, stated as a test: a corner goes wide only where it is a corner of the tile space in
+    /// *both* directions. Every other corner is a seam with another tile and stays tight.
+    ///
+    /// A 2×2 grid is the clean case — each tile gets exactly one outer corner, the one facing out, and
+    /// the four together trace the outline of the arrangement.
+    func testEachTileInAGridKeepsOnlyTheCornerFacingOut() {
+        let space = CanvasTiling.space(of: square)
+        let tiles = CanvasTiling.grid(sizes: even(4), in: space)
+        let corners = tiles.map { CanvasTiling.corners(of: $0, in: space) }
+
+        XCTAssertEqual(corners[0], .init(topLeft: true, topRight: false,
+                                         bottomRight: false, bottomLeft: false))
+        XCTAssertEqual(corners[1], .init(topLeft: false, topRight: true,
+                                         bottomRight: false, bottomLeft: false))
+        XCTAssertEqual(corners[2], .init(topLeft: false, topRight: false,
+                                         bottomRight: false, bottomLeft: true))
+        XCTAssertEqual(corners[3], .init(topLeft: false, topRight: false,
+                                         bottomRight: true, bottomLeft: false))
+    }
+
+    /// The master runs the full height of the space, so it keeps both of its leading corners — and
+    /// loses both trailing ones to the divider, which is the whole argument for the rule. Under the
+    /// looser "any outer edge" reading it would round away from a boundary it is meant to run
+    /// parallel with.
+    func testTheMasterKeepsItsOutsideCornersAndLosesTheOnesAtTheDivider() {
+        let space = CanvasTiling.space(of: wide)
+        let tiles = CanvasTiling.masterStack(sizes: even(4), in: space, fraction: 0.6)
+        XCTAssertEqual(CanvasTiling.corners(of: tiles[0], in: space),
+                       .init(topLeft: true, topRight: false, bottomRight: false, bottomLeft: true))
+    }
+
+    /// A tile with nothing at the frame in both directions — the middle of a stack — is tight all
+    /// round. That is what makes the arrangement read as one object with cuts in it.
+    func testATileInTheMiddleOfAStackIsTightAllRound() {
+        let space = CanvasTiling.space(of: wide)
+        let tiles = CanvasTiling.masterStack(sizes: even(4), in: space, fraction: 0.6)
+        XCTAssertEqual(CanvasTiling.corners(of: tiles[2], in: space),
+                       .init(topLeft: false, topRight: false, bottomRight: false, bottomLeft: false),
+                       "the second of three stacked tiles touches the frame on one side only")
+    }
+
+    /// The last tile in a run reaches the bottom of the space through two roundings, and a corner rule
+    /// that compared exactly would drop its outer corners on some window heights and not others.
+    func testTheEndOfARunStillCountsAsTheFrame() {
+        let odd = CanvasRect(x: 0, y: 0, width: 1000.5, height: 733.3)
+        let space = CanvasTiling.space(of: odd)
+        let tiles = CanvasTiling.masterStack(sizes: even(4), in: space, fraction: 0.6)
+        let last = CanvasTiling.corners(of: tiles[3], in: space)
+        XCTAssertTrue(last.bottomRight, "the bottom of the stack is the bottom of the space")
+        XCTAssertTrue(last.topRight == false, "and its top is a seam with the tile above")
+    }
+
+    /// One tile is the whole space, so it is a window and gets four wide corners.
+    func testASingleTileIsWideAllRound() {
+        let space = CanvasTiling.space(of: wide)
+        let tiles = CanvasTiling.frames(.grid, sizes: even(1), in: wide, masterFraction: 0.6)
+        XCTAssertEqual(CanvasTiling.corners(of: tiles[0], in: space), .all)
+    }
+
+    /// The two radii, and which corner gets which.
+    func testOuterCornersTakeTheWiderRadius() {
+        let corners = CanvasTiling.Corners(topLeft: true, topRight: false,
+                                           bottomRight: false, bottomLeft: true)
+        let radii = corners.radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+        XCTAssertEqual(radii.topLeft, CanvasTiling.outerRadius)
+        XCTAssertEqual(radii.topRight, CanvasTiling.innerRadius)
+        XCTAssertFalse(radii.isUniform)
+        XCTAssertGreaterThan(CanvasTiling.outerRadius, CanvasTiling.innerRadius,
+                             "a seam is tighter than the frame, or there was no point having two")
+    }
+
+    /// A curve inset from another curve stays parallel to it only when its radius drops by the inset —
+    /// which is what keeps the clip inside a tile's hairline from pinching shut at the corners.
+    func testInsettingCornersDropsEachRadiusAndStopsAtZero() {
+        let radii = CanvasTiling.Radii(topLeft: 9, topRight: 5, bottomRight: 0.5, bottomLeft: 5)
+        let inside = radii.inset(by: 1)
+        XCTAssertEqual(inside.topLeft, 8)
+        XCTAssertEqual(inside.topRight, 4)
+        XCTAssertEqual(inside.bottomRight, 0, "a corner tighter than the inset goes square, not negative")
     }
 
     // MARK: Order
@@ -148,7 +234,7 @@ final class CanvasTilingTests: XCTestCase {
     }
 
     /// Inside a tiling with some of the tiles picked, ⌘Return drills in — and now says so. It used to
-    /// say "Leave Tiled View" here, which was the menu promising the opposite of what would happen.
+    /// say "Show Canvas" here, which was the menu promising the opposite of what would happen.
     func testPickingSomeOfTheTilesOffersToDrillIn() {
         XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 2, targets: 0, selected: true),
                        "Fill Window with These 2 Tiles")
@@ -160,15 +246,15 @@ final class CanvasTilingTests: XCTestCase {
     /// of those have to say so.
     func testTakingAllOrNoneOfTheTilesIsTheWayOut() {
         XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 6, targets: 0, selected: true),
-                       "Leave Tiled View")
+                       "Show Canvas")
         XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 0, targets: 0, selected: false),
-                       "Leave Tiled View")
+                       "Show Canvas")
     }
 
     /// A tiling of one is already as far in as it goes.
     func testAFullscreenTileCanOnlyBeLeft() {
         XCTAssertEqual(CanvasTiling.commandTitle(tiled: 1, picked: 1, targets: 0, selected: true),
-                       "Leave Tiled View")
+                       "Show Canvas")
     }
 
     // MARK: Pinning one and stretching the rest

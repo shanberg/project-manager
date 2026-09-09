@@ -179,14 +179,19 @@ final class CanvasOverlayView: NSView {
     private func drawSwapInFlight(_ board: CanvasBoardView, _ scale: Double) {
         guard case .swap(let from, let over)? = board.gesture, let over,
               let a = board.layout.frames[from], let b = board.layout.frames[over] else { return }
-        for rect in [a, b] {
+        for (id, rect) in [(from, a), (over, b)] {
             let standoff = 2 / scale
-            // The card's own corner plus the standoff, which is what keeps an offset curve parallel to
+            // The tile's own corners plus the standoff, which is what keeps an offset curve parallel to
             // the one it is offset from. See `drawSelectionBounds`, which owns the argument.
-            let radius = CanvasNodeView.cornerRadius(for: rect) + standoff
-            let path = NSBezierPath(roundedRect: board.viewRect(rect).insetBy(dx: -standoff,
-                                                                             dy: -standoff),
-                                    xRadius: radius, yRadius: radius)
+            //
+            // The *tile's*, not the card's: this is the one ring drawn while a tiling is up, and traced
+            // at a card's single radius it would be visibly rounder than the two tiles underneath it.
+            let corners = board.tileCorners(id)?.radii(inner: CanvasTiling.innerRadius,
+                                                       outer: CanvasTiling.outerRadius)
+                ?? .uniform(CanvasNodeView.cornerRadius(for: rect))
+            let path = CanvasNodeView.path(in: board.viewRect(rect).insetBy(dx: -standoff,
+                                                                           dy: -standoff),
+                                           radii: corners.grown(by: standoff))
             NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
             path.fill()
             NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()

@@ -466,7 +466,14 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // scroll on most pages and a "go back" on the rest. Back is on the card's menu instead, where
         // it can't be triggered by accident.
         view.allowsBackForwardNavigationGestures = false
-        view.setValue(false, forKey: "drawsBackground")
+        // Left on deliberately, and it is the `drawsBackground` line that used to be here. A page is
+        // only obliged to paint a background if it wants one other than the browser's; plenty of real
+        // pages set none and rely on the default. Through a transparent web view "no background" means
+        // the card's own surface, which in dark appearance is near-black under black text — the page
+        // renders perfectly and is unreadable. Letting the view draw its own background hands that
+        // decision back to WebKit, which is the only party that knows which default the page presumes:
+        // white for a page that never mentions `color-scheme`, WebKit's dark canvas for one that opts
+        // in. Nothing flashes, because the placeholder is over the page until `revealPage`.
         if let resumeState {
             // Puts the page, the scroll position and the back-forward list back as they were, and
             // starts the navigation itself — so no `load` here.

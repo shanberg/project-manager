@@ -601,7 +601,7 @@ extension CanvasBoardView {
     /// and so nothing put it back. A pointer that vanishes over a video and is still missing over the
     /// tile beside it reads as the app having lost it.
     ///
-    /// The gap between two tiles cannot be relied on to fix that. It is nine points wide; a pointer
+    /// The gap between two tiles cannot be relied on to fix that. It is a few points wide; a pointer
     /// moved at any speed crosses it between two mouse-moved reports, and the board never gets the
     /// event in which it was over the gap and would have set a cursor. So the board watches for the
     /// pointer *changing hands* instead, and takes the cursor back at that moment — once, and then

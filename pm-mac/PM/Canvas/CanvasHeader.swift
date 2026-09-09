@@ -36,15 +36,6 @@ final class CanvasHeaderModel: ObservableObject {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     @Published var tiling: (long: String, short: String)?
-    /// The name of the workspace that is up, or nil while it is an unnamed one.
-    ///
-    /// **What the readout says instead of the count, when there is one.** The two never compete: the
-    /// count answers "how much of the board am I seeing", which matters most immediately after an ad-hoc
-    /// ⌘Return — exactly when there is no name — so the readout ends up saying which *kind* of workspace
-    /// you are in by which of the two it is showing. The count is still in the tooltip.
-    @Published var workspace: String?
-    /// Every named workspace on this board, for the readout's menu.
-    @Published var workspaces: [String] = []
     /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
     /// contextual menu use. See `CanvasTiling.commandTitle`.
     ///
@@ -138,17 +129,15 @@ final class CanvasHeaderModel: ObservableObject {
         var focusToken = 0
     }
 
-    /// Whether the pill wears the tiled readout.
+    /// **The pill has no readout, and had one.**
     ///
-    /// Off in a window whose tab bar is showing, where the tab holding this board wears it instead.
-    /// One fact in one place: the pill speaks for the window, and with several tabs up "6 of 43 cards"
-    /// is true of exactly one of them.
-    ///
-    /// **This is where the renderer switch went.** A header used to carry a two-position control saying
-    /// which of a project's faces you were on, because the notes and the board were two shapes. They
-    /// are one board at two scales, so what is worth saying is how far in you are — and the readout was
-    /// already saying it. Its ✕ leaves, and leaving renames the tab.
-    @Published var showsTilingSummary = true
+    /// It used to say which workspace was up, or how many cards were tiled while there was no name to
+    /// say — and it handed that to the tab bar the moment there was a bar, which is where the reflow
+    /// came from: leaving a tiled view renamed a chip, inserted a chip and moved the pill's contents,
+    /// all in one act. §7i settles it in the other direction. The canvas is a permanent chip and every
+    /// workspace is a chip, so the row already answers "which of this board's places am I in" at all
+    /// times, and it answers it in one place. What the pill keeps is the project's name and the way
+    /// back to the board, both of which are true at a constant width.
     /// Whether the `+` offers the project's own note — true only on a project's board that hasn't got
     /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
     /// question (`CanvasBoardView.offersProjectNoteCard`).
@@ -178,19 +167,23 @@ final class CanvasHeaderModel: ObservableObject {
     var findChanged: (String) -> Void = { _ in }
     var findClosed: () -> Void = {}
     var findCommitted: () -> Void = {}
-    var leaveTiling: () -> Void = {}
     var tile: () -> Void = {}
     var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
-    var goToWorkspace: (String) -> Void = { _ in }
-    var nameWorkspace: () -> Void = {}
-    var renameWorkspace: () -> Void = {}
-    var duplicateWorkspace: () -> Void = {}
-    var deleteWorkspace: () -> Void = {}
 }
 
 // MARK: - The pill
 
 /// What board you are looking at. The counterpart of the project window's project pill.
+///
+/// **A name, and nothing else.** It has carried, at various points, a tiled count, a workspace menu and
+/// a ✕, and every one of them has now gone to the row of tabs — which is where "which of this board's
+/// places am I in" belongs, because the row is the list of places (§7i). The ✕ was the last to go and
+/// the least defensible by the end: it meant "show the canvas", and the canvas is a permanent chip
+/// three inches to the right of it. A control that duplicates a control beside it is not an escape
+/// hatch, it is a second thing to explain.
+///
+/// What is left has one useful property: it never changes width, so nothing in the header moves when
+/// you switch between the board and a workspace.
 struct CanvasTitlePill: View {
     @ObservedObject var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
@@ -199,101 +192,19 @@ struct CanvasTitlePill: View {
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(model.title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            // A tiled view is a state of the thing this pill names, so this is where it goes.
-            //
-            // It was a caption and a bordered "Done" button in the control capsule, where it was the
-            // single worst-fitting thing in the row: a sentence and a bezelled button among borderless
-            // glyphs. No amount of equal padding makes those siblings. The pill answers "what am I
-            // looking at", and "6 of 43 cards" is precisely an answer to that — while the ✕ is the
-            // Finder's own idiom for leaving a temporary, filtered state.
-            if let tiling = model.tiling, model.showsTilingSummary {
-                Text(verbatim: "·")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                workspaceMenu(tiling)
-                Button(action: model.leaveTiling) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Leave the tiled view")
-                .accessibilityLabel(Text("Leave the tiled view"))
-            }
-        }
-        .opacity(chrome.contentOpacity)
-        .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
-        .padding(.vertical, HeaderMetrics.pillInset.vertical)
-        .headerBacking(chrome, in: Capsule())
-        .contentShape(Capsule())
-        .onHover { hovering = $0 }
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.tiling?.long)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.showsTilingSummary)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(model.showsTilingSummary
-            ? (model.tiling.map { "\(model.title), tiled, \(model.workspace ?? $0.long)" }
-                ?? model.title)
-            : model.title))
-        .modifier(TitlebarDrop(model: model))
-    }
-
-    /// **The workspace, where the readout used to be.**
-    ///
-    /// This slot already answered "what am I looking at" for a tiled board, and a workspace is the
-    /// honest answer to it — the count was what the pill said while the thing it was describing had no
-    /// name to give. So a named workspace says its name, an unnamed one keeps the count, and the count
-    /// is in the tooltip either way.
-    ///
-    /// A menu rather than a label, because the list belongs where the answer is: naming one is the only
-    /// visible confirmation that naming did anything, and switching between them should not mean
-    /// opening a tab. The ✕ beside it is already a control, so this region was interactive before this.
-    @ViewBuilder private func workspaceMenu(_ tiling: (long: String, short: String)) -> some View {
-        Menu {
-            // The unnamed one is listed only while you are in it, ticked and inert: it is where you
-            // are, and there is nowhere to go — an unnamed workspace is the one that is up or it is
-            // nothing at all. Drawing it is how "ephemeral unless named" stops being merely true and
-            // becomes something you can see, with the count beside it saying what it is made of.
-            if model.workspace == nil {
-                Toggle("Untitled · \(tiling.short)", isOn: .constant(true)).disabled(true)
-            }
-            if !model.workspaces.isEmpty {
-                Divider()
-                // Ticked where you are, so the list says where you are as well as where you could go.
-                // Toggles rather than a Picker, following the arrangement options in this same header.
-                ForEach(model.workspaces, id: \.self) { name in
-                    Toggle(name, isOn: Binding(get: { name == model.workspace },
-                                               set: { _ in model.goToWorkspace(name) }))
-                }
-            }
-            Divider()
-            // The same items a chip carries, because this *is* the chip until there is a bar to hold
-            // one — see `WorkspaceCommands`.
-            WorkspaceCommands(name: model.workspace,
-                              nameIt: model.nameWorkspace,
-                              rename: model.renameWorkspace,
-                              duplicate: model.duplicateWorkspace,
-                              delete: model.deleteWorkspace)
-        } label: {
-            Text(model.workspace
-                 ?? (model.room.showsLongTilingSummary ? tiling.long : tiling.short))
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .layoutPriority(1)
-        .help(model.workspace.map { "\($0) — \(tiling.long)" } ?? tiling.long)
+        Text(model.title)
+            .font(.system(size: 13, weight: .semibold))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .opacity(chrome.contentOpacity)
+            .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
+            .padding(.vertical, HeaderMetrics.pillInset.vertical)
+            .headerBacking(chrome, in: Capsule())
+            .contentShape(Capsule())
+            .onHover { hovering = $0 }
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+            .accessibilityLabel(Text(model.title))
+            .modifier(TitlebarDrop(model: model))
     }
 }
 
@@ -317,7 +228,11 @@ struct CanvasControlCapsule: View {
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        HeaderCapsule(chrome: chrome) {
+        // **No glass over a tiled board.** The backing is there to hold these glyphs legible over cards
+        // panning under them; tiles are panels with their own edges on a plain ground, so the header is
+        // over the ground and the separation has already been made. A second one on top of it reads as
+        // two surfaces arguing about which is in front. See `headerBacking(_:in:showing:)`.
+        HeaderCapsule(chrome: chrome, backed: model.tiling == nil) {
             if model.find.isShowing {
                 findField
                 HeaderDivider()
@@ -355,6 +270,7 @@ struct CanvasControlCapsule: View {
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
         .animation(Motion.animation(.snappy(duration: 0.2)), value: model.find.isShowing)
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
+        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.tiling == nil)
     }
 
     // MARK: Find

@@ -51,6 +51,58 @@ enum CanvasPalette {
     /// anyway: a piece of paper on a desk, not a lighter rectangle.
     static let board = NSColor.windowBackgroundColor
 
+    // MARK: A tiled view, which is the other argument
+
+    /// The ground a *tiling* sits on, in place of `board`.
+    ///
+    /// **Darker than the window's own background, and that is the whole mechanism.** A card is told
+    /// from the board by its shadow — paper on a desk. A tile is not paper; it is a pane let into the
+    /// ground, and a pane is told from what surrounds it by the surround being darker. Taking the
+    /// ground down a step is what lets `tileBorder` come down to almost nothing and the gap come down
+    /// to four points without the tiles running into one another: the separation stops being drawn on
+    /// the tile and starts being what is behind it.
+    ///
+    /// A step rather than a plunge. `windowBackgroundColor` resolves to about 0.925 in light and 0.118
+    /// in dark, and these sit just under both — enough that a white tile has an edge without being
+    /// asked, not so much that the tiling reads as a light box on a dark page.
+    ///
+    /// Constants here where `board` is a system colour, and that asymmetry is deliberate rather than a
+    /// regression: `board` is the window's own background because a board *is* a pane in the window,
+    /// and this is the one place the canvas is asking for something the window doesn't have a colour
+    /// for. It is stated relative to what `windowBackgroundColor` actually is, so it will want looking
+    /// at if a future macOS moves that.
+    static let tileGround = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 0.110, alpha: 1) : NSColor(white: 0.910, alpha: 1)
+    }
+
+    /// A tile's hairline: about a sixth of `cardBorder`, in both appearances.
+    ///
+    /// Not none at all. At these alphas the border is doing almost nothing on a tile's long edges,
+    /// where `tileGround` has already said where the tile ends — but a corner is where the ground gets
+    /// thin, and a tile with no line at all shows its radius as a soft dent rather than a curve. What
+    /// is left is the least that keeps the corners crisp.
+    ///
+    /// The asymmetry between light and dark is inherited from `cardBorder` and holds for the same
+    /// reason it does there, one sixth of the way down.
+    static let tileBorder = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 1, alpha: 0.025) : NSColor(white: 0, alpha: 0.017)
+    }
+
+    /// The key tile's hairline — the tile the arrows and Return are about.
+    ///
+    /// **The edge answers, because in a tiled view nothing else can.** On a board, being picked is said
+    /// with height: `CanvasNodeView.refreshElevation` lifts the card and the shadow does the talking.
+    /// A tiling has no height to spend — a tile that floated would contradict the one thing the mode is
+    /// saying, which is that these are panes let into the ground rather than paper on it — and it has
+    /// no ring and no grips either, because a tile's size isn't yours to set.
+    ///
+    /// So the border does it, at roughly four times the resting one and still under `cardBorder`. It
+    /// reads at a glance across a window of six tiles and does not read as an outline drawn around
+    /// something, which is the line a selected *card* would be wearing.
+    static let tileBorderKey = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 1, alpha: 0.106) : NSColor(white: 0, alpha: 0.071)
+    }
+
     /// The dot grid, at `presence` of its full strength.
     ///
     /// Only drawn while something is being dragged or resized, and only while that drag is snapping —

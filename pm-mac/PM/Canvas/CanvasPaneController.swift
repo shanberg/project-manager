@@ -72,16 +72,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.onGoToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
         scroll.board.workspaceNames = { [weak self] in self?.workspaceNames() ?? [] }
         scroll.board.onDuplicateWorkspace = { [weak tabs] name in tabs?.duplicateWorkspace(name) }
-        // The workspace on screen has stopped being the one it was, and the one it was still exists —
-        // so it keeps a chip. See `CanvasBoardView.onLeftWorkspace`.
-        scroll.board.onLeftWorkspace = { [weak self] name in self?.onLeftWorkspace?(name) }
+        // ⌘↩ on an untiled board: the tiling it is about to make is a workspace, and a workspace is a
+        // tab. See `ProjectSplitViewController.tileAsWorkspace`.
+        scroll.board.onTileAsWorkspace = { [tabModel] tiling in tabModel.tileAsWorkspace(tiling) }
+        // ⌘−, and ⌘↩ with nothing left to narrow. A workspace is a place you were, not a state to
+        // undo, so leaving one is going to the canvas — see `ProjectSplitViewController.goToCanvas`.
+        scroll.board.onGoToCanvas = { [tabModel] in tabModel.goToCanvas() }
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
-            header.workspace = scroll.board.workspaceName
             header.arrangement = scroll.board.tiling?.arrangement
             refreshTileCommand()
             rememberViewState()
@@ -245,12 +247,17 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     // MARK: How you were looking at this board
 
     /// What is worth remembering about the way this board is being looked at. See `CanvasViewState`.
+    /// **What is left of this row is how you were looking at the board, and nothing about workspaces.**
+    ///
+    /// It used to carry the tiling that was up and its name, because a tiling could exist with nothing
+    /// pointing at it — that was the untitled workspace, and this was where it lived. §7i retired it:
+    /// every tiling is a named workspace, named workspaces live in `CanvasWorkspaces`, and the pane
+    /// that owns this row is the canvas tab's, which is never tiled. `lastTiling` stays, and is now the
+    /// only thing here about tiles — it is what makes ⌘Return on the same six cards pick up the order
+    /// and the widths you left them in rather than starting over.
     private var viewState: CanvasViewState {
         CanvasViewState(mode: scroll.board.mode,
-                        tiling: scroll.board.tiling.map(scroll.board.memory(of:)),
-                        workspaceName: scroll.board.workspaceName,
                         refreshInterval: scroll.board.refreshInterval,
-                        // Kept whether or not one is up: a workspace you left is one you built.
                         lastTiling: scroll.board.tilingMemory)
     }
 
@@ -283,13 +290,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // The arrangement comes back even when the board was left untiled, so the next ⌘Return on the
         // same cards picks up where you left off rather than starting over.
         scroll.board.lastTiling = remembered.lastTiling
-        // Set before the restore as well as by it, because the two can come apart: a board left
-        // *untiled* still carries the name of the workspace it was in, so that the next ⌘Return on the
-        // same cards resumes it by name and not merely by layout. See `tile(_:)`.
-        scroll.board.workspaceName = remembered.workspaceName
-        if let tiling = remembered.tiling {
-            scroll.board.restoreTiling(tiling, named: remembered.workspaceName)
-        }
+        // **The tiling in this row is not restored, and used to be.** The pane that owns this row is
+        // the canvas tab's (`focus == .whole`), and the canvas is never tiled (§7i) — a workspace is
+        // restored by its own tab, out of `CanvasWorkspaces`, through `applyFocus`. A row written
+        // before that was true still has a tiling and a name in it; both are simply not read, which is
+        // the whole of the migration.
     }
 
     /// Written on every change rather than on the way out, because there is no reliable way out: a
@@ -380,11 +385,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     // MARK: What the window's tabs need from a board
 
-    /// Leave the tiled view — the tab chip's readout, standing in for the pill's ✕ where the pill has
-    /// given the readout up. Same act as ⌘↩ on a tiled board. Not the same act as Escape, which
-    /// unwinds a drill-in and stops at the root — see `CanvasBoardView.untile`.
-    func leaveTiling() { header.leaveTiling() }
-
     /// Told when this board tiles or untiles, so the tab holding it can re-title itself.
     var onTilingChanged: (() -> Void)?
 
@@ -411,9 +411,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// a workspace changed nothing you could see, which is most of why it read as not having worked.
     func saveWorkspace(as name: String) {
         guard let tiling = scroll.board.tilingMemory else { return }
+        // Acquiring a name that is taken is replacing the workspace that has it, and that workspace is
+        // not this one — see `WorkspaceNamePrompt.confirmReplacing`.
+        guard name == scroll.board.workspaceName || !CanvasWorkspaces.exists(name, of: store.url)
+                || WorkspaceNamePrompt.confirmReplacing(name)
+        else { return }
         CanvasWorkspaces.save(tiling, as: name, for: store.url)
         scroll.board.workspaceName = name
-        workspacesChanged()
         // The chip has to become this workspace's chip, and naming is the one act that changes which
         // workspace a tab is in without changing the tiling — so nothing else would tell the bar.
         onTilingChanged?()
@@ -434,33 +438,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.restoreTiling(tiling, named: name)
     }
 
-    /// **The workspace this pane is showing has stopped being the one it was.** Told with the name it
-    /// was, so the window can keep that one open in a chip of its own — see
-    /// `CanvasBoardView.onLeftWorkspace`, which is where the two acts that do this are named.
-    var onLeftWorkspace: ((String) -> Void)?
-
-    /// Name the workspace that is up — the chip's item for the unnamed one, which has no name to route
-    /// by and so is asked for by tab. Through the board's own command, because the tiling being named
-    /// is the volatile one only the board has.
-    func nameWorkspace() { scroll.board.saveTilingAsWorkspace(nil) }
-
-    /// Re-read the board's named workspaces, for a menu that has to be right without anything on this
-    /// board having changed — one of the window's other tabs renamed or deleted one.
-    func refreshWorkspaceLists() { workspacesChanged() }
-
     /// A workspace was renamed from somewhere else in this window — a chip's menu, on this tab or
     /// another. A board that is *in* the one that moved follows it; a board that is not is untouched.
     func workspaceRenamed(from old: String, to new: String) {
         if scroll.board.workspaceName == old { scroll.board.workspaceName = new }
-        workspacesChanged()
-    }
-
-    /// A workspace was deleted from somewhere else in this window. What is on screen is untouched, for
-    /// the reason `removeWorkspace` gives: a deleted workspace is one that has stopped having a name,
-    /// not a tiling that has stopped existing.
-    func workspaceDeleted(_ name: String) {
-        if scroll.board.workspaceName == name { scroll.board.workspaceName = nil }
-        workspacesChanged()
     }
 
     /// **The write-through, and the whole of "adjusting one is not saving one".**
@@ -481,17 +462,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         else { return }
         CanvasWorkspaces.save(tiling, as: name, for: store.url)
     }
-
-    /// The set of names changed, so every list of them has to.
-    private func workspacesChanged() {
-        tabModel.workspaces = workspaceNames()
-        header.workspaces = workspaceNames()
-        header.workspace = scroll.board.workspaceName
-    }
-
-    /// Whether there is a workspace to name at all — a board that has never been tiled has nothing
-    /// to keep, and the command that offers to keep it should say so by being dim.
-    var hasWorkspaceToSave: Bool { scroll.board.tilingMemory != nil }
 
     /// Take the keyboard, for an owner that has just put this pane on screen.
     func focusBoard() { view.window?.makeFirstResponder(scroll.board) }
@@ -743,23 +713,18 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
-        header.leaveTiling = { [weak self] in self?.scroll.board.leaveTiling(animated: true) }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
-        // The readout's menu. Routed through the board's own commands rather than to the store
-        // directly, so the pill and the View menu are the same three acts and not two spellings of
-        // them — `renameWorkspace` in particular has a rule about the old name that lives there.
-        header.goToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
-        header.nameWorkspace = { [weak self] in self?.scroll.board.saveTilingAsWorkspace(nil) }
-        header.renameWorkspace = { [weak self] in self?.scroll.board.renameWorkspace(nil) }
-        header.duplicateWorkspace = { [weak self] in self?.scroll.board.duplicateWorkspace(nil) }
-        header.deleteWorkspace = { [weak self] in self?.scroll.board.deleteWorkspace(nil) }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —
             // otherwise these two items are settings for a state you have to already be in to reach
             // them. See `setTileArrangement`.
-            if scroll.board.isTiled { scroll.board.setArrangement(arrangement) }
-            else { scroll.board.tile(scroll.board.tileTargets, arrangement: arrangement) }
+            if scroll.board.isTiled { return scroll.board.setArrangement(arrangement) }
+            // Tiling from here makes a workspace, exactly as ⌘↩ does — see `offerAsWorkspace`. The
+            // arrangement you picked is the one it is made with.
+            let targets = scroll.board.tileTargets
+            guard !scroll.board.offerAsWorkspace(targets, arrangement: arrangement) else { return }
+            scroll.board.tile(targets, arrangement: arrangement)
         }
         header.findCommitted = { [weak self] in
             guard let self else { return }

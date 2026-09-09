@@ -7,11 +7,21 @@ import XCTest
 /// from storage that no longer agrees with itself has to be repaired rather than shown.
 final class ProjectTabTests: XCTestCase {
 
-    /// A window nobody has given tabs is the window this app has always had.
-    func testStartsAsOneNotesTabWithNoBar() {
+    /// A window nobody has given tabs is the canvas and the notes, with the notes up — the window this
+    /// app has always shown, plus the board it has always been showing it out of.
+    func testStartsOnTheNotesWithTheCanvasBehindIt() {
         let set = ProjectTabSet()
-        XCTAssertEqual(set.tabs.count, 1)
+        XCTAssertEqual(set.tabs.map(\.view), [.board(.whole), .notes])
         XCTAssertEqual(set.selected.view, .notes)
+        XCTAssertEqual(set.canvasID, set.tabs[0].id)
+        XCTAssertTrue(set.showsBar)
+    }
+
+    /// Asked for the canvas alone, that is the whole row — there is no second tab to make, because the
+    /// canvas is the one that was already there.
+    func testTheCanvasSeedIsNotOpenedTwice() {
+        let set = ProjectTabSet(.board(.whole))
+        XCTAssertEqual(set.tabs.map(\.view), [.board(.whole)])
         XCTAssertFalse(set.showsBar)
     }
 
@@ -19,108 +29,146 @@ final class ProjectTabTests: XCTestCase {
     /// belongs beside that board.
     func testOpensAfterTheCurrentTabAndSelectsIt() {
         var set = ProjectTabSet()
-        let board = set.open(.board(.whole))
+        let workspace = set.open(.board(.workspace("Review")))
         let frame = set.open(.board(.frame("group-1")))
-        XCTAssertEqual(set.tabs.map(\.id), [set.tabs[0].id, board.id, frame.id])
+        XCTAssertEqual(set.tabs.map(\.id),
+                       [set.canvasID, set.tabs[1].id, workspace.id, frame.id])
         XCTAssertEqual(set.selectedID, frame.id)
-        XCTAssertTrue(set.showsBar)
 
-        // Going back to the first and opening again puts the new one second, not last.
-        set.select(set.tabs[0].id)
-        let notes = set.open(.notes)
-        XCTAssertEqual(set.tabs.map(\.id), [set.tabs[0].id, notes.id, board.id, frame.id])
-    }
-
-    /// The renderer switch changes what this tab holds rather than adding one.
-    func testReplacingTheSelectedViewAddsNoTab() {
-        var set = ProjectTabSet()
-        set.replaceSelected(with: .board(.whole))
-        XCTAssertEqual(set.tabs.count, 1)
-        XCTAssertEqual(set.selected.view, .board(.whole))
+        // Going back to the canvas and opening again puts the new one second, not last.
+        set.select(set.canvasID)
+        let another = set.open(.board(.workspace("Standup")))
+        XCTAssertEqual(set.tabs[1].id, another.id)
     }
 
     /// Closing the tab you are on goes right — the direction you were travelling.
     func testClosingTheSelectedTabSelectsTheOneToItsRight() {
         var set = ProjectTabSet()
-        let second = set.open(.board(.whole))
-        let third = set.open(.board(.workspace("Review")))
-        set.select(second.id)
+        let notes = set.tabs[1].id
+        let frame = set.open(.board(.frame("g")))
+        set.select(notes)
 
-        XCTAssertTrue(set.close(second.id))
-        XCTAssertEqual(set.selectedID, third.id)
+        XCTAssertTrue(set.close(notes))
+        XCTAssertEqual(set.selectedID, frame.id)
     }
 
     /// Except at the end of the row, where there is nothing to the right.
     func testClosingTheLastTabInTheRowFallsBackToTheLeft() {
         var set = ProjectTabSet()
-        let second = set.open(.board(.whole))
-        let third = set.open(.notes)
-        XCTAssertEqual(set.selectedID, third.id)
+        let notes = set.tabs[1].id
+        let frame = set.open(.board(.frame("g")))
+        XCTAssertEqual(set.selectedID, frame.id)
 
-        XCTAssertTrue(set.close(third.id))
-        XCTAssertEqual(set.selectedID, second.id)
+        XCTAssertTrue(set.close(frame.id))
+        XCTAssertEqual(set.selectedID, notes)
     }
 
     /// Closing one you are not looking at leaves you where you are.
     func testClosingAnotherTabKeepsTheSelection() {
         var set = ProjectTabSet()
-        let first = set.tabs[0].id
-        let second = set.open(.board(.whole))
-        set.select(second.id)
+        let notes = set.tabs[1].id
+        let frame = set.open(.board(.frame("g")))
 
-        XCTAssertTrue(set.close(first))
-        XCTAssertEqual(set.selectedID, second.id)
-        XCTAssertEqual(set.tabs.count, 1)
-        XCTAssertFalse(set.showsBar)
+        XCTAssertTrue(set.close(notes))
+        XCTAssertEqual(set.selectedID, frame.id)
+        XCTAssertEqual(set.tabs.map(\.view), [.board(.whole), .board(.frame("g"))])
     }
 
-    /// The final tab never closes. A window with no tab has nothing in it, and closing the window is
-    /// the window's decision rather than this type's.
-    func testTheLastTabWillNotClose() {
+    /// **The canvas never closes.** It is the view every other tab is a narrowing of, so a window
+    /// without it is a window with no way back to its own board.
+    func testTheCanvasWillNotClose() {
         var set = ProjectTabSet()
-        XCTAssertFalse(set.close(set.tabs[0].id))
-        XCTAssertEqual(set.tabs.count, 1)
+        XCTAssertFalse(set.close(set.canvasID))
+        XCTAssertEqual(set.tabs.count, 2)
+    }
+
+    /// **And neither does a workspace.** A workspace's chip is the workspace (§7i) — closing one would
+    /// leave a named thing in the store with nowhere to be, and the row would put the chip straight
+    /// back. Delete is the verb that removes one, and it removes both.
+    func testAWorkspaceWillNotClose() {
+        var set = ProjectTabSet()
+        let dashboard = set.open(.board(.workspace("Dashboard")))
+        XCTAssertFalse(set.close(dashboard.id))
+        XCTAssertFalse(set.closable(dashboard))
+        XCTAssertTrue(set.closable(set.tabs[1]), "the notes close")
     }
 
     /// ⌃⇥ wraps in both directions.
     func testCyclingWraps() {
         var set = ProjectTabSet()
-        let second = set.open(.board(.whole))
-        let third = set.open(.notes)
-        set.select(set.tabs[0].id)
+        let canvas = set.canvasID
+        let notes = set.tabs[1].id
+        let frame = set.open(.board(.frame("g")))
+        set.select(canvas)
 
         set.selectNext()
-        XCTAssertEqual(set.selectedID, second.id)
+        XCTAssertEqual(set.selectedID, notes)
         set.selectNext()
-        XCTAssertEqual(set.selectedID, third.id)
+        XCTAssertEqual(set.selectedID, frame.id)
         set.selectNext()
-        XCTAssertEqual(set.selectedID, set.tabs[0].id)
+        XCTAssertEqual(set.selectedID, canvas)
 
         set.selectNext(by: -1)
-        XCTAssertEqual(set.selectedID, third.id)
+        XCTAssertEqual(set.selectedID, frame.id)
     }
 
     /// A drag along the bar reorders without changing what you are looking at.
     func testMovingATabKeepsTheSelection() {
         var set = ProjectTabSet()
-        let second = set.open(.board(.whole))
-        let third = set.open(.board(.frame("g")))
-        set.select(second.id)
+        let notes = set.tabs[1].id
+        let frame = set.open(.board(.frame("g")))
+        set.select(notes)
 
-        set.move(third.id, to: 0)
-        XCTAssertEqual(set.tabs.map(\.id), [third.id, set.tabs[1].id, second.id])
-        XCTAssertEqual(set.selectedID, second.id)
+        set.move(frame.id, to: 1)
+        XCTAssertEqual(set.tabs.map(\.id), [set.canvasID, frame.id, notes])
+        XCTAssertEqual(set.selectedID, notes)
+    }
+
+    /// **The canvas is the row's fixed point.** It cannot be dragged out of first place, and nothing
+    /// can be dropped in front of it — a row whose fixed point moves is a row with two firsts.
+    func testTheCanvasHoldsItsPlaceAtBothEnds() {
+        var set = ProjectTabSet()
+        let canvas = set.canvasID
+        let notes = set.tabs[1].id
+
+        set.move(canvas, to: 1)
+        XCTAssertEqual(set.tabs.map(\.id), [canvas, notes])
+
+        set.move(notes, to: 0)
+        XCTAssertEqual(set.tabs.map(\.id), [canvas, notes])
     }
 
     /// Storage that no longer agrees with itself is repaired rather than trusted.
     func testARebuiltSetRepairsItself() {
         let orphan = ProjectTabSet(tabs: [], selectedID: "gone")
-        XCTAssertEqual(orphan.tabs.count, 1)
-        XCTAssertEqual(orphan.selected.view, .notes)
+        XCTAssertEqual(orphan.tabs.map(\.view), [.board(.whole)])
 
-        let tab = ProjectTab(.board(.whole))
+        let tab = ProjectTab(.notes)
         let dangling = ProjectTabSet(tabs: [tab], selectedID: "not-here")
-        XCTAssertEqual(dangling.selectedID, tab.id)
+        XCTAssertEqual(dangling.selectedID, dangling.canvasID)
+    }
+
+    /// **A row written before the canvas was permanent still opens.** It has no canvas tab, or it has
+    /// one somewhere in the middle; either way it comes back with exactly one, first, and the tab you
+    /// were on is still the tab you were on.
+    func testAnOldRowIsGivenItsCanvas() {
+        let notes = ProjectTab(.notes)
+        let seeded = ProjectTabSet(tabs: [notes], selectedID: notes.id)
+        XCTAssertEqual(seeded.tabs.map(\.view), [.board(.whole), .notes])
+        XCTAssertEqual(seeded.selectedID, notes.id)
+
+        let board = ProjectTab(.board(.whole))
+        let middle = ProjectTabSet(tabs: [notes, board], selectedID: board.id)
+        XCTAssertEqual(middle.tabs.map(\.id), [board.id, notes.id])
+        XCTAssertEqual(middle.selectedID, board.id, "still looking at the board")
+    }
+
+    /// Two canvases in a stored row are two names for one thing, so the second is dropped.
+    func testASecondCanvasIsNotKept() {
+        let one = ProjectTab(.board(.whole))
+        let two = ProjectTab(.board(.whole))
+        let set = ProjectTabSet(tabs: [one, two], selectedID: one.id)
+        XCTAssertEqual(set.tabs.map(\.id), [one.id])
     }
 
     /// A tab pinned to part of a board survives the trip through storage — the case that matters is
@@ -155,19 +203,6 @@ final class ProjectTabTests: XCTestCase {
 
     // MARK: Tabs as the home of a workspace
 
-    /// ⌘Return leaves the named workspace it was in *open*, behind the pane that became the fresh
-    /// unnamed one. Before rather than after, so the row reads in the order the two were made — and
-    /// without moving the selection, which stays on the thing the command just built.
-    func testOpeningBehindKeepsTheSelectionAndGoesFirst() {
-        var set = ProjectTabSet()
-        let board = set.open(.board(.whole))
-        set.openBehind(.board(.workspace("Dashboard")))
-        XCTAssertEqual(set.tabs.count, 3)
-        XCTAssertEqual(set.tabs[1].view, .board(.workspace("Dashboard")))
-        XCTAssertEqual(set.tabs[2].id, board.id)
-        XCTAssertEqual(set.selectedID, board.id, "still in what ⌘Return just made")
-    }
-
     /// Two chips on one workspace are two names for one thing, so switching finds the one that is
     /// open rather than making a second.
     func testFindsTheTabAThingIsAlreadyOpenIn() {
@@ -181,19 +216,19 @@ final class ProjectTabTests: XCTestCase {
                      "a frame and a workspace of the same name are different things")
     }
 
-    /// A tab follows the board it is holding: you named the workspace it was showing, so it is that
-    /// workspace's tab now. The row and the selection are untouched — nothing moved, one chip changed
-    /// what it says.
+    /// A rename is the one act that changes what a chip points at without moving the chip. The row and
+    /// the selection are untouched — one chip changed what it says.
     func testRetargetingATabLeavesTheRowAlone() {
         var set = ProjectTabSet()
-        let board = set.open(.board(.whole))
+        let workspace = set.open(.board(.workspace("Review")))
         let frame = set.open(.board(.frame("group-1")))
-        set.select(board.id)
-        set.retarget(board.id, to: .board(.workspace("Dashboard")))
+        set.select(workspace.id)
+        set.retarget(workspace.id, to: .board(.workspace("Dashboard")))
         XCTAssertEqual(set.tabs.map(\.view),
-                       [.notes, .board(.workspace("Dashboard")), .board(.frame("group-1"))])
-        XCTAssertEqual(set.selectedID, board.id)
-        XCTAssertEqual(set.tabs[2].id, frame.id)
+                       [.board(.whole), .notes, .board(.workspace("Dashboard")),
+                        .board(.frame("group-1"))])
+        XCTAssertEqual(set.selectedID, workspace.id)
+        XCTAssertEqual(set.tabs[3].id, frame.id)
     }
 
     /// An id that is not in the row is a tab that was closed while something was deciding what to do
@@ -201,105 +236,34 @@ final class ProjectTabTests: XCTestCase {
     func testRetargetingAnUnknownTabDoesNothing() {
         var set = ProjectTabSet()
         set.retarget("gone", to: .board(.workspace("Dashboard")))
-        XCTAssertEqual(set.tabs.map(\.view), [.notes])
+        XCTAssertEqual(set.tabs.map(\.view), [.board(.whole), .notes])
     }
 }
 
-// MARK: - A tab follows its board
+// MARK: - The row is the project's workspaces
 
-/// The rule that replaced the renderer switch. See `ProjectTabView.following(workspaceName:…)`.
-final class TabFollowsItsBoardTests: XCTestCase {
-    func testLeavingTheOneCardTilingTurnsTheNotesIntoTheBoard() {
-        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: nil,
-                                                      showingProjectNoteAlone: false),
-                       .board(.whole))
-    }
-
-    func testTheNotesStayTheNotesWhileTheirCardIsWhatIsTiled() {
-        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: nil,
-                                                      showingProjectNoteAlone: true),
-                       .notes)
-    }
-
-    func testTilingTheProjectCardAloneOnTheBoardIsTheWayBackToTheNotes() {
-        XCTAssertEqual(ProjectTabView.board(.whole).following(workspaceName: nil,
-                                                             showingProjectNoteAlone: true),
-                       .notes)
-    }
-
-    func testAStoredNoteFocusIsTreatedAsTheNotes() {
-        XCTAssertEqual(ProjectTabView.board(.note).following(workspaceName: nil,
-                                                            showingProjectNoteAlone: true),
-                       .notes)
-    }
-
-    /// Naming outranks the note rule: you asked for a workspace, so you get one.
-    func testNamingTheOneCardViewMakesItThatWorkspace() {
-        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: "Reading",
-                                                      showingProjectNoteAlone: true),
-                       .board(.workspace("Reading")))
-    }
-
-    func testABoardThatBecomesANamedWorkspaceFollowsIt() {
-        XCTAssertEqual(ProjectTabView.board(.whole).following(workspaceName: "Dashboard",
-                                                             showingProjectNoteAlone: false),
-                       .board(.workspace("Dashboard")))
-    }
-
-    /// A frame is somewhere that exists whatever is tiled, so tiling its cards down to the project's
-    /// own card must not quietly turn the tab into the notes.
-    func testAFrameTabIsNotDraggedOffItsFrameByWhatIsTiled() {
-        XCTAssertNil(ProjectTabView.board(.frame("n1")).following(workspaceName: nil,
-                                                                  showingProjectNoteAlone: true))
-    }
-
-    func testAFrameTabStillFollowsANameItIsGiven() {
-        XCTAssertEqual(ProjectTabView.board(.frame("n1")).following(workspaceName: "Sprint",
-                                                                    showingProjectNoteAlone: false),
-                       .board(.workspace("Sprint")))
-    }
-
-    /// Same argument as the frame: a name points at something that outlives the tiling on screen.
-    func testANamedWorkspaceIsNotDraggedOffItsNameByWhatIsTiled() {
-        XCTAssertNil(ProjectTabView.board(.workspace("Dashboard"))
-            .following(workspaceName: "Dashboard", showingProjectNoteAlone: true))
-    }
-
-    func testAWorkspaceLeftBehindLandsOnTheBoard() {
-        XCTAssertEqual(ProjectTabView.board(.workspace("Dashboard"))
-            .following(workspaceName: nil, showingProjectNoteAlone: false),
-                       .board(.whole))
-    }
-
-    func testAWorkspaceRenamedUnderneathATabIsFollowed() {
-        XCTAssertEqual(ProjectTabView.board(.workspace("Old"))
-            .following(workspaceName: "New", showingProjectNoteAlone: false),
-                       .board(.workspace("New")))
-    }
-}
-
-/// The row of tabs a project opens with.
+/// **A workspace is a chip and a chip is a workspace** (docs/canvas-workspaces.md §7i).
 ///
-/// **The row is the project's workspaces, not only the ones the window was left holding.** A tab is
-/// where an *open* workspace lives (docs/canvas-workspaces.md §7c), which was the whole story while a
-/// workspace could only be reached by making one, and the wrong story on the way in: one you built and
-/// then zoomed out of has no chip, so opening the project showed you none of the work you named.
-final class TabsIncludeTheProjectsWorkspacesTests: XCTestCase {
+/// §7g made the row a view of what exists rather than of what the window was left holding, and kept a
+/// list of the ones you had closed so a close would outlast the session. Once every workspace has a
+/// name and no workspace can be closed, there is nothing left for that list to record: the row is the
+/// store, in your order, and Delete is what takes something out of both.
+final class TabsAreTheProjectsWorkspacesTests: XCTestCase {
     func testAWorkspaceWithNoTabGetsOne() {
-        var tabs = ProjectTabSet(.notes)
+        var tabs = ProjectTabSet()
         tabs.include(workspaces: ["Dashboard", "Research"])
         XCTAssertEqual(tabs.tabs.map(\.view),
-                       [.notes, .board(.workspace("Dashboard")), .board(.workspace("Research"))])
+                       [.board(.whole), .notes,
+                        .board(.workspace("Dashboard")), .board(.workspace("Research"))])
     }
 
     /// The row can be dragged into an order and that order is the user's, so newcomers land after it
     /// rather than being sorted into it.
     func testAnExistingRowKeepsItsOrder() {
         var tabs = ProjectTabSet(.board(.workspace("Research")))
-        tabs.open(.notes)
         tabs.include(workspaces: ["Alpha", "Research"])
         XCTAssertEqual(tabs.tabs.map(\.view),
-                       [.board(.workspace("Research")), .notes, .board(.workspace("Alpha"))])
+                       [.board(.whole), .board(.workspace("Research")), .board(.workspace("Alpha"))])
     }
 
     /// Two chips on one workspace are two names for one thing (§7c), so a workspace that already has a
@@ -307,43 +271,106 @@ final class TabsIncludeTheProjectsWorkspacesTests: XCTestCase {
     func testAWorkspaceThatAlreadyHasATabGetsNoSecondOne() {
         var tabs = ProjectTabSet(.board(.workspace("Dashboard")))
         tabs.include(workspaces: ["Dashboard"])
-        XCTAssertEqual(tabs.tabs.count, 1)
+        XCTAssertEqual(tabs.tabs.count, 2)
     }
 
-    /// The point of the recency: the tab you left selected can be the whole board — leaving a tiled
-    /// view un-pins the tab from its workspace — so "which workspace was I in" has to be asked of the
-    /// workspace store rather than of the selection.
-    func testTheMostRecentWorkspaceIsTheOneSelected() {
+    /// **Seeding the row never moves the selection.** It used to take a "last used" name and go there,
+    /// on the grounds that leaving a tiled view un-pinned the tab so the selection could not say which
+    /// workspace you were in. Nothing un-pins a tab now — see docs/canvas-workspaces.md §7h and §7i.
+    func testSeedingLeavesTheSelectionWhereItWas() {
         var tabs = ProjectTabSet(.board(.whole))
-        tabs.include(workspaces: ["Alpha", "Dashboard"], selecting: "Dashboard")
+        let was = tabs.selectedID
+        tabs.include(workspaces: ["Alpha", "Dashboard"])
+        XCTAssertEqual(tabs.selectedID, was)
+        XCTAssertEqual(tabs.selected.view, .board(.whole))
+    }
+
+    /// **A workspace deleted somewhere else loses its chip here.** The row is the list of workspaces,
+    /// so a chip pointing at a name nothing answers to is a chip for something that is not there.
+    func testAChipForAWorkspaceThatIsGoneIsDropped() {
+        var tabs = ProjectTabSet()
+        tabs.include(workspaces: ["Alpha", "Dashboard"])
+        tabs.include(workspaces: ["Dashboard"])
+        XCTAssertEqual(tabs.tabs.map(\.view),
+                       [.board(.whole), .notes, .board(.workspace("Dashboard"))])
+    }
+
+    /// And you land somewhere sensible when the chip that went was the one you were on.
+    func testLosingTheSelectedChipLandsOnItsNeighbour() {
+        var tabs = ProjectTabSet(.board(.whole))
+        tabs.include(workspaces: ["Alpha", "Dashboard"])
+        tabs.select(tabs.first(showing: .board(.workspace("Alpha")))!.id)
+        tabs.include(workspaces: ["Dashboard"])
         XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
     }
 
-    /// A name that is not on the row — deleted in another window between the two reads — leaves the
-    /// stored selection alone rather than landing on whatever happens to be first.
-    func testAnUnknownRecentWorkspaceLeavesTheSelectionAlone() {
-        var tabs = ProjectTabSet(.notes)
-        let was = tabs.selectedID
-        tabs.include(workspaces: ["Alpha"], selecting: "Deleted")
-        XCTAssertEqual(tabs.selectedID, was)
-    }
-
-    /// Nothing named, nothing added: a project with no workspaces opens exactly as it always has.
+    /// Nothing named, nothing added: a project with no workspaces opens as the canvas and its notes.
     func testNoWorkspacesChangesNothing() {
-        var tabs = ProjectTabSet(.notes)
+        var tabs = ProjectTabSet()
         tabs.include(workspaces: [])
-        XCTAssertEqual(tabs.tabs.map(\.view), [.notes])
-        XCTAssertFalse(tabs.showsBar)
+        XCTAssertEqual(tabs.tabs.map(\.view), [.board(.whole), .notes])
+    }
+}
+
+/// **Two chips on one thing are two names for it** (docs/canvas-workspaces.md §7c), which `openTab`
+/// has always refused to make and a rename could not: renaming onto a name that already has a chip
+/// makes a pair after the fact.
+final class TabsCollapseDuplicatesTests: XCTestCase {
+    func testAPairOnOneViewBecomesOne() {
+        var tabs = ProjectTabSet(.board(.workspace("Dashboard")))
+        let second = tabs.open(.board(.workspace("Review")))
+        tabs.retarget(second.id, to: .board(.workspace("Dashboard")))
+        XCTAssertEqual(tabs.collapseDuplicates(), [second.id])
+        XCTAssertEqual(tabs.tabs.map(\.view), [.board(.whole), .board(.workspace("Dashboard"))])
     }
 
-    /// `openBehind` aimed at a named tab rather than at the one that is up — what a pane leaving a
-    /// workspace uses when you are looking at a different tab.
-    func testOpenBehindANamedTabLandsInFrontOfIt() {
-        var tabs = ProjectTabSet(.notes)
-        let second = tabs.open(.board(.whole))
-        tabs.select(tabs.tabs[0].id)
-        tabs.openBehind(.board(.workspace("Dashboard")), of: second.id)
-        XCTAssertEqual(tabs.tabs.map(\.view),
-                       [.notes, .board(.workspace("Dashboard")), .board(.whole)])
+    /// The leftmost survives, because the row has an order and it is the user's.
+    func testTheChipThatWasAlreadyThereIsTheOneThatStays() {
+        var tabs = ProjectTabSet(.board(.workspace("Dashboard")))
+        let first = tabs.tabs[1].id
+        let second = tabs.open(.board(.workspace("Review")))
+        tabs.retarget(second.id, to: .board(.workspace("Dashboard")))
+        tabs.collapseDuplicates()
+        XCTAssertEqual(tabs.tabs.map(\.id), [tabs.canvasID, first])
+    }
+
+    /// A selection on the chip that goes moves to the one that stays, so the window is still showing
+    /// what it was showing.
+    func testTheSelectionFollowsTheSurvivor() {
+        var tabs = ProjectTabSet(.board(.workspace("Dashboard")))
+        let first = tabs.tabs[1].id
+        let second = tabs.open(.board(.workspace("Review")))
+        tabs.retarget(second.id, to: .board(.workspace("Dashboard")))
+        tabs.collapseDuplicates()
+        XCTAssertEqual(tabs.selectedID, first)
+        XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
+    }
+
+    func testARowWithNoDuplicatesIsLeftAlone() {
+        var tabs = ProjectTabSet()
+        tabs.open(.board(.workspace("Dashboard")))
+        XCTAssertEqual(tabs.collapseDuplicates(), [])
+        XCTAssertEqual(tabs.tabs.count, 3)
+    }
+}
+
+/// ⌘1…⌘9 — see `ProjectWindowController.selectProjectTabByIndex`. ⌘1 is the canvas, always, which is
+/// the one thing about this row that never has to be looked up.
+final class TabsSelectByIndexTests: XCTestCase {
+    func testAPositionSelectsThatTab() {
+        var tabs = ProjectTabSet()
+        tabs.open(.board(.workspace("Dashboard")))
+        tabs.select(at: 0)
+        XCTAssertEqual(tabs.selected.view, .board(.whole))
+        tabs.select(at: 1)
+        XCTAssertEqual(tabs.selected.view, .notes)
+    }
+
+    /// ⌘9 asks for the last one however many there are, which is what every browser on this Mac does.
+    func testPastTheEndIsTheLastTab() {
+        var tabs = ProjectTabSet()
+        tabs.open(.board(.workspace("Dashboard")))
+        tabs.select(at: .max)
+        XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
     }
 }

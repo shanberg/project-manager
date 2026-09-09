@@ -32,8 +32,15 @@ two scales, the renderer switch is gone; the way out of the notes is zooming out
 renames itself on arrival. **The card's keyboard is built too**, by the rule find already used rather
 than the flag §7d expected. **The task column is gone**: a canvas that
 will not parse is now replaced rather than fallen back from (§7f), which was the last thing keeping it
-alive, and the other two jobs it was doing have answers of their own. **This page is built.** What is
-left of it is the one question under Open, which is not a task.
+alive, and the other two jobs it was doing have answers of their own. **§7h is built**: read back as a
+whole, the sections above had left four kinds of debt between them — acts that destroyed work with no
+question, a row that could not hold what §7g put in it, two stores answering one question, and exits
+that vanished exactly when they were needed — and every one of them is a thing an earlier section made
+true and did not go back to. **§7i is built**: every workspace has a name and every tiling is one, the
+canvas is a permanent tab at the head of the row rather than a chip that other chips can turn into, and
+a tab stopped following its board — which is what the header's reflow was made of. **This page is
+built.** What is left of it is the one question under Open,
+which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -286,6 +293,11 @@ has one, and it becomes a **menu**.
   than merely being true.
 - Rename, Duplicate and Delete hang off that menu, on the object they act on.
 
+> **Superseded by §7i.** The pill has no readout and no menu at all now. Both moved to the row: the
+> canvas is a permanent chip, every workspace is a chip, and the row answers "what am I looking at" at
+> a constant width, which the pill could not while it was also the thing that gave way. What the pill
+> kept is the name of the board and the ✕, which now shows the canvas rather than untiling anything.
+
 **Losing the count costs nothing**, because the two never compete. `6/43` answers "how much of the
 board am I seeing", which matters most immediately after an ad-hoc ⌘↩ — exactly when there is no name
 to show. Count when unnamed, name when named, so the readout says which *kind* of workspace you are in
@@ -330,7 +342,8 @@ in the menu compares against, and what ⌘↩ clears.
 also every browser's shortcut for selecting a tab, and this app has tabs. [Backlog
 17](canvas-backlog.md) says decide the navigation grammar before adding a single key, and spending
 ⌘1…9 here would be spending it on the losing side of a question that is already open. ⌃1…9 stays with
-frames.
+frames. *(§7c settled that question — a tab is where an open workspace lives, so the two sides turned
+out to be one — and §7h spends the keys on Go to Tab. It also found that ⌘1 and ⌘2 were not free.)*
 
 ### What shipped, and the two things it decided on the way
 
@@ -344,6 +357,7 @@ named workspace, where it would leave the old one behind and put you in a second
 arrived at by picking the wrong item. Duplicating deserves to be asked for, which is item 10.
 
 **Renaming and deleting break a tab pinned to the old name**, and that is accepted rather than fixed.
+*(§7c fixed it for this window; §7h stopped a rename from landing on a name that already has a chip.)*
 The name is the whole of a workspace's identity — there is nothing underneath to keep pointing at — so
 a pin that no longer resolves lands on the whole board, which is what `applyFocus` has always done for
 a frame deleted in Obsidian. Following the pins would mean reaching into every window's stored tabs to
@@ -390,6 +404,11 @@ The fix is one claim: **a tab is where an open workspace lives**, and everything
 is "ephemeral unless named" rendered a second time, and it is what makes the bar readable as a row of
 workspaces rather than a row of two kinds of thing. The whole *untiled* board keeps saying `Canvas`,
 because a board is not a workspace: a workspace is a set of tiles (§7).
+
+> **Superseded by §7i.** There is no unnamed workspace: every tiling is made named. The paragraph's
+> instinct was right and its conclusion was backwards — a row of two kinds of thing is the problem, and
+> the fix is to stop making the second kind rather than to give it a word. `Canvas` is right and is
+> now a glyph on a permanent first tab rather than a name a chip can acquire.
 
 ### A chip is a name, and it is yours
 
@@ -735,7 +754,7 @@ what other surfaces were already borrowing moved out to files of its own name:
 | `SessionNoteTakeover.swift` | The takeover and the three layout helpers it needs |
 | `MouseMonitors.swift` | The four AppKit monitors, all four used by the card |
 | `RowSelectionBand.swift`, `ReadableWidth.swift` | The two shared bits of row metrics |
-| `DisplayModes.swift` | `TasksMode` and `AppColorMode` — neither was ever about the column |
+| `DisplayModes.swift` | `TasksMode` and `AppColorMode` — neither was ever about the column *(wrong about `TasksMode`: the column was its only reader, and §7h retired it)* |
 
 `ProjectViewState` became `ProjectWindowState`, having shrunk to what the sidebar shares with the
 window, and lost two members with it: `focusedPane` and `isEditingText` were both write-only once the
@@ -776,6 +795,303 @@ which is what makes the row consistent within a session rather than only at the 
 **Seeded, not enforced.** A chip you close stays closed for the session and comes back next time you
 open the project, because the row is a view of what exists. Closing a chip is not deleting a workspace;
 that verb is on the chip's own menu and always has been.
+
+> **Superseded by §7h and then by §7i.** §7h made the close durable, which is machinery to keep a close
+> from being contradicted by the seeding right above it. §7i removed the disagreement instead: a
+> workspace's chip *is* the workspace, so there is no close — Delete is the verb, and it takes the chip
+> with it.
+
+## 7h. What the row cost, once there was one — **built**
+
+§§7–7g built the object, gave it a name, a home, and a chip that arrives with the project. Read back as
+a whole, they left a system whose parts were each right and which had picked up four kinds of debt
+between them: a set of acts that could destroy work with no undo and no question, a row that could not
+hold what §7g put in it, two stores answering one question, and a set of exits that disappeared exactly
+when they were needed. None of these is a disagreement with the sections above; all four are things
+those sections made true and did not go back to.
+
+### Naming was a destructive act nobody had noticed
+
+`CanvasWorkspaces.save` replaces, and §7b argued for that: a named workspace is **live**, so dragging a
+tile has to land on it without a Save. What the argument covers is the write-through. The same call is
+also how a name is *acquired* — Name This Workspace…, a rename, a duplicate, the chip's own field — and
+there the thing being replaced is not the workspace you are looking at. Typing "Dashboard" into an
+untitled chip ended last week's Dashboard, silently, with nothing to undo it.
+
+**The fix is the Finder's question**, on the three paths that acquire a name and not on the
+write-through: one name, two things, only one can keep it. And the same argument, one step further,
+applies to the verb that had no question at all. §7c put Delete on the chip's contextual menu two lines
+above Close Tab; the reasoning for not asking — "what is on screen is untouched, a deleted workspace is
+one that has stopped having a name" — is true and is half the story. The tiles survive; the workspace
+does not, and the workspace is the thing the row is a list of. Both now ask, and both say what survives
+rather than only what goes.
+
+### A rename could make the state §7c says has no meaning
+
+"Two chips on one workspace are two names for one thing, and picking between them is a question with no
+answer." `openTab` has refused to make a second chip since §7c. `retarget` cannot refuse in the same
+way — it is how a tab *follows* its board — and the collision only exists afterwards: rename "Review" to
+"Dashboard" while Dashboard has a chip and the row now says Dashboard twice; delete a workspace two tabs
+were in and both land on the whole board and both say Canvas.
+
+`ProjectTabSet.collapseDuplicates` is the sweep the two bulk retargets do behind themselves. The
+leftmost chip survives, because the row has an order and it is the user's, and a selection on a chip
+that goes moves to the survivor so the window is still showing what it was showing.
+
+### The row outgrew the header §7c fitted it into
+
+§7c is emphatic that a chip is as wide as its name — the flat 168pt cap "fired on the name's length
+rather than on the room available, which is the one thing a cap in a header should never do" — and the
+bar is deliberately the header's give-way, the thing squeezed against the trailing controls. Those two
+were a matched pair for the handful of tabs you had opened by hand. §7g changed how many that is: the
+row seeds a chip for every workspace the board has, with no gesture involved, so a project with eight of
+them arrives with eight chips and "give way" means every name in the row shortening to a sliver at once.
+
+**So the bar gives way by clipping rather than by squeezing.** The chips sit in a horizontal scroll view
+capped at their own measured width, so a bar with two chips is still two chips wide and never a strip
+across the window; past that the overflow is one scroll away and the selection is always scrolled to,
+since a tab you reached with ⌃⇥ that stayed off the end of the row is a switch you have to go looking
+for. A chip is as wide as its name again, and stays that way at any count.
+
+**And an untitled chip carries its count again.** §7c dropped the badge because the board underneath was
+already showing you the tiles at full size — true of the chip you are looking at, and not true of the
+two beside it. A row with three chips all reading `Untitled` is a row you have to click through to read,
+so an unnamed workspace says `Untitled · 6`, which is the pill's own rule (name when named, count when
+not) applied to the chip. A named chip still says only its name; it has one.
+
+**Closing a chip means it.** §7g called the row "seeded, not enforced" and let a closed chip come back
+next launch, on the grounds that the row is a view of what exists. But the control is an ✕, and on this
+Mac an ✕ on a tab is a promise that it stays shut. The set remembers the workspaces you have said no to,
+opening one again retracts it, and closing is still not deleting — that verb is on the chip's own menu
+and now asks first.
+
+### Two stores answered "which workspace was I in"
+
+§7g added a `lastUsed` name per board because leaving a tiled view un-pins the tab, so "the tab
+selection alone cannot answer which workspace was I in once you have zoomed out of one." That premise
+was made false by §7g's own next paragraph: **leaving one keeps its chip.** The row still holds the
+workspace; the selection records that you were looking at the whole board, which is what you were
+looking at. A second store could only disagree with the first, and it did — spend the evening in a
+project's notes after an hour in Dashboard, close the window, and it reopened in Dashboard.
+
+The store is gone and the selection is the answer, which is §7c's rule read the way round it was
+written: **a tab is where an open workspace lives**, so the tab you left selected *is* which workspace
+you were in, including when the honest answer is "none of them".
+
+### The ways out went missing one at a time
+
+A tiled view had, on paper, four exits. In the ordinary case it had one, and it needed a pointer and a
+contextual menu.
+
+- **⌘↩** is the way out "only when there is nothing left to narrow to". Clicking a tile selects it
+  (that is what made a tile clickable in the first place), so after the most ordinary interaction in a
+  tiled view ⌘↩ means *fill the window with this one*.
+- **Escape** stops at the root, deliberately and rightly: it is the key that cancels an edit, and every
+  cancelled edit should not be one keystroke from tearing down a workspace.
+- **The pill's ✕** was handed to the tab bar by §7c the moment a bar existed. The bar has no ✕ — it has
+  a menu item. And §7g made "a bar exists" the ordinary case.
+- **View ▸ Leave Tiled View** had no key equivalent at all.
+
+Two changes, both of them arguments already written down and not followed far enough. The ✕ **stays on
+the pill whenever there is a tiling to leave**: §7c's objection was that a pill saying "Dashboard"
+beside a chip saying "Dashboard" says it twice, which is true of the *name* and is not an argument about
+a button. Only the readout goes to the bar. And **⌘− leaves any tiled view**, not just the note-only
+one — `zoomOut` already carried the whole argument ("the thing one step further out from a workspace is
+the board, which is exactly what ⌘− means everywhere else") and then applied it to one workspace out of
+all of them. It costs nothing: a tiled board's own zoom is fixed, so ⌘− did nothing in every tiled view,
+not just in that one.
+
+### ⌘1…9 was being reserved by two dead menu items
+
+§7b left ⌘1…9 unspent "because it is also every browser's shortcut for selecting a tab, and this app has
+tabs", deferring to backlog 17: settle the navigation grammar before spending a single key. The grammar
+was settled by §7c — a tab is where an open workspace lives, so *go to workspace n* and *go to tab n*
+stopped being two claimants — and meanwhile ⌘1 and ⌘2 were spent anyway, on View ▸ Incomplete/All.
+Those two, and Show Notes beside them, were switches on the task column; §7f removed the column and
+`PMPanelTasksMode` and `PMPanelDetailsExpanded` were left with no reader anywhere in the app. The items
+went on ticking a checkmark and changing nothing. (§7f's own table says `TasksMode` "was never about the
+column", which is the sentence that let it survive: it was a filter over a list of tasks, and the column
+was the list.)
+
+So: the three dead items are gone, and View ▸ Go to Tab has ⌘1…⌘9, nine slots retitled on validation
+the way Go to Frame does it, with ⌘9 meaning the last tab however long §7g has made the row. ⌃1…9 still
+goes to a frame, and the modifier is still what tells the two words apart.
+
+### Three more that were each one line
+
+- **⌘W took the window**, tabs and all, with no question, while View ▸ Close Tab had no key. `performClose`
+  is answered by the window before anything of ours is asked, and a second menu item with the same key
+  would never be reached past File ▸ Close — so the window narrows it: ⌘W closes the tab you are in and
+  the window once that was the last one, which is what every Mac app with tabs does. ⇧⌘W is the window.
+- **"Open in New Tab" on a frame did not exist.** `openSelectedFrameInTab` had been written, was named in
+  two places as one of the two ways a tab gets made, and had no callers anywhere in the app. It is on
+  the frame's contextual menu now.
+- **The bar drew nothing at one tab**, taking the "+" with it — so a window with one tab made no visible
+  offer of a second, and the two routes it was documented as leaving that job to were a File menu item
+  and the command above. One tab is still no *chips*; the "+" is always there.
+
+Two smaller ones went with them: the current chip wore a permanent ✕ (the chip your pointer is nearest,
+and the only one you could hit by accident), and naming from the chip's field started empty while naming
+from the menu started at "Grid, 6" — one act, two seeds, and an empty field that reads as "this had no
+name" under the word `Untitled`.
+
+## 7i. Every workspace has a name, and the canvas is a tab — **built**
+
+§§7–7h built a row of chips and then spent four sections paying for the fact that not every chip was
+the same kind of thing. The row held the notes, the whole board, a frame, a named workspace, and an
+*untitled* one — five kinds behind one shape — and every rule that had to be written twice was written
+twice because of that. This section removes two of the five, and what is left is a row you can read.
+
+Two claims do all the work:
+
+- **A workspace is a named set of tiles.** Both halves are enforced. There is no untitled workspace,
+  and there is no tiling that is not a workspace — except the project-note view, which is a tiling of
+  one card that nobody chose (§7d).
+- **The canvas is not a workspace.** It is the board itself, untiled: the thing every workspace is a
+  narrowing *of*. So it is one permanent tab at the head of the row, drawn as a glyph, and it never
+  closes, never moves, and is never tiled.
+
+### The untitled workspace was the source of most of the special cases
+
+"Ephemeral unless named" (§7) was a good description of where a tiling was *kept* — the volatile
+`CanvasViewMemory` row versus the durable `CanvasWorkspaces` one — and it leaked outward into a kind of
+object. Counting what it cost by the time §7h was finished:
+
+- A chip that had to say `Untitled · 6`, because two of them in a row were otherwise indistinguishable
+  — a count on a chip, which §7c had removed once already for being a fact the board underneath was
+  showing at full size.
+- `WorkspaceCommands` forking on `name: String?`, so the one menu offered "Name This Workspace…" or
+  "Rename …" depending on a state you could not see.
+- `saveTilingAsWorkspace`, one command under two words, retitling itself on validation.
+- `CanvasViewState.workspaceName`, an optional whose nil case meant "tiled, but pointing at nothing".
+- `ProjectTabItem.isWorkspace` beside `workspaceName`, a flag existing purely for the chips that were
+  a workspace without being a named one.
+- And the thing ⌘Return did to get there: clear the board's `workspaceName`, leaving the *named*
+  workspace it had been in with no chip — which is what `onLeftWorkspace` and `openBehind` were built
+  to repair, inserting a chip behind you on every press.
+
+All six are gone, and one rule replaces them: **⌘Return makes a named workspace and opens its tab.**
+
+### The name is assigned, not asked for
+
+⌘Return is the board's fastest gesture — fullscreen this card, tile those six — so a modal in front of
+it would be a modal in front of *looking at something*. `WorkspaceNamePrompt.freshName(avoiding:)`
+hands out "Workspace", "Workspace 2", and the chip is renameable in place the moment it exists. That is
+the Finder's bargain over an untitled folder: a real name from the start, and the real name is the
+thing you type over. It also retires the old seed, "Grid, 6", which was a fair *description* and a poor
+name — it goes stale the moment you swap the arrangement, and it puts a count on a chip.
+
+The obvious objection is that ⌘Return is pressed constantly and the store would fill with junk. The
+answer is in `ProjectSplitViewController.tileAsWorkspace`: **the same set of cards resumes the same
+workspace rather than making a second.** ⌘Return on the six cards you always tile lands in the
+workspace you already have, every time, whatever it is called now. This is the job `lastTiling` was
+already doing for the *arrangement* — "the same cards as last time means the same arrangement as last
+time" — done one level up, for identity.
+
+### A tab stopped following its board, which is where the reflow came from
+
+`ProjectTabView.following(workspaceName:showingProjectNoteAlone:)` was §7c's mechanism and §7e's
+renderer switch: the pane was the answer and the tab was made to agree with it. It is gone.
+
+Watch what one gesture used to cost. Zoom out of Dashboard and: the chip renamed itself from
+"Dashboard" to "Canvas"; a second chip was inserted behind it so the workspace you had just left did
+not vanish; `collapseDuplicates` swept up if that made a pair; and the title pill took its readout back
+from the bar, because the bar had gone from two chips to three and `showsTilingSummary` is keyed on
+whether there is a bar at all. Four things moved, in the header, for one press of ⌘−.
+
+Now nothing moves. A workspace tab is its workspace for as long as the workspace exists, so leaving one
+is not an edit to anything — it is a change of *tab*, and the canvas is a tab. `goToCanvas` is the whole
+of it, and it is what the pill's ✕, ⌘−, ⌘↩-with-nothing-left-to-narrow and the menus' "Show Canvas" all
+now do. **The pane you were in keeps its tiles**, so coming back to its chip is instant and exact —
+which is also why none of this needs an animation: nothing is being undone.
+
+### What the pill gave up
+
+The readout. §7b put "6 of 43 cards" in the pill because a board showing six of forty-three with the
+rest hidden looks like a board most of which has been deleted, and that was true when the pill was the
+only chrome a tiled view had. §7c then handed the readout to the bar whenever there was a bar, and §7h
+had to claw the ✕ back out of that handoff because it had gone along with it.
+
+There is no handoff now. The canvas has a permanent chip and every workspace has a chip, so the row
+answers "which of this board's places am I in" at all times and in one place.
+
+**And then the ✕ went too.** It survived one round longer than it should have. §7h had just fought to
+keep it — §7c gave the readout to the bar and took the ✕ along with it, leaving a window whose only
+click out of a tiled view was inside a right-click menu — so keeping it was right *then*. Once this
+section made it mean "show the canvas", the canvas was a permanent chip a few inches to its right, and
+a control that duplicates the control beside it is not an escape hatch, it is a second thing to
+explain. The pill is the project's name and nothing else, which is the one property worth having here:
+it never changes width, so nothing in the header moves when you switch between the board and a
+workspace.
+
+### The chip, finally
+
+Four debts, all of them visible, none of them arguable:
+
+- **A capsule full of rectangles.** The bar is a `Capsule`; the chips inside it were 5pt rounded rects.
+  Now they are capsules, and the geometry nests.
+- **The selected chip was `.quaternary` over `.regularMaterial`** — the faintest fill SwiftUI has, over
+  glass, at 11pt. It is `.primary` at 9% now, which is what it takes to be seen through a material.
+- **Every chip reserved 17pt on its right for a ✕ it was not showing**, so no label was centred in its
+  own box. Only the chips that *have* a Close reserve it now, which is the notes and a frame — the
+  canvas and every workspace have none at all.
+- **No glyph anywhere.** §7c removed the kind glyph for guarding against a rare name collision, and the
+  answer here is not to put it back: the workspaces are names and read as names. The canvas gets the
+  one glyph in the row, because it is the one chip that is not a name —
+  `rectangle.3.offgrid`, scattered rather than gridded, since the grid is `rectangle.split.2x2`, the
+  button that tiles.
+
+And the header's tool capsules drop their glass over a tiled board (`headerBacking(_:in:showing:)`).
+The backing exists to hold controls legible over content panning beneath them; tiles are panels with
+their own edges on a plain ground, so a second separation on top of one that has already happened just
+reads as two surfaces arguing about which is in front.
+
+### ⌘W means the smallest thing you are inside
+
+Three answers, one rule read at three depths, and it falls out of the row having three kinds of tab in
+it. A tab with a Close — the notes, a frame — closes. A workspace has no Close, and what you mean by
+shutting one is "I am done looking at this", which is the canvas: ⌘W steps out to it, and the workspace
+is exactly where you left it when you come back. On the canvas there is nothing left inside the window,
+so ⌘W means what it means everywhere else on this Mac. File ▸ Close Tab retitles itself to "Show
+Canvas" on a workspace rather than being dimmed, on `tileCommandTitle`'s pattern — a menu item that
+says "Close Tab" while stepping out to the canvas is the menu promising something else.
+
+### Close is not a verb on a workspace
+
+A workspace's chip *is* the workspace, so closing one would leave a named thing in the store with
+nowhere to be — and the row, which is a view of the store, would put the chip straight back. §7g met
+that with a `dismissed` set and §7h made it durable, which is a lot of machinery to make a close
+survive being contradicted.
+
+So a workspace chip has no ✕ and no Close Tab. What it has is **Delete**, on its own menu, behind the
+question §7h added — and Delete now takes the chip with it, which is the same act seen from the row.
+What people mean by "close this" is either "show me the board", which is the canvas chip one click to
+the left, or "I am done with this", which is Delete. `dismissed` is gone, and so is the durable key it
+had just acquired.
+
+### What came out
+
+`ProjectTabView.following`, `ProjectTabSet.dismissed`, `ProjectTabSet.replaceSelected`,
+`ProjectTabSet.openBehind`, `ProjectSplitViewController.reconcileTabsWithTheirBoards`,
+`CanvasBoardView.onLeftWorkspace`, `CanvasBoardView.saveTilingAsWorkspace`,
+`CanvasBoardView.suggestedWorkspaceName`, `CanvasPaneController.nameWorkspace`, `tileCount`,
+`workspaceDeleted`, `hasWorkspaceToSave`, `refreshWorkspaceLists`, `CanvasHeaderModel.workspace`,
+`workspaces`, `showsTilingSummary` and the pill's workspace menu, `ProjectTabItem.isWorkspace` and
+`editSeed`, and the reads of `CanvasViewState.tiling` and `workspaceName` — the two fields stay on the
+wire so an old row still decodes, and nothing reads them.
+
+**One carry-over, and otherwise no migration.** A stored row with no canvas tab is given one by
+`ProjectTabSet.init(tabs:selectedID:)`, a stored `dismissed` array is simply not read, and a stored
+tiling in `CanvasViewMemory` is not restored — the canvas pane owns that row and the canvas is not
+tiled. `CanvasFocus`'s wire format is untouched, `arrangement` included.
+
+The carry-over is which workspace you were in. Before this section a board could be *in* "Main" while
+the tab holding it said `.whole`, so a window closed back then stored a selection that lands on the
+canvas and loses the thing you were working in. The name is in `CanvasViewMemory.workspaceName`, which
+is the only record of it — so `takeWorkspaceName(of:)` reads it once, clears it in the same act, and
+nothing writes the field again. Every board answers it exactly once and nil for ever after, which is
+what keeps it from becoming the second store answering "which workspace was I in" that §7h took a
+section to remove.
 
 ## 8. What this does to the backlog
 
