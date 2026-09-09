@@ -379,11 +379,34 @@ The fix is one claim: **a tab is where an open workspace lives**, and everything
   for one thing, and choosing between them is a question with no answer. It is the same call
   `WindowManager` makes for a project that already has a window.
 
-**An unnamed workspace gets a chip too**, reading `Untitled 6/43` with the workspace glyph — the same
-words the menu uses for it. That is "ephemeral unless named" rendered a second time, and it is what
-makes the bar readable as a row of workspaces rather than a row of two kinds of thing. The whole
-*untiled* board keeps saying `Canvas`, because a board is not a workspace: a workspace is a set of
-tiles (§7).
+**An unnamed workspace gets a chip too**, reading `Untitled` — the same word the menu uses for it. That
+is "ephemeral unless named" rendered a second time, and it is what makes the bar readable as a row of
+workspaces rather than a row of two kinds of thing. The whole *untiled* board keeps saying `Canvas`,
+because a board is not a workspace: a workspace is a set of tiles (§7).
+
+### A chip is a name, and it is yours
+
+The first chips carried three things: a glyph, the name, and a `6/43` badge. Two of them went.
+
+- **The glyph** told a frame called "Research" apart from a workspace called "Research". That is a
+  collision that is rare, that the chip's own menu resolves the moment you ask, and that was costing
+  every chip in the row a symbol to guard against.
+- **The badge** said how many cards the tiling holds — a fact the board underneath is showing you at
+  full size. It was carrying the ✕ out of the tiled view, which is the one thing that had to be
+  rehoused: `Leave Tiled View` is now an item on the chip's menu, on the current tab only, since it
+  acts on the board that is up.
+
+What is left is a name, which is what a tab is. Two things follow from a row of names:
+
+- **Drag one along the row.** `ProjectTabSet.move` was written for this and tested before there was
+  anything to call it — "that one goes *there*", the same operation spelled the same way as
+  `CanvasTileSession.move`. The row reorders as the drag crosses each chip rather than promising an
+  order with an insertion line.
+- **Double-click one to rename it.** On the tab you are in, and only on a workspace: the tabs that are
+  not workspaces are named after what they show rather than by you. A named workspace is renamed and an
+  unnamed one is *named* — the same fork `WorkspaceCommands` draws, arrived at by typing instead of by
+  picking. Return commits, Escape abandons, clicking away commits. The menu keeps its item, because a
+  rename you can only reach by knowing to try is not a rename anybody finds.
 
 ### What ⌘Return does now, and why it is a new tab
 
@@ -418,7 +441,8 @@ because arriving at a duplicate by picking the wrong item is not the same as ask
 Renaming used to break every tab pinned to the old name, on the grounds that the name is the whole of a
 workspace's identity and a pin that stops resolving lands on the board. That is still true of pins in
 *other* windows. It stopped being true here: this window knows every chip on the old name, so
-`renameWorkspace(named:)` carries them across in the same act. The rename is a remove and a save
+`renameWorkspace(named:to:)` carries them across in the same act — and it is the one place both the
+prompt and the chip's own field arrive at. The rename is a remove and a save
 still — there is nothing under the name to re-key — with the save first, so a failure leaves you with
 both rather than neither.
 

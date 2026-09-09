@@ -1,30 +1,26 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// One tab, as the bar needs to draw it. A view model rather than a `ProjectTab`, because the name of
 /// a tab pinned to a frame is the frame's label — a fact about the board's document, which the header
 /// has no business reaching into.
 struct ProjectTabItem: Identifiable, Equatable {
     let id: String
-    /// What the chip says. Short: the project's name is in the pill immediately to the left, so a
-    /// tab only has to say which *view* it is.
+    /// What the chip says, and the whole of what it says. Short: the project's name is in the pill
+    /// immediately to the left, so a tab only has to name which *view* it is.
+    ///
+    /// A chip used to carry a glyph and a "6/43" badge either side of this. The glyph told a frame
+    /// called "Research" apart from a workspace called "Research" — a collision that is rare, that the
+    /// chip's own menu resolves, and that cost every chip in the row a symbol to guard against. The
+    /// badge said how many cards were tiled, which the board underneath is already showing you at full
+    /// size. Both were true and neither was needed, and a row of tabs is read at a glance or not at all.
     let name: String
-    /// What kind of view it is, which is what lets the name stay short — a frame called "Research"
-    /// and a workspace called "Research" are told apart by the glyph rather than by a prefix.
-    let symbol: String
-    /// Whether this tab is showing a workspace — named or not. What the chip hangs the workspace's
-    /// own commands off, and what earns it the workspace glyph: a board you tiled is in one whether or
+    /// Whether this tab is showing a workspace — named or not. What the chip hangs the workspace's own
+    /// commands off, and what makes its label editable: a board you tiled is in a workspace whether or
     /// not you have named it yet.
     var isWorkspace = false
     /// The name of that workspace, or nil for the unnamed one. See `WorkspaceCommands`.
     var workspaceName: String?
-    /// A state of *this* view, after its name — "6/43" while it is tiled.
-    ///
-    /// This used to be the title pill's, and the pill's argument for it was sound while a window showed
-    /// one thing: the pill answers "what am I looking at", and "6 of 43 cards" is precisely an answer
-    /// to that. With tabs the pill is answering it for the window and the fact belongs to one tab —
-    /// tile a board in one tab and the pill would report it over the top of a tab showing the notes.
-    /// So the tab wears it, and the pill stops (see `CanvasHeaderModel.showsTilingSummary`).
-    var detail: String?
 }
 
 /// A project window's tabs, as a capsule in the header band beside the title pill.
@@ -47,17 +43,28 @@ struct ProjectTabBar<AddMenu: View>: View {
     let chrome: HeaderChrome
     var select: (String) -> Void
     var close: (String) -> Void
+    /// Put a tab at an index — a drag along the row. See `TabReorder`.
+    var move: (String, Int) -> Void
     var leaveTiling: () -> Void
     /// The workspace verbs, on the chip of the workspace they act on — see `WorkspaceCommands`.
     var nameWorkspace: (String) -> Void
     var renameWorkspace: (String) -> Void
     var duplicateWorkspace: (String) -> Void
     var deleteWorkspace: (String) -> Void
+    /// A label edited in place, by tab id and the typed name. Naming or renaming, depending on what the
+    /// chip was — see `ProjectSplitViewController.renameTab`.
+    var renameTab: (String, String) -> Void
     @ViewBuilder var addMenu: () -> AddMenu
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
     /// each carrying a permanent × is a row of things to click by accident.
     @State private var hovering: String?
+    /// The chip being dragged along the row, if one is.
+    @State private var dragging: String?
+    /// The chip whose label is being typed into, if one is.
+    @State private var editing: String?
+    @State private var draft = ""
+    @FocusState private var editorFocused: Bool
     @Namespace private var backing
 
     var body: some View {
@@ -77,37 +84,38 @@ struct ProjectTabBar<AddMenu: View>: View {
     private func chip(_ item: ProjectTabItem) -> some View {
         let current = item.id == selectedID
         let showsClose = items.count > 1 && (current || hovering == item.id)
-        return Button { select(item.id) } label: {
-            HStack(spacing: 4) {
-                Image(systemName: item.symbol)
-                    .font(.system(size: HeaderMetrics.iconSize - 1, weight: .medium))
-                Text(item.name)
-                    .font(.caption)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if let detail = item.detail {
-                    detailBadge(detail, on: current)
+        return Group {
+            if editing == item.id {
+                // Not inside the button while the field is up: a `Button` swallows the clicks that
+                // would put the caret where you aimed it, and dragging the chip you are editing is not
+                // a gesture anybody means.
+                content(item, current: current, showsClose: false)
+            } else {
+                Button { select(item.id) } label: {
+                    content(item, current: current, showsClose: showsClose)
                 }
-                // Held rather than inserted, so the name doesn't shift sideways when the pointer
-                // arrives. A tab that re-lays-out under the cursor is a tab you misclick.
-                closeButton(item)
-                    .opacity(showsClose ? 1 : 0)
-                    .allowsHitTesting(showsClose)
-            }
-            .foregroundStyle(current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .padding(.horizontal, HeaderMetrics.textInset)
-            .frame(height: HeaderMetrics.itemHeight)
-            .frame(maxWidth: 168)
-            .contentShape(Rectangle())
-            .background {
-                if current {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(.quaternary)
-                        .matchedGeometryEffect(id: "backing", in: backing)
+                .buttonStyle(.plain)
+                // **Rename where the name is.** Double-clicking a label to edit it is what the Finder,
+                // the sidebar and every tab bar with names in it do, and under
+                // docs/canvas-workspaces.md §7c the chip *is* the workspace — so this is the shortest
+                // path to the one verb you reach for most. The menu keeps its item: a rename you can
+                // only reach by knowing to try is not discoverable.
+                //
+                // Only the tab you are in, and only a workspace. A double-click on a background chip
+                // is a click that arrived at a tab you had not switched to yet, and the tabs that are
+                // not workspaces are named after what they show rather than by you.
+                .simultaneousGesture(TapGesture(count: 2).onEnded {
+                    guard current, item.isWorkspace else { return }
+                    beginEditing(item)
+                })
+                .onDrag {
+                    dragging = item.id
+                    return NSItemProvider(object: item.id as NSString)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .onDrop(of: [.text],
+                delegate: TabReorder(target: item, items: items, dragging: $dragging, move: move))
         // **A workspace's commands live on the workspace.** Right-click is where a Mac keeps the verbs
         // for the thing under the pointer, and it keeps them off the board's tile menu, which is for
         // what you do to a tile — docs/canvas-workspaces.md §7c. Offered on every workspace chip and
@@ -121,6 +129,13 @@ struct ProjectTabBar<AddMenu: View>: View {
                                   duplicate: { item.workspaceName.map(duplicateWorkspace) },
                                   delete: { item.workspaceName.map(deleteWorkspace) })
                 Divider()
+                // The way out of the tiled view, which the chip's badge used to carry as a ✕ and which
+                // the pill only carries while there is no bar. On the current tab alone: `leaveTiling`
+                // acts on the board that is up, so on any other chip it would untile something you
+                // cannot see.
+                if current {
+                    Button("Leave Tiled View", action: leaveTiling)
+                }
             }
             Button("Close Tab") { close(item.id) }.disabled(items.count == 1)
         }
@@ -130,38 +145,68 @@ struct ProjectTabBar<AddMenu: View>: View {
         .accessibilityAddTraits(current ? [.isButton, .isSelected] : .isButton)
     }
 
-    /// The tiled readout, and on the tab you are in, the way out of it.
-    ///
-    /// A click on the badge leaves the tiled view — the ✕ the pill used to carry, in the one place that
-    /// can still hold it. It cannot be a second ✕ beside the close-tab one: two crosses on one chip
-    /// meaning "leave this state" and "close this tab" is a misclick that costs you the tab. A filter
-    /// token you click to clear is the other idiom for exactly this, and it is the one with room here.
-    ///
-    /// Only on the current tab. A background tab's readout is a fact about a board you are not looking
-    /// at, and untiling one from across the bar is an action with no visible result.
-    @ViewBuilder
-    private func detailBadge(_ detail: String, on current: Bool) -> some View {
-        let text = Text(detail)
-            .font(.caption)
-            .monospacedDigit()
-            .lineLimit(1)
-            // Ahead of the name in the queue for space: a truncated "6/4…" says nothing, while a
-            // truncated name still names the tab.
-            .layoutPriority(1)
-        if current {
-            Button(action: leaveTiling) {
-                text.foregroundStyle(.secondary)
-                    .padding(.horizontal, 3)
-                    .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
-                    .contentShape(Rectangle())
+    private func content(_ item: ProjectTabItem, current: Bool, showsClose: Bool) -> some View {
+        HStack(spacing: 4) {
+            if editing == item.id {
+                editor(item)
+            } else {
+                Text(item.name)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .buttonStyle(.plain)
-            .help("Leave the tiled view")
-            .accessibilityLabel(Text("Tiled, " + detail))
-            .accessibilityHint(Text("Leave the tiled view"))
-        } else {
-            text.foregroundStyle(.tertiary)
+            // Held rather than inserted, so the name doesn't shift sideways when the pointer
+            // arrives. A tab that re-lays-out under the cursor is a tab you misclick.
+            closeButton(item)
+                .opacity(showsClose ? 1 : 0)
+                .allowsHitTesting(showsClose)
         }
+        .foregroundStyle(current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        .padding(.horizontal, HeaderMetrics.textInset)
+        .frame(height: HeaderMetrics.itemHeight)
+        .frame(maxWidth: 168)
+        .contentShape(Rectangle())
+        .background {
+            if current {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(.quaternary)
+                    .matchedGeometryEffect(id: "backing", in: backing)
+            }
+        }
+    }
+
+    /// The label, while it is being typed into.
+    ///
+    /// Return commits and Escape abandons, and so does clicking away — committing, because that is what
+    /// an editable label on this Mac does and because the alternative is losing what you typed to a
+    /// click you did not mean as a decision.
+    private func editor(_ item: ProjectTabItem) -> some View {
+        TextField("", text: $draft)
+            .textFieldStyle(.plain)
+            .font(.caption)
+            .focused($editorFocused)
+            .frame(minWidth: 56)
+            .onSubmit { endEditing(item, keeping: true) }
+            .onExitCommand { endEditing(item, keeping: false) }
+            .onChange(of: editorFocused) { _, focused in
+                if !focused { endEditing(item, keeping: true) }
+            }
+    }
+
+    private func beginEditing(_ item: ProjectTabItem) {
+        draft = item.workspaceName ?? ""
+        editing = item.id
+        editorFocused = true
+    }
+
+    /// Guarded on `editing`, because ending an edit blurs the field and the blur would otherwise end it
+    /// a second time — which after Escape would commit the thing Escape just refused.
+    private func endEditing(_ item: ProjectTabItem, keeping: Bool) {
+        guard editing == item.id else { return }
+        editing = nil
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard keeping, !name.isEmpty, name != item.workspaceName else { return }
+        renameTab(item.id, name)
     }
 
     private func closeButton(_ item: ProjectTabItem) -> some View {
@@ -175,6 +220,34 @@ struct ProjectTabBar<AddMenu: View>: View {
         .buttonStyle(.plain)
         .help("Close Tab")
         .accessibilityLabel(Text("Close " + item.name))
+    }
+}
+
+/// Dragging a chip along the row, which is how a row of tabs gets an order that is yours.
+///
+/// The move happens as the drag crosses a chip rather than when it is let go, so the row shows the
+/// order you are making instead of promising it with an insertion line — `ProjectTabSet.move` is
+/// already "that one goes *there*", and the bar's own animation carries it across.
+private struct TabReorder: DropDelegate {
+    let target: ProjectTabItem
+    let items: [ProjectTabItem]
+    @Binding var dragging: String?
+    var move: (String, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging, dragging != target.id,
+              let to = items.firstIndex(where: { $0.id == target.id })
+        else { return }
+        move(dragging, to)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    /// Nothing is read out of the drop: the row was reordered on the way in, and the id it carries was
+    /// only ever how a chip says which one it is.
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        return true
     }
 }
 
@@ -198,6 +271,8 @@ final class ProjectTabModel: ObservableObject {
 
     var select: (String) -> Void = { _ in }
     var close: (String) -> Void = { _ in }
+    /// Put a tab at an index — the drag along the bar.
+    var move: (String, Int) -> Void = { _, _ in }
     var openNotes: () -> Void = {}
     var openBoard: () -> Void = {}
     var openFrame: (String) -> Void = { _ in }
@@ -210,9 +285,12 @@ final class ProjectTabModel: ObservableObject {
     var renameWorkspace: (String) -> Void = { _ in }
     var duplicateWorkspace: (String) -> Void = { _ in }
     var deleteWorkspace: (String) -> Void = { _ in }
+    /// A chip's label, typed rather than picked. By tab id, because it covers both naming and renaming
+    /// and only the tab knows which it was.
+    var renameTab: (String, String) -> Void = { _, _ in }
     /// Go to the tab already showing this workspace, and say whether there was one.
     var selectWorkspace: (String) -> Bool = { _ in false }
-    /// Leave the tiled view on the board the current tab is showing — the badge on its chip.
+    /// Leave the tiled view on the board the current tab is showing — the item on its chip's menu.
     var leaveTiling: () -> Void = {}
 }
 
@@ -233,11 +311,13 @@ struct ProjectTabBarHost: View {
                           chrome: HeaderChrome(active: controlActiveState, hovering: hovering),
                           select: model.select,
                           close: model.close,
+                          move: model.move,
                           leaveTiling: model.leaveTiling,
                           nameWorkspace: model.nameWorkspace,
                           renameWorkspace: model.renameWorkspace,
                           duplicateWorkspace: model.duplicateWorkspace,
                           deleteWorkspace: model.deleteWorkspace,
+                          renameTab: model.renameTab,
                           addMenu: { addMenu })
                 .onHover { hovering = $0 }
         }

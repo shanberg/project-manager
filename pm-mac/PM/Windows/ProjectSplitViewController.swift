@@ -321,6 +321,14 @@ final class ProjectSplitViewController: NSSplitViewController {
             applySelectedTab()
             contentPane.drop(tab: id)
         }
+        tabModel.move = { [weak self] id, index in
+            guard let self else { return }
+            tabs.move(id, to: index)
+            refreshTabModel()
+            // The row's order is part of how the window was left, so it goes to the same place the
+            // rest of the tabs do — nothing on screen changed, only what is remembered.
+            onRendererChanged?()
+        }
         tabModel.openNotes = { [weak self] in self?.openTab(.notes) }
         tabModel.openBoard = { [weak self] in self?.openTab(.board(.whole)) }
         tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
@@ -333,6 +341,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.renameWorkspace = { [weak self] name in self?.renameWorkspace(named: name) }
         tabModel.duplicateWorkspace = { [weak self] name in self?.duplicateWorkspace(named: name) }
         tabModel.deleteWorkspace = { [weak self] name in self?.deleteWorkspace(named: name) }
+        tabModel.renameTab = { [weak self] id, name in self?.renameTab(id, to: name) }
     }
 
     /// Open this view in a tab, or go to the tab already showing it.
@@ -455,31 +464,26 @@ final class ProjectSplitViewController: NSSplitViewController {
             // Its own board, not the one on screen: a tab tiled in the background still says so, and
             // asking the visible pane for every tab's state would put one tab's tiling on all of them.
             let pane = contentPane.content(for: tab.id) as? CanvasPaneController
-            let count = pane?.tilingSummary?.short
+            let isTiled = pane?.tilingSummary != nil
             switch tab.view {
             case .notes:
-                return ProjectTabItem(id: tab.id, name: "Notes", symbol: "list.bullet")
+                return ProjectTabItem(id: tab.id, name: "Notes")
             case .board(.whole):
                 // Tiled and unnamed is the *untitled workspace*, and the chip says so in the words the
                 // menu uses — which is how "ephemeral unless named" stops being merely true and
                 // becomes something on screen. Untiled, it is the board, and the board is not a
                 // workspace: a workspace is a set of tiles (docs/canvas-workspaces.md §7).
-                guard let count else {
-                    return ProjectTabItem(id: tab.id, name: "Canvas", symbol: "rectangle.3.group")
+                guard isTiled else {
+                    return ProjectTabItem(id: tab.id, name: "Canvas")
                 }
-                return ProjectTabItem(id: tab.id, name: "Untitled", symbol: "square.grid.2x2",
-                                      isWorkspace: true, detail: count)
+                return ProjectTabItem(id: tab.id, name: "Untitled", isWorkspace: true)
             case .board(.frame(let node)):
                 // A frame you have tiled is an unnamed workspace made out of it, so the chip offers to
                 // name it — while still saying which frame you are in, because that is where you are.
                 return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
-                                      symbol: "square.dashed", isWorkspace: count != nil,
-                                      detail: count)
+                                      isWorkspace: isTiled)
             case .board(.workspace(let name)):
-                // The chip already *is* the workspace's name, so the count goes back to being the
-                // detail — "Dashboard · Dashboard" says nothing twice.
-                return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
-                                      isWorkspace: true, workspaceName: name, detail: count)
+                return ProjectTabItem(id: tab.id, name: name, isWorkspace: true, workspaceName: name)
             }
         }
         // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes
@@ -536,6 +540,20 @@ final class ProjectSplitViewController: NSSplitViewController {
         return true
     }
 
+    /// A chip's label, typed into rather than picked from a menu.
+    ///
+    /// What that means is what the chip was: a named workspace is renamed, and an unnamed one is being
+    /// named — the same fork `WorkspaceCommands` draws, arrived at by typing. Nothing else in the bar
+    /// has an editable label, so nothing else reaches here.
+    func renameTab(_ id: String, to name: String) {
+        guard let tab = tabs.tabs.first(where: { $0.id == id }) else { return }
+        if case .board(.workspace(let old)) = tab.view {
+            renameWorkspace(named: old, to: name)
+        } else {
+            (contentPane.content(for: id) as? CanvasPaneController)?.saveWorkspace(as: name)
+        }
+    }
+
     /// Rename a workspace, **and carry its chips across with it**.
     ///
     /// §7b accepted that renaming broke a tab pinned to the old name, on the grounds that the name is
@@ -547,9 +565,17 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// re-key. Saved before the old one is removed, so a failure leaves you with both rather than
     /// neither.
     func renameWorkspace(named old: String) {
-        guard let url = canvasSource().url,
-              let tiling = CanvasWorkspaces.tiling(named: old, of: url),
-              let new = WorkspaceNamePrompt.run(titled: "Rename “\(old)”", seed: old), new != old
+        guard let url = canvasSource().url, CanvasWorkspaces.tiling(named: old, of: url) != nil,
+              let new = WorkspaceNamePrompt.run(titled: "Rename “\(old)”", seed: old)
+        else { return }
+        renameWorkspace(named: old, to: new)
+    }
+
+    /// The rename itself, with the name already decided — typed into the chip, or come back from the
+    /// prompt above.
+    func renameWorkspace(named old: String, to new: String) {
+        guard old != new, let url = canvasSource().url,
+              let tiling = CanvasWorkspaces.tiling(named: old, of: url)
         else { return }
         CanvasWorkspaces.save(tiling, as: new, for: url)
         CanvasWorkspaces.remove(old, for: url)

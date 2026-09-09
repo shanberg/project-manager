@@ -312,7 +312,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Every frame the add menu could offer, in reading order.
     func frames() -> [ProjectTabItem] {
-        scroll.board.frameChoices.map { ProjectTabItem(id: $0.id, name: $0.name, symbol: "square.dashed") }
+        scroll.board.frameChoices.map { ProjectTabItem(id: $0.id, name: $0.name) }
     }
 
     /// Every named workspace on this board.
