@@ -18,8 +18,17 @@ final class CanvasSnappingTests: XCTestCase {
         CanvasRect(x: x, y: y, width: w, height: h)
     }
 
-    private let reach = 7.0
+    /// The shipping numbers, written out rather than read off `CanvasSnapping`, so that every case
+    /// below states the distance it is actually about. `testTheSnapRadiusIsHalfAGridUnit` is what keeps
+    /// the two from drifting apart.
+    private let reach = 5.0
     private let show = 48.0
+
+    /// The snap radius is half a grid unit, and that is a relationship rather than a coincidence:
+    /// neither the guides nor the lattice can then move a card further than half a cell.
+    func testTheSnapRadiusIsHalfAGridUnit() {
+        XCTAssertEqual(CanvasSnapping.reach, CanvasSnapping.grid / 2)
+    }
 
     // MARK: Moving
 
@@ -263,16 +272,19 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.ghost?.frame, rect(100, 500), "with the aligned slot drawn for you")
     }
 
-    /// And it fades up as you close, so the mark is faint where it is only possible and solid where it
-    /// is about to be true.
-    func testAnOfferGrowsMorePresentAsYouApproach() {
-        func nearness(at dx: Double) -> Double {
+    /// And it is the same offer at every distance inside the radius. The mark used to be drawn at a
+    /// strength that tracked how near the match was, which over most of the approach put it at a
+    /// fraction of an already quiet alpha — the offer you most needed early, drawn faintest. There is
+    /// nothing left in the model that varies with distance: the ghost 20pt out is the ghost 10pt out,
+    /// and the fading is the view's, at the two ends.
+    func testAnOfferIsTheSameOfferAtEveryDistance() {
+        func offer(at dx: Double) -> CanvasGhost? {
             CanvasSnapping.move(rect(0, 500), by: (dx: dx, dy: 0), against: [rect(100, 0)],
-                                reach: reach, showReach: show, snapsToGrid: false).ghost?.nearness ?? -1
+                                reach: reach, showReach: show, snapsToGrid: false).ghost
         }
-        XCTAssertGreaterThan(nearness(at: 80), 0, "20pt out: visible")
-        XCTAssertGreaterThan(nearness(at: 90), nearness(at: 80), "10pt out: more so")
-        XCTAssertEqual(nearness(at: 95), 1, "5pt out is inside the snap, so the offer has been taken")
+        XCTAssertNotNil(offer(at: 80))
+        XCTAssertEqual(offer(at: 80), offer(at: 90), "20pt out and 10pt out are the same offer")
+        XCTAssertEqual(offer(at: 80), offer(at: 97), "and so is one already taken")
     }
 
     /// Past the show radius there is nothing at all — the point of the second radius is that it ends.
@@ -296,25 +308,21 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.ghost?.frame, rect(100, 500))
     }
 
-    /// **The nearest pending promise governs, not the furthest.** A drag can be ten points from one
-    /// match and twenty from another; waiting for the furthest would hide the ghost for exactly the
-    /// match you are about to make.
+    /// **One hit on each axis, drawn as one frame.** A drag can be ten points from one match and
+    /// twenty from another, and the frame the card would have is both of them at once — there is no
+    /// sense in which the further one is a separate, later offer.
     ///
     /// Two cards, each only reachable on one axis — the second is 5000 away in x, the first 5000 away
     /// in y — so the offer is 10pt out horizontally and 20pt out vertically.
-    func testTheNearerOfTwoPendingOffersDecidesHowVisibleTheGhostIs() {
-        let both = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
-                                       against: [rect(100, 5000), rect(5000, 100)],
-                                       reach: reach, showReach: show, snapsToGrid: false)
-        XCTAssertEqual(both.ghost?.frame, rect(100, 50),
-                       "both offers drawn together — that is the frame the card would have")
-
-        // The same drag with only the horizontal card on the board: the nearer offer, alone.
-        let nearer = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
-                                         against: [rect(100, 5000)],
+    func testTwoPendingOffersAreDrawnAsOneFrame() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
+                                         against: [rect(100, 5000), rect(5000, 100)],
                                          reach: reach, showReach: show, snapsToGrid: false)
-        XCTAssertEqual(both.ghost?.nearness, nearer.ghost?.nearness,
-                       "and it alone decides how present the ghost is")
+        XCTAssertEqual(result.frame, rect(90, 70), "neither is inside the snap, so nothing moved")
+        XCTAssertEqual(result.ghost?.frame, rect(100, 50),
+                       "both offers drawn together — that is the frame the card would have")
+        XCTAssertEqual(result.ghost?.sources, [rect(100, 5000), rect(5000, 100)],
+                       "and both cards named, one per axis")
     }
 
     // MARK: Resizing
@@ -359,7 +367,8 @@ final class CanvasSnappingTests: XCTestCase {
     /// staying put, so the candidate position is `right - otherWidth`.
     func testALeftGripMatchesAWidthByMovingLeftwards() {
         // 335 wide with its right edge at 435, so matching a 340-wide card means the left edge moving
-        // 5pt out to 95 — the right edge is the one staying put.
+        // 5pt out to 95 — the right edge is the one staying put. Exactly the snap radius, and it
+        // snaps: the radius is inclusive, which is the boundary this case now also pins down.
         let result = CanvasSnapping.resize(rect(100, 0, 335, 100), handle: .left,
                                            against: [rect(900, 900, 340, 80)],
                                            reach: reach, snapsToGrid: false)

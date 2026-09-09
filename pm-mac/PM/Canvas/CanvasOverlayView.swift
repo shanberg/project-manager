@@ -21,13 +21,12 @@ final class CanvasOverlayView: NSView {
     /// The sweep in progress, in canvas coordinates.
     var marquee: CanvasRect?
 
-    /// Where the cards being placed would land if the match on offer were taken, which cards the offer
-    /// is being made against, and how near it is to being taken. One rectangle per moving card — see
-    /// `CanvasGhost`, which owns the argument for all of this.
+    /// Where the cards being placed would land if the match on offer were taken, and which cards the
+    /// offer is being made against. One rectangle per moving card — see `CanvasGhost`, which owns the
+    /// argument for all of this.
     struct Ghost: Equatable {
         var frames: [CanvasRect]
         var sources: [CanvasRect]
-        var nearness: Double
     }
 
     /// The offer in front of you, or nil for "nothing is on offer".
@@ -69,12 +68,12 @@ final class CanvasOverlayView: NSView {
 
     /// The outline of where the cards being placed would land.
     ///
-    /// **Two things multiply into how present it is**, and they are answering different questions.
-    /// `nearness` is your hand: how close the offer is to being taken, which is what makes the outline
-    /// arrive as you approach rather than at the instant of the snap. The fade is the clock: it exists
-    /// for the ends, so that an offer appearing or an offer withdrawn is a dissolve rather than a
-    /// blink. Either alone would be wrong — a fade alone is a mark that pops on at full strength the
-    /// moment a match comes in range, and a nearness alone flickers every time you cross the radius.
+    /// **One thing governs how present it is: the fade.** There used to be a second, a `nearness` the
+    /// alpha was multiplied by, so that the outline grew as the card approached its match. It read as
+    /// an argument and drew as a smear — over most of the approach it put the mark at a fraction of an
+    /// alpha chosen to be quiet at full strength, which is a mark that is not there. So the offer is
+    /// either up or not, and the fade is what keeps that from being a blink: appearing and withdrawing
+    /// are both dissolves, and crossing the radius is the only event either of them reports.
     ///
     /// Standing off the frame rather than drawn on it, at the same distance and radius rule the
     /// selection band uses, so the board's transient marks are visibly one family. The standoff earns
@@ -90,12 +89,12 @@ final class CanvasOverlayView: NSView {
     /// already being said. It matters just as much that they are thinner and fainter, because a source
     /// drawn at the ghost's weight reads as a second card about to move.
     ///
-    /// They rise and fall on the same `presence` as the ghost, so the attribution arrives with the
-    /// offer rather than with the snap. That is the whole difference between this and the bands it
-    /// replaced: those were drawn once the match was made, when there was nothing left to decide.
+    /// They rise and fall on the same fade as the ghost, so the attribution arrives with the offer
+    /// rather than with the snap. That is the whole difference between this and the bands it replaced:
+    /// those were drawn once the match was made, when there was nothing left to decide.
     private func drawGhost(_ board: CanvasBoardView, _ scale: Double) {
         guard ghostFade.isVisible, let drawnGhost else { return }
-        let presence = ghostFade.presence * drawnGhost.nearness
+        let presence = ghostFade.presence
         guard presence > 0.001 else { return }
 
         let standoff = Self.ghostStandoff / scale
@@ -130,8 +129,9 @@ final class CanvasOverlayView: NSView {
     private static let ghostWidth: Double = 5
 
     /// The band on a card the offer is being made against: half the ghost's width, a little over half
-    /// its alpha. Deliberately close to the floor of what registers — it is answering a question you
-    /// only sometimes ask, and it is up during every drag that catches on anything.
+    /// its alpha. Quiet, because it answers a question you only sometimes ask and it is up during every
+    /// drag that catches on anything — but a flat quiet now, not a quiet that was being multiplied down
+    /// to nothing for most of every approach.
     private static let sourceWidth: Double = 2.5
     private static let sourceAlpha: Double = 0.17
 

@@ -29,6 +29,15 @@ import PmLib
 /// `CanvasSnapping.reach`, and everything between the two is an offer — the ghost stands where the card
 /// would land and pulling the last few points closes on it.
 ///
+/// **At one opacity the whole time it is up.** It used to be drawn at a strength that tracked how near
+/// the match was, on the theory that a mark growing as you approach is the fade saying "you are nearly
+/// there". In use it says something else: over most of its range the mark sits at a fraction of an
+/// already quiet alpha, which is not a subtle presence but an absent one — the offer you most needed
+/// early is the one drawn faintest, and the marks on the cards being agreed with, quieter again, never
+/// arrive at all. So there is a threshold and no ramp: within `CanvasSnapping.showReach` the mark fades
+/// in, outside it fades out, and in between it simply *is*. How near you are is not something the mark
+/// has to report, being already in the hand doing it.
+///
 /// **Drawn standing off the frame rather than on it**, at `CanvasOverlayView.ghostStandoff`, for the
 /// case that is easy to forget: sizing a card *down*. Then the offered frame is inside the card's
 /// current bounds and the outline lies across the card itself, which is also why the ghost is drawn
@@ -49,12 +58,6 @@ struct CanvasGhost: Equatable {
     /// usually fewer. Deduplicated, because the card your left edge found is frequently also the card
     /// your top edge found, and marking it twice would just be drawing it darker.
     var sources: [CanvasRect]
-
-    /// How close the offer is to being taken: 0 at the far edge of the show radius, 1 once the snap
-    /// has actually fired. The board multiplies the ghost's alpha by this, so it is faint at the moment
-    /// the match becomes possible and solid at the moment it becomes true — which is the fade doing the
-    /// work of saying "you are nearly there" instead of merely softening an appearance.
-    var nearness: Double
 }
 
 /// What a drag or a resize settled on, and what it is offering.
@@ -99,9 +102,18 @@ struct CanvasSnapResult: Equatable {
 /// everything, saying where the ground is — so with the ghost silent, "nothing appeared" reliably means
 /// "nothing matched", and a 5pt click with no ghost reads as tidying rather than as refusal.
 enum CanvasSnapping {
-    /// How near, in **view points**, counts as a snap. Divided by the zoom at the call site, so it is
-    /// the same physical distance to the pointer at 30% as at 200%.
-    static let reach: Double = 7
+    /// How near counts as a snap: **half a grid unit**.
+    ///
+    /// Tied to the lattice rather than picked, and the tie buys a property worth having — neither
+    /// system can move a card more than half a cell. A guide fires within half a unit, and the lattice,
+    /// being a lattice, is never further than half a unit away either. So there is no arrangement in
+    /// which a card declines a guide as too far and is then carried further than that guide would have
+    /// taken it, which is the one way the two could visibly have disagreed.
+    ///
+    /// In **view points**, divided by the zoom at the call site, so it is the same physical distance to
+    /// the pointer at 30% as at 200% — while `grid` is in canvas units. The two are the same number
+    /// rather than the same measurement, and the number is what was asked for.
+    static let reach: Double = grid / 2
 
     /// How near, in **view points**, counts as worth *offering* — the radius the ghost appears within.
     ///
@@ -109,6 +121,10 @@ enum CanvasSnapping {
     /// the card moves, and between the two the board only says what it would do. Too small and the
     /// ghost arrives with the snap and explains a thing that has happened; too large and it is up for
     /// most of every drag and stops meaning anything. Also divided by the zoom at the call site.
+    ///
+    /// It is now the *only* number governing whether the mark is there, which makes it a stronger
+    /// setting than it was: with the ramp gone, everything inside this radius is drawn at full
+    /// strength, so what used to be a barely-visible mark at 40pt out is a present one.
     static let showReach: Double = 48
 
     static let grid: Double = 10
@@ -159,8 +175,7 @@ enum CanvasSnapping {
         }
 
         return CanvasSnapResult(frame: settle(taking: false),
-                                ghost: ghost(of: [horizontal, vertical], at: settle(taking: true),
-                                             reach: reach, show: show))
+                                ghost: ghost(of: [horizontal, vertical], at: settle(taking: true), show: show))
     }
 
     // MARK: Resizing
@@ -244,8 +259,7 @@ enum CanvasSnapping {
         }
 
         return CanvasSnapResult(frame: settle(taking: false),
-                                ghost: ghost(of: [horizontal, vertical], at: settle(taking: true),
-                                             reach: reach, show: show))
+                                ghost: ghost(of: [horizontal, vertical], at: settle(taking: true), show: show))
     }
 
     // MARK: -
@@ -356,18 +370,15 @@ enum CanvasSnapping {
         return abs(first.shift) <= abs(second.shift) ? first : second
     }
 
-    /// The offer worth drawing, if there is one, and how near it is to being taken.
+    /// The offer worth drawing, if there is one.
     ///
-    /// **The nearest *pending* promise governs, not the furthest.** A corner drag can be three points
-    /// from one card's width and forty from another's height. The ghost draws both, because both
-    /// together are what the frame would be — but it has to appear as soon as *either* is within
-    /// sight, or the match you are visibly about to make is the one thing not on screen.
-    ///
-    /// A hit that has already been taken is not pending and does not hold the ghost back; with none
-    /// left pending the snap has fired and the ghost is at full strength, standing off the card it now
-    /// contains.
+    /// **Any one hit puts it up.** A corner drag can be three points from one card's width and forty
+    /// from another's height. The ghost draws the frame the two together produce, and it has to appear
+    /// as soon as *either* is within sight, or the match you are visibly about to make is the one thing
+    /// not on screen. Whether a hit has already been taken makes no difference to that — it is part of
+    /// the same offered frame either way, and it was only the ramp that ever needed to tell them apart.
     private static func ghost(of hits: [Hit?], at frame: CanvasRect,
-                              reach: Double, show: Double) -> CanvasGhost? {
+                              show: Double) -> CanvasGhost? {
         // ⌥ collapses both radii to nothing. An exact landing under it is still an exact landing, and
         // still not something to draw a mark about: the modifier means "leave me alone".
         guard show > 0 else { return nil }
@@ -381,15 +392,7 @@ enum CanvasSnapping {
         var sources: [CanvasRect] = []
         for rect in offers.flatMap(\.sources) where !sources.contains(rect) { sources.append(rect) }
 
-        guard let nearest = offers.map({ abs($0.shift) }).filter({ $0 > reach }).min() else {
-            return CanvasGhost(frame: frame, sources: sources, nearness: 1)
-        }
-        guard show > reach else { return nil }
-        // Squared rather than linear, so the ghost stays out of the way over most of its range and
-        // arrives over the last few points. Linear, it is a mark that is half-present for half of
-        // every drag, which is the loudness this replaced.
-        let closeness = max(0, min(1, (show - nearest) / (show - reach)))
-        return CanvasGhost(frame: frame, sources: sources, nearness: closeness * closeness)
+        return CanvasGhost(frame: frame, sources: sources)
     }
 
     /// The nearest of `candidates` to `value`, within `reach`.

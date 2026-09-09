@@ -197,8 +197,7 @@ extension CanvasBoardView {
                     frames: frames.keys.sorted().compactMap { frames[$0] }.map {
                         CanvasRect(x: $0.x + gdx, y: $0.y + gdy, width: $0.width, height: $0.height)
                     },
-                    sources: ghost.sources,
-                    nearness: ghost.nearness)
+                    sources: ghost.sources)
             }
             showGrid(snapsToGrid(event))
             store.change("Move Card") { doc in
@@ -226,8 +225,7 @@ extension CanvasBoardView {
                 let fitted = CanvasGroupResize.frames(originals, from: box, to: ghost.frame)
                 return CanvasOverlayView.Ghost(
                     frames: fitted.keys.sorted().compactMap { fitted[$0] },
-                    sources: ghost.sources,
-                    nearness: ghost.nearness)
+                    sources: ghost.sources)
             }
             showGrid(snapsToGrid(event))
             let settled = CanvasGroupResize.frames(originals, from: box, to: snap.frame)

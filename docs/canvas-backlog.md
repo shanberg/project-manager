@@ -56,10 +56,19 @@ the one or two cards that actually won, up while you are still deciding. The geo
 agreement it is; it does not say which of six cards sharing an edge you found, and that is the part
 worth knowing when the offer is the one you didn't mean.
 
-What is left is the tolerance, which is a thing to feel rather than derive: the snap fires at 7 view
-points and the offer appears at 48, squared so it stays faint over most of its range. Spacing gives the
-board more to catch on, so 48 will feel more generous than it did. Drag a few cards around a real board
-and say whether it offers too much or too little.
+The snap now fires at half a grid unit — 5 view points — which ties the two systems to one tolerance:
+neither a guide nor the lattice can move a card further than half a cell, so there is no arrangement in
+which they visibly disagree.
+
+And the mark is at one opacity the whole time it is up. It used to be drawn at a strength that tracked
+how near the match was, which over most of the approach put it at a fraction of an already quiet alpha
+— the offer you most needed early, drawn faintest, and the marks on the cards being agreed with fainter
+still. Now there is a threshold and a fade: inside 48 points it fades in, outside it fades out, and in
+between it simply is.
+
+What is left is that 48, which is a thing to feel rather than derive, and which the flat opacity has
+made a stronger setting than it was — everything inside it is now drawn at full strength. Drag a few
+cards around a real board and say whether the offer is up too often.
 
 ## Features
 
