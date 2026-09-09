@@ -26,14 +26,21 @@ Open: what the earlier signal is. `didCommit` is too early — that is a blank f
 visually-non-empty layout is the honest one and WebKit only exposes it privately. A `estimatedProgress`
 threshold is the ugly, public, probably-good-enough version. Whichever it is, the 0.2s cross-fade stays.
 
-### 2. The alignment indicators, again
+### 2. The alignment indicators, again — **rebuilt as a target, wants using**
 
-The redesign landed: one band, drawn three ways — a closed loop for aligned, two runs for same-size,
-four corners for the grid, all at one standoff and one weight so they read as one mark. In use it
-still isn't right.
+The complaint got specific, and it was not about which of the three bands: it was that all of them
+were the wrong *kind* of mark. They explained a snap that had already fired — a receipt — when what a
+person placing a card wants is somewhere to aim.
 
-Nothing to plan until the complaint is specific: which of the three, in which case, and whether the
-problem is that it is unreadable, ambiguous, or simply too loud. Write the sentence, then design.
+So they are gone, and what replaced them is one outline of the frame the card would have if the match
+it is near were carried through, up while you are still approaching and fading in as you close. The
+whole argument is in [CanvasGhost](../pm-mac/PM/Canvas/CanvasSnapping.swift), including why the three
+claims collapse into one rectangle, why the lattice now gets no mark at all, and why the outline moved
+above the cards after `CanvasTileHandleView` had spent its whole life arguing it belonged below them.
+
+What is left is the tolerance, which is a thing to feel rather than derive: the snap still fires at
+7 view points and the offer appears at 48, squared so it stays faint over most of its range. Drag a
+few cards around a real board and say whether 48 is a board that offers too much or too little.
 
 ## Features
 

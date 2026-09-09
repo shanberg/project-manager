@@ -171,9 +171,9 @@ final class CanvasBoardView: NSView {
 
     var nodeViews: [String: CanvasNodeView] = [:]
     let overlay = CanvasOverlayView()
-    /// The alignment guides, at the bottom of the stack — above the board's own drawing and below
-    /// every card. See `CanvasGuideView`.
-    let guideView = CanvasGuideView()
+    /// The tile handlebars, at the bottom of the stack — above the board's own drawing and below
+    /// every card. See `CanvasTileHandleView`.
+    let tileHandleView = CanvasTileHandleView()
 
     /// This board's project note, and whether we have been to look for it.
     ///
@@ -253,12 +253,12 @@ final class CanvasBoardView: NSView {
         self.scrollView = scrollView
         super.init(frame: .zero)
         wantsLayer = true
-        guideView.board = self
+        tileHandleView.board = self
         overlay.board = self
         // Order matters and is load-bearing. These two are the floor and the ceiling of the board's
-        // subviews: cards are inserted `.below` the overlay, which keeps them above the guides and
+        // subviews: cards are inserted `.below` the overlay, which keeps them above the handlebars and
         // below the grips for the life of the board without anything having to re-sort them.
-        addSubview(guideView)
+        addSubview(tileHandleView)
         addSubview(overlay)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Canvas")
@@ -316,7 +316,7 @@ final class CanvasBoardView: NSView {
         content = next
         setFrameSize(NSSize(width: next.width, height: next.height))
         overlay.frame = NSRect(origin: .zero, size: frame.size)
-        guideView.frame = overlay.frame
+        tileHandleView.frame = overlay.frame
 
         if let clip = scrollView?.contentView, shift != .zero {
             var wanted = NSRect(origin: NSPoint(x: clip.bounds.origin.x + shift.x,
@@ -424,7 +424,7 @@ final class CanvasBoardView: NSView {
     func layoutNodeViews() {
         // The tiles' grips move with the tiles, and they are drawn a layer down from them.
         refreshTileHandles()
-        if isTiled { guideView.needsDisplay = true }
+        if isTiled { tileHandleView.needsDisplay = true }
         for (id, view) in nodeViews {
             guard let node = document.node(id: id) else { continue }
             // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
@@ -443,7 +443,7 @@ final class CanvasBoardView: NSView {
             }
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
-        guideView.frame = overlay.frame
+        tileHandleView.frame = overlay.frame
     }
 
     /// Move only the card being carried, and leave the arrangement to travel at its own pace.
@@ -457,7 +457,7 @@ final class CanvasBoardView: NSView {
         guard let reordering, let view = nodeViews[reordering.id] else { return }
         view.frame = viewRect(reordering.frame)
         refreshTileHandles()
-        guideView.needsDisplay = true
+        tileHandleView.needsDisplay = true
     }
 
     /// The tile being dragged by its handlebar, and where the pointer is holding it.

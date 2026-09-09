@@ -160,7 +160,7 @@ extension CanvasBoardView {
     /// Driven from everything that can change the answer — the pointer moving, the selection, a drag
     /// starting or ending, and the layout itself, since a tiling that has gone has no grips at all.
     func refreshTileHandles() {
-        guideView.shownTileHandles = tiling.map { Set($0.ids.filter(showsTileHandle)) } ?? []
+        tileHandleView.shownTileHandles = tiling.map { Set($0.ids.filter(showsTileHandle)) } ?? []
     }
 
     /// The tile whose handlebar is under the pointer.

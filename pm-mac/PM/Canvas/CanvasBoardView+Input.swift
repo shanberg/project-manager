@@ -182,9 +182,20 @@ extension CanvasBoardView {
             let snap = CanvasSnapping.move(box, by: wanted,
                                            against: snapCandidates(excluding: Set(frames.keys)),
                                            reach: snapReach(event),
+                                           showReach: ghostReach(event),
                                            snapsToGrid: snapsToGrid(event))
             let dx = snap.frame.minX - box.minX, dy = snap.frame.minY - box.minY
-            guideView.guides = snap.guides
+            // The offer is made about the box and drawn about the cards: a rectangle around three
+            // dragged cards is a shape none of them has, and an outline you cannot match a card to is
+            // not a target. The same translation the cards are getting, applied to where they are now.
+            overlay.ghost = snap.ghost.map { ghost in
+                let gdx = ghost.frame.minX - box.minX, gdy = ghost.frame.minY - box.minY
+                return CanvasOverlayView.Ghost(
+                    frames: frames.keys.sorted().compactMap { frames[$0] }.map {
+                        CanvasRect(x: $0.x + gdx, y: $0.y + gdy, width: $0.width, height: $0.height)
+                    },
+                    nearness: ghost.nearness)
+            }
             showGrid(snapsToGrid(event))
             store.change("Move Card") { doc in
                 for index in doc.nodes.indices {
@@ -203,8 +214,16 @@ extension CanvasBoardView {
             let snap = CanvasSnapping.resize(wanted, handle: handle,
                                              against: snapCandidates(excluding: Set(originals.keys)),
                                              reach: snapReach(event),
+                                             showReach: ghostReach(event),
                                              snapsToGrid: snapsToGrid(event))
-            guideView.guides = snap.guides
+            // Fitted into the offered box by the same function that fits them into the settled one, so
+            // the outline is exactly the frame each card would get and not an approximation of it.
+            overlay.ghost = snap.ghost.map { ghost in
+                let fitted = CanvasGroupResize.frames(originals, from: box, to: ghost.frame)
+                return CanvasOverlayView.Ghost(
+                    frames: fitted.keys.sorted().compactMap { fitted[$0] },
+                    nearness: ghost.nearness)
+            }
             showGrid(snapsToGrid(event))
             let settled = CanvasGroupResize.frames(originals, from: box, to: snap.frame)
             store.change(originals.count > 1 ? "Resize Cards" : "Resize Card") { doc in
@@ -265,7 +284,7 @@ extension CanvasBoardView {
         defer {
             gesture = nil
             overlay.marquee = nil
-            guideView.guides = []
+            overlay.ghost = nil
             overlay.needsDisplay = true
             showGrid(false)
         }
@@ -357,6 +376,14 @@ extension CanvasBoardView {
     /// reason snapping can be on by default: the cases it gets wrong are one modifier away from right.
     private func snapReach(_ event: NSEvent) -> Double {
         event.modifierFlags.contains(.option) ? 0 : CanvasSnapping.reach / liveScale
+    }
+
+    /// How near counts as worth *offering*, in canvas units — the radius the ghost appears within,
+    /// which is much wider than the snap's. See `CanvasGhost` for why the two are different numbers.
+    /// ⌥ collapses it along with the snap it belongs to: the modifier means "leave me alone", and a
+    /// board still offering matches would only be a quieter way of not doing that.
+    private func ghostReach(_ event: NSEvent) -> Double {
+        event.modifierFlags.contains(.option) ? 0 : CanvasSnapping.showReach / liveScale
     }
 
     private func snapsToGrid(_ event: NSEvent) -> Bool {

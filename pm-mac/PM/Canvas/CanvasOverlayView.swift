@@ -1,11 +1,11 @@
 import AppKit
 import PmLib
 
-/// Everything drawn *over* the cards: selection grips, connection dots, the sweep rectangle, and the
-/// line being dragged out of a card.
+/// Everything drawn *over* the cards: the ghost a drag is being offered, selection grips, connection
+/// dots, the sweep rectangle, and the line being dragged out of a card.
 ///
-/// Not the alignment guides, which are the one piece of board chrome that belongs *under* the cards —
-/// see `CanvasGuideView`.
+/// Not the tile handlebars, which are the one piece of board chrome that belongs *under* the cards —
+/// see `CanvasTileHandleView`.
 ///
 /// A view of its own rather than more drawing in the board, because these have to sit above the cards
 /// and the cards are real subviews — a board that drew its grips in `draw(_:)` would draw them
@@ -20,6 +20,34 @@ final class CanvasOverlayView: NSView {
     weak var board: CanvasBoardView?
     /// The sweep in progress, in canvas coordinates.
     var marquee: CanvasRect?
+
+    /// Where the cards being placed would land if the match on offer were taken, and how near that
+    /// offer is to being taken. One rectangle per moving card — see `CanvasGhost`, which owns the
+    /// argument for all of this.
+    struct Ghost: Equatable {
+        var frames: [CanvasRect]
+        var nearness: Double
+    }
+
+    /// The offer in front of you, or nil for "nothing is on offer".
+    ///
+    /// Setting this fades the outline in or out rather than switching it — see `CanvasFade`. The last
+    /// non-nil value is held in `drawnGhost` so that clearing this on mouse-up leaves something to fade
+    /// *out*; an outline that vanished on the frame the button came up would be the flicker the fade
+    /// exists to remove.
+    var ghost: Ghost? {
+        didSet {
+            guard ghost != oldValue else { return }
+            if let ghost { drawnGhost = ghost }
+            ghostFade.set(ghost != nil)
+            needsDisplay = true
+        }
+    }
+    private var drawnGhost: Ghost?
+    private lazy var ghostFade = CanvasFade(rise: 0.1, fall: 0.16) { [weak self] in
+        self?.needsDisplay = true
+    }
+
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -27,6 +55,9 @@ final class CanvasOverlayView: NSView {
         guard let board else { return }
         let scale = board.liveScale
 
+        // First, so everything else in here sits over it. The ghost is the only mark in this view that
+        // is about a card's *future*, and a grip you are dragging should not be interrupted by it.
+        drawGhost(board, scale)
         drawConnectionAnchors(board, scale)
         drawSelectionBounds(board, scale)
         drawGrips(board, scale)
@@ -34,6 +65,48 @@ final class CanvasOverlayView: NSView {
         drawSwapInFlight(board, scale)
         drawMarquee(board, scale)
     }
+
+    /// The outline of where the cards being placed would land.
+    ///
+    /// **Two things multiply into how present it is**, and they are answering different questions.
+    /// `nearness` is your hand: how close the offer is to being taken, which is what makes the outline
+    /// arrive as you approach rather than at the instant of the snap. The fade is the clock: it exists
+    /// for the ends, so that an offer appearing or an offer withdrawn is a dissolve rather than a
+    /// blink. Either alone would be wrong — a fade alone is a mark that pops on at full strength the
+    /// moment a match comes in range, and a nearness alone flickers every time you cross the radius.
+    ///
+    /// Standing off the frame rather than drawn on it, at the same distance and radius rule the
+    /// selection band uses, so the board's transient marks are visibly one family. The standoff earns
+    /// its place twice over: at the moment the snap fires the outline is a ring *around* the card
+    /// rather than a stroke merged into its border, so the landing is still visible — and when you are
+    /// sizing a card *down*, the offered frame is inside the card's current bounds, where a mark on the
+    /// border would have nothing to stand on at all.
+    private func drawGhost(_ board: CanvasBoardView, _ scale: Double) {
+        guard ghostFade.isVisible, let drawnGhost else { return }
+        let presence = ghostFade.presence * drawnGhost.nearness
+        guard presence > 0.001 else { return }
+
+        let standoff = Self.ghostStandoff / scale
+        CanvasPalette.guide(0.30 * presence).setStroke()
+        for slot in drawnGhost.frames {
+            let rect = board.viewRect(slot).insetBy(dx: -standoff, dy: -standoff)
+            // Concentric with the card that would be inside it: a curve offset from another curve keeps
+            // an even gap only when its radius grows by the offset. Left at the card's own radius the
+            // outline would pinch tight at the corners and bulge along the sides.
+            let radius = CanvasNodeView.cornerRadius(for: slot) + standoff
+            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+            path.lineWidth = Self.ghostWidth / scale
+            path.stroke()
+        }
+    }
+
+    /// How far the outline stands off the frame it is offering, and how thick it is — both in **view
+    /// points over the zoom**, so it is the same weight and the same distance to the eye at 30% as at
+    /// 200%. Measured in canvas units it would be a smear when zoomed in and invisible when zoomed out,
+    /// which is exactly backwards for something whose whole job is to be noticed without being looked
+    /// at.
+    private static let ghostStandoff: Double = 5
+    private static let ghostWidth: Double = 5
 
     /// The two tiles a drop would exchange, while a tiled view is being rearranged.
     ///
@@ -163,14 +236,10 @@ final class CanvasOverlayView: NSView {
     /// edge that was never shown to you.
     ///
     /// **The ghost's treatment, at half the weight.** A band standing off the thing it describes, in
-    /// the neutral, rather than an accent hairline — the same argument as `CanvasGuideView.drawSlot`,
-    /// and the same numbers, so the two marks are visibly the same family. Thinner because they are
-    /// not doing the same job: a guide is transient and has one instant to be noticed, and this is
-    /// persistent for as long as the selection is, which is the other end of the same trade.
-    ///
-    /// **Above the cards, where the guide is below them.** A guide marks where a card is *going* and a
-    /// card sliding over it should cover it. This marks what you have *got*, including the edge you
-    /// are about to grab, and a card lying over that would be hiding a control.
+    /// the neutral, rather than an accent hairline — the same argument as `drawGhost`, and the same
+    /// standoff, so the two marks are visibly the same family. Thinner because they are not doing the
+    /// same job: the ghost is transient and has one instant to be noticed, and this is persistent for
+    /// as long as the selection is, which is the other end of the same trade.
     private func drawSelectionBounds(_ board: CanvasBoardView, _ scale: Double) {
         // Nothing in a tiled view: a tile's bounds are the arrangement's, not yours, and a bracket
         // around three of six tiles is a second grid drawn over the first.

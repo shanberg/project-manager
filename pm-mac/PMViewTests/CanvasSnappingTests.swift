@@ -2,12 +2,16 @@ import XCTest
 import PmLib
 @testable import PMViewTests
 
-/// Snapping a drag and a resize to the cards already on the board.
+/// Snapping a drag and a resize to the cards already on the board, and the ghost it offers on the way.
 ///
 /// Every case here is one the eye would catch on a real board and the arithmetic would otherwise get
 /// almost right: a column of cards whose left edges are within two points of each other, a row where
 /// one card is 4pt wider than its neighbours. The point of snapping is that "almost" stops happening,
 /// so these assert exact values.
+///
+/// The ghost's tests are the other half, and they are all really one question asked from several
+/// directions: *is the offer up before the card moves?* A `showReach` of 0 — the default — is the old
+/// behaviour, where the two radii are the same and there is nothing to steer by.
 final class CanvasSnappingTests: XCTestCase {
 
     private func rect(_ x: Double, _ y: Double, _ w: Double = 200, _ h: Double = 100) -> CanvasRect {
@@ -15,6 +19,7 @@ final class CanvasSnappingTests: XCTestCase {
     }
 
     private let reach = 7.0
+    private let show = 48.0
 
     // MARK: Moving
 
@@ -46,7 +51,6 @@ final class CanvasSnappingTests: XCTestCase {
                                          against: [rect(100, 300)], reach: reach)
         XCTAssertEqual(result.frame.minX, 100)
         XCTAssertEqual(result.frame.minY, 300)
-        XCTAssertEqual(result.guides.count, 2)
     }
 
     /// Nothing to align to, so the grid gets its say — the fallback, not the rule.
@@ -54,19 +58,16 @@ final class CanvasSnappingTests: XCTestCase {
         let result = CanvasSnapping.move(rect(0, 0), by: (dx: 103, dy: 0),
                                          against: [rect(4000, 4000)], reach: reach)
         XCTAssertEqual(result.frame.minX, 100, "rounded to the 10pt grid")
-        XCTAssertEqual(result.guides, [.grid(rect(100, 0))],
-                       "and says so — a card clicking to a lattice nobody mentioned reads as a refusal")
     }
 
-    /// The grid mark is the fallback's mark: it only appears when the lattice is the whole
-    /// explanation, because a card that found a real agreement was not placed by the lattice.
-    func testTheGridSaysNothingWhenSomethingElseExplainedIt() {
-        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 103, dy: 0),
-                                         against: [rect(100, 0)], reach: reach)
-        XCTAssertEqual(result.guides.count, 1)
-        guard case .alignment? = result.guides.first else {
-            return XCTFail("expected the alignment reading and nothing else")
-        }
+    /// **The lattice gets no ghost.** Under a target rather than a receipt it would be a mark up
+    /// during every drag, everywhere, for the weakest claim the board makes — and the dot grid, which
+    /// fades in for the whole of a snapping drag, already says the lattice is there.
+    func testTheGridOffersNothing() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 103, dy: 0),
+                                         against: [rect(4000, 4000)], reach: reach, showReach: show)
+        XCTAssertEqual(result.frame.minX, 100, "still rounded to the grid")
+        XCTAssertNil(result.ghost, "but silently — nothing appeared, so nothing matched")
     }
 
     /// Alignment beats the grid where both apply. Snapping to another card is a much stronger
@@ -83,7 +84,15 @@ final class CanvasSnappingTests: XCTestCase {
                                          against: [rect(100, 0)], reach: 0, snapsToGrid: false)
         XCTAssertEqual(result.frame.minX, 103)
         XCTAssertEqual(result.frame.minY, 7)
-        XCTAssertTrue(result.guides.isEmpty)
+    }
+
+    /// ⌥ turns the *offer* off with the snap. The modifier means "leave me alone", and a board still
+    /// showing what it would have done is a quieter way of not leaving you alone.
+    func testNothingIsOfferedWhenSnappingIsOff() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 103, dy: 7),
+                                         against: [rect(100, 0)], reach: 0, showReach: 0,
+                                         snapsToGrid: false)
+        XCTAssertNil(result.ghost)
     }
 
     func testTheNearestCandidateWins() {
@@ -93,31 +102,71 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.minX, 101)
     }
 
-    /// A guide names the cards that agree — the moving card first, then everything it matched. Each
-    /// of them gets a ghost drawn round it, so the whole rectangle is what has to come back, not a
-    /// summary of where the line would run.
-    func testAGuideNamesEveryCardInTheAgreement() {
-        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
-                                         against: [rect(100, 0), rect(100, 3000)], reach: reach)
-        guard case .alignment(let axis, let position, let cards)? = result.guides.first else {
-            return XCTFail("expected an alignment guide")
-        }
-        XCTAssertEqual(axis, .vertical)
-        XCTAssertEqual(position, 100)
-        XCTAssertEqual(cards, [rect(100, 500),    // the card being moved, where it landed
-                               rect(100, 0),      // the one above it
-                               rect(100, 3000)])
+    // MARK: The offer
+
+    /// The one that says what this whole thing is for: at 30pt out the card has *not* moved, and the
+    /// board is already showing where it would go. A mark that waited for the snap would be explaining
+    /// something instead of offering it.
+    func testAnOfferIsUpLongBeforeTheCardMoves() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 70, dy: 0),
+                                         against: [rect(100, 0)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.frame.minX, 70, "30pt short of the match, and left exactly there")
+        XCTAssertEqual(result.ghost?.frame, rect(100, 500), "with the aligned slot drawn for you")
     }
 
-    /// A card that happens to lie between two that agree is not part of the agreement and gets no
-    /// stretch. The old single line ran straight past it and left you to work that out.
-    func testAGuideSkipsCardsThatDontAgree() {
-        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 100, dy: 0),
-                                         against: [rect(100, 0), rect(340, 200)], reach: reach)
-        guard case .alignment(_, _, let cards)? = result.guides.first else {
-            return XCTFail("expected an alignment guide")
+    /// And it fades up as you close, so the mark is faint where it is only possible and solid where it
+    /// is about to be true.
+    func testAnOfferGrowsMorePresentAsYouApproach() {
+        func nearness(at dx: Double) -> Double {
+            CanvasSnapping.move(rect(0, 500), by: (dx: dx, dy: 0), against: [rect(100, 0)],
+                                reach: reach, showReach: show, snapsToGrid: false).ghost?.nearness ?? -1
         }
-        XCTAssertEqual(cards.count, 2, "the moving card and the one card that lines up with it")
+        XCTAssertGreaterThan(nearness(at: 80), 0, "20pt out: visible")
+        XCTAssertGreaterThan(nearness(at: 90), nearness(at: 80), "10pt out: more so")
+        XCTAssertEqual(nearness(at: 95), 1, "5pt out is inside the snap, so the offer has been taken")
+    }
+
+    /// Past the show radius there is nothing at all — the point of the second radius is that it ends.
+    ///
+    /// Landed exactly between the two cards' agreements: the moving card is 200 wide and the other's
+    /// edges and centre are 100 apart, so from x=50 every candidate — left to left, centre to left,
+    /// right to centre — is 50pt away, two points past the radius.
+    func testNothingIsOfferedFromTooFarAway() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 50, dy: 0),
+                                         against: [rect(100, 0)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertNil(result.ghost, "nobody is aiming at anything from here")
+    }
+
+    /// The offer is the frame the *card* would have, not the card it matched — which is the whole
+    /// reason the bands went away. Here the moving card is nowhere near the card it lines up with.
+    func testTheOfferDescribesTheMovingCardAndNotItsMatch() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 80, dy: 0),
+                                         against: [rect(100, 3000)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.frame, rect(100, 500))
+    }
+
+    /// **The nearest pending promise governs, not the furthest.** A drag can be ten points from one
+    /// match and twenty from another; waiting for the furthest would hide the ghost for exactly the
+    /// match you are about to make.
+    ///
+    /// Two cards, each only reachable on one axis — the second is 5000 away in x, the first 5000 away
+    /// in y — so the offer is 10pt out horizontally and 20pt out vertically.
+    func testTheNearerOfTwoPendingOffersDecidesHowVisibleTheGhostIs() {
+        let both = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
+                                       against: [rect(100, 5000), rect(5000, 100)],
+                                       reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(both.ghost?.frame, rect(100, 50),
+                       "both offers drawn together — that is the frame the card would have")
+
+        // The same drag with only the horizontal card on the board: the nearer offer, alone.
+        let nearer = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
+                                         against: [rect(100, 5000)],
+                                         reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(both.ghost?.nearness, nearer.ghost?.nearness,
+                       "and it alone decides how present the ghost is")
     }
 
     // MARK: Resizing
@@ -138,41 +187,17 @@ final class CanvasSnappingTests: XCTestCase {
                                            against: [rect(900, 900, 340, 80)],
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.width, 340)
-
-        guard case .sameSize(let axes, let cards)? = result.guides.first else {
-            return XCTFail("expected a same-size guide")
-        }
-        XCTAssertEqual(axes, [.horizontal], "the width, and only the width — the heights differ")
-        XCTAssertEqual(cards.map(\.width), [340, 340])
     }
 
-    /// The claim worth telling apart from the others: dragging a corner until a card is another's
-    /// width *and* its height has made it the same shape, which is one fact rather than two.
-    func testMatchingBothDimensionsIsOneClaim() {
+    /// Dragging a corner until a card is another's width *and* its height. One offer, because a target
+    /// only has to say where — the two matches that used to be told apart as different claims are one
+    /// rectangle now.
+    func testACornerCanMatchBothDimensionsAtOnce() {
         let result = CanvasSnapping.resize(rect(0, 0, 337, 197), handle: .bottomRight,
                                            against: [rect(900, 900, 340, 200)],
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.width, 340)
         XCTAssertEqual(result.frame.height, 200)
-        XCTAssertEqual(result.guides.count, 1, "one claim, not the same claim twice")
-        guard case .sameSize(let axes, let cards)? = result.guides.first else {
-            return XCTFail("expected a same-size guide")
-        }
-        XCTAssertEqual(axes, [.horizontal, .vertical])
-        XCTAssertEqual(cards, [rect(0, 0, 340, 200), rect(900, 900, 340, 200)])
-    }
-
-    /// A dimension that was already right counts towards the shape. Only the axis the grip drags can
-    /// snap, so a card already the right height and dragged to the right width would otherwise be
-    /// reported as a width match while sitting there being visibly congruent.
-    func testADimensionThatWasAlreadyRightCountsTowardsTheShape() {
-        let result = CanvasSnapping.resize(rect(0, 0, 337, 200), handle: .right,
-                                           against: [rect(900, 900, 340, 200)],
-                                           reach: reach, snapsToGrid: false)
-        guard case .sameSize(let axes, _)? = result.guides.first else {
-            return XCTFail("expected a same-size guide")
-        }
-        XCTAssertEqual(axes, [.horizontal, .vertical])
     }
 
     func testAHeightSnapsToAnotherCardsHeight() {
@@ -180,10 +205,6 @@ final class CanvasSnappingTests: XCTestCase {
                                            against: [rect(900, 900, 80, 460)],
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.height, 460)
-        guard case .sameSize(let axes, _)? = result.guides.first else {
-            return XCTFail("expected a same-size guide")
-        }
-        XCTAssertEqual(axes, [.vertical])
     }
 
     /// Dragging a *left* grip to match a width grows the card leftward — the right edge is the one
@@ -207,20 +228,6 @@ final class CanvasSnappingTests: XCTestCase {
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.maxX, 200, "right edge onto the other card's left edge")
         XCTAssertEqual(result.frame.height, 340, "height matched the other card's")
-        XCTAssertEqual(result.guides.count, 2)
-    }
-
-    /// Where a position is both an alignment and a size match, it is reported as the alignment — the
-    /// stronger and more obvious of the two readings.
-    func testAlignmentIsPreferredToSizeAtTheSameDistance() {
-        // The other card's left edge is at 340, and it is 340 wide, so both candidates are at 340.
-        let result = CanvasSnapping.resize(rect(0, 0, 337, 100), handle: .right,
-                                           against: [rect(340, 900, 340, 80)],
-                                           reach: reach, snapsToGrid: false)
-        XCTAssertEqual(result.frame.maxX, 340)
-        guard case .alignment? = result.guides.first else {
-            return XCTFail("expected the alignment reading, not the size one")
-        }
     }
 
     func testACardCannotBeResizedInsideOut() {
@@ -234,21 +241,50 @@ final class CanvasSnappingTests: XCTestCase {
         let result = CanvasSnapping.resize(rect(0, 0, 203, 100), handle: .right,
                                            against: [], reach: reach)
         XCTAssertEqual(result.frame.width, 200)
-        XCTAssertEqual(result.guides, [.grid(rect(0, 0, 200, 100))])
     }
 
-    /// A guide describes the card as it ended up, not as it was halfway through being resized. Built
-    /// axis by axis, the width guide carried the height the card had before the other grip's edge had
-    /// moved — and that rectangle is what gets drawn.
-    func testASizeGuideDescribesTheFinishedCard() {
-        let result = CanvasSnapping.resize(rect(0, 0, 337, 337), handle: .bottomRight,
-                                           against: [rect(900, 900, 340, 80)],
-                                           reach: reach, snapsToGrid: true)
-        XCTAssertEqual(result.frame.width, 340)
-        XCTAssertEqual(result.frame.height, 340, "rounded to the grid, since no height matched")
-        guard case .sameSize(_, let cards)? = result.guides.first else {
-            return XCTFail("expected a same-size guide")
-        }
-        XCTAssertEqual(cards.first, rect(0, 0, 340, 340))
+    // MARK: The offer, while resizing
+
+    /// The request in one test: pulling an edge toward another card's height, and being shown the
+    /// height while there is still room to pull.
+    func testAResizeIsOfferedAHeightBeforeItReachesIt() {
+        // 420 tall and heading for a 460-tall card — 40pt of pull left, well inside the show radius.
+        let result = CanvasSnapping.resize(rect(0, 0, 100, 420), handle: .bottom,
+                                           against: [rect(900, 900, 80, 460)],
+                                           reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.frame.height, 420, "the card is exactly where you dragged it")
+        XCTAssertEqual(result.ghost?.frame.height, 460, "and the match is drawn ahead of it")
+    }
+
+    /// **Sizing a card down**, which is the case that decided the outline stands off its frame rather
+    /// than lying on it: the offer is *inside* the card's current bounds, so it has to be drawn over
+    /// the card's own face.
+    func testACardBeingShrunkIsOfferedTheSmallerFrame() {
+        let result = CanvasSnapping.resize(rect(0, 0, 100, 500), handle: .bottom,
+                                           against: [rect(900, 900, 80, 460)],
+                                           reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.frame.height, 500)
+        XCTAssertEqual(result.ghost?.frame.height, 460, "40pt smaller than the card it is drawn on")
+    }
+
+    /// The offer runs through the minimum-size clamp with everything else. A ghost promising a frame
+    /// the clamp would refuse to hand over is an offer the board cannot keep.
+    func testAnOfferCannotPromiseACardSmallerThanTheMinimum() {
+        let result = CanvasSnapping.resize(CanvasRect(x: 0, y: 0, width: 100, height: 60),
+                                           handle: .bottom, against: [rect(900, 900, 80, 20)],
+                                           reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.frame.height, 40, "the minimum, not the 20 that was on offer")
+    }
+
+    /// An offer taken on one axis doesn't hold back the offer still pending on the other — and the
+    /// frame drawn is both of them together, since both are what the card would become.
+    func testATakenOfferAndAPendingOneAreDrawnAsOneFrame() {
+        // The width is 3pt out (inside the snap); the height is 30pt out (an offer).
+        let result = CanvasSnapping.resize(rect(0, 0, 337, 310), handle: .bottomRight,
+                                           against: [rect(900, 900, 340, 340)],
+                                           reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.frame.width, 340, "the width snapped")
+        XCTAssertEqual(result.frame.height, 310, "the height did not")
+        XCTAssertEqual(result.ghost?.frame, rect(0, 0, 340, 340))
     }
 }
