@@ -277,7 +277,8 @@ struct ProjectView: View {
                     session: takeover.session,
                     projectName: displayTitle ?? "",
                     store: store,
-                    state: state,
+                    placement: .titlebar(state),
+                    onOpenProject: { state.openProject(named: $0) },
                     onBack: { activeEditor = nil }
                 )
                 .transition(.asymmetric(
@@ -2836,14 +2837,48 @@ private struct SessionMenu: View {
 /// The label is edited here, in the header, rather than behind a gesture out in the list. This is where
 /// you already are when you're working on a session, it's the one place the label is shown next to the
 /// date it decorates, and it means the list doesn't need a second double-click meaning of its own.
-private struct SessionNoteTakeover: View {
+/// The clearance a takeover's header needs where it is standing — see `SessionNoteTakeover.Placement`.
+///
+/// A modifier rather than a branch in the header itself, so the two hosts differ in one named place
+/// instead of putting an `if` through the middle of a view that is otherwise identical in both.
+private struct SessionNoteHeaderInset: ViewModifier {
+    let placement: SessionNoteTakeover.Placement
+
+    @ViewBuilder func body(content: Content) -> some View {
+        switch placement {
+        case .titlebar(let state):
+            content.modifier(TitlebarClearance(state: state, bottom: 8))
+        case .card:
+            // The card's own gutter, and the same 8pt below the header the window leaves — this stands
+            // over the editor rather than above it either way, so the gap is the editor's top inset.
+            content.padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 8)
+        }
+    }
+}
+
+/// **Not private, because a project card hosts it too.** A board is a place you work, so writing a note
+/// happens where you are rather than in the window you would have had to go to — and a card that grew
+/// its own editor would be a lookalike of this one, drifting from it a fix at a time. The two couplings
+/// to a window are parameters instead: where the header stands, and what opens a `[[project]]`.
+struct SessionNoteTakeover: View {
+    /// Where this takeover is standing, which is the only thing that differs between the two hosts.
+    ///
+    /// In a window the header shares the titlebar strip with the task column's, under the same traffic
+    /// lights, and insets itself from the same measurements. A card has no titlebar and no buttons to
+    /// clear, so there the header is simply a header.
+    enum Placement {
+        case titlebar(ProjectViewState)
+        case card
+    }
+
     let index: Int
     let session: Session
     let projectName: String
     @ObservedObject var store: PMStore
-    /// Only for the titlebar clearance — this header stands in the same strip as the task list's, under
-    /// the same traffic lights, so it insets itself from the same measurements.
-    let state: ProjectViewState
+    let placement: Placement
+    /// Follows a `[[Project]]` out of the note — the window's sidebar in one host, the board's
+    /// open-project in the other.
+    let onOpenProject: (String) -> Void
     let onBack: () -> Void
 
     @State private var text: String
@@ -2877,13 +2912,15 @@ private struct SessionNoteTakeover: View {
     @State private var headerHovering = false
     @Environment(\.controlActiveState) private var controlActiveState
 
-    init(index: Int, session: Session, projectName: String,
-         store: PMStore, state: ProjectViewState, onBack: @escaping () -> Void) {
+    init(index: Int, session: Session, projectName: String, store: PMStore,
+         placement: Placement, onOpenProject: @escaping (String) -> Void,
+         onBack: @escaping () -> Void) {
         self.index = index
         self.session = session
         self.projectName = projectName
         self.store = store
-        self.state = state
+        self.placement = placement
+        self.onOpenProject = onOpenProject
         self.onBack = onBack
         _text = State(initialValue: sessionNoteBody(body: session.body))
         _label = State(initialValue: session.label)
@@ -2907,7 +2944,7 @@ private struct SessionNoteTakeover: View {
         ZStack(alignment: .top) {
             // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
             // it and a relative link can be followed back out of it.
-            MarkdownTextEditor(onOpenProject: { state.openProject(named: $0) },
+            MarkdownTextEditor(onOpenProject: onOpenProject,
                                text: $text, onSubmit: onBack,
                                placeholder: "Write a note…",
                                noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
@@ -2963,7 +3000,7 @@ private struct SessionNoteTakeover: View {
             Spacer(minLength: 12)
         }
         .opacity(chrome.contentOpacity)
-        .modifier(TitlebarClearance(state: state, bottom: 8))
+        .modifier(SessionNoteHeaderInset(placement: placement))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.18)) { headerHovering = hovering }
         }
@@ -3154,38 +3191,55 @@ private struct SessionNoteTakeover: View {
 
 // MARK: Project details
 
-private struct ProjectDetailsView: View {
+/// The project's brief — summary, problem, goals, approach, links, learnings — read as a printed page
+/// and edited in place.
+///
+/// **Not private, because a project card shows one too.** The board is a surface you work on, and the
+/// brief is part of the notes rather than part of the window.
+struct ProjectDetailsView: View {
     let notes: ProjectNotes?
     @ObservedObject var store: PMStore
     @Binding var isEditing: Bool
+    /// Whether an empty brief draws its six "Add summary…" prompts, or nothing at all.
+    ///
+    /// The window shows them: the details band is a section you deliberately revealed, so it owes you
+    /// an answer to "what can go in here", and it needs a target for the double-click. A card is not
+    /// revealed — it is the project, sitting on a board beside five others — and a project with no
+    /// brief would otherwise lead with six lines of empty prompts above the work. There, an empty brief
+    /// is simply not drawn, and Edit Details on the card's menu is the way in.
+    var showsPlaceholders = true
 
     var body: some View {
-        if let n = notes {
+        // Nothing at all, rather than an empty band. Without placeholders there is no content, but the
+        // padding and the double-click target below would still be there — an invisible strip across
+        // the top of every project card, swallowing the clicks that land in it.
+        if let n = notes, isEditing || showsPlaceholders || hasAnyDetail(n) {
             Group {
                 if isEditing {
-                    DetailsEditor(notes: n, kind: store.kind) { edited in
-                        // Merge the edited detail fields (including links) onto freshly-parsed notes,
-                        // leaving title and sessions untouched.
+                    // One field at a time, onto freshly-parsed notes, leaving the title, the sessions
+                    // and every *other* field untouched. Writing the whole block on every commit would
+                    // make an edit to the summary overwrite a goal somebody had just changed in another
+                    // window — which the old form could not do only because it wrote once, at the end.
+                    DetailsEditor(notes: n, kind: store.kind) { edited, field in
                         store.saveDetails { fresh in
                             var out = fresh
-                            out.summary = edited.summary
-                            out.problem = edited.problem
-                            out.goals = edited.goals
-                            out.approach = edited.approach
-                            out.links = edited.links
-                            out.learnings = edited.learnings
+                            switch field {
+                            case .summary: out.summary = edited.summary
+                            case .problem: out.problem = edited.problem
+                            case .goals: out.goals = edited.goals
+                            case .approach: out.approach = edited.approach
+                            case .links: out.links = edited.links
+                            case .learnings: out.learnings = edited.learnings
+                            }
                             return out
                         }
-                        isEditing = false
-                    } onCancel: {
-                        isEditing = false
                     }
                     .reportEditorFrame()
                 } else {
                     Group {
                         if hasAnyDetail(n) {
                             readContent(n)
-                        } else {
+                        } else if showsPlaceholders {
                             placeholderContent
                         }
                     }
@@ -3344,6 +3398,11 @@ private struct EditedDetails {
     var learnings: [String]
 }
 
+/// Which part of the brief a commit is about.
+///
+/// A commit names its field so the write can touch that one and no other — see `ProjectDetailsView`.
+enum DetailField { case summary, problem, goals, approach, links, learnings }
+
 /// One editable link row (label + URL). Backed by a stable `id` so add/remove keep field focus and
 /// SwiftUI diffs the list correctly; converted to/from `LinkEntry` at the editor's edges.
 private struct EditableLink: Identifiable {
@@ -3352,17 +3411,54 @@ private struct EditableLink: Identifiable {
     var url: String
 }
 
-/// Inline edit form for the project-details section. Shows every editable section (Summary, Problem,
-/// Goals×3, Approach, Links, Learnings) regardless of whether it currently has content. Seeded from
-/// the notes on appear; local `@State` so Cancel is a no-op.
+/// Inline editing for the project-details section. Shows every editable section (Summary, Problem,
+/// Goals×3, Approach, Links, Learnings) regardless of whether it currently has content.
+///
+/// **Live rows, and no Cancel.** This was a form: seeded into `@State`, written once by a Save button,
+/// with a Cancel beside it that made the whole sitting a no-op — so an edit was lost if the pane closed
+/// mid-sentence, which is not how the task rows behave, and that inconsistency is what made it read as
+/// a bug. Now each field commits itself as you leave it, and the two buttons are gone.
+///
+/// Cancel had to go with them rather than survive as a convenience: a surface that both writes as you
+/// type and offers to discard is lying about one of the two. What replaces it is what the rest of the
+/// app already relies on — the notes file has undo behind it, and no other editing in this app is
+/// modal. Escape and an outside click still leave; they just no longer throw anything away.
+///
+/// The card is what forced it. A brief can now sit on a board, in one pane of a tiled view you are
+/// working across, and a modal form there is worse than a modal form in a window.
 private struct DetailsEditor: View {
     /// Which header fields to offer. The read view already hides a blank section, so it needs no kind;
     /// the editor does, because offering a field is what puts content in it. An Area given a Problem
     /// box would get a Problem — the serializer keeps a section the kind omits precisely when it isn't
     /// empty, so the value would stick, and the one place it could have been refused is here.
     let kind: ProjectKind
-    let onSave: (EditedDetails) -> Void
-    let onCancel: () -> Void
+    /// Called with the whole brief and the one field that changed, each time a field is left.
+    let onCommit: (EditedDetails, DetailField) -> Void
+
+    /// Which field the caret is in. Leaving one is what commits it, so this is the editor's clock.
+    @FocusState private var focused: Focus?
+    /// What was last written, so a field left untouched writes nothing at all. Without it, tabbing
+    /// through the brief would put six identical entries on the undo stack.
+    @State private var seed: EditedDetails
+
+    /// A field the caret can be in. Finer-grained than `DetailField` because the three goals and each
+    /// link's two halves are separate fields that commit as one part of the document.
+    private enum Focus: Hashable {
+        case summary, problem, approach, learnings
+        case goal(Int)
+        case linkLabel(UUID), linkURL(UUID)
+
+        var part: DetailField {
+            switch self {
+            case .summary: return .summary
+            case .problem: return .problem
+            case .approach: return .approach
+            case .learnings: return .learnings
+            case .goal: return .goals
+            case .linkLabel, .linkURL: return .links
+            }
+        }
+    }
 
     @State private var summary: String
     @State private var problem: String
@@ -3375,28 +3471,41 @@ private struct DetailsEditor: View {
     private let preservedGroups: [LinkEntry]
 
     init(notes: ProjectNotes, kind: ProjectKind,
-         onSave: @escaping (EditedDetails) -> Void, onCancel: @escaping () -> Void) {
+         onCommit: @escaping (EditedDetails, DetailField) -> Void) {
         self.kind = kind
-        self.onSave = onSave
-        self.onCancel = onCancel
+        self.onCommit = onCommit
         // Split the stored links: grouped entries are set aside; flat entries seed the editable rows
         // (dropping the empty placeholder entry the model carries when there are no real links).
-        self.preservedGroups = notes.links.filter { !($0.children ?? []).isEmpty }
-        _links = State(initialValue: notes.links
+        let groups = notes.links.filter { !($0.children ?? []).isEmpty }
+        let seededLinks = notes.links
             .filter { ($0.children ?? []).isEmpty }
-            .compactMap { entry in
+            .compactMap { entry -> EditableLink? in
                 let label = (entry.label ?? "").trimmingCharacters(in: .whitespaces)
                 let url = (entry.url ?? "").trimmingCharacters(in: .whitespaces)
                 return (label.isEmpty && url.isEmpty) ? nil
                     : EditableLink(label: entry.label ?? "", url: entry.url ?? "")
-            })
+            }
+        self.preservedGroups = groups
+        _links = State(initialValue: seededLinks)
         _summary = State(initialValue: notes.summary)
         _problem = State(initialValue: notes.problem)
         _goals = State(initialValue: Array((notes.goals + ["", "", ""]).prefix(3)))
         _approach = State(initialValue: notes.approach)
-        _learningsText = State(initialValue: notes.learnings
+        let seededLearnings = notes.learnings
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .joined(separator: "\n"))
+            .joined(separator: "\n")
+        _learningsText = State(initialValue: seededLearnings)
+        // The document as it stood when this opened, through the *same* normalisation a commit uses —
+        // so the comparison is like for like. Built from `notes.links` rather than the raw list,
+        // otherwise the first time a link field was left it would report a change that was only this
+        // editor's own tidying, and write it.
+        _seed = State(initialValue: Self.edited(
+            summary: notes.summary,
+            problem: notes.problem,
+            goals: Array((notes.goals + ["", "", ""]).prefix(3)),
+            approach: notes.approach,
+            links: seededLinks, preserved: groups,
+            learningsText: seededLearnings))
     }
 
     var body: some View {
@@ -3408,28 +3517,37 @@ private struct DetailsEditor: View {
             }
             field("Links") { linksEditor }
             field("Learnings") {
-                TextField("One per line", text: $learningsText, axis: .vertical).lineLimit(2...8)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save", action: save).keyboardShortcut(.defaultAction)
+                TextField("One per line", text: $learningsText, axis: .vertical)
+                    .lineLimit(2...8)
+                    .focused($focused, equals: .learnings)
             }
         }
         .textFieldStyle(.roundedBorder)
         .controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Leaving a field is what writes it — tab, click into the next one, click away entirely.
+        .onChange(of: focused) { was, _ in if let was { commit(was.part) } }
+        // And leaving the editor writes whichever field still had the caret. This is the case the form
+        // lost outright: the pane closing, or the card being stepped out of, mid-sentence.
+        .onDisappear { if let focused { commit(focused.part) } }
     }
 
     @ViewBuilder private func headerField(_ section: HeaderSection) -> some View {
         switch section {
-        case .summary: TextField("", text: $summary, axis: .vertical).lineLimit(1...5)
-        case .problem: TextField("", text: $problem, axis: .vertical).lineLimit(1...5)
-        case .approach: TextField("", text: $approach, axis: .vertical).lineLimit(1...5)
+        case .summary:
+            TextField("", text: $summary, axis: .vertical).lineLimit(1...5)
+                .focused($focused, equals: .summary)
+        case .problem:
+            TextField("", text: $problem, axis: .vertical).lineLimit(1...5)
+                .focused($focused, equals: .problem)
+        case .approach:
+            TextField("", text: $approach, axis: .vertical).lineLimit(1...5)
+                .focused($focused, equals: .approach)
         case .goals:
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(0..<3, id: \.self) { i in
                     TextField("\(section.label.dropLast()) \(i + 1)", text: $goals[i])
+                        .focused($focused, equals: .goal(i))
                 }
             }
         }
@@ -3442,9 +3560,14 @@ private struct DetailsEditor: View {
             ForEach($links) { $link in
                 HStack(spacing: 4) {
                     TextField("Label", text: $link.label).frame(width: 90)
+                        .focused($focused, equals: .linkLabel(link.id))
                     TextField("URL", text: $link.url)
+                        .focused($focused, equals: .linkURL(link.id))
                     Button {
+                        // Removing is a whole act rather than a field being left, so it writes itself.
+                        // Nothing else would: the row it was about no longer exists to lose focus.
                         links.removeAll { $0.id == link.id }
+                        commit(.links)
                     } label: {
                         Image(systemName: "minus.circle")
                     }
@@ -3454,6 +3577,8 @@ private struct DetailsEditor: View {
                 }
             }
             Button {
+                // No commit here: an empty row is not a link yet, and writing one would put a blank
+                // entry in the document every time somebody clicked this and thought better of it.
                 links.append(EditableLink(label: "", url: ""))
             } label: {
                 Label("Add link", systemImage: "plus.circle").font(.caption)
@@ -3470,28 +3595,57 @@ private struct DetailsEditor: View {
         }
     }
 
-    private func save() {
+    /// Write one field, if it actually changed.
+    ///
+    /// The guard is what makes leaving a field free: tabbing through the brief without typing puts
+    /// nothing on the undo stack, and the same field left twice writes once.
+    private func commit(_ part: DetailField) {
+        let now = current()
+        guard changed(part, from: seed, to: now) else { return }
+        onCommit(now, part)
+        seed = now
+    }
+
+    private func current() -> EditedDetails {
+        Self.edited(summary: summary, problem: problem, goals: goals, approach: approach,
+                    links: links, preserved: preservedGroups, learningsText: learningsText)
+    }
+
+    private func changed(_ part: DetailField, from was: EditedDetails, to now: EditedDetails) -> Bool {
+        switch part {
+        case .summary: return was.summary != now.summary
+        case .problem: return was.problem != now.problem
+        case .goals: return was.goals != now.goals
+        case .approach: return was.approach != now.approach
+        case .links: return was.links != now.links
+        case .learnings: return was.learnings != now.learnings
+        }
+    }
+
+    /// The editor's state as the document would hold it. Static and pure, so the seed taken at `init`
+    /// and every later comparison come out of the same function rather than out of two that have to be
+    /// kept agreeing.
+    ///
+    /// Blank link rows are dropped, each is normalised into a `LinkEntry`, and the preserved groups are
+    /// re-appended. An empty result falls back to the model's single empty entry, which is what a
+    /// linkless project holds.
+    private static func edited(summary: String, problem: String, goals: [String], approach: String,
+                               links: [EditableLink], preserved: [LinkEntry],
+                               learningsText: String) -> EditedDetails {
         let learnings = learningsText
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        // Drop blank rows, normalize each into a LinkEntry, then re-append the preserved groups. If the
-        // result is empty, fall back to the model's single empty entry (matching a linkless project).
         let flatLinks: [LinkEntry] = links.compactMap { row in
             let label = row.label.trimmingCharacters(in: .whitespaces)
             let url = row.url.trimmingCharacters(in: .whitespaces)
             if label.isEmpty && url.isEmpty { return nil }
             return LinkEntry(label: label.isEmpty ? nil : label, url: url.isEmpty ? nil : url)
         }
-        let mergedLinks = flatLinks + preservedGroups
-        onSave(EditedDetails(
-            summary: summary,
-            problem: problem,
-            goals: goals,
-            approach: approach,
-            links: mergedLinks.isEmpty ? [LinkEntry()] : mergedLinks,
-            learnings: learnings.isEmpty ? [""] : learnings
-        ))
+        let merged = flatLinks + preserved
+        return EditedDetails(summary: summary, problem: problem, goals: goals, approach: approach,
+                             links: merged.isEmpty ? [LinkEntry()] : merged,
+                             learnings: learnings.isEmpty ? [""] : learnings)
     }
 }
 

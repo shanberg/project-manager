@@ -334,6 +334,17 @@ extension CanvasBoardView {
                 // app, and a look across a board should not quietly repoint the things on the other end
                 // of it.
                 add(menu, "Focus This Project", #selector(focusProjectForCard))
+                menu.addItem(.separator())
+                // The two writes, carrying the keys they answer to. This is where somebody looks when
+                // they wonder what a card can be told to do, and the keys work from here whether or not
+                // the card has been stepped into — see `newSessionOnCard`, which steps in on your
+                // behalf, because that is what clicking the item would have done anyway.
+                key(add(menu, "New Session", #selector(newSession(_:))), "n", modifiers: [.command, .shift])
+                key(add(menu, "New Task", #selector(newTask(_:))), "n")
+                // No key, because the window has none for it either — the brief is reached by
+                // double-clicking it. This item is for the case that gesture cannot serve: a project
+                // with no brief yet draws nothing on a card, so there is nothing to double-click.
+                add(menu, "Edit Details\u{2026}", #selector(editProjectDetails(_:)))
             }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
@@ -424,6 +435,11 @@ extension CanvasBoardView {
         menu.addItem(.separator())
         key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
             "\u{8}", modifiers: [])
+    }
+
+    /// The project cards in the selection — what every project command acts on.
+    private var selectedProjectCards: [CanvasFileNodeView] {
+        selection.compactMap { nodeViews[$0] as? CanvasFileNodeView }.filter(\.isProjectCard)
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -905,6 +921,53 @@ extension CanvasBoardView {
         PMStore.setGlobalFocus(key: key) {
             (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
         }
+    }
+
+    /// File ▸ New Session (⇧⌘N) on a board.
+    ///
+    /// **Aimed at the card you are standing in.** A board can hold six projects, so a command that acts
+    /// on "the project" has to say which — and this is the kind you do *to* one, not the kind that
+    /// remembers (⌘Z takes `lastEditedProject` for exactly the opposite reason). With nothing stepped
+    /// into, the item is dim rather than guessing.
+    ///
+    /// Reached from a card's own contextual menu, it steps that card in first. Right-clicking a card is
+    /// pointing at it, and dimming an item on the very card it names — because you had not clicked it
+    /// first — would be the command refusing an aim it had already been given.
+    @objc func newSession(_ sender: Any?) {
+        projectCommandTarget(for: sender)?.projectCommands.requestNewSession()
+    }
+
+    /// File ▸ New Task (⌘N) on a board, on the same routing as New Session.
+    @objc func newTask(_ sender: Any?) {
+        projectCommandTarget(for: sender)?.projectCommands.requestNewTask()
+    }
+
+    /// Open the brief on a card for editing, revealing it first when the project hasn't got one — the
+    /// same errand as the window's `editDetails`, which also reveals before it edits.
+    @objc func editProjectDetails(_ sender: Any?) {
+        projectCommandTarget(for: sender)?.projectCommands.requestEditDetails()
+    }
+
+    /// Which card a project command is about, engaging it when the aim came from its own menu.
+    ///
+    /// The engagement matters beyond tidiness: the card's editors are gated on it, and a card told to
+    /// start a session while stepped out would open a note takeover and then close it again the moment
+    /// the step-out was noticed.
+    private func projectCommandTarget(for sender: Any?) -> CanvasFileNodeView? {
+        if let engaged = engagedProjectCard { return engaged }
+        guard sender is NSMenuItem, let id = selection.first,
+              let card = nodeViews[id] as? CanvasFileNodeView, card.isProjectCard else { return nil }
+        selection = [id]
+        card.engage(true)
+        return card
+    }
+
+    /// Whether a project command has anything to act on: the card you are in, or — from a card's own
+    /// menu — the card you right-clicked.
+    private var hasProjectCommandTarget: Bool {
+        if engagedProjectCard != nil { return true }
+        guard let id = selection.first else { return false }
+        return (nodeViews[id] as? CanvasFileNodeView)?.isProjectCard == true
     }
 
     /// Go to the project a card's notes belong to.
@@ -1392,6 +1455,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Still not, and alone in that. A frame is a container of cards rather than a card, so
             // there is no tile it could become — it would be an edit made entirely behind the view.
             return !isTiled
+        case #selector(newSession(_:)), #selector(newTask(_:)), #selector(editProjectDetails(_:)):
+            return hasProjectCommandTarget
         case #selector(removeMenuTile(_:)):
             return menuTile != nil
         case #selector(removeTile(_:)):

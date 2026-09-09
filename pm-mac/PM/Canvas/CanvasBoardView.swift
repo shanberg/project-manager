@@ -237,6 +237,21 @@ final class CanvasBoardView: NSView {
         nodeViews.values.first { $0.isEngaged && $0.isPageCard }
     }
 
+    /// The project card you have stepped into, if any — the board's current project.
+    ///
+    /// **Aimed, where `lastEditedProject` remembers.** Undo takes the more recently edited of the two
+    /// documents because "the thing I just did" is what ⌘Z means. New Session is not that kind of
+    /// command: it is a thing you do *to* a project, so it takes the project you are standing in, and a
+    /// board with nothing engaged has nothing to aim at rather than a best guess. One card at a time is
+    /// engaged — a tile click engages the tile it lands in — so there is never a question of which.
+    ///
+    /// It is also the answer to what "the current project" means on a board holding six of them, which
+    /// the window's own project cannot answer for a board opened straight from a file.
+    var engagedProjectCard: CanvasFileNodeView? {
+        nodeViews.values.compactMap { $0 as? CanvasFileNodeView }
+            .first { $0.isEngaged && $0.isProjectCard }
+    }
+
     /// Told when a page is stepped into or out of, or navigates — so the window can offer the controls
     /// for it, and only then.
     var onPageStateChanged: (() -> Void)?

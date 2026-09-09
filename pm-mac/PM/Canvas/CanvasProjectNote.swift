@@ -26,6 +26,14 @@ import PmLib
 /// read and moved around, and a checkbox that fired on the first click that landed near it would make
 /// the board hazardous to pan across. One click steps in, and from then on the card is a project.
 ///
+/// **Everything the window does to the notes, this does too.** It used to be tasks and nothing else —
+/// tick, retype, set a date — on a premise stated out loud elsewhere: "the board is read-only", with
+/// Go to Project as the way in to actually doing something. That premise is retired. A board is a
+/// thinking space you also act and write in, so a session starts here, its note is written here, and
+/// the brief is edited here. The line the card does *not* cross is the project as a thing on disk —
+/// archiving, renaming, revealing it — which is what Go to Project is now for, rather than an
+/// admission that this surface cannot do the work.
+///
 /// **In a tiled view that click is the same click.** There is nothing to pan across and no doubt about
 /// which card you meant, so a tile takes its clicks outright and the one you click in is stepped into
 /// by the act of clicking in it — see `CanvasBoardView.tileClicked`. The card cannot tell the two
@@ -41,6 +49,9 @@ struct CanvasProjectNote: View {
     let noteURL: URL
     /// Opens a project a `[[…]]` names, exactly as the window's rows do.
     var onOpenProject: (String) -> Void
+    /// What the board is asking of this card — New Session and New Task, when it is the one you are
+    /// standing in. See `CanvasProjectCardCommands`.
+    @ObservedObject var commands: CanvasProjectCardCommands
 
     /// The open inline editor, if any. One at a time, exactly as in the task list and the focus panel.
     @State private var activeEditor: EditorTarget?
@@ -49,26 +60,124 @@ struct CanvasProjectNote: View {
     @State private var addPosition: TaskInsertPosition = .after
     /// The task row under the pointer, which is what reveals its "＋date".
     @State private var hovering: String?
+    /// The session whose note has taken the card over, by index, or nil when the card is showing the
+    /// project. Only the index is held here; the editor takes its own `SessionRef` on the way in and
+    /// commits against that, which is what makes it safe for the list underneath to be reindexed by
+    /// somebody else while it is open.
+    @State private var openNote: Int?
+
+    /// Whether the brief is being edited rather than read. The details view keeps the text; this is
+    /// only which of its two faces is up.
+    @State private var editingDetails = false
+
+    /// The add editor that belongs to no task — the window's `quickAddTarget`, under the same key, for
+    /// the same job: a task appended to the current session rather than placed against another one.
+    private static let quickAdd = EditorTarget(key: "quick", kind: .quickAdd)
 
     private var notes: ProjectNotes? { store.notes }
 
     var body: some View {
+        Group {
+            // Writing prose takes the card over, exactly as it takes the window's column over. Not an
+            // inline field: a card is already a narrow column, and an editor inside a rendered note
+            // would be a narrower one inside it. The same view as the window's, too, rather than a
+            // lookalike — it has learnt things a second copy would have to learn again, starting with
+            // not writing your note into whichever session has since moved into that index.
+            if let index = openNote, let sessions = notes?.sessions, sessions.indices.contains(index) {
+                SessionNoteTakeover(index: index, session: sessions[index],
+                                    projectName: displayName, store: store,
+                                    placement: .card, onOpenProject: onOpenProject,
+                                    onBack: { openNote = nil })
+            } else {
+                list
+            }
+        }
+        // Stepping out closes whatever was open. An editor left standing on a card you have walked away
+        // from is a text field with the keyboard nowhere near it, holding an edit that will never be
+        // committed. The note takeover is the exception that proves it: it saves on the way out, so
+        // closing it here is a commit rather than a discard.
+        .onChange(of: engagement.isEngaged) { _, engaged in
+            if !engaged {
+                activeEditor = nil
+                openNote = nil
+                // The brief's fields commit as they are left, and leaving the card is leaving the
+                // field — so this closes an editor that has already written, not one being abandoned.
+                editingDetails = false
+            }
+        }
+        .onChange(of: commands.newSessionRequest) { _, _ in beginCurrentSession() }
+        .onChange(of: commands.newTaskRequest) { _, _ in beginTask() }
+        .onChange(of: commands.editDetailsRequest) { _, _ in
+            openNote = nil
+            activeEditor = nil
+            editingDetails = true
+        }
+    }
+
+    private var list: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 title
+                // The brief, above the work, exactly where the window puts it — and the same view, so
+                // it reads as the same printed page and edits the same way (double-click, then live
+                // rows). Drawn only when there is one: an empty brief on a card would be six lines of
+                // "Add summary…" standing between you and the sessions.
+                ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
+                                   showsPlaceholders: false)
                 ForEach(Array((notes?.sessions ?? []).enumerated()), id: \.offset) { index, session in
                     session_(session, at: index)
                 }
+                footer
             }
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // Stepping out closes whatever was open. An editor left standing on a card you have walked away
-        // from is a text field with the keyboard nowhere near it, holding an edit that will never be
-        // committed.
-        .onChange(of: engagement.isEngaged) { _, engaged in
-            if !engaged { activeEditor = nil }
+    }
+
+    /// The quick add, and the two dead ends.
+    ///
+    /// **Only the dead ends get a row of their own.** Everything else on this card is reached the way
+    /// the window reaches it — a menu, a key — because a card that grew buttons the window has not got
+    /// would be saying the two surfaces are different things. But a project with no sessions and a
+    /// project with no tasks each have nothing to right-click, and a surface whose only affordance is
+    /// on an object you do not have yet is a surface that looks broken. So: one row, revealed once you
+    /// have stepped in, in the place the window puts its own add editor.
+    @ViewBuilder private var footer: some View {
+        if activeEditor == Self.quickAdd {
+            AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
+                      onOpenProject: onOpenProject) { text, due in
+                store.addTodo(text: text, due: due)
+                activeEditor = nil
+            } onCancel: { activeEditor = nil }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+        } else if engagement.isEngaged, activeEditor == nil, store.hasLoaded {
+            // `hasLoaded`, because a store that has not read the file yet has no sessions and no tasks
+            // — which is indistinguishable from a project that has neither, and would put "Start a
+            // session" on a card that is about to show you six.
+            if notes?.sessions.isEmpty != false {
+                startRow("Start a session", symbol: "calendar.badge.plus", action: beginCurrentSession)
+            } else if store.todos.isEmpty {
+                startRow("Add a task", symbol: "plus") { activeEditor = Self.quickAdd }
+            }
         }
+    }
+
+    /// A dead end's way out: a plain row, in the task rows' own metrics, saying the one thing there is
+    /// to do here. Quiet — it is scaffolding that disappears the moment it has been used once.
+    private func startRow(_ title: String, symbol: String,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 11))
+                Text(title).font(.system(size: 12.5))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// The document's own title. The project window puts this in its header pill; a card has no header,
@@ -78,8 +187,15 @@ struct CanvasProjectNote: View {
     /// read, and until it finishes `notes` is nil — so a board of project cards came up as a screenful
     /// of blank rectangles for as long as that took, which is exactly the moment a card most needs to
     /// say what it is. The notes file is named for its project, so the name is already in hand.
+    /// What this card calls the project — its own title once the store has read it, the filename until
+    /// then. Also what the note takeover puts in its header, which is why it is a property rather than
+    /// a local.
+    private var displayName: String {
+        notes?.title.isEmpty == false ? notes!.title : filenameTitle
+    }
+
     @ViewBuilder private var title: some View {
-        let name = notes?.title.isEmpty == false ? notes!.title : filenameTitle
+        let name = displayName
         if !name.isEmpty {
             Text(name)
                 .font(.system(size: 14, weight: .semibold))
@@ -106,6 +222,10 @@ struct CanvasProjectNote: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 3)
                 .padding(.top, index == 0 ? 0 : 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { openNote = index }
+                .contextMenu { sessionMenu(at: index) }
         }
         ForEach(blocks(for: session, at: index)) { block in
             switch block {
@@ -114,6 +234,13 @@ struct CanvasProjectNote: View {
                              noteURL: noteURL, maxImageHeight: 240)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    // The window's gesture, on the window's object: double-clicking a session's prose
+                    // opens its note. Same act, same surface, whichever one you are looking at it
+                    // through — which is the rule the task row's double-click already follows.
+                    .onTapGesture(count: 2) { openNote = index }
+                    .contextMenu { sessionMenu(at: index) }
             case .task(let identified):
                 row(identified.todo)
             }
@@ -241,6 +368,47 @@ struct CanvasProjectNote: View {
     /// nesting has to leave room for the sentence.
     private func indent(_ depth: Int) -> Double { Double(depth) * 11 }
 
+    /// What a session offers on a card: its note, and the next sitting.
+    ///
+    /// Deliberately shorter than the window's `SessionMenu`. Renaming happens in the note takeover's
+    /// header, where the label is shown beside the date it decorates; deleting a session is the kind of
+    /// thing the window keeps, being an edit to the shape of the document rather than to its contents.
+    @ViewBuilder private func sessionMenu(at index: Int) -> some View {
+        Button(sessionHasNote(index) ? "Edit Note" : "Add Note") { openNote = index }
+        Divider()
+        Button("New Session") { beginCurrentSession() }
+        Button("New Task") { beginTask() }
+    }
+
+    private func sessionHasNote(_ index: Int) -> Bool {
+        guard let sessions = notes?.sessions, sessions.indices.contains(index) else { return false }
+        return !sessionNoteBody(body: sessions[index].body)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// New Session, meaning the *current* one: the sitting the project is already in, or a new one when
+    /// it has none for today or has been left alone long enough that this counts as new work. The same
+    /// `openCurrentSession` the window's File ▸ New Session calls, so a session started from a board and
+    /// a session started from a window are the same session and obey the same idle window.
+    ///
+    /// It lands in the note with the caret ready, for the window's reason: a session you have just asked
+    /// for is one you are about to write in, and dropping an empty heading into the card and leaving you
+    /// to find your way into it would be the long way round to the same place.
+    private func beginCurrentSession() {
+        guard store.projectName != nil else { return }
+        activeEditor = nil
+        store.openCurrentSession { index in openNote = index }
+    }
+
+    /// New Task: appended to the current session rather than placed against a row, which is what the
+    /// window's own no-anchor add does. The anchored kinds live on `TaskMenu`, where the anchor is the
+    /// row the menu was opened on.
+    private func beginTask() {
+        guard store.projectName != nil else { return }
+        openNote = nil
+        activeEditor = Self.quickAdd
+    }
+
     private func open(_ kind: EditorTarget.Kind, on todo: Todo) {
         activeEditor = EditorTarget(key: PMStore.key(for: todo), kind: kind)
     }
@@ -260,6 +428,25 @@ struct CanvasProjectNote: View {
             return IdentifiedTodo(id: "\(index)/\(todo.rawLine)#\(n)", todo: todo)
         }
     }
+}
+
+/// What the board asks of the project card you are standing in.
+///
+/// **Counters, not flags**, on the pattern `ProjectViewState` already uses for the window's File menu:
+/// a command is an event, and the same command given twice in a row has to fire twice. A flag set to
+/// true and back would be a change SwiftUI might never see.
+///
+/// The board cannot call into this card's SwiftUI directly — the card is an `NSHostingView` inside an
+/// `NSView` — and this is the seam the window already has for the same problem, in the same shape.
+@MainActor
+final class CanvasProjectCardCommands: ObservableObject {
+    @Published private(set) var newSessionRequest = 0
+    @Published private(set) var newTaskRequest = 0
+    @Published private(set) var editDetailsRequest = 0
+
+    func requestNewSession() { newSessionRequest &+= 1 }
+    func requestNewTask() { newTaskRequest &+= 1 }
+    func requestEditDetails() { editDetailsRequest &+= 1 }
 }
 
 /// Whether a card has been stepped into, published so its SwiftUI content can react.

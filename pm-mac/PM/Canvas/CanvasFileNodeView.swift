@@ -33,6 +33,10 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// Published to this card's SwiftUI content, which starts scrolling and stops holding an open
     /// editor as you step in and out.
     private let engagement = CanvasCardEngagement()
+    /// The other direction: what the board asks of this card when it is the one you are standing in —
+    /// New Session, New Task. Held here rather than made per render, so a command survives the card
+    /// rebuilding its content (a zoom threshold, a re-resolved path) with an editor open.
+    let projectCommands = CanvasProjectCardCommands()
     /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
     /// here, from the project's own window, or from anywhere else holding the same store.
     private var projectEdits: AnyCancellable?
@@ -165,9 +169,11 @@ final class CanvasFileNodeView: CanvasNodeView {
             // task list is not a part of a file, so a card pointing into one falls through to prose.
             if subpath == nil, let store = projectStore(for: url) {
                 return NSHostingView(rootView:
-                    CanvasProjectNote(store: store, engagement: engagement, noteURL: url) { folder in
-                        WindowManager.shared.open(named: folder)
-                    })
+                    CanvasProjectNote(store: store, engagement: engagement, noteURL: url,
+                                      onOpenProject: { folder in
+                                          WindowManager.shared.open(named: folder)
+                                      },
+                                      commands: projectCommands))
             }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text

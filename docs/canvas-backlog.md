@@ -156,7 +156,7 @@ Where it lives: the tile's contextual menu, beside promote and pin. Not on the h
 and does nothing else, deliberately, and every other tile command has moved off it and into the two
 menus.
 
-### 9. Saved arrangements — already built, and hard to find
+### 9. Saved arrangements — **they are workspaces; see [canvas-workspaces.md](canvas-workspaces.md)**
 
 Worth writing down because it looks like a gap and isn't. Arrangements are saved per board, by name,
 in defaults rather than in the `.canvas` — [CanvasArrangements](../pm-mac/PM/Canvas/CanvasArrangements.swift),
@@ -164,17 +164,25 @@ with the whole lifetime argument set out there — and a tab can be pinned to on
 (`CanvasFocus.arrangement`).
 
 So the request "save tile layouts to the project, in app persistence rather than project data" is done,
-exactly as asked. What is missing is a way to notice: it is one contextual-menu item with no shortcut
-and nothing in the window pointing at it. Find out whether the answer is discoverability or a real gap
-before building anything.
+exactly as asked. What was open was whether the rest is a real gap or only discoverability, and that is
+now answered from the other end rather than by investigation: a saved tiling **is** the workspace the
+board is organised around, so it wants a word people use and a place in the window, not one unlabelled
+contextual-menu item.
 
-### 10. Duplicate the current arrangement
+The two stores turn out to be the definition rather than an implementation detail. **A workspace is
+ephemeral unless named**: the one that is up lives in the volatile `CanvasViewMemory`, and naming it
+promotes it into this file. That is not save-as bolted on the side — the two were built apart, with
+different lifetimes, for exactly this reason.
+
+### 10. Duplicate the current arrangement — **now the ordinary way to make a workspace**
 
 Small, and only worth stating because of what it is *for*: you have built a six-tile view and want a
 variant of it. Today that means building the variant from scratch.
 
-Sketch: "Duplicate Arrangement" beside Save, seeding the name from the one that is up ("Dashboard
-copy"), then the copy is what your adjustments land on. Depends on nothing except 9 being answered.
+Sketch: "Duplicate Workspace" beside Save, seeding the name from the one that is up ("Dashboard copy"),
+then the copy is what your adjustments land on. Under
+[canvas-workspaces.md](canvas-workspaces.md) §7 this stops being a convenience: if a workspace is what
+a tab shows, duplicating one is how the second one gets made.
 
 ### 11. BSP layouts
 
@@ -193,22 +201,21 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 12. What a project card shows
+### 12. What a project card shows — **designed, see [canvas-workspaces.md](canvas-workspaces.md) §6**
 
 A project card renders the whole notes document — title, every session, every task. On a board of six
 projects that is six of everything, when what you wanted from five of them was the current state and
 the open work.
 
-Wanted: a card set to show any of the latest session, all sessions, the metadata block
-(summary/problem/goals/approach), open tasks, or all tasks — and mixed, so one card is "goals + open
-tasks" and another is just the latest session.
+Wanted: a card set to show any of the latest session, all sessions, the brief, and its tasks — and
+mixed, so one card is "goals + open tasks" and another is just the latest session.
 
 The pieces exist: `SessionBody` already cuts the document into blocks and `CanvasProjectNote` already
-composes from them. The questions are where the setting lives — a card menu, a control on the card, or
-the same picker in both — and where it is *stored*. A per-card setting is a fact about a card, which
-argues for the `.canvas`; but the `.canvas` is Obsidian's file and PM has so far put every view
-preference in defaults. Probably defaults, keyed by canvas path and node id, which is what
-`CanvasCardMedia` and `CanvasCardSession` already do.
+composes from them. Where the setting *lives* is answered — the card's own contextual menu, beside the
+writes it grew in §§1–5 — and where it is **stored** is answered against the sketch this entry used to
+carry: it goes on the node in the `.canvas`, not in defaults. This entry had it backwards.
+`CanvasCardZoom`, `CanvasCardSession` and `CanvasCardMedia` all keep their per-card settings on the
+node, and a fact about one card on one board is exactly what `extra` is for.
 
 ### 13. Offer the project's own links when adding a web card
 
@@ -220,9 +227,10 @@ pick rather than a paste. And the mirror: putting a card on an address the proje
 offers — never requires — to add it to the block. An offer, because a board is where you try things,
 and half the pages you put on one are not worth writing down.
 
-Open: what "the current project" means on a board with six project cards on it. The window's project is
-the obvious answer, and is nothing at all for a board opened from a file. Possibly: the window's
-project first, then every project the board has a card for.
+Open: what "the current project" means on a board with six project cards on it — **answered by
+[canvas-workspaces.md](canvas-workspaces.md) §5**: it is the card you are stepped into. The window's
+project was the obvious answer and is nothing at all for a board opened from a file; the engaged card
+is an answer that board has too.
 
 ### 14. Pin and reorder a project's links
 
@@ -239,24 +247,6 @@ and does not sync — the same trade `CanvasArrangements` made, and it came out 
 
 Depends on 13 only in that both want a better answer to "what are this project's links".
 
-### 15. Live-saving the summary and goals
-
-Edits to the summary/problem/goals/approach block are lost if the pane closes mid-sentence, which is
-not how the task rows behave — and that inconsistency is what makes it read as a bug.
-
-**It is a bigger ask than it sounds, and the reason is Cancel.** This is not a field that commits on
-blur; it is an explicit form. `DetailsEditor` seeds `@State` from the notes, and the only way anything
-reaches the file is the Save button — with a Cancel beside it
-([ProjectView.swift:3358](../pm-mac/PM/Project/ProjectView.swift:3358)). Saving live means retiring
-that Cancel, because a form that both writes as you type and offers to discard is lying about one of
-the two.
-
-Which is a fair trade and is probably the right one — the rest of the app has no modal editing and the
-notes file has undo behind it — but it is a decision about how this app edits, not a debounce. Open:
-whether the whole block becomes live rows like the task list (bigger, more consistent), or keeps its
-form and merely commits on dismissal as well as on Save (smaller, and leaves the inconsistency
-half-fixed). Also whether ⌘Z reaches it either way.
-
 ### 16. Deliberately start a new session
 
 A write joins the last session unless the project has been left alone for 90 minutes
@@ -267,6 +257,11 @@ The panel already has a New Session command — the question is whether it is th
 whether the override belongs on every surface that writes (the CLI, Raycast, quick capture) or only on
 the one place you would deliberately say "this is new work". Probably the latter, since the whole point
 of the window is that the other surfaces should not have to think about it.
+
+A project card is now a third surface that starts one, and it calls the same `openCurrentSession`, so it
+inherits the window and this question along with it. That does not change the answer — a card is a place
+you work, not a capture surface — but it is one more place the override would have to appear if the
+answer turns out to be "wherever you would say it deliberately".
 
 ### 17. Zoom to fit the selection, and the rest of the grammar
 
@@ -283,42 +278,42 @@ for one act. Decide whether the Figma set replaces the ⌘ set or joins it befor
 
 ## Discussion
 
-### 18. What a workspace is
+### 18. What a workspace is — **answered, see [canvas-workspaces.md](canvas-workspaces.md)**
 
-Raised as a discussion, and it is one, because the app currently has **three** answers and they
-disagree.
+Raised as a discussion, and it was one, because the app had **three** answers and they disagreed: a
+**frame** on the board was called a workspace outright (`CanvasBoardView+Tiling.workspaces`, ⌃1…9), a
+**saved arrangement** is a named tiling of a named set of cards, and a **tab** can be pinned to either.
 
-- A **frame** on the board is called a workspace outright — `CanvasBoardView+Tiling.workspaces`, ⌃1…9
-  goes to one, and the justification is that a frame is already a named container of cards.
-- A **saved arrangement** is a named tiling of a named set of cards
-  ([CanvasArrangements](../pm-mac/PM/Canvas/CanvasArrangements.swift)).
-- A **tab** in a project window is `ProjectTabView` — the notes, or a board narrowed by `CanvasFocus`
-  to the whole thing, a frame, or an arrangement
-  ([ProjectTab.swift:38](../pm-mac/PM/Project/ProjectTab.swift:38)).
+The question it was blocked on was whether a workspace is a region of a board or a window layout, and
+the answer is the second: **a particular set of tiles, their relative placement and size, and their
+pinning settings — named or not, and ephemeral unless named.** "The project and Jira", "its tasks and
+Figma", "Slack and Google Docs and no project at all."
 
-So a tab can already be pinned to either of the first two, and the proposal — "each project may have an
-unlimited number of workspaces" — is a request to collapse the three into one named thing.
+That is `CanvasViewState.Tiling` field for field, so what is left is a rename and a home rather than a
+design. A frame is not one: it is a group node in the `.canvas` with a position, which Obsidian also
+shows, and its membership is which cards sit inside it. A workspace has no position at all.
 
-The question to answer before any of it: **is a workspace a region of a board, or a window layout?** A
-frame is the first: it lives in the `.canvas`, Obsidian can see it, and it has a place on the board. An
-arrangement is the second: it is per-machine, invisible to Obsidian, and has no position at all. They
-feel alike because both are "a set of cards you named", and they behave differently in every way that
-follows from where they are stored. Deciding that is deciding what the feature is.
+Three words for three things: a frame goes back to being a **frame**; a saved tiling becomes a
+**workspace**; and `CanvasTiling.Arrangement` — the layout algorithm, which is the third thing in that
+menu wearing one of these words, four lines under "Save Arrangement…" and meaning something else —
+keeps **arrangement**, which is what it actually is.
 
 ## Priority
 
-**First — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
-2 is in this tier the moment the complaint is specific: which of the three marks, in which case, and
-whether it is unreadable, ambiguous or merely too loud.
+**First — designed and waiting to be built:** 12, then 18 → 9 → 10 in that order. 12 finishes the card
+— a card you have stepped into is now the project, and what is left is saying how much of it to draw
+([canvas-workspaces.md](canvas-workspaces.md) §6). The other three are the workspace rename, its home
+in the window, and duplicating one, argued in §7 of the same page. Nothing in either is waiting on a
+decision.
+
+**Beside it — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
 
 **Then — find out before designing:** 6, which is the same instruction it has always been — drop a
-markdown file on a board and see what actually happens — and 9, which asks whether saved arrangements
-are missing or only hidden.
+markdown file on a board and see what actually happens.
 
-**Then — design first, then build:** 12 (what a project card shows), 13 (suggest the project's links),
-14 (pin and reorder them), 15 (live editing, and what happens to Cancel), 17 (the navigation grammar),
-7 (tidy, the largest), 5 (image cards), 8 (the tile picker), 10 (duplicate an arrangement, once 9 is
-answered).
+**Then — design first, then build:** 13 (suggest the project's links), 14 (pin and reorder them), 17
+(the navigation grammar), 7 (tidy, the largest), 5 (image cards), 8 (the tile picker).
 
-**Blocked on an argument, not on work:** 18 — what a workspace is — which 11 (BSP) sits behind, and
-3 and 4, which are one ⌥ collision seen twice and want deciding together.
+**Blocked on an argument, not on work:** 11 (BSP), which was sitting behind 18 and is now only behind
+its own question — whether a tree is one arrangement more or a different kind of thing — and 3 and 4,
+which are one ⌥ collision seen twice and want deciding together.
