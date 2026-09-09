@@ -37,6 +37,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// New Session, New Task. Held here rather than made per render, so a command survives the card
     /// rebuilding its content (a zoom threshold, a re-resolved path) with an editor open.
     let projectCommands = CanvasProjectCardCommands()
+    /// This card's live copy of what it shows. Kept in step with the node by `update`, and published
+    /// to the SwiftUI content so the change is a redraw rather than a rebuild.
+    private let projectDisplay = CanvasProjectCardDisplay()
+
+    /// What this card is set to draw of its project, as the document says.
+    var shows: CanvasCardShows { CanvasCardShows.of(node) }
     /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
     /// here, from the project's own window, or from anywhere else holding the same store.
     private var projectEdits: AnyCancellable?
@@ -52,6 +58,18 @@ final class CanvasFileNodeView: CanvasNodeView {
     private var stored: (path: String, subpath: String?) {
         if case .file(let path, let subpath) = node.content { return (path, subpath) }
         return ("", nil)
+    }
+
+    /// The node changed. Beyond what the base class watches — the content and the zoom — this card has
+    /// a setting of its own in `extra`, and it is deliberately *not* a rebuild: assigning it publishes,
+    /// and the SwiftUI content redraws around whatever it was holding.
+    ///
+    /// Guarded on a difference because `update` runs on every document change and every layout pass,
+    /// and an unguarded `@Published` write does not care whether the value moved.
+    override func update(node: CanvasNode, scale: Double) {
+        super.update(node: node, scale: scale)
+        let wanted = CanvasCardShows.of(node)
+        if projectDisplay.shows != wanted { projectDisplay.shows = wanted }
     }
 
     override func contentChanged() {
@@ -173,7 +191,7 @@ final class CanvasFileNodeView: CanvasNodeView {
                                       onOpenProject: { folder in
                                           WindowManager.shared.open(named: folder)
                                       },
-                                      commands: projectCommands))
+                                      commands: projectCommands, display: projectDisplay))
             }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text

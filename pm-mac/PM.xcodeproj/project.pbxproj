@@ -64,6 +64,7 @@
 		4ED5BD423A2A7FB39451B701 /* CanvasTileSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3298759F7836947EDB88B2 /* CanvasTileSession.swift */; };
 		5067836D6AAD43EA4838C507 /* CanvasWebSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B78492229004D23C8950DF6 /* CanvasWebSession.swift */; };
 		5261F89226899DE67E22799C /* CanvasSnapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F76094B9162CBB804EEE118 /* CanvasSnapping.swift */; };
+		5373F6519FFB9872B7CCB3C5 /* CanvasCardShows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */; };
 		559F6E1B49BEC7F380B1DF70 /* CanvasPaneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B2306FD03B435C83C0588A /* CanvasPaneController.swift */; };
 		586FDE837EFB0F824560F189 /* CanvasBlockPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B693908982BE1960D0F08898 /* CanvasBlockPolicy.swift */; };
 		592A7378AE3279B5F9F87630 /* OutsideClick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */; };
@@ -83,6 +84,7 @@
 		6928D4167DAD7A53AF2177F8 /* CanvasNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638B1B5554C563993A9A241C /* CanvasNavigation.swift */; };
 		6A02BDACC60D2013AD7DCD81 /* ObsidianLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17912D894364C3FC66AC8134 /* ObsidianLink.swift */; };
 		6E8BB2E1117C1031D7CE8E75 /* ProjectTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A8C1ABCEE220CAA7C8B45A9 /* ProjectTab.swift */; };
+		70EF5BB844BE88425BF2BF8D /* CanvasCardShows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */; };
 		7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF1B5393B4FF9F362814CC03 /* SearchField.swift */; };
 		7237BE622BB08CF9030FB9FC /* CanvasArrangements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362F3B074C83D11101CF4329 /* CanvasArrangements.swift */; };
 		749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */; };
@@ -152,6 +154,7 @@
 		B873BB0CBA658E83551FBAFC /* RendererSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F645602BE13AC8C39B1BE9 /* RendererSwitch.swift */; };
 		B88326FF99730FF53AEFF84C /* CanvasWebSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B78492229004D23C8950DF6 /* CanvasWebSession.swift */; };
 		B8E1F7C55E70007FBCB2C37E /* TokenTextLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 752EE233AC836B99051CA1A4 /* TokenTextLabel.swift */; };
+		B8E98D041D89F9689764F9F5 /* CanvasCardShowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E64D763E4CB8157EC30D74 /* CanvasCardShowsTests.swift */; };
 		B99E33C923922E536CC14BC1 /* CanvasColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32A09525B56826B0BA2CF331 /* CanvasColors.swift */; };
 		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
 		BD9B0642122BF6D6218ED08C /* CanvasAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7F4236A54907ECC9B1FDC3 /* CanvasAddress.swift */; };
@@ -240,6 +243,7 @@
 		16874666CE86567B918D811D /* CanvasBlockPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBlockPolicyTests.swift; sourceTree = "<group>"; };
 		178B8A1AD3756B842EA2A5B6 /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		17912D894364C3FC66AC8134 /* ObsidianLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianLink.swift; sourceTree = "<group>"; };
+		17E64D763E4CB8157EC30D74 /* CanvasCardShowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardShowsTests.swift; sourceTree = "<group>"; };
 		17FA0B4FC52FB9DC24629BF6 /* ProjectIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectIndex.swift; sourceTree = "<group>"; };
 		19EFCE48163B4933B104DA26 /* AppIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIcons.swift; sourceTree = "<group>"; };
 		1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDocumentStore.swift; sourceTree = "<group>"; };
@@ -310,6 +314,7 @@
 		752EE233AC836B99051CA1A4 /* TokenTextLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenTextLabel.swift; sourceTree = "<group>"; };
 		7B930F4A9AF2217B022C04F5 /* CanvasSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSummaryTests.swift; sourceTree = "<group>"; };
 		7C83138169424E7CE3A881B7 /* Stubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stubs.swift; sourceTree = "<group>"; };
+		7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardShows.swift; sourceTree = "<group>"; };
 		7D7548520C03B6F6076B86CC /* TaskTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTiming.swift; sourceTree = "<group>"; };
 		7E52CC55119B4E41DFD8F4EC /* SettingsPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanes.swift; sourceTree = "<group>"; };
 		819D546D01432ADD10CAFD15 /* ProjectTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTabTests.swift; sourceTree = "<group>"; };
@@ -615,6 +620,7 @@
 				3289C6CC8EA5AA6D92A3943D /* CanvasBoardView+Tiling.swift */,
 				3202FE3BD4B24BE3435D4E9B /* CanvasCardMedia.swift */,
 				67C9C91443C938A6F7527779 /* CanvasCardSession.swift */,
+				7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */,
 				4C441A99B0002381AA5E630B /* CanvasCardZoom.swift */,
 				32A09525B56826B0BA2CF331 /* CanvasColors.swift */,
 				4EF0D38D9DB80542D10BF94C /* CanvasContentBlocker.swift */,
@@ -716,6 +722,7 @@
 				CF329F5E6B1828CCC5F30A89 /* CanvasAddressTests.swift */,
 				16874666CE86567B918D811D /* CanvasBlockPolicyTests.swift */,
 				F948EEFBB8F60C1F23B327A1 /* CanvasCardSessionTests.swift */,
+				17E64D763E4CB8157EC30D74 /* CanvasCardShowsTests.swift */,
 				F27DD1258F2F0F89701ADB5F /* CanvasCardZoomTests.swift */,
 				AABAA1D39A0CA679864E9DFD /* CanvasGroupResizeTests.swift */,
 				4CE3567F3B6910C743A9B22F /* CanvasNavigationTests.swift */,
@@ -889,6 +896,7 @@
 				12611291393EE67DFFE5CA46 /* CanvasBoardView.swift in Sources */,
 				46C367160209DA62CE6B4791 /* CanvasCardMedia.swift in Sources */,
 				9454422E4EE26FE4CCDAC870 /* CanvasCardSession.swift in Sources */,
+				5373F6519FFB9872B7CCB3C5 /* CanvasCardShows.swift in Sources */,
 				0FA836B7BD028F4388178A44 /* CanvasCardZoom.swift in Sources */,
 				A68A33BCA5759E3EDCC460F9 /* CanvasColors.swift in Sources */,
 				E72FC312F57CA385A3CD74C8 /* CanvasContentBlocker.swift in Sources */,
@@ -1035,6 +1043,8 @@
 				387069AF75F6B831208CBB15 /* CanvasBlockPolicyTests.swift in Sources */,
 				EAB471D09BB31B88D34EF1C2 /* CanvasCardSession.swift in Sources */,
 				B7E723016700033A0D293827 /* CanvasCardSessionTests.swift in Sources */,
+				70EF5BB844BE88425BF2BF8D /* CanvasCardShows.swift in Sources */,
+				B8E98D041D89F9689764F9F5 /* CanvasCardShowsTests.swift in Sources */,
 				62BAE17B01FC29446457B582 /* CanvasCardZoom.swift in Sources */,
 				D2C1BF98A981292521558F78 /* CanvasCardZoomTests.swift in Sources */,
 				B99E33C923922E536CC14BC1 /* CanvasColors.swift in Sources */,

@@ -162,6 +162,7 @@ targets:
       - path: PM/Canvas/CanvasCardZoom.swift
       - path: PM/Canvas/CanvasPageTitles.swift
       - path: PM/Canvas/CanvasCardSession.swift
+      - path: PM/Canvas/CanvasCardShows.swift
       - path: PM/Canvas/CanvasProjectNoteCard.swift
       - path: PM/Canvas/CanvasNavigation.swift
       - path: PM/Canvas/CanvasLayout.swift

@@ -201,22 +201,6 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 12. What a project card shows — **designed, see [canvas-workspaces.md](canvas-workspaces.md) §6**
-
-A project card renders the whole notes document — title, every session, every task. On a board of six
-projects that is six of everything, when what you wanted from five of them was the current state and
-the open work.
-
-Wanted: a card set to show any of the latest session, all sessions, the brief, and its tasks — and
-mixed, so one card is "goals + open tasks" and another is just the latest session.
-
-The pieces exist: `SessionBody` already cuts the document into blocks and `CanvasProjectNote` already
-composes from them. Where the setting *lives* is answered — the card's own contextual menu, beside the
-writes it grew in §§1–5 — and where it is **stored** is answered against the sketch this entry used to
-carry: it goes on the node in the `.canvas`, not in defaults. This entry had it backwards.
-`CanvasCardZoom`, `CanvasCardSession` and `CanvasCardMedia` all keep their per-card settings on the
-node, and a fact about one card on one board is exactly what `extra` is for.
-
 ### 13. Offer the project's own links when adding a web card
 
 Adding a web card means typing or pasting an address, when nine times in ten the address is already in
@@ -300,11 +284,11 @@ keeps **arrangement**, which is what it actually is.
 
 ## Priority
 
-**First — designed and waiting to be built:** 12, then 18 → 9 → 10 in that order. 12 finishes the card
-— a card you have stepped into is now the project, and what is left is saying how much of it to draw
-([canvas-workspaces.md](canvas-workspaces.md) §6). The other three are the workspace rename, its home
-in the window, and duplicating one, argued in §7 of the same page. Nothing in either is waiting on a
-decision.
+**First — designed and waiting to be built:** 18 → 9 → 10, in that order: the workspace rename, its
+home in the window, and duplicating one. The argument is written down in
+[canvas-workspaces.md](canvas-workspaces.md) §7 and nothing there is waiting on a decision. The card
+half of that page is built — a card you have stepped into is the project, and it draws as much or as
+little of it as you set — so what is left is the half about looking at several cards at once.
 
 **Beside it — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
 

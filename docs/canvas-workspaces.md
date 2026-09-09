@@ -18,11 +18,12 @@ Everything below follows from retiring that sentence. It is not a list of missin
 commands are missing *because* of it, and adding them one at a time without replacing the premise is
 how the card ended up able to tick a task but not write down why.
 
-**Status.** §§1–5 are built. A project card you have stepped into starts sessions, writes their notes,
-adds tasks, and reads and edits the brief; and the brief's fields commit as you leave them, in the
-window as well as on a card. The arguments now live where the code is — `CanvasProjectNote`,
-`SessionNoteTakeover`, `DetailsEditor`, `CanvasBoardView.engagedProjectCard`. What is kept here is the
-shape of the whole, because **§6 and §7 are not built** and lean on it.
+**Status.** §§1–6 are built. A project card you have stepped into starts sessions, writes their notes,
+adds tasks, and reads and edits the brief; the brief's fields commit as you leave them, in the window as
+well as on a card; and a card is set to draw the brief, the notes, the tasks, finished work, and either
+every sitting or the latest. The arguments now live where the code is — `CanvasProjectNote`,
+`SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
+kept here is the shape of the whole, because **§7 is not built** and leans on it.
 
 ## 1. What a project card can and cannot do today
 
@@ -145,7 +146,7 @@ file-opened board too, and does not need a window to have an opinion.
 
 A workspace of "the project's tasks, and Figma" and a workspace of "the whole project, and Jira" are
 two cards on the same project, configured differently. So what began as a density complaint about a
-board of six projects — the backlog's item 12 — became the thing that
+board of six projects — the backlog's item 12, now built as `CanvasCardShows` — became the thing that
 makes workspaces distinguishable: a card set to show the latest session, all sessions, the details block, open tasks, or
 all tasks — and mixed.
 
@@ -244,8 +245,8 @@ point where they should.
 ## 8. What this does to the backlog
 
 - **New, and first:** the card is the project (§§2–5). The complaint that started this.
-- **12** — what a card shows — is promoted and re-argued: display is not capability, and it is stored
-  on the node, not in defaults (§6). It is the next thing to build.
+- **12** — what a card shows — was promoted and re-argued: display is not capability, and it is stored
+  on the node, not in defaults (§6). Built as `CanvasCardShows`, and the item is retired.
 - **15** — live-saving the summary and goals — is **decided**: live rows, and Cancel is retired, in the
   window as well as on the card (§4). It stopped being optional the moment a details block could sit in
   a tile.

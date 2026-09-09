@@ -345,6 +345,7 @@ extension CanvasBoardView {
                 // double-clicking it. This item is for the case that gesture cannot serve: a project
                 // with no brief yet draws nothing on a card, so there is nothing to double-click.
                 add(menu, "Edit Details\u{2026}", #selector(editProjectDetails(_:)))
+                addShowsMenu(menu)
             }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
@@ -440,6 +441,40 @@ extension CanvasBoardView {
     /// The project cards in the selection — what every project command acts on.
     private var selectedProjectCards: [CanvasFileNodeView] {
         selection.compactMap { nodeViews[$0] as? CanvasFileNodeView }.filter(\.isProjectCard)
+    }
+
+    /// How much of its project a card draws — see `CanvasCardShows`.
+    ///
+    /// A submenu, and last on the card's own block, following the link card's Session for the same
+    /// reason: the whole project is right for nearly every card ever made, and this is the setting for
+    /// the boards where it isn't — six projects up at once, or two cards on one project showing
+    /// different halves of it.
+    private func addShowsMenu(_ menu: NSMenu) {
+        let cards = selectedProjectCards
+        guard !cards.isEmpty else { return }
+        let shows = NSMenu(title: "Shows")
+        for part in CanvasCardShows.Part.allCases {
+            let entry = add(shows, part.title, #selector(toggleShownPart(_:)))
+            entry.representedObject = part.rawValue
+            // Ticked only when every selected card agrees, which is how a mixed selection reads as
+            // mixed rather than as whatever the first card happened to say.
+            entry.state = cards.allSatisfy { $0.shows.shows(part) } ? .on : .off
+        }
+        shows.addItem(.separator())
+        let completed = add(shows, "Completed Tasks", #selector(toggleCompletedTasks(_:)))
+        completed.state = cards.allSatisfy(\.shows.completed) ? .on : .off
+        shows.addItem(.separator())
+        // A pair rather than one "Latest Session Only" tick, because this is a choice between two
+        // scopes and a checkbox would leave the unticked state unnamed.
+        let all = add(shows, "All Sessions", #selector(setSessionScope(_:)))
+        all.representedObject = "all"
+        all.state = cards.allSatisfy { !$0.shows.latestOnly } ? .on : .off
+        let latest = add(shows, "Latest Session Only", #selector(setSessionScope(_:)))
+        latest.representedObject = "latest"
+        latest.state = cards.allSatisfy(\.shows.latestOnly) ? .on : .off
+
+        let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
+        item.submenu = shows
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -940,6 +975,58 @@ extension CanvasBoardView {
     /// File ▸ New Task (⌘N) on a board, on the same routing as New Session.
     @objc func newTask(_ sender: Any?) {
         projectCommandTarget(for: sender)?.projectCommands.requestNewTask()
+    }
+
+    /// Show or hide one part of the project on every selected card.
+    ///
+    /// One direction for the whole selection, on the media toggles' rule: a mixed selection turns *on*,
+    /// because the tick was off and the item said so. A card that cannot take the change — the part
+    /// being turned off is the last one it draws — keeps what it had rather than going blank.
+    @objc func toggleShownPart(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let part = CanvasCardShows.Part(rawValue: raw) else { return }
+        let cards = selectedProjectCards
+        guard !cards.isEmpty else { return }
+        let on = !cards.allSatisfy { $0.shows.shows(part) }
+        setShows(cards, actionName: on ? "Show \(part.title)" : "Hide \(part.title)") { current in
+            current.setting(part, to: on) ?? current
+        }
+    }
+
+    @objc func toggleCompletedTasks(_ sender: Any?) {
+        let cards = selectedProjectCards
+        guard !cards.isEmpty else { return }
+        let on = !cards.allSatisfy(\.shows.completed)
+        setShows(cards, actionName: on ? "Show Completed Tasks" : "Hide Completed Tasks") { current in
+            var out = current
+            out.completed = on
+            return out
+        }
+    }
+
+    @objc func setSessionScope(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        let latest = raw == "latest"
+        let cards = selectedProjectCards
+        guard !cards.isEmpty else { return }
+        setShows(cards, actionName: latest ? "Show Latest Session" : "Show All Sessions") { current in
+            var out = current
+            out.latestOnly = latest
+            return out
+        }
+    }
+
+    /// Write a display setting to every one of these cards, as one undoable change — the same shape as
+    /// `setMedia`, and undoable for the same reason: it is an edit to the document.
+    private func setShows(_ cards: [CanvasFileNodeView], actionName: String,
+                          _ change: (CanvasCardShows) -> CanvasCardShows) {
+        let ids = Set(cards.map(\.node.id))
+        store.change(actionName) { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                let wanted = change(CanvasCardShows.of(doc.nodes[index]))
+                CanvasCardShows.set(wanted, on: &doc.nodes[index])
+            }
+        }
     }
 
     /// Open the brief on a card for editing, revealing it first when the project hasn't got one — the
@@ -1455,6 +1542,20 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Still not, and alone in that. A frame is a container of cards rather than a card, so
             // there is no tile it could become — it would be an edit made entirely behind the view.
             return !isTiled
+        case #selector(toggleShownPart(_:)):
+            guard let raw = (item as? NSMenuItem)?.representedObject as? String,
+                  let part = CanvasCardShows.Part(rawValue: raw) else { return false }
+            let cards = selectedProjectCards
+            guard !cards.isEmpty else { return false }
+            let on = !cards.allSatisfy { $0.shows.shows(part) }
+            // Dim rather than a click that does nothing. The last part a card draws cannot be turned
+            // off, and an item that would refuse should look like it will.
+            return cards.contains { $0.shows.setting(part, to: on) != nil }
+        case #selector(toggleCompletedTasks(_:)):
+            // Nothing to filter on a card that isn't showing tasks at all.
+            return selectedProjectCards.contains(where: \.shows.tasks)
+        case #selector(setSessionScope(_:)):
+            return !selectedProjectCards.isEmpty
         case #selector(newSession(_:)), #selector(newTask(_:)), #selector(editProjectDetails(_:)):
             return hasProjectCommandTarget
         case #selector(removeMenuTile(_:)):

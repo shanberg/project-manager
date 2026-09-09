@@ -52,6 +52,8 @@ struct CanvasProjectNote: View {
     /// What the board is asking of this card — New Session and New Task, when it is the one you are
     /// standing in. See `CanvasProjectCardCommands`.
     @ObservedObject var commands: CanvasProjectCardCommands
+    /// How much of the project this card draws. See `CanvasCardShows`.
+    @ObservedObject var display: CanvasProjectCardDisplay
 
     /// The open inline editor, if any. One at a time, exactly as in the task list and the focus panel.
     @State private var activeEditor: EditorTarget?
@@ -75,6 +77,18 @@ struct CanvasProjectNote: View {
     private static let quickAdd = EditorTarget(key: "quick", kind: .quickAdd)
 
     private var notes: ProjectNotes? { store.notes }
+    private var shows: CanvasCardShows { display.shows }
+
+    /// The sessions this card draws, each with the index it has in the document.
+    ///
+    /// The index travels with the session rather than being the position in this list, because
+    /// everything downstream is addressed by it — which tasks belong to a sitting, which note a
+    /// double-click opens. `prefix(1)` is the latest one because `addSession` inserts at the front.
+    private var shownSessions: [(index: Int, session: Session)] {
+        let all = notes?.sessions ?? []
+        return (shows.latestOnly ? Array(all.prefix(1)) : all)
+            .enumerated().map { (index: $0.offset, session: $0.element) }
+    }
 
     var body: some View {
         Group {
@@ -122,9 +136,14 @@ struct CanvasProjectNote: View {
                 // it reads as the same printed page and edits the same way (double-click, then live
                 // rows). Drawn only when there is one: an empty brief on a card would be six lines of
                 // "Add summary…" standing between you and the sessions.
-                ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
-                                   showsPlaceholders: false)
-                ForEach(Array((notes?.sessions ?? []).enumerated()), id: \.offset) { index, session in
+                // `|| editingDetails`, and that is the whole of "display is not capability": a card set
+                // not to show the brief can still be told to edit it, and the brief appears for as long
+                // as you are in it. Hiding it would make Edit Details on such a card do nothing visible.
+                if shows.brief || editingDetails {
+                    ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
+                                       showsPlaceholders: false)
+                }
+                ForEach(shownSessions, id: \.index) { index, session in
                     session_(session, at: index)
                 }
                 footer
@@ -157,7 +176,7 @@ struct CanvasProjectNote: View {
             // session" on a card that is about to show you six.
             if notes?.sessions.isEmpty != false {
                 startRow("Start a session", symbol: "calendar.badge.plus", action: beginCurrentSession)
-            } else if store.todos.isEmpty {
+            } else if store.todos.isEmpty, shows.tasks {
                 startRow("Add a task", symbol: "plus") { activeEditor = Self.quickAdd }
             }
         }
@@ -214,8 +233,12 @@ struct CanvasProjectNote: View {
     }
 
     @ViewBuilder private func session_(_ session: Session, at index: Int) -> some View {
+        let blocks = blocks(for: session, at: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
-        if !caption.isEmpty {
+        // One rule, no exceptions: a sitting is captioned when it puts something on the card. Narrowed
+        // to tasks, a session whose whole content was prose contributes nothing and would otherwise
+        // leave a date standing over the next session's work.
+        if !blocks.isEmpty, !caption.isEmpty {
             Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -227,7 +250,7 @@ struct CanvasProjectNote: View {
                 .onTapGesture(count: 2) { openNote = index }
                 .contextMenu { sessionMenu(at: index) }
         }
-        ForEach(blocks(for: session, at: index)) { block in
+        ForEach(blocks) { block in
             switch block {
             case .prose(_, let text):
                 RenderedNote(prose: text, font: .systemFont(ofSize: 12.5),
@@ -421,12 +444,19 @@ struct CanvasProjectNote: View {
     /// lines in one session are two rows and `ForEach` misbehaves on duplicate ids.
     private func blocks(for session: Session, at index: Int) -> [SessionBlock] {
         var seen: [String: Int] = [:]
-        return SessionBody.blocks(body: session.body,
-                                  tasks: store.todos.filter { $0.sessionIndex == index }) { todo in
+        let all = SessionBody.blocks(body: session.body,
+                                     tasks: store.todos.filter { $0.sessionIndex == index }) { todo in
+            // The closure that answers "is this row being drawn" — which on a card used to always say
+            // yes, there being no Incomplete filter and no find bar to narrow it. Now the card has a
+            // narrowing of its own, and this is where it lands. Every task is still *passed in*, hidden
+            // or not, or the walk loses its place against the body's lines.
+            guard shows.tasks, shows.completed || !todo.checked else { return nil }
             let n = seen[todo.rawLine, default: 0]
             seen[todo.rawLine] = n + 1
             return IdentifiedTodo(id: "\(index)/\(todo.rawLine)#\(n)", todo: todo)
         }
+        guard !shows.notes else { return all }
+        return all.filter { if case .prose = $0 { return false } else { return true } }
     }
 }
 
@@ -447,6 +477,18 @@ final class CanvasProjectCardCommands: ObservableObject {
     func requestNewSession() { newSessionRequest &+= 1 }
     func requestNewTask() { newTaskRequest &+= 1 }
     func requestEditDetails() { editDetailsRequest &+= 1 }
+}
+
+/// How much of its project a card is drawing, published so a change made from the menu **redraws**
+/// rather than rebuilds.
+///
+/// The setting lives on the node in the document (`CanvasCardShows`); this is the card's live copy of
+/// it. Rebuilding the hosting view would work and would be simpler, and it would also throw away the
+/// scroll position and any open editor — for a change whose whole purpose is to adjust what you are
+/// looking at while you look at it.
+@MainActor
+final class CanvasProjectCardDisplay: ObservableObject {
+    @Published var shows = CanvasCardShows.everything
 }
 
 /// Whether a card has been stepped into, published so its SwiftUI content can react.
