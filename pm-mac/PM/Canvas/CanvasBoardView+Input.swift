@@ -662,6 +662,9 @@ extension CanvasBoardView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Before anything else: a project card you are standing in is a list, and a list answers three
+        // of these keys. See `projectCardTakes`.
+        if projectCardTakes(event) { return }
         switch event.specialKey {
         case .delete, .deleteForward:
             deleteSelection()
@@ -675,12 +678,53 @@ extension CanvasBoardView {
         default:
             if event.charactersIgnoringModifiers == "\u{1b}" {
                 cancelOperation(nil)
+            } else if event.charactersIgnoringModifiers == "\r",
+                      let commands = engagedProjectCard?.projectCommands, commands.selectedRows == 1 {
+                // A list's "open": Return on one selected row focuses that task, the same act as its
+                // double-click. One row only, for the reason the window gives — Return has to name a
+                // single thing to open.
+                commands.requestOpenRow()
             } else if event.charactersIgnoringModifiers == "\r", let only = selection.first {
                 beginEditing(only)
             } else {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    /// The list keys, handed to the project card you have stepped into.
+    ///
+    /// **Because the board is the only thing that can tell what they mean.** ↑/↓, ⌘A and ⌫ are all keys
+    /// the board already answers about its cards; a card claiming them from inside SwiftUI would be
+    /// claiming them for the whole window, and a card that never claimed them would let ↓ nudge itself
+    /// across the document while you were reading its tasks. So they are decided here, by the same rule
+    /// the zoom commands and find already use: inside a card, a command means the card. §7d left this
+    /// undone and called it a question with an obvious answer; this is the answer.
+    ///
+    /// Three deliberate exceptions:
+    ///
+    /// - **⌥ arrows stay the board's.** Moving between cards is the gesture a tiling window manager is
+    ///   built around, and it is still worth having with a card open — see `moveFocus`.
+    /// - **⌫ with no rows picked out is the card's own delete**, not a delete of nothing. That is what
+    ///   the board would have done anyway, and the card says how many rows it has (`selectedRows`).
+    /// - **A text field is first responder while you are typing in one**, so none of this is reached
+    ///   then. That is not a check here; it is how the responder chain already works, and it is why
+    ///   these can be unconditional.
+    private func projectCardTakes(_ event: NSEvent) -> Bool {
+        guard let commands = engagedProjectCard?.projectCommands else { return false }
+        let extending = event.modifierFlags.contains(.shift)
+        switch event.specialKey {
+        case .delete, .deleteForward:
+            guard commands.selectedRows > 0 else { return false }
+            commands.requestDeleteRows()
+        case .upArrow where !event.modifierFlags.contains(.option):
+            commands.stepRows(-1, extending: extending)
+        case .downArrow where !event.modifierFlags.contains(.option):
+            commands.stepRows(1, extending: extending)
+        default:
+            return false
+        }
+        return true
     }
 
     private func arrow(_ direction: CanvasNavigation.Direction, _ event: NSEvent) {

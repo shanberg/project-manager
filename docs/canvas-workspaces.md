@@ -29,7 +29,9 @@ tab, which is where its commands are and what duplicating one makes another of. 
 project window's notes *are* a board tiled to the project's own card. **§7e is built**: every project
 has a note and a canvas — enforced now rather than asserted — and with two faces down to one board at
 two scales, the renderer switch is gone; the way out of the notes is zooming out of them, and the tab
-renames itself on arrival. **This page is built.** What is left of it is the one question under Open, which is not a task.
+renames itself on arrival. **The card's keyboard is built too**, by the rule find already used rather
+than the flag §7d expected. **This page is built.** What is left is the task column's other two jobs,
+recorded at the end of §7d, which are not this page's. What is left of it is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -531,11 +533,47 @@ grown, and the rule they break was worth breaking. Everything else here is reach
 reaches it, on the grounds that a card with buttons the window has not got would be saying the two
 surfaces are different things. They are not two surfaces any more.
 
-### What is still not ported
+### The keyboard, which §7d left undone — **built**
 
-The list's **keyboard** — ↑/↓, ⌘A, ⌘⌫ — which on a board belongs to the board. A one-card workspace has
-no cards to arrow between, so this is now a question with an obvious answer and a `isProjectNoteView`
-flag to hang it off; it is simply not done. Everything reachable by mouse and menu is.
+↑/↓ and ⇧↑/⇧↓, ⌘A, ⌘⌫, ⌘C, ⌘V and Return. §7d called this a question with an obvious answer, and the
+answer turned out not to be the `isProjectNoteView` flag it expected: **it is the rule find and the zoom
+commands already follow.** Inside a card, a command means the card.
+
+So the keys are decided at the board (`CanvasBoardView.projectCardTakes`, `selectAll`, `copy`, `paste`)
+and handed to the card you are standing in through `CanvasProjectCardCommands`, the seam the board
+already used for New Task and New Session. Not from inside SwiftUI, and that is the load-bearing part:
+a card claiming ⌘A from its own view hierarchy would claim it for the whole window whether or not you
+were standing in the card, which is the fault the window's own hidden shortcut buttons had to be talked
+out of. It also fixes something nobody had noticed — with the keys unclaimed, ↓ in a project card
+bubbled to the board and *nudged the card across the document* while you read its tasks.
+
+Three deliberate exceptions, each written down where it is made:
+
+- **⌥ arrows stay the board's.** Moving between cards is the gesture a tiling manager is built around,
+  and it is still worth having with a card open.
+- **⌫ with no rows picked out is the card's own delete.** Not a delete of nothing — that is what the
+  board would have done anyway, which is why the card publishes `selectedRows` for the board to ask.
+- **⌘V is decided by the pasteboard.** A copied card has no meaning in a task list and a copied
+  paragraph has none on a board, so each surface takes what it can use, and the board's own clipping is
+  recognised as one first.
+
+A text field being first responder while you type is not checked anywhere. It does not have to be —
+that is how the responder chain already works, and it is why these can be unconditional.
+
+### What the column is still for
+
+`ProjectView` is not the project's notes any more, but it has not turned out to be only a fallback
+either. It is doing three jobs, and the card supersedes one of them:
+
+1. **The task column** — superseded.
+2. **The no-project window.** `pm`'s cold start opens a window on `PMFiles.focusedProjectKey()`, which
+   is nil until something is focused, and "No focused project" plus its hint is that screen.
+3. **Where a store's load error is read.** `store.errorMessage` has no other surface.
+
+And its fallback is not decorative: a project's tasks live in its **markdown**, not in its canvas, so a
+`.canvas` that will not parse is a UI coupling away from "I cannot reach my tasks". Retiring the column
+means answering 2 and 3 somewhere else and giving the card a host that supplies what the pane supplies
+it — a header, find, and the key routing above. That is a port, not a deletion.
 
 ## 7e. Every project has a note and a canvas — **built**
 

@@ -156,6 +156,31 @@ struct CanvasProjectNote: View {
     }
 
     var body: some View {
+        card
+            .onChange(of: commands.rowStepRequest) { _, _ in
+                moveSelection(commands.rowStep, extending: commands.rowStepExtends)
+            }
+            .onChange(of: commands.selectAllRowsRequest) { _, _ in
+                selection.selectAll(in: visibleKeys)
+            }
+            .onChange(of: commands.deleteRowsRequest) { _, _ in requestDelete(selectedTodos) }
+            // The board asks this before it decides whether ⌫ was about the rows, and it has to be
+            // true *before* the key arrives — so it is published on every change to the selection
+            // rather than read across the seam on demand.
+            .onChange(of: selection.count) { _, count in commands.selectedRows = count }
+            .onChange(of: commands.copyRowsRequest) { _, _ in
+                TaskPasteboard.copy(markdown: store.markdown(for: selectedTodos))
+            }
+            .onChange(of: commands.pasteRowsRequest) { _, _ in pasteTasks() }
+            .onChange(of: commands.openRowRequest) { _, _ in
+                guard selectedTodos.count == 1, let todo = selectedTodos.first else { return }
+                store.focus(todo)
+            }
+    }
+
+    /// The card itself. Split from `body` only because the two together are more than the type checker
+    /// will take in one expression.
+    private var card: some View {
         Group {
             // Writing prose takes the card over, exactly as it takes the window's column over. Not an
             // inline field: a card is already a narrow column, and an editor inside a rendered note
@@ -186,6 +211,9 @@ struct CanvasProjectNote: View {
             rightClick.start()
             mouseUp.onMouseUp = { if draggingKey != nil { draggingKey = nil; dropTarget = nil } }
             mouseUp.start()
+            // The commands object outlives this view — it belongs to the node — so a card rebuilt
+            // around a fresh, empty selection has to say so rather than leave the old count standing.
+            commands.selectedRows = selection.count
         }
         .onDisappear { rightClick.stop(); mouseUp.stop() }
         // One place to let the dim go, whichever way the drag ended — dropped, cancelled outside, or
@@ -236,6 +264,61 @@ struct CanvasProjectNote: View {
             openNote = nil
             activeEditor = nil
             editingDetails = true
+        }
+    }
+
+    // MARK: The list's keyboard
+
+    /// ↑/↓ move the selection one row; ⇧ extends it from the anchor instead. With nothing selected, ↓
+    /// starts at the top and ↑ at the bottom. Left and right are left alone — depth in this outline is
+    /// a drag, not a keystroke, and on a board they are the board's.
+    ///
+    /// The rule itself is `RowSelection.step`, shared with the window's column. What is here is only
+    /// the scroll that has to follow it: a selection moved past the edge of a card is a selection you
+    /// cannot see, and a card is a much smaller window onto the list than the column ever was.
+    private func moveSelection(_ delta: Int, extending: Bool) {
+        guard let key = selection.step(delta, extending: extending, in: visibleKeys) else { return }
+        scrollToken &+= 1
+        scrollTarget = key
+    }
+
+    /// The tasks the selection names, in document order — what ⌘⌫ and ⌘A act on.
+    ///
+    /// Not `contextTargets`, which answers the different question a right-click asks (the selection, or
+    /// the row you clicked outside it). A keystroke has no row under it.
+    private var selectedTodos: [Todo] {
+        store.todos.filter { selection.contains(PMStore.key(for: $0)) }
+    }
+
+    /// Ask to delete `todos`, surfacing the confirmation above the rows.
+    ///
+    /// Confirmation earns its place even though ⌘Z reverses a delete: the subtasks that ride along are
+    /// the part you cannot see from the row you picked, and the prompt is where they get named. Same
+    /// argument, same view, as the window's — see `TaskDeleteConfirmation`.
+    private func requestDelete(_ todos: [Todo]) {
+        guard !todos.isEmpty, store.projectName != nil else { return }
+        activeEditor = nil
+        pendingDelete = todos
+    }
+
+    /// ⌘V. Land whatever text is on the pasteboard as tasks, after the selected row's subtree — or at
+    /// the end of the current session when nothing is selected.
+    ///
+    /// The selection moves to what arrived, the way every Mac list leaves a paste selected: it is what
+    /// you would act on next, and on a card it is also the only way to see where the thing went, since
+    /// a card shows a few rows of a list that may be long.
+    private func pasteTasks() {
+        let block = TaskPasteboard.tasksOnPasteboard()
+        guard !block.isEmpty, store.projectName != nil else { return NSSound.beep() }
+        let anchor = selectedTodos.count == 1 ? selectedTodos.first : nil
+        let before = Set(visibleKeys)
+        store.pasteTasks(block, after: anchor) {
+            let arrived = visibleKeys.filter { !before.contains($0) }
+            guard !arrived.isEmpty else { return }
+            selection.select(arrived)
+            guard let first = arrived.first else { return }
+            scrollToken &+= 1
+            scrollTarget = first
         }
     }
 
@@ -816,6 +899,44 @@ final class CanvasProjectCardCommands: ObservableObject {
     func requestNewSession() { newSessionRequest &+= 1 }
     func requestNewTask() { newTaskRequest &+= 1 }
     func requestEditDetails() { editDetailsRequest &+= 1 }
+
+    // MARK: The list's keyboard
+
+    /// ↑/↓, ⌘A and ⌘⌫, which reach a card through the board rather than through SwiftUI focus.
+    ///
+    /// **The board is the only place that can tell what they mean.** Every one of the three is a key
+    /// the board already answers about its *cards* — arrow to the next one, select them all, delete
+    /// them — and a card that claimed them from inside SwiftUI would be claiming them for the whole
+    /// window, whether or not you were standing in it. So the board asks first, exactly as it does for
+    /// find and for the zoom commands: inside a card, they mean the card. See
+    /// `CanvasBoardView.projectCardTakes(_:)`.
+    @Published private(set) var rowStepRequest = 0
+    private(set) var rowStep = 1
+    private(set) var rowStepExtends = false
+    @Published private(set) var selectAllRowsRequest = 0
+    @Published private(set) var deleteRowsRequest = 0
+
+    /// How many rows are selected, written back by the card. The board reads it to decide whether ⌫
+    /// is about the rows at all — with nothing picked out, a delete in a project card is not a delete
+    /// of nothing, it is a delete of the *card*, which is what the board would have done anyway.
+    @Published var selectedRows = 0
+
+    func stepRows(_ step: Int, extending: Bool) {
+        rowStep = step
+        rowStepExtends = extending
+        rowStepRequest &+= 1
+    }
+
+    func requestSelectAllRows() { selectAllRowsRequest &+= 1 }
+    func requestDeleteRows() { deleteRowsRequest &+= 1 }
+
+    @Published private(set) var copyRowsRequest = 0
+    @Published private(set) var pasteRowsRequest = 0
+    @Published private(set) var openRowRequest = 0
+
+    func requestCopyRows() { copyRowsRequest &+= 1 }
+    func requestPasteRows() { pasteRowsRequest &+= 1 }
+    func requestOpenRow() { openRowRequest &+= 1 }
 }
 
 /// How much of its project a card is drawing, published so a change made from the menu **redraws**

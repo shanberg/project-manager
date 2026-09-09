@@ -16,13 +16,25 @@ extension CanvasBoardView {
 
     // MARK: Selecting
 
+    /// ⌘A — every card, or every row of the project card you are standing in.
+    ///
+    /// The same rule the zoom commands and find already follow: inside a card, a command means the
+    /// card. See `CanvasProjectCardCommands`, and `projectCardTakes(_:)` for the two keys that arrive
+    /// as key events rather than through the responder chain.
     override func selectAll(_ sender: Any?) {
+        if let card = engagedProjectCard { return card.projectCommands.requestSelectAllRows() }
         selection = Set(document.nodes.map(\.id))
     }
 
     // MARK: Copying
 
     @objc func copy(_ sender: Any?) {
+        // Inside a project card with rows picked out, ⌘C is those rows as markdown — the same bytes
+        // the window's column puts on the pasteboard. With nothing picked out it is the card, which is
+        // what the board would have copied anyway.
+        if let card = engagedProjectCard, card.projectCommands.selectedRows > 0 {
+            return card.projectCommands.requestCopyRows()
+        }
         guard !selection.isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -63,7 +75,18 @@ extension CanvasBoardView {
 
     // MARK: Pasting
 
+    /// ⌘V — cards onto the board, or **text as tasks** into the project card you are standing in.
+    ///
+    /// Only for text, and that is the whole rule: a copied card, file or image has no meaning inside a
+    /// task list, and a copied paragraph has none on a board that would rather make it a card. So the
+    /// pasteboard decides, and each surface takes what it can use.
     @objc func paste(_ sender: Any?) {
+        // Cards first: copying cards also puts their text down, so a board's own clipping has to be
+        // recognised as one wherever you happen to be standing.
+        let copiedCards = NSPasteboard.general.types?.contains(Self.pasteboardType) == true
+        if let card = engagedProjectCard, !copiedCards, TaskPasteboard.hasTasksToPaste {
+            return card.projectCommands.requestPasteRows()
+        }
         paste(at: nil)
     }
 

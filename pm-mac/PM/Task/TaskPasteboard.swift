@@ -141,6 +141,15 @@ enum TaskPasteboard {
         guard let text = NSPasteboard.general.string(forType: .string) else { return [] }
         return parse(text)
     }
+
+    /// Whether ⌘V has anything a task list can use.
+    ///
+    /// Reads the pasteboard rather than guessing, so the command is dim for a copied image and live for
+    /// a copied paragraph — and so a board can ask before deciding whether a paste belongs to the card
+    /// you are standing in or to the plane behind it.
+    static var hasTasksToPaste: Bool {
+        NSPasteboard.general.canReadObject(forClasses: [NSString.self], options: nil)
+    }
 }
 
 /// Async reads of a dropped item, so a drop handler can `await` what arrived instead of nesting
