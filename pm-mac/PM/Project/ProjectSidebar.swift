@@ -477,7 +477,7 @@ struct ProjectSidebar: View {
 
     /// The projects the Up Next band cards, most pressing first. Empty means no band at all.
     private var upNext: [PMStore.ProjectEntry] {
-        Self.upNext(store.allProjects, status: status, grouping: grouping,
+        Self.upNext(store.allProjects, status: status, kinds: kindFilter, grouping: grouping,
                     sort: sortOrder, horizon: upNextHorizon)
     }
 
@@ -498,18 +498,20 @@ struct ProjectSidebar: View {
     /// - nothing is due inside the horizon.
     ///
     /// Archived projects never card, even under the Archived or All filter: an archived project isn't
-    /// work, whatever date its notes still carry. Everything else is filtered by the same `status` the
-    /// list uses, so the band can never point at a project that isn't below it.
+    /// work, whatever date its notes still carry. Everything else is filtered by the same `status`
+    /// *and* `kinds` the list is filtered by, so the band can never point at a project that isn't
+    /// below it — a card standing for no row is a card whose selection highlights nothing.
     ///
     /// Pure and static for the same reason `arranged` is: it's read while a body is being built.
     private static func upNext(_ projects: [PMStore.ProjectEntry],
                                status: ProjectStatusFilter,
+                               kinds: ProjectKindFilter,
                                grouping: ProjectGrouping,
                                sort: ProjectSortOrder,
                                horizon: UpNextHorizon) -> [PMStore.ProjectEntry] {
         guard let horizonDays = horizon.days, grouping != .due else { return [] }
         let candidates = projects.filter { entry in
-            guard status.includes(entry), !entry.isArchived else { return false }
+            guard status.includes(entry), kinds.includes(entry), !entry.isArchived else { return false }
             guard let due = entry.nextDue, let delta = RelativeDue.dayDelta(due) else { return false }
             return delta <= horizonDays
         }
