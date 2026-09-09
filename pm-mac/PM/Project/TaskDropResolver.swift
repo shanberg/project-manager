@@ -270,3 +270,23 @@ struct ListDropDelegate: DropDelegate {
         return onPerform(target)
     }
 }
+
+
+/// The end signal SwiftUI's `.onDrag` doesn't otherwise give us.
+///
+/// A real drag ending — dropped, or cancelled by letting go somewhere else — releases the item
+/// provider, which deallocates whatever is hanging off it. Attaching one of these as an associated
+/// object on the provider therefore turns "the provider went away" into "the drag is over", which is
+/// the only reliable notice of it. (A press that never moves releases nothing, and is caught by a
+/// `LeftMouseUpMonitor` instead.)
+///
+/// Shared, because both lists that drag rows need it: the project window's column and the project
+/// card on a board.
+final class DragEndSentinel {
+    private let onEnd: () -> Void
+    init(onEnd: @escaping () -> Void) { self.onEnd = onEnd }
+    deinit {
+        let onEnd = self.onEnd
+        DispatchQueue.main.async(execute: onEnd)
+    }
+}

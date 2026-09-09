@@ -25,8 +25,10 @@ every sitting or the latest. The arguments now live where the code is — `Canva
 `SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
 kept here is the shape of the whole. **§7, §7b and §7c are built too** — the words go to the right
 things; a workspace has a name you can see, a list you can switch from, and no Save; and its home is a
-tab, which is where its commands are and what duplicating one makes another of. **This page is built.**
-What is left of it is the one question under Open, which is not a task.
+tab, which is where its commands are and what duplicating one makes another of. **§7d is the first half
+of one more thing**: the note-only view is on its way to being a workspace with one card on it, and this
+is the pass that makes the card able to carry it. What is left of it is the second half, and the one
+question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -452,6 +454,58 @@ chip, because a board's one volatile row *is* its unnamed workspace and a named 
 durable row of its own. The one thing that had to be pinned down is that a pane goes on owning that row
 after its tab acquires a name (`CanvasPaneController.ownsViewMemory`), or naming a workspace would have
 quietly stopped the board remembering its connect mode.
+
+## 7d. The note-only view, as a workspace with one card on it — **half built**
+
+A project window has two shapes: its notes and its board. That was always one shape too many. A card
+already *is* the project window's notes — `CanvasProjectNote` renders them with the window's own pieces,
+against the window's own store and undo stack — so "the notes" is a board tiled to that one card, and
+the second renderer is a thing the app keeps because it had it first.
+
+Two things stood in the way, and only one of them was real.
+
+- **A project might not have a `.canvas`.** It turns out this was answered before the question was
+  asked: `PMStore.openableCanvasPath` writes one on demand, and says why in its own words — "a project
+  is assumed to have a canvas, so opening one is never a two-step ceremony". `createProjectCanvas` puts
+  the project's own card on it. So the board a notes tab would become always exists by the time it is
+  asked for.
+- **The card could not do everything the column does.** This one was real, and measurable: task
+  multi-select and the bulk actions that hang off it, drag-to-reorder, and ⌘F. Switching before closing
+  that would have been calling a regression a simplification.
+
+### What closed it
+
+- **Selection.** `RowSelection` — the rules written down once, as a value with hostless tests, on the
+  same argument `ProjectTabSet` makes. The window's list had them inline; a second copy on the card
+  would have been two answers to "what does ⇧-click do" waiting to drift. Writing the tests found a bug
+  the inline version had: ⇧↑ on a range built downwards grew it upwards instead of shrinking it,
+  because the extending step was leaving from the same end a plain step leaves from. A range has a
+  fixed end and a moving one, and the fixed end is the anchor.
+- **The bulk actions came free.** `TaskMenu` has taken a `targets` list since the window grew one; the
+  card was simply passing it nothing. `TaskDeleteConfirmation` moved out of `ProjectView` and is now
+  put up by both — and it earns its place on a card for the reason it earned it in the window, which is
+  that the subtasks riding along are the part you cannot see from the rows you picked.
+- **Drag-to-reorder.** The geometry was already extracted (`TaskDropResolver`, `ListDropDelegate`), so
+  the card supplies its own metrics — half the window's indent step, because a card is a narrower
+  column — and gets the same resolution, the same insertion mark, and the same "drag right to indent".
+  Only the app's own task type: a file dropped on a board becomes a card, and a card that quietly ate
+  that drop would make where you let go matter in a way nothing says.
+- **Find, on the rule that was already there.** The board's find has always looked *inside* the thing
+  you have stepped into when that thing is a page card, and at the board's cards when it is not. A
+  project card is the third case, and it narrows its task list exactly as the window's find bar narrows
+  the same list. No new bar: the field in the header is the field, ⌘F is how it opens, and ⌘G walks the
+  narrowed list because a shortened list is what the matches are.
+- **The Incomplete filter was already there** and is called something else. `CanvasCardShows.completed`
+  is the card's version, per card and kept in the file, which is the bargain every other card setting
+  made. Adding a second app-wide one would have been the two-spellings fault again.
+
+### What is left
+
+The flip itself: `ProjectTabView.notes` becoming `.board(.note)`, a board tiled to the project's own
+card and nothing else. Also unported, and deliberately: the list's **keyboard** — ↑/↓, ⌘A, ⌘⌫ — which
+on a board belongs to the board, and whose right answer is bound up with the flip rather than with the
+card. A one-card workspace has no cards to arrow between, which is exactly the condition under which
+those keys should reach the list instead.
 
 ## 8. What this does to the backlog
 

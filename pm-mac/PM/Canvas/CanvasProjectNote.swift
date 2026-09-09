@@ -62,6 +62,48 @@ struct CanvasProjectNote: View {
     @State private var addPosition: TaskInsertPosition = .after
     /// The task row under the pointer, which is what reveals its "＋date".
     @State private var hovering: String?
+    /// The picked rows. The card is the project window's list on a board, so it selects the way that
+    /// list selects — the rules are `RowSelection`'s, held here rather than restated.
+    ///
+    /// Only tasks are rows. A session's caption is a quiet separator between groups, exactly as it is
+    /// in the window's compact list, and stopping on one every few presses would only lengthen the
+    /// walk from one task to the next. The window makes captions selectable only in the mode where a
+    /// session is a first-class heading with its own note and commands.
+    @State private var selection = RowSelection()
+    /// The row under the pointer, again — as a reference, so the right-click monitor's closure reads
+    /// the live value rather than the copy it captured. See `RowHoverTracker`.
+    @State private var rowHover = RowHoverTracker()
+    /// Moves the highlight onto a right-clicked row that isn't already picked (Finder's rule).
+    @StateObject private var rightClick = RightMouseDownMonitor()
+    /// Tasks awaiting the delete confirmation. Empty when none is pending.
+    @State private var pendingDelete: [Todo] = []
+    /// The key of the task subtree being dragged, or nil when none is. See `TaskDropResolver`.
+    @State private var draggingKey: String?
+    /// The keys riding along with it, so those rows dim in place under the floating ghost. Held rather
+    /// than derived per row: working it out from the store inside each row's body would walk the task
+    /// list once per row, which is a quadratic redraw for a cosmetic dim.
+    @State private var draggedSubtree: Set<String> = []
+    /// Every visible task row's extent and depth, collected by preference, in the card's own
+    /// coordinate space. What the drop delegate resolves the pointer against.
+    @State private var rowFrames: [RowFrame] = []
+    /// The one resolved insertion slot for the drag in flight — where the indicator goes and where the
+    /// drop will land.
+    @State private var dropTarget: DropTarget?
+    /// Clears drag state on a press that never moved, which releases no provider and so fires no
+    /// `DragEndSentinel`.
+    @StateObject private var mouseUp = LeftMouseUpMonitor()
+    /// A row Find Next has just moved onto, for the scroll view to reveal. Bumped rather than set, so
+    /// two steps onto the same row are two distinct requests.
+    @State private var scrollTarget: String?
+    @State private var scrollToken = 0
+
+    /// Where a depth-0 row's content begins, and what one level of nesting costs — the pointer's depth
+    /// is measured against these, so they have to be the row's real metrics. A card's step is half the
+    /// window's for the reason `indent(_:)` gives: a card is a narrower column.
+    private static let rowContentInset: CGFloat = 12
+    private static let indentStep: CGFloat = 11
+    /// Associated-object key holding a drag's end sentinel on its item provider — see `DragEndSentinel`.
+    private nonisolated(unsafe) static var dragSentinelKey: UInt8 = 0
     /// The session whose note has taken the card over, by index, or nil when the card is showing the
     /// project. Only the index is held here; the editor takes its own `SessionRef` on the way in and
     /// commits against that, which is what makes it safe for the list underneath to be reindexed by
@@ -90,6 +132,29 @@ struct CanvasProjectNote: View {
             .enumerated().map { (index: $0.offset, session: $0.element) }
     }
 
+    /// Every visible task row's key, in the order the card is drawing them — what a ⇧-click ranges
+    /// over, and what the selection is checked against when the document changes underneath it.
+    private var visibleKeys: [String] {
+        shownSessions.flatMap { index, session in
+            blocks(for: session, at: index).compactMap { block in
+                if case .task(let identified) = block { return PMStore.key(for: identified.todo) }
+                return nil
+            }
+        }
+    }
+
+    /// The tasks a row's commands act on: the whole selection when the clicked row is inside it, and
+    /// just that row when it is not — `RowSelection.targets(clicked:)`, resolved back to tasks in
+    /// document order.
+    ///
+    /// Pure, and it has to stay that way: SwiftUI builds a `.contextMenu`'s content while it builds
+    /// the row, so this runs for every visible row on every pass. See `ProjectView.contextTargets`.
+    private func contextTargets(for todo: Todo) -> [Todo] {
+        let keys = selection.targets(clicked: PMStore.key(for: todo))
+        guard keys.count > 1 else { return [todo] }
+        return store.todos.filter { keys.contains(PMStore.key(for: $0)) }
+    }
+
     var body: some View {
         Group {
             // Writing prose takes the card over, exactly as it takes the window's column over. Not an
@@ -110,15 +175,61 @@ struct CanvasProjectNote: View {
         // from is a text field with the keyboard nowhere near it, holding an edit that will never be
         // committed. The note takeover is the exception that proves it: it saves on the way out, so
         // closing it here is a commit rather than a discard.
+        .onAppear {
+            rightClick.onRightMouseDown = {
+                // Only the card you are standing in. A global monitor is global, and moving the
+                // highlight in a card across the board from the one you right-clicked would be a
+                // selection changing where you are not looking.
+                guard engagement.isEngaged, let key = rowHover.key else { return }
+                selection.revealForContextMenu(key)
+            }
+            rightClick.start()
+            mouseUp.onMouseUp = { if draggingKey != nil { draggingKey = nil; dropTarget = nil } }
+            mouseUp.start()
+        }
+        .onDisappear { rightClick.stop(); mouseUp.stop() }
+        // One place to let the dim go, whichever way the drag ended — dropped, cancelled outside, or
+        // released without ever moving.
+        .onChange(of: draggingKey) { _, key in if key == nil { draggedSubtree = [] } }
         .onChange(of: engagement.isEngaged) { _, engaged in
             if !engaged {
                 activeEditor = nil
                 openNote = nil
+                // A selection is a thing you are about to act on, and stepping out of the card is
+                // saying you are not. Left standing it would also be a highlight on a card nobody is
+                // in, which on a board of them reads as "this one is somehow current".
+                selection.clear()
+                pendingDelete = []
+                draggingKey = nil
+                dropTarget = nil
+                // A card left filtered by a search you have walked away from is a card showing three
+                // of its nineteen tasks with nothing on it saying why.
+                display.find = ""
                 // The brief's fields commit as they are left, and leaving the card is leaving the
                 // field — so this closes an editor that has already written, not one being abandoned.
                 editingDetails = false
             }
         }
+        // Keys are document positions, so a task completed, moved or deleted — here or in the window,
+        // which is the same store — leaves the selection naming rows nobody can see. Narrowing the
+        // card does the same thing without touching the document, which is why the setting is watched
+        // beside the tasks.
+        .onChange(of: store.todos) { _, _ in
+            selection.keep(within: visibleKeys)
+            // A completed move reindexes the todos, so the key in the air names a different task.
+            draggingKey = nil
+            dropTarget = nil
+        }
+        .onChange(of: display.shows) { _, _ in selection.keep(within: visibleKeys) }
+        // A find narrows the list without touching the document, so the same reconcile applies — and
+        // the count goes back to the field that asked for it. In `onChange` rather than in the body:
+        // publishing from inside a view update is a write to the thing being drawn.
+        .onChange(of: display.find) { _, _ in
+            selection.keep(within: visibleKeys)
+            reportMatches()
+        }
+        .onChange(of: store.todos) { _, _ in reportMatches() }
+        .onChange(of: display.findStepRequest) { _, _ in stepFind(display.findStepDirection) }
         .onChange(of: commands.newSessionRequest) { _, _ in beginCurrentSession() }
         .onChange(of: commands.newTaskRequest) { _, _ in beginTask() }
         .onChange(of: commands.editDetailsRequest) { _, _ in
@@ -129,28 +240,128 @@ struct CanvasProjectNote: View {
     }
 
     private var list: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 0) {
-                title
-                // The brief, above the work, exactly where the window puts it — and the same view, so
-                // it reads as the same printed page and edits the same way (double-click, then live
-                // rows). Drawn only when there is one: an empty brief on a card would be six lines of
-                // "Add summary…" standing between you and the sessions.
-                // `|| editingDetails`, and that is the whole of "display is not capability": a card set
-                // not to show the brief can still be told to edit it, and the brief appears for as long
-                // as you are in it. Hiding it would make Edit Details on such a card do nothing visible.
-                if shows.brief || editingDetails {
-                    ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
-                                       showsPlaceholders: false)
+        VStack(spacing: 0) {
+            // Above the rows rather than over them, and outside the scroll view so it cannot be
+            // scrolled away from: a refused batch is about the selection, and the selection is in the
+            // rows right below this line.
+            TaskDeleteConfirmation(
+                todos: pendingDelete, store: store,
+                confirm: {
+                    store.deleteTasks(pendingDelete)
+                    pendingDelete = []
+                    // Keys are document positions, so after a delete the survivors name different
+                    // tasks. Starting clean beats silently reselecting the neighbours.
+                    selection.clear()
+                },
+                cancel: { pendingDelete = [] })
+            ScrollViewReader { scroller in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    title
+                    // The brief, above the work, exactly where the window puts it — and the same view,
+                    // so it reads as the same printed page and edits the same way (double-click, then
+                    // live rows). Drawn only when there is one: an empty brief on a card would be six
+                    // lines of "Add summary…" standing between you and the sessions.
+                    // `|| editingDetails`, and that is the whole of "display is not capability": a card
+                    // set not to show the brief can still be told to edit it, and the brief appears for
+                    // as long as you are in it. Hiding it would make Edit Details on such a card do
+                    // nothing visible.
+                    if shows.brief || editingDetails {
+                        ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
+                                           showsPlaceholders: false)
+                    }
+                    ForEach(shownSessions, id: \.index) { index, session in
+                        session_(session, at: index)
+                    }
+                    footer
                 }
-                ForEach(shownSessions, id: \.index) { index, session in
-                    session_(session, at: index)
-                }
-                footer
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .coordinateSpace(name: TaskDropResolver.coordinateSpace)
+                .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+                .overlay(alignment: .topLeading) { dropIndicator }
+                // **Only the app's own tasks.** The window's list also takes text and files dragged in
+                // from elsewhere; a card cannot, because the board underneath it is already the target
+                // for those — a file dropped on a board becomes a card, and a card that quietly ate
+                // the drop instead would make where you let go matter in a way nothing says.
+                .onDrop(of: [TaskPasteboard.taskKeysType], delegate: ListDropDelegate(
+                    isActive: { draggingKey != nil },
+                    onCompute: { computeDropTarget(at: $0) },
+                    onUpdate: { dropTarget = $0 },
+                    onPerform: { performListDrop($0) },
+                    onComputeExternal: { _ in nil },
+                    onDropExternal: { _, _ in false }
+                ))
             }
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(of: scrollToken) { _, _ in
+                guard let key = scrollTarget else { return }
+                withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(key, anchor: .center) }
+            }
+            }
         }
+    }
+
+    /// The single insertion indicator: a caret dot and a rule at the resolved slot's Y, indented to the
+    /// depth the drop will use. The same mark the window's list paints, so a reorder looks like a
+    /// reorder on either surface.
+    @ViewBuilder private var dropIndicator: some View {
+        if let target = dropTarget {
+            HStack(spacing: 0) {
+                Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                Capsule().fill(Color.accentColor).frame(height: 2)
+            }
+            .padding(.leading, Self.rowContentInset + CGFloat(target.depth) * Self.indentStep)
+            .padding(.trailing, 12)
+            // Centre the 6pt dot on the boundary line.
+            .offset(y: target.gapY - 3)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Resolve a pointer into an insertion slot. The geometry is `TaskDropResolver`'s; this supplies
+    /// only what the card knows — the rows it drew, and which of them are riding along in the drag.
+    ///
+    /// No session frames. A card captions a session only when that session puts something on it, so
+    /// there is no empty session drawn here to drop *into* — the window's list is the surface where an
+    /// empty sitting is a first-class row with somewhere to aim.
+    private func computeDropTarget(at point: CGPoint) -> DropTarget? {
+        guard let key = draggingKey,
+              let dragged = store.todos.first(where: { PMStore.key(for: $0) == key })
+        else { return nil }
+        return TaskDropResolver.resolve(pointer: point,
+                                        rows: rowFrames,
+                                        sessionFrames: [],
+                                        draggedSubtree: store.subtreeKeys(of: dragged),
+                                        contentInset: Self.rowContentInset,
+                                        indentStep: Self.indentStep)
+    }
+
+    /// Commit a resolved drop: move the dragged subtree, then clear the drag.
+    private func performListDrop(_ target: DropTarget) -> Bool {
+        guard let key = draggingKey,
+              let source = store.todos.first(where: { PMStore.key(for: $0) == key })
+        else { return false }
+        switch target.destination {
+        case let .beside(session, line, after):
+            guard let anchor = store.todos.first(where: {
+                $0.sessionIndex == session && $0.lineIndex == line
+            }) else { return false }
+            store.moveSubtree(source, anchor: anchor, insertAfter: after, depth: target.depth)
+        case let .endOfSession(index):
+            store.moveSubtree(source, toSession: index)
+        }
+        draggingKey = nil
+        dropTarget = nil
+        return true
+    }
+
+    /// What a dragged row carries: the whole selection when the row you grabbed is part of one, else
+    /// just that row — the same rule the window's drag follows, and the same rule its context menu
+    /// follows. Private keys for this list's own drop, markdown for every other app.
+    private func dragProvider(for todo: Todo) -> NSItemProvider {
+        let dragged = contextTargets(for: todo)
+        return TaskPasteboard.itemProvider(keys: dragged.map(PMStore.key(for:)),
+                                           markdown: store.markdown(for: dragged))
     }
 
     /// The quick add, and the two dead ends.
@@ -352,19 +563,74 @@ struct CanvasProjectNote: View {
                     onPick: { store.setDue(todo, due: $0) },
                     onPickCustom: { open(.due, on: todo) })
         }
-        .onHover { inside in hovering = inside ? key : (hovering == key ? nil : hovering) }
+        .onHover { inside in
+            hovering = inside ? key : (hovering == key ? nil : hovering)
+            rowHover.set(key, inside: inside)
+        }
         .padding(.leading, 12 + indent(todo.depth))
         .padding(.trailing, 12)
         .padding(.vertical, 2)
+        // Outside the depth indent, so a subtask's highlight starts where every other row's does — a
+        // band that stepped in with the text would read as a second kind of row. The same view the
+        // window's list paints, so a selection looks like a selection wherever you made it.
+        //
+        // "Emphasized" is the card being stepped into. That is what standing in this list means on a
+        // board, and it is the same distinction AppKit draws between a selection in the focused
+        // control and the same selection in one beside it.
+        .background(RowSelectionBand(isSelected: selection.contains(key),
+                                     isEmphasized: engagement.isEngaged,
+                                     isHovering: hovering == key && activeEditor == nil))
+        // The row's breathing room is *inside* the published frame, so adjacent rows tile edge to edge
+        // and the gaps the drop delegate computes abut with no dead bands between them.
+        .background(GeometryReader { geometry in
+            let frame = geometry.frame(in: .named(TaskDropResolver.coordinateSpace))
+            Color.clear.preference(key: RowFramesKey.self, value: [RowFrame(
+                key: key, session: todo.sessionIndex, line: todo.lineIndex,
+                depth: todo.depth, minY: frame.minY, maxY: frame.maxY)])
+        })
+        // In the background, so `ForEach`'s own identity for the row is left alone — an `.id` on the
+        // row itself would replace it and undo the stable-across-reindex animations.
+        .background(Color.clear.frame(width: 0, height: 0).id(key))
         .contentShape(Rectangle())
+        // **Drag a task to move it**, which the card could not do before: reordering was the window's
+        // and a board was where you read. It is the same drag, resolved by the same
+        // `TaskDropResolver`, and rightward still means "make this a child of the row above".
+        //
+        // Off while an editor is open, so the list stays still in edit mode — and gated on the card
+        // being stepped into, because until then the board owns this drag and it moves the card. That
+        // is the same line `CanvasNodeView.takesItsOwnClicks` already draws; in a tiled view, where
+        // there is nowhere to move a card to, the card has the drag from the first press.
+        .ifCondition(activeEditor == nil && engagement.isEngaged) { view in
+            view.onDrag {
+                let dragged = key
+                draggingKey = dragged
+                draggedSubtree = store.subtreeKeys(of: todo)
+                let provider = dragProvider(for: todo)
+                // The drag's real end — a drop, or a cancel outside — releases the provider and so
+                // this sentinel, which is the only notice `.onDrag` gives that it is over.
+                let sentinel = DragEndSentinel { [dragging = $draggingKey] in
+                    if dragging.wrappedValue == dragged { dragging.wrappedValue = nil }
+                }
+                objc_setAssociatedObject(provider, &Self.dragSentinelKey, sentinel,
+                                         .OBJC_ASSOCIATION_RETAIN)
+                return provider
+            }
+        }
+        // Dim the dragged subtree in place, under the ghost floating over it.
+        .opacity(draggedSubtree.contains(key) ? 0.35 : 1)
+        .animation(.easeOut(duration: 0.15), value: draggedSubtree.contains(key))
         // Double-click *activates* — focuses the task — exactly as it does in the project window. It
         // used to open the text editor here, which meant the same gesture on the same object meant two
         // different things depending on which surface you were looking at it through. The surface is
         // not the thing; the task is.
         //
-        // ⌥ double-click edits the text, and so does the context menu's Edit. No single-click
-        // selection: a card has no selection to keep, and a click that did nothing visible would be a
-        // click that looked broken.
+        // ⌥ double-click edits the text, and so does the context menu's Edit.
+        //
+        // **A single click selects**, which it did not use to: the card had no selection to keep, so a
+        // click that changed nothing visible would have looked broken. It has one now — the window's,
+        // with the window's ⇧ and ⌘ — because a list you can only act on one row at a time is a list
+        // missing the thing this app says out loud everywhere else: you say which ones, then you say
+        // what to do. The gesture is the row's, not the checkbox's, so the whole band is one target.
         .onTapGesture(count: 2) {
             if NSEvent.modifierFlags.contains(.option) || todo.checked {
                 open(.edit, on: todo)
@@ -372,14 +638,22 @@ struct CanvasProjectNote: View {
                 store.focus(todo)
             }
         }
+        .onTapGesture { selection.click(key, modifiers: NSEvent.modifierFlags, in: visibleKeys) }
         .contextMenu {
-            TaskMenu(todo: todo, store: store,
+            TaskMenu(todo: todo, targets: contextTargets(for: todo), store: store,
                      openEditor: { open($0, on: todo) },
                      openAdd: { position in
                          addPosition = position
                          open(.add, on: todo)
                      },
-                     onDelete: { store.deleteTasks($0) },
+                     // Asked rather than done, exactly as the window asks — and now for the reason the
+                     // window gives, since a card can delete a whole selection at once and the
+                     // subtasks riding along are the part you cannot see from the rows you picked.
+                     onDelete: { todos in
+                         guard !todos.isEmpty, store.projectName != nil else { return }
+                         activeEditor = nil
+                         pendingDelete = todos
+                     },
                      onGoToProject: { key in
                          guard let folder = PMFiles.projectName(fromKey: key) else { return }
                          onOpenProject(folder)
@@ -390,6 +664,14 @@ struct CanvasProjectNote: View {
     /// A subtask's step in, half the window's. A card is a narrower column than a window's, and the
     /// nesting has to leave room for the sentence.
     private func indent(_ depth: Int) -> Double { Double(depth) * 11 }
+
+    /// Whether a task survives the find. Its own text only, not its ancestors': filtering by a parent
+    /// would pull in every child of a matching task and read as "3 matches" over a dozen rows — the
+    /// same call the window's list makes.
+    private func matches(_ todo: Todo) -> Bool {
+        guard let query = display.find.trimmed?.lowercased() else { return true }
+        return todo.text.lowercased().contains(query)
+    }
 
     /// What a session offers on a card: its note, and the next sitting.
     ///
@@ -432,6 +714,27 @@ struct CanvasProjectNote: View {
         activeEditor = Self.quickAdd
     }
 
+    /// ⌘G / ⇧⌘G. This find narrows rather than highlighting, so there is no "next highlight" to jump
+    /// to: the shortened list *is* the matches, and stepping means moving the selection down it — the
+    /// same answer `ProjectView.stepFind` gives. Wraps at both ends, as every find in the system does.
+    private func stepFind(_ direction: Int) {
+        let keys = visibleKeys
+        guard !keys.isEmpty else { return NSSound.beep() }
+        let current = selection.single.flatMap(keys.firstIndex(of:))
+        let next = current.map { ($0 + direction + keys.count) % keys.count }
+            ?? (direction > 0 ? 0 : keys.count - 1)
+        selection.select([keys[next]])
+        scrollTarget = keys[next]
+        scrollToken &+= 1
+    }
+
+    /// Tell the find field how many rows its query left standing. Guarded, because writing the same
+    /// number back would publish a change and ask for another pass to say it again.
+    private func reportMatches() {
+        let count = display.find.trimmed == nil ? nil : visibleKeys.count
+        if display.matches != count { display.matches = count }
+    }
+
     private func open(_ kind: EditorTarget.Kind, on todo: Todo) {
         activeEditor = EditorTarget(key: PMStore.key(for: todo), kind: kind)
     }
@@ -450,7 +753,7 @@ struct CanvasProjectNote: View {
             // yes, there being no Incomplete filter and no find bar to narrow it. Now the card has a
             // narrowing of its own, and this is where it lands. Every task is still *passed in*, hidden
             // or not, or the walk loses its place against the body's lines.
-            guard shows.tasks, shows.completed || !todo.checked else { return nil }
+            guard shows.tasks, shows.completed || !todo.checked, self.matches(todo) else { return nil }
             let n = seen[todo.rawLine, default: 0]
             seen[todo.rawLine] = n + 1
             return IdentifiedTodo(id: "\(index)/\(todo.rawLine)#\(n)", todo: todo)
@@ -489,6 +792,33 @@ final class CanvasProjectCardCommands: ObservableObject {
 @MainActor
 final class CanvasProjectCardDisplay: ObservableObject {
     @Published var shows = CanvasCardShows.everything
+
+    /// What the board's find is looking for, while this is the card you are standing in.
+    ///
+    /// **Not persisted, unlike `shows`.** A card's parts are something you set and would resent
+    /// forgetting; a search is something you are doing right now, and a card that came back tomorrow
+    /// still showing three of its nineteen tasks would be a card that looked broken.
+    ///
+    /// It narrows rather than highlighting, which is what the window's find bar does to the same list —
+    /// see `ProjectView.visibleTodos`. The board's own find selects matching *cards*, and the page
+    /// card's goes into the page; this is the third of the same rule, which is that find looks inside
+    /// whatever you have stepped into.
+    @Published var find = ""
+
+    /// How many task rows the query left standing, written back by the card so the find field can say
+    /// so. Nil while nothing is being searched for — which is not the same as zero, and the field says
+    /// nothing rather than "0" for it.
+    @Published var matches: Int?
+
+    /// Find Next / Find Previous, as a counter for the reason `CanvasProjectCardCommands` gives: the
+    /// same command twice in a row has to fire twice, and a flag set and unset is a change nobody sees.
+    @Published private(set) var findStepRequest = 0
+    private(set) var findStepDirection = 1
+
+    func stepFind(_ direction: Int) {
+        findStepDirection = direction
+        findStepRequest &+= 1
+    }
 }
 
 /// Whether a card has been stepped into, published so its SwiftUI content can react.

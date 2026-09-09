@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 import PmLib
@@ -735,6 +736,47 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.engagedPageCard as? CanvasLinkNodeView
     }
 
+    /// The project card you are standing in, when there is one. The third thing find can be pointed
+    /// at, on the same rule as the first two: **find looks inside whatever you have stepped into.**
+    /// Nothing engaged means the board itself, and the board's find matches cards.
+    private var searchedProjectCard: CanvasFileNodeView? { scroll.board.engagedProjectCard }
+
+    /// The card whose match count is being listened to, and the subscription doing it.
+    ///
+    /// The count cannot be read back the moment the query is written: the card is SwiftUI, so it does
+    /// the counting on its next pass, and reading straight after writing would put yesterday's answer
+    /// in the field on every keystroke. So the field follows the card rather than asking it.
+    private weak var searchedCard: CanvasFileNodeView?
+    private var searchedCardMatches: AnyCancellable?
+
+    private func watchMatches(of card: CanvasFileNodeView) {
+        guard searchedCard !== card else { return }
+        searchedCard = card
+        searchedCardMatches = card.projectDisplay.$matches
+            // `@Published` fires *before* the value lands, so the read has to be a turn later.
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.showMatchCount(of: card) }
+    }
+
+    private func showMatchCount(of card: CanvasFileNodeView) {
+        let query = card.projectDisplay.find
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            header.find.summary = ""
+            notice.dismiss()
+            updateNotice()
+            return
+        }
+        let matches = card.projectDisplay.matches ?? 0
+        header.find.summary = "\(matches)"
+        if matches == 0 {
+            notice.show(message: "No tasks on this card match \u{201C}\(query)\u{201D}.",
+                        kind: .informational, actionTitle: nil)
+        } else {
+            notice.dismiss()
+            updateNotice()
+        }
+    }
+
     private func search(_ query: String) {
         if let page = searchTarget {
             guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -756,6 +798,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
                                 kind: .informational, actionTitle: nil)
                 }
             }
+            return
+        }
+        // A project card is a task list, so find narrows it the way the window's find bar narrows the
+        // same list — rather than selecting the one card the query is obviously inside.
+        if let card = searchedProjectCard {
+            watchMatches(of: card)
+            card.projectDisplay.find = query
             return
         }
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -780,6 +829,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// a selection you'll wonder about.
     private func closeFind() {
         header.find = CanvasHeaderModel.Find()
+        // A filter you cannot see is a filter you will forget, so closing the field un-narrows the
+        // card as well as dropping the board's selection.
+        searchedProjectCard?.projectDisplay.find = ""
         scroll.board.select([])
         updateNotice()
         view.window?.makeFirstResponder(scroll.board)
@@ -801,6 +853,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             // own find has never offered because a set of matching cards has no direction to walk in.
             if let page = searchTarget {
                 page.find(lastQuery, forward: action == .nextMatch) { _ in }
+            } else if let card = searchedProjectCard {
+                // A narrowed list has a direction after all: "again" walks the selection down it.
+                card.projectDisplay.stepFind(action == .nextMatch ? 1 : -1)
             } else {
                 scroll.board.findNext(lastQuery)
             }

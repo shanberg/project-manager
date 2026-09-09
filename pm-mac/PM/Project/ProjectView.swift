@@ -794,52 +794,13 @@ struct ProjectView: View {
     }
 
     /// The inline delete confirmation, pinned under the header so it can't scroll out of reach.
-    ///
-    /// Inline rather than an alert or a sheet: this is a confirmation, not an interruption. It names
-    /// what's about to go (the subtasks riding along are the part you can't see from the rows you
-    /// picked) without blocking the rest of the window, so you can still look at the list you're about
-    /// to cut into. Return deletes, Escape cancels.
+    /// What it says, and why it says it inline, is `TaskDeleteConfirmation`'s — the project card puts
+    /// up the same prompt.
     @ViewBuilder private var deleteConfirmation: some View {
-        if !pendingDelete.isEmpty {
-            let summary = store.deletionSummary(pendingDelete)
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(deletePrompt(summary))
-                        .font(.callout.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if summary.descendants > 0 {
-                        Text("Also deletes \(count(summary.descendants, "subtask")).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Button("Cancel") { pendingDelete = [] }
-                        .keyboardShortcut(.cancelAction)
-                    Button("Delete", role: .destructive, action: confirmDelete)
-                        .keyboardShortcut(.defaultAction)
-                }
-            }
-            .controlSize(.small)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.06))
-            Divider()
-        }
+        TaskDeleteConfirmation(todos: pendingDelete, store: store,
+                               confirm: confirmDelete, cancel: { pendingDelete = [] })
     }
 
-    /// "Delete “Ship the thing”?" for one task, "Delete 4 tasks?" for a set — the same shape a Mac
-    /// alert would use, naming the single case and counting the plural one.
-    private func deletePrompt(_ summary: (tasks: Int, descendants: Int)) -> String {
-        if summary.tasks == 1, let only = store.outermost(pendingDelete).first {
-            return "Delete “\(only.text.truncated(60))”?"
-        }
-        return "Delete \(count(summary.tasks, "task"))?"
-    }
-
-    private func count(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
 
     /// A due date set from a row's editor lands on the whole selection when that row is part of one —
     /// the same rule the context menu follows, so the two can't disagree.
@@ -2550,18 +2511,6 @@ private struct TaskRow: View {
 
     /// Associated-object key holding a drag's end sentinel on its item provider (see `.onDrag`).
     static var dragSentinelKey: UInt8 = 0
-}
-
-/// Clears drag state when a drag session ends. Held as an associated object on the drag's item
-/// provider, so its `deinit` runs when the session releases the provider — on a drop *or* a cancel,
-/// the end signal SwiftUI's `.onDrag` doesn't otherwise give us.
-private final class DragEndSentinel {
-    private let onEnd: () -> Void
-    init(onEnd: @escaping () -> Void) { self.onEnd = onEnd }
-    deinit {
-        let onEnd = self.onEnd
-        DispatchQueue.main.async(execute: onEnd)
-    }
 }
 
 // MARK: Due chip + editor

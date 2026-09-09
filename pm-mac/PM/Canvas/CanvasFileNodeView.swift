@@ -39,7 +39,10 @@ final class CanvasFileNodeView: CanvasNodeView {
     let projectCommands = CanvasProjectCardCommands()
     /// This card's live copy of what it shows. Kept in step with the node by `update`, and published
     /// to the SwiftUI content so the change is a redraw rather than a rebuild.
-    private let projectDisplay = CanvasProjectCardDisplay()
+    ///
+    /// Not private: the window's find writes its query here while this is the card you are standing
+    /// in, and reads the match count back out — see `CanvasPaneController.search`.
+    let projectDisplay = CanvasProjectCardDisplay()
 
     /// What this card is set to draw of its project, as the document says.
     var shows: CanvasCardShows { CanvasCardShows.of(node) }

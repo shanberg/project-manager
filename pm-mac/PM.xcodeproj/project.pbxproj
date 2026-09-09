@@ -31,6 +31,7 @@
 		1B552F102655404937D55CDC /* WaitingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC72D30EB9E944089C22D2F /* WaitingWindowController.swift */; };
 		21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */; };
 		2231B6FEB34E5F1D03FEB8EE /* CanvasSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01DF3405ADA2611E2DE1123 /* CanvasSummary.swift */; };
+		2371DC5BCADB7D6D25C25E5F /* TaskDeleteConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */; };
 		26E4B15FFCCAA17908C2747E /* ProjectCodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEB4BC2DF1073FE4608E2138 /* ProjectCodes.swift */; };
 		27683EE9DA04C934CD7C4312 /* CanvasViewStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C611BFA8DE3DED1B89E9683A /* CanvasViewStateTests.swift */; };
 		279030B8D85CFD29348AA682 /* CanvasSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E01C208CC17DE6B8A683C8 /* CanvasSelection.swift */; };
@@ -230,6 +231,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDeleteConfirmation.swift; sourceTree = "<group>"; };
 		018A49D0D9BC18495C26A46C /* WaitingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingView.swift; sourceTree = "<group>"; };
 		03A7709B2DE4D155EAE70CCF /* PMStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMStore.swift; sourceTree = "<group>"; };
 		03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenuRow.swift; sourceTree = "<group>"; };
@@ -569,6 +571,7 @@
 			children = (
 				3E0EE114EBE0F9568379C8A6 /* CompletingTextField.swift */,
 				96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */,
+				00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */,
 				C5C091CF8691F406FDF304F2 /* TaskEditors.swift */,
 				6DE496B1AB05F26705086349 /* TaskMenu.swift */,
 				F2951CDF9FD603B6CDB53BA9 /* TaskPasteboard.swift */,
@@ -1027,6 +1030,7 @@
 				2AB4A19C5F60D4154DC72182 /* ShortcutsSettings.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */,
+				2371DC5BCADB7D6D25C25E5F /* TaskDeleteConfirmation.swift in Sources */,
 				CBC61A251C3ED45EEEEEC6AE /* TaskDropResolver.swift in Sources */,
 				92006127F2FED5B39114B8C2 /* TaskEditors.swift in Sources */,
 				3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */,
