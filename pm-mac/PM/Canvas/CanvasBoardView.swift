@@ -204,6 +204,15 @@ final class CanvasBoardView: NSView {
     /// every card. See `CanvasTileHandleView`.
     let tileHandleView = CanvasTileHandleView()
 
+    /// Whether this board is standing in for the project window's notes — tiled to the project's own
+    /// card, and nothing else (docs/canvas-workspaces.md §7d).
+    ///
+    /// What it turns off is the two commands that would take you out of that view without taking you
+    /// out of the *tab*: leaving the tiled view would leave a tab called "Notes" showing the whole
+    /// board, and naming this as a workspace would give the app a second name for the shape it already
+    /// has one for. The way to the board is the renderer switch, which is right there.
+    var isProjectNoteView = false
+
     /// This board's project note, and whether we have been to look for it.
     ///
     /// Looked for once and remembered, including the answer "there isn't one": the canvas does not

@@ -25,10 +25,9 @@ every sitting or the latest. The arguments now live where the code is — `Canva
 `SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
 kept here is the shape of the whole. **§7, §7b and §7c are built too** — the words go to the right
 things; a workspace has a name you can see, a list you can switch from, and no Save; and its home is a
-tab, which is where its commands are and what duplicating one makes another of. **§7d is the first half
-of one more thing**: the note-only view is on its way to being a workspace with one card on it, and this
-is the pass that makes the card able to carry it. What is left of it is the second half, and the one
-question under Open, which is not a task.
+tab, which is where its commands are and what duplicating one makes another of. **§7d is built**: the
+project window's notes *are* a board tiled to the project's own card, and the second renderer is gone.
+**This page is built.** What is left of it is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -455,7 +454,7 @@ durable row of its own. The one thing that had to be pinned down is that a pane 
 after its tab acquires a name (`CanvasPaneController.ownsViewMemory`), or naming a workspace would have
 quietly stopped the board remembering its connect mode.
 
-## 7d. The note-only view, as a workspace with one card on it — **half built**
+## 7d. The note-only view, as a workspace with one card on it — **built**
 
 A project window has two shapes: its notes and its board. That was always one shape too many. A card
 already *is* the project window's notes — `CanvasProjectNote` renders them with the window's own pieces,
@@ -499,13 +498,44 @@ Two things stood in the way, and only one of them was real.
   is the card's version, per card and kept in the file, which is the bargain every other card setting
   made. Adding a second app-wide one would have been the two-spellings fault again.
 
-### What is left
+### The flip
 
-The flip itself: `ProjectTabView.notes` becoming `.board(.note)`, a board tiled to the project's own
-card and nothing else. Also unported, and deliberately: the list's **keyboard** — ↑/↓, ⌘A, ⌘⌫ — which
-on a board belongs to the board, and whose right answer is bound up with the flip rather than with the
-card. A one-card workspace has no cards to arrow between, which is exactly the condition under which
-those keys should reach the list instead.
+`ProjectTabView.notes` still exists and still goes on the wire — it is what every stored tab says, and
+it is the honest name for "this project's notes". What changed is what it *builds*: a
+`CanvasPaneController` on `CanvasFocus.note`, which is the board tiled to the project's own card and
+nothing else. So the case stayed and the renderer went, which is the cheaper half of the same trade
+§7c made: no storage change, and nothing anybody set comes back wrong.
+
+- **The card is put back if it isn't there.** Every board `createProjectCanvas` writes starts with one,
+  and taking it off is a thing you can do — but "show me this project" cannot depend on a card somebody
+  dragged to the bin. It is the same act the add menu offers, and it lands in the document, because the
+  note-only view is a board tiled to a real card and not a special case pretending to be one.
+- **The project gets a canvas, on opening its window.** This is the convention
+  `PMStore.openableCanvasPath` has stated in its own words since long before this: *a project is assumed
+  to have a canvas, so opening one is never a two-step ceremony*. What is new is only that the notes are
+  now the thing that asks. It is quiet in both directions — no dialog on success, and no dialog on
+  failure either, where the old task column stands in instead. **A fallback is not a second answer**: it
+  is what a broken file gets, the way the empty state is what no file gets.
+- **The card is stepped into from the start.** New Session, New Task, Edit Details and find all ask
+  which project you are standing in, and a view whose entire content is one project should not need a
+  click to admit which. `engage(cardWithID:)` does what a click on a tile does, without the click.
+- **Two commands are off in this view.** Leaving the tiled view would leave a tab called "Notes" showing
+  the whole board, and naming it as a workspace would give the app a second name for a shape it already
+  names. The way to the board is the renderer switch, which is in the header where it always was — and
+  which now has to be *told* which side it is on, since both sides are boards.
+- **The tiled readout is off too.** "1/43" is a fact about how the app draws your notes rather than
+  about the project, and the ✕ beside it is the command that was just turned off.
+
+**And the buttons.** The card has New Task and New Session beside its title — the first controls it has
+grown, and the rule they break was worth breaking. Everything else here is reached the way the window
+reaches it, on the grounds that a card with buttons the window has not got would be saying the two
+surfaces are different things. They are not two surfaces any more.
+
+### What is still not ported
+
+The list's **keyboard** — ↑/↓, ⌘A, ⌘⌫ — which on a board belongs to the board. A one-card workspace has
+no cards to arrow between, so this is now a question with an obvious answer and a `isProjectNoteView`
+flag to hang it off; it is simply not done. Everything reachable by mouse and menu is.
 
 ## 8. What this does to the backlog
 

@@ -51,6 +51,13 @@ enum CanvasFocus: Codable, Equatable {
     /// A frame, by node id. The id rather than the label, because a frame you rename is the same frame
     /// and a tab pointed at it should follow rather than break.
     case frame(String)
+    /// The project's own card, tiled alone — the note-only view.
+    ///
+    /// **A way of looking, not a thing on the board.** The other two narrowed cases point at something
+    /// the document names; this one points at the project, and the card is wherever the card is (or is
+    /// put back if it has been taken off). It is a workspace of one card that nobody had to name,
+    /// which is what the project window's notes turned out to be — see docs/canvas-workspaces.md §7d.
+    case note
     /// A named workspace, by its name. The name *is* the identity here — there is nothing else to point
     /// at — so renaming one is making a different workspace, which is the honest answer for a thing
     /// whose whole content is a list of card ids and some widths.
@@ -66,6 +73,7 @@ enum CanvasFocus: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case whole
         case frame
+        case note
         case workspace = "arrangement"
     }
 }

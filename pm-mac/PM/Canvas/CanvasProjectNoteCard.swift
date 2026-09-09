@@ -58,12 +58,19 @@ enum CanvasProjectNoteCard {
     /// path is written from somewhere else in the tree still matches on the tail. Being wrong costs a
     /// menu item that shouldn't be there, or isn't — never a broken board.
     static func isOn(_ document: CanvasDocument, notes: URL, resolver: CanvasFileResolver) -> Bool {
+        id(on: document, notes: notes, resolver: resolver) != nil
+    }
+
+    /// *Which* card it is, when it is on the board — what the note-only view tiles to (§7d), and what
+    /// `isOn` is asking without needing the answer.
+    static func id(on document: CanvasDocument, notes: URL,
+                   resolver: CanvasFileResolver) -> String? {
         let wanted = (resolver.storablePath(for: notes) ?? notes.path).lowercased()
-        return document.nodes.contains { node in
+        return document.nodes.first { node in
             guard case .file(let path, _) = node.content else { return false }
             let stored = path.lowercased()
             return stored == wanted || stored.hasSuffix("/" + wanted) || wanted.hasSuffix("/" + stored)
-        }
+        }?.id
     }
 
     /// The card itself, centred on `at`.

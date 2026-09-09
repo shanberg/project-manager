@@ -148,6 +148,12 @@ final class CanvasHeaderModel: ObservableObject {
     /// It was a lone button here and a different lone button there, each findable only once you were
     /// already on the other side of it and neither saying there was another side.
     @Published var showsRendererSwitch = false
+    /// Which side of that switch this pane is.
+    ///
+    /// It used to be `.canvas` by construction — a board's header could only ever be the board. Since
+    /// §7d the project's notes are a board too, tiled to its own card, so a header has to be told
+    /// which of the two it is drawing rather than assuming.
+    @Published var renderer: ProjectRenderer = .canvas
     /// Whether the pill wears the tiled readout.
     ///
     /// Off in a window whose tab bar is showing, where the tab holding this board wears it instead —
@@ -325,7 +331,7 @@ struct CanvasControlCapsule: View {
     var body: some View {
         HeaderCapsule(chrome: chrome) {
             if model.showsRendererSwitch {
-                RendererSwitch(renderer: .canvas) { model.setRenderer($0) }
+                RendererSwitch(renderer: model.renderer) { model.setRenderer($0) }
                 HeaderDivider()
             }
             if model.find.isShowing {

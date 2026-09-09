@@ -62,6 +62,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             switch focus {
             case .whole: tabModel.openBoard()
             case .frame(let id): tabModel.openFrame(id)
+            case .note: tabModel.openNotes()
             case .workspace(let name): tabModel.openWorkspace(name)
             }
         }
@@ -290,9 +291,34 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             break
         case .frame(let id):
             scroll.board.goTo(frame: id)
+        case .note:
+            goToProjectNote()
         case .workspace(let name):
             goToWorkspace(named: name)
         }
+    }
+
+    /// The board, tiled to the project's own card and nothing else — the project window's notes
+    /// (docs/canvas-workspaces.md §7d).
+    ///
+    /// **The card is put back if it isn't there.** Every board `createProjectCanvas` writes starts with
+    /// one, and taking it off is a thing you can do — but "show me this project" cannot depend on a
+    /// card somebody dragged to the bin last week. Putting it back is the same act the add menu offers
+    /// (`Add Project Note`), and it lands in the document, which is right: the note-only view is a
+    /// board tiled to a real card, not a special case pretending to be one.
+    ///
+    /// Nothing happens for a canvas that is not a project's — a board opened straight from a file has
+    /// no project note to show, and the window that opened it never asks for this.
+    private func goToProjectNote() {
+        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url) else { return }
+        let existing = CanvasProjectNoteCard.id(on: store.document, notes: notes,
+                                                resolver: store.resolver)
+        guard let id = existing ?? scroll.board.addProjectNoteCard(at: nil) else { return }
+        scroll.board.isProjectNoteView = true
+        scroll.board.tile([id])
+        // A turn later, because tiling is what builds the card's view. See `engage(cardWithID:)` for
+        // why it is stepped into rather than waiting for a click.
+        afterCurrentUpdate { [weak self] in self?.scroll.board.engage(cardWithID: id) }
     }
 
     // MARK: What the window's tabs need from a board

@@ -401,6 +401,19 @@ extension CanvasBoardView {
     /// `engage` rather than `beginEditing`, which is not the same errand on every kind of card: a file
     /// card's opens the file in whatever owns it, and a project card's, on one too small to read, walks
     /// out of the board to the project window. Neither is a thing a click inside a tile should do.
+    /// Step into a card without a click having landed on it.
+    ///
+    /// What the note-only view does with the one card it shows (docs/canvas-workspaces.md §7d): the
+    /// commands that act on "the project you are standing in" — New Session, New Task, Edit Details,
+    /// and find — all ask `engagedProjectCard`, and a view whose whole content is one project should
+    /// not need a click to admit which project that is. Selection first and then engagement, in that
+    /// order and for the reason `tileClicked` gives.
+    func engage(cardWithID id: String) {
+        guard let card = nodeViews[id] else { return }
+        selection = [id]
+        card.engage(true)
+    }
+
     private func tileClicked(_ event: NSEvent) {
         guard event.window === window,
               let hit = window?.contentView?.hitTest(event.locationInWindow) else { return }

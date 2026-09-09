@@ -889,11 +889,12 @@ extension CanvasBoardView {
     /// Nothing happens on a board that hasn't got a project, which is the same answer the menu gives
     /// by not offering the item — but this is reachable from the header too, and a command whose
     /// enabled state is computed in one place and acted on in another has to check twice.
-    func addProjectNoteCard(at where_: CanvasPoint?) {
-        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url) else { return }
+    @discardableResult
+    func addProjectNoteCard(at where_: CanvasPoint?) -> String? {
+        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url) else { return nil }
         let node = CanvasProjectNoteCard.node(for: notes, at: where_ ?? centreOfVisibleBoard,
                                               resolver: store.resolver)
-        addCard(node, actionName: "Add Project Note")
+        return addCard(node, actionName: "Add Project Note")
     }
 
     @objc private func newCardHere() { addTextCard(at: menuPoint) }
@@ -1561,7 +1562,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.title = workspaceName.map { "Rename “\($0)”\u{2026}" }
                 ?? "Name This Workspace\u{2026}"
             // Something to keep: a board that has never been tiled has no workspace to name.
-            return tilingMemory != nil
+            return tilingMemory != nil && !isProjectNoteView
         case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)),
              #selector(duplicateWorkspace(_:)):
             // All three act on the workspace you are in, so all three want one with a name. Retitled
@@ -1658,7 +1659,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             guard let id = focusedTile, tiling?.arrangement == .masterStack else { return false }
             return tiling?.ids.first != id
         case #selector(leaveTilingCommand(_:)):
-            return isTiled
+            return isTiled && !isProjectNoteView
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
             return pinnableTile != nil

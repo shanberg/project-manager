@@ -153,6 +153,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                     self.window?.title,
                     { [weak self] in self?.openProjectCanvas() })
         }
+        split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
         watchCanvasPath()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
@@ -349,6 +350,28 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     ///
     /// Creation is a side effect of asking, which is `PMStore.openableCanvasPath`'s whole convention —
     /// a project is assumed to have a canvas, so opening one is never "make it, then open it".
+    /// Make the project's board if it hasn't got one, without going to it — what a notes tab needs,
+    /// since its notes are a card on that board (docs/canvas-workspaces.md §7d).
+    ///
+    /// **Quiet on both outcomes**, which is what separates it from `openProjectCanvas` below. That one
+    /// is a thing you asked for, so it says so when it cannot be done; this is the app making a file on
+    /// its own behalf to answer a question you asked in other words, and the honest response to failing
+    /// at it is to show you your notes the old way rather than to put up a box about a file you never
+    /// mentioned.
+    func ensureProjectCanvas() {
+        guard !makingCanvas else { return }
+        guard store.projectKey != nil else { return split.canvasCouldNotBeMade() }
+        makingCanvas = true
+        store.openableCanvasPath { [weak self] result in
+            guard let self else { return }
+            makingCanvas = false
+            // On success the path publishes, and the watch above rebuilds the tab onto the board.
+            if case .failure = result { split.canvasCouldNotBeMade() }
+        }
+    }
+
+    private var makingCanvas = false
+
     func openProjectCanvas() {
         store.openableCanvasPath { [weak self] result in
             guard let self else { return }
@@ -386,16 +409,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                                                    store.$hasResolvedCanvasPath.removeDuplicates())
             .dropFirst()
             .sink { [weak self] _ in
-                guard let self, renderer == .canvas || awaitsRememberedCanvas else { return }
+                guard self != nil else { return }
                 // On the next turn: this fires from inside the store's own publish, and re-entering the
                 // split view's child swap from there is a layout change during an update.
                 afterCurrentUpdate { [weak self] in
-                    guard let self, self.renderer == .canvas || self.awaitsRememberedCanvas else {
-                        return
+                    guard let self else { return }
+                    if renderer == .canvas || awaitsRememberedCanvas {
+                        awaitsRememberedCanvas = false
+                        applyRememberedRenderer()
                     }
-                    self.awaitsRememberedCanvas = false
-                    self.applyRememberedRenderer()
-                    self.split.canvasPathChanged()
+                    // Unconditionally, unlike before: a *notes* tab wants the board too now (§7d), and
+                    // its renderer is `.tasks`. The split answers for whether it has anything to do.
+                    split.canvasPathChanged()
                 }
             }
     }

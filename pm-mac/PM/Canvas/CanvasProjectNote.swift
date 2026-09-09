@@ -366,12 +366,11 @@ struct CanvasProjectNote: View {
 
     /// The quick add, and the two dead ends.
     ///
-    /// **Only the dead ends get a row of their own.** Everything else on this card is reached the way
-    /// the window reaches it — a menu, a key — because a card that grew buttons the window has not got
-    /// would be saying the two surfaces are different things. But a project with no sessions and a
-    /// project with no tasks each have nothing to right-click, and a surface whose only affordance is
-    /// on an object you do not have yet is a surface that looks broken. So: one row, revealed once you
-    /// have stepped in, in the place the window puts its own add editor.
+    /// **The dead ends keep their row even now the title has buttons**, because the two say different
+    /// things. A `+` is a verb you already know you want; "Start a session" on a project that has never
+    /// had one is a sentence telling you what this surface is for. It is scaffolding, and it goes away
+    /// the moment it has been used once — which is the test for whether an empty state has earned its
+    /// place.
     @ViewBuilder private var footer: some View {
         if activeEditor == Self.quickAdd {
             AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
@@ -427,13 +426,50 @@ struct CanvasProjectNote: View {
     @ViewBuilder private var title: some View {
         let name = displayName
         if !name.isEmpty {
-            Text(name)
-                .font(.system(size: 14, weight: .semibold))
-                .lineLimit(2)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-                .foregroundStyle(store.hasLoaded ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(2)
+                    .foregroundStyle(store.hasLoaded ? AnyShapeStyle(.primary)
+                                                     : AnyShapeStyle(.secondary))
+                Spacer(minLength: 8)
+                // Only once the file has been read. A store still loading has no project to add to,
+                // and a button that does nothing on the press you actually make is worse than one that
+                // arrives a moment later.
+                if store.hasLoaded, store.projectName != nil {
+                    titleButton("plus", "New Task", action: beginTask)
+                    titleButton("calendar.badge.plus", "New Session", action: beginCurrentSession)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
+    }
+
+    /// The two verbs a project card is for, beside the name of the project they act on.
+    ///
+    /// **These are the first controls this card has grown**, and the rule they break was worth
+    /// breaking. Everything else here is reached the way the window reaches it — a menu, a key —
+    /// because a card that grew buttons the window has not got would be saying the two surfaces are
+    /// different things. They are not two surfaces any more: the window's notes *are* this card
+    /// (docs/canvas-workspaces.md §7d), so a control here is a control there, and starting a session
+    /// or adding a task is not something you should have to know a menu to do.
+    ///
+    /// On a board, the first click steps into the card and the second presses the button — the same
+    /// rule that governs every other target on it (`CanvasNodeView.takesItsOwnClicks`). In a tiled view
+    /// the tile takes its clicks outright, so the press lands first time.
+    private func titleButton(_ symbol: String, _ title: String,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(Text(title))
     }
 
     /// `Notes - Walkable.md` is the Walkable project. The prefix is the convention `getNotesPath`

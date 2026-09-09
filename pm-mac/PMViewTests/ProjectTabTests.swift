@@ -129,9 +129,28 @@ final class ProjectTabTests: XCTestCase {
         let tabs = [ProjectTab(.notes),
                     ProjectTab(.board(.whole)),
                     ProjectTab(.board(.frame("group-7"))),
+                    ProjectTab(.board(.note)),
                     ProjectTab(.board(.workspace("Standup")))]
         let data = try JSONEncoder().encode(tabs)
         XCTAssertEqual(try JSONDecoder().decode([ProjectTab].self, from: data), tabs)
+    }
+
+    /// **A workspace still goes on the wire as `arrangement`.** Every stored tab written since tabs
+    /// existed spells it that way, and a case added beside it must not disturb the spelling — a tab
+    /// that decodes as nothing comes back as a window one tab short, quietly, weeks later. This asserts
+    /// the bytes rather than a round trip, which would pass however the case were named.
+    func testAWorkspaceKeepsItsOldNameOnDisk() throws {
+        let json = String(decoding: try JSONEncoder().encode(ProjectTab(.board(.workspace("Standup")),
+                                                                        id: "t1")),
+                          as: UTF8.self)
+        XCTAssertTrue(json.contains("\"arrangement\""), json)
+        XCTAssertFalse(json.contains("\"workspace\""), json)
+
+        // And the note, whose name on disk is its own — it is new, so there is nothing to keep faith
+        // with, and the honest word is the one the code uses.
+        let note = String(decoding: try JSONEncoder().encode(ProjectTab(.board(.note), id: "t2")),
+                          as: UTF8.self)
+        XCTAssertTrue(note.contains("\"note\""), note)
     }
 
     // MARK: Tabs as the home of a workspace

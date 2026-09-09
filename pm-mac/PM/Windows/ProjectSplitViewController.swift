@@ -301,6 +301,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         // would find it in the cache and show it again for good. Dropped the moment the waiting ends.
         if canvasPending, !pending { contentPane.dropAll() }
         canvasPending = pending
+        canvasUnavailable = false
         tabs = next
         applySelectedTab()
     }
@@ -393,14 +394,19 @@ final class ProjectSplitViewController: NSSplitViewController {
     private func makeContent(for tab: ProjectTab) -> NSViewController {
         switch tab.view {
         case .notes:
-            let hosting = NSHostingController(rootView: makeContentView())
-            // The content fills whatever frame the split gives it. Left on the default
-            // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal
-            // size, which fights the user's own window size on every content change.
-            hosting.sizingOptions = []
-            hosting.view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            hosting.view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            return hosting
+            // **The notes are the project's own card, tiled alone** — docs/canvas-workspaces.md §7d.
+            // One shape, not two: this tab used to be a second renderer of the same document, and the
+            // card had already become the better one.
+            if let board = makeBoard(.note) { return board }
+            // No board to tile. Two different reasons, and only one of them is fixable: the project
+            // has never had a canvas, which is ordinary and is answered by making one; or it has one
+            // that will not open, which is not, and the column is the honest answer to it. Holding
+            // still while the making happens, for the reason `canvasPending` gives.
+            if canvasSource().url == nil, !canvasUnavailable {
+                if !canvasPending { afterCurrentUpdate { [weak self] in self?.ensureCanvas() } }
+                return ProjectWaitingPaneController()
+            }
+            return makeNotesColumn()
         case .board(let focus):
             if let board = makeBoard(focus) { return board }
             // **Nothing to show yet is not nothing to show.** A project's canvas path arrives with its
@@ -426,10 +432,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
         pane.focus = focus
         // The same switch the task list's header carries, so the way back is where the way here was.
+        // Both sides of it are boards now, so which one this pane *is* decides which way it goes.
         pane.header.showsRendererSwitch = true
+        pane.header.renderer = focus == .note ? .tasks : .canvas
         pane.header.setRenderer = { [weak self] next in
-            guard next == .tasks else { return }
-            self?.replaceSelected(with: .notes)
+            guard let self, next != (focus == .note ? .tasks : .canvas) else { return }
+            replaceSelected(with: next == .tasks ? .notes : .board(.whole))
         }
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
         // ⌘Return started a fresh workspace, or a duplicate did — either way the named one it left is
@@ -442,6 +450,44 @@ final class ProjectSplitViewController: NSSplitViewController {
             refreshTabModel()
         }
         return pane
+    }
+
+    /// The project's task list as its own column — what a notes tab was until §7d, and what it falls
+    /// back to when the project's board cannot be opened at all.
+    ///
+    /// **A fallback is not a second answer.** This is what you get when the file is broken, in the same
+    /// way `makeCanvasEmptyState` is what you get when there is nothing to show; the answer to "what
+    /// are this project's notes" is the card.
+    private func makeNotesColumn() -> NSViewController {
+        let hosting = NSHostingController(rootView: makeContentView())
+        // The content fills whatever frame the split gives it. Left on the default
+        // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal
+        // size, which fights the user's own window size on every content change.
+        hosting.sizingOptions = []
+        hosting.view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        hosting.view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return hosting
+    }
+
+    /// Make the project's board if it hasn't got one — supplied by the window, which owns the store.
+    ///
+    /// A project window needs a canvas the moment it opens now, because its notes are a card on one.
+    /// That is the convention `PMStore.openableCanvasPath` has always stated in its own words: a
+    /// project is assumed to have a canvas, so opening one is never a two-step ceremony of "make it,
+    /// then open it".
+    var ensureCanvas: () -> Void = {}
+
+    /// Set once making the board has been tried and failed, so the notes tab stops waiting for one and
+    /// shows the column instead. Cleared when the window takes a different project.
+    private(set) var canvasUnavailable = false
+
+    /// The board could not be made. Told by the window, which is where the error is reported.
+    func canvasCouldNotBeMade() {
+        guard !canvasUnavailable else { return }
+        canvasUnavailable = true
+        guard tabs.selected.view == .notes else { return }
+        contentPane.drop(tab: tabs.selectedID)
+        applySelectedTab()
     }
 
     private func makeCanvasEmptyState() -> NSViewController {
@@ -477,6 +523,11 @@ final class ProjectSplitViewController: NSSplitViewController {
                     return ProjectTabItem(id: tab.id, name: "Canvas")
                 }
                 return ProjectTabItem(id: tab.id, name: "Untitled", isWorkspace: true)
+            case .board(.note):
+                // Nothing opens one — `onOpenInTab` sends the note to a `.notes` tab, which is what a
+                // notes tab is. Drawn the same either way, so a stored tab from some future that does
+                // open one still says what it is.
+                return ProjectTabItem(id: tab.id, name: "Notes")
             case .board(.frame(let node)):
                 // A frame you have tiled is an unnamed workspace made out of it, so the chip offers to
                 // name it — while still saying which frame you are in, because that is where you are.
@@ -491,7 +542,10 @@ final class ProjectSplitViewController: NSSplitViewController {
         // since a background tab's pill is what you see the instant you switch to it.
         for tab in tabs.tabs {
             guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController else { continue }
-            pane.header.showsTilingSummary = !tabs.showsBar
+            // Never on the notes, whose "1/43" is a fact about how the app draws them rather than
+            // about the project — and whose ✕ would leave a tab called "Notes" showing the whole
+            // board. See `CanvasBoardView.isProjectNoteView`.
+            pane.header.showsTilingSummary = !tabs.showsBar && tab.view != .notes
             // And the list in its readout's menu, which another tab's chip may have just changed.
             pane.refreshWorkspaceLists()
         }
@@ -639,7 +693,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// showing the empty state, so making a canvas from it lands on the board rather than leaving the
     /// window on the page that offered to make one.
     func canvasPathChanged() {
-        guard tabs.selected.view.isBoard, !(contentPane.current is CanvasPaneController) else { return }
+        canvasUnavailable = false
+        let wantsBoard = tabs.selected.view.isBoard || tabs.selected.view == .notes
+        guard wantsBoard, !(contentPane.current is CanvasPaneController) else { return }
         contentPane.drop(tab: tabs.selectedID)
         applySelectedTab()
     }
