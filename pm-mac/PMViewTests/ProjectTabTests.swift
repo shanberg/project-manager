@@ -204,3 +204,76 @@ final class ProjectTabTests: XCTestCase {
         XCTAssertEqual(set.tabs.map(\.view), [.notes])
     }
 }
+
+// MARK: - A tab follows its board
+
+/// The rule that replaced the renderer switch. See `ProjectTabView.following(workspaceName:…)`.
+final class TabFollowsItsBoardTests: XCTestCase {
+    func testLeavingTheOneCardTilingTurnsTheNotesIntoTheBoard() {
+        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: nil,
+                                                      showingProjectNoteAlone: false),
+                       .board(.whole))
+    }
+
+    func testTheNotesStayTheNotesWhileTheirCardIsWhatIsTiled() {
+        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: nil,
+                                                      showingProjectNoteAlone: true),
+                       .notes)
+    }
+
+    func testTilingTheProjectCardAloneOnTheBoardIsTheWayBackToTheNotes() {
+        XCTAssertEqual(ProjectTabView.board(.whole).following(workspaceName: nil,
+                                                             showingProjectNoteAlone: true),
+                       .notes)
+    }
+
+    func testAStoredNoteFocusIsTreatedAsTheNotes() {
+        XCTAssertEqual(ProjectTabView.board(.note).following(workspaceName: nil,
+                                                            showingProjectNoteAlone: true),
+                       .notes)
+    }
+
+    /// Naming outranks the note rule: you asked for a workspace, so you get one.
+    func testNamingTheOneCardViewMakesItThatWorkspace() {
+        XCTAssertEqual(ProjectTabView.notes.following(workspaceName: "Reading",
+                                                      showingProjectNoteAlone: true),
+                       .board(.workspace("Reading")))
+    }
+
+    func testABoardThatBecomesANamedWorkspaceFollowsIt() {
+        XCTAssertEqual(ProjectTabView.board(.whole).following(workspaceName: "Dashboard",
+                                                             showingProjectNoteAlone: false),
+                       .board(.workspace("Dashboard")))
+    }
+
+    /// A frame is somewhere that exists whatever is tiled, so tiling its cards down to the project's
+    /// own card must not quietly turn the tab into the notes.
+    func testAFrameTabIsNotDraggedOffItsFrameByWhatIsTiled() {
+        XCTAssertNil(ProjectTabView.board(.frame("n1")).following(workspaceName: nil,
+                                                                  showingProjectNoteAlone: true))
+    }
+
+    func testAFrameTabStillFollowsANameItIsGiven() {
+        XCTAssertEqual(ProjectTabView.board(.frame("n1")).following(workspaceName: "Sprint",
+                                                                    showingProjectNoteAlone: false),
+                       .board(.workspace("Sprint")))
+    }
+
+    /// Same argument as the frame: a name points at something that outlives the tiling on screen.
+    func testANamedWorkspaceIsNotDraggedOffItsNameByWhatIsTiled() {
+        XCTAssertNil(ProjectTabView.board(.workspace("Dashboard"))
+            .following(workspaceName: "Dashboard", showingProjectNoteAlone: true))
+    }
+
+    func testAWorkspaceLeftBehindLandsOnTheBoard() {
+        XCTAssertEqual(ProjectTabView.board(.workspace("Dashboard"))
+            .following(workspaceName: nil, showingProjectNoteAlone: false),
+                       .board(.whole))
+    }
+
+    func testAWorkspaceRenamedUnderneathATabIsFollowed() {
+        XCTAssertEqual(ProjectTabView.board(.workspace("Old"))
+            .following(workspaceName: "New", showingProjectNoteAlone: false),
+                       .board(.workspace("New")))
+    }
+}

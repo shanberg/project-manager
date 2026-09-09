@@ -96,48 +96,6 @@ enum ProjectRenderer: String {
     case tasks, canvas
 }
 
-/// What the content column shows for a project that hasn't got a canvas yet.
-///
-/// Switching a *view* must not write to disk, which is the whole reason this exists. The app's other
-/// route to a project's board — File ▸ Open Project Canvas in New Window, and this state's own button —
-/// creates the file as a side effect of asking for it, and that is right there: you asked for the board,
-/// so you get one. Here
-/// you asked to look at the window differently, and answering that by creating a file in somebody's
-/// vault is a decision the request didn't contain.
-struct ProjectCanvasEmptyState: View {
-    var projectName: String?
-    var create: () -> Void
-    var showTasks: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "square.on.square.dashed")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(.tertiary)
-            VStack(spacing: 5) {
-                Text(projectName.map { "\($0) has no canvas yet." } ?? "No project.")
-                    .font(.headline)
-                Text("A canvas is an Obsidian board in the project\u{2019}s folder. "
-                     + "PM will make an empty one and open it here.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
-            }
-            if projectName != nil {
-                HStack(spacing: 10) {
-                    Button("Back to Tasks", action: showTasks)
-                    Button("Create Canvas", action: create)
-                        .keyboardShortcut(.defaultAction)
-                }
-                .padding(.top, 2)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
-    }
-}
-
 /// A pane with nothing in it, shown while a board tab is waiting to find out where its canvas is.
 ///
 /// Deliberately empty — no spinner, no message. The wait is one asynchronous directory listing, over

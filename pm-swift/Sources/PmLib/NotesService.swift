@@ -23,14 +23,26 @@ public struct NotesHandle {
     }
 }
 
-/// Resolve a project (full name or unambiguous prefix) to its notes file.
-/// - Throws: `.projectNotFound`/`.ambiguousProject` from resolution, `.notesNotFound` if the project
-///   has no notes file yet, `.configNotFound` if pm is unconfigured.
+/// Resolve a project (full name or unambiguous prefix) to its notes file, **making the file if it
+/// isn't there**.
+///
+/// Every project has notes. That has been the assumption everywhere above this line — `createProject`
+/// scaffolds them, every read and write here goes looking for them, and `ProjectCanvas` cites this
+/// function's shape as the precedent for making a project's board on first use. It just wasn't true:
+/// a project whose notes file had been moved, renamed out of the pattern, or never scaffolded threw
+/// `.notesNotFound`, which is a report of a broken invariant handed to someone who cannot act on it.
+/// "Your notes are missing" — yes, and?
+///
+/// So it is enforced rather than asserted, in the one place every caller already comes through, and in
+/// the same words `openableCanvasPath` uses: the file is a consequence of opening the thing, not a
+/// decision anybody has to make first. A project you can name is a project you can write in.
+///
+/// - Throws: `.projectNotFound`/`.ambiguousProject` from resolution, `.configNotFound` if pm is
+///   unconfigured, and whatever `createNotesFromTemplate` throws when the notes cannot be written.
 public func resolveNotesHandle(project: String) throws -> NotesHandle {
     let projectPath = try resolveProjectPath(nameOrPrefix: project)
-    guard let notesPath = try resolveNotesPath(projectPath: projectPath) else {
-        throw PmError.notesNotFound(getNotesPath(projectPath: projectPath))
-    }
+    let notesPath = try resolveNotesPath(projectPath: projectPath)
+        ?? createNotesFromTemplate(projectPath: projectPath)
     guard let config = try loadConfig() else { throw PmError.configNotFound }
     let io = makeNotesIO(notesPath: notesPath, config: config)
     return NotesHandle(projectPath: projectPath, notesPath: notesPath, config: config, io: io)

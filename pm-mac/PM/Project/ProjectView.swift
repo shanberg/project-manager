@@ -1055,8 +1055,8 @@ struct ProjectView: View {
         HStack(alignment: .center, spacing: 8) {
             projectPill
             // The window's tabs, in the same place the board's header puts them, so the bar doesn't
-            // move when you use it — the argument `RendererSwitch` makes about itself, and the reason
-            // both headers render this one view. Nothing at all while there is a single tab.
+            // move when you use it, which is why both headers render this one view. Nothing at all
+            // while there is a single tab.
             ProjectTabBarHost(model: state.tabs)
             Spacer(minLength: 12)
             headerControls
@@ -1125,19 +1125,16 @@ struct ProjectView: View {
     /// the strip any more, the capsule is also what keeps the progress count legible over whatever has
     /// scrolled underneath it.
     ///
-    /// Reading order is what you're looking at, then what you're doing, then how you're looking at it,
-    /// then where else it lives: the renderer switch, count, add, add, view options, open.
+    /// Reading order is what you're looking at, then what you're doing, then where else it lives:
+    /// count, add, add, view options, open.
     ///
-    /// The switch leads because it answers the first question — which of this project's two faces am I
-    /// on — and because it has to sit in the same place here as it does in the board's header, or using
-    /// it would move it.
+    /// **No renderer switch.** It used to lead, answering "which of this project's two faces am I on" —
+    /// and this column is not one of two faces any more. It is what a project window falls back to when
+    /// its board cannot be opened at all, so a control offering the board would be offering the thing
+    /// that just failed.
     @ViewBuilder private var headerControls: some View {
         if hasHeaderControls {
             HeaderCapsule(chrome: headerChrome) {
-                if store.projectPath != nil {
-                    rendererSwitch
-                    HeaderDivider()
-                }
                 let p = store.progress
                 if p.total > 0 {
                     Text("\(p.done)/\(p.total)")
@@ -1275,16 +1272,6 @@ struct ProjectView: View {
     /// discover by accident on somebody else's project. Clicking with nothing there makes it, which is
     /// the same bargain the notes file has always had — you get the document by asking for it, not by
     /// deciding to create it first. The tooltip says which of the two is about to happen.
-    /// Tasks or canvas, in this window. The board's own header carries the same control — see
-    /// `RendererSwitch`.
-    ///
-    /// It used to be a one-way button that opened a new window on the board, which put two doors on one
-    /// room: ⌥⌘C already showed the same canvas in the window you were in. Opening the board in a window
-    /// of its own is still ⇧⌘C, which now says so in its name.
-    private var rendererSwitch: some View {
-        RendererSwitch(renderer: .tasks) { state.setRenderer($0) }
-    }
-
     /// Opens the project in Obsidian, or in Finder while ⌥ is held (icon swaps to match), mirroring
     /// the menubar's "Open in Obsidian / ⌥ Open in Finder" alternate. The ⌥ swap is suppressed while a
     /// text editor is open, where ⌥ is used for typing and the flicker is just distracting.

@@ -70,8 +70,7 @@ final class CanvasHeaderModel: ObservableObject {
     /// can *read elsewhere*. The page and the find field are things you asked for a moment ago and are
     /// acting on now. So the mode label goes first, and the address field narrows rather than leaving —
     /// an address bar with no address in it is not an address bar, and it is the only place a card can
-    /// tell you whose password field you are looking at. What never goes: the renderer switch, Add, and
-    /// the options menu.
+    /// tell you whose password field you are looking at. What never goes: Add and the options menu.
     ///
     /// The tiled count is measured here too, but it isn't in the control capsule any more — it belongs
     /// to the pill, which is where "what am I looking at" is answered. It shortens to a bare fraction
@@ -139,32 +138,21 @@ final class CanvasHeaderModel: ObservableObject {
         var focusToken = 0
     }
 
-    /// Whether this board is one face of a project window, and how to turn it over.
-    ///
-    /// Set when a project window is rendering its project as a board — and then the header carries the
-    /// *same* `RendererSwitch` the task list's header carries, in the same place, so the control doesn't
-    /// move when you use it.
-    ///
-    /// It was a lone button here and a different lone button there, each findable only once you were
-    /// already on the other side of it and neither saying there was another side.
-    @Published var showsRendererSwitch = false
-    /// Which side of that switch this pane is.
-    ///
-    /// It used to be `.canvas` by construction — a board's header could only ever be the board. Since
-    /// §7d the project's notes are a board too, tiled to its own card, so a header has to be told
-    /// which of the two it is drawing rather than assuming.
-    @Published var renderer: ProjectRenderer = .canvas
     /// Whether the pill wears the tiled readout.
     ///
-    /// Off in a window whose tab bar is showing, where the tab holding this board wears it instead —
-    /// see `ProjectTabItem.detail`. One fact in one place: the pill speaks for the window, and with
-    /// several tabs up "6 of 43 cards" is true of exactly one of them.
+    /// Off in a window whose tab bar is showing, where the tab holding this board wears it instead.
+    /// One fact in one place: the pill speaks for the window, and with several tabs up "6 of 43 cards"
+    /// is true of exactly one of them.
+    ///
+    /// **This is where the renderer switch went.** A header used to carry a two-position control saying
+    /// which of a project's faces you were on, because the notes and the board were two shapes. They
+    /// are one board at two scales, so what is worth saying is how far in you are — and the readout was
+    /// already saying it. Its ✕ leaves, and leaving renames the tab.
     @Published var showsTilingSummary = true
     /// Whether the `+` offers the project's own note — true only on a project's board that hasn't got
     /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
     /// question (`CanvasBoardView.offersProjectNoteCard`).
     @Published var offersProjectNote = false
-    var setRenderer: (ProjectRenderer) -> Void = { _ in }
 
     // MARK: What the controls do. Supplied by the window controller.
 
@@ -330,10 +318,6 @@ struct CanvasControlCapsule: View {
 
     var body: some View {
         HeaderCapsule(chrome: chrome) {
-            if model.showsRendererSwitch {
-                RendererSwitch(renderer: model.renderer) { model.setRenderer($0) }
-                HeaderDivider()
-            }
             if model.find.isShowing {
                 findField
                 HeaderDivider()

@@ -1437,8 +1437,15 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         scrollView?.canvasScroll?.zoom(by: 1.25)
     }
 
+    /// **And out of the notes, to the board.**
+    ///
+    /// A project's notes are its own card tiled alone, so the thing one step further out from them is
+    /// the board — which is exactly what ⌘− means everywhere else, said about a workspace instead of a
+    /// plane. It costs nothing to say it here: the card is a file card and does not zoom its content,
+    /// and a tiled board's own zoom is fixed, so this was the one view where the key did nothing at all.
     @objc func zoomOut(_ sender: Any?) {
         guard !zoomEngagedCard(by: -1) else { return }
+        guard !isProjectNoteView else { return leaveTiling(animated: true) }
         scrollView?.canvasScroll?.zoom(by: 1 / 1.25)
     }
 
@@ -1659,14 +1666,18 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             guard let id = focusedTile, tiling?.arrangement == .masterStack else { return false }
             return tiling?.ids.first != id
         case #selector(leaveTilingCommand(_:)):
-            return isTiled && !isProjectNoteView
+            return isTiled
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
             return pinnableTile != nil
-        case #selector(zoomIn(_:)), #selector(zoomOut(_:)), #selector(zoomActualSize(_:)):
+        case #selector(zoomIn(_:)), #selector(zoomActualSize(_:)):
             // Live while a zoomable card is engaged even in a tiled view, because there they mean the
             // card and not the board — see `zoomIn`.
             return !isTiled || zoomableEngagedCard != nil
+        case #selector(zoomOut(_:)):
+            // And one more place: the note view, where zooming out of a workspace of one card is the
+            // board. See `zoomOut`.
+            return !isTiled || zoomableEngagedCard != nil || isProjectNoteView
         case #selector(zoomToFit(_:)):
             // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
             // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.

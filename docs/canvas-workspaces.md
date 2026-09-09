@@ -26,8 +26,10 @@ every sitting or the latest. The arguments now live where the code is — `Canva
 kept here is the shape of the whole. **§7, §7b and §7c are built too** — the words go to the right
 things; a workspace has a name you can see, a list you can switch from, and no Save; and its home is a
 tab, which is where its commands are and what duplicating one makes another of. **§7d is built**: the
-project window's notes *are* a board tiled to the project's own card, and the second renderer is gone.
-**This page is built.** What is left of it is the one question under Open, which is not a task.
+project window's notes *are* a board tiled to the project's own card. **§7e is built**: every project
+has a note and a canvas — enforced now rather than asserted — and with two faces down to one board at
+two scales, the renderer switch is gone; the way out of the notes is zooming out of them, and the tab
+renames itself on arrival. **This page is built.** What is left of it is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -519,12 +521,10 @@ nothing else. So the case stayed and the renderer went, which is the cheaper hal
 - **The card is stepped into from the start.** New Session, New Task, Edit Details and find all ask
   which project you are standing in, and a view whose entire content is one project should not need a
   click to admit which. `engage(cardWithID:)` does what a click on a tile does, without the click.
-- **Two commands are off in this view.** Leaving the tiled view would leave a tab called "Notes" showing
-  the whole board, and naming it as a workspace would give the app a second name for a shape it already
-  names. The way to the board is the renderer switch, which is in the header where it always was — and
-  which now has to be *told* which side it is on, since both sides are boards.
-- **The tiled readout is off too.** "1/43" is a fact about how the app draws your notes rather than
-  about the project, and the ✕ beside it is the command that was just turned off.
+- **Two commands were off in this view.** Leaving the tiled view would have left a tab called "Notes"
+  showing the whole board, and naming it as a workspace would give the app a second name for a shape it
+  already names. §7e took the first of those back; the second still stands.
+- **The tiled readout was off too**, for the same reason, and §7e turned it back on.
 
 **And the buttons.** The card has New Task and New Session beside its title — the first controls it has
 grown, and the rule they break was worth breaking. Everything else here is reached the way the window
@@ -536,6 +536,70 @@ surfaces are different things. They are not two surfaces any more.
 The list's **keyboard** — ↑/↓, ⌘A, ⌘⌫ — which on a board belongs to the board. A one-card workspace has
 no cards to arrow between, so this is now a question with an obvious answer and a `isProjectNoteView`
 flag to hang it off; it is simply not done. Everything reachable by mouse and menu is.
+
+## 7e. Every project has a note and a canvas — **built**
+
+§7d left the window holding a control it had stopped needing. If the notes are the board tiled to one
+card, then the board is that view zoomed out, and a two-position switch saying *which of this project's
+faces am I on* is answering a question the app no longer asks. Two faces became one board at two
+scales.
+
+### The switch is a claim about the world, so fix the world first
+
+The switch could only go once the thing underneath it was reliably there, and it was not. Two
+invariants that the code stated in prose were enforced in only one direction:
+
+- **The canvas.** `ProjectCanvas.swift` opens by saying *"every project is assumed to have one, or to
+  want one: there is no 'does this project do canvases?' question anywhere above this file"*, and
+  `openableCanvasPath` makes one on first ask. True — except the ask could go unanswered:
+  `openableCanvasPath` returned without calling its completion when a loaded store had no project path,
+  which under §7d is a window waiting on a file for ever with its in-flight latch stuck. It reports now.
+- **The note.** Every project has notes — `createProject` scaffolds them, and `ProjectCanvas` cites
+  their creation as the precedent for its own. Except `resolveNotesHandle` *threw* `.notesNotFound`,
+  which is a report of a broken invariant handed to somebody who cannot act on it. It creates now, from
+  the template, in the one place every read and write already comes through.
+
+An invariant asserted in a comment and thrown at runtime is not an invariant. These are the two files
+the whole design rests on, so they say the same thing twice now instead of once each way.
+
+### What the switch cost, and where it went
+
+Removing a control is only free if nothing was using it, and two things were: it was the way *out* of
+the notes, and it was the only thing on screen in a one-tab window saying the project had a board at
+all. Both went to the pill's tiled readout, which was already there and already saying half of it.
+
+- **Out** is now the board's own vocabulary — the readout's ✕, ⌘↩, and ⌘−, which is the one key that
+  had nothing to say in this view (a file card does not zoom its content and a tiled board's zoom is
+  fixed) and which everywhere else means exactly this: one step further out.
+- **In** is tiling the project's own card, by ⌘↩ or from its tile menu. No new gesture, and no new
+  place to look.
+- **The tab renames itself on arrival.** This is what made leaving safe, and it is `ProjectTabView`
+  `.following(workspaceName:showingProjectNoteAlone:)` — the rule that a tab is what its board is
+  showing, which §7c already applied to named workspaces and which now covers the other end too. A
+  workspace of exactly the project's card *is* the notes, however it was built; nothing has to remember
+  which door you came through. Only the three views with no identity of their own move: a frame stays
+  on its frame and a name stays on its name.
+
+`isProjectNoteView` became derived rather than declared, for the same reason — it was set once on the
+way in, which was fine while the way out was a button somewhere else.
+
+### And the branches that assumed otherwise
+
+With the invariant real, the "what if not" cases stop being cases:
+
+- **`ProjectCanvasEmptyState` is gone.** It offered to create a canvas, and argued for itself on the
+  grounds that *switching a view must not write to disk*. Under §7d opening the window already does,
+  so the page was offering a choice that had been made before it appeared.
+- **One fallback, not two.** Every tab makes a board and falls back the same way, so `makeContent` is
+  two lines and `makeBoardless` holds the whole argument: wait while it is being made, and take the
+  column when it cannot be. `canvasUnavailable` went from incidental to load-bearing — with no empty
+  state left to land on, it is the only thing between an unwritable vault and a window that waits for
+  ever.
+- **The column keeps its own switch off.** `ProjectView` is what you get when the board *failed*, so a
+  control offering the board would be offering the thing that just failed.
+
+The column itself is still there, and is the last piece: once the card carries the list's keyboard
+there is nothing in it the board does not do.
 
 ## 8. What this does to the backlog
 

@@ -32,11 +32,10 @@ struct ProjectTabItem: Identifiable, Equatable {
 /// floating island in the same band, sized to their own contents, with the same glass and the same
 /// hover as the two either side of them. See `CanvasHeader`.
 ///
-/// **Built from the header's own parts**, the way `RendererSwitch` is — and it is very nearly that
-/// control with the count taken off: positions in a row, the current one lifted onto a soft backing
-/// that slides between them. That is not a coincidence worth hiding. A window with one tab still shows
-/// the switch and no bar; a window with several shows this, and the two should look like the same idea
-/// at two sizes, because they are.
+/// **Built from the header's own parts**, and very nearly the renderer switch this replaced: positions
+/// in a row, the current one lifted onto a soft backing that slides between them. That switch had two
+/// positions and named a project's two faces; this has as many as you have opened and names them all,
+/// which is what a project turned out to have instead of two faces.
 struct ProjectTabBar<AddMenu: View>: View {
     let items: [ProjectTabItem]
     let selectedID: String
@@ -253,9 +252,9 @@ private struct TabReorder: DropDelegate {
 
 /// What the two headers watch so the bar is the same bar in both.
 ///
-/// The bar has to render in the task column's header *and* in the board's, in the same place, for the
-/// reason `RendererSwitch` gives: a control that jumps from one end of the window to the other as you
-/// use it is not one control. Those are two separate view hierarchies — one SwiftUI, one a hosting view
+/// The bar has to render in the task column's header *and* in the board's, in the same place: a control
+/// that jumps from one end of the window to the other as you use it is not one control. Those are two
+/// separate view hierarchies — one SwiftUI, one a hosting view
 /// over an AppKit board — so what they share is this, one per window, owned by the split controller.
 @MainActor
 final class ProjectTabModel: ObservableObject {

@@ -86,6 +86,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             refreshTileCommand()
             rememberViewState()
             keepNamedWorkspaceUpToDate()
+            // Derived rather than declared. It used to be set once, on the way in, which was fine
+            // while the note view was a place you could only leave through the switch. Now that
+            // leaving is a tiling command it has to be able to stop being true — and to *start* being
+            // true when you tile the project's own card by hand on the whole board, which is the same
+            // view arrived at from the other end.
+            scroll.board.isProjectNoteView = isShowingProjectNoteAlone
             // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
             onTilingChanged?()
         }
@@ -195,9 +201,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         guard !hasFitted else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, !hasFitted, scroll.zoomToFit() else { return }
-            hasFitted = true
             restoreViewState()
             applyFocus()
+            // **Last, which is what `isSettled` has always claimed.** The latch used to be set first,
+            // and a tiling restored or focused between there and here would announce itself to a tab
+            // that then read the half-built board as the answer — retargeting a notes tab to the whole
+            // board a beat before the card it wanted was tiled. Nothing can interleave inside this
+            // block, so the only thing moving it costs is the window of wrongness it closes.
+            hasFitted = true
             view.window?.makeFirstResponder(scroll.board)
         }
     }
@@ -207,10 +218,25 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// **Asked before a tab is allowed to follow its board.** A pane pinned to a workspace spends a
     /// runloop turn or more knowing nothing about it, and a tab reconciled against that pane in the
     /// meantime would read "in no workspace" and throw the pin away before it was ever applied. See
-    /// `ProjectSplitViewController.reconcileWorkspacePins`.
+    /// `ProjectSplitViewController.reconcileTabsWithTheirBoards`.
     var isSettled: Bool { hasFitted }
 
     private var hasFitted = false
+
+    /// Whether this board is tiled to the project's own card and nothing else.
+    ///
+    /// **The note view, however you arrived at it** — restored into a `.note` tab, or built by hand on
+    /// the whole board by tiling that one card. Since the switch went there is no other definition
+    /// available: "am I looking at this project's notes" is a question about what is on screen, not
+    /// about which door you came through, and a tab is made to agree with the answer (see
+    /// `ProjectSplitViewController.reconcileTabsWithTheirBoards`).
+    var isShowingProjectNoteAlone: Bool {
+        guard let ids = scroll.board.tiling?.ids, ids.count == 1, let tiled = ids.first,
+              let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url)
+        else { return false }
+        return CanvasProjectNoteCard.id(on: store.document, notes: notes,
+                                        resolver: store.resolver) == tiled
+    }
 
     // MARK: How you were looking at this board
 
@@ -240,7 +266,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         //
         // **Settled here, once, rather than re-read from `focus`** — which now moves. A tab follows the
         // board it holds, so the plain tab you named a workspace in becomes a workspace tab
-        // (`ProjectSplitViewController.reconcileWorkspacePins`), and a pane that stopped writing at
+        // (`ProjectSplitViewController.reconcileTabsWithTheirBoards`), and a pane that stopped writing at
         // that moment would stop remembering the connect mode and the refresh interval too. Ownership
         // is about which pane opened the board, not about what its tab has since become.
         guard !hasRestoredViewState else { return }
@@ -314,7 +340,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         let existing = CanvasProjectNoteCard.id(on: store.document, notes: notes,
                                                 resolver: store.resolver)
         guard let id = existing ?? scroll.board.addProjectNoteCard(at: nil) else { return }
-        scroll.board.isProjectNoteView = true
+        // `isProjectNoteView` is not set here — tiling says it. See `onTilingChanged` above.
         scroll.board.tile([id])
         // A turn later, because tiling is what builds the card's view. See `engage(cardWithID:)` for
         // why it is stepped into rather than waiting for a click.

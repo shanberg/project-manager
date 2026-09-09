@@ -409,7 +409,14 @@ final class PMStore: ObservableObject {
             // nothing — a command that silently no-ops the first time you press it, and works the
             // second, is the kind of bug people stop reporting and start working around. `hasLoaded`
             // stops this at one retry: after a load, nil means there really is no project.
-            if !hasLoaded { reload { [weak self] in self?.openableCanvasPath(done) } }
+            //
+            // And then it *says so*. This used to return without calling back at all, which was
+            // survivable while the answer only decided whether a menu command did anything. It isn't
+            // now: a project window's notes are a card on this board, so a caller left holding a
+            // completion that never runs is a window waiting on a file for ever — see
+            // `ProjectWindowController.ensureProjectCanvas`, whose in-flight latch would never clear.
+            guard !hasLoaded else { return done(.failure(PmError.projectNotFound(projectName ?? ""))) }
+            reload { [weak self] in self?.openableCanvasPath(done) }
             return
         }
         let notesPath = self.notesPath

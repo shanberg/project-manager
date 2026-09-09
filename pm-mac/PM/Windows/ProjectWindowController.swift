@@ -134,7 +134,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.onOpenProject?(key, inNewWindow)
         }
         state.toggleSidebar = { [weak self] in self?.toggleSidebar() }
-        state.setRenderer = { [weak self] next in self?.setRenderer(next) }
         state.tabs = split.tabModel
         // The split switches tabs on its own — a click on the bar — so it asks for the project's board
         // rather than being handed it. The store is the window's.
@@ -145,13 +144,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // *opened* on for the rest of its life, so retargeting to a project with no canvas and then
         // switching to the board handed back the previous project's file.
         split.canvasSource = { [weak self] in
-            guard let self else { return (nil, nil, {}) }
+            guard let self else { return (nil, nil) }
             // A window opened on a file shows that file. Ahead of the project's own board rather than
             // instead of it: the two never both apply, because opening on a file is what a window with
             // no project does, and taking a project clears it.
             return (self.openedCanvas ?? self.store.canvasPath.map { URL(fileURLWithPath: $0) },
-                    self.window?.title,
-                    { [weak self] in self?.openProjectCanvas() })
+                    self.window?.title)
         }
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
         watchCanvasPath()

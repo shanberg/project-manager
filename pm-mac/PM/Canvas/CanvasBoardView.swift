@@ -207,10 +207,15 @@ final class CanvasBoardView: NSView {
     /// Whether this board is standing in for the project window's notes — tiled to the project's own
     /// card, and nothing else (docs/canvas-workspaces.md §7d).
     ///
-    /// What it turns off is the two commands that would take you out of that view without taking you
-    /// out of the *tab*: leaving the tiled view would leave a tab called "Notes" showing the whole
-    /// board, and naming this as a workspace would give the app a second name for the shape it already
-    /// has one for. The way to the board is the renderer switch, which is right there.
+    /// What it turns off is **naming this as a workspace**, which would give the app a second name for
+    /// the shape it already has one for — the notes are the one workspace nobody had to name.
+    ///
+    /// It used to turn off leaving the tiled view too, on the grounds that it would leave a tab called
+    /// "Notes" showing the whole board. That is no longer what happens: the tab follows its board (see
+    /// `ProjectSplitViewController.reconcileTabsWithTheirBoards`), so leaving renames the chip, and
+    /// leaving is now *the* way to the board rather than a way to break the tab. It is also what ⌘−
+    /// means here, which is the only view where that key had nothing to say — the project's own card
+    /// does not zoom its content, and zooming out of a workspace of one card is the board.
     var isProjectNoteView = false
 
     /// This board's project note, and whether we have been to look for it.

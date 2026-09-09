@@ -33,6 +33,36 @@ enum ProjectTabView: Codable, Equatable {
     case board(CanvasFocus)
 
     var isBoard: Bool { if case .board = self { return true }; return false }
+
+    /// What a tab *becomes*, given what its board is now showing. Nil to leave it where it is.
+    ///
+    /// **This is the renderer switch.** Notes and board were two shapes with a two-position control
+    /// between them; they are one board at two scales, so travelling between them is the board's own
+    /// vocabulary — leave the tiled view to come out (⌘−, the readout's ✕, ⌘↩), tile the project's own
+    /// card to go back in — and the tab renames itself on arrival rather than being *told* by a button
+    /// which of two things it is. Nothing else has to know how you got there, which is the whole gain:
+    /// a workspace of exactly the project's card is the notes however it was built.
+    ///
+    /// Only the three views with no identity of their own move. A frame tab stays on its frame and a
+    /// named workspace stays on its name — both point at something that goes on existing whatever is
+    /// tiled at the moment, and both should reopen at it.
+    ///
+    /// Here rather than beside the caller so it can be tested without a board, a store or a window;
+    /// see `ProjectSplitViewController.reconcileTabsWithTheirBoards`, which supplies the two facts.
+    func following(workspaceName: String?, showingProjectNoteAlone: Bool) -> ProjectTabView? {
+        switch self {
+        case .notes, .board(.note), .board(.whole):
+            // Naming outranks the rest: a workspace made out of one of these is a workspace, and it is
+            // the only thing here worth keeping a pin on.
+            if let workspaceName { return .board(.workspace(workspaceName)) }
+            return showingProjectNoteAlone ? .notes : .board(.whole)
+        case .board(.frame):
+            return workspaceName.map { .board(.workspace($0)) }
+        case .board(.workspace(let pinned)):
+            guard workspaceName != pinned else { return nil }
+            return .board(workspaceName.map(CanvasFocus.workspace) ?? .whole)
+        }
+    }
 }
 
 /// Which part of a board a tab is pinned to.
@@ -170,7 +200,7 @@ struct ProjectTabSet: Codable, Equatable {
     ///
     /// Not `replaceSelected`: this is how a tab *follows* the board it is holding — you named the
     /// workspace it was showing, or ⌘Return took it out of one — rather than how a tab is sent
-    /// somewhere. See `ProjectSplitViewController.reconcileWorkspacePins`.
+    /// somewhere. See `ProjectSplitViewController.reconcileTabsWithTheirBoards`.
     mutating func retarget(_ id: String, to view: ProjectTabView) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].view != view else {
             return

@@ -279,12 +279,16 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// What both headers draw the bar from. See `ProjectTabModel`.
     let tabModel = ProjectTabModel()
 
-    /// Where the project's board is, what to call it, and what to do when it hasn't got one.
+    /// Where the project's board is and what to call it.
     ///
     /// A closure rather than arguments, because a tab is switched from inside this controller — a click
     /// on the bar — and there is nobody to pass them in at that moment. The window supplies it; the
     /// store belongs to the window.
-    var canvasSource: () -> (url: URL?, name: String?, create: () -> Void) = { (nil, nil, {}) }
+    ///
+    /// It used to carry a third member, `create`, for the empty state's button. Nothing asks to have a
+    /// canvas made any more: having one is a consequence of opening the project, so the making is
+    /// `ensureCanvas` and there is nobody left to press.
+    var canvasSource: () -> (url: URL?, name: String?) = { (nil, nil) }
 
     /// Which renderer is up. Read by the window for its menu checkmark and its width cap.
     var renderer: ProjectRenderer { tabs.selected.view.isBoard ? .canvas : .tasks }
@@ -391,54 +395,47 @@ final class ProjectSplitViewController: NSSplitViewController {
     }
 
     /// The controller a tab needs, made fresh.
+    ///
+    /// **Every tab in a project window is a board.** The notes are the project's own card tiled alone
+    /// (docs/canvas-workspaces.md §7d); everything else is that board at some other scale. So there is
+    /// one path here and one fallback, where there used to be two of each.
     private func makeContent(for tab: ProjectTab) -> NSViewController {
-        switch tab.view {
-        case .notes:
-            // **The notes are the project's own card, tiled alone** — docs/canvas-workspaces.md §7d.
-            // One shape, not two: this tab used to be a second renderer of the same document, and the
-            // card had already become the better one.
-            if let board = makeBoard(.note) { return board }
-            // No board to tile. Two different reasons, and only one of them is fixable: the project
-            // has never had a canvas, which is ordinary and is answered by making one; or it has one
-            // that will not open, which is not, and the column is the honest answer to it. Holding
-            // still while the making happens, for the reason `canvasPending` gives.
-            if canvasSource().url == nil, !canvasUnavailable {
-                if !canvasPending { afterCurrentUpdate { [weak self] in self?.ensureCanvas() } }
-                return ProjectWaitingPaneController()
-            }
-            return makeNotesColumn()
-        case .board(let focus):
-            if let board = makeBoard(focus) { return board }
-            // **Nothing to show yet is not nothing to show.** A project's canvas path arrives with its
-            // first read of the folder, so for a moment after a switch every project looks like a
-            // project without a board. Answering then — with the empty state, or by falling back to the
-            // notes, which is what the window used to do — puts a whole view on screen and takes it
-            // away again, and the switch reads as having gone somewhere it didn't. So the tab holds
-            // still until the looking is over; it is measured in milliseconds and there is nothing
-            // worth saying inside it.
-            return canvasPending ? ProjectWaitingPaneController() : makeCanvasEmptyState()
-        }
+        let focus: CanvasFocus = if case .board(let pinned) = tab.view { pinned } else { .note }
+        return makeBoard(focus) ?? makeBoardless()
+    }
+
+    /// What a tab shows when the board could not be put on screen.
+    ///
+    /// Under the invariant there is no third case: a project has a canvas, and if one is not there yet
+    /// it is being made. So this is a wait or a failure, and never a question — the empty state that
+    /// used to offer to create one is gone with the ask that needed it.
+    ///
+    /// **Nothing to show yet is not nothing to show.** A project's canvas path arrives with its first
+    /// read of the folder, so for a moment after a switch every project looks like a project without a
+    /// board. Answering then puts a whole view on screen and takes it away again. The tab holds still
+    /// instead; it is milliseconds, and there is nothing worth saying inside them.
+    ///
+    /// A canvas that is *on disk* and will not open is the failure, not the wait — making one is no
+    /// answer when the file is already there — so that goes straight to the column, as does a creation
+    /// that came back empty-handed. See `canvasUnavailable`.
+    private func makeBoardless() -> NSViewController {
+        guard canvasSource().url == nil, !canvasUnavailable else { return makeNotesColumn() }
+        if !canvasPending { afterCurrentUpdate { [weak self] in self?.ensureCanvas() } }
+        return ProjectWaitingPaneController()
     }
 
     private func makeBoard(_ focus: CanvasFocus) -> CanvasPaneController? {
         let source = canvasSource()
         guard let url = source.url, let store = try? CanvasStoreRegistry.store(for: url) else {
-            // A canvas that won't parse, or a project without one. The empty state is the honest
-            // answer for the second; for the first, File ▸ Open Canvas reports the error properly.
+            // A canvas that won't parse, or a project whose one is not there yet. `makeBoardless`
+            // tells those two apart and answers each; File ▸ Open Canvas reports a parse error
+            // properly for anyone who went at the file directly.
             return nil
         }
         let pane = CanvasPaneController(store: store, tabs: tabModel)
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
         pane.focus = focus
-        // The same switch the task list's header carries, so the way back is where the way here was.
-        // Both sides of it are boards now, so which one this pane *is* decides which way it goes.
-        pane.header.showsRendererSwitch = true
-        pane.header.renderer = focus == .note ? .tasks : .canvas
-        pane.header.setRenderer = { [weak self] next in
-            guard let self, next != (focus == .note ? .tasks : .canvas) else { return }
-            replaceSelected(with: next == .tasks ? .notes : .board(.whole))
-        }
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
         // ⌘Return started a fresh workspace, or a duplicate did — either way the named one it left is
         // still in the store and now keeps a chip, so it is a click away instead of a menu away. The
@@ -452,12 +449,13 @@ final class ProjectSplitViewController: NSSplitViewController {
         return pane
     }
 
-    /// The project's task list as its own column — what a notes tab was until §7d, and what it falls
-    /// back to when the project's board cannot be opened at all.
+    /// The project's task list as its own column — what a notes tab was until §7d, and now only what a
+    /// window falls back to when the project's board cannot be opened at all.
     ///
-    /// **A fallback is not a second answer.** This is what you get when the file is broken, in the same
-    /// way `makeCanvasEmptyState` is what you get when there is nothing to show; the answer to "what
-    /// are this project's notes" is the card.
+    /// **A fallback is not a second answer.** The answer to "what are this project's notes" is the
+    /// card. This is what is left when the file is broken, and it is on its way out: once the card
+    /// carries the list's keyboard there is nothing here the board does not do, and `ProjectView` goes
+    /// with it.
     private func makeNotesColumn() -> NSViewController {
         let hosting = NSHostingController(rootView: makeContentView())
         // The content fills whatever frame the split gives it. Left on the default
@@ -477,34 +475,29 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// then open it".
     var ensureCanvas: () -> Void = {}
 
-    /// Set once making the board has been tried and failed, so the notes tab stops waiting for one and
-    /// shows the column instead. Cleared when the window takes a different project.
+    /// Set once making the board has been tried and failed, so a tab stops waiting for one and shows
+    /// the column instead. Cleared when the window takes a different project.
+    ///
+    /// Load-bearing rather than incidental: with no empty state left to land on, this is the only thing
+    /// standing between a vault that cannot be written to and a window that waits for ever.
     private(set) var canvasUnavailable = false
 
     /// The board could not be made. Told by the window, which is where the error is reported.
+    ///
+    /// Whatever tab is up, not only the notes: every tab wants a board now, so every tab is waiting on
+    /// this answer and every tab has the same fallback.
     func canvasCouldNotBeMade() {
         guard !canvasUnavailable else { return }
         canvasUnavailable = true
-        guard tabs.selected.view == .notes else { return }
         contentPane.drop(tab: tabs.selectedID)
         applySelectedTab()
-    }
-
-    private func makeCanvasEmptyState() -> NSViewController {
-        let source = canvasSource()
-        let empty = NSHostingController(rootView: ProjectCanvasEmptyState(
-            projectName: source.name,
-            create: source.create,
-            showTasks: { [weak self] in self?.replaceSelected(with: .notes) }))
-        empty.sizingOptions = []
-        return empty
     }
 
     /// Say what the bar should now draw. The names of pinned tabs come from the board's own document —
     /// a frame's label is the frame's, not the tab's — so a frame renamed in Obsidian renames the tab
     /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
     func refreshTabModel() {
-        reconcileWorkspacePins()
+        let selectedChanged = reconcileTabsWithTheirBoards()
         let board = canvasPane
         tabModel.items = tabs.tabs.map { tab in
             // Its own board, not the one on screen: a tab tiled in the background still says so, and
@@ -542,16 +535,23 @@ final class ProjectSplitViewController: NSSplitViewController {
         // since a background tab's pill is what you see the instant you switch to it.
         for tab in tabs.tabs {
             guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController else { continue }
-            // Never on the notes, whose "1/43" is a fact about how the app draws them rather than
-            // about the project — and whose ✕ would leave a tab called "Notes" showing the whole
-            // board. See `CanvasBoardView.isProjectNoteView`.
-            pane.header.showsTilingSummary = !tabs.showsBar && tab.view != .notes
+            // **On the notes too, now.** It was off there because "1/43" read as a fact about how the
+            // app draws your notes rather than about the project, and because its ✕ would have left a
+            // tab called "Notes" showing the whole board. The second objection is what the first one
+            // rested on, and it went with the switch: leaving *renames the chip*, so the readout is no
+            // longer a stray control — it is the only thing on screen saying this project has a board
+            // and the way out to it, which is exactly the pair the switch used to be.
+            pane.header.showsTilingSummary = !tabs.showsBar
             // And the list in its readout's menu, which another tab's chip may have just changed.
             pane.refreshWorkspaceLists()
         }
         tabModel.selectedID = tabs.selectedID
         tabModel.frames = board?.frames() ?? []
         tabModel.workspaces = board?.workspaceNames() ?? []
+        // Last, and only when it happened: the tab in front of you became something else without
+        // anybody switching to it — you zoomed out of your notes — so the window has a different width
+        // limit to apply and a different row to store.
+        if selectedChanged { onRendererChanged?() }
     }
 
     // MARK: The workspaces this window has open
@@ -562,26 +562,34 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// and a plain board tab that had switched to it from the readout's menu — `Dashboard · 6/43` in
     /// one chip and `Canvas · Dashboard` in another, for the same six cards on the same board. Two
     /// spellings of one fact is the shape of fault §7b diagnosed one layer down, so this is the same
-    /// fix applied again: the pane's `workspaceName` is the answer, and the tab is made to agree with
-    /// it (docs/canvas-workspaces.md §7c).
+    /// fix applied again: the pane is the answer, and the tab is made to agree with it
+    /// (docs/canvas-workspaces.md §7c).
     ///
-    /// Only *named* workspaces move a pin. An unnamed one has no name to point at — that is what
-    /// unnamed means — so a board tab that gets tiled stays a board tab and a frame tab that gets tiled
-    /// stays on its frame, which is what both of them should reopen at.
+    /// **It is also what the renderer switch used to be.** Notes and board were two shapes with a
+    /// control between them; they are one board at two scales, so travelling between them is the
+    /// board's own vocabulary — leave the tiled view to come out, tile the project's own card to go
+    /// back in — and the chip renames itself on arrival. There is nothing left for a switch to do that
+    /// this does not do from wherever you happen to be standing.
     ///
     /// A tab with no pane yet is left alone: it has not been looked at, so its pin *is* its truth.
-    private func reconcileWorkspacePins() {
+    ///
+    /// - Returns: whether the tab that is *up* changed, which is the window's cue to re-read the
+    ///   renderer. It has to be told: the notes and the board size a window differently and are
+    ///   remembered differently, and a tab that changed by itself never went through `applySelectedTab`.
+    @discardableResult
+    private func reconcileTabsWithTheirBoards() -> Bool {
+        var selectedChanged = false
         for tab in tabs.tabs {
-            guard case .board(let pin) = tab.view,
-                  let pane = contentPane.content(for: tab.id) as? CanvasPaneController,
-                  pane.isSettled
+            guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController, pane.isSettled,
+                  let next = tab.view.following(workspaceName: pane.workspaceName,
+                                                showingProjectNoteAlone: pane.isShowingProjectNoteAlone),
+                  next != tab.view
             else { continue }
-            let pinned: String? = if case .workspace(let name) = pin { name } else { nil }
-            guard pinned != pane.workspaceName else { continue }
-            let next = pane.workspaceName.map(CanvasFocus.workspace) ?? .whole
-            tabs.retarget(tab.id, to: .board(next))
-            pane.focus = next
+            tabs.retarget(tab.id, to: next)
+            pane.focus = if case .board(let focus) = next { focus } else { .note }
+            selectedChanged = selectedChanged || tab.id == tabs.selectedID
         }
+        return selectedChanged
     }
 
     /// Go to the tab already showing this workspace. False when none is, which is the caller's cue to
@@ -683,15 +691,15 @@ final class ProjectSplitViewController: NSSplitViewController {
         refreshTabModel()
     }
 
-    /// Back to the task list — View ▸ Show Canvas turning itself off, and the empty state's button.
+    /// Back to the notes — View ▸ Show Canvas turning itself off.
     func showTasks() { replaceSelected(with: .notes) }
 
     /// Show the project's board in the tab that is up.
     func showCanvas() { replaceSelected(with: .board(.whole)) }
 
-    /// The project's board has appeared (or moved) since a tab was built. Rebuild any tab that is
-    /// showing the empty state, so making a canvas from it lands on the board rather than leaving the
-    /// window on the page that offered to make one.
+    /// The project's board has appeared (or moved) since a tab was built. Rebuild the tab that is
+    /// waiting on it, so a canvas that has just been made lands on screen rather than leaving the
+    /// window on the pane that was holding still for it.
     func canvasPathChanged() {
         canvasUnavailable = false
         let wantsBoard = tabs.selected.view.isBoard || tabs.selected.view == .notes
