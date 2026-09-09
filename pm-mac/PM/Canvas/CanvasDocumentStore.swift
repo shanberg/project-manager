@@ -57,7 +57,8 @@ final class CanvasDocumentStore {
     ///
     /// With one exception, which is the Mac's own: a card you are standing in and typing into has its
     /// own stack while its editor is open, and ⌘Z there undoes your typing rather than the board. What
-    /// reaches this stack is the finished edit, as one step — see `registerEdit`.
+    /// reaches this stack is the whole session, as the one step its first keystroke registered — see
+    /// `CanvasCardEditing.hasWritten`.
     let undoManager: UndoManager
     private var saveWork: DispatchWorkItem?
     /// The modification date of the last write we made or read. What tells our own save apart from
@@ -112,10 +113,10 @@ final class CanvasDocumentStore {
     /// a double-click in the wrong place. Registering an undo for that would put a step on the stack
     /// whose only effect is to bring the empty card back, which is not a thing anyone means by ⌘Z.
     ///
-    /// And **a keystroke in a card you are typing in**, which is a step in the editor rather than in
-    /// the document. ⌘Z there means the editor's own stack, coalesced into typing bursts the way it is
-    /// in every other Mac text view; the document hears about the edit as one step when you step back
-    /// out. See `registerEdit` and `CanvasTextNodeView`.
+    /// And **a keystroke in a card you are typing in**, after the first one. ⌘Z there means the
+    /// editor's own stack, coalesced into typing bursts the way it is in every other Mac text view;
+    /// the document's one step for the session is registered by the keystroke that opened it, through
+    /// `change` above. See `CanvasCardEditing.hasWritten`.
     ///
     /// Both still save: the file should match the board.
     func changeQuietly(_ mutate: (inout CanvasDocument) -> Void) {
@@ -125,32 +126,6 @@ final class CanvasDocumentStore {
         document = next
         documentChanged()
         scheduleSave()
-    }
-
-    /// Put one undo step on the stack for an edit to one card that was already made, in pieces,
-    /// without one.
-    ///
-    /// What an editing session in a card comes to when you step out of it. Every keystroke went in
-    /// through `changeQuietly` and registered nothing, because while the editor was open ⌘Z belonged
-    /// to the editor; stepping out is the moment the whole edit becomes one thing the *document* can
-    /// undo. That is what an inline editor does everywhere else on the Mac — you undo your typing
-    /// while you are in the field, and one step takes the whole edit back once you have left it.
-    ///
-    /// **The step is built from the document as it stands now**, with this one card's content put
-    /// back, rather than from a copy taken when the session began. A session is not exclusive — a card
-    /// can be moved or resized while you are typing in it, and each of those registers an undo of its
-    /// own — so a step that restored the whole document as it was on the way in would quietly take
-    /// those back too, and leave their own undo steps on the stack pointing at a board that had
-    /// already been rolled past them.
-    ///
-    /// Nothing is registered for a session that changed nothing, so opening a card, reading it and
-    /// stepping out doesn't put a step on the stack.
-    func registerEdit(restoring content: CanvasContent, of id: String, actionName: String) {
-        var previous = document
-        guard let index = previous.nodes.firstIndex(where: { $0.id == id }),
-              previous.nodes[index].content != content else { return }
-        previous.nodes[index].content = content
-        registerUndo(restoring: previous, actionName: actionName)
     }
 
     /// A gesture in progress: the document as it stood when the mouse went down, and what to call it.

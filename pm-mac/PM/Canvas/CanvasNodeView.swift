@@ -505,7 +505,6 @@ final class CanvasTextNodeView: CanvasNodeView {
     }
 
     override func contentChanged() {
-        reported = nil
         if isEngaged { return showEditor() }
         if isSimplified { return setContent(summaryView(canvasCardSummary(text))) }
         showRendered()
@@ -522,32 +521,11 @@ final class CanvasTextNodeView: CanvasNodeView {
     /// card is one hosting view whose only input is the text and the font.
     override func contentZoomChanged() { contentChanged() }
 
-    /// Whether the card had nothing in it when you opened it. See `engagementChanged`.
-    private var openedEmpty = false
+    /// The editing session you are in, while you are in one — the rules of which are
+    /// `CanvasCardEditing`, so that they can be asked without a board and a window to ask them in.
+    private var editing: CanvasCardEditing?
 
-    /// The text this card has written into the document since its view was last built — what tells
-    /// its own edit apart from somebody else's when the document reports one.
-    ///
-    /// **Every keystroke came back as a change and rebuilt the editor.** The editor reports each edit
-    /// into the store, the store tells the board, and the board hands this card a node whose text is
-    /// not the text the card was built with — so `contentChanged` built a *new* editor, once per
-    /// character. A new `NSTextView` is handed the whole string, which leaves the caret after it, and
-    /// takes first responder a runloop turn later (`MarkdownTextEditor.Coordinator.claimFocus`). So
-    /// typing anywhere but the end threw the caret to the end after one character, and a keystroke
-    /// that landed in the turn before focus came back reached the board instead, where it was beeped
-    /// away and lost. Neither is something typing may ever do.
-    ///
-    /// A change that *isn't* this — an edit from Obsidian, an undo, another window on the same file —
-    /// still rebuilds, because the editor has no other way to hear about it. Which is why this is
-    /// cleared by every rebuild: what is on screen then came from the document, and a card holding a
-    /// stale claim about what it wrote would ignore an outside edit that happened to arrive back at
-    /// the same text.
-    private var reported: String?
-
-    override func isOwnEdit(_ content: CanvasContent) -> Bool {
-        guard case .text(let value) = content else { return false }
-        return value == reported
-    }
+    override func isOwnEdit(_ content: CanvasContent) -> Bool { editing?.echoes(content) ?? false }
 
     /// ⌘Z while you are typing in this card, which is the editor's own stack and not the board's.
     ///
@@ -566,42 +544,28 @@ final class CanvasTextNodeView: CanvasNodeView {
     /// `CanvasDocumentStore.registerEdit`.
     private(set) var editingUndo: UndoManager?
 
-    /// The card's text as it stood when you stepped into it — the other half of that one step.
-    private var editBaseline: String?
-
     override func engagementChanged() {
-        let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if isEngaged {
-            openedEmpty = empty
-            editBaseline = text
+            editing = CanvasCardEditing(opening: text)
             contentChanged()
             window?.makeFirstResponder(hosting)
             return
         }
 
-        // Stepping out ends the editing session: the editor's stack goes with the editor, and what it
-        // did becomes one step the document can undo. See `editingUndo`.
-        let baseline = editBaseline
-        editBaseline = nil
+        // Stepping out ends the session: the editor's undo stack goes with the editor, and what the
+        // session did is already one step the *document* can undo — registered by the first keystroke,
+        // see `CanvasCardEditing.hasWritten`. All that is left is whether this was ever a card.
+        let session = editing
+        editing = nil
         editingUndo = nil
 
-        // A card you opened empty, typed nothing into, and clicked away from was never a card —
-        // otherwise a board accumulates an empty rectangle every time a double-click lands somewhere
-        // you didn't mean. Obsidian does the same.
-        //
-        // Only when it was *already* empty on the way in. A card whose text you deliberately cleared
-        // is a card you emptied, and deleting it would take with it something ⌘Z can no longer bring
-        // back — the edits that emptied it would restore the text into a card that no longer exists.
-        if empty && openedEmpty {
+        if session?.stepOut(showing: text) == .discardTheCard {
             let id = node.id
             board.store.changeQuietly { doc in
                 doc.nodes.removeAll { $0.id == id }
                 doc.edges.removeAll { $0.fromNode == id || $0.toNode == id }
             }
             return
-        }
-        if let baseline {
-            board.store.registerEdit(restoring: .text(baseline), of: node.id, actionName: "Edit Card")
         }
         contentChanged()
     }
@@ -627,15 +591,26 @@ final class CanvasTextNodeView: CanvasNodeView {
         let id = node.id
         let undo = UndoManager()
         editingUndo = undo
+        // What is about to be on screen came from the document, so this session has nothing
+        // outstanding for the document to be echoing back. See `CanvasCardEditing.editorBuilt`.
+        editing?.editorBuilt()
         let view = NSHostingView(rootView:
             CanvasTextEditing(text: text, zoom: contentZoom, undoManager: undo) { [weak self] edited in
-                // Before the change, not after: the store notifies inside `change`, so the answer has
-                // to be in place by the time it comes back to us. See `reported`.
-                self?.reported = edited
-                // Quietly: a keystroke is a step in the editor, not in the document — see `editingUndo`.
-                self?.board.store.changeQuietly { doc in
+                guard let self else { return }
+                let write = { (doc: inout CanvasDocument) in
                     guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
                     doc.nodes[index].content = .text(edited)
+                }
+                // The first keystroke of a session is the document's one step; every one after it is
+                // the editor's own, and goes in quietly. See `CanvasCardEditing.hasWritten`.
+                let opensTheEdit = editing?.hasWritten == false
+                // Told before the change, not after: the store notifies inside `change`, so the answer
+                // to "is this mine?" has to be in place by the time it comes back to us.
+                editing?.wrote(edited)
+                if opensTheEdit {
+                    board.store.change("Edit Card", write)
+                } else {
+                    board.store.changeQuietly(write)
                 }
             } onDone: { [weak self] in
                 self?.engage(false)

@@ -809,6 +809,13 @@ final class ShortcutTextView: NSTextView {
 
     /// The pasteboard a paste reads. The general one in the app, always; a test points it at its own
     /// so running the suite doesn't wipe what you had copied.
+    ///
+    /// Honoured by the *whole* of `paste(_:)`, including the fall-through — which is why that ends in
+    /// `readSelection(from:)`, the call `NSTextView.paste(_:)` makes internally, rather than in
+    /// `super.paste`. `super` reads the general pasteboard whatever this says, so with it there the
+    /// seam covered the branches this class handles and stopped exactly where ordinary text began:
+    /// the commonest paste of all was the one no test could make without reaching for the clipboard
+    /// you were actually using.
     var pasteSource: NSPasteboard = .general
 
     /// The `@` mention list, and the sigil position the reader last dismissed it at.
@@ -1179,7 +1186,9 @@ final class ShortcutTextView: NSTextView {
             insert(embed, at: selectedRange())
             return
         }
-        super.paste(sender)
+        // Anything else pastes as itself — see `pasteSource` for why this is spelled out rather than
+        // left to `super`.
+        readSelection(from: pasteboard)
     }
 
     // MARK: writing images into the note
