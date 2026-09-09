@@ -73,11 +73,12 @@ struct ProjectView: View {
     /// The single resolved insertion slot for the in-flight drag — where to paint the indicator and
     /// which document slot the drop will use. Nil when nothing is being dragged over the list.
     @State private var dropTarget: DropTarget?
-    /// The selected task rows, by `PMStore.key`. Ephemeral (never persisted): the keys are document
-    /// positions, so they only mean anything against the currently-loaded todos.
-    @State private var selection: Set<String> = []
-    /// The row a ⇧-click or ⇧-arrow extends the selection *from* — the last row picked without ⇧.
-    @State private var selectionAnchor: String?
+    /// The selected rows, by `PMStore.key` (or `sessionKey`). Ephemeral (never persisted): the keys
+    /// are document positions, so they only mean anything against the currently-loaded todos.
+    ///
+    /// The rules live in `RowSelection` rather than here, because the project card is the same list on
+    /// a board and a second copy of "what does ⇧-click do" is two answers waiting to drift.
+    @State private var selection = RowSelection()
     /// Whether the task list holds keyboard focus. Drives "emphasized" selection — the Mac's
     /// distinction between a selection in the focused control and the same selection in an unfocused
     /// one — and mirrors itself into `state.focusedPane`, which is what routes ⌘A / ⌘C / Return across
@@ -170,10 +171,7 @@ struct ProjectView: View {
         // doesn't survive the collapse — left behind, it would keep ⌘N and Return pointing at a row
         // that isn't on screen.
         if !expanded {
-            selection = selection.filter { Self.sessionIndex(fromRowKey: $0) == nil }
-            if let anchor = selectionAnchor, Self.sessionIndex(fromRowKey: anchor) != nil {
-                selectionAnchor = nil
-            }
+            selection.remove { Self.sessionIndex(fromRowKey: $0) != nil }
         }
         withAnimation(Self.detailsMotion) { detailsExpanded = expanded }
         if storedDetailsExpanded != expanded { storedDetailsExpanded = expanded }
@@ -213,7 +211,7 @@ struct ProjectView: View {
     /// The session a command should act on: the one whose header is selected, on its own. Nil whenever
     /// the selection is a task, or spans more than one row.
     private var selectedSessionIndex: Int? {
-        guard selection.count == 1, let key = selection.first else { return nil }
+        guard let key = selection.single else { return nil }
         return Self.sessionIndex(fromRowKey: key)
     }
 
@@ -376,8 +374,7 @@ struct ProjectView: View {
             editingDetails = false
             addingFirstTask = false
             // A different project's tasks are behind the same keys, so nothing selected survives.
-            selection = []
-            selectionAnchor = nil
+            selection.clear()
             pendingDelete = []
         }
         // A completed move (or any reload) reindexes the todos, so drop the now-stale drag state, and
@@ -386,8 +383,7 @@ struct ProjectView: View {
         .onChange(of: store.todos) { _ in
             draggingKey = nil
             dropTarget = nil
-            let live = Set(rowKeys)
-            if !selection.isSubset(of: live) { selection.formIntersection(live) }
+            selection.keep(within: rowKeys)
         }
         // Adding/deleting a session shifts session indices, so close any open session editor when the
         // count changes (a keyed editor would otherwise point at the wrong session) — unless this
@@ -710,8 +706,7 @@ struct ProjectView: View {
             // After the reload, so the keys name rows that exist. Whatever's new is what landed.
             let arrived = rowKeys.filter { !before.contains($0) }
             guard !arrived.isEmpty else { return }
-            selection = Set(arrived)
-            selectionAnchor = arrived.first
+            selection.select(arrived)
             if let first = arrived.first {
                 scrollToken &+= 1
                 scrollTarget = ScrollRequest(key: first, token: scrollToken)
@@ -723,8 +718,7 @@ struct ProjectView: View {
         if state.focusedPane == .projects {
             state.projectSelection = Set(store.allProjects.map(\.projectKey))
         } else {
-            selection = Set(rowKeys)
-            selectionAnchor = rowKeys.first
+            selection.selectAll(in: rowKeys)
         }
     }
 
@@ -734,15 +728,7 @@ struct ProjectView: View {
     /// note — is the double-click, see `TaskRow` and `SessionHeader`.)
     private func selectRow(_ key: String, modifiers: NSEvent.ModifierFlags) {
         focusTasks()
-        if modifiers.contains(.shift), let anchor = selectionAnchor {
-            selection = keysInRange(from: anchor, to: key)
-        } else if modifiers.contains(.command) {
-            if selection.contains(key) { selection.remove(key) } else { selection.insert(key) }
-            selectionAnchor = key
-        } else {
-            selection = [key]
-            selectionAnchor = key
-        }
+        selection.click(key, modifiers: modifiers, in: rowKeys)
     }
 
     /// The rows a row's context menu acts on: the whole selection when the click lands inside it, just
@@ -763,17 +749,8 @@ struct ProjectView: View {
     /// Move the highlight onto a right-clicked row that isn't part of the current selection. Driven by
     /// an actual `rightMouseDown`, so it runs once per click rather than once per row per render.
     private func selectForContextMenu(_ key: String) {
-        guard !selection.contains(key) else { return }
-        selection = [key]
-        selectionAnchor = key
+        guard selection.revealForContextMenu(key) else { return }
         focusTasks()
-    }
-
-    /// Every visible row's key between two rows inclusive, in visible order.
-    private func keysInRange(from anchor: String, to key: String) -> Set<String> {
-        let keys = rowKeys
-        guard let i = keys.firstIndex(of: anchor), let j = keys.firstIndex(of: key) else { return [key] }
-        return Set(keys[min(i, j)...max(i, j)])
     }
 
     /// ↑/↓ move the selection one row; holding ⇧ extends it from the anchor instead. With nothing
@@ -783,25 +760,15 @@ struct ProjectView: View {
     /// `onMoveCommand` doesn't report modifiers, so ⇧ is read from the current event state; that read
     /// happens while the keystroke is being handled, so it reflects the key that caused it.
     private func moveSelection(_ direction: MoveCommandDirection) {
-        let keys = rowKeys
-        guard !keys.isEmpty else { return }
         let step: Int
         switch direction {
         case .up: step = -1
         case .down: step = 1
         default: return
         }
-        let selected = keys.indices.filter { selection.contains(keys[$0]) }
-        let from = step < 0 ? (selected.first ?? keys.count) : (selected.last ?? -1)
-        let key = keys[min(max(from + step, 0), keys.count - 1)]
-        if NSEvent.modifierFlags.contains(.shift) {
-            let anchor = selectionAnchor ?? key
-            selection = keysInRange(from: anchor, to: key)
-            selectionAnchor = anchor
-        } else {
-            selection = [key]
-            selectionAnchor = key
-        }
+        guard let key = selection.step(step, extending: NSEvent.modifierFlags.contains(.shift),
+                                       in: rowKeys)
+        else { return }
         scrollToken &+= 1
         scrollTarget = ScrollRequest(key: key, token: scrollToken)
         focusTasks()
@@ -823,8 +790,7 @@ struct ProjectView: View {
         pendingDelete = []
         // Selection keys are document positions: after a delete the surviving ones name different
         // tasks, so the honest move is to start clean rather than silently reselect the neighbours.
-        selection = []
-        selectionAnchor = nil
+        selection.clear()
     }
 
     /// The inline delete confirmation, pinned under the header so it can't scroll out of reach.
@@ -994,12 +960,11 @@ struct ProjectView: View {
     private func stepFind(by direction: Int) {
         let keys = rowKeys
         guard !keys.isEmpty else { NSSound.beep(); return }
-        let current = selection.count == 1 ? selection.first.flatMap(keys.firstIndex(of:)) : nil
+        let current = selection.single.flatMap(keys.firstIndex(of:))
         let next = current.map { ($0 + direction + keys.count) % keys.count }
             ?? (direction > 0 ? 0 : keys.count - 1)
         let key = keys[next]
-        selection = [key]
-        selectionAnchor = key
+        selection.select([key])
         scrollToken &+= 1
         scrollTarget = ScrollRequest(key: key, token: scrollToken)
     }
@@ -1103,8 +1068,7 @@ struct ProjectView: View {
         } else if findVisible {
             closeFind()
         } else if !selection.isEmpty || hasProjectMultiSelection {
-            selection = []
-            selectionAnchor = nil
+            selection.clear()
             state.collapseProjectSelection(to: store.projectKey)
         }
         // ...and stops there. A real window isn't summoned, so Escape has no business closing it —

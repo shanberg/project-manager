@@ -172,6 +172,7 @@ targets:
       - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift
       - path: PM/Project/ProjectTab.swift
+      - path: PM/Project/RowSelection.swift
       - path: PM/QuickBar/ProjectSearch.swift
     dependencies:
       - package: PmLib
