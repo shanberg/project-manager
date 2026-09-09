@@ -65,9 +65,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             }
         }
         scroll.board.onSaveWorkspace = { [weak self] name in self?.saveWorkspace(as: name) }
-        scroll.board.onRemoveWorkspace = { [weak self] name in self?.removeWorkspace(name) }
+        scroll.board.onRemoveWorkspace = { [weak tabs] name in tabs?.deleteWorkspace(name) }
+        scroll.board.onRenameWorkspace = { [weak tabs] name in tabs?.renameWorkspace(name) }
         scroll.board.onGoToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
         scroll.board.workspaceNames = { [weak self] in self?.workspaceNames() ?? [] }
+        scroll.board.onDuplicateWorkspace = { [weak tabs] name in tabs?.duplicateWorkspace(name) }
+        // The workspace on screen has stopped being the one it was, and the one it was still exists —
+        // so it keeps a chip. See `CanvasBoardView.onLeftWorkspace`.
+        scroll.board.onLeftWorkspace = { [weak self] name in self?.onLeftWorkspace?(name) }
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
@@ -195,6 +200,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         }
     }
 
+    /// Whether this pane has fitted, restored and applied its focus — see `fitWhenThereIsAWindowToFitTo`.
+    ///
+    /// **Asked before a tab is allowed to follow its board.** A pane pinned to a workspace spends a
+    /// runloop turn or more knowing nothing about it, and a tab reconciled against that pane in the
+    /// meantime would read "in no workspace" and throw the pin away before it was ever applied. See
+    /// `ProjectSplitViewController.reconcileWorkspacePins`.
+    var isSettled: Bool { hasFitted }
+
     private var hasFitted = false
 
     // MARK: How you were looking at this board
@@ -222,8 +235,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // A pane that was opened *at* something takes its state from what it was opened at, not from
         // how the board was last left. This is also what keeps two tabs on one canvas from fighting
         // over the single row `CanvasViewMemory` keeps per file: only the plain one writes to it.
-        guard focus == .whole, !hasRestoredViewState else { return }
+        //
+        // **Settled here, once, rather than re-read from `focus`** — which now moves. A tab follows the
+        // board it holds, so the plain tab you named a workspace in becomes a workspace tab
+        // (`ProjectSplitViewController.reconcileWorkspacePins`), and a pane that stopped writing at
+        // that moment would stop remembering the connect mode and the refresh interval too. Ownership
+        // is about which pane opened the board, not about what its tab has since become.
+        guard !hasRestoredViewState else { return }
         hasRestoredViewState = true
+        ownsViewMemory = focus == .whole
+        guard ownsViewMemory else { return }
         let remembered = CanvasViewMemory.of(store.url)
         scroll.board.mode = remembered.mode
         scroll.board.refreshInterval = remembered.refreshInterval
@@ -246,11 +267,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Silent until the restore has happened, so the empty state a board starts in cannot overwrite
     /// the state being restored into it.
     private func rememberViewState() {
-        guard focus == .whole, hasRestoredViewState else { return }
+        guard ownsViewMemory else { return }
         CanvasViewMemory.remember(viewState, for: store.url)
     }
 
     private var hasRestoredViewState = false
+    /// Whether this pane is the one that owns the board's row in `CanvasViewMemory` — see
+    /// `restoreViewState`, which is the only thing that decides it.
+    private var ownsViewMemory = false
 
     /// Put the board where this tab says it should be.
     ///
@@ -306,24 +330,53 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         CanvasWorkspaces.save(tiling, as: name, for: store.url)
         scroll.board.workspaceName = name
         workspacesChanged()
-    }
-
-    /// Forget one. What is on screen is untouched — a deleted workspace is a workspace that has stopped
-    /// having a name, not a tiling that has stopped existing — so the board keeps its tiles and loses
-    /// only the name, and only if it was in the one that went.
-    func removeWorkspace(_ name: String) {
-        CanvasWorkspaces.remove(name, for: store.url)
-        if scroll.board.workspaceName == name { scroll.board.workspaceName = nil }
-        workspacesChanged()
+        // The chip has to become this workspace's chip, and naming is the one act that changes which
+        // workspace a tab is in without changing the tiling — so nothing else would tell the bar.
+        onTilingChanged?()
     }
 
     /// Switch to one.
     ///
+    /// **The tab it is already open in, if it is open in one.** Two chips on one workspace are two
+    /// names for one thing, so switching goes to the chip that exists rather than retiling this board
+    /// into a second copy of it — the same answer `WindowManager` gives for a project that already has
+    /// a window (docs/canvas-workspaces.md §7c).
+    ///
     /// Silent about a name that is not there any more, which is the same answer `applyFocus` gives: a
     /// workspace deleted in another window is a stale menu, not a reason to do something drastic.
     func goToWorkspace(named name: String) {
+        guard !tabModel.selectWorkspace(name) else { return }
         guard let tiling = CanvasWorkspaces.tiling(named: name, of: store.url) else { return }
         scroll.board.restoreTiling(tiling, named: name)
+    }
+
+    /// **The workspace this pane is showing has stopped being the one it was.** Told with the name it
+    /// was, so the window can keep that one open in a chip of its own — see
+    /// `CanvasBoardView.onLeftWorkspace`, which is where the two acts that do this are named.
+    var onLeftWorkspace: ((String) -> Void)?
+
+    /// Name the workspace that is up — the chip's item for the unnamed one, which has no name to route
+    /// by and so is asked for by tab. Through the board's own command, because the tiling being named
+    /// is the volatile one only the board has.
+    func nameWorkspace() { scroll.board.saveTilingAsWorkspace(nil) }
+
+    /// Re-read the board's named workspaces, for a menu that has to be right without anything on this
+    /// board having changed — one of the window's other tabs renamed or deleted one.
+    func refreshWorkspaceLists() { workspacesChanged() }
+
+    /// A workspace was renamed from somewhere else in this window — a chip's menu, on this tab or
+    /// another. A board that is *in* the one that moved follows it; a board that is not is untouched.
+    func workspaceRenamed(from old: String, to new: String) {
+        if scroll.board.workspaceName == old { scroll.board.workspaceName = new }
+        workspacesChanged()
+    }
+
+    /// A workspace was deleted from somewhere else in this window. What is on screen is untouched, for
+    /// the reason `removeWorkspace` gives: a deleted workspace is one that has stopped having a name,
+    /// not a tiling that has stopped existing.
+    func workspaceDeleted(_ name: String) {
+        if scroll.board.workspaceName == name { scroll.board.workspaceName = nil }
+        workspacesChanged()
     }
 
     /// **The write-through, and the whole of "adjusting one is not saving one".**
@@ -614,6 +667,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.goToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
         header.nameWorkspace = { [weak self] in self?.scroll.board.saveTilingAsWorkspace(nil) }
         header.renameWorkspace = { [weak self] in self?.scroll.board.renameWorkspace(nil) }
+        header.duplicateWorkspace = { [weak self] in self?.scroll.board.duplicateWorkspace(nil) }
         header.deleteWorkspace = { [weak self] in self?.scroll.board.deleteWorkspace(nil) }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }

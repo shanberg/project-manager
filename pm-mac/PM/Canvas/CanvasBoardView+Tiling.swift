@@ -107,7 +107,17 @@ extension CanvasBoardView {
         // another. A non-empty history means you are drilling *into* the one you are already in, which
         // Escape unwinds — and a drill-in that renamed the board's workspace to nothing would strand
         // you, one press from a tiling with no name and nowhere to put it back.
-        if remembered == nil, tilingHistory.isEmpty { workspaceName = nil }
+        //
+        // **What is left behind keeps a tab**, rather than only a line in a menu. The workspace you
+        // were in still exists in the durable store and is still one click away — and now the click is
+        // on a chip beside this one, because the window is where the workspaces you have open live
+        // (docs/canvas-workspaces.md §7c). It is the pane in front of you that becomes the fresh
+        // Untitled one, since that is the pane holding the selection this command just acted on.
+        if remembered == nil, tilingHistory.isEmpty {
+            let left = workspaceName
+            workspaceName = nil
+            left.map(onLeftWorkspace)
+        }
         // **At 100%, whatever the board was at.** A tiling fills the window with cards, and on a board
         // zoomed out to 40% — where you nearly always are when you decide to fill the window with
         // something — it would fill it with cards whose text is at 40%. Filling the window is a request

@@ -159,6 +159,7 @@ targets:
       - path: PM/Canvas/CanvasTileSession.swift
       - path: PM/Canvas/CanvasViewState.swift
       - path: PM/Canvas/CanvasWorkspaces.swift
+      - path: PM/Canvas/WorkspaceNamePrompt.swift
       - path: PM/Canvas/CanvasCardZoom.swift
       - path: PM/Canvas/CanvasPageTitles.swift
       - path: PM/Canvas/CanvasCardSession.swift

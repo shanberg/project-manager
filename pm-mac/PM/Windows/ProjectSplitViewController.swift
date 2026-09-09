@@ -326,10 +326,27 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
         tabModel.openWorkspace = { [weak self] name in self?.openTab(.board(.workspace(name))) }
         tabModel.leaveTiling = { [weak self] in self?.canvasPane?.leaveTiling() }
+        tabModel.selectWorkspace = { [weak self] name in self?.selectWorkspace(name) ?? false }
+        tabModel.nameWorkspace = { [weak self] id in
+            (self?.contentPane.content(for: id) as? CanvasPaneController)?.nameWorkspace()
+        }
+        tabModel.renameWorkspace = { [weak self] name in self?.renameWorkspace(named: name) }
+        tabModel.duplicateWorkspace = { [weak self] name in self?.duplicateWorkspace(named: name) }
+        tabModel.deleteWorkspace = { [weak self] name in self?.deleteWorkspace(named: name) }
     }
 
+    /// Open this view in a tab, or go to the tab already showing it.
+    ///
+    /// **A second chip on one thing is two names for it**, and picking between them is a question with
+    /// no answer — so opening what is open is switching to it. That is the same call `WindowManager`
+    /// makes for a project that already has a window, and under docs/canvas-workspaces.md §7c it is
+    /// what lets the bar be read as the list of what you have open.
     func openTab(_ view: ProjectTabView) {
-        tabs.open(view)
+        if let existing = tabs.first(showing: view) {
+            tabs.select(existing.id)
+        } else {
+            tabs.open(view)
+        }
         applySelectedTab()
     }
 
@@ -406,6 +423,15 @@ final class ProjectSplitViewController: NSSplitViewController {
             self?.replaceSelected(with: .notes)
         }
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
+        // ⌘Return started a fresh workspace, or a duplicate did — either way the named one it left is
+        // still in the store and now keeps a chip, so it is a click away instead of a menu away. The
+        // pane in front of you is the one that becomes the new thing, because it is the one holding
+        // the selection the command acted on; the tab for what it left is made behind it.
+        pane.onLeftWorkspace = { [weak self] name in
+            guard let self else { return }
+            tabs.openBehind(.board(.workspace(name)))
+            refreshTabModel()
+        }
         return pane
     }
 
@@ -423,41 +449,158 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// a frame's label is the frame's, not the tab's — so a frame renamed in Obsidian renames the tab
     /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
     func refreshTabModel() {
+        reconcileWorkspacePins()
         let board = canvasPane
         tabModel.items = tabs.tabs.map { tab in
             // Its own board, not the one on screen: a tab tiled in the background still says so, and
             // asking the visible pane for every tab's state would put one tab's tiling on all of them.
             let pane = contentPane.content(for: tab.id) as? CanvasPaneController
             let count = pane?.tilingSummary?.short
-            // The chip is where the readout went when the bar appeared, so it takes the pill's rule
-            // with it: the workspace's name when it has one, the count when it hasn't.
-            let detail = pane?.tilingSummary == nil ? nil : (pane?.workspaceName ?? count)
             switch tab.view {
             case .notes:
                 return ProjectTabItem(id: tab.id, name: "Notes", symbol: "list.bullet")
             case .board(.whole):
-                return ProjectTabItem(id: tab.id, name: "Canvas", symbol: "rectangle.3.group",
-                                      detail: detail)
+                // Tiled and unnamed is the *untitled workspace*, and the chip says so in the words the
+                // menu uses — which is how "ephemeral unless named" stops being merely true and
+                // becomes something on screen. Untiled, it is the board, and the board is not a
+                // workspace: a workspace is a set of tiles (docs/canvas-workspaces.md §7).
+                guard let count else {
+                    return ProjectTabItem(id: tab.id, name: "Canvas", symbol: "rectangle.3.group")
+                }
+                return ProjectTabItem(id: tab.id, name: "Untitled", symbol: "square.grid.2x2",
+                                      isWorkspace: true, detail: count)
             case .board(.frame(let node)):
+                // A frame you have tiled is an unnamed workspace made out of it, so the chip offers to
+                // name it — while still saying which frame you are in, because that is where you are.
                 return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
-                                      symbol: "square.dashed", detail: detail)
+                                      symbol: "square.dashed", isWorkspace: count != nil,
+                                      detail: count)
             case .board(.workspace(let name)):
                 // The chip already *is* the workspace's name, so the count goes back to being the
                 // detail — "Dashboard · Dashboard" says nothing twice.
                 return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
-                                      detail: count)
+                                      isWorkspace: true, workspaceName: name, detail: count)
             }
         }
         // The pill gives the readout up to the tabs the moment there are tabs to give it to, and takes
         // it back when the bar goes away — for every board in the window, not only the visible one,
         // since a background tab's pill is what you see the instant you switch to it.
         for tab in tabs.tabs {
-            (contentPane.content(for: tab.id) as? CanvasPaneController)?
-                .header.showsTilingSummary = !tabs.showsBar
+            guard let pane = contentPane.content(for: tab.id) as? CanvasPaneController else { continue }
+            pane.header.showsTilingSummary = !tabs.showsBar
+            // And the list in its readout's menu, which another tab's chip may have just changed.
+            pane.refreshWorkspaceLists()
         }
         tabModel.selectedID = tabs.selectedID
         tabModel.frames = board?.frames() ?? []
         tabModel.workspaces = board?.workspaceNames() ?? []
+    }
+
+    // MARK: The workspaces this window has open
+
+    /// **A tab follows the board it is holding.**
+    ///
+    /// There used to be two ways to be in "Dashboard" and they drew differently: a tab *pinned* to it,
+    /// and a plain board tab that had switched to it from the readout's menu — `Dashboard · 6/43` in
+    /// one chip and `Canvas · Dashboard` in another, for the same six cards on the same board. Two
+    /// spellings of one fact is the shape of fault §7b diagnosed one layer down, so this is the same
+    /// fix applied again: the pane's `workspaceName` is the answer, and the tab is made to agree with
+    /// it (docs/canvas-workspaces.md §7c).
+    ///
+    /// Only *named* workspaces move a pin. An unnamed one has no name to point at — that is what
+    /// unnamed means — so a board tab that gets tiled stays a board tab and a frame tab that gets tiled
+    /// stays on its frame, which is what both of them should reopen at.
+    ///
+    /// A tab with no pane yet is left alone: it has not been looked at, so its pin *is* its truth.
+    private func reconcileWorkspacePins() {
+        for tab in tabs.tabs {
+            guard case .board(let pin) = tab.view,
+                  let pane = contentPane.content(for: tab.id) as? CanvasPaneController,
+                  pane.isSettled
+            else { continue }
+            let pinned: String? = if case .workspace(let name) = pin { name } else { nil }
+            guard pinned != pane.workspaceName else { continue }
+            let next = pane.workspaceName.map(CanvasFocus.workspace) ?? .whole
+            tabs.retarget(tab.id, to: .board(next))
+            pane.focus = next
+        }
+    }
+
+    /// Go to the tab already showing this workspace. False when none is, which is the caller's cue to
+    /// switch the board it has — see `CanvasPaneController.goToWorkspace(named:)`.
+    private func selectWorkspace(_ name: String) -> Bool {
+        guard let tab = tabs.first(showing: .board(.workspace(name))), tab.id != tabs.selectedID
+        else { return false }
+        tabs.select(tab.id)
+        applySelectedTab()
+        return true
+    }
+
+    /// Rename a workspace, **and carry its chips across with it**.
+    ///
+    /// §7b accepted that renaming broke a tab pinned to the old name, on the grounds that the name is
+    /// the whole of a workspace's identity and a pin that stops resolving lands on the board. That is
+    /// still true of pins in *other* windows. It stopped being true here the moment a tab became where
+    /// a workspace lives: this window knows every chip on the old name, so it moves them.
+    ///
+    /// A remove and a save rather than a key change, because there is nothing underneath the name to
+    /// re-key. Saved before the old one is removed, so a failure leaves you with both rather than
+    /// neither.
+    func renameWorkspace(named old: String) {
+        guard let url = canvasSource().url,
+              let tiling = CanvasWorkspaces.tiling(named: old, of: url),
+              let new = WorkspaceNamePrompt.run(titled: "Rename “\(old)”", seed: old), new != old
+        else { return }
+        CanvasWorkspaces.save(tiling, as: new, for: url)
+        CanvasWorkspaces.remove(old, for: url)
+        for tab in tabs.tabs where tab.view == .board(.workspace(old)) {
+            tabs.retarget(tab.id, to: .board(.workspace(new)))
+            let pane = contentPane.content(for: tab.id) as? CanvasPaneController
+            pane?.focus = .workspace(new)
+            pane?.workspaceRenamed(from: old, to: new)
+        }
+        refreshTabModel()
+    }
+
+    /// Copy a workspace and open the copy — backlog item 10, and the last of §7b.
+    ///
+    /// You have built a six-tile workspace and want a variant of it; before this the only answer was to
+    /// build the variant from scratch. §7b made that shortage sharper rather than easier: a named
+    /// workspace is adjusted **live**, so "let me try something without wrecking this one" had nowhere
+    /// left to go. It goes here.
+    ///
+    /// Copied from the store rather than from a board, so a workspace you are not looking at can be
+    /// duplicated from its chip. For the one you are in they are the same bytes anyway — the
+    /// write-through keeps the durable row level with the screen.
+    ///
+    /// The copy arrives in its own tab and takes the selection, which is the shape every act that
+    /// *makes* a workspace now has, ⌘Return included.
+    func duplicateWorkspace(named old: String) {
+        guard let url = canvasSource().url,
+              let tiling = CanvasWorkspaces.tiling(named: old, of: url)
+        else { return }
+        let taken = CanvasWorkspaces.names(of: url)
+        guard let new = WorkspaceNamePrompt.run(
+            titled: "Duplicate “\(old)”",
+            seed: WorkspaceNamePrompt.copyName(of: old, avoiding: taken)), new != old
+        else { return }
+        CanvasWorkspaces.save(tiling, as: new, for: url)
+        openTab(.board(.workspace(new)))
+    }
+
+    /// Forget a workspace. What is on screen is untouched — a deleted workspace is one that has
+    /// stopped having a name, not a tiling that has stopped existing — so a tab that was in it keeps
+    /// its tiles and becomes the untitled workspace it now is.
+    func deleteWorkspace(named name: String) {
+        guard let url = canvasSource().url else { return }
+        CanvasWorkspaces.remove(name, for: url)
+        for tab in tabs.tabs where tab.view == .board(.workspace(name)) {
+            tabs.retarget(tab.id, to: .board(.whole))
+            let pane = contentPane.content(for: tab.id) as? CanvasPaneController
+            pane?.focus = .whole
+            pane?.workspaceDeleted(name)
+        }
+        refreshTabModel()
     }
 
     /// Back to the task list — View ▸ Show Canvas turning itself off, and the empty state's button.

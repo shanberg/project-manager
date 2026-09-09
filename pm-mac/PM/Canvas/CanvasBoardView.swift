@@ -98,6 +98,15 @@ final class CanvasBoardView: NSView {
     /// it. See `CanvasViewState.workspaceName`, and `tile(_:)` for the one act that clears it.
     var workspaceName: String?
 
+    /// **The workspace on screen has stopped being the one you were in, and that one still exists.**
+    ///
+    /// Sent with the name being left, by the two acts that leave a named workspace behind rather than
+    /// changing it: ⌘Return, which starts a fresh unnamed one (`tile(_:)`), and duplicating. The window
+    /// answers by giving the one being left a tab of its own, so it stays on screen a click away
+    /// instead of only in a menu — docs/canvas-workspaces.md §7c. A board with no window around it
+    /// drops it, which is right: there is nowhere for a second view to go.
+    var onLeftWorkspace: (String) -> Void = { _ in }
+
     /// Open part of this board as a tab of the window it is in — see `CanvasPaneController.tabModel`,
     /// which says why these are no longer optional.
     var onOpenInTab: (CanvasFocus) -> Void = { _ in }
@@ -108,6 +117,13 @@ final class CanvasBoardView: NSView {
     /// Switch to a named workspace. Routed out to the pane because the names live in a store the board
     /// has no url to read — the board knows cards, the pane knows which document they are in.
     var onGoToWorkspace: (String) -> Void = { _ in }
+    /// Make a copy of a named workspace and open it. Routed out for the reason `duplicateWorkspace`
+    /// gives: the copy wants a tab, and tabs are the window's.
+    var onDuplicateWorkspace: (String) -> Void = { _ in }
+    /// Rename a named workspace. Routed out with the rest, so the one implementation is the one that
+    /// can also carry every tab pinned to the old name across — see
+    /// `ProjectSplitViewController.renameWorkspace(named:)`.
+    var onRenameWorkspace: (String) -> Void = { _ in }
     /// The board's named workspaces, for the menus that list them.
     var workspaceNames: () -> [String] = { [] }
 

@@ -190,6 +190,7 @@ final class CanvasHeaderModel: ObservableObject {
     var goToWorkspace: (String) -> Void = { _ in }
     var nameWorkspace: () -> Void = {}
     var renameWorkspace: () -> Void = {}
+    var duplicateWorkspace: () -> Void = {}
     var deleteWorkspace: () -> Void = {}
 }
 
@@ -279,12 +280,13 @@ struct CanvasTitlePill: View {
                 }
             }
             Divider()
-            if model.workspace == nil {
-                Button("Name This Workspace…", action: model.nameWorkspace)
-            } else {
-                Button("Rename…", action: model.renameWorkspace)
-                Button("Delete", action: model.deleteWorkspace)
-            }
+            // The same items a chip carries, because this *is* the chip until there is a bar to hold
+            // one — see `WorkspaceCommands`.
+            WorkspaceCommands(name: model.workspace,
+                              nameIt: model.nameWorkspace,
+                              rename: model.renameWorkspace,
+                              duplicate: model.duplicateWorkspace,
+                              delete: model.deleteWorkspace)
         } label: {
             Text(model.workspace
                  ?? (model.room.showsLongTilingSummary ? tiling.long : tiling.short))

@@ -11,6 +11,12 @@ struct ProjectTabItem: Identifiable, Equatable {
     /// What kind of view it is, which is what lets the name stay short — a frame called "Research"
     /// and a workspace called "Research" are told apart by the glyph rather than by a prefix.
     let symbol: String
+    /// Whether this tab is showing a workspace — named or not. What the chip hangs the workspace's
+    /// own commands off, and what earns it the workspace glyph: a board you tiled is in one whether or
+    /// not you have named it yet.
+    var isWorkspace = false
+    /// The name of that workspace, or nil for the unnamed one. See `WorkspaceCommands`.
+    var workspaceName: String?
     /// A state of *this* view, after its name — "6/43" while it is tiled.
     ///
     /// This used to be the title pill's, and the pill's argument for it was sound while a window showed
@@ -42,6 +48,11 @@ struct ProjectTabBar<AddMenu: View>: View {
     var select: (String) -> Void
     var close: (String) -> Void
     var leaveTiling: () -> Void
+    /// The workspace verbs, on the chip of the workspace they act on — see `WorkspaceCommands`.
+    var nameWorkspace: (String) -> Void
+    var renameWorkspace: (String) -> Void
+    var duplicateWorkspace: (String) -> Void
+    var deleteWorkspace: (String) -> Void
     @ViewBuilder var addMenu: () -> AddMenu
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
@@ -97,6 +108,22 @@ struct ProjectTabBar<AddMenu: View>: View {
             }
         }
         .buttonStyle(.plain)
+        // **A workspace's commands live on the workspace.** Right-click is where a Mac keeps the verbs
+        // for the thing under the pointer, and it keeps them off the board's tile menu, which is for
+        // what you do to a tile — docs/canvas-workspaces.md §7c. Offered on every workspace chip and
+        // not only the current one: renaming the one you are not looking at is a fair thing to want,
+        // and the chip is the only place it is named.
+        .contextMenu {
+            if item.isWorkspace {
+                WorkspaceCommands(name: item.workspaceName,
+                                  nameIt: { nameWorkspace(item.id) },
+                                  rename: { item.workspaceName.map(renameWorkspace) },
+                                  duplicate: { item.workspaceName.map(duplicateWorkspace) },
+                                  delete: { item.workspaceName.map(deleteWorkspace) })
+                Divider()
+            }
+            Button("Close Tab") { close(item.id) }.disabled(items.count == 1)
+        }
         .onHover { hovering = $0 ? item.id : (hovering == item.id ? nil : hovering) }
         .help(item.name)
         .accessibilityLabel(Text(item.name))
@@ -175,6 +202,16 @@ final class ProjectTabModel: ObservableObject {
     var openBoard: () -> Void = {}
     var openFrame: (String) -> Void = { _ in }
     var openWorkspace: (String) -> Void = { _ in }
+    /// The workspace verbs — see `WorkspaceCommands`. By **name**, because a workspace is the same
+    /// workspace whichever chip you reached it from and the window has to find every chip on it either
+    /// way. Naming is the exception and goes by tab id: an unnamed workspace has no name to route by,
+    /// and it is the pane holding it that knows the tiling being named.
+    var nameWorkspace: (String) -> Void = { _ in }
+    var renameWorkspace: (String) -> Void = { _ in }
+    var duplicateWorkspace: (String) -> Void = { _ in }
+    var deleteWorkspace: (String) -> Void = { _ in }
+    /// Go to the tab already showing this workspace, and say whether there was one.
+    var selectWorkspace: (String) -> Bool = { _ in false }
     /// Leave the tiled view on the board the current tab is showing — the badge on its chip.
     var leaveTiling: () -> Void = {}
 }
@@ -197,6 +234,10 @@ struct ProjectTabBarHost: View {
                           select: model.select,
                           close: model.close,
                           leaveTiling: model.leaveTiling,
+                          nameWorkspace: model.nameWorkspace,
+                          renameWorkspace: model.renameWorkspace,
+                          duplicateWorkspace: model.duplicateWorkspace,
+                          deleteWorkspace: model.deleteWorkspace,
                           addMenu: { addMenu })
                 .onHover { hovering = $0 }
         }
@@ -232,5 +273,38 @@ struct ProjectTabBarHost: View {
         .fixedSize()
         .help("New Tab")
         .accessibilityLabel(Text("New Tab"))
+    }
+}
+
+/// The verbs on a workspace, wherever one is shown.
+///
+/// **Written once because there are two places to show it and one of them is a stand-in.** A chip is a
+/// workspace's home in the window (docs/canvas-workspaces.md §7c) — but one tab is no tabs, so a window
+/// showing a single board has no bar and no chip, and the title pill's readout carries the same menu
+/// until a second tab makes the bar appear. That is the handoff the readout itself already makes; these
+/// items follow it rather than being written out twice.
+///
+/// **Name and Rename are one item**, for the reason `CanvasBoardView.saveTilingAsWorkspace` gives: a
+/// workspace that has a name cannot be named again, and letting Name run on a named one would leave the
+/// old one behind and put you in a second — a duplicate arrived at by picking the wrong item. Duplicate
+/// is right below it, asked for on purpose.
+struct WorkspaceCommands: View {
+    /// The workspace's name, or nil for an unnamed one — which has nothing to duplicate or delete,
+    /// because there is nothing kept to make a copy of or to forget.
+    let name: String?
+    var nameIt: () -> Void
+    var rename: () -> Void
+    var duplicate: () -> Void
+    var delete: () -> Void
+
+    var body: some View {
+        if let name {
+            Button("Rename “\(name)”…", action: rename)
+            Button("Duplicate “\(name)”…", action: duplicate)
+            Divider()
+            Button("Delete “\(name)”", action: delete)
+        } else {
+            Button("Name This Workspace…", action: nameIt)
+        }
     }
 }

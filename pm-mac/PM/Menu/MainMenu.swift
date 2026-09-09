@@ -287,36 +287,6 @@ enum MainMenu {
         }
         let arrangeItem = menu.addItem(withTitle: "Arrange Tiles", action: nil, keyEquivalent: "")
         arrangeItem.submenu = arrange
-        // Keep the tiling that is up, so a tab can open straight into it. Routed to the board like
-        // everything else here, and dim wherever there are no tabs to pin one to.
-        // **The workspace's home that a menu bar can be read through.**
-        //
-        // The pill's readout is the same list in the place that says where you are, and it is the one
-        // you reach for — but it is gone in a window with a tab bar, where the tab wears the readout
-        // instead (`CanvasHeaderModel.showsTilingSummary`). This is the copy that is always there, on
-        // the same principle as the tile commands: the contextual surface for the thing you pointed at,
-        // and the menu bar for the thing you can look up.
-        //
-        // Nine slots, retitled and dimmed on validation, exactly as "Go to Frame" above does it — a
-        // menu bar is built once and the list it names changes under it.
-        let workspaces = NSMenu(title: "Workspace")
-        for index in 0..<9 {
-            let entry = workspaces.addItem(withTitle: "Workspace \(index + 1)",
-                                           action: #selector(CanvasBoardView.goToWorkspace(_:)),
-                                           keyEquivalent: "")
-            entry.tag = index
-        }
-        workspaces.addItem(.separator())
-        // One item for naming, which retitles itself to "Rename …" once the workspace has a name —
-        // there is no second act there, only a second word for it. See `saveTilingAsWorkspace`.
-        workspaces.addItem(withTitle: "Name This Workspace\u{2026}",
-                           action: #selector(CanvasBoardView.saveTilingAsWorkspace(_:)),
-                           keyEquivalent: "")
-        workspaces.addItem(withTitle: "Delete Workspace",
-                           action: #selector(CanvasBoardView.deleteWorkspace(_:)),
-                           keyEquivalent: "")
-        let workspacesItem = menu.addItem(withTitle: "Workspace", action: nil, keyEquivalent: "")
-        workspacesItem.submenu = workspaces
 
         // **What a tile can be told, with no pointer involved.** These four were reachable only by
         // right-clicking a tile's handlebar — a 3.5pt bar out in the gap, which you had to already know
@@ -336,6 +306,48 @@ enum MainMenu {
         menu.addItem(withTitle: "Leave Tiled View",
                      action: #selector(CanvasBoardView.leaveTilingCommand(_:)),
                      keyEquivalent: "")
+
+        // **The workspace's home that a menu bar can be read through.**
+        //
+        // Beside "Go to Frame" and out of the tile commands, which is where it used to sit. A tile's
+        // menu is for what you do to a tile — promote it, pin it, drop it — and naming or deleting a
+        // workspace is not one of those: it acts on the identity of the whole set. The two were one
+        // group, and separating them is the boundary docs/canvas-workspaces.md §7c draws. Its
+        // neighbour now is the other "go to a named set of cards", which is the thing it is actually
+        // like.
+        //
+        // The chip in the tab bar is a workspace's real home — right-click is where a Mac keeps the
+        // verbs for the thing under the pointer — and the pill's readout stands in for the chip in a
+        // window with one tab. This is the copy that is always there, on the same principle as the tile
+        // commands: the contextual surface for the thing you pointed at, the menu bar for the thing you
+        // look up.
+        //
+        // Nine slots, retitled and dimmed on validation, exactly as "Go to Frame" below does it — a
+        // menu bar is built once and the list it names changes under it.
+        let workspaces = NSMenu(title: "Workspace")
+        for index in 0..<9 {
+            let entry = workspaces.addItem(withTitle: "Workspace \(index + 1)",
+                                           action: #selector(CanvasBoardView.goToWorkspace(_:)),
+                                           keyEquivalent: "")
+            entry.tag = index
+        }
+        workspaces.addItem(.separator())
+        // One item for naming, which retitles itself to "Rename …" once the workspace has a name —
+        // there is no second act there, only a second word for it. See `saveTilingAsWorkspace`.
+        workspaces.addItem(withTitle: "Name This Workspace\u{2026}",
+                           action: #selector(CanvasBoardView.saveTilingAsWorkspace(_:)),
+                           keyEquivalent: "")
+        // Directly under it, because it is the item you wanted when Name would have been wrong: on a
+        // named workspace Name renames, and making a second one is this.
+        workspaces.addItem(withTitle: "Duplicate Workspace\u{2026}",
+                           action: #selector(CanvasBoardView.duplicateWorkspace(_:)),
+                           keyEquivalent: "")
+        workspaces.addItem(.separator())
+        workspaces.addItem(withTitle: "Delete Workspace",
+                           action: #selector(CanvasBoardView.deleteWorkspace(_:)),
+                           keyEquivalent: "")
+        let workspacesItem = menu.addItem(withTitle: "Workspace", action: nil, keyEquivalent: "")
+        workspacesItem.submenu = workspaces
 
         // ⌃1…9 goes to a frame — a region of the board, fitted in the window. Nine, because that is how
         // many a row of number keys holds and how many every manager that does this offers.

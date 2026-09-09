@@ -133,4 +133,55 @@ final class ProjectTabTests: XCTestCase {
         let data = try JSONEncoder().encode(tabs)
         XCTAssertEqual(try JSONDecoder().decode([ProjectTab].self, from: data), tabs)
     }
+
+    // MARK: Tabs as the home of a workspace
+
+    /// ⌘Return leaves the named workspace it was in *open*, behind the pane that became the fresh
+    /// unnamed one. Before rather than after, so the row reads in the order the two were made — and
+    /// without moving the selection, which stays on the thing the command just built.
+    func testOpeningBehindKeepsTheSelectionAndGoesFirst() {
+        var set = ProjectTabSet()
+        let board = set.open(.board(.whole))
+        set.openBehind(.board(.workspace("Dashboard")))
+        XCTAssertEqual(set.tabs.count, 3)
+        XCTAssertEqual(set.tabs[1].view, .board(.workspace("Dashboard")))
+        XCTAssertEqual(set.tabs[2].id, board.id)
+        XCTAssertEqual(set.selectedID, board.id, "still in what ⌘Return just made")
+    }
+
+    /// Two chips on one workspace are two names for one thing, so switching finds the one that is
+    /// open rather than making a second.
+    func testFindsTheTabAThingIsAlreadyOpenIn() {
+        var set = ProjectTabSet()
+        let dashboard = set.open(.board(.workspace("Dashboard")))
+        set.open(.board(.workspace("Review")))
+        XCTAssertEqual(set.first(showing: .board(.workspace("Dashboard")))?.id, dashboard.id)
+        XCTAssertNil(set.first(showing: .board(.workspace("Standup"))),
+                     "a workspace that is not open is not open")
+        XCTAssertNil(set.first(showing: .board(.frame("Dashboard"))),
+                     "a frame and a workspace of the same name are different things")
+    }
+
+    /// A tab follows the board it is holding: you named the workspace it was showing, so it is that
+    /// workspace's tab now. The row and the selection are untouched — nothing moved, one chip changed
+    /// what it says.
+    func testRetargetingATabLeavesTheRowAlone() {
+        var set = ProjectTabSet()
+        let board = set.open(.board(.whole))
+        let frame = set.open(.board(.frame("group-1")))
+        set.select(board.id)
+        set.retarget(board.id, to: .board(.workspace("Dashboard")))
+        XCTAssertEqual(set.tabs.map(\.view),
+                       [.notes, .board(.workspace("Dashboard")), .board(.frame("group-1"))])
+        XCTAssertEqual(set.selectedID, board.id)
+        XCTAssertEqual(set.tabs[2].id, frame.id)
+    }
+
+    /// An id that is not in the row is a tab that was closed while something was deciding what to do
+    /// about it — silence rather than a crash, and rather than retargeting some other tab.
+    func testRetargetingAnUnknownTabDoesNothing() {
+        var set = ProjectTabSet()
+        set.retarget("gone", to: .board(.workspace("Dashboard")))
+        XCTAssertEqual(set.tabs.map(\.view), [.notes])
+    }
 }

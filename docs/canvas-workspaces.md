@@ -23,9 +23,10 @@ adds tasks, and reads and edits the brief; the brief's fields commit as you leav
 well as on a card; and a card is set to draw the brief, the notes, the tasks, finished work, and either
 every sitting or the latest. The arguments now live where the code is — `CanvasProjectNote`,
 `SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
-kept here is the shape of the whole. **§7 and §7b are built too** — the words go to the right things,
-and a workspace has a name you can see, a list you can switch from, and no Save. What is left of this
-page is item 10, duplicating one, which §7b's live adjustment is what makes worth having.
+kept here is the shape of the whole. **§7, §7b and §7c are built too** — the words go to the right
+things; a workspace has a name you can see, a list you can switch from, and no Save; and its home is a
+tab, which is where its commands are and what duplicating one makes another of. **This page is built.**
+What is left of it is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -340,6 +341,93 @@ The name is the whole of a workspace's identity — there is nothing underneath 
 a pin that no longer resolves lands on the whole board, which is what `applyFocus` has always done for
 a frame deleted in Obsidian. Following the pins would mean reaching into every window's stored tabs to
 rewrite a string, for a case the existing fallback already handles quietly.
+
+## 7c. A workspace's home is a tab — **built**
+
+§7b gave a workspace a name you could see. It left two things unfinished, and they turned out to be one
+thing: **the commands and the object had drifted apart.**
+
+- **A workspace's verbs were sitting in the tile menu.** View ▸ Board ran `Fill Window with Selection`,
+  `Arrange Tiles`, **`Workspace ▸`**, then `Make This the Master Tile`, `Pin Tile Width`, `Remove from
+  Tiled View` — the workspace submenu sandwiched inside the tile group, every item of it a
+  `#selector(CanvasBoardView…)`. Promote, pin, remove and rearrange are verbs on a *tile*. Name,
+  duplicate and delete are verbs on the *identity of a whole set*. They shared a receiver and a menu
+  group, and nothing in either says why.
+- **There were two ways to be in "Dashboard", and they drew differently.** `CanvasFocus.workspace(name)`
+  — a tab pinned to it — and `CanvasViewState.workspaceName` — the board's live answer — were both
+  telling you which workspace you were in. A pinned tab's chip said `Dashboard · 6/43`; a plain board
+  tab that had switched to it from the readout's menu said `Canvas · Dashboard`. Same board, same six
+  cards, two chips. That is the shape of fault §7b diagnosed one layer down, surfacing one layer up.
+
+### The tab is the workspace
+
+The fix is one claim: **a tab is where an open workspace lives**, and everything follows.
+
+- **The pane's `workspaceName` is the answer, and the tab is made to agree with it.** Name the workspace
+  a plain board tab is showing and that tab *becomes* the workspace's tab; ⌘Return out of one and it
+  stops being it. `reconcileWorkspacePins` is the whole mechanism, and it runs from the one funnel that
+  already existed. Only named workspaces move a pin — an unnamed one has no name to point at, which is
+  what unnamed means, so a tiled board tab stays a board tab and a tiled frame tab stays on its frame.
+- **The chip carries the commands**, on right-click, which is where a Mac keeps the verbs for the thing
+  under the pointer. `WorkspaceCommands` is written once and shown in two places, because one tab is no
+  tabs: a window with a single board has no bar and no chip, and the title pill's readout carries the
+  same menu until a second tab makes the bar appear. That is the handoff the readout itself already
+  makes.
+- **The menu bar keeps its mirror**, moved out of the tile group and set beside `Go to Frame` — the
+  other "go to a named set of cards", which is the thing it is actually like.
+- **Switching goes to the tab a workspace is already open in.** Two chips on one workspace are two names
+  for one thing, and choosing between them is a question with no answer. It is the same call
+  `WindowManager` makes for a project that already has a window.
+
+**An unnamed workspace gets a chip too**, reading `Untitled 6/43` with the workspace glyph — the same
+words the menu uses for it. That is "ephemeral unless named" rendered a second time, and it is what
+makes the bar readable as a row of workspaces rather than a row of two kinds of thing. The whole
+*untiled* board keeps saying `Canvas`, because a board is not a workspace: a workspace is a set of
+tiles (§7).
+
+### What ⌘Return does now, and why it is a new tab
+
+§7b's one carve-out was that ⌘Return starts a fresh unnamed workspace instead of adjusting the named one
+— the guard that makes live adjustment safe where there is no undo. It worked, and you could not see it
+work: the chip changed under you and Dashboard was gone from the window.
+
+**So the workspace being left keeps its tab.** ⌘Return opens a chip for it *behind* the pane you are
+looking at, and that pane becomes the Untitled one — that way round because the pane in front of you is
+the one holding the selection the command just acted on. Dashboard is then a click away in the bar
+rather than two clicks away in a menu, and §7b's protection is a thing you can see rather than a rule
+you have to be told.
+
+Duplicating has the same shape for the same reason: the copy arrives in its own tab. **Every act that
+*makes* a workspace makes a tab; switching between them makes none.** That is the line, and it is why
+"a way of looking should not multiply views" survives intact — that sentence was about switching.
+
+### Duplicate, which is backlog 10 and the last of §7b
+
+`ProjectSplitViewController.duplicateWorkspace(named:)`, seeded `Dashboard copy` and counting past the
+copies that exist. Copied from the *store* rather than from a board, so a workspace you are not looking
+at can be duplicated from its chip — and for the one you are in they are the same bytes anyway, because
+the write-through keeps the durable row level with the screen.
+
+It is worth saying what it is for, since it looks like a convenience: §7b made a named workspace **live**,
+so "let me try something without wrecking this one" had no answer at all until this. And Name This
+Workspace… deliberately stopped being that answer, renaming instead of leaving the old one behind —
+because arriving at a duplicate by picking the wrong item is not the same as asking for one.
+
+### One cost §7b accepted, now partly paid back
+
+Renaming used to break every tab pinned to the old name, on the grounds that the name is the whole of a
+workspace's identity and a pin that stops resolving lands on the board. That is still true of pins in
+*other* windows. It stopped being true here: this window knows every chip on the old name, so
+`renameWorkspace(named:)` carries them across in the same act. The rename is a remove and a save
+still — there is nothing under the name to re-key — with the save first, so a failure leaves you with
+both rather than neither.
+
+**What it needed that did not exist:** nothing in storage. `CanvasFocus` is unchanged, wire format
+included, and no new key was added — the two stores §7 argued for already lined up with the two kinds of
+chip, because a board's one volatile row *is* its unnamed workspace and a named one already had a
+durable row of its own. The one thing that had to be pinned down is that a pane goes on owning that row
+after its tab acquires a name (`CanvasPaneController.ownsViewMemory`), or naming a workspace would have
+quietly stopped the board remembering its connect mode.
 
 ## 8. What this does to the backlog
 

@@ -135,6 +135,41 @@ struct ProjectTabSet: Codable, Equatable {
         tabs[index].view = view
     }
 
+    /// Open `view` *behind* the tab that is up, without going to it.
+    ///
+    /// **What ⌘Return does with the workspace it leaves.** Starting a fresh unnamed workspace does not
+    /// discard the named one you were in — it is still in the durable store, and under
+    /// docs/canvas-workspaces.md §7c the honest place for a workspace that still exists is a chip. So
+    /// the one being left keeps a tab and the fresh one keeps the pane, which is the only way round
+    /// that works: the pane in front of you is the one holding the selection ⌘Return acted on.
+    ///
+    /// Before rather than after, so the row reads in the order the two were made.
+    mutating func openBehind(_ view: ProjectTabView) {
+        tabs.insert(ProjectTab(view), at: selectedIndex)
+    }
+
+    /// The first tab showing exactly this, if one is open.
+    ///
+    /// **Switching goes to the tab a thing is already in rather than opening a second.** Two chips on
+    /// one workspace are two names for one thing, and picking between them is a question with no
+    /// answer — the same reason `WindowManager` brings a window forward instead of opening another on
+    /// the project it already has.
+    func first(showing view: ProjectTabView) -> ProjectTab? {
+        tabs.first { $0.view == view }
+    }
+
+    /// Point an existing tab at something else, leaving the row and the selection alone.
+    ///
+    /// Not `replaceSelected`: this is how a tab *follows* the board it is holding — you named the
+    /// workspace it was showing, or ⌘Return took it out of one — rather than how a tab is sent
+    /// somewhere. See `ProjectSplitViewController.reconcileWorkspacePins`.
+    mutating func retarget(_ id: String, to view: ProjectTabView) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].view != view else {
+            return
+        }
+        tabs[index].view = view
+    }
+
     /// Close a tab. The last one never closes — closing it is closing the window, which is the window's
     /// decision and not this type's.
     ///

@@ -1338,17 +1338,15 @@ extension CanvasBoardView {
 
     /// Rename the workspace that is up.
     ///
-    /// A remove and a save rather than a key change, because the name *is* the identity: there is
-    /// nothing underneath to keep pointing at. That is also why a tab pinned to the old name stops
-    /// resolving — and it lands on the board's whole canvas rather than on nothing, which is what
-    /// `CanvasPaneController.applyFocus` has always done for a pin that has gone. The same is true of
-    /// Delete, and it is the one cost of a thing whose whole identity is a string.
+    /// **Routed out to the window**, which is what makes this cheaper than §7b said it was. A rename
+    /// used to be a remove and a save here, and a tab pinned to the old name simply stopped resolving.
+    /// Now that a tab *is* where a workspace lives, the window renames the store and carries its chips
+    /// across in the same act, and only pins in other windows are left behind — see
+    /// `ProjectSplitViewController.renameWorkspace(named:)`.
     @objc func renameWorkspace(_ sender: Any?) {
-        guard let old = workspaceName,
-              let name = askForWorkspaceName(titled: "Rename “\(old)”", seed: old), name != old
-        else { return }
-        onRemoveWorkspace(old)
-        onSaveWorkspace(name)
+        let name = (sender as? NSMenuItem)?.representedObject as? String ?? workspaceName
+        guard let name else { return }
+        onRenameWorkspace(name)
     }
 
     /// Forget a named workspace. The tiling stays up — you are still looking at exactly what you were
@@ -1365,20 +1363,26 @@ extension CanvasBoardView {
         onGoToWorkspace(name)
     }
 
-    /// One field, one alert. Named on the way in for both of the commands above, because a workspace
-    /// with no name is not a kept workspace at all.
+    /// Duplicate a named workspace — **the ordinary way a second one comes to exist**.
+    ///
+    /// You have built a six-tile workspace and want a variant of it. Before this the only answer was
+    /// to build the variant from scratch, and §7b made that worse rather than better: a named
+    /// workspace is adjusted *live*, so "let me try something without wrecking this" had nowhere left
+    /// to go. This is where it goes.
+    ///
+    /// Routed out to the window rather than done here, because the copy wants a tab: duplicating is
+    /// making a thing, and a workspace that exists and is open is a chip (docs/canvas-workspaces.md
+    /// §7c). The board's own state is untouched — you keep looking at the original until you click
+    /// the copy.
+    @objc func duplicateWorkspace(_ sender: Any?) {
+        let name = (sender as? NSMenuItem)?.representedObject as? String ?? workspaceName
+        guard let name else { return }
+        onDuplicateWorkspace(name)
+    }
+
+    /// One field, one alert — see `WorkspaceNamePrompt`, which the window shares.
     private func askForWorkspaceName(titled title: String, seed: String) -> String? {
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
-        field.stringValue = seed
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = "Kept for this board, so a tab can open straight into it."
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
+        WorkspaceNamePrompt.run(titled: title, seed: seed)
     }
 
     /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
@@ -1558,11 +1562,20 @@ extension CanvasBoardView: NSUserInterfaceValidations {
                 ?? "Name This Workspace\u{2026}"
             // Something to keep: a board that has never been tiled has no workspace to name.
             return tilingMemory != nil
-        case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)):
-            // Both act on the workspace you are in, so both want one with a name. Retitled with it,
-            // because "Delete Workspace" under a list of five is a fair question to have answered.
-            if let entry = item as? NSMenuItem, entry.action == #selector(deleteWorkspace(_:)) {
-                entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Workspace"
+        case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)),
+             #selector(duplicateWorkspace(_:)):
+            // All three act on the workspace you are in, so all three want one with a name. Retitled
+            // with it, because "Delete Workspace" under a list of five is a fair question to have
+            // answered.
+            if let entry = item as? NSMenuItem {
+                switch entry.action {
+                case #selector(deleteWorkspace(_:)):
+                    entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Workspace"
+                case #selector(duplicateWorkspace(_:)):
+                    entry.title = workspaceName.map { "Duplicate “\($0)”\u{2026}" }
+                        ?? "Duplicate Workspace\u{2026}"
+                default: break
+                }
             }
             return workspaceName != nil
         case #selector(goToWorkspace(_:)):

@@ -156,22 +156,6 @@ Where it lives: the tile's contextual menu, beside promote and pin. Not on the h
 and does nothing else, deliberately, and every other tile command has moved off it and into the two
 menus.
 
-### 10. Duplicate a workspace — **the ordinary way to make one, and the last of §7b**
-
-Small, and only worth stating because of what it is *for*: you have built a six-tile workspace and want
-a variant of it. Today that means building the variant from scratch.
-
-Sketch: "Duplicate Workspace" in the workspace menu, seeding the name from the one that is up
-("Dashboard copy"), then the copy is what your adjustments land on. Under
-[canvas-workspaces.md](canvas-workspaces.md) §7 this stops being a convenience: if a workspace is what
-a tab shows, duplicating one is how the second one gets made.
-
-Two things that shipped with 9 make it the one thing still missing. A named workspace is adjusted
-**live**, so "I want to try something without wrecking this one" now has no answer except this. And
-Name This Workspace… deliberately stopped doing it by accident: on a named workspace it renames rather
-than leaving the old one behind and putting you in a second, because arriving at a duplicate by picking
-the wrong item is not the same as asking for one.
-
 ### 11. BSP layouts
 
 `CanvasTiling` currently offers a grid and a master-stack, and rules BSP out in its own doc comment:
@@ -250,16 +234,16 @@ for one act. Decide whether the Figma set replaces the ⌘ set or joins it befor
 
 ## Priority
 
-**First — designed and waiting to be built:** 10, duplicating a workspace, which is all that is left of
-[canvas-workspaces.md](canvas-workspaces.md). Nothing there is waiting on a decision.
+**First — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
 
-That page is otherwise built. A card you have stepped into is the project and draws as much or as
-little of it as you set; the words go to the right things — frames are frames, a saved tiling is a
-**workspace**, and `CanvasTiling.Arrangement` keeps *arrangement* by being the only one of the three
-using it correctly; and a workspace now has a name you can see in the pill, a list you can switch from,
-and no Save, because a named one is adjusted live.
-
-**Beside it — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
+[canvas-workspaces.md](canvas-workspaces.md) is **built, and closed**. A card you have stepped into is
+the project and draws as much or as little of it as you set; the words go to the right things — frames
+are frames, a saved tiling is a **workspace**, and `CanvasTiling.Arrangement` keeps *arrangement* by
+being the only one of the three using it correctly; a workspace has a name you can see and no Save,
+because a named one is adjusted live; and its home is a tab, which is where its commands live, what
+switching between them goes to, and what duplicating one makes another of. The one thing left on that
+page is the question under its Open heading — whether a workspace can span boards — which is a question
+and not a task.
 
 **Then — find out before designing:** 6, which is the same instruction it has always been — drop a
 markdown file on a board and see what actually happens.
