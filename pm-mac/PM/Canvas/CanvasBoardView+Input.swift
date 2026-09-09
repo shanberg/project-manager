@@ -188,12 +188,16 @@ extension CanvasBoardView {
             // The offer is made about the box and drawn about the cards: a rectangle around three
             // dragged cards is a shape none of them has, and an outline you cannot match a card to is
             // not a target. The same translation the cards are getting, applied to where they are now.
+            //
+            // The sources take no translation at all — they are cards standing still, and they are
+            // where they are.
             overlay.ghost = snap.ghost.map { ghost in
                 let gdx = ghost.frame.minX - box.minX, gdy = ghost.frame.minY - box.minY
                 return CanvasOverlayView.Ghost(
                     frames: frames.keys.sorted().compactMap { frames[$0] }.map {
                         CanvasRect(x: $0.x + gdx, y: $0.y + gdy, width: $0.width, height: $0.height)
                     },
+                    sources: ghost.sources,
                     nearness: ghost.nearness)
             }
             showGrid(snapsToGrid(event))
@@ -222,6 +226,7 @@ extension CanvasBoardView {
                 let fitted = CanvasGroupResize.frames(originals, from: box, to: ghost.frame)
                 return CanvasOverlayView.Ghost(
                     frames: fitted.keys.sorted().compactMap { fitted[$0] },
+                    sources: ghost.sources,
                     nearness: ghost.nearness)
             }
             showGrid(snapsToGrid(event))

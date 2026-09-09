@@ -49,6 +49,13 @@ they are not a row until the gaps agree, and until now the board could not tell 
 The grid stays exactly as it was — quantizing placement, drawn while you drag, and offering nothing.
 That division is the point: the lattice tidies, and the guides relate cards to each other.
 
+And the offer now says what it is an offer *against*: the cards that produced it are marked, in the
+same band at half the ghost's weight, appearing and fading with it. Not the old bands returning — those
+were one per kind of claim, around every card in an agreement, at the instant the snap fired. These are
+the one or two cards that actually won, up while you are still deciding. The geometry says what kind of
+agreement it is; it does not say which of six cards sharing an edge you found, and that is the part
+worth knowing when the offer is the one you didn't mean.
+
 What is left is the tolerance, which is a thing to feel rather than derive: the snap fires at 7 view
 points and the offer appears at 48, squared so it stays faint over most of its range. Spacing gives the
 board more to catch on, so 48 will feel more generous than it did. Drag a few cards around a real board

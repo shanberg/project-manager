@@ -185,6 +185,71 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.minX, 668)
     }
 
+    // MARK: Which cards
+
+    /// An offer that doesn't say what it is an offer *against* is only half an answer. On a board where
+    /// several cards share an edge, "you are collinear with one of them" is not the same information as
+    /// which one — and which one is the whole of what tells you the offer is the one you meant.
+    func testTheOfferNamesTheCardItIsAligningWith() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 70, dy: 0),
+                                         against: [rect(100, 0)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.sources, [rect(100, 0)])
+    }
+
+    /// A gap names both cards, because a gap is not a property of either of them. One card marked would
+    /// say "you are some distance from this", which is true of every card on the board.
+    func testAGapNamesTheCardsEitherSideOfIt() {
+        // The centred-in-a-hole case. The two cards are pushed up and down out of alignment with the
+        // moving one, so the only thing they can be named for is the gap.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 354, dy: 0),
+                                         against: [rect(0, -60, 200, 560), rect(703, -60, 200, 560)],
+                                         reach: reach)
+        XCTAssertEqual(result.frame.minX, 351.5)
+        XCTAssertEqual(result.ghost?.sources,
+                       [rect(0, -60, 200, 560), rect(703, -60, 200, 560)])
+    }
+
+    /// A continued run names the two cards whose pitch is being continued — not the whole run, which is
+    /// the pair the arithmetic actually used.
+    func testAContinuedRunNamesThePairThatSetThePitch() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 644, dy: 0),
+                                         against: [rect(0, 0), rect(337, 0)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.frame, rect(674, 0))
+        XCTAssertEqual(result.ghost?.sources, [rect(0, 0), rect(337, 0)])
+    }
+
+    /// One card answering both axes is marked once. Drawn twice it would simply come out darker than
+    /// its neighbours, which is a difference that means nothing.
+    func testACardAnsweringBothAxesIsNamedOnce() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 97, dy: 297),
+                                         against: [rect(100, 300)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.frame.minX, 100)
+        XCTAssertEqual(result.frame.minY, 300)
+        XCTAssertEqual(result.ghost?.sources, [rect(100, 300)])
+    }
+
+    /// A matched extent names its card too, even though the card is nowhere near the one being sized —
+    /// which is exactly the case that needed it. A width caught from a card 900pt away is the offer you
+    /// would otherwise have no way of accounting for.
+    func testAMatchedWidthNamesTheCardItCameFrom() {
+        let result = CanvasSnapping.resize(rect(0, 0, 337, 100), handle: .right,
+                                           against: [rect(900, 900, 340, 80)],
+                                           reach: reach, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.sources, [rect(900, 900, 340, 80)])
+    }
+
+    /// The lattice names nobody, because there is nobody: it is the one claim the board makes that is
+    /// not about another card. It draws no ghost either — see `testTheGridOffersNothing`.
+    func testTheLatticeNamesNoCards() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 103, dy: 0),
+                                         against: [rect(4000, 4000)], reach: reach, showReach: show)
+        XCTAssertEqual(result.frame.minX, 100)
+        XCTAssertNil(result.ghost)
+    }
+
     // MARK: The offer
 
     /// The one that says what this whole thing is for: at 30pt out the card has *not* moved, and the

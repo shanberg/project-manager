@@ -21,11 +21,12 @@ final class CanvasOverlayView: NSView {
     /// The sweep in progress, in canvas coordinates.
     var marquee: CanvasRect?
 
-    /// Where the cards being placed would land if the match on offer were taken, and how near that
-    /// offer is to being taken. One rectangle per moving card — see `CanvasGhost`, which owns the
-    /// argument for all of this.
+    /// Where the cards being placed would land if the match on offer were taken, which cards the offer
+    /// is being made against, and how near it is to being taken. One rectangle per moving card — see
+    /// `CanvasGhost`, which owns the argument for all of this.
     struct Ghost: Equatable {
         var frames: [CanvasRect]
+        var sources: [CanvasRect]
         var nearness: Double
     }
 
@@ -81,22 +82,42 @@ final class CanvasOverlayView: NSView {
     /// rather than a stroke merged into its border, so the landing is still visible — and when you are
     /// sizing a card *down*, the offered frame is inside the card's current bounds, where a mark on the
     /// border would have nothing to stand on at all.
+    ///
+    /// **The cards being agreed with get the same band at half the weight**, which is the treatment the
+    /// selection box already uses for the same reason: one family of transient marks, and the quieter
+    /// one is plainly the subordinate clause. It matters that they are the *same shape*, because the
+    /// alternative — a hairline, a wash, an accent — invents a third vocabulary for a thing that is
+    /// already being said. It matters just as much that they are thinner and fainter, because a source
+    /// drawn at the ghost's weight reads as a second card about to move.
+    ///
+    /// They rise and fall on the same `presence` as the ghost, so the attribution arrives with the
+    /// offer rather than with the snap. That is the whole difference between this and the bands it
+    /// replaced: those were drawn once the match was made, when there was nothing left to decide.
     private func drawGhost(_ board: CanvasBoardView, _ scale: Double) {
         guard ghostFade.isVisible, let drawnGhost else { return }
         let presence = ghostFade.presence * drawnGhost.nearness
         guard presence > 0.001 else { return }
 
         let standoff = Self.ghostStandoff / scale
-        CanvasPalette.guide(0.30 * presence).setStroke()
-        for slot in drawnGhost.frames {
+        // Concentric with the card inside it: a curve offset from another curve keeps an even gap only
+        // when its radius grows by the offset. Left at the card's own radius the outline would pinch
+        // tight at the corners and bulge along the sides.
+        func band(around slot: CanvasRect, width: Double, alpha: Double) {
             let rect = board.viewRect(slot).insetBy(dx: -standoff, dy: -standoff)
-            // Concentric with the card that would be inside it: a curve offset from another curve keeps
-            // an even gap only when its radius grows by the offset. Left at the card's own radius the
-            // outline would pinch tight at the corners and bulge along the sides.
             let radius = CanvasNodeView.cornerRadius(for: slot) + standoff
             let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-            path.lineWidth = Self.ghostWidth / scale
+            path.lineWidth = width / scale
+            CanvasPalette.guide(alpha * presence).setStroke()
             path.stroke()
+        }
+
+        // Sources first, so that a ghost landing on top of one of them — which is what a gap being
+        // closed looks like — is the mark that survives the overlap.
+        for card in drawnGhost.sources {
+            band(around: card, width: Self.sourceWidth, alpha: Self.sourceAlpha)
+        }
+        for slot in drawnGhost.frames {
+            band(around: slot, width: Self.ghostWidth, alpha: 0.30)
         }
     }
 
@@ -107,6 +128,12 @@ final class CanvasOverlayView: NSView {
     /// at.
     private static let ghostStandoff: Double = 5
     private static let ghostWidth: Double = 5
+
+    /// The band on a card the offer is being made against: half the ghost's width, a little over half
+    /// its alpha. Deliberately close to the floor of what registers — it is answering a question you
+    /// only sometimes ask, and it is up during every drag that catches on anything.
+    private static let sourceWidth: Double = 2.5
+    private static let sourceAlpha: Double = 0.17
 
     /// The two tiles a drop would exchange, while a tiled view is being rearranged.
     ///

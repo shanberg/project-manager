@@ -9,14 +9,19 @@ import PmLib
 /// kind of claim, several of them at once on a busy board, and all of it arriving too late to be any
 /// use in placing the card. This is one outline, in one place: where the card is going.
 ///
-/// **The relationship needs no mark of its own.** Losing the bands sounds like losing the answer to
-/// "which card did I match", and it isn't, because the geometry says it: the ghost's height *is* the
-/// other card's height and that card is on screen, the ghost's edge is collinear with the other card's
-/// edge and collinearity is visible for free. An offered gap is the same argument at its strongest —
-/// two gaps of one length, side by side, is the easiest comparison the eye makes, and a mark drawn
-/// between the cards to announce it would be measuring something already legible. The bands were saying
-/// a second time what the ghost's position already says. (The case that genuinely goes dark is a match
-/// against a card scrolled off screen — where the band was off screen too, and no better.)
+/// **And a quiet mark on the cards it is agreeing with.** The bands were dropped on the argument that
+/// the geometry already says which card you matched: collinearity is visible for free, and two gaps of
+/// one length side by side is the easiest comparison the eye makes. That is true of the *kind* of
+/// agreement and not of the *card*. On a board where six cards share a left edge, "your edge is
+/// collinear with one of those" is not the same information as which one — and the difference is worth
+/// exactly what it costs at the moment the offer is the one you didn't mean, which is the only moment
+/// an offer needs reading at all. So the cards that produced the winning candidate are marked. See
+/// `sources`.
+///
+/// This is not the old bands coming back. Those were one band per kind of claim, drawn around every
+/// card in an agreement, at the instant the snap fired. These are the two or three cards that actually
+/// won, drawn from the moment the offer appears and fading out with it — still a target, and still
+/// about this one placement rather than about everything simultaneously true of the board.
 ///
 /// **It is up before the snap fires, which is the whole of what makes it a target.** A mark that
 /// arrived as the card jumped would be a receipt again: there would be nothing left to steer toward.
@@ -32,6 +37,18 @@ struct CanvasGhost: Equatable {
     /// Where the moving box would be. The board turns that into one outline per moving card, since a
     /// bounding box around three dragged cards is a rectangle that matches none of them.
     var frame: CanvasRect
+
+    /// The cards the offer is made against: the one whose edge or extent the ghost is landing on, and
+    /// for a gap, the pair whose rhythm it would be joining.
+    ///
+    /// In canvas coordinates, and never the cards being moved — so unlike `frame`, which the board
+    /// translates into one outline per dragged card, these pass through untouched.
+    ///
+    /// At most a handful, which is what keeps them readable: an alignment names one card and a gap
+    /// names two, per axis, so a corner that has caught something in both directions is four marks and
+    /// usually fewer. Deduplicated, because the card your left edge found is frequently also the card
+    /// your top edge found, and marking it twice would just be drawing it darker.
+    var sources: [CanvasRect]
 
     /// How close the offer is to being taken: 0 at the far edge of the show radius, 1 once the snap
     /// has actually fired. The board multiplies the ghost's alpha by this, so it is faint at the moment
@@ -63,8 +80,9 @@ struct CanvasSnapResult: Equatable {
 ///
 /// All three are expressed as candidate positions for a single edge, so they compete on the same terms
 /// and the nearer one wins — rather than one being applied on top of another and quietly undoing it.
-/// And nothing downstream tells them apart: a target only has to say *where*, so the kinds that used to
-/// be drawn as different marks are one rectangle. See `CanvasGhost`.
+/// And nothing downstream tells them apart: a target has to say *where*, and which cards put it there,
+/// and neither answer depends on which of the three produced it — so the kinds that used to be drawn as
+/// three different marks are one rectangle and a few marked cards. See `CanvasGhost`.
 ///
 /// The grid is the fallback, not the rule. Snapping to another card is a stronger statement of intent
 /// than snapping to an invisible 10pt lattice, so the grid only gets a say on an axis where nothing
@@ -119,13 +137,11 @@ enum CanvasSnapping {
         // nearer one should win, but at the same distance an edge landing on an edge is the plainer
         // thing to have asked for — and a tie broken by argument beats one broken by array order.
         let horizontal = closer(alignment(of: [proposed.minX, proposed.midX, proposed.maxX],
-                                          to: others.flatMap { [$0.minX, $0.midX, $0.maxX] },
-                                          reach: show),
+                                          to: edges(of: others, horizontal: true), reach: show),
                                 spacing(span(proposed, horizontal: true),
                                         among: others.map { span($0, horizontal: true) }, reach: show))
         let vertical = closer(alignment(of: [proposed.minY, proposed.midY, proposed.maxY],
-                                        to: others.flatMap { [$0.minY, $0.midY, $0.maxY] },
-                                        reach: show),
+                                        to: edges(of: others, horizontal: false), reach: show),
                               spacing(span(proposed, horizontal: false),
                                       among: others.map { span($0, horizontal: false) }, reach: show))
 
@@ -174,18 +190,22 @@ enum CanvasSnapping {
         var horizontal: Hit?
         if handle.unit.x != 0.5 {
             let fixed = movingRight ? frame.minX : frame.maxX
-            let edges = others.flatMap { [$0.minX, $0.midX, $0.maxX] }
-            let sizes = others.map { movingRight ? fixed + $0.width : fixed - $0.width }
+            let positions = edges(of: others, horizontal: true)
+            let widths = others.map {
+                Candidate(value: movingRight ? fixed + $0.width : fixed - $0.width, sources: [$0])
+            }
             horizontal = nearest(to: movingRight ? frame.maxX : frame.minX,
-                                 among: edges + sizes, reach: show)
+                                 among: positions + widths, reach: show)
         }
         var vertical: Hit?
         if handle.unit.y != 0.5 {
             let fixed = movingBottom ? frame.minY : frame.maxY
-            let edges = others.flatMap { [$0.minY, $0.midY, $0.maxY] }
-            let sizes = others.map { movingBottom ? fixed + $0.height : fixed - $0.height }
+            let positions = edges(of: others, horizontal: false)
+            let heights = others.map {
+                Candidate(value: movingBottom ? fixed + $0.height : fixed - $0.height, sources: [$0])
+            }
             vertical = nearest(to: movingBottom ? frame.maxY : frame.minY,
-                               among: edges + sizes, reach: show)
+                               among: positions + heights, reach: show)
         }
 
         /// Both answers from one piece of arithmetic — see the same function in `move`. Running the
@@ -233,6 +253,29 @@ enum CanvasSnapping {
     private struct Hit: Equatable {
         var target: Double
         var shift: Double
+        /// The cards that put the target there. One for an alignment or a matched extent, two for a
+        /// gap. Carried the whole way out so the ghost can name them — see `CanvasGhost.sources`.
+        var sources: [CanvasRect]
+    }
+
+    /// A position one edge could take, and the cards responsible for it.
+    ///
+    /// The candidates used to be bare numbers, which was enough while the only question was where the
+    /// card goes. Attribution is the reason for the wrapper: a position computed from a card and then
+    /// separated from it cannot be traced back afterwards — several cards on a busy board will have an
+    /// edge at exactly that number, and picking one of them later would be a guess dressed as an answer.
+    private struct Candidate {
+        var value: Double
+        var sources: [CanvasRect]
+    }
+
+    /// Every position another card's edges and centre offer along one axis, each still knowing which
+    /// card it came from.
+    private static func edges(of others: [CanvasRect], horizontal: Bool) -> [Candidate] {
+        others.flatMap { rect in
+            (horizontal ? [rect.minX, rect.midX, rect.maxX] : [rect.minY, rect.midY, rect.maxY])
+                .map { Candidate(value: $0, sources: [rect]) }
+        }
     }
 
     /// One rectangle reduced to the axis being asked about: where it begins and ends along that axis,
@@ -243,12 +286,16 @@ enum CanvasSnapping {
     /// once and the axis is an argument.
     private struct Span {
         var lead: Double, trail: Double, crossLead: Double, crossTrail: Double
+        /// The card this was reduced from, kept so a gap can say whose gap it is.
+        var rect: CanvasRect
     }
 
     private static func span(_ rect: CanvasRect, horizontal: Bool) -> Span {
         horizontal
-            ? Span(lead: rect.minX, trail: rect.maxX, crossLead: rect.minY, crossTrail: rect.maxY)
-            : Span(lead: rect.minY, trail: rect.maxY, crossLead: rect.minX, crossTrail: rect.maxX)
+            ? Span(lead: rect.minX, trail: rect.maxX,
+                   crossLead: rect.minY, crossTrail: rect.maxY, rect: rect)
+            : Span(lead: rect.minY, trail: rect.maxY,
+                   crossLead: rect.minX, crossTrail: rect.maxX, rect: rect)
     }
 
     /// Where this box would have to sit for the gaps around it to agree with the gaps already there.
@@ -281,18 +328,23 @@ enum CanvasSnapping {
         let before = band.filter { $0.trail <= box.lead }.max(by: { $0.trail < $1.trail })
         let after = band.filter { $0.lead >= box.trail }.min(by: { $0.lead < $1.lead })
 
-        var candidates: [Double] = []
+        var candidates: [Candidate] = []
         if let before, let after {
             let room = after.lead - before.trail - extent
-            if room >= 0 { candidates.append(before.trail + room / 2) }
+            if room >= 0 {
+                candidates.append(Candidate(value: before.trail + room / 2,
+                                            sources: [before.rect, after.rect]))
+            }
         }
         if let before,
            let prior = band.filter({ $0.trail <= before.lead }).max(by: { $0.trail < $1.trail }) {
-            candidates.append(before.trail + (before.lead - prior.trail))
+            candidates.append(Candidate(value: before.trail + (before.lead - prior.trail),
+                                        sources: [prior.rect, before.rect]))
         }
         if let after,
            let next = band.filter({ $0.lead >= after.trail }).min(by: { $0.lead < $1.lead }) {
-            candidates.append(after.lead - (next.lead - after.trail) - extent)
+            candidates.append(Candidate(value: after.lead - (next.lead - after.trail) - extent,
+                                        sources: [after.rect, next.rect]))
         }
         return nearest(to: box.lead, among: candidates, reach: reach)
     }
@@ -321,15 +373,23 @@ enum CanvasSnapping {
         guard show > 0 else { return nil }
         let offers = hits.compactMap { $0 }
         guard !offers.isEmpty else { return nil }
+
+        // Every hit that is part of this frame, taken or still pending, contributes its cards: the axis
+        // that has already snapped is as much a part of what the ghost is claiming as the one you are
+        // still closing on, and dropping its mark the instant it landed would take the attribution away
+        // at exactly the moment it came true.
+        var sources: [CanvasRect] = []
+        for rect in offers.flatMap(\.sources) where !sources.contains(rect) { sources.append(rect) }
+
         guard let nearest = offers.map({ abs($0.shift) }).filter({ $0 > reach }).min() else {
-            return CanvasGhost(frame: frame, nearness: 1)
+            return CanvasGhost(frame: frame, sources: sources, nearness: 1)
         }
         guard show > reach else { return nil }
         // Squared rather than linear, so the ghost stays out of the way over most of its range and
         // arrives over the last few points. Linear, it is a mark that is half-present for half of
         // every drag, which is the loudness this replaced.
         let closeness = max(0, min(1, (show - nearest) / (show - reach)))
-        return CanvasGhost(frame: frame, nearness: closeness * closeness)
+        return CanvasGhost(frame: frame, sources: sources, nearness: closeness * closeness)
     }
 
     /// The nearest of `candidates` to `value`, within `reach`.
@@ -339,20 +399,20 @@ enum CanvasSnapping {
     /// both lands on the alignment's target. The two targets are the same number, so the ghost is the
     /// same rectangle either way — but the card's *frame* comes from `target`, and picking
     /// deterministically is worth more than picking meaningfully here.
-    private static func nearest(to value: Double, among candidates: [Double],
+    private static func nearest(to value: Double, among candidates: [Candidate],
                                 reach: Double) -> Hit? {
         var best: Hit?
         for candidate in candidates {
-            let shift = candidate - value
+            let shift = candidate.value - value
             guard abs(shift) <= reach else { continue }
             if let current = best, abs(current.shift) <= abs(shift) { continue }
-            best = Hit(target: candidate, shift: shift)
+            best = Hit(target: candidate.value, shift: shift, sources: candidate.sources)
         }
         return best
     }
 
     /// The nearest agreement between any of `mine` and any of `theirs`.
-    private static func alignment(of mine: [Double], to theirs: [Double], reach: Double) -> Hit? {
+    private static func alignment(of mine: [Double], to theirs: [Candidate], reach: Double) -> Hit? {
         var best: Hit?
         for value in mine {
             guard let hit = nearest(to: value, among: theirs, reach: reach) else { continue }
