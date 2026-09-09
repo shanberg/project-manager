@@ -102,6 +102,89 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.minX, 101)
     }
 
+    // MARK: Spacing
+
+    /// **The one a lattice can never give you.** Two cards keeping a 137pt gap are a rhythm; the third
+    /// card belongs 137pt past the second, and no amount of rounding to tens will ever find that
+    /// number. The gap is deliberately not a multiple of the grid, so the grid cannot be what answered.
+    func testACardCarriesOnTheGapItsNeighboursKeep() {
+        // Cards at 0…200 and 337…537: a gap of 137. The next in the run starts at 537 + 137 = 674.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 671, dy: 0),
+                                         against: [rect(0, 0), rect(337, 0)], reach: reach)
+        XCTAssertEqual(result.frame.minX, 674, "the run continued, not rounded to 670")
+    }
+
+    /// The same rhythm read the other way: arriving from the left of a run, the offer is the slot
+    /// *before* it. A row is built from either end.
+    func testARunIsCarriedOnBackwards() {
+        // Cards at 1000…1200 and 1337…1537, gap 137. A 200-wide card before the first one leaves the
+        // same gap when its left edge is at 1000 − 137 − 200.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 660, dy: 0),
+                                         against: [rect(1000, 0), rect(1337, 0)], reach: reach)
+        XCTAssertEqual(result.frame.minX, 663)
+    }
+
+    /// Dropped into a hole between two cards, the offer is the middle of it — the placement where the
+    /// gap on the left and the gap on the right come out the same.
+    func testACardInAGapIsOfferedTheMiddleOfIt() {
+        // 200…703 is 503 of clear space; a 200-wide card centred in it leaves 151.5 either side.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 354, dy: 0),
+                                         against: [rect(0, 0), rect(703, 0)], reach: reach)
+        XCTAssertEqual(result.frame.minX, 351.5, "equal gaps, and half a point off the lattice")
+    }
+
+    /// Gaps run in both directions, and the arithmetic is written once for both — see `Span`.
+    func testGapsWorkDownwardsToo() {
+        // Cards at y 0…100 and y 237…337: a gap of 137, so the next row starts at 474.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 0, dy: 471),
+                                         against: [rect(0, 0), rect(0, 237)], reach: reach)
+        XCTAssertEqual(result.frame.minY, 474)
+    }
+
+    /// **A gap is only a gap between cards you can see abreast of each other.** The same two cards, the
+    /// same 137pt rhythm, moved out of the moving card's band — and the offer is gone, because the
+    /// distance to a card five thousand points away is a coincidence rather than a spacing.
+    func testGapsOnlyCountWithinABand() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 671, dy: 0),
+                                         against: [rect(0, -5000), rect(337, -5000)], reach: reach)
+        XCTAssertEqual(result.frame.minX, 670, "nothing to continue, so the lattice tidied it")
+    }
+
+    /// One neighbour is not a rhythm. There is a distance to it, but a single card cannot say what the
+    /// board's spacing *is*, and offering a gap from it would be inventing the pitch rather than
+    /// continuing one.
+    func testASingleNeighbourEstablishesNoRhythm() {
+        // One card, tall enough to be abreast of the moving one — so it is in the band, and the band is
+        // still all there is. Its own edges and centre are deliberately out of reach vertically, so a
+        // nil ghost can only mean the gap was not offered.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 644, dy: 0),
+                                         against: [rect(0, -60, 200, 560)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertNil(result.ghost)
+    }
+
+    /// A gap is offered on the same terms as everything else — from the show radius, long before the
+    /// card moves.
+    func testAGapIsOfferedBeforeTheCardReachesIt() {
+        // 30pt short of the 674 the run wants.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 644, dy: 0),
+                                         against: [rect(0, 0), rect(337, 0)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.frame.minX, 644, "not moved")
+        XCTAssertEqual(result.ghost?.frame, rect(674, 0), "and shown where the run continues")
+    }
+
+    /// At the same distance an edge beats a gap. Both are worth having and the nearer wins, but a tie
+    /// broken by argument beats one broken by the order of an array.
+    func testAnEdgeTakesTheTieFromAGap() {
+        // The run offers 674, three points to the right. A card in another band offers its left edge at
+        // 668, three points to the left.
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 671, dy: 0),
+                                         against: [rect(0, 0), rect(337, 0), rect(668, 5000)],
+                                         reach: reach)
+        XCTAssertEqual(result.frame.minX, 668)
+    }
+
     // MARK: The offer
 
     /// The one that says what this whole thing is for: at 30pt out the card has *not* moved, and the

@@ -12,9 +12,11 @@ import PmLib
 /// **The relationship needs no mark of its own.** Losing the bands sounds like losing the answer to
 /// "which card did I match", and it isn't, because the geometry says it: the ghost's height *is* the
 /// other card's height and that card is on screen, the ghost's edge is collinear with the other card's
-/// edge and collinearity is visible for free. The bands were saying a second time what the ghost's
-/// position already says. (The case that genuinely goes dark is a match against a card scrolled off
-/// screen — where the band was off screen too, and no better.)
+/// edge and collinearity is visible for free. An offered gap is the same argument at its strongest —
+/// two gaps of one length, side by side, is the easiest comparison the eye makes, and a mark drawn
+/// between the cards to announce it would be measuring something already legible. The bands were saying
+/// a second time what the ghost's position already says. (The case that genuinely goes dark is a match
+/// against a card scrolled off screen — where the band was off screen too, and no better.)
 ///
 /// **It is up before the snap fires, which is the whole of what makes it a target.** A mark that
 /// arrived as the card jumped would be a receipt again: there would be nothing left to steer toward.
@@ -46,28 +48,38 @@ struct CanvasSnapResult: Equatable {
 
 /// Snapping a drag or a resize to the cards already on the board.
 ///
-/// Two kinds of agreement are worth catching, and they are different questions. **Alignment** is about
-/// position: a card's left edge, centre or right edge sitting exactly where another's does, which is
-/// what makes a column read as a column. **Size** is about extent: a card being exactly as wide as
+/// Three kinds of agreement are worth catching, and they are different questions. **Alignment** is
+/// about position: a card's left edge, centre or right edge sitting exactly where another's does, which
+/// is what makes a column read as a column. **Size** is about extent: a card being exactly as wide as
 /// another, which is what makes a row of cards read as a set rather than as a row of near-misses.
+/// **Spacing** is about rhythm: the gap a card leaves on one side matching the gap on the other, or
+/// matching the gap the run beside it is already keeping.
 ///
-/// Both are expressed as candidate positions for a single edge, so they compete on the same terms and
-/// the nearer one wins — rather than one being applied on top of the other and quietly undoing it. And
-/// nothing downstream tells them apart any more: a target only has to say *where*, so the two kinds
-/// that used to be drawn as two different marks are now one rectangle. See `CanvasGhost`.
+/// Spacing is the late arrival and the one the board could not see at all before. It is also the one
+/// that answers what a lattice never could: three cards with the same top edge are aligned, and are
+/// still not a row until the gaps between them agree. A grid cannot produce that — two cards both
+/// sitting on multiples of ten say nothing whatever about the distance between them — which is the
+/// whole reason the lattice is a tidier and not a guide. See `gridShift`.
+///
+/// All three are expressed as candidate positions for a single edge, so they compete on the same terms
+/// and the nearer one wins — rather than one being applied on top of another and quietly undoing it.
+/// And nothing downstream tells them apart: a target only has to say *where*, so the kinds that used to
+/// be drawn as different marks are one rectangle. See `CanvasGhost`.
 ///
 /// The grid is the fallback, not the rule. Snapping to another card is a stronger statement of intent
 /// than snapping to an invisible 10pt lattice, so the grid only gets a say on an axis where nothing
 /// aligned. ⌥ turns the lot off, which is what makes snapping safe to have on by default.
 ///
-/// **The lattice gets no ghost.** It used to get a mark of its own — four corners — because a card
-/// clicking to a grid nobody had mentioned reads as a card refusing to go where you put it. Under a
-/// target that mark would be up during every drag, everywhere, for the weakest claim the board makes,
-/// which is the loudest possible answer to the mildest possible complaint. The dot grid already fades
-/// in for the duration of a snapping drag (`CanvasBoardView.showGrid`), which announces the lattice
-/// far better than a mark on one card ever did — so with the ghost silent, "nothing appeared" now
-/// reliably means "nothing matched", and a 5pt click with no ghost reads as tidying rather than as
-/// refusal.
+/// **The lattice gets no ghost, because it is not one of the three.** It used to get a mark of its own
+/// — four corners — because a card clicking to a grid nobody had mentioned reads as a card refusing to
+/// go where you put it. But the mark was answering the wrong question. A guide exists to promote a
+/// *relationship*, and every relationship above needs a second card to exist: an edge is another card's
+/// edge, a width is another card's width, a gap is the gap beside it. The lattice needs nothing and
+/// relates a card to nothing; it rounds. Drawn, it would be up during every drag, everywhere, for the
+/// only claim the board makes that isn't about anything. The dot grid already fades in for the duration
+/// of a snapping drag (`CanvasBoardView.showGrid`), which is the right way to show a lattice — under
+/// everything, saying where the ground is — so with the ghost silent, "nothing appeared" reliably means
+/// "nothing matched", and a 5pt click with no ghost reads as tidying rather than as refusal.
 enum CanvasSnapping {
     /// How near, in **view points**, counts as a snap. Divided by the zoom at the call site, so it is
     /// the same physical distance to the pointer at 30% as at 200%.
@@ -102,12 +114,20 @@ enum CanvasSnapping {
 
         // Searched out to the *show* radius, not the snap's. Everything past `reach` that comes back is
         // an offer rather than a move.
-        let horizontal = alignment(of: [proposed.minX, proposed.midX, proposed.maxX],
-                                   to: others.flatMap { [$0.minX, $0.midX, $0.maxX] },
-                                   reach: show)
-        let vertical = alignment(of: [proposed.minY, proposed.midY, proposed.maxY],
-                                 to: others.flatMap { [$0.minY, $0.midY, $0.maxY] },
-                                 reach: show)
+        //
+        // Alignment first of the two on each axis, so it takes a tie. Both are worth having and the
+        // nearer one should win, but at the same distance an edge landing on an edge is the plainer
+        // thing to have asked for — and a tie broken by argument beats one broken by array order.
+        let horizontal = closer(alignment(of: [proposed.minX, proposed.midX, proposed.maxX],
+                                          to: others.flatMap { [$0.minX, $0.midX, $0.maxX] },
+                                          reach: show),
+                                spacing(span(proposed, horizontal: true),
+                                        among: others.map { span($0, horizontal: true) }, reach: show))
+        let vertical = closer(alignment(of: [proposed.minY, proposed.midY, proposed.maxY],
+                                        to: others.flatMap { [$0.minY, $0.midY, $0.maxY] },
+                                        reach: show),
+                              spacing(span(proposed, horizontal: false),
+                                      among: others.map { span($0, horizontal: false) }, reach: show))
 
         /// The frame this drag produces — twice, from the same arithmetic. `taking` is the difference
         /// between the two questions: false is "where does the card go", which declines an offer that
@@ -135,6 +155,12 @@ enum CanvasSnapping {
     /// top edge onto a guide — and each moving edge considers both kinds of candidate at once: the
     /// positions other cards' edges and centres sit at, and the positions that would make this card
     /// exactly as wide (or as tall) as another.
+    ///
+    /// **No spacing here**, which is a judgement rather than an omission. A grip moves one edge, so the
+    /// only gap it can equalise is the one on that side, and "stretch this card until the space it
+    /// leaves matches the space over there" is a thing almost nobody is doing — while the two it
+    /// already offers, an edge and a matched extent, are what sizing a card is nearly always for.
+    /// Rhythm is made by placing cards, and `move` is where it belongs.
     static func resize(_ frame: CanvasRect,
                        handle: CanvasHandle,
                        against others: [CanvasRect],
@@ -207,6 +233,75 @@ enum CanvasSnapping {
     private struct Hit: Equatable {
         var target: Double
         var shift: Double
+    }
+
+    /// One rectangle reduced to the axis being asked about: where it begins and ends along that axis,
+    /// and the band it occupies across it.
+    ///
+    /// Spacing is the same question twice — gaps left and right, gaps above and below — and written
+    /// twice it would be two chances to get one of them subtly wrong. Reduced to this, it is written
+    /// once and the axis is an argument.
+    private struct Span {
+        var lead: Double, trail: Double, crossLead: Double, crossTrail: Double
+    }
+
+    private static func span(_ rect: CanvasRect, horizontal: Bool) -> Span {
+        horizontal
+            ? Span(lead: rect.minX, trail: rect.maxX, crossLead: rect.minY, crossTrail: rect.maxY)
+            : Span(lead: rect.minY, trail: rect.maxY, crossLead: rect.minX, crossTrail: rect.maxX)
+    }
+
+    /// Where this box would have to sit for the gaps around it to agree with the gaps already there.
+    ///
+    /// **Only cards in the same band count.** A gap is a gap between two things you can see abreast of
+    /// each other; the distance to a card two screens up is not a gap, it is a coincidence. So the
+    /// candidates come only from cards whose span across the other axis overlaps the moving box's,
+    /// which is the same test the eye is doing when it decides that four cards are "a row".
+    ///
+    /// **And only the cards it is actually between.** Every gap present anywhere in the band would be a
+    /// dozen offers inside a few hundred points, most of them relating this card to something nobody is
+    /// looking at — and a target that could be any of a dozen positions is not a target. So the
+    /// neighbour on each side, and that neighbour's own neighbour, and nothing further out.
+    ///
+    /// That leaves three positions worth naming, and each is a sentence a person would say:
+    ///
+    /// - *Centred between these two* — the gaps either side come out equal. The one placement that
+    ///   turns a card dropped into a hole into a card that belongs in it.
+    /// - *Carrying on the run* — the neighbour to the left and the card before it are keeping a pitch,
+    ///   and this is where the next card in that rhythm goes. What makes a row of cards a row rather
+    ///   than three cards with the same top edge.
+    /// - The same, reflected: carrying the run on backwards from the neighbour to the right.
+    private static func spacing(_ box: Span, among others: [Span], reach: Double) -> Hit? {
+        // Two, not one: one card in the band establishes no rhythm, and offering a gap because a single
+        // other card exists would be inventing the pitch rather than continuing one.
+        let band = others.filter { $0.crossLead < box.crossTrail && $0.crossTrail > box.crossLead }
+        guard band.count > 1 else { return nil }
+
+        let extent = box.trail - box.lead
+        let before = band.filter { $0.trail <= box.lead }.max(by: { $0.trail < $1.trail })
+        let after = band.filter { $0.lead >= box.trail }.min(by: { $0.lead < $1.lead })
+
+        var candidates: [Double] = []
+        if let before, let after {
+            let room = after.lead - before.trail - extent
+            if room >= 0 { candidates.append(before.trail + room / 2) }
+        }
+        if let before,
+           let prior = band.filter({ $0.trail <= before.lead }).max(by: { $0.trail < $1.trail }) {
+            candidates.append(before.trail + (before.lead - prior.trail))
+        }
+        if let after,
+           let next = band.filter({ $0.lead >= after.trail }).min(by: { $0.lead < $1.lead }) {
+            candidates.append(after.lead - (next.lead - after.trail) - extent)
+        }
+        return nearest(to: box.lead, among: candidates, reach: reach)
+    }
+
+    /// Whichever of two offers is nearer, with the tie going to the first.
+    private static func closer(_ first: Hit?, _ second: Hit?) -> Hit? {
+        guard let second else { return first }
+        guard let first else { return second }
+        return abs(first.shift) <= abs(second.shift) ? first : second
     }
 
     /// The offer worth drawing, if there is one, and how near it is to being taken.

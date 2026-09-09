@@ -34,13 +34,25 @@ person placing a card wants is somewhere to aim.
 
 So they are gone, and what replaced them is one outline of the frame the card would have if the match
 it is near were carried through, up while you are still approaching and fading in as you close. The
-whole argument is in [CanvasGhost](../pm-mac/PM/Canvas/CanvasSnapping.swift), including why the three
-claims collapse into one rectangle, why the lattice now gets no mark at all, and why the outline moved
-above the cards after `CanvasTileHandleView` had spent its whole life arguing it belonged below them.
+whole argument is in [CanvasGhost](../pm-mac/PM/Canvas/CanvasSnapping.swift), including why the claims
+collapse into one rectangle, why the lattice gets no mark at all, and why the outline moved above the
+cards after `CanvasTileHandleView` had spent its whole life arguing it belonged below them.
 
-What is left is the tolerance, which is a thing to feel rather than derive: the snap still fires at
-7 view points and the offer appears at 48, squared so it stays faint over most of its range. Drag a
-few cards around a real board and say whether 48 is a board that offers too much or too little.
+Then the brief got sharper again, and this time about what a guide is *for*: it should promote
+alignment and regularity, and rounding a card to a 10pt lattice does neither. Two cards both sitting on
+multiples of ten say nothing whatever about the distance between them. So the board learnt **spacing**
+— the third kind of agreement, beside alignment and size, and the first one that can see a gap. It
+offers the placement that centres a card in the hole it was dropped into, and the placement that
+carries on the pitch a run of cards is already keeping. Three cards with the same top edge are aligned;
+they are not a row until the gaps agree, and until now the board could not tell the difference.
+
+The grid stays exactly as it was — quantizing placement, drawn while you drag, and offering nothing.
+That division is the point: the lattice tidies, and the guides relate cards to each other.
+
+What is left is the tolerance, which is a thing to feel rather than derive: the snap fires at 7 view
+points and the offer appears at 48, squared so it stays faint over most of its range. Spacing gives the
+board more to catch on, so 48 will feel more generous than it did. Drag a few cards around a real board
+and say whether it offers too much or too little.
 
 ## Features
 
