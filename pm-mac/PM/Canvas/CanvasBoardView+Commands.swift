@@ -244,22 +244,39 @@ extension CanvasBoardView {
         // dismissed by the time the item fires, and by then the pointer has moved.
         menuPoint = where_
         menuDivider = nil
+        menuTile = nil
 
-        // In a tiled view the arrangement's own chrome answers first — it is drawn in the gaps, where
-        // the board would otherwise offer you New Card and Paste, neither of which a tiled view can do.
+        // In a tiled view the arrangement's own chrome answers first — the boundaries are in the gaps,
+        // and a menu about a card there would be a menu about whichever card the gap happened to be
+        // beside.
         if isTiled {
-            if let id = tileHandle(at: where_) {
+            // The boundary first, and that is not a new precedence — it has always been asked before
+            // the card, because `dividerReach` is as wide as the whole gap and so laps 4.5pt onto the
+            // tiles either side of it. A right-click in that strip is about the pair, not about one.
+            if let divider = tileDivider(at: where_) {
+                menuDivider = divider
+                buildDividerMenu(menu, divider)
+                return menu
+            }
+            // **Any part of a tile, not only its handlebar.** The tile block used to hang off the
+            // handlebar alone — a 3.5pt bar out in the gap, which you had to know was a menu before you
+            // could find the menu. The handlebar's whole job is the drag; every command a tile has is
+            // here, on the tile itself, and in the View menu. Asked of the card first and the bar
+            // second, so the gap the bar sits in still answers for the tile it belongs to.
+            if let id = tiledMenuTarget(at: where_) {
                 // The same rule the board's own path below follows, and it was the one line that
                 // didn't: right-clicking one of four selected tiles has to leave the four selected, or
                 // every command in the menu quietly means one card. A tiled view is where a bulk
                 // command — reload these six — is most likely to be what you wanted.
                 if !selection.contains(id) { selection = [id] }
-                buildCardMenu(menu, id: id)
-                return menu
-            }
-            if let divider = tileDivider(at: where_) {
-                menuDivider = divider
-                buildDividerMenu(menu, divider)
+                menuTile = id
+                buildCardMenu(menu, id: id, includingTiling: false)
+                // The card's commands, then the tile's, each under its own header — see
+                // `addTileSection`. The first header goes in afterwards because `buildCardMenu` is
+                // shared with the untiled board, where there is only one kind of object and a header
+                // would be labelling the whole menu.
+                menu.insertItem(.sectionHeader(title: "Card"), at: 0)
+                addTileSection(menu, id: id)
                 return menu
             }
         }
@@ -277,7 +294,22 @@ extension CanvasBoardView {
         return menu
     }
 
-    private func buildCardMenu(_ menu: NSMenu, id: String) {
+    /// The tile a right-click in a tiled view is about: the one it landed on, else the one whose
+    /// handlebar it landed on.
+    ///
+    private func tiledMenuTarget(at where_: CanvasPoint) -> String? {
+        switch hitTester.hit(where_) {
+        case .node(let id), .handle(let id, _), .anchor(let id, _):
+            return tiling?.ids.contains(id) == true ? id : nil
+        case .edge, .board:
+            return tileHandle(at: where_)
+        }
+    }
+
+    /// `includingTiling` is false for the one caller that groups the tiling commands itself under a
+    /// header of their own — see `addTileSection`. Everywhere else they belong in the run of the
+    /// menu, because everywhere else there is only one kind of object to act on.
+    private func buildCardMenu(_ menu: NSMenu, id: String, includingTiling: Bool = true) {
         guard let node = document.node(id: id) else { return }
 
         switch node.content {
@@ -376,7 +408,7 @@ extension CanvasBoardView {
             add(menu, "Rename Frame…", #selector(renameSelectedFrame))
         }
 
-        addTiling(menu)
+        if includingTiling { addTiling(menu) }
         menu.addItem(.separator())
         // All four carry their keys, for the reason Fill Window does — see `addTiling`. A contextual
         // menu draws a key equivalent exactly as the menu bar does, and it is the one place a person
@@ -480,12 +512,99 @@ extension CanvasBoardView {
         }
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
-        // Only where there are tabs to pin one to. An arrangement saved in a canvas window would be a
-        // thing you can make and never reach.
-        if onSaveArrangement != nil {
-            add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
-        }
+        add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
     }
+
+    /// What a right-click on a *tile* can say about the tile, as opposed to about the card in it.
+    ///
+    /// **Both, and in that order, because a tile is two things at once.** Right-clicking one used to
+    /// build the card menu and stop, so everything about the arrangement was reachable only by
+    /// right-clicking a *boundary* — a control you have to know exists, three points wide, in the gap
+    /// between two tiles. The card's own commands are still first: a tile is mostly a card, and the
+    /// thing you most often want from one is to open it, reload it or copy its address.
+    ///
+    /// Under a section header, which is what the header is for: the two blocks act on different objects
+    /// and "Delete Card" sitting a line above "Leave Tiled View" without one is a menu inviting the
+    /// mistake. `buildCardMenu` gets the matching header inserted above it by the caller.
+    ///
+    /// **Remove, not close**, and it is the last item for the same reason Delete is last everywhere
+    /// else: it is the one that takes something away. A tile is a view of a card, so "close" would be
+    /// the ambiguous word — half of what a person means by closing something is destroying it, and
+    /// this destroys nothing. See `removeFromTiling`.
+    private func addTileSection(_ menu: NSMenu, id: String) {
+        guard let tiling else { return }
+        menu.addItem(.sectionHeader(title: "Tile"))
+        // The block `buildCardMenu` was told to skip: fill the window with this one, pin its length,
+        // and — since ⌘↩ means the first of those here rather than the last — leave. The header is the
+        // separator, so it doesn't want a second one above it.
+        addTiling(menu, separated: false)
+
+        // Only where it means something: a grid has no master, and the master is already the master.
+        if tiling.arrangement == .masterStack, tiling.ids.first != id {
+            let promote = add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:)))
+            promote.keyEquivalent = "\r"
+            promote.keyEquivalentModifierMask = [.command, .shift]
+        }
+
+        let arrange = NSMenu()
+        for option in CanvasTiling.Arrangement.allCases {
+            let item = add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
+                                                                  : #selector(arrangeAsMasterStack(_:)))
+            item.state = tiling.arrangement == option ? .on : .off
+        }
+        let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
+        item.submenu = arrange
+
+        add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
+
+        menu.addItem(.separator())
+        add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
+    }
+
+    /// Make the right-clicked tile the master. `promoteTile` is the same command with no pointer
+    /// behind it — the difference between a contextual menu, which is about the thing you pointed at,
+    /// and the menu bar, which can only be about the thing that is focused.
+    @objc func promoteMenuTile(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        promoteInTiling(id)
+    }
+
+    /// The tile a menu-bar command acts on: the focused one, and only when it is on its own.
+    ///
+    /// A menubar item has nothing under a pointer to mean, so "this tile" has to mean the selection —
+    /// and a selection of four tiles cannot promote or be removed without picking one of the four for
+    /// you. Dim rather than guess.
+    var focusedTile: String? {
+        guard let tiling, selection.count == 1, let id = selection.first,
+              tiling.ids.contains(id) else { return nil }
+        return id
+    }
+
+    /// ⌘⇧Return. Documented on `promoteInTiling` from the day it was written and never actually
+    /// wired to anything: the key equivalent it carried was on a contextual-menu item, and nothing in
+    /// a contextual menu is searched for key equivalents — it was drawn and never dispatched.
+    @objc func promoteTile(_ sender: Any?) {
+        guard let id = focusedTile else { return NSSound.beep() }
+        promoteInTiling(id)
+    }
+
+    /// Take the focused tile out of the view — the menu bar's half of `removeMenuTile`.
+    @objc func removeTile(_ sender: Any?) {
+        guard let id = focusedTile else { return NSSound.beep() }
+        removeFromTiling(id)
+    }
+
+    /// Take the right-clicked tile out of the view. Like `promoteMenuTile`, it acts on the tile you
+    /// pointed at rather than on the selection: right-clicking one of four selected tiles has to be
+    /// able to mean that one, and a bulk "remove these four" from a menu whose other items act on all
+    /// four is a mistake waiting to be made with no undo behind it (a tiling is a view, so ⌘Z has
+    /// nothing to say about it).
+    @objc func removeMenuTile(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        removeFromTiling(id)
+    }
+
+    @objc func leaveTilingCommand(_ sender: Any?) { leaveTiling(animated: true) }
 
     private func pinTitle(_ id: String, side: String) -> String {
         "\(isTilePinned(id) ? "Unpin" : "Pin") \(side) Tile"
@@ -563,11 +682,12 @@ extension CanvasBoardView {
     /// Carrying the key equivalent so the menu teaches it. A contextual menu draws one exactly as the
     /// menu bar does, which makes this the cheapest possible way to hand somebody a shortcut they were
     /// never going to find in the View menu.
-    private func addTiling(_ menu: NSMenu) {
+    private func addTiling(_ menu: NSMenu, separated: Bool = true) {
         // Its own separator rather than one from each caller, so that bailing out on an empty board
-        // leaves the menu with one divider rather than two stacked on each other.
+        // leaves the menu with one divider rather than two stacked on each other. `separated` is for
+        // the one caller that has already drawn a line of its own — a section header.
         guard isTiled || document.nodes.contains(where: { !$0.isGroup }) else { return }
-        menu.addItem(.separator())
+        if separated { menu.addItem(.separator()) }
         let item = add(menu, tileCommandTitle, #selector(tileSelection(_:)))
         item.keyEquivalent = "\r"
         item.keyEquivalentModifierMask = [.command]
@@ -575,6 +695,20 @@ extension CanvasBoardView {
         // one, or a layout would stop responding to its window one adjustment at a time without
         // anybody having asked for that. See `togglePinTile`.
         if pinnableTile != nil { add(menu, pinTileTitle, #selector(togglePinTileSize(_:))) }
+        addLeaveTiling(menu)
+    }
+
+    /// The way out, wherever a tiled view offers a menu at all.
+    ///
+    /// ⌘↩ above is the way out *only when there is nothing left to narrow to* — with one tile of six
+    /// picked it reads "Fill Window with This Tile", and while that is what it says there was no item
+    /// anywhere on this menu that left the tiled view. Escape used to cover for that and deliberately
+    /// no longer does (see `CanvasBoardView.untile`), which makes this the item that has to exist.
+    ///
+    /// Skipped when ⌘↩ *is* already the way out, so the menu never says it twice.
+    private func addLeaveTiling(_ menu: NSMenu) {
+        guard isTiled, tileCommandTitle != "Leave Tiled View" else { return }
+        add(menu, "Leave Tiled View", #selector(leaveTilingCommand(_:)))
     }
 
     @discardableResult
@@ -606,12 +740,45 @@ extension CanvasBoardView {
                          initial: "") { [weak self] text in
             guard let self else { return }
             let at = where_ ?? centreOfVisibleBoard
-            let node = CanvasNode(content: .link(url: text),
-                                  frame: CanvasRect(x: at.x - 200, y: at.y - 200,
-                                                    width: 400, height: 400))
-            store.change("Add Link") { $0.nodes.append(node) }
-            select([node.id])
+            addCard(CanvasNode(content: .link(url: text),
+                               frame: CanvasRect(x: at.x - 200, y: at.y - 200,
+                                                 width: 400, height: 400)),
+                    actionName: "Add Link")
         }
+    }
+
+    /// Put a new card on the board — and, while tiled, up on the screen with the rest.
+    ///
+    /// **Every add command ends here**, which is what makes "adding a card works while tiled" one
+    /// change rather than five. It used to be five copies of `store.change` and `select`, and a tiled
+    /// view was handled by dimming four of them and having the fifth apologise.
+    ///
+    /// The card goes on the end of the tiling — see `CanvasTileSession.add`, which argues that — and
+    /// its position *on the board* is stepped clear of whatever is already there. That second part
+    /// matters only while tiled, and only because of what tiled means: the point you appear to be
+    /// looking at is a region of the board the tiles are drawn over, so a card dropped at it would land
+    /// on top of the cards that live there — damage you cannot see, done to the layout you cannot see.
+    /// Untiled, where you land it is where you asked for it, so nothing steps it anywhere.
+    @discardableResult
+    func addCard(_ node: CanvasNode, actionName: String) -> String {
+        var node = node
+        if isTiled { node.frame = freeFrame(from: node.frame) }
+        store.change(actionName) { $0.nodes.append(node) }
+        addToTiling(node.id)
+        select([node.id])
+        return node.id
+    }
+
+    /// An empty text card, ready to be typed into. The board's own New Card and the header's Add both
+    /// mean this — they had a copy each, and the copies had already drifted apart on which point they
+    /// centred the card at.
+    func addTextCard(at where_: CanvasPoint?) {
+        let at = where_ ?? centreOfVisibleBoard
+        let id = addCard(CanvasNode(content: .text(""),
+                                    frame: CanvasRect(x: at.x - 125, y: at.y - 30,
+                                                      width: 250, height: 60)),
+                         actionName: "Add Card")
+        beginEditing(id)
     }
 
     /// Ask for a web address, and hand back a usable one or nothing at all.
@@ -651,11 +818,10 @@ extension CanvasBoardView {
         // in both apps. A file outside the vault has no such path and is stored as it stands.
         let path = store.resolver.storablePath(for: url) ?? url.path
         let at = where_ ?? centreOfVisibleBoard
-        let node = CanvasNode(content: .file(path: path, subpath: nil),
-                              frame: CanvasRect(x: at.x - 200, y: at.y - 175,
-                                                width: 400, height: 350))
-        store.change("Add File") { $0.nodes.append(node) }
-        select([node.id])
+        addCard(CanvasNode(content: .file(path: path, subpath: nil),
+                           frame: CanvasRect(x: at.x - 200, y: at.y - 175,
+                                             width: 400, height: 350)),
+                actionName: "Add File")
     }
 
     @objc private func newLinkHere() { addLinkCard(at: menuPoint) }
@@ -676,18 +842,10 @@ extension CanvasBoardView {
         guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url) else { return }
         let node = CanvasProjectNoteCard.node(for: notes, at: where_ ?? centreOfVisibleBoard,
                                               resolver: store.resolver)
-        store.change("Add Project Note") { $0.nodes.append(node) }
-        select([node.id])
+        addCard(node, actionName: "Add Project Note")
     }
 
-    @objc private func newCardHere() {
-        let at = menuPoint ?? centreOfVisibleBoard
-        let node = CanvasNode(content: .text(""),
-                              frame: CanvasRect(x: at.x - 125, y: at.y - 30, width: 250, height: 60))
-        store.change("Add Card") { $0.nodes.append(node) }
-        selection = [node.id]
-        beginEditing(node.id)
-    }
+    @objc private func newCardHere() { addTextCard(at: menuPoint) }
 
     @objc private func newFrameHere() {
         let at = menuPoint ?? centreOfVisibleBoard
@@ -754,8 +912,7 @@ extension CanvasBoardView {
     /// Where that lands depends on where you asked from, which is the Mac's own rule and was the one
     /// thing this app's several "open" commands disagreed about. A board rendered inside a project
     /// window retargets *that* window, exactly as clicking its sidebar does — it is the same errand
-    /// reached from a card instead of a row. A board in a window of its own has no window to retarget,
-    /// so it opens or raises one.
+    /// reached from a card instead of a row. Asked for a new window, it opens one instead.
     @objc private func openProjectForCard() { goToProjectForCard(inNewWindow: false) }
 
     @objc private func openProjectInNewWindowForCard() { goToProjectForCard(inNewWindow: true) }
@@ -777,7 +934,10 @@ extension CanvasBoardView {
         if !inNewWindow, let host = window?.windowController as? ProjectWindowController {
             return WindowManager.shared.retarget(host, to: key)
         }
-        WindowManager.shared.open(projectKey: key)
+        // In a new window when that is what was asked for, even if this project already has one —
+        // otherwise the item brings forward the window you right-clicked in, which is most of the time
+        // on a board showing its own project's notes card. Without the flag it reads as doing nothing.
+        WindowManager.shared.open(projectKey: key, reusingExistingWindow: !inNewWindow)
     }
 
     @objc private func openLinkInBrowser() {
@@ -920,22 +1080,28 @@ extension CanvasBoardView {
             doc.nodes.append(node)
             doc.edges.append(edge)
         }
-        // A tiled view shows a handful of named cards and the new one is not among them, so it would
-        // otherwise arrive invisibly. The board is still the thing being added to; say so rather than
-        // refusing a deliberate gesture.
+        // Up on screen with the rest, on the end of the order. This used to report "added to the board,
+        // behind this tiled view" — honest about where the card had gone and no use at all, since
+        // following a link is a request to *read* the page and the tiled view is what you were reading
+        // in. Revealing is the untiled half of the same sentence: put the new card where I can see it.
+        select([node.id])
         if isTiled {
-            report("Added a card to the board, behind this tiled view.")
+            addToTiling(node.id)
         } else {
-            select([node.id])
             (scrollView as? CanvasScrollView)?.reveal(node.id)
         }
     }
 
     /// The first empty spot to the right of `frame`, at the same size.
     private func freeFrame(rightOf frame: CanvasRect) -> CanvasRect {
+        freeFrame(from: CanvasRect(x: frame.maxX + 40, y: frame.minY,
+                                   width: frame.width, height: frame.height))
+    }
+
+    /// The first spot from `start` downwards that nothing is already sitting in.
+    private func freeFrame(from start: CanvasRect) -> CanvasRect {
         let gap = 40.0
-        var candidate = CanvasRect(x: frame.maxX + gap, y: frame.minY,
-                                   width: frame.width, height: frame.height)
+        var candidate = start
         // Nine tries and then take what you get: a board dense enough to defeat this is one where any
         // answer is a compromise, and a card you can see and drag beats a search that never ends.
         for _ in 0..<9 {
@@ -994,7 +1160,7 @@ extension CanvasBoardView {
     /// Open the selected frame as a tab of its own — see `ProjectTab`.
     @objc private func openSelectedFrameInTab() {
         guard let id = selection.first, document.node(id: id)?.isGroup == true else { return }
-        onOpenInTab?(.frame(id))
+        onOpenInTab(.frame(id))
     }
 
     /// Keep the tiling that is up, under a name, so a tab can be pinned to it.
@@ -1003,7 +1169,6 @@ extension CanvasBoardView {
     /// arrangement's identity — there is nothing else to point at — so there is no version of this that
     /// can be deferred.
     @objc func saveTilingAsArrangement(_ sender: Any?) {
-        guard onSaveArrangement != nil else { return }
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
         field.stringValue = suggestedArrangementName
         let alert = NSAlert()
@@ -1015,7 +1180,7 @@ extension CanvasBoardView {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        onSaveArrangement?(name)
+        onSaveArrangement(name)
     }
 
     /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
@@ -1186,9 +1351,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
         case #selector(saveTilingAsArrangement(_:)):
-            // Somewhere to keep it, and something to keep: a canvas window has no tabs to pin one to,
-            // and a board that has never been tiled has no arrangement.
-            return onSaveArrangement != nil && tilingMemory != nil
+            // Something to keep: a board that has never been tiled has no arrangement.
+            return tilingMemory != nil
         case #selector(setTileArrangement(_:)):
             (item as? NSMenuItem).map { entry in
                 entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue
@@ -1218,13 +1382,27 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // `default` below and was live over an empty pasteboard. It is the same question as
             // `paste(_:)` and gets the same answer.
             return !isTiled && NSPasteboard.general.types?.isEmpty == false
-        case #selector(newCardHere), #selector(newFrameHere), #selector(newLinkHere),
-             #selector(newFileHere):
-            // Dim while tiled, for the reason cut and copy are: a tiled view is a way of looking, and
-            // a card added through it would land at a point on a board the lens has moved out from
-            // under you. Reachable at all only because a right-click on a gap that isn't a divider
-            // falls through to the board's menu.
+        case #selector(newCardHere), #selector(newLinkHere), #selector(newFileHere):
+            // Live while tiled, which they were not. The old reason was that a card added through a
+            // tiled view would land at a point on a board the lens has moved out from under you — true,
+            // and answered by `addCard`, which steps the card clear and puts a tile up for it. The
+            // right-click that reaches these while tiled is one on a gap that isn't a divider.
+            return true
+        case #selector(newFrameHere):
+            // Still not, and alone in that. A frame is a container of cards rather than a card, so
+            // there is no tile it could become — it would be an edit made entirely behind the view.
             return !isTiled
+        case #selector(removeMenuTile(_:)):
+            return menuTile != nil
+        case #selector(removeTile(_:)):
+            return focusedTile != nil
+        case #selector(promoteTile(_:)):
+            // Only where it means something, which is what the contextual menu says by leaving the
+            // item out altogether: a grid has no master, and the master is already the master.
+            guard let id = focusedTile, tiling?.arrangement == .masterStack else { return false }
+            return tiling?.ids.first != id
+        case #selector(leaveTilingCommand(_:)):
+            return isTiled
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
             return pinnableTile != nil

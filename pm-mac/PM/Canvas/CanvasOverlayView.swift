@@ -45,9 +45,13 @@ final class CanvasOverlayView: NSView {
         guard case .swap(let from, let over)? = board.gesture, let over,
               let a = board.layout.frames[from], let b = board.layout.frames[over] else { return }
         for rect in [a, b] {
-            let path = NSBezierPath(roundedRect: board.viewRect(rect).insetBy(dx: -2 / scale,
-                                                                             dy: -2 / scale),
-                                    xRadius: 12 / scale, yRadius: 12 / scale)
+            let standoff = 2 / scale
+            // The card's own corner plus the standoff, which is what keeps an offset curve parallel to
+            // the one it is offset from. See `drawSelectionBounds`, which owns the argument.
+            let radius = CanvasNodeView.cornerRadius(for: rect) + standoff
+            let path = NSBezierPath(roundedRect: board.viewRect(rect).insetBy(dx: -standoff,
+                                                                             dy: -standoff),
+                                    xRadius: radius, yRadius: radius)
             NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
             path.fill()
             NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
@@ -115,16 +119,26 @@ final class CanvasOverlayView: NSView {
             // glow is the Mac's own way of saying "this is what your input is going to".
             // The halo keeps its weight. It isn't about shaping — it says where your typing is going,
             // which is the one thing on this board worth being emphatic about.
+            //
+            // **Both marks take the card's own corner, and neither divides it by the zoom.** They used
+            // to be fixed 11 and 9 around a card whose radius grows with it (`CanvasNodeView`
+            // `cornerRadius(for:)`), so a ring was rounder than a small card and squarer than a large
+            // one — two curves meant to read as one line and its outline. Dividing by the zoom is right
+            // for a hairline, which should hold its weight as you zoom, and wrong for a corner, which
+            // is part of the shape and has to zoom with it.
+            let corner = CanvasNodeView.cornerRadius(for: board.layout.frame(of: node))
             if board.nodeViews[id]?.isEngaged == true {
-                let halo = NSBezierPath(roundedRect: rect.insetBy(dx: -3.5 / scale, dy: -3.5 / scale),
-                                        xRadius: 11 / scale, yRadius: 11 / scale)
+                let standoff = 3.5 / scale
+                let halo = NSBezierPath(roundedRect: rect.insetBy(dx: -standoff, dy: -standoff),
+                                        xRadius: corner + standoff, yRadius: corner + standoff)
                 halo.lineWidth = 5 / scale
                 NSColor.controlAccentColor.withAlphaComponent(0.3).setStroke()
                 halo.stroke()
             }
 
-            let ring = NSBezierPath(roundedRect: rect.insetBy(dx: -1 / scale, dy: -1 / scale),
-                                    xRadius: 9 / scale, yRadius: 9 / scale)
+            let standoff = 1 / scale
+            let ring = NSBezierPath(roundedRect: rect.insetBy(dx: -standoff, dy: -standoff),
+                                    xRadius: corner + standoff, yRadius: corner + standoff)
             ring.lineWidth = 1.25 / scale
             NSColor.controlAccentColor.withAlphaComponent(0.55).setStroke()
             ring.stroke()

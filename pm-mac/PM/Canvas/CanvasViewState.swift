@@ -46,9 +46,9 @@ struct CanvasViewState: Codable, Equatable {
 /// Where those are kept: one entry per canvas file.
 ///
 /// **Keyed by the file, not by the project.** It is a fact about a board, and a board is one document
-/// however you reached it — through a project window's renderer switch, through File ▸ Open Canvas, or
-/// as a canvas that belongs to no project at all. One memory for the three of them is the only version
-/// that cannot disagree with itself.
+/// however you reached it — through a window's renderer switch, through File ▸ Open Canvas, or in a
+/// second window on the same file. One memory for all of them is the only version that cannot disagree
+/// with itself.
 ///
 /// **In defaults, not in the canvas.** Writing "you had these six tiled" into the file would put a
 /// private, per-machine, per-person view preference into a document that syncs between machines, that

@@ -1,24 +1,43 @@
 # Canvas backlog
 
-Raised 2026-09-06. One entry per item: what it is, where it lives, and — where there is one — the
-question that has to be answered before it can be built. Deliberately short. An item that turns out to
-need a real design argument graduates to [open-items.md](open-items.md) or a page of its own.
+One entry per item: what it is, where it lives, and — where there is one — the question that has to be
+answered before it can be built. Deliberately short. An item that turns out to need a real design
+argument graduates to [open-items.md](open-items.md) or a page of its own.
+
+Finished items are deleted rather than kept, because the reasoning that was worth having outlives them
+in the code: this codebase argues in its comments, and a done entry here is a second copy going stale.
+What is below is what is left to do.
 
 Priorities are at the bottom.
 
 ## Fixes
 
-### 1. Don't autoscroll while resizing — **done 2026-09-06**
+### 1. The placeholder sits over a page you could already read
 
-A drag near the window's edge pans the board so you can drag further across it. A *resize* gets the
-same treatment, so grabbing an edge and pulling drags the whole board along under the card, which is
-never what a resize means — the card's other edge is the fixed thing you are sizing against.
+A card shows its globe-and-host placeholder until the page finishes loading, which on an app-shell
+page — the kind a dashboard is made of — is long after the page is worth looking at.
 
-`mouseDragged` called `autoscroll(with:)` for every gesture. It now asks the gesture —
-`Gesture.pansTheBoard` — and a resize says no. The marquee and a dragged connection keep it: both are
-going somewhere, and reaching past the edge of the window is how you get there.
+Not an accident: `revealPage` is called from `didFinish`, with an eight-second fallback for pages that
+never settle ([CanvasLinkNodeView.swift:505](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:505)), and
+`suppressesIncrementalRendering` is on so the reveal is never half-painted. The design answers "don't
+flash"; the complaint is that it answers it by waiting for the wrong signal.
 
-### 2. ⇧ and ⌥ while resizing — **parked 2026-09-06**
+Open: what the earlier signal is. `didCommit` is too early — that is a blank frame. First
+visually-non-empty layout is the honest one and WebKit only exposes it privately. A `estimatedProgress`
+threshold is the ugly, public, probably-good-enough version. Whichever it is, the 0.2s cross-fade stays.
+
+### 2. The alignment indicators, again
+
+The redesign landed: one band, drawn three ways — a closed loop for aligned, two runs for same-size,
+four corners for the grid, all at one standoff and one weight so they read as one mark. In use it
+still isn't right.
+
+Nothing to plan until the complaint is specific: which of the three, in which case, and whether the
+problem is that it is unreadable, ambiguous, or simply too loud. Write the sentence, then design.
+
+## Features
+
+### 3. ⇧ and ⌥ while resizing — **parked**
 
 The design-tool grammar: **⇧ keeps the aspect ratio, ⌥ resizes about the centre**, and together, both.
 Neither exists today — a resize is the dragged grip and nothing else
@@ -31,113 +50,16 @@ needs somewhere else for the escape hatch (⌘ is the other candidate, and is cu
 extend-selection modifier on mouse-down). Not worth trading one muscle memory for another without
 deciding it deliberately, so this waits.
 
-### 3. ⇧ and ⌥ for the marquee — **done 2026-09-06**
+### 4. ⌥-drag to duplicate a card
 
-The rectangle you sweep over empty board. ⇧ was already spoken for — it is what makes a sweep add to
-what is selected ([CanvasBoardView+Input.swift:26](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:26))
-— so the new one is **⌥, which sweeps from the centre**: the press is the middle of the rectangle
-rather than a corner, which is what you want when every corner you could start from is inside another
-card. Free of ⌥'s other meaning, since a sweep has nothing to snap to.
+The Mac's own gesture, missing. `duplicate` already exists as a command, and the drag machinery in
+`CanvasBoardView+Input` already reads ⌥ for "don't snap" — which is the collision, and it is
+the same one 3 is parked on, met in a new place.
 
-### 4. Say *what* the alignment indicator is claiming — **done 2026-09-06**
+Not free, then: ⌥ cannot mean both. Worth deciding both at once, since a person who has learnt ⌥-drag
+from Figma has also learnt ⌥ for no-snapping from everywhere else.
 
-A guide said "these agree" without saying what they agree about, and said the size half of it in a
-different visual language: a hairline bar with a tick at each end, ruled beside each card — a
-measurement drawing on a board that otherwise speaks in soft rounded bands.
-
-**One mark now, and how much of it is drawn is the claim.** The band is the loop that already stood
-off an aligned card; the other cases are that same loop with parts left out, at the same standoff,
-the same 5pt breadth, the same neutral tone and the same fade. They are drawn by clipping the one
-path rather than by building shapes of their own, so they cannot drift apart:
-
-- **closed loop** — they line up, or (round exactly two cards) they are the same size in *both*
-  dimensions and so the same shape. The strongest mark for the two strongest claims, and in the
-  congruent case the two loops are congruent, which is the proof.
-- **two runs**, top and bottom or left and right — the same width, or the same height. What survives
-  is the pair of runs that span the dimension being claimed.
-- **four corners** — the 10pt lattice, which used to draw nothing at all, so a card clicking to a
-  grid nobody had mentioned read as a card refusing to go where you put it. Emitted only when there
-  is no other guide, because the grid is the fallback and not the rule.
-
-`CanvasGuide.sameSize` now carries `axes: [Axis]` rather than one axis, because "the same width *and*
-the same height" is one claim rather than two — and a dimension that was already right counts towards
-it, so a corner drag reaches the congruence case. The resize guides are also built from the settled
-frame instead of axis by axis, which fixes a width guide being drawn around a rectangle carrying the
-card's pre-resize height.
-
-### 5. Pan freely, with or without overflow — **done 2026-09-06**
-
-The board is the document's bounds plus a 1600pt margin
-([CanvasBoardView.swift:60](../pm-mac/PM/Canvas/CanvasBoardView.swift:60)), and a scroll view will not
-scroll a document smaller than its clip view. So a board with three cards on it is nailed in place:
-you can zoom, but you cannot push the cards aside to have room to think. Panning should always be
-available in both axes.
-
-`CanvasClipView` now overrides `constrainBoundsRect` and constrains only the *losing* of the board:
-you can pan until 120pt of it is left in the window, in any direction, whether or not it overflows.
-
-### 6. Don't flash the notes view when switching to a project that opens on its board — **done 2026-09-06**
-
-A window remembers which tab a project was last read in. When that is a board, the switch shows the
-**notes** first and the board a moment later, because the canvas path is learned asynchronously and
-the wait is spent on the notes tab
-([ProjectWindowController.swift:215](../pm-mac/PM/Windows/ProjectWindowController.swift:215)).
-
-Waiting was right; waiting *on the notes* was what made it a flash. The store can now tell "nobody has
-looked" from "there isn't one" (`PMStore.hasResolvedCanvasPath`), so the tabs come up correct and the
-board tab holds an empty pane for the moment it takes — and a project that turns out to have no canvas
-gets the empty state that offers to make one, rather than the task list.
-
-## Features
-
-### 7. Mute, and don't autoplay, on a web card — **done 2026-09-06**
-
-A board of YouTube embeds all start playing at once the moment the zoom brings them inside the page
-budget ([CanvasPageBudget](../pm-mac/PM/Canvas/CanvasPageBudget.swift)) — a dozen soundtracks from a
-gesture that meant "look closer".
-
-`WKWebViewConfiguration` is built per card at
-[CanvasLinkNodeView.swift:393](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:393) and sets no media
-policy, so the platform default (play on load) applies.
-
-`CanvasCardMedia` now holds both, saved on the node beside `pmSession`:
-
-- **Autoplay is off for every card** unless the card says otherwise
-  (`mediaTypesRequiringUserActionForPlayback = .all`), and "Autoplay Media" on the card's menu is the
-  opt-in for the stream or the dashboard you do want running.
-- **Mute** is a user script — WebKit has no public switch — injected at document start in every frame,
-  which is what an embed needs, since a YouTube card is a page containing a player.
-- **Neither one restarts the card**, because you reach for these while something is playing. The mute
-  script is injected into every card whether or not it is muted, so it is a switch that can be thrown
-  later: the app throws it in the main frame, and each frame relays the message down to its iframes,
-  which is the only way to reach the cross-origin frame a YouTube card actually is. The user scripts
-  are reinstalled at the same time so a link followed inside a muted card stays muted. Autoplay needs
-  nothing live — it decides whether a page may start *by itself*, which is only asked as a page loads
-  — so it applies the next time the card's page does, and nothing is taken away from you meanwhile.
-
-### 8. A "New Project Note" card, when the board hasn't got one — **done 2026-09-06**
-
-`createProjectCanvas` starts every project's board with one card: a file card pointing at
-`docs/Notes - <Title>.md`. It is an ordinary card and deleting it is a keystroke — and there was no
-way to get it back short of knowing the filename and hunting for it through New File….
-
-Both add menus — the board's right-click and the header's `+` — now offer **New Project Note** as a
-fifth item, and only when the board hasn't got it. Conditional was the whole point: a permanent item
-would be an invitation to put a second copy of one document on one board. Offered this way it is not
-really a fifth command, it is the board noticing something is missing in the place you would go to fix
-it. No ellipsis, because unlike New File… there is nothing to ask.
-
-[CanvasProjectNoteCard](../pm-mac/PM/Canvas/CanvasProjectNoteCard.swift) answers both halves, and the
-two are deliberately asked at different rates. *Which* file is the project's is decided once and
-remembered — the canvas doesn't move, so neither does its project — and tested by
-`resolveNotesPath` finding a real `Notes - *.md` a step above the board, **not** by a `ProjectIndex`
-lookup: the index is built after launch, and a board asked before it is ready would cache "no
-project" forever. *Whether* the card is already there is re-asked on every document change, which
-during a drag is every frame, so it compares the vault-relative path the card would be stored as
-rather than calling the resolver, which touches the disk. The card it builds is the one
-`createProjectCanvas` writes: same content, same 400×400.
-
-### 9. Cards that are just an image
+### 5. Cards that are just an image
 
 An image card letterboxes: `scaleProportionallyUpOrDown`
 ([CanvasFileNodeView.swift:145](../pm-mac/PM/Canvas/CanvasFileNodeView.swift:145)), so a board of
@@ -148,23 +70,23 @@ the crop is invisible at that tolerance and the board tidies itself. Beyond the 
 fitting, because a deliberate wide crop of a tall picture is a decision.
 
 Open: is the tolerance a preference, a per-card switch, or a constant nobody sees? Also whether a
-resize should *offer* the image's own aspect ratio as a snap, which item 4 would then have to explain.
+resize should *offer* the image's own aspect ratio as a snap, which 2 would then have to say out
+loud.
 
-### 10. Swap the card in a tile
+### 6. Dropping files on the board — verify, then polish
 
-In a tiled view, a way to say "this slot, different card" — a control on the tile that raises a
-picker of the cards on the board that are not currently up.
+Mostly built already: the board takes `.fileURL`, `.string`, `.URL` and image types, and a dropped
+file becomes a file card at the drop point
+([CanvasBoardView+Commands.swift:76](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:76)). So the
+first job is to try it with a markdown file and find out what is actually missing. Suspected gaps:
 
-- Rows are `[thumbnail] [title / preview text]`.
-- **The project note sorts first when it isn't already on screen**, since that is the card you most
-  often meant.
-- Existing pieces: `CanvasPageTitles` for names, and the summary/preview text in `CanvasSummary`.
-  Thumbnails are the unknown — a web card's snapshot exists, a file card's does not.
+- no visible feedback while dragging over the board — the drop lands with no indication of where,
+- a file from outside the vault is stored as an absolute path
+  ([CanvasBoardView+Commands.swift:159](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:159)),
+  which Obsidian cannot resolve. Copy it in, or say so,
+- several files cascade by 30pt rather than laying out.
 
-Where it lives: the tile handlebar's neighbourhood, or the tile's contextual menu, which already has
-promote and pin.
-
-### 11. Tidy
+### 7. Tidy
 
 FigJam's tidy-up: take a rough cluster and make it a clean grid, keeping the reading order and the
 rows people already meant. Different from the tiling — a tiling is a temporary *way of looking*, this
@@ -178,28 +100,184 @@ Open: whether it acts on the selection, on a frame, or on everything; whether ca
 uniform or only their positions regularised (Figma keeps sizes — probably right); what the spacing is
 and whether it is the 10pt grid.
 
-### 12. Dropping files on the board — verify, then polish
+### 8. Swap the card in a tile
 
-Mostly built already: the board takes `.fileURL`, `.string`, `.URL` and image types, and a dropped
-file becomes a file card at the drop point
-([CanvasBoardView+Commands.swift:76](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:76)). So the
-first job is to try it with a markdown file and find out what is actually missing. Suspected gaps:
+In a tiled view, a way to say "this slot, different card" — a control on the tile that raises a
+picker of the cards on the board that are not currently up.
 
-- no visible feedback while dragging over the board — the drop lands with no indication of where,
-- a file from outside the vault is stored as an absolute path
-  ([CanvasBoardView+Commands.swift:159](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:159)),
-  which Obsidian cannot resolve. Copy it in, or say so,
-- several files cascade by 30pt rather than laying out.
+- Rows are `[thumbnail] [title / preview text]`.
+- **The project note sorts first when it isn't already on screen**, since that is the card you most
+  often meant.
+- Existing pieces: `CanvasPageTitles` for names, and the summary/preview text in `CanvasSummary`.
+  Thumbnails are the unknown — a web card's snapshot exists, a file card's does not.
+
+Where it lives: the tile's contextual menu, beside promote and pin. Not on the handlebar — that drags
+and does nothing else, deliberately, and every other tile command has moved off it and into the two
+menus.
+
+### 9. Saved arrangements — already built, and hard to find
+
+Worth writing down because it looks like a gap and isn't. Arrangements are saved per board, by name,
+in defaults rather than in the `.canvas` — [CanvasArrangements](../pm-mac/PM/Canvas/CanvasArrangements.swift),
+with the whole lifetime argument set out there — and a tab can be pinned to one
+(`CanvasFocus.arrangement`).
+
+So the request "save tile layouts to the project, in app persistence rather than project data" is done,
+exactly as asked. What is missing is a way to notice: it is one contextual-menu item with no shortcut
+and nothing in the window pointing at it. Find out whether the answer is discoverability or a real gap
+before building anything.
+
+### 10. Duplicate the current arrangement
+
+Small, and only worth stating because of what it is *for*: you have built a six-tile view and want a
+variant of it. Today that means building the variant from scratch.
+
+Sketch: "Duplicate Arrangement" beside Save, seeding the name from the one that is up ("Dashboard
+copy"), then the copy is what your adjustments land on. Depends on nothing except 9 being answered.
+
+### 11. BSP layouts
+
+`CanvasTiling` currently offers a grid and a master-stack, and rules BSP out in its own doc comment:
+"a scheme for windows that arrive one at a time and split whatever had focus, and a board's cards all
+exist already" ([CanvasTiling.swift:13](../pm-mac/PM/Canvas/CanvasTiling.swift:13)).
+
+That argument survives the request as far as *automatic* BSP goes — there is no arrival order to
+recurse on. What it does not answer is BSP as a thing you *build*: split this tile, put that card in
+the new half. Tiles can be added now, so the arrival order exists — you are the one supplying it —
+and the objection goes away. What replaces it is that an added tile currently goes on the end of a
+list, and under BSP "the end" is not a place: it would have to name a tile to split and a direction,
+which is a second grammar for adding rather than a second arrangement.
+
+Open: whether that is one arrangement more or a different kind of thing entirely — a grid and a
+master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
+tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
+
+### 12. What a project card shows
+
+A project card renders the whole notes document — title, every session, every task. On a board of six
+projects that is six of everything, when what you wanted from five of them was the current state and
+the open work.
+
+Wanted: a card set to show any of the latest session, all sessions, the metadata block
+(summary/problem/goals/approach), open tasks, or all tasks — and mixed, so one card is "goals + open
+tasks" and another is just the latest session.
+
+The pieces exist: `SessionBody` already cuts the document into blocks and `CanvasProjectNote` already
+composes from them. The questions are where the setting lives — a card menu, a control on the card, or
+the same picker in both — and where it is *stored*. A per-card setting is a fact about a card, which
+argues for the `.canvas`; but the `.canvas` is Obsidian's file and PM has so far put every view
+preference in defaults. Probably defaults, keyed by canvas path and node id, which is what
+`CanvasCardMedia` and `CanvasCardSession` already do.
+
+### 13. Offer the project's own links when adding a web card
+
+Adding a web card means typing or pasting an address, when nine times in ten the address is already in
+the project's `## Links` block.
+
+Sketch: the add-a-link field suggests the current project's links first, so switching between them is a
+pick rather than a paste. And the mirror: putting a card on an address the project doesn't know about
+offers — never requires — to add it to the block. An offer, because a board is where you try things,
+and half the pages you put on one are not worth writing down.
+
+Open: what "the current project" means on a board with six project cards on it. The window's project is
+the obvious answer, and is nothing at all for a board opened from a file. Possibly: the window's
+project first, then every project the board has a card for.
+
+### 14. Pin and reorder a project's links
+
+`LinkEntry` is `label`, `url`, `children`
+([NotesTypes.swift:3](../pm-swift/Sources/PmLib/NotesTypes.swift:3)) — a list whose order is the order
+of the lines in `## Links`, with nothing to say one matters more than another.
+
+Reordering is therefore an edit to the notes file, which is fine and is what a drag should write.
+Pinning needs somewhere to put the fact. The `key:value` convention the task lines already use is the
+obvious spelling and would not be an invention (see the todo.txt findings in
+[open-items.md](open-items.md)), but a token on a link line is visible in Obsidian in a way a token on
+a task line has already earned. The alternative is a defaults-side pin, which is invisible in Obsidian
+and does not sync — the same trade `CanvasArrangements` made, and it came out the other way there.
+
+Depends on 13 only in that both want a better answer to "what are this project's links".
+
+### 15. Live-saving the summary and goals
+
+Edits to the summary/problem/goals/approach block are lost if the pane closes mid-sentence, which is
+not how the task rows behave — and that inconsistency is what makes it read as a bug.
+
+**It is a bigger ask than it sounds, and the reason is Cancel.** This is not a field that commits on
+blur; it is an explicit form. `DetailsEditor` seeds `@State` from the notes, and the only way anything
+reaches the file is the Save button — with a Cancel beside it
+([ProjectView.swift:3358](../pm-mac/PM/Project/ProjectView.swift:3358)). Saving live means retiring
+that Cancel, because a form that both writes as you type and offers to discard is lying about one of
+the two.
+
+Which is a fair trade and is probably the right one — the rest of the app has no modal editing and the
+notes file has undo behind it — but it is a decision about how this app edits, not a debounce. Open:
+whether the whole block becomes live rows like the task list (bigger, more consistent), or keeps its
+form and merely commits on dismissal as well as on Save (smaller, and leaves the inconsistency
+half-fixed). Also whether ⌘Z reaches it either way.
+
+### 16. Deliberately start a new session
+
+A write joins the last session unless the project has been left alone for 90 minutes
+([SessionWindow.swift:25](../pm-swift/Sources/PmLib/SessionWindow.swift:25)). The window is a good
+default and there is no override: two distinct sittings inside an hour and a half land in one block.
+
+The panel already has a New Session command — the question is whether it is the same thing, and
+whether the override belongs on every surface that writes (the CLI, Raycast, quick capture) or only on
+the one place you would deliberately say "this is new work". Probably the latter, since the whole point
+of the window is that the other surfaces should not have to think about it.
+
+### 17. Zoom to fit the selection, and the rest of the grammar
+
+⇧2 for "fit what is selected", explicitly asked for — and asked for as part of a larger want: one
+coherent set of navigation keys rather than the current scatter.
+
+What exists: ⌘0 fits the whole board, ⌘+/− step, ⌃1…9 go to a frame, ⌘↩ tiles, the arrow keys move by
+direction ([CanvasNavigation](../pm-mac/PM/Canvas/CanvasNavigation.swift)). What is missing is fit-to-
+selection and, arguably, "back to where I was".
+
+Design first. The nearest existing grammar is Figma's — ⇧1 fit all, ⇧2 fit selection, ⇧0 100% — and
+adopting it wholesale would put ⇧1 next to a ⌘0 that already means the same thing, which is two keys
+for one act. Decide whether the Figma set replaces the ⌘ set or joins it before adding a single key.
+
+## Discussion
+
+### 18. What a workspace is
+
+Raised as a discussion, and it is one, because the app currently has **three** answers and they
+disagree.
+
+- A **frame** on the board is called a workspace outright — `CanvasBoardView+Tiling.workspaces`, ⌃1…9
+  goes to one, and the justification is that a frame is already a named container of cards.
+- A **saved arrangement** is a named tiling of a named set of cards
+  ([CanvasArrangements](../pm-mac/PM/Canvas/CanvasArrangements.swift)).
+- A **tab** in a project window is `ProjectTabView` — the notes, or a board narrowed by `CanvasFocus`
+  to the whole thing, a frame, or an arrangement
+  ([ProjectTab.swift:38](../pm-mac/PM/Project/ProjectTab.swift:38)).
+
+So a tab can already be pinned to either of the first two, and the proposal — "each project may have an
+unlimited number of workspaces" — is a request to collapse the three into one named thing.
+
+The question to answer before any of it: **is a workspace a region of a board, or a window layout?** A
+frame is the first: it lives in the `.canvas`, Obsidian can see it, and it has a place on the board. An
+arrangement is the second: it is per-machine, invisible to Obsidian, and has no position at all. They
+feel alike because both are "a set of cards you named", and they behave differently in every way that
+follows from where they are stored. Deciding that is deciding what the feature is.
 
 ## Priority
 
-**~~First — small, unambiguous, and each one is a thing that reads as broken: 1, 6, 5, 7.~~** Done
-2026-09-06.
+**First — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
+2 is in this tier the moment the complaint is specific: which of the three marks, in which case, and
+whether it is unreadable, ambiguous or merely too loud.
 
-**Next:** ~~8 (project-note card)~~ done 2026-09-06. 12 — find out what dropping a markdown file
-actually does today before designing anything. Item 2 is parked on the ⌥ collision; 3 is done without
-it.
+**Then — find out before designing:** 6, which is the same instruction it has always been — drop a
+markdown file on a board and see what actually happens — and 9, which asks whether saved arrangements
+are missing or only hidden.
 
-**Then — design first, then build:** 9 (image cards), 10 (the tile picker), 11 (tidy, the largest).
-Item 4 was in this tier and came out of it early: the design turned out to be one mark drawn three
-ways rather than three marks.
+**Then — design first, then build:** 12 (what a project card shows), 13 (suggest the project's links),
+14 (pin and reorder them), 15 (live editing, and what happens to Cancel), 17 (the navigation grammar),
+7 (tidy, the largest), 5 (image cards), 8 (the tile picker), 10 (duplicate an arrangement, once 9 is
+answered).
+
+**Blocked on an argument, not on work:** 18 — what a workspace is — which 11 (BSP) sits behind, and
+3 and 4, which are one ⌥ collision seen twice and want deciding together.

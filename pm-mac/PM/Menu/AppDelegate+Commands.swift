@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// The menu bar's app-level actions. Window-shaped commands (New Task, Show Projects, Close) are
 /// answered further down the responder chain by `ProjectWindowController` and the split view
@@ -42,20 +43,36 @@ extension AppDelegate: NSMenuItemValidation {
     /// Open an Obsidian canvas in a window of its own.
     ///
     /// A separate errand from opening a project, and deliberately not folded into one: a canvas is a
-    /// file, it can live anywhere in the vault — four of the ones in a real vault sit at its root,
-    /// belonging to no project at all — and it opens into a different kind of window.
+    /// file and can live anywhere in the vault — four of the ones in a real vault sit at its root,
+    /// belonging to no project at all. What it opens into is an ordinary project window with no
+    /// project; see `WindowManager.open(canvas:)`.
     @objc func openCanvas() {
-        CanvasWindowController.runOpenPanel()
+        let panel = NSOpenPanel()
+        // By extension rather than by the declared type: `md.obsidian.canvas` is only *imported* by
+        // PM, so on a Mac without Obsidian installed it may not be registered at all, and a panel
+        // filtered on an unregistered type shows nothing openable.
+        if let canvas = UTType(filenameExtension: "canvas") {
+            panel.allowedContentTypes = [canvas]
+        }
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose an Obsidian canvas."
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { WindowManager.shared.open(canvas: url) }
     }
 
-    /// Open the focused project's own canvas, making it if the project hasn't got one yet.
+    /// Open the focused project's own canvas, in a window of its own, making it if the project hasn't
+    /// got one yet.
     ///
-    /// Goes through `openFocusedProject()` like every other command that needs a project, so it works
-    /// with no window up — the menu bar item's menu can reach it, and PM keeps running with everything
-    /// closed. The project window comes forward first and the board opens over it, which is also the
-    /// order you'd want if the canvas turns out to need making.
+    /// A second window on the project rather than a second *kind* of window: what this used to make
+    /// was a `CanvasWindowController`, and the only thing that was ever really asked for is a window
+    /// with the board in it. View ▸ Show Canvas remains the one-keystroke-away command that uses the
+    /// window you are already in, which is the distinction the two names carry.
+    ///
+    /// Goes through the focused project like every other command that needs one, so it works with no
+    /// window up — the menu bar item's menu can reach it, and PM keeps running with everything closed.
     @objc func projectCanvas() {
-        WindowManager.shared.openFocusedProject().openProjectCanvas()
+        let key = PMFiles.focusedProjectKey()
+        WindowManager.shared.open(projectKey: key, reusingExistingWindow: false).openProjectCanvas()
     }
 
     /// Ask for a domain and a title, create the project, and open it. Runs without a window — it's on

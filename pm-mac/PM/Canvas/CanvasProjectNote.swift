@@ -25,6 +25,11 @@ import PmLib
 /// **Editing needs stepping in first.** Like a web card, and for the same reason: a board is mostly
 /// read and moved around, and a checkbox that fired on the first click that landed near it would make
 /// the board hazardous to pan across. One click steps in, and from then on the card is a project.
+///
+/// **In a tiled view that click is the same click.** There is nothing to pan across and no doubt about
+/// which card you meant, so a tile takes its clicks outright and the one you click in is stepped into
+/// by the act of clicking in it — see `CanvasBoardView.tileClicked`. The card cannot tell the two
+/// apart and does not need to: either way, by the time a row opens an editor the keyboard is here.
 struct CanvasProjectNote: View {
     @ObservedObject var store: PMStore
     /// Whether the card has been stepped into. Only the open editor depends on it — everything else is

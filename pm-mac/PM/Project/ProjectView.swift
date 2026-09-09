@@ -1254,7 +1254,7 @@ struct ProjectView: View {
         }
     }
 
-    /// One control in the trailing capsule. `HeaderSymbolButton` now, shared with the canvas window's
+    /// One control in the trailing capsule. `HeaderSymbolButton` now, shared with the board's
     /// header — these were the same code written twice and were already a point apart.
     private func headerButton(symbol: String, help: String,
                               action: @escaping () -> Void) -> some View {

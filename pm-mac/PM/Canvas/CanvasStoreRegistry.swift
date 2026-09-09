@@ -3,7 +3,7 @@ import PmLib
 
 /// One `CanvasDocumentStore` per file, however many surfaces are showing it.
 ///
-/// A canvas can be open in a window of its own and rendered inside a project window at the same time.
+/// One board can be up in two windows at once, and in two tabs of one window.
 /// Two stores on one file would be worse than either alone: each debounces its own saves and each polls
 /// the file for outside changes, so a save by one arrives at the other as somebody else's edit, gets
 /// reloaded over the top, and takes any in-flight work there with it. Sharing the store makes both

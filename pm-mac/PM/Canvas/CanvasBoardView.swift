@@ -92,12 +92,11 @@ final class CanvasBoardView: NSView {
     /// Tiling the same set of cards again picks this up rather than starting over.
     var lastTiling: CanvasViewState.Tiling?
 
-    /// Open part of this board as a tab of the window it is in. Nil in a canvas window of its own,
-    /// which has no tabs — and the menu items that would use it stay away rather than being dim, since
-    /// "no tabs here" is not a state you can fix by satisfying a condition.
-    var onOpenInTab: ((CanvasFocus) -> Void)?
-    /// Keep the tiling that is up under a name. Nil for the same reason.
-    var onSaveArrangement: ((String) -> Void)?
+    /// Open part of this board as a tab of the window it is in — see `CanvasPaneController.tabModel`,
+    /// which says why these are no longer optional.
+    var onOpenInTab: (CanvasFocus) -> Void = { _ in }
+    /// Keep the tiling that is up under a name.
+    var onSaveArrangement: (String) -> Void = { _ in }
 
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {
@@ -106,8 +105,13 @@ final class CanvasBoardView: NSView {
             // the mouse reports, and none of those frames change whether a tiling is up.
             guard (oldValue == nil) != (tiling == nil) else { return }
             scrollView?.canvasScroll?.showsScrollers(!isTiled)
+            watchTileClicks(isTiled)
         }
     }
+
+    /// The watch that hands the keyboard to the tile you click into. Only while one is up — see
+    /// `watchTileClicks`.
+    var tileClickWatch: Any?
     /// Told when a tiling is entered, left or rearranged, so the window can say what it is showing.
     var onTilingChanged: (() -> Void)?
 
@@ -196,6 +200,10 @@ final class CanvasBoardView: NSView {
     /// The boundary a right-click landed on, if it landed on one. Held for the same reason as
     /// `menuPoint`: the menu is long dismissed by the time an item fires.
     var menuDivider: CanvasTileDivider?
+    /// The tile a right-click landed on, if it landed on one. Held for the same reason, and asked
+    /// rather than the selection because a tile command names *this* tile — "make this the master" has
+    /// no reading against four selected at once.
+    var menuTile: String?
     /// Which match ⌘G steps to next.
     var findCursor = 0
     /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
@@ -291,6 +299,14 @@ final class CanvasBoardView: NSView {
     /// The origin moves whenever a card is dragged out past the current extent, and every view
     /// coordinate is relative to that origin — so without compensating the scroll position, dragging a
     /// card off the left edge would yank the whole board sideways under the pointer.
+    ///
+    /// The compensation is a *wish*, not an answer: it asks for the position that leaves what you were
+    /// looking at where it was, and a board that has just changed shape need not have such a position.
+    /// Delete the card you were parked beside and the wish names a place the board no longer reaches.
+    /// So it is put through the same rule a pan is — `setBoundsOrigin` does not consult
+    /// `constrainBoundsRect`, only a scroll does, so a wish written straight in is written in
+    /// unchecked, and the next pan is the first event to notice. That noticing is the jump in
+    /// canvas-backlog item 1.
     func recomputeContent() {
         let bounds = document.bounds ?? CanvasRect(x: 0, y: 0, width: 800, height: 600)
         let next = bounds.inset(by: Self.margin)
@@ -303,8 +319,17 @@ final class CanvasBoardView: NSView {
         guideView.frame = overlay.frame
 
         if let clip = scrollView?.contentView, shift != .zero {
-            clip.setBoundsOrigin(NSPoint(x: clip.bounds.origin.x + shift.x,
-                                         y: clip.bounds.origin.y + shift.y))
+            var wanted = NSRect(origin: NSPoint(x: clip.bounds.origin.x + shift.x,
+                                                y: clip.bounds.origin.y + shift.y),
+                                size: clip.bounds.size)
+            if !isTiled, let cards = document.bounds,
+               let settled = CanvasPanBounds.constrain(wanted, holding: viewRect(cards)) {
+                wanted = settled
+            }
+            clip.setBoundsOrigin(wanted.origin)
+            // The scrollers don't follow a bounds origin written directly — the same reason
+            // `otherMouseDragged` says this after a `scroll(_:)`.
+            scrollView?.reflectScrolledClipView(clip)
         }
         layoutNodeViews()
     }
@@ -321,6 +346,10 @@ final class CanvasBoardView: NSView {
         recomputeContent()
         if !store.isInteracting {
             selection = selection.filter { document.node(id: $0) != nil }
+            // A tiling names its cards, so a card that has gone has to come out of it — see
+            // `pruneTilingOfDeletedCards`. Before the views are rebuilt, since it decides which of
+            // them there are.
+            pruneTilingOfDeletedCards()
             refreshNodeViews()
         }
         layoutNodeViews()

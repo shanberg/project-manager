@@ -12,9 +12,8 @@ import PmLib
 /// Saving is automatic and debounced: a canvas is dragged around, and a save per frame of a drag would
 /// be absurd while a save only on ⌘S would mean a window you can lose work from.
 ///
-/// **One store per file, however many things are looking at it.** A canvas can now be open in its own
-/// window and rendered inside a project window at the same time, and two stores on one file would be
-/// worse than either alone: each debounces its own writes and each watches the file for outside
+/// **One store per file, however many things are looking at it.** One board can be up in two windows at
+/// once, and in two tabs of one window, and two stores on one file would be worse than either alone: each debounces its own writes and each watches the file for outside
 /// changes, so a save by one is read by the other as somebody else's edit, reloaded over the top, and
 /// whatever was in flight there is gone. `CanvasStoreRegistry` hands out the same store to every
 /// holder, which makes both surfaces views of one document with one undo stack — the arrangement the

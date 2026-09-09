@@ -25,7 +25,13 @@ extension CanvasBoardView {
         let where_ = point(event)
         let extending = event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.command)
 
-        if event.clickCount == 2 {
+        // **A tiled view has no second meaning for a second click**, so the double-click branch is the
+        // board's alone. Reached while tiled it answered from the *document's* hit test, which knows
+        // nothing about the tiling: over a handlebar — which sits out in the gap, deliberately never on
+        // the card (see `tileHandle`) — that reads as the background, and double-clicking the one
+        // control you are meant to grab added a card to the board. The handlebar drags. That is all it
+        // does; everything else a tile can be told is in the View menu and in its contextual menu.
+        if event.clickCount == 2, !isTiled {
             doubleClick(at: where_)
             return
         }
@@ -267,15 +273,6 @@ extension CanvasBoardView {
         case .swap(let from, let over):
             if let over {
                 swapInTiling(from, with: over)
-            } else if event.clickCount == 2 {
-                // Double-click promotes a stack tile to master, which is what double-clicking a window's
-                // titlebar means in the managers that have a master. In a grid there is nothing to
-                // promote, so it steps into the card instead.
-                if tiling?.arrangement == .masterStack {
-                    promoteInTiling(from)
-                } else {
-                    nodeViews[from]?.beginEditing()
-                }
             } else if let view = nodeViews[from], view.engagesOnClick, !view.isEngaged {
                 view.beginEditing()
             }
@@ -620,8 +617,12 @@ extension CanvasBoardView {
 
     // MARK: Keys
 
-    /// Escape backs out one step at a time, the way it does everywhere: out of a tiled view first, and
+    /// Escape backs out one step at a time, the way it does everywhere: out of a drill-in first, and
     /// only then out of a selection.
+    ///
+    /// **It stops at the root of a tiled view rather than leaving it** — see `untile`, which owns that
+    /// argument. Nor does it clear the selection there: in a tiled view the selection is which tile the
+    /// arrows and Return are about, and a tiling deliberately never has none (see `tile`).
     ///
     /// Here rather than only in `keyDown` because Escape reaches the board two ways. A page card hands
     /// the key to WebKit, which sends it back as this command rather than as a key event, and a card

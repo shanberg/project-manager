@@ -243,8 +243,8 @@ enum MainMenu {
         shortcuts.target = target
     }
 
-    /// The four zoom commands a canvas window answers, routed through the responder chain so they are
-    /// live when a board is in front and dim when it isn't.
+    /// The four zoom commands a board answers, routed through the responder chain so they are live when
+    /// one is in front and dim when it isn't.
     private static func canvasZoomItems(_ menu: NSMenu) {
         menu.addItem(.separator())
         let inn = menu.addItem(withTitle: "Zoom In", action: #selector(CanvasBoardView.zoomIn(_:)),
@@ -291,6 +291,25 @@ enum MainMenu {
         // everything else here, and dim wherever there are no tabs to pin one to.
         menu.addItem(withTitle: "Save Arrangement\u{2026}",
                      action: #selector(CanvasBoardView.saveTilingAsArrangement(_:)),
+                     keyEquivalent: "")
+
+        // **What a tile can be told, with no pointer involved.** These four were reachable only by
+        // right-clicking a tile's handlebar — a 3.5pt bar out in the gap, which you had to already know
+        // was a menu. The handlebar drags and does nothing else; the commands live here, where a menu
+        // bar can be read through, and on the tile's own contextual menu. Each acts on the focused
+        // tile, so each is dim unless exactly one is focused — see `CanvasBoardView.focusedTile`.
+        let promote = menu.addItem(withTitle: "Make This the Master Tile",
+                                   action: #selector(CanvasBoardView.promoteTile(_:)),
+                                   keyEquivalent: "\r")
+        promote.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(withTitle: "Pin Tile Width",
+                     action: #selector(CanvasBoardView.togglePinTileSize(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Remove from Tiled View",
+                     action: #selector(CanvasBoardView.removeTile(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Leave Tiled View",
+                     action: #selector(CanvasBoardView.leaveTilingCommand(_:)),
                      keyEquivalent: "")
 
         // Frames as workspaces. A frame is already a named container of cards, which is what a
@@ -419,17 +438,16 @@ enum MainMenu {
         menu.addItem(.separator())
         add(menu, "Show Notes", #selector(AppDelegate.toggleNotes), target: target, key: "")
         // Render the project window's content column as the project's board instead of its task list.
-        // Routed to the window rather than the app, because it is a property of the window you are in —
-        // and so it is dim in a canvas window, which is already a board and has nothing to switch.
+        // Routed to the window rather than the app, because it is a property of the window you are in.
         //
-        // ⌥⌘C, not the ⇧⌘C on File ▸ Project Canvas: that one opens the board in a window of its own,
+        // ⌥⌘C, not the ⇧⌘C on File ▸ Open Project Canvas in New Window: that one makes a second window,
         // and the two are genuinely different requests. Both can be up at once, on one shared document.
         add(menu, "Show Canvas", #selector(ProjectWindowController.toggleCanvasRenderer(_:)),
             target: nil, key: "c", modifiers: [.command, .option])
         menu.addItem(.separator())
         // A project window's tabs: the notes, the board, a frame on it, an arrangement of it — several
         // views of one project side by side. Routed to the window, like Show Canvas above and for the
-        // same reason: it is a property of the window you are in, and a canvas window has none.
+        // same reason: it is a property of the window you are in.
         //
         // New Tab itself is in the File menu beside New Window, where a Mac app puts it. These three
         // are here because they are about the window in front of you rather than about making
@@ -456,8 +474,8 @@ enum MainMenu {
         // hole punched through the middle of it. Each of the three draws its own separators, so the
         // block delimits itself — do not add another before Appearance.
         //
-        // Zoom is answered only by a canvas window. ⌘= as well as ⌘+ because the plus is a shifted
-        // equals on most layouts and AppKit matches the literal character.
+        // Zoom is answered only by a board. ⌘= as well as ⌘+ because the plus is a shifted equals on
+        // most layouts and AppKit matches the literal character.
         canvasZoomItems(menu)
         canvasTilingItems(menu)
         canvasPageItems(menu)

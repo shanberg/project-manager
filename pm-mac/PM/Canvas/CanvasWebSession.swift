@@ -137,6 +137,35 @@ enum CanvasWebSession {
         return made
     }
 
+    // MARK: What a card calls itself
+
+    /// The tail of the user agent every web card sends: `Version/<n> Safari/605.1.15`.
+    ///
+    /// **Not a spoof — a card *is* Safari.** Same WebKit, same version, same rendering. What it was
+    /// missing was a name: a bare `WKWebView` sends a user agent that stops after
+    /// `AppleWebKit/605.1.15 (KHTML, like Gecko)`, with no `Version/` and no `Safari/` token after it.
+    /// Every browser-detection table in the world is a list of exactly those two tokens, so a card
+    /// wasn't read as an old browser, it was read as an unknown one — which is the branch Slack and
+    /// Google Docs send to their "your browser is not supported" page.
+    ///
+    /// **The version is the installed Safari's, read once.** A constant would be a lie the day after
+    /// the next OS update, and the number is only meaningful because it tracks the engine actually
+    /// doing the rendering. `Info.plist` is where Safari keeps it and the read costs one stat at first
+    /// use. The fallback covers a machine where Safari has been moved or removed, and errs new: a
+    /// version claimed too low is turned away by the same tables this exists to satisfy.
+    static let applicationName: String = {
+        let installed = Bundle(path: "/Applications/Safari.app")?
+            .infoDictionary?["CFBundleShortVersionString"] as? String
+        return "Version/\(installed ?? "26.0") Safari/605.1.15"
+    }()
+
+    /// Say so on a configuration, wherever one is built — a card, a card on a profile of its own, or a
+    /// sign-in window. One call rather than a line each, because a sign-in window that identified
+    /// itself differently from the card it was opened for would be signing in as a different browser.
+    static func identify(_ configuration: WKWebViewConfiguration) {
+        configuration.applicationNameForUserAgent = applicationName
+    }
+
     /// Everything one site has stored — its cookies, and the local storage a modern login also uses.
     ///
     /// Matched on the registrable domain, which is what WebKit files a record under: signing out of

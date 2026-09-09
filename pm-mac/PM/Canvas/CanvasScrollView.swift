@@ -200,16 +200,32 @@ final class CanvasScrollView: NSScrollView {
     /// Never magnifies past 1: a board with three cards on it fitted to a large window would draw them
     /// at 400%, which is not "fit", it's "fill". Fit means you can see everything, and seeing
     /// everything at its true size is better than seeing it enormous.
-    func zoomToFit() {
-        guard let bounds = board.document.bounds else { return zoomToActualSize() }
-        let padded = bounds.inset(by: 60)
+    ///
+    /// **Answers whether it fitted**, because it cannot always: asked before the pane has been laid
+    /// out there is no window to fit anything to, and there is no honest answer to give — the old one
+    /// was to return quietly, which reads at the call site as a fit that happened. It did not, and the
+    /// board was left at the origin of its own frame: 1600pt of margin above and left of every card,
+    /// which is canvas-backlog item 1's "opens panned into a corner" exactly. See
+    /// `CanvasPaneController.fitWhenThereIsAWindowToFitTo`, which now waits for a true.
+    @discardableResult
+    func zoomToFit() -> Bool {
         let visible = contentView.frame.size
-        guard padded.width > 0, padded.height > 0, visible.width > 0, visible.height > 0 else { return }
+        guard visible.width > 0, visible.height > 0 else { return false }
+        // Nothing to fit is not a failure — but a board of no cards still has a middle, and starting
+        // at the corner of 1600pt of blank is no better here than anywhere else.
+        guard let bounds = board.document.bounds else {
+            setZoom(1)
+            centre(on: CanvasPoint(x: board.content.midX, y: board.content.midY))
+            return true
+        }
+        let padded = bounds.inset(by: 60)
+        guard padded.width > 0, padded.height > 0 else { return false }
 
         let scale = min(visible.width / padded.width, visible.height / padded.height, 1)
         magnification = max(scale, Self.minimumZoom)
         centre(on: CanvasPoint(x: padded.midX, y: padded.midY))
         board.magnificationChanged()
+        return true
     }
 
     /// Put a point on the board in the middle of the window — how ⌘F frames what it found.
@@ -235,28 +251,31 @@ final class CanvasScrollView: NSScrollView {
 /// The clip a board scrolls inside, for the one thing `NSClipView` will not do by itself: let you pan
 /// a board that fits.
 ///
-/// A scroll view scrolls what overflows. So a board with three cards on it, or any board at all zoomed
-/// far enough out that the whole of it fits in the window, is nailed in place — you can look at it and
-/// you cannot move it, which is the one thing an infinite plane must never do. Panning is how you make
-/// room to think: pushing what is there off to one side to work in the space beside it is a move, not a
-/// consequence of the content having grown.
-///
-/// So position is free, and only *losing* the board is prevented. The board keeps a wide margin around
-/// its cards already — see `CanvasBoardView.margin` — so this is a long way out before it bites, and
-/// what it guarantees is that some of the board is always in the window to scroll back from.
+/// The rule itself is `CanvasPanBounds`, which is arithmetic on two rectangles and is tested as such.
+/// All this does is decide which two, and take `NSClipView`'s own answer when the rule has no opinion.
 @MainActor
 final class CanvasClipView: NSClipView {
-    /// How much of the board has to stay in the window, in the clip's own units. A sliver is enough:
-    /// it is a way back, not a view.
-    private static let keep: CGFloat = 120
-
     override func constrainBoundsRect(_ proposed: NSRect) -> NSRect {
-        guard let board = documentView?.frame else { return super.constrainBoundsRect(proposed) }
-        var rect = proposed
-        // The furthest the window can travel in each direction: until only `keep` of the board is left
-        // at the trailing edge, and until only `keep` is left at the leading one.
-        rect.origin.x = min(max(rect.minX, board.minX - rect.width + Self.keep), board.maxX - Self.keep)
-        rect.origin.y = min(max(rect.minY, board.minY - rect.height + Self.keep), board.maxY - Self.keep)
-        return rect
+        guard let held, let constrained = CanvasPanBounds.constrain(proposed, holding: held)
+        else { return super.constrainBoundsRect(proposed) }
+        return constrained
+    }
+
+    /// What has to stay in the window, in the board's own coordinates: **the cards, not the board.**
+    ///
+    /// The two are a long way apart. A board's frame is its cards' extent grown by
+    /// `CanvasBoardView.margin` on every side, so the frame rule was satisfied by a window of blank
+    /// paper 1600pt from anything — you were still "on the board", and there was nothing on screen to
+    /// tell you which way the board was. Holding a card instead means a pan always leaves you
+    /// something to steer by, and costs nothing you wanted: a sliver of card at one edge still leaves
+    /// the rest of the window empty to spread into.
+    ///
+    /// A tiled view is exempt. Its position is not panned, it is *laid out* — the tiles were fitted to
+    /// the window and the wheel is swallowed rather than obeyed (`CanvasScrollView.scrollWheel`), so
+    /// the one thing the rule must not do there is move the clip out from under them.
+    private var held: NSRect? {
+        guard let board = documentView as? CanvasBoardView else { return documentView?.frame }
+        guard !board.isTiled, let cards = board.document.bounds else { return board.frame }
+        return board.viewRect(cards)
     }
 }

@@ -395,7 +395,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             // answer for the second; for the first, File ▸ Open Canvas reports the error properly.
             return nil
         }
-        let pane = CanvasPaneController(store: store)
+        let pane = CanvasPaneController(store: store, tabs: tabModel)
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
         pane.focus = focus
@@ -405,7 +405,6 @@ final class ProjectSplitViewController: NSSplitViewController {
             guard next == .tasks else { return }
             self?.replaceSelected(with: .notes)
         }
-        pane.tabModel = tabModel
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
         return pane
     }

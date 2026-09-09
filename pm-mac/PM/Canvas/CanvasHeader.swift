@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The canvas window's chrome: a pill naming the board at the leading edge, the controls at the trailing
-/// one, and nothing at all in between.
+/// A board's chrome: a pill naming it at the leading edge, the controls at the trailing one, and nothing
+/// at all in between.
 ///
 /// This replaces an `NSToolbar` carrying a View/Edit segmented control, an Add pull-down, a search
 /// field and — while a web card was engaged — four browser buttons. All of it was permanently occupying
@@ -132,9 +132,9 @@ final class CanvasHeaderModel: ObservableObject {
 
     /// Whether this board is one face of a project window, and how to turn it over.
     ///
-    /// Nil in a canvas window, which has no task list to switch to. Set when a project window is
-    /// rendering its project as a board — and then the header carries the *same* `RendererSwitch` the
-    /// task list's header carries, in the same place, so the control doesn't move when you use it.
+    /// Set when a project window is rendering its project as a board — and then the header carries the
+    /// *same* `RendererSwitch` the task list's header carries, in the same place, so the control doesn't
+    /// move when you use it.
     ///
     /// It was a lone button here and a different lone button there, each findable only once you were
     /// already on the other side of it and neither saying there was another side.
@@ -342,7 +342,12 @@ struct CanvasControlCapsule: View {
             // The board's right-click menu offers the same four; both read their names from
             // `CanvasAddCommand` so the two can't drift into "Card" here and "New Card" there again.
             Button(CanvasAddCommand.card.title, action: model.addCard)
+            // The one of the four a tiled view cannot take. A frame is a container of cards rather
+            // than a card, so there is no tile it could become — adding one from here would be an edit
+            // made entirely behind the view. The board's own menu dims it for the same reason; the
+            // other three now work while tiled and go on the end of the arrangement.
             Button(CanvasAddCommand.frame.title, action: model.addFrame)
+                .disabled(model.tiling != nil)
             Button(CanvasAddCommand.link.title, action: model.addLink)
             Button(CanvasAddCommand.file.title, action: model.addFile)
             // Conditional, and the board's right-click menu makes the same test — the item is the board

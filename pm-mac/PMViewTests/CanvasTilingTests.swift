@@ -249,6 +249,98 @@ final class CanvasTilingTests: XCTestCase {
         }
     }
 
+    // MARK: Adding and removing tiles
+
+    private func row(_ ids: [String], sizes: [String: CanvasTiling.Size] = [:]) -> CanvasTileSession {
+        CanvasTileSession(ids: ids, arrangement: .grid, sizes: sizes,
+                          area: CanvasRect(x: 0, y: 0, width: 1800, height: 300),
+                          restoreVisible: .init(x: 0, y: 0, width: 1800, height: 300))
+    }
+
+    /// The decision, stated as a test so it cannot quietly become something cleverer: a new card goes
+    /// on the end, wherever you were looking and whatever is focused.
+    func testANewCardGoesOnTheEnd() {
+        var session = row(["a", "b", "c"])
+        session.add("d")
+        XCTAssertEqual(session.ids, ["a", "b", "c", "d"])
+    }
+
+    /// Including in master-and-stack, where the end is the bottom of the stack — *not* the master
+    /// slot. Landing in the master would take the window away from whatever you were reading in order
+    /// to give it to a card you have not looked at yet.
+    func testANewCardDoesNotBecomeTheMaster() {
+        var session = row(["a", "b", "c"])
+        session.arrangement = .masterStack
+        session.add("d")
+        XCTAssertEqual(session.ids.first, "a", "the master is still the master")
+        XCTAssertEqual(session.ids.last, "d")
+    }
+
+    /// And then you move it, which is the other half of the sentence.
+    func testAndThenYouMoveIt() {
+        var session = row(["a", "b", "c"])
+        session.add("d")
+        session.move("d", to: 1)
+        XCTAssertEqual(session.ids, ["a", "d", "b", "c"])
+    }
+
+    func testACardAlreadyUpIsNotAddedTwice() {
+        var session = row(["a", "b", "c"])
+        session.add("b")
+        XCTAssertEqual(session.ids, ["a", "b", "c"])
+    }
+
+    /// Every tile gets a frame, so a card added to the order is a card on the screen — the assertion
+    /// that would fail if `add` appended to `ids` and the layout were built from something else.
+    func testTheAddedCardIsOnScreen() {
+        var session = row(["a", "b", "c"])
+        session.add("d")
+        XCTAssertNotNil(session.layout.frames["d"])
+        XCTAssertTrue(session.layout.shows("d"))
+        XCTAssertEqual(session.layout.frames.count, 4)
+    }
+
+    func testRemovingATileTakesItOffTheScreen() {
+        var session = row(["a", "b", "c"])
+        session.remove("b")
+        XCTAssertEqual(session.ids, ["a", "c"])
+        XCTAssertNil(session.layout.frames["b"])
+        XCTAssertFalse(session.layout.shows("b"), "the layout stops showing it")
+    }
+
+    /// A length is a share of one particular run, so it does not lie in wait for a card that has left.
+    func testRemovingATileTakesItsLengthWithIt() {
+        var session = row(["a", "b", "c"], sizes: ["b": .pinned(420)])
+        session.remove("b")
+        XCTAssertNil(session.sizes["b"])
+        XCTAssertEqual(session.run.count, 2)
+    }
+
+    /// The negative control for the one above: the *other* tiles' lengths are exactly what must
+    /// survive, or every removal would quietly even out an arrangement you had dragged into shape.
+    func testRemovingATileLeavesEveryOtherLengthAlone() {
+        var session = row(["a", "b", "c"], sizes: ["a": .pinned(300), "b": .pinned(420)])
+        session.remove("b")
+        XCTAssertEqual(session.sizes, ["a": .pinned(300)])
+    }
+
+    func testRemovingACardThatIsNotUpChangesNothing() {
+        var session = row(["a", "b", "c"], sizes: ["a": .pinned(300)])
+        let before = session
+        session.remove("zzz")
+        XCTAssertEqual(session, before)
+    }
+
+    /// Add then remove is the identity, which is what "a tiling is a way of looking" has to mean:
+    /// nothing about the arrangement you built is spent by looking at one more card for a moment.
+    func testAddingAndRemovingLeavesTheArrangementAsItWas() {
+        let before = row(["a", "b", "c"], sizes: ["a": .pinned(300)])
+        var session = before
+        session.add("d")
+        session.remove("d")
+        XCTAssertEqual(session, before)
+    }
+
     // MARK: Reordering under the hand
 
     /// A row wide enough to be laid out as one run, with the tiles at deliberately unequal widths —

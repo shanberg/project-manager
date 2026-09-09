@@ -1,10 +1,19 @@
 import AppKit
+import PmLib
 
 /// Owns the app's project windows: opening, focusing, retargeting, closing, and remembering which
 /// projects were open across launches.
 ///
-/// The unit is a project, not a window: asking to open a project that already has a window brings that
-/// window forward rather than opening a second one on the same thing.
+/// **A project can have as many windows as you want, and reaching for one still finds it.** Those are
+/// two different errands and the app used to answer both the same way. "Take me to this project" — the
+/// menubar, the hotkey, the Dock, a `[[…]]` token — means *a* window on it, and bringing the one that
+/// exists forward is exactly right. "Open this in a new window" means a second one, and answering that
+/// with the window you are already looking at is the same as doing nothing, which is how it read.
+///
+/// So the reuse is a parameter rather than a rule, and it is off wherever the ask was explicit. See
+/// `open(projectKey:reusingExistingWindow:)` and `retarget`. `ProjectTab` tells the rest of this
+/// story: a window used to be a project because a project had one shape, and this was two of the five
+/// places that assumed it.
 @MainActor
 final class WindowManager {
     static let shared = WindowManager()
@@ -13,14 +22,22 @@ final class WindowManager {
 
     // MARK: Opening
 
-    /// Bring up a window for `projectKey`, or focus the one already showing it.
+    /// Bring up a window for `projectKey`.
+    ///
+    /// `reusingExistingWindow` is the difference between the two errands in the type comment above.
+    /// Left at its default, an open that finds a window already showing the project brings that one
+    /// forward — which is what every "take me to this project" surface means. Passed `false`, it makes
+    /// a second window regardless, which is what the two Open in New Window items and ⌥-click mean, and
+    /// what restoring a saved session means when the same project was open in two windows last time.
     @discardableResult
-    func open(projectKey: String?) -> ProjectWindowController {
-        if let existing = controllers.first(where: { $0.projectKey == projectKey }) {
+    func open(projectKey: String?, reusingExistingWindow: Bool = true,
+              canvas: URL? = nil) -> ProjectWindowController {
+        if reusingExistingWindow,
+           let existing = controllers.first(where: { $0.projectKey == projectKey }) {
             existing.show()
             return existing
         }
-        let controller = makeController(projectKey: projectKey)
+        let controller = makeController(projectKey: projectKey, canvas: canvas)
         controllers.append(controller)
         Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
         rememberOpenProjects()
@@ -33,6 +50,47 @@ final class WindowManager {
         }
         controller.show()
         return controller
+    }
+
+    /// Open a window on one canvas file — Finder's "Open With ▸ PM", and File ▸ Open Canvas.
+    ///
+    /// **A window on a canvas is a project window with no project.** A `.canvas` can live anywhere in
+    /// the vault and several in a real one belong to no project at all, so this used to be answered by
+    /// a second window type — its own registry, its own chrome, no tabs, and a standing "except in a
+    /// canvas window" clause on every feature a project window grew. Since a project window renders a
+    /// board in a tab, the second type earned nothing; the projectless window it leaves behind is a
+    /// state the app already has, and the sidebar in it is the way to a project rather than the absence
+    /// of one. See `ProjectWindowController.openedCanvas`.
+    ///
+    /// One window per file, like before: asking for a canvas that is already up brings it forward
+    /// rather than opening a second view of the same document.
+    ///
+    /// A canvas that won't parse is reported here rather than opened, because an empty board and a
+    /// broken file look identical and only one of them is something you can fix. Read for the answer
+    /// rather than by taking a store: taking one and giving it back would write the file on the way
+    /// out, which is a great deal to do to a file you have only been asked to look at.
+    @discardableResult
+    func open(canvas url: URL) -> ProjectWindowController? {
+        let key = url.standardizedFileURL
+        if let existing = controllers.first(where: { $0.openedCanvas == key }) {
+            existing.show()
+            return existing
+        }
+        do {
+            let document = try CanvasDocument.read(contentsOf: key)
+            Log.write("canvas opened: \(key.lastPathComponent) "
+                + "nodes=\(document.nodes.count) edges=\(document.edges.count)")
+        } catch {
+            Log.write("canvas open failed: \(key.lastPathComponent): \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open \(url.lastPathComponent)."
+            alert.informativeText = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+            return nil
+        }
+        return open(projectKey: nil, reusingExistingWindow: false, canvas: key)
     }
 
     /// Open a window on the project a `[[…]]` names, given the folder name written inside it.
@@ -52,18 +110,16 @@ final class WindowManager {
         return true
     }
 
-    /// Show `projectKey` in `controller` — the sidebar's plain double-click / Return. If another window
-    /// already has that project, that window comes forward instead: two windows on one project would
-    /// show the same store twice with nothing to tell them apart.
+    /// Show `projectKey` in `controller` — what clicking a row in that window's sidebar means.
+    ///
+    /// **This window, always.** It used to hand the errand to whichever other window already had the
+    /// project and leave the asking one where it was, on the grounds that two windows on one project
+    /// would show the same store twice with nothing to tell them apart. With two windows open that made
+    /// clicking a row in the sidebar do nothing to the window you clicked in, which is not a behaviour
+    /// any list on the Mac has — and the premise is gone anyway: the two windows are told apart by
+    /// their tabs, and they share one store and one undo stack (`StoreRegistry` is refcounted), so
+    /// editing in both is coherent rather than a race.
     func retarget(_ controller: ProjectWindowController, to projectKey: String) {
-        if let existing = controllers.first(where: { $0.projectKey == projectKey }), existing !== controller {
-            existing.show()
-            // The asking window stays on the project it was already showing, so its sidebar has to say
-            // so: the selection there *is* the window's project, and the click that brought us here
-            // moved it onto a project that turned out to live somewhere else.
-            controller.syncSidebarSelection()
-            return
-        }
         let previous = controller.projectKey
         let store = StoreRegistry.shared.acquire(projectKey)
         controller.retarget(to: store, projectKey: projectKey)
@@ -87,7 +143,7 @@ final class WindowManager {
 
     // MARK: Lifecycle
 
-    private func makeController(projectKey: String?) -> ProjectWindowController {
+    private func makeController(projectKey: String?, canvas: URL? = nil) -> ProjectWindowController {
         let store = StoreRegistry.shared.acquire(projectKey)
         // Only a session's first window opens with the sidebar; the rest are opened to see another
         // project beside it, not to carry a second copy of the project list.
@@ -98,12 +154,14 @@ final class WindowManager {
                                                  // The frame is the window type's, not the project's,
                                                  // so exactly one window owns it: the one opening into
                                                  // an empty screen. See `ProjectWindowController.init`.
-                                                 remembersFrame: controllers.isEmpty)
+                                                 remembersFrame: controllers.isEmpty,
+                                                 canvas: canvas)
         controller.onClose = { [weak self] closed in self?.windowClosed(closed) }
         controller.onOpenProject = { [weak self, weak controller] key, inNewWindow in
             guard let self else { return }
             if inNewWindow || controller == nil {
-                self.open(projectKey: key)
+                // Explicit: a second window on this project if that is what it takes.
+                self.open(projectKey: key, reusingExistingWindow: !inNewWindow)
             } else if let controller {
                 self.retarget(controller, to: key)
             }
@@ -126,8 +184,10 @@ final class WindowManager {
             // Skip keys that no longer name a project — a renamed or deleted folder, or a bad key that
             // got saved — rather than reopening a window that can only show the empty state. Dropping
             // them here also cleans them out of the saved list on the next write.
+            // One window per remembered entry, not one per distinct project: the list is a list of
+            // windows, and a project you had open in two of them comes back in two.
             for key in WindowSettings.shared.openProjectKeys where PMFiles.projectName(fromKey: key) != nil {
-                open(projectKey: key)
+                open(projectKey: key, reusingExistingWindow: false)
             }
         }
         guard !controllers.isEmpty else {

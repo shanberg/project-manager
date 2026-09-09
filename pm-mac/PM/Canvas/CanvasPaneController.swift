@@ -3,14 +3,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PmLib
 
-/// A canvas, with its chrome, as a view controller — so the same board can be a window of its own and
-/// the contents of a project window's content pane.
+/// A canvas, with its chrome, as a view controller — what a project window puts in the content pane
+/// its task list would otherwise be in.
 ///
 /// Everything about showing and driving a board lives here: the scroller, the floating header, the
 /// notice banner, find, the page controls, and the page budget's answer to nobody looking. What is left
 /// outside is what genuinely belongs to a window — its frame, its title, its tabs — which is why this
-/// exists at all. `CanvasWindowController` is now a window wrapped around one of these, and a project
-/// window puts another one in the pane its task list would otherwise be in.
+/// exists at all.
 ///
 /// The store is **not** created here. Two surfaces can be showing the same file, so the store comes from
 /// `CanvasStoreRegistry` and the owner is responsible for taking and giving back its hold — see
@@ -27,31 +26,19 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     let header = CanvasHeaderModel()
     private var pill: NSHostingView<CanvasTitlePill>!
     private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
-    /// The window's tabs, when this board is a tab in a project window. Nil in a canvas window of its
-    /// own, which has no tabs to draw.
     private var tabBar: NSHostingView<CanvasTabBar>!
     /// Which part of the board this pane is pinned to. `.whole` is a plain board and behaves exactly as
     /// one; the other two are a tab that was opened *at* something.
     var focus: CanvasFocus = .whole
-    var tabModel: ProjectTabModel? {
-        didSet {
-            tabBar?.rootView = CanvasTabBar(model: header, tabs: tabModel ?? ProjectTabModel())
-            // The board's own menus reach the window's tabs through these. Nil in a canvas window,
-            // where the items they drive don't appear at all.
-            scroll.board.onOpenInTab = tabModel.map { model in
-                { focus in
-                    switch focus {
-                    case .whole: model.openBoard()
-                    case .frame(let id): model.openFrame(id)
-                    case .arrangement(let name): model.openArrangement(name)
-                    }
-                }
-            }
-            scroll.board.onSaveArrangement = tabModel == nil ? nil : { [weak self] name in
-                self?.saveArrangement(as: name)
-            }
-        }
-    }
+
+    /// The tabs of the window this board is in.
+    ///
+    /// **Not optional, and that is the whole of what retiring the separate canvas window bought.** A
+    /// board used to be able to be in a window that had no tabs, so every feature reached through them
+    /// — opening a frame beside its board, keeping an arrangement, pinning either — carried an "except
+    /// there" clause, and the menu items for them appeared or didn't depending on which window you were
+    /// in. Every board is in a project window now, so there is one answer.
+    let tabModel: ProjectTabModel
     private var pillLeading: NSLayoutConstraint!
 
     /// How far the header's leading edge starts in from the pane's own edge.
@@ -63,10 +50,21 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         didSet { measureTitlebar() }
     }
 
-    init(store: CanvasDocumentStore) {
+    init(store: CanvasDocumentStore, tabs: ProjectTabModel) {
         self.store = store
+        self.tabModel = tabs
         scroll = CanvasScrollView(store: store)
         super.init(nibName: nil, bundle: nil)
+
+        // The board's own menus reach the window's tabs through these.
+        scroll.board.onOpenInTab = { [tabModel] focus in
+            switch focus {
+            case .whole: tabModel.openBoard()
+            case .frame(let id): tabModel.openFrame(id)
+            case .arrangement(let name): tabModel.openArrangement(name)
+            }
+        }
+        scroll.board.onSaveArrangement = { [weak self] name in self?.saveArrangement(as: name) }
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
@@ -161,12 +159,31 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         view.window?.layoutIfNeeded()
         measureTitlebar()
         paneResized()
+        fitWhenThereIsAWindowToFitTo()
+    }
+
+    /// Frame the board the first time this pane has a window to frame it in.
+    ///
+    /// Deferred a runloop turn because "fit" is computed against the clip view, and asked during
+    /// `viewDidAppear` that is a view AppKit has not laid out yet. **The turn is not a guarantee**, and
+    /// treating it as one is what left boards opening in the corner: a pane that appears inside a
+    /// window still sizing itself — switching to a project whose canvas tab was never front, most of
+    /// all — comes back from the hop with the same zero-width clip, `zoomToFit` quietly did nothing,
+    /// and the latch was already set. The board then sat at the origin of its own frame, which is
+    /// 1600pt of `CanvasBoardView.margin` above and left of the nearest card: scrollers pinned to the
+    /// top-left, every card off the bottom-right, and only ⌘0 to get back. Canvas-backlog item 1.
+    ///
+    /// So the latch waits for `zoomToFit` to say it fitted, and `paneResized` asks again — which is the
+    /// notification that fires when the pane finally gets a size, so the retry costs nothing and needs
+    /// no clock.
+    ///
+    /// Restoring the view state waits on the same answer, for the reason `restoreViewState` gives: a
+    /// tiling laid out for a window of no width is not a tiling anyone wants back.
+    private func fitWhenThereIsAWindowToFitTo() {
         guard !hasFitted else { return }
-        hasFitted = true
-        // Fitted after the pane has a size, or "fit" is computed against a zero-width clip view.
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            scroll.zoomToFit()
+            guard let self, !hasFitted, scroll.zoomToFit() else { return }
+            hasFitted = true
             restoreViewState()
             applyFocus()
             view.window?.makeFirstResponder(scroll.board)
@@ -245,7 +262,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     // MARK: What the window's tabs need from a board
 
     /// Leave the tiled view — the tab chip's readout, standing in for the pill's ✕ where the pill has
-    /// given the readout up. Same act as Escape and as ⌘↩ on a tiled board.
+    /// given the readout up. Same act as ⌘↩ on a tiled board. Not the same act as Escape, which
+    /// unwinds a drill-in and stops at the root — see `CanvasBoardView.untile`.
     func leaveTiling() { header.leaveTiling() }
 
     /// Told when this board tiles or untiles, so the tab holding it can re-title itself.
@@ -269,7 +287,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     func saveArrangement(as name: String) {
         guard let tiling = scroll.board.tilingMemory else { return }
         CanvasArrangements.save(tiling, as: name, for: store.url)
-        tabModel?.arrangements = arrangementNames()
+        tabModel.arrangements = arrangementNames()
     }
 
     /// Whether there is an arrangement to save at all — a board that has never been tiled has nothing
@@ -328,6 +346,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     @objc private func paneResized() {
         let room = CanvasHeaderModel.Room(width: container.bounds.width)
         if header.room != room { header.room = room }
+        // The pane getting a size is the event the first fit was waiting for, when it was asked too
+        // early to have one. A no-op once it has happened.
+        fitWhenThereIsAWindowToFitTo()
     }
 
     @objc private func windowBecameKey() {
@@ -337,10 +358,32 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         store.checkForOutsideChange()
     }
 
+    /// Looked away. Start the clock — unless the board is tiled, which is exempt.
+    ///
+    /// **A tiling is the answer to the question the timer is guessing at.** Everything that pauses a
+    /// page is a guess about which of them you would miss: the budget guesses from distance and from
+    /// how long ago you saw a card, and this guesses from how long the window has been in the
+    /// background. A tiled view has no guessing left to do — you named these cards and the window is
+    /// showing every one of them, which is the same argument `CanvasPageBudget.liveWhileTiled` already
+    /// makes against the budget. It only ever reached here because this asked a question about the
+    /// window and never about the board inside it.
+    ///
+    /// It is a real cost and worth stating: a tiled board left behind your work goes on running its
+    /// pages for as long as it is open. That is what a dashboard is, and it is bounded by the tiling —
+    /// a handful of cards that fit the window at a readable size, not the forty on the board. Leaving
+    /// the tiled view hands it straight back to the budget.
     @objc private func windowResignedKey() {
         idleTimer?.invalidate()
+        idleTimer = nil
+        guard !scroll.board.isTiled else { return }
         idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleGrace, repeats: false) { _ in
-            Task { @MainActor [weak self] in self?.scroll.board.pauseAllPages() }
+            Task { @MainActor [weak self] in
+                // Asked again on the way out as well as on the way in: a board can be tiled from
+                // another window's command between the two, and pausing the tiles of a view somebody
+                // has just built is the one outcome this must not have.
+                guard let self, !self.scroll.board.isTiled else { return }
+                self.scroll.board.pauseAllPages()
+            }
         }
     }
 
@@ -362,7 +405,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // The hosting view is the size SwiftUI says it is, so each view's frame is the pill or the
         // capsule and not a rectangle of window around it. Set one at a time because the two are
         // different generic types and an array of them is an array of `NSView`.
-        tabBar = NSHostingView(rootView: CanvasTabBar(model: header, tabs: tabModel ?? ProjectTabModel()))
+        tabBar = NSHostingView(rootView: CanvasTabBar(model: header, tabs: tabModel))
         pill.sizingOptions = [.intrinsicContentSize]
         capsule.sizingOptions = [.intrinsicContentSize]
         tabBar.sizingOptions = [.intrinsicContentSize]
@@ -459,9 +502,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     ///
     /// The vertical drop is the header's business (see `TitlebarDrop`), because it depends on how tall
     /// each piece turns out to be. The leading inset is this pane's, because it depends on where the
-    /// traffic lights are relative to *it* — and there are three answers, not two. A canvas window puts
-    /// them over the board, so the pill starts clear of them. Full screen has none, so it starts at the
-    /// edge. And in a project window with its sidebar showing they sit over the sidebar, which is a
+    /// traffic lights are relative to *it* — and there are three answers, not two. A window with its
+    /// sidebar hidden puts them over the board, so the pill starts clear of them. Full screen has none, so
+    /// it starts at the edge. And with the sidebar showing they sit over the sidebar, which is a
     /// different pane entirely, so again the pill starts at the edge — see `ignoresTrafficLights`.
     private func measureTitlebar() {
         guard pillLeading != nil else { return }
@@ -830,15 +873,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         return scroll.board.canvasPoint(NSPoint(x: visible.midX, y: visible.midY))
     }
 
-    @objc private func addTextCard() {
-        let centre = centreOfView
-        let node = CanvasNode(content: .text(""),
-                              frame: CanvasRect(x: centre.x - 125, y: centre.y - 30,
-                                                width: 250, height: 60))
-        store.change("Add Card") { $0.nodes.append(node) }
-        scroll.board.select([node.id])
-        scroll.board.beginEditing(node.id)
-    }
+    /// The header's Add ▸ Card. The board owns it — it had a copy of its own for the right-click menu,
+    /// and a card added from here landed on top of the tiles while one was up because only the board's
+    /// copy knew about tiled views. See `CanvasBoardView.addTextCard`.
+    @objc private func addTextCard() { scroll.board.addTextCard(at: nil) }
 
     @objc private func addFrame() {
         let centre = centreOfView

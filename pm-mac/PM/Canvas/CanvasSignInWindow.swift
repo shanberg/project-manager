@@ -45,6 +45,9 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
     private init(url: URL, profile: String?, onFinish: (() -> Void)?) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = CanvasWebSession.store(named: profile)
+        // The same name the card sends, for the same reason and doubly so here: a sign-in page is
+        // exactly where a site decides whether it will talk to your browser at all.
+        CanvasWebSession.identify(configuration)
         // The same filtering the card gets. A sign-in page that behaves differently from the card it
         // was opened for is a debugging trap, and consent banners are, if anything, worse here.
         CanvasContentBlocker.attach(to: configuration, for: url.host())

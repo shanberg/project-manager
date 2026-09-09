@@ -171,6 +171,12 @@ class CanvasNodeView: NSView {
     /// edge, the boundaries lie in the gaps, and the handlebar sits outside the tile it belongs to — so
     /// selecting, swapping, reordering and resizing are all still the board's, and none of them was
     /// ever aimed at the middle of a tile.
+    ///
+    /// **Taking the click and having the keyboard are two things**, and this is only the first. A tile
+    /// whose click reached it but whose typing still went to the board could open an editor and then
+    /// drop every character into it — which is what a task row on a project tile did. The second half
+    /// is `CanvasBoardView.tileClicked`, which listens for these clicks without taking them and
+    /// engages the tile they landed in. One tile at a time, because the keyboard is one thing.
     var takesItsOwnClicks: Bool { isEngaged || board.isTiled }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -391,7 +397,15 @@ class CanvasNodeView: NSView {
         }
         layer?.shadowOpacity = lift.opacity
         layer?.shadowRadius = lift.radius
-        layer?.shadowOffset = CGSize(width: 0, height: -lift.drop)
+        // **Positive is down here.** A card sits in a flipped superview — `CanvasBoardView.isFlipped` —
+        // and AppKit places a layer inside one by flipping the backing layer's geometry, which takes
+        // the shadow offset with it. So the negative height that means "down" on an ordinary layer cast
+        // every card's shadow upwards, and a board of cards was lit from below.
+        //
+        // The superview's flippedness is what decides, not this view's own; `CanvasNoticeBar` is
+        // flipped too and its shadow is spelled the other way round, correctly. See
+        // `FlippedShadowTests`, which asserts all three cases against AppKit rather than against us.
+        layer?.shadowOffset = CGSize(width: 0, height: lift.drop)
     }
 
     /// About to be thrown away because it scrolled out of view. A web card stops loading here.

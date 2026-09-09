@@ -437,6 +437,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // Every card, on every board, and the sign-in window too — unless this card has been put on a
         // profile of its own, which is how one board holds two accounts. See `CanvasCardSession`.
         configuration.websiteDataStore = CanvasWebSession.store(named: profile)
+        // Name ourselves as the Safari we are, or the sites that read the user agent send us to their
+        // unsupported-browser page. See `CanvasWebSession.applicationName`.
+        CanvasWebSession.identify(configuration)
         // Ads, trackers and cookie banners. A rule list can only be handed to a web view as that view
         // is built, which is also why excusing a site rebuilds the page rather than reloading it.
         CanvasContentBlocker.attach(to: configuration, for: url.host())

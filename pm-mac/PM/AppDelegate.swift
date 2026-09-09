@@ -379,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // alternate handler, never the default — the vault's canvases belong to Obsidian, and
                 // an app that quietly took them over on install would be taking a decision that isn't
                 // its to take. "Open With ▸ PM" is the whole claim.
-                CanvasWindowController.open(url: url)
+                WindowManager.shared.open(canvas: url)
             }
         }
     }

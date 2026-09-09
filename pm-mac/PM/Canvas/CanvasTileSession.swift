@@ -41,6 +41,35 @@ struct CanvasTileSession: Equatable {
                             visible: Set(ids))
     }
 
+    /// Put a card into the tiling — **on the end, and then you move it.**
+    ///
+    /// Not beside the tile you were looking at, not into the master slot, not wherever the geometry
+    /// says there is room. Every cleverer rule is a guess about intent, and one that is wrong even a
+    /// third of the time is worse than no rule at all: you have to learn it *and* you still have to
+    /// correct it. The end of the order is the one position that can be predicted without learning
+    /// anything — the last cell of a grid, the bottom of a stack — and `move(_:to:)` is right there
+    /// for putting it where you actually meant.
+    ///
+    /// Silent about a card that is already up, because every caller's question is "is this card in the
+    /// tiling now", and for that one the answer is already yes.
+    mutating func add(_ id: String) {
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+    }
+
+    /// Take a tile out of the view. **The card is not touched** — see `CanvasLayout`: a tiling is a way
+    /// of looking, and the only thing this changes is what you are looking at.
+    ///
+    /// Its length goes with it, rather than waiting for it. A length is a share of one particular run
+    /// of tiles, so the number a card was given among six means something else among five; keeping it
+    /// would also leave `sizes` accumulating entries for cards the tiling no longer contains, which is
+    /// what `memory(of:)` writes down.
+    mutating func remove(_ id: String) {
+        guard let index = ids.firstIndex(of: id) else { return }
+        ids.remove(at: index)
+        sizes[id] = nil
+    }
+
     /// Put `id` where `other` is and vice versa — a drag inside a tiled view.
     ///
     /// Swapping rather than moving, which is the difference between a tiling manager and a desktop:

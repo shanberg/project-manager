@@ -10,9 +10,9 @@ import SwiftUI
 /// to agree: two pieces of glass in the same header disagreeing about whether they exist is worse than
 /// either choice made consistently.
 ///
-/// Shared by the project window's header and the canvas window's, which is the whole point — the canvas
-/// was asked to follow the pattern of the main window, and following it means using the same components
-/// rather than a second set that looks like them and drifts.
+/// Shared by the task list's header and the board's, which is the whole point — the canvas was asked to
+/// follow the pattern of the main window, and following it means using the same components rather than a
+/// second set that looks like them and drifts.
 enum HeaderChrome: Equatable {
     /// Another window has the focus. No glass at all, and the content behind it recedes.
     case dormant
@@ -217,8 +217,8 @@ struct HeaderDivider: View {
 /// One control in a header: a symbol at the size and weight every other one uses, in a hit area big
 /// enough to click without aiming.
 ///
-/// Shared by both headers so they cannot drift, which they had — the project window's buttons and the
-/// canvas window's were the same code written twice, and were already a point apart.
+/// Shared by both headers so they cannot drift, which they had — the task list's buttons and the
+/// board's were the same code written twice, and were already a point apart.
 struct HeaderSymbolButton: View {
     let symbol: String
     let help: String

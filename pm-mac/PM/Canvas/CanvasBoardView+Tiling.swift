@@ -189,20 +189,45 @@ extension CanvasBoardView {
         count >= 4 ? .masterStack : .grid
     }
 
-    /// Escape. Back out one level: to the tiling you drilled in from, or to the board.
+    /// Escape. Back out one level of drill-in — **and stop at the root.**
     ///
-    /// One level is Escape's whole meaning and it is the only caller that wants it. Anything that means
-    /// "leave the tiled view" wants `leaveTiling`.
+    /// It used to keep going: at the root of the stack the next Escape left the tiled view altogether.
+    /// That was one step too far. A tiled view is where you are *working*, and Escape is the key that
+    /// dismisses a menu, cancels a field and steps out of a card — all of them smaller acts that
+    /// happen *inside* a workspace. Making the same key also close the workspace means every cancelled
+    /// edit is one keystroke away from tearing down an arrangement you built by hand.
+    ///
+    /// So at the root it does nothing, which is the right amount for a key with nothing left to cancel.
+    /// Leaving has its own three doors and always did: ⌘↩, the header's ✕, and stepping to a frame.
+    /// See `leaveTiling`.
     func untile(animated: Bool) {
-        guard let session = tiling else { return }
-        if let previous = tilingHistory.popLast() {
-            tiling = previous
-            selection = selection.intersection(previous.ids)
-            setLayout(previous.layout, animated: animated)
-            onTilingChanged?()
-            announceTiling()
-            return
-        }
+        guard tiling != nil, let previous = tilingHistory.popLast() else { return }
+        tiling = previous
+        selection = selection.intersection(previous.ids)
+        setLayout(previous.layout, animated: animated)
+        onTilingChanged?()
+        announceTiling()
+    }
+
+    /// Leave the tiled view altogether, however deep into it you have drilled.
+    ///
+    /// **Escape unwinds; everything else leaves.** The drill-in is a stack and backing out of it one
+    /// level at a time is exactly what Escape is for — see `untile`. Every other way out means the
+    /// board and says so: ⌘↩ is one command at both ends, the header's ✕ is labelled "leave the
+    /// tiled view", and stepping to a frame is a request to go and look at somewhere else.
+    ///
+    /// **What is kept is the arrangement you built, not the card you left through.** The order you
+    /// dragged the tiles into and the widths you set are the deliberate work; a fullscreen card you
+    /// drilled into to read is not something to hand back the next time you tile those cards. So the
+    /// stack's root is the session that gets remembered — see `CanvasViewState.lastTiling`.
+    func leaveTiling(animated: Bool) {
+        guard let current = tiling else { return }
+        let session = tilingHistory.first ?? current
+        tilingHistory.removeAll()
+        // Step out of whatever tile you were typing in. Engagement is the tiled view's own doing — see
+        // `tileClicked` — and leaving it holding would hand back a board with one card open in an
+        // editor, which is a state you never asked the board for.
+        for id in current.ids { nodeViews[id]?.engage(false) }
         // Kept, not discarded — see `CanvasViewState.lastTiling`.
         lastTiling = memory(of: session)
         tiling = nil
@@ -220,29 +245,6 @@ extension CanvasBoardView {
         onTilingChanged?()
     }
 
-    /// Leave the tiled view altogether, however deep into it you have drilled.
-    ///
-    /// **Escape unwinds; everything else leaves.** The drill-in is a stack and backing out of it one
-    /// level at a time is exactly what Escape is for — see `untile`. Every other way out means the
-    /// board and says so: ⌘↩ is one command at both ends, the header's ✕ is labelled "leave the
-    /// tiled view", and stepping to a frame is a request to go and look at somewhere else. All four
-    /// used to call `untile`, so all four stopped one short.
-    ///
-    /// **What is kept is the arrangement you built, not the card you left through.** The order you
-    /// dragged the tiles into and the widths you set are the deliberate work; a fullscreen card you
-    /// drilled into to read is not something to hand back the next time you tile those cards. So the
-    /// stack's root becomes the session `untile` remembers — see `CanvasViewState.lastTiling`.
-    func leaveTiling(animated: Bool) {
-        guard tiling != nil else { return }
-        if let root = tilingHistory.first {
-            tilingHistory.removeAll()
-            // Assigned rather than laid out: nothing is drawn from it, and `untile` is about to
-            // replace the layout wholesale. This is only about which session it keeps.
-            tiling = root
-        }
-        untile(animated: animated)
-    }
-
     /// Swap the arrangement without leaving the tiling.
     func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
         guard var session = tiling, session.arrangement != arrangement else { return }
@@ -251,6 +253,140 @@ extension CanvasBoardView {
         tiling = session
         setLayout(session.layout, animated: true)
         onTilingChanged?()
+    }
+
+    /// Put a card into the tiled view that is up. Nothing at all when there isn't one, which is what
+    /// lets every add command call it unconditionally.
+    ///
+    /// **Every level of the drill-in, not only the one you can see.** Drilled into one card and asked
+    /// for a link, you get two tiles; Escape then has to hand you back the six you came from *plus*
+    /// the new one. Adding only to the visible session would instead make the card vanish on the way
+    /// out — you would have added something to a view that was about to be discarded, which is the one
+    /// outcome nobody could have meant. `removeFromTiling` is symmetric for the same reason.
+    ///
+    /// A frame is a container of cards rather than a card, so there is no tile it could be.
+    func addToTiling(_ id: String) {
+        guard var session = tiling, document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
+        session.add(id)
+        guard session != tiling else { return }
+        for index in tilingHistory.indices { tilingHistory[index].add(id) }
+        tiling = session
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+        announceTiling()
+    }
+
+    /// Take a tile out of the view, leaving the card exactly where it is on the board.
+    ///
+    /// **Stop showing it, never delete it.** A tile is a view of a card, so the obvious word for this —
+    /// close — is the dangerous one: deleting through a view is how people lose work, and the view is
+    /// precisely the place where you cannot see what you would be losing. The card is still on the
+    /// board, in the same spot, and leaving the tiling shows it there.
+    ///
+    /// The last tile is the way out. A tiling of nothing is not a state — the window would be empty
+    /// with no way to say what it was — so removing the only tile means leaving, which is also what
+    /// anybody doing it was asking for.
+    func removeFromTiling(_ id: String) {
+        guard var session = tiling, let index = session.ids.firstIndex(of: id) else { return }
+        guard session.ids.count > 1 else { return leaveTiling(animated: true) }
+        session.remove(id)
+        for position in tilingHistory.indices { tilingHistory[position].remove(id) }
+        tiling = session
+        // Something has to stay focused, for the same reason entering a tiling focuses something: the
+        // arrows and Return act on it. The tile that took this one's place, else the new last one.
+        selection.remove(id)
+        if selection.isDisjoint(with: session.ids) {
+            selection = [session.ids[min(index, session.ids.count - 1)]]
+        }
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+        announceTiling()
+    }
+
+    /// A card that has gone takes its tile with it.
+    ///
+    /// `ids` is a list of names, and nothing was checking that they still named anything — a card
+    /// deleted while it was up left a tile-shaped hole in the arrangement that no card would ever fill
+    /// and no gesture could close. Reachable in the ordinary way (⌫ on a focused tile) and now in an
+    /// unremarkable one too: an empty text card you click into and click away from deletes itself, and
+    /// clicking into one is exactly what a tiled view now offers.
+    ///
+    /// Losing the last one leaves the tiling, for the reason `removeFromTiling` gives: a tiling of
+    /// nothing is not a state.
+    func pruneTilingOfDeletedCards() {
+        guard let session = tiling else { return }
+        let gone = session.ids.filter { document.node(id: $0) == nil }
+        guard !gone.isEmpty else { return }
+        guard gone.count < session.ids.count else { return leaveTiling(animated: true) }
+        var next = session
+        for id in gone {
+            next.remove(id)
+            for index in tilingHistory.indices { tilingHistory[index].remove(id) }
+        }
+        // A level of the drill-in that has lost everything is a level Escape would back out *into*,
+        // which is a blank window. Unlike in `removeFromTiling`, where a level always keeps at least
+        // one card, a delete can empty one outright.
+        tilingHistory.removeAll { $0.ids.isEmpty }
+        tiling = next
+        if selection.isDisjoint(with: next.ids) { selection = [next.ids[0]] }
+        setLayout(next.layout, animated: true)
+        onTilingChanged?()
+        announceTiling()
+    }
+
+    // MARK: Which tile has the keyboard
+
+    /// While a tiling is up, watch for a click landing inside a tile.
+    ///
+    /// A watch rather than a `mouseDown`, because the board never sees these clicks and that is the
+    /// point: a tiled card takes its own — `CanvasNodeView.takesItsOwnClicks` grants it outright, so
+    /// you can scroll a page in one tile and tick a task in another without focusing either first. The
+    /// board is only told about the edge bands and the gaps. So the one thing still missing was not a
+    /// click *for* the card but a click the board could hear *about*.
+    ///
+    /// Put and taken away with the tiling itself, from `tiling`'s `didSet`, so an untiled board carries
+    /// nothing. The event is returned unchanged: this listens, it never consumes.
+    func watchTileClicks(_ watching: Bool) {
+        if let existing = tileClickWatch { NSEvent.removeMonitor(existing) }
+        tileClickWatch = nil
+        guard watching else { return }
+        tileClickWatch = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.tileClicked(event)
+            return event
+        }
+    }
+
+    /// **The tile you clicked into is the tile you can type in.**
+    ///
+    /// Editing a card meant stepping into it, and a tile was never stepped into — so a task row on a
+    /// project tile opened an editor with the keyboard still on the board, and a text tile had no
+    /// gesture at all that would show you its editor. Return on the focused tile always worked, which
+    /// is a thing you have to be told; a click is the thing everybody tries.
+    ///
+    /// **The click is not spent on this.** It goes on to whatever it was aimed at, and because a local
+    /// monitor runs before the window routes the event, a text card that swaps its rendering for an
+    /// editor here has that editor in place by the time the click lands in it — you click on the
+    /// sentence and the caret is in the sentence.
+    ///
+    /// `engage` rather than `beginEditing`, which is not the same errand on every kind of card: a file
+    /// card's opens the file in whatever owns it, and a project card's, on one too small to read, walks
+    /// out of the board to the project window. Neither is a thing a click inside a tile should do.
+    private func tileClicked(_ event: NSEvent) {
+        guard event.window === window,
+              let hit = window?.contentView?.hitTest(event.locationInWindow) else { return }
+        // AppKit's own answer to "whose click is this". A press on the band the board keeps along a
+        // tile's edge, on a boundary, or in a gap hit-tests to the board itself and walks up to nothing
+        // — which is exactly right, since those presses are the arrangement's rather than the card's.
+        var view: NSView? = hit
+        while let current = view, !(current is CanvasNodeView) { view = current.superview }
+        guard let card = view as? CanvasNodeView, tiling?.ids.contains(card.node.id) == true else {
+            return
+        }
+        // Focused as well as engaged, and in that order. They have to be the same tile or the menus
+        // are about one card while the keyboard is in another — and setting the selection is what
+        // steps every *other* card back out, through `CanvasNodeView.selectionChanged`.
+        selection = [card.node.id]
+        card.engage(true)
     }
 
     /// Move a tile along the order — the handlebar's drag. See `CanvasTileSession.move`.
@@ -346,7 +482,12 @@ extension CanvasBoardView {
         return false
     }
 
-    /// Make the focused card the master tile — ⌘⇧Return, and a double-click on a stack tile.
+    /// Make the focused card the master tile — ⌘⇧Return, the View menu, and the tile's own menu.
+    ///
+    /// It used to claim a double-click on a stack tile as well. That was never dispatched: the second
+    /// click of a double-click is answered before the tiled view is, and the ⌘⇧Return it also claimed
+    /// was written on a contextual-menu item, which is drawn and never searched. Both are real now,
+    /// and the double-click is gone rather than fixed — see `CanvasBoardView.mouseDown`.
     func promoteInTiling(_ id: String) {
         guard var session = tiling else { return }
         session.promote(id)

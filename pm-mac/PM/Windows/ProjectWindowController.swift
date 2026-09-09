@@ -15,6 +15,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     private(set) var projectKey: String?
     private(set) var store: PMStore
 
+    /// The board this window was opened *on*, when it was opened on a file rather than a project.
+    ///
+    /// A `.canvas` is a file and can live anywhere in the vault — several in a real one sit at its root
+    /// belonging to no project at all — so "open this canvas" is an errand no project answers. It used
+    /// to be answered by a second window type (`CanvasWindowController`), which is a whole idea of what
+    /// a window is, kept for one case. This is the same case answered by the window the app already
+    /// has: a project window with no project, showing that board.
+    ///
+    /// Only the *source* differs, which is why one optional is the whole of it — everything downstream
+    /// of `canvasSource` is asking "which file", not "which project". And it is where the window
+    /// **started**, not what it is: click a project in the sidebar and this clears, because a window
+    /// showing a project's board should show *that project's* board. See `retarget`.
+    private(set) var openedCanvas: URL?
+
     /// Which way this window is rendering its project — its task list, or its board.
     ///
     /// **Per project, and remembered.** A window opened onto a project, and a window retargeted at one,
@@ -46,9 +60,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Asks to open a project — in this window or a new one. Supplied by `WindowManager`.
     var onOpenProject: ((String, Bool) -> Void)?
 
-    init(projectKey: String?, store: PMStore, startsWithSidebar: Bool, remembersFrame: Bool) {
+    init(projectKey: String?, store: PMStore, startsWithSidebar: Bool, remembersFrame: Bool,
+         canvas: URL? = nil) {
         self.projectKey = projectKey
         self.store = store
+        self.openedCanvas = canvas
 
         split = ProjectSplitViewController(store: store, state: state,
                                            startsWithSidebar: startsWithSidebar)
@@ -130,9 +146,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // switching to the board handed back the previous project's file.
         split.canvasSource = { [weak self] in
             guard let self else { return (nil, nil, {}) }
-            return (self.store.canvasPath.map { URL(fileURLWithPath: $0) },
+            // A window opened on a file shows that file. Ahead of the project's own board rather than
+            // instead of it: the two never both apply, because opening on a file is what a window with
+            // no project does, and taking a project clears it.
+            return (self.openedCanvas ?? self.store.canvasPath.map { URL(fileURLWithPath: $0) },
                     self.window?.title,
-                    { [weak self] in self?.createAndShowCanvas() })
+                    { [weak self] in self?.openProjectCanvas() })
         }
         watchCanvasPath()
         split.onRendererChanged = { [weak self] in
@@ -205,6 +224,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Called on the way up and again on every retarget, since a retarget is the same question asked
     /// about a different project.
     private func applyRememberedRenderer() {
+        // A window opened on a file has one thing to show and no project whose habits to consult.
+        // Nothing is pending either — the path did not have to be looked for, it was handed in.
+        if openedCanvas != nil { return split.setTabs(ProjectTabSet(.board(.whole))) }
         // The tabs this project was last looked at through, seeded — for a project that has never had
         // any — from what the old one-renderer memory said. See `ProjectTabMemory`.
         let seed: ProjectTabView = ProjectRendererMemory.of(projectKey) == .canvas
@@ -222,8 +244,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     /// ⌘Z goes to whatever this window is showing. With a board up that is the canvas document's own
-    /// stack, shared with the canvas's own window if it also has one open — which is the only coherent
-    /// answer when both are the same document.
+    /// stack, shared with every other window showing the same file — which is the only coherent answer
+    /// when they are all the same document.
     ///
     /// The task list gets one manager for the window, which is what AppKit would have made for it
     /// anyway: implementing this method at all takes the default away, so returning nil here would mean
@@ -258,8 +280,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// stale-constant problem the measurement exists to avoid came back by another route.
     /// Write the window's own button geometry through to the view state, ignoring sub-point noise so a
     /// live resize doesn't republish (and re-lay-out the whole column) on every frame for a value that
-    /// hasn't moved. The measuring itself is `NSWindow.titlebarButtonMetrics`, shared with the canvas
-    /// window's header.
+    /// hasn't moved. The measuring itself is `NSWindow.titlebarButtonMetrics`.
     private func measureTitlebarButtons() {
         guard let metrics = window?.titlebarButtonMetrics() else { return }
         if abs(state.leadingTitlebarInset - metrics.leadingInset) > 0.5 {
@@ -279,6 +300,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         guard newKey != projectKey else { return }
         projectKey = newKey
         store = newStore
+        // The window has a project now, so it is a project's window: whatever file it was opened on is
+        // where it started and not what it shows. Before `applyTitle` and the renderer, both of which
+        // read it.
+        openedCanvas = nil
         split.retarget(to: newStore, projectKey: newKey)
         applyTitle()
         pushFocusToDisk()
@@ -289,39 +314,66 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         applyRememberedRenderer()
     }
 
-    /// Put the sidebar's selection back on the project this window is actually showing. Used when a
-    /// switch doesn't happen after all — the project turned out to be open in another window, which
-    /// comes forward instead (see `WindowManager.retarget`).
-    func syncSidebarSelection() {
-        state.projectSelection = projectKey.map { [$0] } ?? []
-    }
-
     /// The window's title — invisible in the titlebar, but what the Window menu, ⌘`, and the tab bar
     /// all show. The subtitle carries progress, which is where the header's "3/8" goes in a window.
     func applyTitle() {
         guard let window else { return }
+        // A window opened on a file is named for the file, and carries it: `representedURL` is what
+        // gives the titlebar its proxy icon and its ⌘-click path menu, which for a document window is
+        // most of what a title is for.
+        if let openedCanvas {
+            window.title = openedCanvas.deletingPathExtension().lastPathComponent
+            window.subtitle = ""
+            window.representedURL = openedCanvas
+            return
+        }
         let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
         // The folder name is the fallback and the one that carries a code, so it's written the way the
         // rest of the app has been told to write names — see `ProjectCodes`.
         let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
         window.title = name ?? "PM"
+        // A window retargeted away from the file it was opened on must lose the proxy icon with it: a
+        // titlebar still offering the old canvas's path menu is a window claiming to be a document it
+        // is not showing.
+        window.representedURL = nil
         let p = store.progress
         window.subtitle = p.total > 0 ? "\(p.done) of \(p.total) done" : ""
     }
 
-    /// File ▸ Project Canvas, and the header button's twin — this window's project, its board.
+    /// This window's project, as its board — making the board first if the project hasn't got one.
+    ///
+    /// The canvas empty state's button and File ▸ Open Project Canvas in New Window are the same
+    /// errand reached two ways, and the half worth not duplicating is the failure: creating the board
+    /// writes a file, so a refusal has to be *said*. Silence and a window that didn't change is the one
+    /// outcome that leaves you nothing to act on.
+    ///
+    /// Creation is a side effect of asking, which is `PMStore.openableCanvasPath`'s whole convention —
+    /// a project is assumed to have a canvas, so opening one is never "make it, then open it".
     func openProjectCanvas() {
-        CanvasWindowController.openProjectCanvas(for: store)
+        store.openableCanvasPath { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                setRenderer(.canvas)
+            case .failure(let error):
+                let alert = NSAlert()
+                alert.messageText = "Couldn't make a canvas for this project."
+                alert.informativeText = (error as? LocalizedError)?.errorDescription
+                    ?? String(describing: error)
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
     }
 
     // MARK: Rendering the project as a board
 
     /// View ▸ Show Canvas — render this window's project as its board rather than as its task list.
     ///
-    /// A different thing from File ▸ Project Canvas, which opens the board in a window of its own. This
-    /// is the same window looking at the same project a different way, and both can be up at once: the
-    /// document store is shared per file (see `CanvasStoreRegistry`), so the two are views of one board
-    /// with one undo stack rather than two copies racing each other to save.
+    /// A different thing from File ▸ Open Project Canvas in New Window, which is the same view in a
+    /// second window; this is the window you are in, looking another way. Both can be up at once, on
+    /// one document: the store is shared per file (see `CanvasStoreRegistry`), so two windows on a
+    /// board are two views of it with one undo stack rather than two copies racing each other to save.
     @objc func toggleCanvasRenderer(_ sender: Any?) {
         setRenderer(renderer == .canvas ? .tasks : .canvas)
     }
@@ -379,26 +431,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
     @objc func selectPreviousProjectTab(_ sender: Any?) { split.cycleTabs(by: -1) }
-
-    /// The empty state's button: make the board, then show it. The creating half is
-    /// `PMStore.openableCanvasPath`, which is the app's one place that decides where a project's canvas
-    /// goes and what starts in it.
-    private func createAndShowCanvas() {
-        store.openableCanvasPath { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success:
-                setRenderer(.canvas)
-            case .failure(let error):
-                let alert = NSAlert()
-                alert.messageText = "Couldn't make a canvas for this project."
-                alert.informativeText = (error as? LocalizedError)?.errorDescription
-                    ?? String(describing: error)
-                alert.alertStyle = .warning
-                alert.runModal()
-            }
-        }
-    }
 
     /// The window's size limits, which are not the same for the two renderers.
     ///

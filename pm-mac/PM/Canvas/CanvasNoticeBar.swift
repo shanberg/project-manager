@@ -1,6 +1,6 @@
 import AppKit
 
-/// A banner floating under the canvas window's header, for the things the board itself can't say.
+/// A banner floating under a board's header, for the things the board itself can't say.
 ///
 /// One is that cards on this board point at files that have moved — a property of the whole document,
 /// not of any one card, and worth saying once at the top rather than only as a mark on each card you
@@ -42,6 +42,10 @@ final class CanvasNoticeBar: NSView {
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.16
         layer?.shadowRadius = 10
+        // Down. Negative here and positive on a card, and the difference is not a mistake: what flips
+        // a layer's geometry — and its shadow with it — is being placed in a flipped *superview*, which
+        // a card is and this banner isn't. Its own `isFlipped` only lays out its own subviews. See
+        // `FlippedShadowTests`.
         layer?.shadowOffset = CGSize(width: 0, height: -3)
         isHidden = true
 
