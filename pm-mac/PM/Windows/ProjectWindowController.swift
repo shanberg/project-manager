@@ -208,14 +208,28 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // any — from what the old one-renderer memory said. See `ProjectTabMemory`.
         let seed: ProjectTabView = ProjectRendererMemory.of(projectKey) == .canvas
             ? .board(.whole) : .notes
-        let remembered = ProjectTabMemory.of(projectKey, seed: seed)
+        var remembered = ProjectTabMemory.of(projectKey, seed: seed)
+        // **The workspaces this project has, not only the ones this window was left holding.** A
+        // workspace you named is work you kept, and it should be along the top when you come back —
+        // including the ones you had zoomed out of before closing the window, which lose their chip on
+        // the way out (`ProjectTabView.following`) and so would otherwise be invisible until you went
+        // looking in a menu. And the one you were last in is the one that comes up.
+        //
+        // Only when the path is already known: a project whose board is still being looked for gets
+        // this a moment later, from `watchCanvasPath`, which re-runs the whole of this.
+        if let url = store.canvasPath.map({ URL(fileURLWithPath: $0) }) {
+            remembered.include(workspaces: CanvasWorkspaces.names(of: url),
+                               selecting: CanvasWorkspaces.lastUsed(of: url))
+        }
         // A board that isn't there yet is worth waiting for rather than falling back from: the store
         // learns the canvas path asynchronously, and answering in the meantime would either offer to
         // make a canvas the project already has or — as this did until the store could tell "nobody
         // has looked" from "there isn't one" — put the whole task list on screen for the fraction of a
         // second before the board arrived. The tabs are right either way; it is only the pane inside
         // the board tab that has to hold still. See `ProjectSplitViewController.setTabs`.
-        let pending = remembered.tabs.contains { $0.view.isBoard } && !store.hasResolvedCanvasPath
+        // Every tab wants a board now, including the notes (§7d), and so does the workspace seeding
+        // above — so what decides whether this has to be asked again is only whether the path is known.
+        let pending = !store.hasResolvedCanvasPath
         awaitsRememberedCanvas = pending
         split.setTabs(remembered, canvasPending: pending)
     }

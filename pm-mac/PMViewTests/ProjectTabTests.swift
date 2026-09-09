@@ -277,3 +277,73 @@ final class TabFollowsItsBoardTests: XCTestCase {
                        .board(.workspace("New")))
     }
 }
+
+/// The row of tabs a project opens with.
+///
+/// **The row is the project's workspaces, not only the ones the window was left holding.** A tab is
+/// where an *open* workspace lives (docs/canvas-workspaces.md §7c), which was the whole story while a
+/// workspace could only be reached by making one, and the wrong story on the way in: one you built and
+/// then zoomed out of has no chip, so opening the project showed you none of the work you named.
+final class TabsIncludeTheProjectsWorkspacesTests: XCTestCase {
+    func testAWorkspaceWithNoTabGetsOne() {
+        var tabs = ProjectTabSet(.notes)
+        tabs.include(workspaces: ["Dashboard", "Research"])
+        XCTAssertEqual(tabs.tabs.map(\.view),
+                       [.notes, .board(.workspace("Dashboard")), .board(.workspace("Research"))])
+    }
+
+    /// The row can be dragged into an order and that order is the user's, so newcomers land after it
+    /// rather than being sorted into it.
+    func testAnExistingRowKeepsItsOrder() {
+        var tabs = ProjectTabSet(.board(.workspace("Research")))
+        tabs.open(.notes)
+        tabs.include(workspaces: ["Alpha", "Research"])
+        XCTAssertEqual(tabs.tabs.map(\.view),
+                       [.board(.workspace("Research")), .notes, .board(.workspace("Alpha"))])
+    }
+
+    /// Two chips on one workspace are two names for one thing (§7c), so a workspace that already has a
+    /// tab does not get a second — whichever tab it is, and however the row is ordered.
+    func testAWorkspaceThatAlreadyHasATabGetsNoSecondOne() {
+        var tabs = ProjectTabSet(.board(.workspace("Dashboard")))
+        tabs.include(workspaces: ["Dashboard"])
+        XCTAssertEqual(tabs.tabs.count, 1)
+    }
+
+    /// The point of the recency: the tab you left selected can be the whole board — leaving a tiled
+    /// view un-pins the tab from its workspace — so "which workspace was I in" has to be asked of the
+    /// workspace store rather than of the selection.
+    func testTheMostRecentWorkspaceIsTheOneSelected() {
+        var tabs = ProjectTabSet(.board(.whole))
+        tabs.include(workspaces: ["Alpha", "Dashboard"], selecting: "Dashboard")
+        XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
+    }
+
+    /// A name that is not on the row — deleted in another window between the two reads — leaves the
+    /// stored selection alone rather than landing on whatever happens to be first.
+    func testAnUnknownRecentWorkspaceLeavesTheSelectionAlone() {
+        var tabs = ProjectTabSet(.notes)
+        let was = tabs.selectedID
+        tabs.include(workspaces: ["Alpha"], selecting: "Deleted")
+        XCTAssertEqual(tabs.selectedID, was)
+    }
+
+    /// Nothing named, nothing added: a project with no workspaces opens exactly as it always has.
+    func testNoWorkspacesChangesNothing() {
+        var tabs = ProjectTabSet(.notes)
+        tabs.include(workspaces: [])
+        XCTAssertEqual(tabs.tabs.map(\.view), [.notes])
+        XCTAssertFalse(tabs.showsBar)
+    }
+
+    /// `openBehind` aimed at a named tab rather than at the one that is up — what a pane leaving a
+    /// workspace uses when you are looking at a different tab.
+    func testOpenBehindANamedTabLandsInFrontOfIt() {
+        var tabs = ProjectTabSet(.notes)
+        let second = tabs.open(.board(.whole))
+        tabs.select(tabs.tabs[0].id)
+        tabs.openBehind(.board(.workspace("Dashboard")), of: second.id)
+        XCTAssertEqual(tabs.tabs.map(\.view),
+                       [.notes, .board(.workspace("Dashboard")), .board(.whole)])
+    }
+}

@@ -533,6 +533,12 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// that points at it, and one deleted leaves a tab that says so rather than one that vanishes.
     func refreshTabModel() {
         let selectedChanged = reconcileTabsWithTheirBoards()
+        // Which workspace this board was most recently in, so opening the project comes back to it.
+        // Here because this is the one funnel both ways of arriving in a workspace pass through —
+        // clicking its chip, and naming the one you just built.
+        if case .board(.workspace(let name)) = tabs.selected.view, let url = canvasSource().url {
+            CanvasWorkspaces.markUsed(name, of: url)
+        }
         let board = canvasPane
         tabModel.items = tabs.tabs.map { tab in
             // Its own board, not the one on screen: a tab tiled in the background still says so, and
@@ -620,6 +626,16 @@ final class ProjectSplitViewController: NSSplitViewController {
                                                 showingProjectNoteAlone: pane.isShowingProjectNoteAlone),
                   next != tab.view
             else { continue }
+            // **A workspace that is being left keeps its chip**, which is §7c's rule for ⌘Return
+            // applied to the other way out. Zooming out of Dashboard un-pins this tab from it, and the
+            // workspace still exists — so it stays a click away in the bar rather than dropping to a
+            // menu. Guarded on there not being one already, which is what makes it idempotent beside
+            // `onLeftWorkspace`, whose ⌘Return path gets here second.
+            if case .board(.workspace(let left)) = tab.view,
+               tabs.tabs.filter({ $0.view == tab.view }).count == 1,
+               let url = canvasSource().url, CanvasWorkspaces.tiling(named: left, of: url) != nil {
+                tabs.openBehind(tab.view, of: tab.id)
+            }
             tabs.retarget(tab.id, to: next)
             pane.focus = if case .board(let focus) = next { focus } else { .note }
             selectedChanged = selectedChanged || tab.id == tabs.selectedID

@@ -59,6 +59,29 @@ enum CanvasWorkspaces {
         write(all, for: url)
     }
 
+    /// The workspace this board was most recently in, if it still exists.
+    ///
+    /// **Validated on the way out rather than kept tidy on the way in.** A name here is a note about
+    /// where you were, not a second claim about what exists — so a workspace deleted (or renamed) in
+    /// another window leaves a stale row that answers nil, instead of every delete having to remember
+    /// to come here too.
+    ///
+    /// What it is for: a project opens on the workspace you were last using, even when the tab you left
+    /// selected was something else. Leaving a tiled view un-pins that tab from its workspace (see
+    /// `ProjectTabView.following`), so the tab selection alone cannot answer "which workspace was I in"
+    /// once you have zoomed out of one.
+    static func lastUsed(of url: URL) -> String? {
+        guard let name = used()[key(url)], of(url)[name] != nil else { return nil }
+        return name
+    }
+
+    static func markUsed(_ name: String, of url: URL) {
+        var rows = used()
+        guard rows[key(url)] != name else { return }
+        rows[key(url)] = name
+        UserDefaults.standard.set(rows, forKey: lastUsedKey)
+    }
+
     static func remove(_ name: String, for url: URL) {
         var all = of(url)
         guard all.removeValue(forKey: name) != nil else { return }
@@ -72,9 +95,14 @@ enum CanvasWorkspaces {
     }
 
     private static let defaultsKey = "PMCanvasWorkspaces"
+    private static let lastUsedKey = "PMCanvasWorkspaceLastUsed"
 
     private static func stored() -> [String: Data] {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: Data] ?? [:]
+    }
+
+    private static func used() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: lastUsedKey) as? [String: String] ?? [:]
     }
 
     /// The path, standardized — the same key `CanvasViewMemory` uses, so one board is one row in both.

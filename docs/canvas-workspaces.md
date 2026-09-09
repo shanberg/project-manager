@@ -737,6 +737,39 @@ menu is, so the column's own ⌘A / ⌘C had to be told by hand to stand aside f
 answers those from the responder chain, where a focused text view is already ahead of it — which is the
 rule the flag was imitating. `TextFocusWindow` keeps its token field editor and nothing else.
 
+## 7g. Opening a project shows its workspaces — **built**
+
+§7c settled that **a tab is where an open workspace lives**, and that every act which *makes* a
+workspace makes a tab. That is the right story on the way out and the wrong one on the way in.
+
+A workspace you built last week, named, and then zoomed out of before closing the window still exists —
+and had no chip. `ProjectTabView.following` un-pins a tab the moment its board stops being that
+workspace (§7e), which is honest about what the tab is showing and leaves the workspace reachable only
+through a menu. So opening a project showed you none of the work you had named.
+
+**The row is the project's workspaces now, not only the ones the window was left holding.**
+`ProjectTabSet.include(workspaces:selecting:)` puts a chip on the row for every workspace that has none.
+Existing tabs keep their places — the row can be dragged into an order and that order is the user's —
+and newcomers land after them in the alphabetical order `CanvasWorkspaces.names` hands over, which is
+the order you would look one up in. A workspace that already has a tab gets no second one, for §7c's
+reason: two chips on one workspace are two names for one thing.
+
+**And the one you were last in is the one that comes up.** That cannot be read off the stored tab
+selection, because leaving a tiled view un-pins the tab: the last thing you did in Dashboard was leave
+it, and the selection records the whole board. So `CanvasWorkspaces` keeps a `lastUsed` name per board,
+written from `refreshTabModel` — the one funnel both ways of arriving in a workspace pass through,
+clicking a chip and naming the one you just built. It is validated on read rather than kept tidy on
+write, so a workspace deleted in another window answers nil instead of every delete having to come here.
+
+**Leaving one keeps its chip.** ⌘Return already did this (§7c: "the workspace being left keeps its
+tab"), because starting a fresh workspace should not make the named one vanish. The same is now true of
+the other way out — zooming out of Dashboard leaves a Dashboard chip beside the tab you zoomed out in —
+which is what makes the row consistent within a session rather than only at the moment of opening.
+
+**Seeded, not enforced.** A chip you close stays closed for the session and comes back next time you
+open the project, because the row is a view of what exists. Closing a chip is not deleting a workspace;
+that verb is on the chip's own menu and always has been.
+
 ## 8. What this does to the backlog
 
 - **New, and first:** the card is the project (§§2–5). The complaint that started this.

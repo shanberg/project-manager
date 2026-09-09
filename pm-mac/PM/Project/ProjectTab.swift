@@ -183,7 +183,36 @@ struct ProjectTabSet: Codable, Equatable {
     ///
     /// Before rather than after, so the row reads in the order the two were made.
     mutating func openBehind(_ view: ProjectTabView) {
-        tabs.insert(ProjectTab(view), at: selectedIndex)
+        openBehind(view, of: selectedID)
+    }
+
+    /// The same, behind a named tab rather than behind the one that is up — for a pane that left a
+    /// workspace while you were looking at something else.
+    mutating func openBehind(_ view: ProjectTabView, of id: String) {
+        let index = tabs.firstIndex { $0.id == id } ?? selectedIndex
+        tabs.insert(ProjectTab(view), at: index)
+    }
+
+    /// Put a chip on the row for every workspace that exists and hasn't got one, and go to `active`.
+    ///
+    /// **The row is the project's workspaces, not only the ones you happened to leave open.** A tab is
+    /// where an open workspace lives (docs/canvas-workspaces.md §7c), and that was the whole story
+    /// while a workspace could only be reached by making one. It is the wrong story on the way *in*: a
+    /// workspace you built last week, and then zoomed out of before closing the window, exists and has
+    /// no chip, so opening the project shows you none of the work you named.
+    ///
+    /// **Existing tabs keep their places and their order.** The row can be dragged into an order
+    /// (§7c) and that order is the user's; newcomers land after it, in the alphabetical order
+    /// `CanvasWorkspaces.names` hands over — which is the order you would look one up in.
+    ///
+    /// `active` is the workspace to select, if it has a tab. Nil, or a name with no chip, leaves the
+    /// selection where storage put it.
+    mutating func include(workspaces names: [String], selecting active: String? = nil) {
+        for name in names where first(showing: .board(.workspace(name))) == nil {
+            tabs.append(ProjectTab(.board(.workspace(name))))
+        }
+        guard let active, let tab = first(showing: .board(.workspace(active))) else { return }
+        selectedID = tab.id
     }
 
     /// The first tab showing exactly this, if one is open.
