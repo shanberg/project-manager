@@ -82,12 +82,13 @@ final class CanvasOverlayView: NSView {
     /// sizing a card *down*, the offered frame is inside the card's current bounds, where a mark on the
     /// border would have nothing to stand on at all.
     ///
-    /// **The cards being agreed with get the same band at half the weight**, which is the treatment the
-    /// selection box already uses for the same reason: one family of transient marks, and the quieter
-    /// one is plainly the subordinate clause. It matters that they are the *same shape*, because the
-    /// alternative — a hairline, a wash, an accent — invents a third vocabulary for a thing that is
-    /// already being said. It matters just as much that they are thinner and fainter, because a source
-    /// drawn at the ghost's weight reads as a second card about to move.
+    /// **The cards being agreed with glow instead.** They were a thinner copy of the same offset band,
+    /// on the argument that one shape twice was one vocabulary — but the two marks are not saying the
+    /// same kind of thing, and drawing them alike made the board look like it was offering two slots.
+    /// A band stands *off* a frame, which is what makes it read as a place a card is going. A glow sits
+    /// *on* the card, hugging its own edge with no gap to cross, and that is the whole difference: this
+    /// card is not moving, it is the reason. Softness does the work the reduced weight used to do —
+    /// there is no line to compete with the outline, only a card that has been lit.
     ///
     /// They rise and fall on the same fade as the ghost, so the attribution arrives with the offer
     /// rather than with the snap. That is the whole difference between this and the bands it replaced:
@@ -110,10 +111,39 @@ final class CanvasOverlayView: NSView {
             path.stroke()
         }
 
+        // A halo hugging the card's own frame, spilling outward only: the fill that casts it is
+        // clipped away, so what is left is the shadow's spill and the card's face is untouched. Drawn
+        // from the card's own corner radius, since the glow starts where the card ends.
+        func glow(on card: CanvasRect) {
+            guard let context = NSGraphicsContext.current else { return }
+            context.saveGraphicsState()
+            defer { context.restoreGraphicsState() }
+
+            let rect = board.viewRect(card)
+            let corner = CanvasNodeView.cornerRadius(for: card)
+            let shape = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
+
+            let spread = Self.sourceGlow / scale
+            let outside = NSBezierPath(rect: rect.insetBy(dx: -spread * 3, dy: -spread * 3))
+            outside.append(shape)
+            outside.windingRule = .evenOdd
+            outside.setClip()
+
+            let halo = NSShadow()
+            halo.shadowBlurRadius = spread
+            halo.shadowOffset = .zero
+            halo.shadowColor = CanvasPalette.guide(Self.sourceAlpha * presence)
+            halo.set()
+            // Opaque, because the alpha that matters is the shadow colour's — this fill is only the
+            // shape the blur is taken from, and it never survives the clip.
+            CanvasPalette.guide(1).setFill()
+            shape.fill()
+        }
+
         // Sources first, so that a ghost landing on top of one of them — which is what a gap being
         // closed looks like — is the mark that survives the overlap.
         for card in drawnGhost.sources {
-            band(around: card, width: Self.sourceWidth, alpha: Self.sourceAlpha)
+            glow(on: card)
         }
         for slot in drawnGhost.frames {
             band(around: slot, width: Self.ghostWidth, alpha: 0.30)
@@ -128,12 +158,17 @@ final class CanvasOverlayView: NSView {
     private static let ghostStandoff: Double = 5
     private static let ghostWidth: Double = 5
 
-    /// The band on a card the offer is being made against: half the ghost's width, a little over half
-    /// its alpha. Quiet, because it answers a question you only sometimes ask and it is up during every
-    /// drag that catches on anything — but a flat quiet now, not a quiet that was being multiplied down
-    /// to nothing for most of every approach.
-    private static let sourceWidth: Double = 2.5
-    private static let sourceAlpha: Double = 0.17
+    /// The glow on a card the offer is being made against: **8 view points** of spread, over the zoom
+    /// like everything else here.
+    ///
+    /// Its alpha is not comparable to a stroke's and is not derived from one. A blur spreads the same
+    /// ink across the whole 8 points, so the brightest part of the halo — right against the card's
+    /// edge — is already a fraction of the number below, and it falls off to nothing from there. The
+    /// figure that makes a 2.5pt line quietly present makes a glow that is not there at all. Quiet is
+    /// still the target: this answers a question you only sometimes ask, and it is up during every drag
+    /// that catches on anything.
+    private static let sourceGlow: Double = 8
+    private static let sourceAlpha: Double = 0.38
 
     /// The two tiles a drop would exchange, while a tiled view is being rearranged.
     ///

@@ -102,18 +102,18 @@ struct CanvasSnapResult: Equatable {
 /// everything, saying where the ground is — so with the ghost silent, "nothing appeared" reliably means
 /// "nothing matched", and a 5pt click with no ghost reads as tidying rather than as refusal.
 enum CanvasSnapping {
-    /// How near counts as a snap: **half a grid unit**.
+    /// How near counts as a snap: **one grid unit**.
     ///
-    /// Tied to the lattice rather than picked, and the tie buys a property worth having — neither
-    /// system can move a card more than half a cell. A guide fires within half a unit, and the lattice,
-    /// being a lattice, is never further than half a unit away either. So there is no arrangement in
-    /// which a card declines a guide as too far and is then carried further than that guide would have
-    /// taken it, which is the one way the two could visibly have disagreed.
+    /// Tied to the lattice rather than picked, and the tie settles which of the two has the last word.
+    /// The lattice never carries a card further than half a unit; a guide reaches a full one. So a
+    /// guide always fires first where it applies, and a card that declines a guide as too far — more
+    /// than a unit off — can never then be carried further than that guide would have taken it. The
+    /// two cannot visibly disagree, and where they both have something to say, the guide wins.
     ///
     /// In **view points**, divided by the zoom at the call site, so it is the same physical distance to
     /// the pointer at 30% as at 200% — while `grid` is in canvas units. The two are the same number
     /// rather than the same measurement, and the number is what was asked for.
-    static let reach: Double = grid / 2
+    static let reach: Double = grid
 
     /// How near, in **view points**, counts as worth *offering* — the radius the ghost appears within.
     ///

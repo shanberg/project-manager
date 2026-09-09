@@ -49,16 +49,22 @@ they are not a row until the gaps agree, and until now the board could not tell 
 The grid stays exactly as it was — quantizing placement, drawn while you drag, and offering nothing.
 That division is the point: the lattice tidies, and the guides relate cards to each other.
 
-And the offer now says what it is an offer *against*: the cards that produced it are marked, in the
-same band at half the ghost's weight, appearing and fading with it. Not the old bands returning — those
-were one per kind of claim, around every card in an agreement, at the instant the snap fired. These are
-the one or two cards that actually won, up while you are still deciding. The geometry says what kind of
-agreement it is; it does not say which of six cards sharing an edge you found, and that is the part
-worth knowing when the offer is the one you didn't mean.
+And the offer now says what it is an offer *against*: the cards that produced it get an 8pt glow,
+appearing and fading with the ghost. Not the old bands returning — those were one per kind of claim,
+around every card in an agreement, at the instant the snap fired. These are the one or two cards that
+actually won, up while you are still deciding. The geometry says what kind of agreement it is; it does
+not say which of six cards sharing an edge you found, and that is the part worth knowing when the offer
+is the one you didn't mean.
 
-The snap now fires at half a grid unit — 5 view points — which ties the two systems to one tolerance:
-neither a guide nor the lattice can move a card further than half a cell, so there is no arrangement in
-which they visibly disagree.
+The glow is deliberately not the ghost's shape. It started as the same offset band at half the weight,
+which read as the board offering two slots — a band stands *off* a frame, and that gap is what makes it
+mean "a card is going here". A glow sits on the card's own edge with no gap to cross, so it says the
+opposite: this one is not moving, it is the reason.
+
+The snap now fires at a full grid unit — 10 view points — which settles which of the two systems has
+the last word. The lattice never carries a card further than half a unit, so a guide always gets there
+first where it applies, and a card that declines a guide as too far can never then be carried further
+than that guide would have taken it.
 
 And the mark is at one opacity the whole time it is up. It used to be drawn at a strength that tracked
 how near the match was, which over most of the approach put it at a fraction of an already quiet alpha

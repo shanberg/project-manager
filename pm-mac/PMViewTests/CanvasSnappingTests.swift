@@ -19,15 +19,16 @@ final class CanvasSnappingTests: XCTestCase {
     }
 
     /// The shipping numbers, written out rather than read off `CanvasSnapping`, so that every case
-    /// below states the distance it is actually about. `testTheSnapRadiusIsHalfAGridUnit` is what keeps
+    /// below states the distance it is actually about. `testTheSnapRadiusIsOneGridUnit` is what keeps
     /// the two from drifting apart.
-    private let reach = 5.0
+    private let reach = 10.0
     private let show = 48.0
 
-    /// The snap radius is half a grid unit, and that is a relationship rather than a coincidence:
-    /// neither the guides nor the lattice can then move a card further than half a cell.
-    func testTheSnapRadiusIsHalfAGridUnit() {
-        XCTAssertEqual(CanvasSnapping.reach, CanvasSnapping.grid / 2)
+    /// The snap radius is one grid unit, and that is a relationship rather than a coincidence: the
+    /// lattice never carries a card further than half a unit, so a guide — reaching a full one —
+    /// always gets there first, and declining a guide can never cost you more than taking it would.
+    func testTheSnapRadiusIsOneGridUnit() {
+        XCTAssertEqual(CanvasSnapping.reach, CanvasSnapping.grid)
     }
 
     // MARK: Moving
@@ -313,12 +314,12 @@ final class CanvasSnappingTests: XCTestCase {
     /// sense in which the further one is a separate, later offer.
     ///
     /// Two cards, each only reachable on one axis — the second is 5000 away in x, the first 5000 away
-    /// in y — so the offer is 10pt out horizontally and 20pt out vertically.
+    /// in y — so the offer is 12pt out horizontally and 20pt out vertically.
     func testTwoPendingOffersAreDrawnAsOneFrame() {
-        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 90, dy: 70),
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 88, dy: 70),
                                          against: [rect(100, 5000), rect(5000, 100)],
                                          reach: reach, showReach: show, snapsToGrid: false)
-        XCTAssertEqual(result.frame, rect(90, 70), "neither is inside the snap, so nothing moved")
+        XCTAssertEqual(result.frame, rect(88, 70), "neither is inside the snap, so nothing moved")
         XCTAssertEqual(result.ghost?.frame, rect(100, 50),
                        "both offers drawn together — that is the frame the card would have")
         XCTAssertEqual(result.ghost?.sources, [rect(100, 5000), rect(5000, 100)],
@@ -366,15 +367,15 @@ final class CanvasSnappingTests: XCTestCase {
     /// Dragging a *left* grip to match a width grows the card leftward — the right edge is the one
     /// staying put, so the candidate position is `right - otherWidth`.
     func testALeftGripMatchesAWidthByMovingLeftwards() {
-        // 335 wide with its right edge at 435, so matching a 340-wide card means the left edge moving
-        // 5pt out to 95 — the right edge is the one staying put. Exactly the snap radius, and it
+        // 330 wide with its right edge at 430, so matching a 340-wide card means the left edge moving
+        // 10pt out to 90 — the right edge is the one staying put. Exactly the snap radius, and it
         // snaps: the radius is inclusive, which is the boundary this case now also pins down.
-        let result = CanvasSnapping.resize(rect(100, 0, 335, 100), handle: .left,
+        let result = CanvasSnapping.resize(rect(100, 0, 330, 100), handle: .left,
                                            against: [rect(900, 900, 340, 80)],
                                            reach: reach, snapsToGrid: false)
         XCTAssertEqual(result.frame.width, 340)
-        XCTAssertEqual(result.frame.minX, 95)
-        XCTAssertEqual(result.frame.maxX, 435, "the right edge didn't move")
+        XCTAssertEqual(result.frame.minX, 90)
+        XCTAssertEqual(result.frame.maxX, 430, "the right edge didn't move")
     }
 
     /// A corner grip snaps both dimensions, and can take one from an alignment and the other from a
