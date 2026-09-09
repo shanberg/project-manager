@@ -9,7 +9,7 @@ import SwiftUI
 // that drives it.
 //
 // Keeping the resolver a free function over plain values — no store, no view, no `@State` — is what
-// makes the geometry checkable on its own, which the ad-hoc version inside `ProjectView` was not.
+// makes the geometry checkable on its own, which the ad-hoc version inside the task column was not.
 
 /// A visible task row's vertical extent and depth in the task-list coordinate space, published via
 /// preference so the single list-level drop delegate can resolve the pointer into a gap + depth
@@ -62,7 +62,7 @@ struct SessionFramesKey: PreferenceKey {
 /// "empty" means "no rows left once the dragged subtree is lifted out", which a heading can't know
 /// about itself. Both headings wear it: the notes view's `SessionHeader` and the compact list's
 /// caption. What each list chooses to draw is what's reachable, so a session hidden because a filter
-/// emptied it isn't a target in either — see `ProjectView.sessionOrder`.
+/// emptied it isn't a target in either.
 struct SessionFrameReporter: View {
     let index: Int
     var body: some View {

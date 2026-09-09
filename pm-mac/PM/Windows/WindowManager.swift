@@ -49,6 +49,12 @@ final class WindowManager {
             new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
         }
         controller.show()
+        // **A window with no project has one thing to offer, so it offers it.** This used to open onto
+        // a sentence saying "No focused project" and telling you which key would take you somewhere;
+        // the list of projects is right there in the same window, and revealing it with the keyboard in
+        // it is that key, already pressed. A window opened on a canvas file is not projectless in this
+        // sense — it has a document — so it is left alone.
+        if projectKey == nil, canvas == nil { controller.revealProjectList() }
         return controller
     }
 
@@ -95,7 +101,7 @@ final class WindowManager {
 
     /// Open a window on the project a `[[…]]` names, given the folder name written inside it.
     ///
-    /// The app-wide half of `ProjectViewState.openProject(named:)`. A project window retargets itself
+    /// The app-wide half of `ProjectWindowState.openProject(named:)`. A project window retargets itself
     /// — the token is in a note you're reading, and the window it's in is where you want to end up —
     /// but the surfaces with no window of their own (the immersive session note, the quick bar's note
     /// mode) have nothing to retarget, so for them following a token means putting a window in front.

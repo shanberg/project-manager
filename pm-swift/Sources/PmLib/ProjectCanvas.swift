@@ -48,30 +48,90 @@ public func resolveProjectCanvasPath(projectPath: String) throws -> String? {
     return nil
 }
 
-/// Make the project's canvas, and return where it went.
+/// Make the project's canvas, and return where it went. See `openingDocument` for what is in it.
 ///
-/// It isn't empty, for the same reason the notes file isn't: a new project's notes arrive as a
-/// template with the sections already in them. The board's equivalent is one card showing the notes —
-/// the one document that certainly belongs to this project — so the canvas opens as a view *of* the
-/// project rather than as a blank page. It's an ordinary card and deleting it is a keystroke.
-///
-/// - Parameter notesPath: the project's notes file, if it has one. A project whose notes haven't been
-///   created yet gets a genuinely empty canvas rather than a card pointing at nothing.
+/// - Parameter notesPath: the project's notes file, if it has one.
 public func createProjectCanvas(projectPath: String, notesPath: String? = nil) throws -> String {
     let path = getProjectCanvasPath(projectPath: projectPath)
     if FileManager.default.fileExists(atPath: path) {
         throw PmError.canvasAlreadyExists(path)
     }
     let url = URL(fileURLWithPath: path)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true)
+    try openingDocument(notesPath: notesPath, at: url).write(to: url)
+    return path
+}
+
+/// Move a canvas that will not open aside, and put a readable one where it was.
+///
+/// **A project has a canvas.** That is a declaration, not a hope, and this is what keeps it true when
+/// the file on disk stops being one — a truncated write, a bad merge, something that edited it that
+/// shouldn't have. The alternative is a project window that can show you nothing, in an app whose job
+/// is showing you your tasks; and the tasks aren't even in here, they're in the notes, so a stray comma
+/// in a sidecar file would cost you the thing the sidecar doesn't hold.
+///
+/// **Nothing is destroyed.** The unreadable file keeps its own name with the date appended, in the
+/// folder it was already in, so whatever was in it is still recoverable by hand — and the caller is
+/// expected to say where it went rather than replace it silently. The suffix goes *after* `.canvas`
+/// so the kept file stops being one: `resolveProjectCanvasPath` adopts a lone canvas in a folder, and
+/// two of them there would make it decline to answer at all.
+///
+/// A write that fails puts the original back. A project with an unreadable canvas is a bad place to
+/// be; a project with no canvas and no record of having had one is worse.
+///
+/// - Returns: where the unreadable file was kept.
+public func replaceUnreadableCanvas(at path: String, notesPath: String? = nil) throws -> String {
+    let kept = keptAsidePath(for: path)
+    try FileManager.default.moveItem(atPath: path, toPath: kept)
+    let url = URL(fileURLWithPath: path)
+    do {
+        try openingDocument(notesPath: notesPath, at: url).write(to: url)
+    } catch {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.moveItem(atPath: kept, toPath: path)
+        throw error
+    }
+    return kept
+}
+
+/// What a project's canvas opens as when it is made rather than found: one card showing the notes.
+///
+/// It isn't empty, for the same reason the notes file isn't — a new project's notes arrive as a
+/// template with the sections already in them. The board's equivalent is the one document that
+/// certainly belongs to this project, so the canvas opens as a view *of* the project rather than as a
+/// blank page. It's an ordinary card and deleting it is a keystroke.
+///
+/// A project whose notes haven't been created yet, or that sits outside a vault, gets a genuinely
+/// empty canvas rather than a card pointing at nothing.
+private func openingDocument(notesPath: String?, at url: URL) -> CanvasDocument {
     var document = CanvasDocument()
     if let notesPath, let stored = vaultRelativePath(of: notesPath, from: url) {
         document.nodes = [CanvasNode(content: .file(path: stored, subpath: nil),
                                      frame: CanvasRect(x: 0, y: 0, width: 400, height: 400))]
     }
-    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                            withIntermediateDirectories: true)
-    try document.write(to: url)
-    return path
+    return document
+}
+
+/// Where an unreadable canvas is kept: its own name, the date, and a counter if the day already has
+/// one. Dated rather than numbered alone, because the question anyone asks of this file is "which
+/// one is my board from before Tuesday".
+private func keptAsidePath(for path: String) -> String {
+    let stamp = ISO8601DateFormatter.keptAsideDay.string(from: Date())
+    let base = "\(path).unreadable-\(stamp)"
+    guard FileManager.default.fileExists(atPath: base) else { return base }
+    for n in 2...99 where !FileManager.default.fileExists(atPath: "\(base)-\(n)") {
+        return "\(base)-\(n)"
+    }
+    return "\(base)-\(UUID().uuidString.prefix(8))"
+}
+
+private extension ISO8601DateFormatter {
+    static let keptAsideDay: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return formatter
+    }()
 }
 
 /// A file card's path is written the way Obsidian writes it: from the vault root, no leading slash.

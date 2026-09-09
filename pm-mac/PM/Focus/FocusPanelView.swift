@@ -510,7 +510,7 @@ struct FocusPanelView: View {
                 .disabled(store.nextTodo == nil || isEditing)
             // Both stand down while an editor is open, so ⌘Z in a field undoes the typing rather than
             // the document. A SwiftUI shortcut is offered the keystroke before the main menu is (see
-            // `ProjectView.keyboardShortcuts`), so an enabled button here would take it from the field.
+            // `TextFocusWindow`), so an enabled button here would take it from the field.
             Button("Undo", action: store.undo)
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(!store.canUndo || isEditing)

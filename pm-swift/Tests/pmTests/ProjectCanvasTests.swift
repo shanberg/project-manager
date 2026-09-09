@@ -146,4 +146,52 @@ final class ProjectCanvasTests: XCTestCase {
             }
         }
     }
+
+    // MARK: Replacing an unreadable one
+
+    /// The declaration in one test: a project's canvas may be unreadable for a moment, and then it is
+    /// readable again, and what was in it is still on disk under a name that says what happened.
+    func testReplacingAnUnreadableCanvasKeepsTheOldFile() throws {
+        let path = project("W-001 Site")
+        try put("Projects/W-001 Site/docs/Notes - Site.md", "site")
+        try put("Projects/W-001 Site/docs/Site.canvas", "{ this is not json")
+
+        let canvas = try XCTUnwrap(try resolveProjectCanvasPath(projectPath: path))
+        let kept = try replaceUnreadableCanvas(at: canvas,
+                                               notesPath: try resolveNotesPath(projectPath: path))
+
+        let document = try CanvasDocument.read(contentsOf: URL(fileURLWithPath: canvas))
+        XCTAssertEqual(document.nodes.first?.content,
+                       .file(path: "Projects/W-001 Site/docs/Notes - Site.md", subpath: nil))
+        XCTAssertEqual(try String(contentsOfFile: kept, encoding: .utf8), "{ this is not json")
+        XCTAssertTrue(kept.hasPrefix(canvas + ".unreadable-"))
+    }
+
+    /// The kept file must stop being a canvas. `resolveProjectCanvasPath` adopts a lone board in a
+    /// folder and declines when there are two, so a name ending in `.canvas` would leave the project
+    /// unable to say which of the two is its board — including the fresh one just written for it.
+    func testTheKeptFileIsNotItselfACanvas() throws {
+        let path = project("C-002 Strahd")
+        try put("Projects/C-002 Strahd/The Curse of Strahd.canvas", "nonsense")
+
+        let canvas = try XCTUnwrap(try resolveProjectCanvasPath(projectPath: path))
+        let kept = try replaceUnreadableCanvas(at: canvas)
+
+        XCTAssertFalse(kept.hasSuffix(".canvas"))
+        // And the board is still the adopted one, in the place it was already in.
+        XCTAssertEqual(try resolveProjectCanvasPath(projectPath: path), canvas)
+    }
+
+    /// Twice in one day is two kept files, not one overwriting the other.
+    func testASecondFailureTheSameDayKeepsBothFiles() throws {
+        let path = project("W-001 Site")
+        try put("Projects/W-001 Site/docs/Site.canvas", "first")
+        let one = try replaceUnreadableCanvas(at: getProjectCanvasPath(projectPath: path))
+        try put("Projects/W-001 Site/docs/Site.canvas", "second")
+        let two = try replaceUnreadableCanvas(at: getProjectCanvasPath(projectPath: path))
+
+        XCTAssertNotEqual(one, two)
+        XCTAssertEqual(try String(contentsOfFile: one, encoding: .utf8), "first")
+        XCTAssertEqual(try String(contentsOfFile: two, encoding: .utf8), "second")
+    }
 }

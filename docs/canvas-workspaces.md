@@ -30,8 +30,10 @@ project window's notes *are* a board tiled to the project's own card. **§7e is 
 has a note and a canvas — enforced now rather than asserted — and with two faces down to one board at
 two scales, the renderer switch is gone; the way out of the notes is zooming out of them, and the tab
 renames itself on arrival. **The card's keyboard is built too**, by the rule find already used rather
-than the flag §7d expected. **This page is built.** What is left is the task column's other two jobs,
-recorded at the end of §7d, which are not this page's. What is left of it is the one question under Open, which is not a task.
+than the flag §7d expected. **The task column is gone**: a canvas that
+will not parse is now replaced rather than fallen back from (§7f), which was the last thing keeping it
+alive, and the other two jobs it was doing have answers of their own. **This page is built.** What is
+left of it is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -46,7 +48,7 @@ the project.
 **It cannot:**
 
 - **Start a session.** Nothing on the card offers it. ⇧⌘N reaches `state.requestNewSession()`, which
-  only [ProjectView](../pm-mac/PM/Project/ProjectView.swift:635) answers — so on a canvas tab it lands
+  only the task column answers — so on a canvas tab it lands
   nowhere, and a standalone board window has no `ProjectWindowController` to send it to at all.
 - **Write or edit prose.** The card draws prose through `RenderedNote`, which is a renderer. The
   window's way in is `openSessionNote(index)` → `SessionNoteTakeover`. The card has no equivalent, so
@@ -96,7 +98,7 @@ same landing, which is the caret in the note, because a session you just asked f
 to write in.
 
 **Writing prose is a takeover, not an inline field.** The window replaces its whole column with
-[`SessionNoteTakeover`](../pm-mac/PM/Project/ProjectView.swift:2839) — a header, a `MarkdownTextEditor`,
+[`SessionNoteTakeover`](../pm-mac/PM/Project/SessionNoteTakeover.swift) — a header, a `MarkdownTextEditor`,
 no Save or Cancel, auto-saving on every way out. A card should do exactly that to itself: while you are
 writing, the card *is* the editor, and Back returns it to the note. Three reasons, and the third is the
 one that decides it:
@@ -127,7 +129,7 @@ editor.
 **The details block edits as live rows.** Summary, problem, goals and approach are the one part of the
 notes that is not already live: `DetailsEditor` is an explicit form, seeded into `@State`, and the only
 way anything reaches the file is the Save button — with a Cancel beside it
-([ProjectView.swift:3358](../pm-mac/PM/Project/ProjectView.swift:3358)). A modal form inside one pane of
+([`DetailsEditor`](../pm-mac/PM/Project/ProjectDetails.swift)). A modal form inside one pane of
 a workspace you are working across is worse than it is in a window, so the card forces the question
 [item 15](canvas-backlog.md) was holding: the block becomes live rows like the task list, and **Cancel
 is retired**. That is the honest half of the trade — a form that both writes as you type and offers to
@@ -560,20 +562,19 @@ Three deliberate exceptions, each written down where it is made:
 A text field being first responder while you type is not checked anywhere. It does not have to be —
 that is how the responder chain already works, and it is why these can be unconditional.
 
-### What the column is still for
+### What the column was still for — **answered in §7f**
 
-`ProjectView` is not the project's notes any more, but it has not turned out to be only a fallback
-either. It is doing three jobs, and the card supersedes one of them:
+`ProjectView` was not the project's notes any more, but it did not turn out to be only a fallback
+either. It was doing three jobs, and the card superseded one of them:
 
 1. **The task column** — superseded.
 2. **The no-project window.** `pm`'s cold start opens a window on `PMFiles.focusedProjectKey()`, which
-   is nil until something is focused, and "No focused project" plus its hint is that screen.
-3. **Where a store's load error is read.** `store.errorMessage` has no other surface.
+   is nil until something is focused, and "No focused project" plus its hint was that screen.
+3. **Where a store's load error is read.** `store.errorMessage` had no other surface.
 
-And its fallback is not decorative: a project's tasks live in its **markdown**, not in its canvas, so a
-`.canvas` that will not parse is a UI coupling away from "I cannot reach my tasks". Retiring the column
-means answering 2 and 3 somewhere else and giving the card a host that supplies what the pane supplies
-it — a header, find, and the key routing above. That is a port, not a deletion.
+And the fallback was not decorative: a project's tasks live in its **markdown**, not in its canvas, so
+a `.canvas` that will not parse was one UI coupling away from "I cannot reach my tasks". Retiring the
+column meant answering all three, which §7f does.
 
 ## 7e. Every project has a note and a canvas — **built**
 
@@ -629,15 +630,99 @@ With the invariant real, the "what if not" cases stop being cases:
   grounds that *switching a view must not write to disk*. Under §7d opening the window already does,
   so the page was offering a choice that had been made before it appeared.
 - **One fallback, not two.** Every tab makes a board and falls back the same way, so `makeContent` is
-  two lines and `makeBoardless` holds the whole argument: wait while it is being made, and take the
-  column when it cannot be. `canvasUnavailable` went from incidental to load-bearing — with no empty
-  state left to land on, it is the only thing between an unwritable vault and a window that waits for
-  ever.
-- **The column keeps its own switch off.** `ProjectView` is what you get when the board *failed*, so a
+  short and `makeBoardless` holds the whole argument: wait while it is being made, and answer when it
+  cannot be. `canvasUnavailable` went from incidental to load-bearing — with no empty state left to
+  land on, it is the only thing between an unwritable vault and a window that waits for ever.
+- **The column keeps its own switch off.** The column is what you get when the board *failed*, so a
   control offering the board would be offering the thing that just failed.
 
 The column itself is still there, and is the last piece: once the card carries the list's keyboard
 there is nothing in it the board does not do.
+
+## 7f. A canvas that will not open is a file to fix, not a state to render — **built**
+
+The column outlived the switch by one release because deleting it looked like a deletion and was not.
+Its three jobs (§7d) were answered separately, and only after the third one stopped existing.
+
+### The asymmetry was the tell
+
+Four situations reached the same place — the window cannot show you this project — and they were
+answered by wildly different things:
+
+| Situation | What it got |
+| --- | --- |
+| The board is still being located | A blank pane, deliberately; it is milliseconds |
+| The canvas will not parse | **The entire old application** — a working task list, header, quick add |
+| `store.errorMessage` | One grey sentence, inside a column's chrome, headed "No focused project" |
+| No project focused at all | The same sentence, plus a hint naming a key |
+
+Nothing about that was a decision anyone made. It is where the code sat when the column *was* the
+window: a broken file got a complete alternate app, and a project that would not load got a sentence
+wearing that app's costume.
+
+### The canvas case is the only one that mattered
+
+The other three are messages. This one was a capability: with the column deleted, a `.canvas` with a
+stray comma in it would cost you access to tasks that are not in the canvas at all.
+
+Three ways out were on the table — show the error and accept the loss; give the card a second host with
+its own header, find and key routing; or **refuse to have a broken canvas**. The third is the one the
+declaration in §7e already implies. Every project has a canvas; a file that will not parse is not one.
+
+So `PmLib.replaceUnreadableCanvas` moves it aside — same folder, same name, `.unreadable-<date>`
+appended — and writes a fresh one in its place, and the pane that opens says so and offers **Show in
+Finder** for the old file. Nothing is destroyed, and the fourth row of that table stops existing.
+
+Two details are load-bearing:
+
+- **The suffix goes after `.canvas`, not before it.** `resolveProjectCanvasPath` adopts a lone board in
+  a folder and declines when there are two, so a kept file still named `*.canvas` would leave the
+  project unable to say which of the two was its board — including the fresh one just written for it.
+- **Once per project per window.** A second failure straight after a replacement is not a broken
+  canvas, it is a vault that cannot be written to, and rewriting the file again would not help. That
+  falls through to the pane below.
+
+And it is only ever the *project's* board. A window opened on a `.canvas` file is looking at somebody's
+document; rewriting one of those because it failed to parse would be a great deal to do to a file you
+were only asked to look at, so `WindowManager.open(canvas:)` still reports those instead.
+
+### The other three collapse into one small pane
+
+`ProjectTrouble` is a pure function from *(is there a project, did it load, which key is bound)* to two
+lines of text, and `ProjectTroublePaneController` draws them centred with no chrome. No header and no
+tab bar: everything a header offers acts on a board, and there is no board — a window that draws its
+full furniture around a failure is claiming to be working.
+
+### The cold start is not a message at all
+
+The last of the three was the best one to reconsider rather than port. ⌘N with nothing focused used to
+give you a window whose content was a sentence telling you to press another key to make the window
+useful — while the list of projects sat in the same window, one toggle away.
+
+So a window with no project **reveals the project list with the keyboard in it**. That is the key,
+already pressed. `browseAllProjects` had been doing exactly this all along; it is now what a
+projectless window *is*. A window opened on a canvas file is not projectless in this sense — it has a
+document — so it is left alone.
+
+### What came out
+
+`ProjectView.swift` was 3,773 lines. The `ProjectView` struct and everything private to it is gone;
+what other surfaces were already borrowing moved out to files of its own name:
+
+| Went to | What |
+| --- | --- |
+| `ProjectDetails.swift` | `ProjectDetailsView` and its editor, used by the card |
+| `SessionNoteTakeover.swift` | The takeover and the three layout helpers it needs |
+| `MouseMonitors.swift` | The four AppKit monitors, all four used by the card |
+| `RowSelectionBand.swift`, `ReadableWidth.swift` | The two shared bits of row metrics |
+| `DisplayModes.swift` | `TasksMode` and `AppColorMode` — neither was ever about the column |
+
+`ProjectViewState` became `ProjectWindowState`, having shrunk to what the sidebar shares with the
+window, and lost two members with it: `focusedPane` and `isEditingText` were both write-only once the
+column left. They existed because a SwiftUI `.keyboardShortcut` is offered a keystroke before the main
+menu is, so the column's own ⌘A / ⌘C had to be told by hand to stand aside for a text field. The board
+answers those from the responder chain, where a focused text view is already ahead of it — which is the
+rule the flag was imitating. `TextFocusWindow` keeps its token field editor and nothing else.
 
 ## 8. What this does to the backlog
 

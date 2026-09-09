@@ -180,7 +180,7 @@ final class RowSelectionTests: XCTestCase {
     }
 
     /// Collapsing the brief takes the session headers out of the list entirely — see
-    /// `ProjectView.setDetails`.
+    /// the details form’s commit.
     func testRemovingByPredicateTakesTheAnchorWithIt() {
         var selection = RowSelection()
         selection.click("sess:0", modifiers: [], in: ["sess:0", "a"])

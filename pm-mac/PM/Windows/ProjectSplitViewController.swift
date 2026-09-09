@@ -13,7 +13,7 @@ import SwiftUI
 @MainActor
 final class ProjectSplitViewController: NSSplitViewController {
     private(set) var store: PMStore
-    let state: ProjectViewState
+    let state: ProjectWindowState
     /// Whether this window opens with its sidebar showing. The first window of a session takes the
     /// persisted preference; later ones start collapsed — a second window is opened to look at another
     /// project *beside* the first, and a second copy of the project list isn't what it's for.
@@ -35,7 +35,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// state, whoever changed it. See where it's installed in `viewDidLoad`.
     private var collapseObservation: NSKeyValueObservation?
 
-    init(store: PMStore, state: ProjectViewState, startsWithSidebar: Bool) {
+    init(store: PMStore, state: ProjectWindowState, startsWithSidebar: Bool) {
         self.store = store
         self.state = state
         self.startsWithSidebar = startsWithSidebar
@@ -266,12 +266,6 @@ final class ProjectSplitViewController: NSSplitViewController {
         window.setFrame(window.constrainFrameRect(frame, to: window.screen), display: true)
     }
 
-    /// Rebuild the SwiftUI content — used on first load and whenever the window is retargeted at a
-    /// different project.
-    private func makeContentView() -> ProjectView {
-        ProjectView(store: store, state: state)
-    }
-
     // MARK: What the column shows
 
     /// This window's tabs. One on the notes is what the window has always been; the rest is new.
@@ -306,6 +300,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         if canvasPending, !pending { contentPane.dropAll() }
         canvasPending = pending
         canvasUnavailable = false
+        triedReplacingCanvas = false
         tabs = next
         applySelectedTab()
     }
@@ -401,8 +396,43 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// one path here and one fallback, where there used to be two of each.
     private func makeContent(for tab: ProjectTab) -> NSViewController {
         let focus: CanvasFocus = if case .board(let pinned) = tab.view { pinned } else { .note }
-        return makeBoard(focus) ?? makeBoardless()
+        if let pane = makeBoard(focus) { return pane }
+        if replaceUnreadableCanvasOnce(), let pane = makeBoard(focus) { return pane }
+        return makeBoardless()
     }
+
+    /// The project's canvas is on disk and will not open. Replace it, once.
+    ///
+    /// **Under the invariant this is not a state to render, it is a file to fix.** A project has a
+    /// canvas; a file that will not parse is not one, and the fallback it used to earn — the whole task
+    /// column — coupled reaching your tasks to a sidecar file that does not hold them. Nothing is
+    /// destroyed: the unreadable file keeps its name with the date on it, and the pane that opens says
+    /// so and offers to show it. See `PmLib.replaceUnreadableCanvas`.
+    ///
+    /// **Once per project per window.** A second failure straight after a replacement is not a broken
+    /// canvas — it is a vault that cannot be written to, and writing the file again would not help. So
+    /// that falls through to the pane that says so.
+    ///
+    /// Only the project's own board, never a window opened on somebody's canvas file: `replaceCanvas`
+    /// answers nil for those. The declaration is about projects, and a `.canvas` you asked PM to open
+    /// is a document you are looking at, not a file the app is entitled to rewrite.
+    private func replaceUnreadableCanvasOnce() -> Bool {
+        guard !triedReplacingCanvas, canvasSource().url != nil else { return false }
+        triedReplacingCanvas = true
+        guard let kept = replaceCanvas() else { return false }
+        replacementNotice = ("This project's canvas couldn't be read, so PM made a new one. "
+                                 + "Your old board is still in the folder.", kept)
+        return true
+    }
+
+    /// Set once a replacement has been tried for the project this window is on. Cleared with
+    /// `canvasUnavailable`, which is to say whenever the window takes a different project.
+    private var triedReplacingCanvas = false
+
+    /// What the next board pane should say about the file it was given, and the file to show for it.
+    /// Consumed by the first pane made after a replacement — there is only ever one notice, and saying
+    /// it again in every tab would be nagging rather than reporting.
+    private var replacementNotice: (message: String, file: URL?)?
 
     /// What a tab shows when the board could not be put on screen.
     ///
@@ -419,7 +449,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// answer when the file is already there — so that goes straight to the column, as does a creation
     /// that came back empty-handed. See `canvasUnavailable`.
     private func makeBoardless() -> NSViewController {
-        guard canvasSource().url == nil, !canvasUnavailable else { return makeNotesColumn() }
+        guard canvasSource().url == nil, !canvasUnavailable else { return makeTroublePane() }
         if !canvasPending { afterCurrentUpdate { [weak self] in self?.ensureCanvas() } }
         return ProjectWaitingPaneController()
     }
@@ -433,6 +463,8 @@ final class ProjectSplitViewController: NSSplitViewController {
             return nil
         }
         let pane = CanvasPaneController(store: store, tabs: tabModel)
+        pane.openingNotice = replacementNotice
+        replacementNotice = nil
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
         pane.ignoresTrafficLights = !sidebarItem.isCollapsed
         pane.focus = focus
@@ -449,22 +481,20 @@ final class ProjectSplitViewController: NSSplitViewController {
         return pane
     }
 
-    /// The project's task list as its own column — what a notes tab was until §7d, and now only what a
-    /// window falls back to when the project's board cannot be opened at all.
+    /// What is left when the window cannot show this project: a sentence and how to act on it.
     ///
-    /// **A fallback is not a second answer.** The answer to "what are this project's notes" is the
-    /// card. This is what is left when the file is broken, and it is on its way out: once the card
-    /// carries the list's keyboard there is nothing here the board does not do, and `ProjectView` goes
-    /// with it.
-    private func makeNotesColumn() -> NSViewController {
-        let hosting = NSHostingController(rootView: makeContentView())
-        // The content fills whatever frame the split gives it. Left on the default
-        // (`.preferredContentSize`) AppKit would resize the window to the SwiftUI content's ideal
-        // size, which fights the user's own window size on every content change.
-        hosting.sizingOptions = []
-        hosting.view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        hosting.view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return hosting
+    /// This is where the task column used to be. It stopped being an answer when the notes became a
+    /// card on the board — a fallback that renders the whole application is a second implementation of
+    /// it, kept alive by a case that should not exist — and the case itself is gone now: a canvas that
+    /// will not parse is replaced rather than fallen back from. See `ProjectTrouble`.
+    private func makeTroublePane() -> NSViewController {
+        ProjectTroublePaneController(message: troubleMessage)
+    }
+
+    private var troubleMessage: ProjectTrouble.Message {
+        ProjectTrouble.message(hasProject: store.projectKey != nil,
+                               errorMessage: store.errorMessage,
+                               goToProjectKeys: ShortcutHint.keys(.quickGoToProject))
     }
 
     /// Make the project's board if it hasn't got one — supplied by the window, which owns the store.
@@ -474,6 +504,11 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// project is assumed to have a canvas, so opening one is never a two-step ceremony of "make it,
     /// then open it".
     var ensureCanvas: () -> Void = {}
+
+    /// Replace this project's unreadable canvas, and say where the old file was kept — supplied by the
+    /// window, which owns the store. Nil when there is nothing to replace, or when the window is
+    /// showing a canvas it was opened on rather than a project's own.
+    var replaceCanvas: () -> URL? = { nil }
 
     /// Set once making the board has been tried and failed, so a tab stops waiting for one and shows
     /// the column instead. Cleared when the window takes a different project.
@@ -702,6 +737,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// window on the pane that was holding still for it.
     func canvasPathChanged() {
         canvasUnavailable = false
+        triedReplacingCanvas = false
         let wantsBoard = tabs.selected.view.isBoard || tabs.selected.view == .notes
         guard wantsBoard, !(contentPane.current is CanvasPaneController) else { return }
         contentPane.drop(tab: tabs.selectedID)

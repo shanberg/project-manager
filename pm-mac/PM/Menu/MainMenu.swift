@@ -10,11 +10,12 @@ import AppKit
 /// Two routing rules run through the whole thing:
 ///
 ///   * Text-editing items keep their **first-responder selectors** (`undo:`, `copy:`, `selectAll:`), so
-///     while a text field is focused they route to its field editor and edit the text. That only
-///     happens if nothing in the key window claims the keystroke first: AppKit offers a key equivalent
-///     to the key *window* before this menu, and a SwiftUI `.keyboardShortcut` is exactly such a claim.
-///     So the content's own ⌘C / ⌘A stand down while a field has the keyboard rather than merely
-///     sitting behind these — see `ProjectView.keyboardShortcuts` and `ProjectViewState.isEditingText`.
+///     while a text field is focused they route to its field editor and edit the text. Nothing in a
+///     project window claims those keys ahead of the menu any more: the board answers them from the
+///     responder chain (`CanvasBoardView+Commands`), which a focused text view is already ahead of.
+///     A SwiftUI `.keyboardShortcut` would not be — AppKit offers a key equivalent to the key *window*
+///     before this menu — which is why the task column had to be told to stand down by hand, and why
+///     nothing here should grow one.
 ///   * Everything window-shaped targets `nil` too, so it walks the responder chain and lands on the
 ///     `ProjectWindowController` of whichever window is in front — `toggleSidebar:` is answered by the
 ///     split view controller, the rest by the window controller. App-wide items target the delegate.
@@ -207,7 +208,7 @@ enum MainMenu {
 
         add("Find…", .showFindInterface, key: "f")
         // The find bar filters rather than highlighting in place, so "next match" means the next row
-        // of the narrowed list — see `ProjectView.stepFind`. ⌘G / ⇧⌘G either way: what the keys mean
+        // of the narrowed list — see `CanvasProjectNote.stepFind`. ⌘G / ⇧⌘G either way: what the keys mean
         // to the person pressing them is "show me the next one", and that's what they do.
         add("Find Next", .nextMatch, key: "g")
         add("Find Previous", .previousMatch, key: "g", modifiers: [.command, .shift])

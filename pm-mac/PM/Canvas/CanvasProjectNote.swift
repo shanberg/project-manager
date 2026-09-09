@@ -148,7 +148,7 @@ struct CanvasProjectNote: View {
     /// document order.
     ///
     /// Pure, and it has to stay that way: SwiftUI builds a `.contextMenu`'s content while it builds
-    /// the row, so this runs for every visible row on every pass. See `ProjectView.contextTargets`.
+    /// the row, so this runs for every visible row on every pass.
     private func contextTargets(for todo: Todo) -> [Todo] {
         let keys = selection.targets(clicked: PMStore.key(for: todo))
         guard keys.count > 1 else { return [todo] }
@@ -835,7 +835,7 @@ struct CanvasProjectNote: View {
 
     /// ⌘G / ⇧⌘G. This find narrows rather than highlighting, so there is no "next highlight" to jump
     /// to: the shortened list *is* the matches, and stepping means moving the selection down it — the
-    /// same answer `ProjectView.stepFind` gives. Wraps at both ends, as every find in the system does.
+    /// the same answer the page find gives. Wraps at both ends, as every find in the system does.
     private func stepFind(_ direction: Int) {
         let keys = visibleKeys
         guard !keys.isEmpty else { return NSSound.beep() }
@@ -884,7 +884,7 @@ struct CanvasProjectNote: View {
 
 /// What the board asks of the project card you are standing in.
 ///
-/// **Counters, not flags**, on the pattern `ProjectViewState` already uses for the window's File menu:
+/// **Counters, not flags**, on the pattern `ProjectWindowState` already uses for the window's File menu:
 /// a command is an event, and the same command given twice in a row has to fire twice. A flag set to
 /// true and back would be a change SwiftUI might never see.
 ///
@@ -957,7 +957,7 @@ final class CanvasProjectCardDisplay: ObservableObject {
     /// still showing three of its nineteen tasks would be a card that looked broken.
     ///
     /// It narrows rather than highlighting, which is what the window's find bar does to the same list —
-    /// see `ProjectView.visibleTodos`. The board's own find selects matching *cards*, and the page
+    /// see `visibleKeys`. The board's own find selects matching *cards*, and the page
     /// card's goes into the page; this is the third of the same rule, which is that find looks inside
     /// whatever you have stepped into.
     @Published var find = ""

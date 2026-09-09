@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import PmLib
 import SwiftUI
 
 /// One project window: a real Mac window with a hidden titlebar and a full-size content view. The
@@ -52,7 +53,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// previous project's board, or an empty state for a project that has one.
     private var canvasPathWatch: AnyCancellable?
 
-    let state = ProjectViewState()
+    let state = ProjectWindowState()
     private let split: ProjectSplitViewController
 
     /// Called when the window has closed, so `WindowManager` can drop it.
@@ -152,6 +153,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                     self.window?.title)
         }
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
+        split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
@@ -159,18 +161,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             applyWidthLimits()
             ProjectTabMemory.remember(split.tabs, for: projectKey)
         }
-        // Publish "a field has the keyboard" into the shared state, which is what stands the window's
-        // own ⌘A / ⌘C / ⌘Z / ⌘⌫ down while you're typing — see `ProjectViewState.isEditingText`.
-        // Deferred by a turn of the run loop because AppKit changes the first responder from inside
-        // SwiftUI's own focus update, and publishing into an `ObservableObject` from there is a write
-        // during a view update. A turn is far quicker than the next keystroke.
-        window.onTextFocusChange = { [weak self] editing in
-            afterCurrentUpdate {
-                guard let self, self.state.isEditingText != editing else { return }
-                self.state.isEditingText = editing
-            }
-        }
-
         // One remembered frame for project windows, not one per project. A window is a window: it has
         // the size and place you last left it at, and pointing it at a different project doesn't move
         // or resize it. It used to autosave under `PMProject:<key>`, which meant every project carried
@@ -206,7 +196,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         applyTitle()
 
         // Measure before the first frame is drawn, not after the window is ordered in. The defaults in
-        // `ProjectViewState` are only starting guesses — 92pt of traffic lights and a compact
+        // `ProjectWindowState` are only starting guesses — 92pt of traffic lights and a compact
         // titlebar's 13pt drop — so measuring in `show()` meant the header was laid out against the
         // guess and then visibly settled onto the real numbers as the window opened. `layoutIfNeeded`
         // forces the theme frame to place its buttons, which is what makes them measurable this early.
@@ -369,6 +359,25 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     private var makingCanvas = false
+
+    /// This project's canvas is there and will not open. Put a readable one in its place, and say where
+    /// the old file went so the pane can offer it.
+    ///
+    /// **Only a project's own board.** A window opened on a `.canvas` file is looking at somebody's
+    /// document, and rewriting one of those because it failed to parse would be a great deal to do to a
+    /// file you were only asked to look at — `WindowManager.open(canvas:)` reports those instead. The
+    /// declaration that every project has a canvas is about projects.
+    private func replaceUnreadableProjectCanvas() -> URL? {
+        guard openedCanvas == nil, let path = store.canvasPath else { return nil }
+        do {
+            let kept = try replaceUnreadableCanvas(at: path, notesPath: store.notesPath)
+            Log.write("canvas replaced: \(path) — old file kept at \(kept)")
+            return URL(fileURLWithPath: kept)
+        } catch {
+            Log.write("canvas replace failed: \(path): \(error)")
+            return nil
+        }
+    }
 
     func openProjectCanvas() {
         store.openableCanvasPath { [weak self] result in
@@ -536,56 +545,38 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     // MARK: Menu commands answered by this window
 
-    /// File ▸ New Task. The content opens its inline add editor; the window can't do it directly, so it
-    /// nudges the shared state and the view responds.
+    /// File ▸ New Task, and the same errand asked of this window from somewhere with no responder
+    /// chain to walk — the quick bar, the menubar, `pm` itself.
+    ///
+    /// These used to nudge a counter the task column watched. The column is gone and the board answers
+    /// these itself when it is the one being asked (`CanvasBoardView+Commands`), so what is left here
+    /// is the *window-shaped* version of the ask: not "the card I am standing in" but "this project",
+    /// which is its own note card. See `CanvasPaneController.aimAtProjectCard`.
     @objc func newTask(_ sender: Any?) {
-        state.requestNewTask()
+        aimAtProjectCard { $0.requestNewTask() }
     }
 
-    /// File ▸ New Session. Same hand-off as New Task: the content opens the current session's note,
-    /// starting a session first when there isn't one to continue.
+    /// File ▸ New Session — the content opens the current session's note, starting a session first
+    /// when there isn't one to continue.
     @objc func newSession(_ sender: Any?) {
-        state.requestNewSession()
+        aimAtProjectCard { $0.requestNewSession() }
     }
 
     /// Open the project's details form — the summary, problem, goals, approach and learnings, which
-    /// were five separate Raycast forms and are one brief here. Same hand-off again.
+    /// were five separate Raycast forms and are one brief here.
     ///
     /// Deferred by a turn, unlike the two above, because the quick bar's `>details` may have opened
-    /// this window a moment ago: a counter bumped before the content's first body pass is a change
-    /// `onChange` never sees, and the request would be dropped. (The New Session hand-off can be
-    /// reached the same way from the menu bar and takes that chance today.)
+    /// this window a moment ago and the board it is aimed at is not on screen yet.
     func editDetails() {
-        afterCurrentUpdate { [weak self] in self?.state.requestEditDetails() }
+        afterCurrentUpdate { [weak self] in self?.aimAtProjectCard { $0.requestEditDetails() } }
     }
 
-    /// Edit ▸ Find. One selector for the whole submenu, dispatched on the item's tag — which is how
-    /// AppKit's own find menu works, and why `MainMenu` sets `NSTextFinder.Action` raw values as tags
-    /// rather than giving each item a selector of its own.
-    ///
-    /// Only reaches this window when nothing closer in the responder chain wants it. `NSTextView`
-    /// implements `performFindPanelAction:`, so while a field editor holds the keyboard ⌘E means "use
-    /// the text I selected" and never gets here — which is the behaviour a Mac user expects and comes
-    /// free from routing it this way.
-    @objc func performFindPanelAction(_ sender: Any?) {
-        let tag = (sender as? NSMenuItem)?.tag ?? NSTextFinder.Action.showFindInterface.rawValue
-        switch NSTextFinder.Action(rawValue: tag) {
-        case .nextMatch: state.requestFindStep(1)
-        case .previousMatch: state.requestFindStep(-1)
-        case .setSearchString: state.requestUseSelectionForFind()
-        default: state.requestFind()
-        }
+    private func aimAtProjectCard(_ act: @escaping (CanvasProjectCardCommands) -> Void) {
+        split.canvasPane?.aimAtProjectCard(act)
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(performFindPanelAction(_:)):
-            guard store.projectName != nil else { return false }
-            // Next/Previous need matches to step between; the other two only need a project.
-            switch NSTextFinder.Action(rawValue: item.tag) {
-            case .nextMatch, .previousMatch: return state.findIsFiltering
-            default: return true
-            }
         case #selector(newTask(_:)), #selector(newSession(_:)):
             return store.projectName != nil
         case #selector(toggleCanvasRenderer(_:)):
@@ -614,21 +605,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 }
 
-/// The project window itself: an `NSWindow` that reports whether a text editor holds the keyboard.
+/// The project window itself: an `NSWindow` that lends its token fields an editor of their own.
 ///
-/// `makeFirstResponder` is the one funnel every focus change goes through — a SwiftUI `TextField`
-/// taking the keyboard makes its *field editor* (an `NSTextView`) the responder, the note editor's own
-/// text view goes the same way, and moving focus back to a list swaps in a plain view. So watching it
-/// answers "is the user typing" for every field in either pane, present or future, without the panes
-/// having to declare themselves.
+/// It used to do a second job — report on every first-responder change whether a text editor held the
+/// keyboard, so the content's SwiftUI key equivalents could stand aside for a field you were typing in.
+/// A SwiftUI `.keyboardShortcut` is offered the keystroke before the main menu is, so the task column
+/// could not rely on Edit ▸ Select All winning the race and had to be told to stand down.
 ///
-/// Why the window needs to answer that at all: see `ProjectView.keyboardShortcuts`. In short, SwiftUI
-/// key equivalents are offered the keystroke before the main menu is, so the content's commands have to
-/// stand aside for the field rather than trusting Edit ▸ Select All to get there first.
+/// Nothing in the window claims a key that way any more. The board answers ⌘A / ⌘C / ⌘V / ⌘⌫ from the
+/// responder chain (`CanvasBoardView+Commands`), where a text view holding the keyboard is already
+/// ahead of it in the chain — which is the rule the flag was imitating. See
+/// docs/canvas-workspaces.md §7e.
 final class TextFocusWindow: NSWindow {
-    /// Called on every first-responder change with whether the new one is an editable text view.
-    var onTextFocusChange: ((Bool) -> Void)?
-
     /// The token-aware field editor, made on first use and then shared — one per window, which is what
     /// a field editor is.
     private lazy var tokenEditor = TokenFieldEditor()
@@ -645,14 +633,5 @@ final class TextFocusWindow: NSWindow {
     override func fieldEditor(_ createFlag: Bool, for client: Any?) -> NSText? {
         guard TokenFieldEditor.wants(client) else { return super.fieldEditor(createFlag, for: client) }
         return tokenEditor
-    }
-
-    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let accepted = super.makeFirstResponder(responder)
-        // Read back `firstResponder` rather than trusting the argument: handing a window an
-        // `NSTextField` installs the shared field editor instead, and that editor is the responder the
-        // keystrokes actually reach.
-        onTextFocusChange?((firstResponder as? NSText)?.isEditable ?? false)
-        return accepted
     }
 }

@@ -57,7 +57,7 @@ enum ProjectWindow {
     /// Both panes run their content under the (hidden, transparent) titlebar so the window has no dead
     /// strip along its top — which means whichever pane is leftmost has to keep its own header clear of
     /// the traffic lights. AppKit publishes no metric for this, so each window measures its own buttons
-    /// once it's on screen and publishes the result (`ProjectViewState.leadingTitlebarInset`); this is
+    /// once it's on screen and publishes the result (`ProjectWindowState.leadingTitlebarInset`); this is
     /// only what the first layout uses, before there's a window to measure. Sized for the unified
     /// titlebar these windows use, where the buttons sit further in than in a compact one.
     static let trafficLightsWidth: CGFloat = 92

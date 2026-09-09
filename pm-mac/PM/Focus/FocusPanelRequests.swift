@@ -16,7 +16,7 @@ struct FocusEditorRequest: Equatable {
 ///
 /// The panel's editors are `@State` inside a SwiftUI view that the controller rebuilds wholesale, so
 /// there's nothing outside to call. An observable request the view watches is the way in — the same
-/// shape as `ProjectViewState`'s counters, and for the same reason.
+/// shape as `ProjectWindowState`'s counters, and for the same reason.
 @MainActor
 final class FocusPanelRequests: ObservableObject {
     static let shared = FocusPanelRequests()

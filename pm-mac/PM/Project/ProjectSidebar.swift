@@ -146,11 +146,10 @@ struct ProjectSidebar: View {
     @ObservedObject var store: PMStore
     /// The state shared with the task column across the split: the project selection (so the window's
     /// ⌘C / ⌘A can act on this pane), which pane has focus, and the task header's measured height.
-    @ObservedObject var state: ProjectViewState
+    @ObservedObject var state: ProjectWindowState
 
     /// Whether the list holds keyboard focus. Local — a `@FocusState` can't span the two hosting
-    /// controllers the split view puts the panes in — and mirrored into `state.focusedPane` on the way
-    /// in, which is what the window's commands route on.
+    /// controllers the split view puts the panes in.
     @FocusState private var listFocused: Bool
 
     @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
@@ -214,9 +213,6 @@ struct ProjectSidebar: View {
         // Only ever written on *gaining* focus: a pane losing it (the window going inactive, a menu
         // opening) shouldn't strand ⌘C with no target.
         .onChange(of: state.focusProjectListRequest) { _ in listFocused = true }
-        .onChange(of: listFocused) { focused in
-            if focused { state.focusedPane = .projects }
-        }
     }
 
     /// The projects, as a real `List`.

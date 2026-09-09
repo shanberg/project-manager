@@ -178,6 +178,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         measureTitlebar()
         paneResized()
         fitWhenThereIsAWindowToFitTo()
+        if let opening = openingNotice {
+            openingNotice = nil
+            say(opening.message, reveal: opening.file)
+        }
     }
 
     /// Frame the board the first time this pane has a window to frame it in.
@@ -345,6 +349,33 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // A turn later, because tiling is what builds the card's view. See `engage(cardWithID:)` for
         // why it is stepped into rather than waiting for a click.
         afterCurrentUpdate { [weak self] in self?.scroll.board.engage(cardWithID: id) }
+    }
+
+    /// Aim a project command at this project's own card, for a command that arrived at the *window*
+    /// rather than at a card you are standing in — the quick bar's `>session` and `>details`, and the
+    /// menubar's New Session, all of which open a window and then ask it for something.
+    ///
+    /// The card you are in still wins, on the rule every project command on a board follows: inside a
+    /// card, a command means the card. Otherwise it is the project's own note card, engaged first —
+    /// the card's editors are gated on engagement, so one told to start a session while stepped out
+    /// would open a takeover and close it again the moment the step-out was noticed.
+    ///
+    /// Nil-safe rather than card-making: a board whose project card has been deleted is a command with
+    /// nothing to act on, which is not a reason to put the card back.
+    ///
+    /// A turn late when it has to engage, because engagement is what builds the card's SwiftUI body,
+    /// and a request counter bumped before that body's first pass is a change `onChange` never sees.
+    func aimAtProjectCard(_ act: @escaping (CanvasProjectCardCommands) -> Void) {
+        if let engaged = scroll.board.engagedProjectCard { return act(engaged.projectCommands) }
+        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url),
+              let id = CanvasProjectNoteCard.id(on: store.document, notes: notes,
+                                                resolver: store.resolver)
+        else { return }
+        scroll.board.engage(cardWithID: id)
+        afterCurrentUpdate { [weak self] in
+            guard let card = self?.scroll.board.engagedProjectCard else { return }
+            act(card.projectCommands)
+        }
     }
 
     // MARK: What the window's tabs need from a board
@@ -1031,6 +1062,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// How long a report stays up. Long enough to read a sentence and reach the button on it, short
     /// enough that the standing warning underneath is not hidden for the rest of the session.
     private static let eventLifetime: TimeInterval = 9
+
+    /// Something to say the moment this pane appears, rather than in response to anything done in it.
+    ///
+    /// Set before the view loads, by whoever made the pane. The one caller is the split view controller
+    /// after it has replaced a canvas that would not open: the pane it then builds is the first thing
+    /// you see of a board you did not know had been rewritten, and it owes you that sentence and the
+    /// button to the old file. See `ProjectSplitViewController.replaceUnreadableCanvasOnce`.
+    var openingNotice: (message: String, file: URL?)?
 
     private func say(_ message: String, reveal file: URL?) {
         event = (message, file)

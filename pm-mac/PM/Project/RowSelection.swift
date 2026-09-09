@@ -123,7 +123,7 @@ struct RowSelection: Equatable {
     /// moves the highlight first.
     ///
     /// Pure, and it has to stay that way — SwiftUI builds a `.contextMenu`'s content while it builds
-    /// the row, so this runs for every visible row on every pass. See `ProjectView.contextTargets`.
+    /// the row, so this runs for every visible row on every pass. See `CanvasProjectNote.contextTargets`.
     func targets(clicked key: String) -> Set<String> {
         keys.contains(key) ? keys : [key]
     }
