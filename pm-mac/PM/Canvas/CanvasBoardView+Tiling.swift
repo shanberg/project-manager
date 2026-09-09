@@ -57,8 +57,9 @@ extension CanvasBoardView {
     /// cases where being told the number matters.
     var tileTargets: Set<String> {
         var ids = selection.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
-        // A frame is a container of cards, so tiling one means tiling what is in it. This is the
-        // "frames are workspaces" reading, and it is the one command where it pays off immediately.
+        // A frame is a container of cards, so tiling one means tiling what is in it — "make a workspace
+        // out of this region", and the one point where frames and workspaces should meet. See `frames`
+        // for why that is the whole of the relationship rather than the two being the same thing.
         for id in selection {
             guard let node = document.node(id: id), node.isGroup else { continue }
             ids.formUnion(canvasCardsInside(node.frame, of: document))
@@ -165,7 +166,7 @@ extension CanvasBoardView {
                                sizes: session.sizes.isEmpty ? nil : session.sizes)
     }
 
-    /// The arrangement this board would carry into another session: the one that is up, or the last one
+    /// The workspace this board would carry into another session: the one that is up, or the last one
     /// there was.
     var tilingMemory: CanvasViewState.Tiling? { tiling.map(memory(of:)) ?? lastTiling }
 
@@ -195,7 +196,7 @@ extension CanvasBoardView {
     /// That was one step too far. A tiled view is where you are *working*, and Escape is the key that
     /// dismisses a menu, cancels a field and steps out of a card — all of them smaller acts that
     /// happen *inside* a workspace. Making the same key also close the workspace means every cancelled
-    /// edit is one keystroke away from tearing down an arrangement you built by hand.
+    /// edit is one keystroke away from tearing down a workspace you built by hand.
     ///
     /// So at the root it does nothing, which is the right amount for a key with nothing left to cancel.
     /// Leaving has its own three doors and always did: ⌘↩, the header's ✕, and stepping to a frame.
@@ -216,7 +217,7 @@ extension CanvasBoardView {
     /// board and says so: ⌘↩ is one command at both ends, the header's ✕ is labelled "leave the
     /// tiled view", and stepping to a frame is a request to go and look at somewhere else.
     ///
-    /// **What is kept is the arrangement you built, not the card you left through.** The order you
+    /// **What is kept is the workspace you built, not the card you left through.** The order you
     /// dragged the tiles into and the widths you set are the deliberate work; a fullscreen card you
     /// drilled into to read is not something to hand back the next time you tile those cards. So the
     /// stack's root is the session that gets remembered — see `CanvasViewState.lastTiling`.
@@ -553,13 +554,22 @@ extension CanvasBoardView {
         setLayout(session.layout, animated: false)
     }
 
-    // MARK: Frames as workspaces
+    // MARK: Frames
 
-    /// The board's frames, in reading order — the workspaces you can step between.
+    /// The board's frames, in reading order — the regions of it you can step between.
     ///
-    /// A frame is already a named container of cards, which is what a workspace is. Nothing had to be
-    /// built for this; it only had to be noticed.
-    var workspaces: [CanvasNode] {
+    /// **These used to be called workspaces, and they are not.** The noticing behind that name was
+    /// right as far as it went — a frame is a named container of cards, and so is a workspace — and it
+    /// is also the entire overlap between them. A frame has a position, a size and a place in the
+    /// `.canvas` that Obsidian opens; a workspace has no position at all and never touches the file.
+    /// You drag a card *into* a frame; you choose cards *into* a workspace. A frame's layout is where
+    /// you put the cards; a workspace's is computed from an arrangement and some sizes.
+    ///
+    /// So the word went to the thing that had no other name — a saved tiling, `CanvasWorkspaces` — and
+    /// frames went back to being frames. The relationship survives and is the useful one: ⌘Return on a
+    /// frame tiles what is inside it, which is *make a workspace out of this region*, and that is the
+    /// one point where the two should meet. See docs/canvas-workspaces.md §7.
+    var frames: [CanvasNode] {
         document.nodes.filter(\.isGroup).sorted {
             $0.frame.minY == $1.frame.minY ? $0.frame.minX < $1.frame.minX
                                            : $0.frame.minY < $1.frame.minY
@@ -571,9 +581,9 @@ extension CanvasBoardView {
     /// Fitting rather than tiling, because a frame was arranged by hand and the arrangement is the
     /// point — that is what distinguishes a frame from a bag of cards. ⌘Return then tiles what this
     /// selected, for the times it isn't.
-    @objc func goToWorkspace(_ sender: Any?) {
+    @objc func goToFrame(_ sender: Any?) {
         guard let index = (sender as? NSMenuItem)?.tag, index >= 0 else { return }
-        let frames = workspaces
+        let frames = self.frames
         guard index < frames.count else { return NSSound.beep() }
         let frame = frames[index]
         if isTiled { leaveTiling(animated: false) }
@@ -623,7 +633,7 @@ extension CanvasBoardView {
 
     /// Every frame on the board, in reading order, as (id, name) — what the add menu offers.
     var frameChoices: [(id: String, name: String)] {
-        workspaces.map { node in
+        frames.map { node in
             var name = "Untitled Frame"
             if case .group(let label, _, _) = node.content, let label, !label.isEmpty { name = label }
             return (node.id, name)

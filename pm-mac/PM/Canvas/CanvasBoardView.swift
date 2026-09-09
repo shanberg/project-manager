@@ -96,7 +96,7 @@ final class CanvasBoardView: NSView {
     /// which says why these are no longer optional.
     var onOpenInTab: (CanvasFocus) -> Void = { _ in }
     /// Keep the tiling that is up under a name.
-    var onSaveArrangement: (String) -> Void = { _ in }
+    var onSaveWorkspace: (String) -> Void = { _ in }
 
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {

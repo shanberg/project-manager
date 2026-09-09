@@ -10,7 +10,7 @@ import Foundation
 /// is intent: a zoom is something you *set*, so it belongs to the document. A title is derived from a
 /// page PM happened to load, and writing it into the file would mean that *looking* at a board edits
 /// it — in a document Obsidian also has open and git may well be watching. That is the line
-/// `CanvasViewMemory` and `CanvasArrangements` already draw, and a cache is on the same side of it as
+/// `CanvasViewMemory` and `CanvasWorkspaces` already draw, and a cache is on the same side of it as
 /// a view state.
 ///
 /// **Keyed by the address, so it is shared.** Every card pointing at a page is named the moment any one

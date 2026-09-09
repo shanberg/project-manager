@@ -9,7 +9,7 @@ struct ProjectTabItem: Identifiable, Equatable {
     /// tab only has to say which *view* it is.
     let name: String
     /// What kind of view it is, which is what lets the name stay short — a frame called "Research"
-    /// and an arrangement called "Research" are told apart by the glyph rather than by a prefix.
+    /// and a workspace called "Research" are told apart by the glyph rather than by a prefix.
     let symbol: String
     /// A state of *this* view, after its name — "6/43" while it is tiled.
     ///
@@ -161,10 +161,10 @@ struct ProjectTabBar<AddMenu: View>: View {
 final class ProjectTabModel: ObservableObject {
     @Published var items: [ProjectTabItem] = []
     @Published var selectedID: String = ""
-    /// Frames and arrangements the board could open in a tab, for the add menu. Empty while the window
+    /// Frames and workspaces the board could open in a tab, for the add menu. Empty while the window
     /// is showing something that isn't a board, and empty for a board that has neither.
     @Published var frames: [ProjectTabItem] = []
-    @Published var arrangements: [String] = []
+    @Published var workspaces: [String] = []
 
     /// One tab is no tabs — see `ProjectTabSet.showsBar`.
     var showsBar: Bool { items.count > 1 }
@@ -174,7 +174,7 @@ final class ProjectTabModel: ObservableObject {
     var openNotes: () -> Void = {}
     var openBoard: () -> Void = {}
     var openFrame: (String) -> Void = { _ in }
-    var openArrangement: (String) -> Void = { _ in }
+    var openWorkspace: (String) -> Void = { _ in }
     /// Leave the tiled view on the board the current tab is showing — the badge on its chip.
     var leaveTiling: () -> Void = {}
 }
@@ -213,10 +213,10 @@ struct ProjectTabBarHost: View {
                     }
                 }
             }
-            if !model.arrangements.isEmpty {
-                Section("Arrangements") {
-                    ForEach(model.arrangements, id: \.self) { name in
-                        Button(name) { model.openArrangement(name) }
+            if !model.workspaces.isEmpty {
+                Section("Workspaces") {
+                    ForEach(model.workspaces, id: \.self) { name in
+                        Button(name) { model.openWorkspace(name) }
                     }
                 }
             }

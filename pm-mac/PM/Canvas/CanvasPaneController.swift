@@ -35,7 +35,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     ///
     /// **Not optional, and that is the whole of what retiring the separate canvas window bought.** A
     /// board used to be able to be in a window that had no tabs, so every feature reached through them
-    /// — opening a frame beside its board, keeping an arrangement, pinning either — carried an "except
+    /// — opening a frame beside its board, naming a workspace, pinning either — carried an "except
     /// there" clause, and the menu items for them appeared or didn't depending on which window you were
     /// in. Every board is in a project window now, so there is one answer.
     let tabModel: ProjectTabModel
@@ -61,10 +61,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             switch focus {
             case .whole: tabModel.openBoard()
             case .frame(let id): tabModel.openFrame(id)
-            case .arrangement(let name): tabModel.openArrangement(name)
+            case .workspace(let name): tabModel.openWorkspace(name)
             }
         }
-        scroll.board.onSaveArrangement = { [weak self] name in self?.saveArrangement(as: name) }
+        scroll.board.onSaveWorkspace = { [weak self] name in self?.saveWorkspace(as: name) }
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
@@ -199,7 +199,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         CanvasViewState(mode: scroll.board.mode,
                         tiling: scroll.board.tiling.map(scroll.board.memory(of:)),
                         refreshInterval: scroll.board.refreshInterval,
-                        // Kept whether or not one is up: an arrangement you left is one you built.
+                        // Kept whether or not one is up: a workspace you left is one you built.
                         lastTiling: scroll.board.tilingMemory)
     }
 
@@ -242,9 +242,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Put the board where this tab says it should be.
     ///
-    /// After the fit, for the reason `restoreViewState` is after it: an arrangement is laid out in the
+    /// After the fit, for the reason `restoreViewState` is after it: a workspace is laid out in the
     /// region the window can show, and a frame is fitted to the window, so both need a window with a
-    /// width. A pin that no longer resolves — a frame deleted, an arrangement removed — leaves the
+    /// width. A pin that no longer resolves — a frame deleted, a workspace removed — leaves the
     /// board on the whole canvas rather than on nothing, which is the same answer `restoreTiling` gives
     /// for cards that have gone.
     private func applyFocus() {
@@ -253,8 +253,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             break
         case .frame(let id):
             scroll.board.goTo(frame: id)
-        case .arrangement(let name):
-            guard let tiling = CanvasArrangements.tiling(named: name, of: store.url) else { return }
+        case .workspace(let name):
+            guard let tiling = CanvasWorkspaces.tiling(named: name, of: store.url) else { return }
             scroll.board.restoreTiling(tiling)
         }
     }
@@ -280,19 +280,19 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.frameChoices.map { ProjectTabItem(id: $0.id, name: $0.name, symbol: "square.dashed") }
     }
 
-    /// Every arrangement saved for this board.
-    func arrangementNames() -> [String] { CanvasArrangements.names(of: store.url) }
+    /// Every named workspace on this board.
+    func workspaceNames() -> [String] { CanvasWorkspaces.names(of: store.url) }
 
-    /// Keep the tiling that is up under `name`, for a tab to be pinned to.
-    func saveArrangement(as name: String) {
+    /// Name the workspace that is up, which is what promotes it out of `CanvasViewMemory` and keeps it.
+    func saveWorkspace(as name: String) {
         guard let tiling = scroll.board.tilingMemory else { return }
-        CanvasArrangements.save(tiling, as: name, for: store.url)
-        tabModel.arrangements = arrangementNames()
+        CanvasWorkspaces.save(tiling, as: name, for: store.url)
+        tabModel.workspaces = workspaceNames()
     }
 
-    /// Whether there is an arrangement to save at all — a board that has never been tiled has nothing
+    /// Whether there is a workspace to name at all — a board that has never been tiled has nothing
     /// to keep, and the command that offers to keep it should say so by being dim.
-    var hasArrangementToSave: Bool { scroll.board.tilingMemory != nil }
+    var hasWorkspaceToSave: Bool { scroll.board.tilingMemory != nil }
 
     /// Take the keyboard, for an owner that has just put this pane on screen.
     func focusBoard() { view.window?.makeFirstResponder(scroll.board) }

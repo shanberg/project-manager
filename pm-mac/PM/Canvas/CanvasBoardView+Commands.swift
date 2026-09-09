@@ -563,7 +563,7 @@ extension CanvasBoardView {
         }
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
-        add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
+        add(menu, "Name This Workspace\u{2026}", #selector(saveTilingAsWorkspace(_:)))
     }
 
     /// What a right-click on a *tile* can say about the tile, as opposed to about the card in it.
@@ -606,7 +606,7 @@ extension CanvasBoardView {
         let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
         item.submenu = arrange
 
-        add(menu, "Save Arrangement\u{2026}", #selector(saveTilingAsArrangement(_:)))
+        add(menu, "Name This Workspace\u{2026}", #selector(saveTilingAsWorkspace(_:)))
 
         menu.addItem(.separator())
         add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
@@ -1313,16 +1313,21 @@ extension CanvasBoardView {
         onOpenInTab(.frame(id))
     }
 
-    /// Keep the tiling that is up, under a name, so a tab can be pinned to it.
+    /// Give the workspace that is up a name, which is what keeps it.
     ///
-    /// Named on the way in rather than saved anonymously and renamed later: the name is the whole of an
-    /// arrangement's identity — there is nothing else to point at — so there is no version of this that
+    /// **Not a save, and the wording says so.** A tiling is already a workspace the moment it exists —
+    /// it is just an unnamed one, living in the volatile `CanvasViewMemory`. Naming it promotes it into
+    /// `CanvasWorkspaces`, which is the durable store; nothing is copied and there is no second thing
+    /// afterwards. That is the whole of "ephemeral unless named" (docs/canvas-workspaces.md §7).
+    ///
+    /// Named on the way in rather than kept anonymously and named later: the name is the whole of a
+    /// workspace's identity — there is nothing else to point at — so there is no version of this that
     /// can be deferred.
-    @objc func saveTilingAsArrangement(_ sender: Any?) {
+    @objc func saveTilingAsWorkspace(_ sender: Any?) {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
-        field.stringValue = suggestedArrangementName
+        field.stringValue = suggestedWorkspaceName
         let alert = NSAlert()
-        alert.messageText = "Name this arrangement"
+        alert.messageText = "Name this workspace"
         alert.informativeText = "Kept for this board, so a tab can open straight into it."
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
@@ -1330,13 +1335,17 @@ extension CanvasBoardView {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        onSaveArrangement(name)
+        onSaveWorkspace(name)
     }
 
     /// What the name field starts with: the arrangement and how many tiles are in it, which is a true
     /// description of what you are keeping and a name you would never have to think of.
-    private var suggestedArrangementName: String {
-        guard let tiling else { return "Arrangement" }
+    ///
+    /// The *arrangement* — grid or master-and-stack — because that is the one word here that still
+    /// means the layout algorithm and nothing else. It is the third thing that used to wear "workspace"
+    /// in this menu, and it kept its own name by being the only one that was already using it correctly.
+    private var suggestedWorkspaceName: String {
+        guard let tiling else { return "Workspace" }
         return "\(tiling.arrangement.title), \(tiling.ids.count)"
     }
 
@@ -1500,7 +1509,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // back out. Only a board with nothing on it has nothing for it to mean.
             (item as? NSMenuItem)?.title = tileCommandTitle
             return isTiled || document.nodes.contains { !$0.isGroup }
-        case #selector(saveTilingAsArrangement(_:)):
+        case #selector(saveTilingAsWorkspace(_:)):
             // Something to keep: a board that has never been tiled has no arrangement.
             return tilingMemory != nil
         case #selector(setTileArrangement(_:)):
@@ -1509,9 +1518,9 @@ extension CanvasBoardView: NSUserInterfaceValidations {
                     ? .on : .off
             }
             return true
-        case #selector(goToWorkspace(_:)):
+        case #selector(goToFrame(_:)):
             guard let entry = item as? NSMenuItem else { return false }
-            let frames = workspaces
+            let frames = self.frames
             guard entry.tag < frames.count else {
                 entry.title = "Frame \(entry.tag + 1)"
                 return false

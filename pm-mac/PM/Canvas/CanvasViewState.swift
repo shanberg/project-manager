@@ -19,7 +19,7 @@ struct CanvasViewState: Codable, Equatable {
     var refreshInterval: TimeInterval?
     /// The last one made on this board, kept after leaving it.
     ///
-    /// **Leaving a tiled view is not throwing the arrangement away.** The order you dragged the tiles
+    /// **Leaving a tiled view is not throwing the workspace away.** The order you dragged the tiles
     /// into, the widths you set, the tile you pinned — those took deliberate work, and until now
     /// pressing Escape discarded all of it, so coming back to the same six cards meant building it
     /// again. Escape means "show me the board", not "forget what I did".
@@ -27,9 +27,20 @@ struct CanvasViewState: Codable, Equatable {
 
     /// The tiled view that was up: which cards, in what order, arranged how.
     ///
-    /// The order is stored because the order *is* the arrangement. Swapping two tiles and promoting one
-    /// to master are edits to nothing but this list, so a restore that re-derived it from where the
-    /// cards sit on the board would silently undo every one of them.
+    /// **This is the workspace**, and the whole of one: a set of tiles, their relative placement (which
+    /// is the order), their relative size, and their pinning. Named or not — naming is what promotes a
+    /// copy of this into `CanvasWorkspaces`, and it adds nothing to the structure, which is why the
+    /// definition needed no designing. See docs/canvas-workspaces.md §7.
+    ///
+    /// It keeps the name `Tiling` rather than becoming `Workspace` because it is the *data*, and both
+    /// stores hold it: the unnamed one that is up, and the named ones you kept. A workspace is a tiling
+    /// that may have a name, so the type is a tiling and `CanvasWorkspaces` is where the named ones
+    /// live. `CanvasTileSession` is the third of these and the one that is alive — this is what it
+    /// flattens down to.
+    ///
+    /// The order is stored because the order is the placement. Swapping two tiles and promoting one to
+    /// master are edits to nothing but this list, so a restore that re-derived it from where the cards
+    /// sit on the board would silently undo every one of them.
     struct Tiling: Codable, Equatable {
         var ids: [String]
         var arrangement: CanvasTiling.Arrangement

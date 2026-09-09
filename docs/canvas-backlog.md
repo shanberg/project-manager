@@ -164,10 +164,12 @@ with the whole lifetime argument set out there — and a tab can be pinned to on
 (`CanvasFocus.arrangement`).
 
 So the request "save tile layouts to the project, in app persistence rather than project data" is done,
-exactly as asked. What was open was whether the rest is a real gap or only discoverability, and that is
-now answered from the other end rather than by investigation: a saved tiling **is** the workspace the
-board is organised around, so it wants a word people use and a place in the window, not one unlabelled
-contextual-menu item.
+exactly as asked. What was open was whether the rest is a real gap or only discoverability, and the
+answer is **both, with one cause**: a workspace is the only major object in this app with no
+representation of itself on screen, which is why saving one produces no visible change, why nothing
+says which one you are in, and why `CanvasArrangements.remove` has sat there with no callers. §7b names
+the home — the title pill's tiled readout stops being a readout and becomes the workspace, showing its
+name and opening the list.
 
 The two stores turn out to be the definition rather than an implementation detail. **A workspace is
 ephemeral unless named**: the one that is up lives in the volatile `CanvasViewMemory`, and naming it
@@ -179,10 +181,11 @@ different lifetimes, for exactly this reason.
 Small, and only worth stating because of what it is *for*: you have built a six-tile view and want a
 variant of it. Today that means building the variant from scratch.
 
-Sketch: "Duplicate Workspace" beside Save, seeding the name from the one that is up ("Dashboard copy"),
-then the copy is what your adjustments land on. Under
+Sketch: "Duplicate Workspace" in the workspace menu, seeding the name from the one that is up
+("Dashboard copy"), then the copy is what your adjustments land on. Under
 [canvas-workspaces.md](canvas-workspaces.md) §7 this stops being a convenience: if a workspace is what
-a tab shows, duplicating one is how the second one gets made.
+a tab shows, duplicating one is how the second one gets made — and under §7b it is also the answer to
+"I want to try something without wrecking this one", since a named workspace is now adjusted live.
 
 ### 11. BSP layouts
 
@@ -260,35 +263,19 @@ Design first. The nearest existing grammar is Figma's — ⇧1 fit all, ⇧2 fit
 adopting it wholesale would put ⇧1 next to a ⌘0 that already means the same thing, which is two keys
 for one act. Decide whether the Figma set replaces the ⌘ set or joins it before adding a single key.
 
-## Discussion
-
-### 18. What a workspace is — **answered, see [canvas-workspaces.md](canvas-workspaces.md)**
-
-Raised as a discussion, and it was one, because the app had **three** answers and they disagreed: a
-**frame** on the board was called a workspace outright (`CanvasBoardView+Tiling.workspaces`, ⌃1…9), a
-**saved arrangement** is a named tiling of a named set of cards, and a **tab** can be pinned to either.
-
-The question it was blocked on was whether a workspace is a region of a board or a window layout, and
-the answer is the second: **a particular set of tiles, their relative placement and size, and their
-pinning settings — named or not, and ephemeral unless named.** "The project and Jira", "its tasks and
-Figma", "Slack and Google Docs and no project at all."
-
-That is `CanvasViewState.Tiling` field for field, so what is left is a rename and a home rather than a
-design. A frame is not one: it is a group node in the `.canvas` with a position, which Obsidian also
-shows, and its membership is which cards sit inside it. A workspace has no position at all.
-
-Three words for three things: a frame goes back to being a **frame**; a saved tiling becomes a
-**workspace**; and `CanvasTiling.Arrangement` — the layout algorithm, which is the third thing in that
-menu wearing one of these words, four lines under "Save Arrangement…" and meaning something else —
-keeps **arrangement**, which is what it actually is.
-
 ## Priority
 
-**First — designed and waiting to be built:** 18 → 9 → 10, in that order: the workspace rename, its
-home in the window, and duplicating one. The argument is written down in
-[canvas-workspaces.md](canvas-workspaces.md) §7 and nothing there is waiting on a decision. The card
-half of that page is built — a card you have stepped into is the project, and it draws as much or as
-little of it as you set — so what is left is the half about looking at several cards at once.
+**First — designed and waiting to be built:** 9 → 10, in that order: a workspace's home in the window,
+and duplicating one. The argument is written down in [canvas-workspaces.md](canvas-workspaces.md) §7
+and §7b, and nothing in either is waiting on a decision — 9's home is the title pill's tiled readout,
+which stops being a readout and becomes the workspace, and how a named workspace behaves when you
+adjust it is settled (live, with ⌘↩ the one act that starts a fresh one).
+
+The rename that used to lead this list is done: frames are frames again, a saved tiling is a
+**workspace**, and `CanvasTiling.Arrangement` keeps *arrangement* by being the only one of the three
+that was using the word correctly. The card half of that page is built too — a card you have stepped
+into is the project, and it draws as much or as little of it as you set — so what is left is the half
+about looking at several cards at once.
 
 **Beside it — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
 

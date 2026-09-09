@@ -1,22 +1,34 @@
 import Foundation
 
-/// The tilings you named and kept, per board.
+/// The workspaces you named and kept, per board.
 ///
-/// **A different store from `CanvasViewMemory`, on purpose, and the reason is lifetime.** That memory
-/// is volatile: it is rewritten on every change to how you are looking at a board, so that leaving one
-/// tiled and coming back finds it tiled. These are deliberate — you built an arrangement, you named it,
-/// and you expect it to be there next month. Keeping both in one row would mean every pan across a
-/// board rewriting the file your saved arrangements live in, which is one careless memberwise
-/// initialiser away from losing all of them. Same format, different file, different lifetime.
+/// **A workspace is a particular set of tiles, their relative placement and size, and their pinning —
+/// named or not, and ephemeral unless named.** Which is `CanvasViewState.Tiling` field for field, so
+/// there is no type here beyond the two stores: the unnamed one lives in `CanvasViewMemory` and naming
+/// it promotes it into this file. The word is the whole of what this rename added; the structure was
+/// already right. See docs/canvas-workspaces.md §7.
 ///
-/// In defaults rather than in the `.canvas`, for the reason `CanvasViewMemory` already gives: a saved
-/// arrangement is a private, per-machine way of looking at a document that Obsidian also opens and git
+/// **A different store from `CanvasViewMemory`, on purpose, and the reason is lifetime** — which is
+/// also why "ephemeral unless named" is a fact about where a workspace is kept rather than a rule
+/// imposed on top. That memory is volatile: it is rewritten on every change to how you are looking at a
+/// board, so that leaving one tiled and coming back finds it tiled. These are deliberate — you built a
+/// workspace, you named it, and you expect it to be there next month. Keeping both in one row would
+/// mean every pan across a board rewriting the file your named workspaces live in, which is one
+/// careless memberwise initialiser away from losing all of them. Same format, different file, different
+/// lifetime.
+///
+/// In defaults rather than in the `.canvas`, for the reason `CanvasViewMemory` already gives: a
+/// workspace is a private, per-machine way of looking at a document that Obsidian also opens and git
 /// may well be watching, and it must not show up there as an edit.
 ///
-/// The name is the identity. There is nothing else to point at — an arrangement's whole content is a
-/// list of card ids and some widths — so a tab pinned to one holds its name, and renaming is making a
-/// different arrangement.
-enum CanvasArrangements {
+/// The name is the identity. There is nothing else to point at — a workspace's whole content is a list
+/// of card ids and some widths — so a tab pinned to one holds its name, and renaming is making a
+/// different workspace.
+///
+/// **The defaults key keeps its old spelling on purpose.** `PMCanvasArrangements` is private to this
+/// file and is read by nothing else, so renaming it would buy a tidier string at the cost of every
+/// workspace anybody has already saved.
+enum CanvasWorkspaces {
     /// Everything saved for this board.
     static func of(_ url: URL) -> [String: CanvasViewState.Tiling] {
         guard let data = stored()[key(url)],
@@ -37,7 +49,7 @@ enum CanvasArrangements {
     }
 
     /// Keep `tiling` under `name`, replacing one already there. Replacing rather than refusing: saving
-    /// over an arrangement you have adjusted is the common case, and asking about it every time would
+    /// over a workspace you have adjusted is the common case, and asking about it every time would
     /// make keeping one cost more than rebuilding it.
     static func save(_ tiling: CanvasViewState.Tiling, as name: String, for url: URL) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -59,7 +71,7 @@ enum CanvasArrangements {
         UserDefaults.standard.set(rows, forKey: defaultsKey)
     }
 
-    private static let defaultsKey = "PMCanvasArrangements"
+    private static let defaultsKey = "PMCanvasWorkspaces"
 
     private static func stored() -> [String: Data] {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: Data] ?? [:]

@@ -324,7 +324,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.openNotes = { [weak self] in self?.openTab(.notes) }
         tabModel.openBoard = { [weak self] in self?.openTab(.board(.whole)) }
         tabModel.openFrame = { [weak self] id in self?.openTab(.board(.frame(id))) }
-        tabModel.openArrangement = { [weak self] name in self?.openTab(.board(.arrangement(name))) }
+        tabModel.openWorkspace = { [weak self] name in self?.openTab(.board(.workspace(name))) }
         tabModel.leaveTiling = { [weak self] in self?.canvasPane?.leaveTiling() }
     }
 
@@ -438,7 +438,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             case .board(.frame(let node)):
                 return ProjectTabItem(id: tab.id, name: board?.frameName(node) ?? "Frame",
                                       symbol: "square.dashed", detail: detail)
-            case .board(.arrangement(let name)):
+            case .board(.workspace(let name)):
                 return ProjectTabItem(id: tab.id, name: name, symbol: "square.grid.2x2",
                                       detail: detail)
             }
@@ -452,7 +452,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         }
         tabModel.selectedID = tabs.selectedID
         tabModel.frames = board?.frames() ?? []
-        tabModel.arrangements = board?.arrangementNames() ?? []
+        tabModel.workspaces = board?.workspaceNames() ?? []
     }
 
     /// Back to the task list — View ▸ Show Canvas turning itself off, and the empty state's button.

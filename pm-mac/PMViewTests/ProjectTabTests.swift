@@ -43,7 +43,7 @@ final class ProjectTabTests: XCTestCase {
     func testClosingTheSelectedTabSelectsTheOneToItsRight() {
         var set = ProjectTabSet()
         let second = set.open(.board(.whole))
-        let third = set.open(.board(.arrangement("Review")))
+        let third = set.open(.board(.workspace("Review")))
         set.select(second.id)
 
         XCTAssertTrue(set.close(second.id))
@@ -129,7 +129,7 @@ final class ProjectTabTests: XCTestCase {
         let tabs = [ProjectTab(.notes),
                     ProjectTab(.board(.whole)),
                     ProjectTab(.board(.frame("group-7"))),
-                    ProjectTab(.board(.arrangement("Standup")))]
+                    ProjectTab(.board(.workspace("Standup")))]
         let data = try JSONEncoder().encode(tabs)
         XCTAssertEqual(try JSONDecoder().decode([ProjectTab].self, from: data), tabs)
     }

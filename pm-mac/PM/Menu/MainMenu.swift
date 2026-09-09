@@ -289,8 +289,8 @@ enum MainMenu {
         arrangeItem.submenu = arrange
         // Keep the tiling that is up, so a tab can open straight into it. Routed to the board like
         // everything else here, and dim wherever there are no tabs to pin one to.
-        menu.addItem(withTitle: "Save Arrangement\u{2026}",
-                     action: #selector(CanvasBoardView.saveTilingAsArrangement(_:)),
+        menu.addItem(withTitle: "Name This Workspace\u{2026}",
+                     action: #selector(CanvasBoardView.saveTilingAsWorkspace(_:)),
                      keyEquivalent: "")
 
         // **What a tile can be told, with no pointer involved.** These four were reachable only by
@@ -312,14 +312,17 @@ enum MainMenu {
                      action: #selector(CanvasBoardView.leaveTilingCommand(_:)),
                      keyEquivalent: "")
 
-        // Frames as workspaces. A frame is already a named container of cards, which is what a
-        // workspace is, so ⌃1…9 is the tiling manager's own gesture arriving on a thing the board
-        // already had. Nine, because that is how many a row of number keys holds and how many every
-        // manager that does this offers.
+        // ⌃1…9 goes to a frame — a region of the board, fitted in the window. Nine, because that is how
+        // many a row of number keys holds and how many every manager that does this offers.
+        //
+        // ⌃ and not ⌘, and this is the one place the two words are told apart by a modifier: a frame is
+        // somewhere on the board, a workspace is a way of looking at it. ⌘1…9 is left unspent, because
+        // it is also every browser's key for selecting a tab and this app has tabs — see backlog 17,
+        // which says settle the navigation grammar before spending a single key.
         let frames = NSMenu(title: "Go to Frame")
         for index in 0..<9 {
             let entry = frames.addItem(withTitle: "Frame \(index + 1)",
-                                       action: #selector(CanvasBoardView.goToWorkspace(_:)),
+                                       action: #selector(CanvasBoardView.goToFrame(_:)),
                                        keyEquivalent: "\(index + 1)")
             entry.keyEquivalentModifierMask = [.control]
             entry.tag = index

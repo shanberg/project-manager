@@ -23,7 +23,7 @@ adds tasks, and reads and edits the brief; the brief's fields commit as you leav
 well as on a card; and a card is set to draw the brief, the notes, the tasks, finished work, and either
 every sitting or the latest. The arguments now live where the code is — `CanvasProjectNote`,
 `SessionNoteTakeover`, `DetailsEditor`, `CanvasCardShows`, `CanvasBoardView.engagedProjectCard`. What is
-kept here is the shape of the whole, because **§7 is not built** and leans on it.
+kept here is the shape of the whole, because **§7 and §7b are not built** and lean on it.
 
 ## 1. What a project card can and cannot do today
 
@@ -242,6 +242,86 @@ frame is a good way to *choose* the cards a workspace is made of. ⌘Return on a
 is inside it, which is "make a workspace out of this region" — the two concepts meeting at the one
 point where they should.
 
+## 7b. Making a workspace visible
+
+§7 settled what a workspace *is*. What was still missing is anywhere to see one, and reading the code
+for it turns up four complaints with one cause between them.
+
+- **Saving one produces no visible change.** Run "Save Arrangement…", type a name, press Save, and the
+  window is identical. The only evidence anywhere in the app is a new line inside a submenu of the "+"
+  button. A save with no feedback reads as a save that did not happen.
+- **Nothing says which one you are in.** The readout says `6/43` whether you are in "Dashboard" or in
+  something you tiled ten seconds ago and will never want again.
+- **The only list of them is inside the new-tab menu**, which conflates *switch to this workspace* with
+  *open another tab*. Going from Dashboard to Review means opening a tab, and a way of looking should
+  not multiply views.
+- **You can make them and never manage them.** No rename, no duplicate, no delete —
+  `CanvasArrangements.remove` exists and has no callers anywhere in the app. The dead function is the
+  tell: the store was built for a UI that was never finished.
+
+Under all four: **a workspace is the only major object in this app with no representation of itself on
+screen.** A card is a rectangle, a frame is a labelled rectangle, a tab is a chip. A workspace is a
+string in a submenu.
+
+### The readout is the workspace
+
+One move fixes all four, and it needs no new chrome. The title pill already answers "what am I looking
+at" and already carries the tiled state as `6/43 ✕`. That slot shows the workspace's **name** when it
+has one, and it becomes a **menu**.
+
+- Naming has a visible effect: `6/43` becomes `Dashboard`. The first complaint is fixed by the same
+  change that fixes the second.
+- The menu lists every workspace on this board with the current one ticked — **including `Untitled ·
+  6 tiles` when you have not named it**, which is how "ephemeral unless named" gets rendered rather
+  than merely being true.
+- Rename, Duplicate and Delete hang off that menu, on the object they act on.
+
+**Losing the count costs nothing**, because the two never compete. `6/43` answers "how much of the
+board am I seeing", which matters most immediately after an ad-hoc ⌘↩ — exactly when there is no name
+to show. Count when unnamed, name when named, so the readout says which *kind* of workspace you are in
+by which of the two it is showing. The count moves to the help text.
+
+**"Save Arrangement…" stops being a save.** It becomes "Name This Workspace…", which is what it always
+was: the promotion from the volatile store to the durable one that §7 describes. Nothing is copied; one
+thing acquires a name.
+
+Tabs are not replaced by any of this and are not in competition with it. The tab bar answers *which of
+my open views am I in*, and is already good at it. This menu answers *what exists on this board*,
+including what is not open anywhere. The "+" menu keeps its section, renamed, still meaning "open in a
+new tab" — an act that is now clearly distinct, because switching lives somewhere else.
+
+### Adjusting one is not saving one
+
+**A named workspace is live.** Drag a tile, pin a width, promote a master, switch to grid — it lands on
+the workspace as you do it. No Save, no dirty mark, no Revert. This is §4's decision applied to a
+second object: a thing that both writes as you work and offers to discard is lying about one of the
+two, and this app has stopped doing that.
+
+**⌘↩ is the exception, and it is the only one.** "Fill Window with Selection" does not mean "adjust
+this"; it means "these cards, now" — it is the act that made the workspace in the first place. So it
+starts a fresh **Untitled** workspace and leaves the named one exactly as it was, one click away in the
+menu. That line is not arbitrary: every other tiling command is incremental, an edit to the tiling that
+is up, and ⌘↩ is the one that replaces the set wholesale.
+
+Worth stating the cost plainly, because it is real: **a tiling has no undo.** It is view state, not a
+document change, so `store.change` is not involved and ⌘Z will not bring a removed tile back — you
+re-add it by hand. That is survivable at this scale (nothing is destroyed but a layout, and the cards
+are all still on the board) and it is what makes the ⌘↩ carve-out load-bearing rather than tidy: it
+keeps the one destructive-feeling act off the named thing.
+
+### What it needs that does not exist
+
+**One field.** `CanvasViewState.workspaceName: String?` — which named workspace the tiling that is up
+*is*. `CanvasFocus.arrangement(name)` is not that: it is a tab pin, and a board tiled ad hoc in a
+whole-board tab has nowhere to record a name today. The field is what the readout reads, what the tick
+in the menu compares against, and what ⌘↩ clears.
+
+**No keys, deliberately.** ⌘1…9 is free and is the obvious slot for "go to workspace *n*" — and it is
+also every browser's shortcut for selecting a tab, and this app has tabs. [Backlog
+17](canvas-backlog.md) says decide the navigation grammar before adding a single key, and spending
+⌘1…9 here would be spending it on the losing side of a question that is already open. ⌃1…9 stays with
+frames.
+
 ## 8. What this does to the backlog
 
 - **New, and first:** the card is the project (§§2–5). The complaint that started this.
@@ -250,18 +330,23 @@ point where they should.
 - **15** — live-saving the summary and goals — is **decided**: live rows, and Cancel is retired, in the
   window as well as on the card (§4). It stopped being optional the moment a details block could sit in
   a tile.
-- **18** — what a workspace is — is **answered** (§7), and what is left is a rename plus a home. The
-  definition turned out to be `CanvasViewState.Tiling` as it already stands.
-- **9** and **10** fold into §7: not "is this hidden or missing" but "this is the unit, give it a home",
-  and duplicating one is how the second workspace gets made.
+- **18** — what a workspace is — was **answered** (§7) and the rename it asked for is **done**; the
+  item is retired. The definition turned out to be `CanvasViewState.Tiling` as it already stood, so
+  what shipped was three words going to three things and nothing else.
+- **9** and **10** fold into §7 and §7b: not "is this hidden or missing" but "this is the unit, give it
+  a home", and duplicating one is how the second workspace gets made. §7b says where that home is — the
+  pill's tiled readout, which stops being a readout — and answers 9's remaining question with *both*:
+  it was a real gap **and** a discoverability one, and they had the same cause.
 - **13** — suggest the project's links — gets its open question answered by §5.
 
 ## Open
 
-**The rename's blast radius.** `goToWorkspace(_:)`, `workspaces`, `CanvasFocus.arrangement`, the saved
-defaults key, and every doc comment that argues "frames are workspaces" — including
-[CanvasBoardView+Tiling.swift:556](../pm-mac/PM/Canvas/CanvasBoardView+Tiling.swift:556), which argues it
-well and will need to argue the opposite. Saved data keyed by name has to survive it.
+**The rename is done**, and what it turned on is recorded in the code rather than here:
+`CanvasFocus.CodingKeys` (why `workspace` still goes on the wire as `arrangement`),
+`CanvasWorkspaces` (why the defaults key keeps its old spelling), `CanvasBoardView+Tiling.frames` (why
+a frame is not one), and `CanvasViewState.Tiling` (why the type kept its name while the concept took a
+new one). `CanvasFocusCodingTests` is what holds the wire format still, since nothing else in the code
+would notice it moving.
 
 **Whether a workspace can span boards.** Everything above keeps a workspace inside one board, because a
 tiling is a list of card ids and cards live in a `.canvas`. "Slack and Google Docs, no project notes"

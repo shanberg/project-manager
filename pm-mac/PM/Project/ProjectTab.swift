@@ -38,19 +38,36 @@ enum ProjectTabView: Codable, Equatable {
 /// Which part of a board a tab is pinned to.
 ///
 /// **Both of the narrowed cases name something that already exists and is already named**, which is
-/// what keeps this from needing a naming UI of its own. A frame is a labelled container of cards — the
-/// board already treats them as workspaces and ⌃1…9 already goes to one. An arrangement is a tiling
-/// you kept, and keeping it is where you name it.
+/// what keeps this from needing a naming UI of its own. A frame is a labelled container of cards on the
+/// board, which ⌃1…9 goes to. A workspace is a tiling you named, and naming it is what kept it.
+///
+/// The two are different kinds of thing and used to share a word — see docs/canvas-workspaces.md §7.
+/// A frame has a position and lives in the `.canvas`; a workspace has no position at all and never
+/// touches the file. What they have in common is being a named set of cards, and that is the entire
+/// overlap.
 enum CanvasFocus: Codable, Equatable {
     /// The whole board, as the file describes it.
     case whole
     /// A frame, by node id. The id rather than the label, because a frame you rename is the same frame
     /// and a tab pointed at it should follow rather than break.
     case frame(String)
-    /// A saved tiling, by the name you gave it. The name *is* the identity here — there is nothing else
-    /// to point at — so renaming one is making a different arrangement, which is the honest answer for
-    /// a thing whose whole content is a list of card ids and some widths.
-    case arrangement(String)
+    /// A named workspace, by its name. The name *is* the identity here — there is nothing else to point
+    /// at — so renaming one is making a different workspace, which is the honest answer for a thing
+    /// whose whole content is a list of card ids and some widths.
+    case workspace(String)
+
+    /// **`workspace` goes on the wire as `arrangement`, and must keep doing so.**
+    ///
+    /// Swift synthesizes an enum's `Codable` from its *case names*, so this case has been encoding the
+    /// literal word `arrangement` into every stored tab since tabs existed (`ProjectTabMemory`).
+    /// Renaming the case without this would not fail loudly: the tab would decode as nothing, and a
+    /// window somebody set up weeks ago would quietly come back one tab short. The word people read is
+    /// worth changing; the word on disk is worth nothing, and changing it costs their tabs.
+    enum CodingKeys: String, CodingKey {
+        case whole
+        case frame
+        case workspace = "arrangement"
+    }
 }
 
 // MARK: - The tabs a window is holding
