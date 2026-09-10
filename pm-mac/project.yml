@@ -147,6 +147,7 @@ targets:
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Project/SessionBlocks.swift
       - path: PM/Canvas/CanvasPageBudget.swift
+      - path: PM/Canvas/CanvasPageKeys.swift
       - path: PM/Canvas/CanvasPanBounds.swift
       - path: PM/Canvas/CanvasWebSession.swift
       - path: PM/Canvas/CanvasWebPopup.swift
