@@ -35,16 +35,38 @@ final class CanvasBoardView: NSView {
     /// The top is the header's, not a safe area's: the board deliberately runs up under the titlebar,
     /// and the room the floating chrome needs is a constant this owns rather than something AppKit
     /// reports.
-    var tileableRect: CanvasRect {
+    var tileableRect: CanvasRect { tileableRect(atZoom: liveScale) }
+
+    /// The same, for a zoom the board is not at yet.
+    ///
+    /// **Because entering a workspace now travels to 100% rather than arriving there.** The tiles are
+    /// laid out in canvas coordinates and have to be laid out for the zoom they will be *read* at, so
+    /// the measurement has to be taken before the journey rather than after it — the board is still at
+    /// 40% when this is asked and will be at 100% when the cards land. Measured about the same centre
+    /// the window has now, which is the other half of it: a crossing that also slid sideways would be
+    /// two changes to follow.
+    func tileableRect(atZoom scale: Double) -> CanvasRect {
+        CanvasTiling.area(of: visibleCanvasRect(atZoom: scale), margins: tileMargins(atZoom: scale))
+    }
+
+    /// Everything the window would be able to show at a given zoom, about the middle it is looking at
+    /// now. The zoom the board is *at* answers with its own visible region exactly.
+    private func visibleCanvasRect(atZoom scale: Double) -> CanvasRect {
         let visible = canvasRect(visibleRect)
+        let ratio = liveScale / max(0.0001, scale)
+        let width = visible.width * ratio
+        let height = visible.height * ratio
+        return CanvasRect(x: visible.midX - width / 2, y: visible.midY - height / 2,
+                          width: width, height: height)
+    }
+
+    /// What the window keeps for itself out of that: the sidebar the board runs beneath, and the band
+    /// the floating header needs. See `CanvasTiling.Margins`.
+    func tileMargins(atZoom scale: Double) -> CanvasTiling.Margins {
         let covered = scrollView?.safeAreaInsets ?? NSEdgeInsets()
-        let leading = Double(covered.left) / liveScale
-        let trailing = Double(covered.right) / liveScale
-        let top = Self.headerClearance / liveScale
-        return CanvasRect(x: visible.minX + leading,
-                          y: visible.minY + top,
-                          width: max(80, visible.width - leading - trailing),
-                          height: max(80, visible.height - top))
+        return CanvasTiling.Margins(leading: Double(covered.left) / scale,
+                                    trailing: Double(covered.right) / scale,
+                                    top: Self.headerClearance / scale)
     }
 
     /// Room at the top for the floating header, and nothing else.
@@ -86,8 +108,6 @@ final class CanvasBoardView: NSView {
     /// whenever the canvas document changes, so it always names the most recent of the two.
     var lastEditedProject: PMStore?
 
-    /// The tilings you drilled in from, outermost first. Escape pops one at a time.
-    var tilingHistory: [CanvasTileSession] = []
     /// The last tiling made on this board, kept after it was left — see `CanvasViewState.lastTiling`.
     /// Tiling the same set of cards again picks this up rather than starting over.
     var lastTiling: CanvasViewState.Tiling?
@@ -143,20 +163,67 @@ final class CanvasBoardView: NSView {
             guard (oldValue == nil) != (tiling == nil) else { return }
             scrollView?.canvasScroll?.showsScrollers(!isTiled)
             watchTileClicks(isTiled)
-            // The ground goes with the mode — see `ground`. The scroll view paints the same colour
-            // behind an elastic overscroll, so it has to be told too or a rubber-banded tiling flashes
-            // the board's grey at the edges.
-            scrollView?.backgroundColor = ground
-            needsDisplay = true
-            // Every card changes vocabulary at once: height and a card's hairline on the way out, a
-            // tile's near-invisible edge and its two radii on the way in.
-            for view in nodeViews.values {
-                view.refreshElevation()
-                view.needsDisplay = true
-                view.needsLayout = true
-            }
+            // Every card changes vocabulary at once, and it does it over a third of a second rather
+            // than between two frames: height and a card's hairline on the way out, a tile's
+            // near-invisible edge and its two radii on the way in, over a ground that darkens with
+            // them. See `tiledness`, which is the number all of that is drawn against.
+            tiledFade.set(isTiled)
         }
     }
+
+    // MARK: Between the two modes
+
+    /// How far this board is between showing itself and showing a workspace: 0 is a board, 1 is tiles.
+    ///
+    /// **A crossing you can watch.** Everything that tells a tile from a card is a *drawn* difference —
+    /// the ground it sits on, the hairline, the two radii, the shadow it has or hasn't got — so none of
+    /// it can be handed to `animator()` and none of it was animated: the cards slid into their tile
+    /// positions (`settleIntoLayout`) while the vocabulary they were drawn in changed in a single
+    /// frame. Half a transition reads worse than none, because the half that cuts is the half that says
+    /// what kind of thing you are now looking at.
+    ///
+    /// So it is a number between the two, and every one of those differences is drawn against it. The
+    /// mode itself is still a boolean and changes at once — `isTiled` is what the commands, the hit
+    /// testing and the page budget ask, and a board that was *half* tiled to the keyboard would be a
+    /// board with two grammars. This is about paint only.
+    ///
+    /// Independent of `tiling` for one reason, which is the whole of `arrive(from:)`: a board that is
+    /// not tiled at all can be posed at 1 and asked to ease out of it, which is how a workspace's tiles
+    /// are still on screen in the pane that takes over from it.
+    var tiledness: Double { tiledFade.presence }
+
+    /// Long enough to read as one thing turning into another, and the same third of a second the cards
+    /// take to fly (`settleIntoLayout`). Coming and going are the same length here, unlike the grid's:
+    /// this is not chrome answering your hand, it is the window changing what it is showing, and that
+    /// costs the same either way.
+    private lazy var tiledFade = CanvasFade(rise: 0.3, fall: 0.3, on: self) { [weak self] in
+        self?.tilednessChanged()
+    }
+
+    /// Repaint everything the crossing is drawn into. Called on every step of the fade.
+    ///
+    /// The scroll view is told as well as the board: it paints the same colour behind an elastic
+    /// overscroll, so without this a rubber-banded tiling flashes the board's grey at the edges.
+    private func tilednessChanged() {
+        FrameMeter.span("fadeStep") { tilednessChangedBody() }
+    }
+
+    private func tilednessChangedBody() {
+        scrollView?.backgroundColor = ground
+        needsDisplay = true
+        for (id, view) in nodeViews { applyPresence(to: view, id: id) }
+        overlay.needsDisplay = true
+        // **The grips come up with the tiles, not before them.** They are drawn from the session, which
+        // exists from the first frame of the crossing — so without this they are already lying in the
+        // gaps between tiles that have not arrived yet, which is the one piece of a tiled view that can
+        // be in the wrong place rather than merely early. Going the other way they are simply gone: the
+        // session is cleared as leaving starts, and a grip belongs to the state that is over.
+        tileHandleView.alphaValue = tiledness
+        tileHandleView.needsDisplay = true
+    }
+
+    /// Pose the crossing without animating it — see `CanvasFade.hold` and `arrive(from:)`.
+    func holdTiledness(_ value: Double) { tiledFade.hold(value) }
 
     /// The watch that hands the keyboard to the tile you click into. Only while one is up — see
     /// `watchTileClicks`.
@@ -165,20 +232,14 @@ final class CanvasBoardView: NSView {
     var onTilingChanged: (() -> Void)?
 
     var selection: Set<String> = [] { didSet { selectionChanged(from: oldValue) } }
-    /// The card under the pointer. The board carries its tooltip, because the card can't: an unengaged
-    /// card returns nil from `hitTest` and so never sees the mouse. See `CanvasNodeView.cardDescription`.
-    var hovered: String? { didSet { if hovered != oldValue { refreshHoverDescription() } } }
+    /// The card under the pointer. The board tracks it because the card can't: an unengaged card
+    /// returns nil from `hitTest` and so never sees the mouse. Read by the overlay, the hit tester and
+    /// the tile handlebars — nothing is drawn or said by hovering alone.
+    var hovered: String?
 
-    /// A card's answer changed while the pointer was on it — a page navigated, a page got older.
+    /// A card's answer about itself changed — a page navigated, a page got older.
     func descriptionChanged(for id: String) {
-        if hovered == id { refreshHoverDescription() }
         if nodeViews[id]?.isEngaged == true { pageStateChanged() }
-    }
-
-    private func refreshHoverDescription() {
-        let description = hovered.flatMap { nodeViews[$0]?.cardDescription }
-        guard description != toolTip else { return }
-        toolTip = description
     }
 
     /// What the pointer is currently doing. Nil between gestures.
@@ -482,6 +543,10 @@ final class CanvasBoardView: NSView {
     /// `settleIntoLayout`.
     private func buildNodeViews() {
         guard window != nil else { return }
+        FrameMeter.span("build") { buildNodeViewsBody() }
+    }
+
+    private func buildNodeViewsBody() {
         let visible = canvasRect(visibleRect)
         let keep = visible.inset(by: max(visible.width, visible.height) * 0.5)
 
@@ -522,7 +587,39 @@ final class CanvasBoardView: NSView {
     /// Internal because a drag calls it directly: a card being carried is repositioned on every
     /// mouse-moved event, and going through `setLayout` would be asking the board to reconsider a
     /// layout that has not changed.
+    /// The cards a layout is *not* showing, or nil for one that shows everything.
+    private func hiddenCards(of layout: CanvasLayout) -> Set<String>? {
+        guard let visible = layout.visible else { return nil }
+        let hidden = Set(document.nodes.map(\.id)).subtracting(visible)
+        return hidden.isEmpty ? nil : hidden
+    }
+
+    /// The cards the current crossing is fading out or in — the ones a workspace leaves behind. Kept
+    /// because `layout` stops being able to answer the question halfway through; see `setLayout`.
+    private(set) var fadingCards: Set<String> = []
+
+    /// Whether a card is drawn at all, and how strongly.
+    ///
+    /// **Faded, not hidden, while the crossing is on screen.** A workspace of six cards on a board of
+    /// forty-three used to take the other thirty-seven away in the frame it opened, which is the one
+    /// moment the board could have said what it was doing with them. Now they go as the six fly, and
+    /// come back as the six return — which is the true account: they are still there, they are not in
+    /// this workspace.
+    ///
+    /// Hidden at the end regardless. A card at zero alpha is still a card AppKit lays out, hit-tests
+    /// and hands events to, and a board of forty-three of those under a tiling is the cost the hiding
+    /// was there to avoid.
+    private func applyPresence(to view: CanvasNodeView, id: String) {
+        let fading = fadingCards.contains(id)
+        view.refreshTiledness(fading: fading)
+        view.isHidden = !layout.shows(id) && view.alphaValue <= 0.001
+    }
+
     func layoutNodeViews() {
+        FrameMeter.span("layoutViews") { layoutNodeViewsBody() }
+    }
+
+    private func layoutNodeViewsBody() {
         // The tiles' grips move with the tiles, and they are drawn a layer down from them.
         refreshTileHandles()
         if isTiled { tileHandleView.needsDisplay = true }
@@ -531,7 +628,8 @@ final class CanvasBoardView: NSView {
             // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
             // other thirty-seven and rebuild them on the way out — which for a board of web cards means
             // reloading every page you were watching, as the price of having glanced at six of them.
-            view.isHidden = !layout.shows(id)
+            // And faded rather than hidden while the crossing is running — see `applyPresence`.
+            applyPresence(to: view, id: id)
             // The arrangement may have handed this tile different corners — a tile moved from the end
             // of a stack into the middle keeps its size and loses two of them. Cheap when it hasn't,
             // which is every frame of a card being dragged around a board.
@@ -592,6 +690,11 @@ final class CanvasBoardView: NSView {
     /// it is the same argument in reverse on the way out.
     func setLayout(_ next: CanvasLayout, animated: Bool) {
         guard next != layout else { return }
+        // Whoever is out of the picture at either end of this change is out of it at both, as far as the
+        // fade is concerned: going in they are the cards the workspace does not show, and coming out
+        // they are the same cards arriving back. Worked out here because a moment later the layout
+        // cannot say — on the way out every card is in the layout again the instant it is set.
+        fadingCards = hiddenCards(of: next) ?? hiddenCards(of: layout) ?? []
         layout = next
         // Built first, placed second — and when the move is animated, placed inside the animation.
         // See `buildNodeViews`, which is the half that must not touch a card that is about to fly.
@@ -638,6 +741,10 @@ final class CanvasBoardView: NSView {
 
     /// Zoom changed: cards that render differently at different sizes get told.
     func magnificationChanged() {
+        FrameMeter.span("magChanged") { magnificationChangedBody() }
+    }
+
+    private func magnificationChangedBody() {
         for (id, view) in nodeViews {
             guard let node = document.node(id: id) else { continue }
             view.update(node: node, scale: liveScale)
@@ -655,8 +762,20 @@ final class CanvasBoardView: NSView {
     /// Cancelled and replaced on every scroll and zoom — see `settlePageBudget`.
     private var settleWork: DispatchWorkItem?
 
+    /// Whether the board is in the middle of a crossing — the fade still travelling, or the view still
+    /// flying to the zoom a tiling is laid out at.
+    var isCrossing: Bool { tiledFade.isMoving || scrollView?.canvasScroll?.isFlying == true }
+
     /// Decide again which pages are live, at the end of the current run loop pass.
     func reviewPageBudget() {
+        // **Not during a crossing**, which is exactly the case `settlePageBudget` was written for and
+        // the one place it was being routed around. Entering a workspace takes the board to 100%, that
+        // carries every web card across `pagesLoadAbove`, and each one asks for a review — which lands
+        // next runloop turn, in the middle of the animation, and builds a renderer per card while the
+        // tiles are trying to fly. Measured at 165–206ms in a single synchronous pass, inside a 350ms
+        // movement. A crossing is a gesture that has not finished saying what it wants, and the answer
+        // is the same one scrolling gets: decide when it stops.
+        if isCrossing { return settlePageBudget() }
         guard !budgetReviewQueued else { return }
         budgetReviewQueued = true
         DispatchQueue.main.async { [weak self] in
@@ -679,9 +798,36 @@ final class CanvasBoardView: NSView {
     }
 
     private func applyPageBudget() {
+        FrameMeter.span("pageBudget") { applyPageBudgetBody() }
+    }
+
+    private func applyPageBudgetBody() {
         settleWork?.cancel()
         settleWork = nil
         guard window != nil else { return }
+        let candidates = pageCandidates()
+        // A tiled view is not a budget problem — every tile runs. See `CanvasPageBudget.liveWhileTiled`.
+        let live = isTiled ? CanvasPageBudget.liveWhileTiled(among: candidates)
+                           : CanvasPageBudget.live(among: candidates)
+        if live != pagesLive {
+            Log.write("canvas pages live: \(live.count) of \(candidates.count)")
+            pagesLive = live
+        }
+        for (id, view) in nodeViews where view.isPageCard {
+            view.setPageLive(live.contains(id))
+            view.timePassed()
+        }
+        refreshStalePages()
+        keepWatchingPages(live.isEmpty)
+    }
+
+    /// Every page card on the board, as the budget sees it.
+    ///
+    /// This is the one place `lastVisibleAt` is written, and writing it here rather than at the top of
+    /// a particular caller is deliberate: the grace period measures how long ago a card was last
+    /// *drawn*, and every question about the budget is asked at a moment when the answer to that is
+    /// whatever is on screen right now.
+    private func pageCandidates() -> [CanvasPageBudget.Candidate] {
         let visible = canvasRect(visibleRect)
         let centre = CanvasPoint(x: visible.midX, y: visible.midY)
 
@@ -701,25 +847,14 @@ final class CanvasBoardView: NSView {
                                                               layout.frame(of: node).midY - centre.y),
                                     secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt)))
         }
-        // A tiled view is not a budget problem — every tile runs. See `CanvasPageBudget.liveWhileTiled`.
-        let live = isTiled ? CanvasPageBudget.liveWhileTiled(among: candidates)
-                           : CanvasPageBudget.live(among: candidates)
-        if live != pagesLive {
-            Log.write("canvas pages live: \(live.count) of \(candidates.count)")
-            pagesLive = live
-        }
-        for (id, view) in nodeViews where view.isPageCard {
-            view.setPageLive(live.contains(id))
-            view.timePassed()
-        }
-        refreshStalePages()
-        keepWatchingPages(live.isEmpty)
+        return candidates
     }
 
     /// How often this board's pages reload themselves, or nil for never.
     ///
     /// **A dashboard is a thing you leave up.** The board already knows how old each page is — it says
-    /// so on a card's tooltip — and until now did nothing whatever about it: a wall of tickets left
+    /// so in the header for the card you are in — and until now did nothing whatever about it: a wall
+    /// of tickets left
     /// open since the morning is a wall of tickets as they were in the morning, indistinguishable from
     /// how they are now. Off by default, because a page reloading itself is a network call you didn't
     /// ask for and some pages cost real money to fetch.
@@ -792,7 +927,7 @@ final class CanvasBoardView: NSView {
     }
 
     /// Only so a change can be logged once rather than on every settle.
-    private var pagesLive: Set<String> = []
+    private(set) var pagesLive: Set<String> = []
 
     /// Let every card go, because the board is going with it.
     ///
@@ -804,7 +939,10 @@ final class CanvasBoardView: NSView {
         for view in nodeViews.values { view.prepareForRemoval() }
     }
 
-    /// Freeze every page on this board — the window has stopped being looked at.
+    /// Freeze every page on this board, without exception — the board itself is going away.
+    ///
+    /// For giving the board up. Looking away is `pauseIdlePages`, which is not the same question and
+    /// must not have the same answer.
     func pauseAllPages() {
         settleWork?.cancel()
         settleWork = nil
@@ -814,13 +952,39 @@ final class CanvasBoardView: NSView {
         for view in nodeViews.values where view.isPageCard { view.setPageLive(false) }
     }
 
+    /// Whether the board is actually in front of somebody: not hidden, not minimised, not entirely
+    /// behind something else. `.visible` is any part of the window, which is the right threshold —
+    /// a board you have left a corner of showing is a board you meant to keep.
+    private var isOnScreen: Bool { window?.occlusionState.contains(.visible) ?? false }
+
+    /// Freeze this board's pages because the window has been left alone for a while — sparing the card
+    /// you are standing in, as long as PM is still on screen.
+    ///
+    /// The rule and the reasons are in `CanvasPageBudget.liveWhileAway`. Off screen, or with no window
+    /// at all, this is `pauseAllPages` and says so by calling it.
+    func pauseIdlePages() {
+        guard window != nil, isOnScreen else { return pauseAllPages() }
+        settleWork?.cancel()
+        settleWork = nil
+        let spared = CanvasPageBudget.liveWhileAway(among: pageCandidates(), onScreen: true)
+        if pagesLive != spared {
+            Log.write("canvas pages paused: \(pagesLive.subtracting(spared).count), "
+                + "kept \(spared.count) in use")
+        }
+        pagesLive = spared
+        // Stopped even with a card still live, because all the heartbeat does is apply the budget
+        // again — which would wake every card this just froze. The window becoming key starts it.
+        keepWatchingPages(true)
+        for (id, view) in nodeViews where view.isPageCard { view.setPageLive(spared.contains(id)) }
+    }
+
     // MARK: The grid
 
     /// How present the dot grid is, 0…1. See `drawGrid`.
     ///
     /// Up in a couple of frames, because it has to be there by the time you have noticed the card is
     /// moving; down slowly enough not to read as a blink between two quick drags.
-    private lazy var gridFade = CanvasFade(rise: 0.09, fall: 0.22) { [weak self] in
+    private lazy var gridFade = CanvasFade(rise: 0.09, fall: 0.22, on: self) { [weak self] in
         guard let self else { return }
         setNeedsDisplay(visibleRect)
     }
@@ -839,9 +1003,16 @@ final class CanvasBoardView: NSView {
 
     /// What this board is painted with. A tiling sits on a deeper ground than a board does, which is
     /// what buys the near-invisible tile edge and the four-point gap — see `CanvasPalette.tileGround`.
-    var ground: NSColor { isTiled ? CanvasPalette.tileGround : CanvasPalette.board }
+    ///
+    /// Asked of `tiledness` rather than of `isTiled`, so the step between the two grounds is taken over
+    /// the same third of a second the cards take to fly rather than in the frame the mode changed.
+    var ground: NSColor { CanvasPalette.ground(tiled: tiledness) }
 
     override func draw(_ dirty: NSRect) {
+        FrameMeter.span("boardDraw") { drawBody(dirty) }
+    }
+
+    private func drawBody(_ dirty: NSRect) {
         ground.setFill()
         dirty.fill()
         drawGrid(in: dirty)
@@ -849,8 +1020,17 @@ final class CanvasBoardView: NSView {
         // routed to a position a card no longer has would be fiction drawn at full contrast; a tiled
         // view is about content, and the relationships are still there when you come back out.
         guard layout.isDocument else { return }
+        // **And they come back at the pace the cards do.** The layout is the document's again in the
+        // frame leaving starts, while every card is still somewhere over the board — so drawn outright,
+        // a connection line is a full-contrast statement about where two cards are that will not be true
+        // for another third of a second. Faded in against the crossing, it is a claim that arrives as
+        // its evidence does. See `tiledness`.
+        guard tiledness < 0.999 else { return }
+        NSGraphicsContext.current?.saveGraphicsState()
+        NSGraphicsContext.current?.cgContext.setAlpha(CGFloat(1 - tiledness))
         drawGroups(in: dirty)
         drawEdges(in: dirty)
+        NSGraphicsContext.current?.restoreGraphicsState()
     }
 
     /// The dot grid — **while you are moving something, and not otherwise**.

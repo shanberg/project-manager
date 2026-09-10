@@ -50,7 +50,9 @@ final class CanvasTileHandleView: NSView {
         if let existing = handleFades[id] { return existing }
         // Quicker in than out: appearing has to keep up with a pointer, and leaving is allowed to take
         // its time because nothing is waiting on it.
-        let fade = CanvasFade(rise: 0.11, fall: 0.18) { [weak self] in self?.needsDisplay = true }
+        let fade = CanvasFade(rise: 0.11, fall: 0.18, on: self) { [weak self] in
+            self?.needsDisplay = true
+        }
         handleFades[id] = fade
         return fade
     }

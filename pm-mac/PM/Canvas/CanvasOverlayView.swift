@@ -44,7 +44,7 @@ final class CanvasOverlayView: NSView {
         }
     }
     private var drawnGhost: Ghost?
-    private lazy var ghostFade = CanvasFade(rise: 0.1, fall: 0.16) { [weak self] in
+    private lazy var ghostFade = CanvasFade(rise: 0.1, fall: 0.16, on: self) { [weak self] in
         self?.needsDisplay = true
     }
 

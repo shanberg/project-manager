@@ -26,8 +26,8 @@ import PmLib
 ///
 /// **Nothing is drawn on top of the page.** No caption strip above it, no freshness capsule floating
 /// over it. A loaded page fills the card corner to corner, and everything a card used to say about
-/// itself in its own chrome is said somewhere that costs the page nothing: the host and the age on the
-/// tooltip, and — for the one card you have stepped into, which is the only card whose address can
+/// itself in its own chrome is said somewhere that costs the page nothing: the host and the age to
+/// VoiceOver, and — for the one card you have stepped into, which is the only card whose address can
 /// cost you anything — the live address in the window's own header, beside the controls that drive it.
 /// See `cardDescription` and `CanvasHeaderModel`.
 @MainActor
@@ -120,8 +120,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// The name of whatever is actually on screen.
     ///
     /// The running page's own title first, and deliberately: a card you have followed a link out of is
-    /// showing something else, and what the tooltip owes you is the name of the thing in front of you
-    /// rather than the name of the thing the board meant to put there. The remembered one is the
+    /// showing something else, and what a name owes you is the thing in front of you rather than the
+    /// thing the board meant to put there. The remembered one is the
     /// answer for every card that isn't running, which is most of them.
     var liveTitle: String? {
         if let title = web?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
@@ -460,6 +460,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         configuration.suppressesIncrementalRendering = true
 
         let view = WKWebView(frame: .zero, configuration: configuration)
+        CanvasWebSession.allowInspecting(view)
         view.navigationDelegate = self
         view.uiDelegate = self
         // Left off deliberately: a two-finger swipe inside an engaged card would be a horizontal
@@ -597,7 +598,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         ])
     }
 
-    /// What the card says about itself when you linger on it.
+    /// What this card would say about itself if asked.
     ///
     /// This is where the caption strip went, and the freshness capsule with it. Both were chrome drawn
     /// on the card — one above the page, one over it — and both were saying things worth knowing
@@ -605,10 +606,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// captions and eleven capsules permanently on screen so that you could, once in a while, want one
     /// of them.
     ///
-    /// A tooltip is the Mac's own answer to exactly that: it costs nothing until you ask, it takes no
-    /// space, and asking is lingering rather than clicking. The board owns the tooltip and reads this
-    /// from whichever card is under the pointer — a card doesn't hit-test until you step into it, so it
-    /// could not carry one itself. See `CanvasBoardView.hovered`.
+    /// For a while a tooltip carried it, and no longer: hovering is how you get *past* a card as much
+    /// as how you attend to one, so the sentence arrived over cards nobody had asked about. It is now
+    /// said in the two places where it was asked for — the header, for the card you have stepped into,
+    /// and VoiceOver. See `CanvasNodeView.cardDescription`.
     override var cardDescription: String? {
         // The name first and the host under it, which is the order the placeholder puts them in and the
         // order the question is actually asked: what is this, then whose is it. A card whose page has
@@ -621,8 +622,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         return lines.joined(separator: "\n")
     }
 
-    /// Say it again, after anything that changes what it would say — the tooltip if the pointer is
-    /// here, and the window's header if this is the card you have stepped into.
+    /// Say it again, after anything that changes what it would say — the window's header, if this is
+    /// the card you have stepped into.
     private func describeYourself() {
         board.descriptionChanged(for: node.id)
     }

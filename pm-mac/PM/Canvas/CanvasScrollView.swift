@@ -1,5 +1,6 @@
 import AppKit
 import PmLib
+import QuartzCore
 
 /// The scroller a board sits in, and everything about zoom.
 ///
@@ -60,7 +61,9 @@ final class CanvasScrollView: NSScrollView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     /// The window changed size. A tiled view has to be laid out again for the shape it is now filling —
     /// see `CanvasBoardView.retileForWindowSize`.
@@ -194,6 +197,91 @@ final class CanvasScrollView: NSScrollView {
         setMagnification(min(max(zoom, Self.minimumZoom), Self.maximumZoom), centeredAt: centre)
         board.magnificationChanged()
     }
+
+    /// Ease to a zoom *and* a place at once, which is what crossing into or out of a workspace is.
+    ///
+    /// **Both, together, on one clock.** Entering a workspace puts the board at 100% and leaving hands
+    /// back the zoom you were at — a change the board used to make in the frame the key was pressed, on
+    /// the honest grounds that the alternative was two animations disagreeing. See
+    /// `CanvasBoardView.leaveTiling`, whose "the view first, then the cards" note is about exactly that
+    /// hazard. What made it safe is that the two are set here in the same step of the same timer, so
+    /// there is one answer per frame to where the board is and how big it is drawn.
+    ///
+    /// **The zoom travels as a ratio**, not as a distance: 40% to 100% and 100% to 250% are the same
+    /// gesture, and interpolating linearly makes the first half of a zoom-in crawl and the second half
+    /// lurch. This is the same argument `zoom(with:)` makes about a wheel notch.
+    ///
+    /// The cards are flying at the same time, on Core Animation's clock rather than this one — see
+    /// `CanvasBoardView.settleIntoLayout`. Two clocks, and safely: this one decides how the board is
+    /// scaled and where it is, that one decides where each card is *on* the board, and neither is
+    /// trying to answer the other's question. What must never be split across the two is a single
+    /// number, which is what `HeaderChromeMotionTests` is about at the other end of the window.
+    func fly(to zoom: CGFloat, centre point: CanvasPoint, animated: Bool) {
+        ticker.stop()
+        flight = nil
+        let wanted = min(max(zoom, Self.minimumZoom), Self.maximumZoom)
+        let seconds = animated ? Motion.duration(0.3) : 0
+        let from = magnification
+        let at = board.canvasPoint(NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY))
+        // **On the display's clock**, rather than a `Timer` at 1/60, and read from it rather than
+        // counted up: this runs at the same moment as `CanvasFade`'s crossing and as the cards' own
+        // Core Animation group, and three animations describing one movement have to agree about what
+        // time it is or the zoom arrives from a slightly different instant than the cards do. See
+        // `DisplayTicker`.
+        //
+        // A view with no screen to tick against has nothing to animate in front of, and arrives
+        // outright down the same path Reduce Motion and a zero distance take — and so, under
+        // `CrossingTuning`, does a run measuring what the zoom flight costs.
+        let flies = !CrossingTuning.current.contains(.skipZoomFlight)
+        guard flies, seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
+            magnification = wanted
+            centre(on: point)
+            board.magnificationChanged()
+            return
+        }
+        flight = Flight(from: from, to: wanted, at: at, centre: point,
+                        startedAt: CACurrentMediaTime(), seconds: seconds)
+    }
+
+    /// The crossing currently under way, if one is. Held so a second one takes over cleanly rather than
+    /// fighting the first for the magnification.
+    private var flight: Flight?
+
+    private struct Flight {
+        var from: CGFloat
+        var to: CGFloat
+        /// Where the board is looking now, and where it is going.
+        var at: CanvasPoint
+        var centre: CanvasPoint
+        var startedAt: CFTimeInterval
+        var seconds: Double
+    }
+
+    private lazy var ticker = DisplayTicker { [weak self] now in self?.stepFlight(at: now) }
+
+    private func stepFlight(at now: CFTimeInterval) {
+        guard let flight else { return ticker.stop() }
+        let fraction = min(1, max(0, (now - flight.startedAt) / flight.seconds))
+        // Ease out, matching the curve the cards are flying on closely enough that the two read as one
+        // movement. Not the spring: the board overshooting its zoom would show as the whole window
+        // breathing, which is a much larger claim than a card landing.
+        let eased = 1 - pow(1 - fraction, 3)
+        magnification = flight.from * pow(flight.to / flight.from, CGFloat(eased))
+        centre(on: CanvasPoint(x: flight.at.x + (flight.centre.x - flight.at.x) * eased,
+                               y: flight.at.y + (flight.centre.y - flight.at.y) * eased))
+        guard fraction >= 1 else { return }
+        ticker.stop()
+        self.flight = nil
+        // Once, at the end. Deciding which cards are worth building and how much detail each draws is
+        // a question about the zoom you arrived at — the same reason `settleZoom` defers it after a
+        // wheel.
+        board.magnificationChanged()
+        board.settlePageBudget()
+    }
+
+    /// Whether the board is mid-crossing. Nothing may re-lay a tiling out while it is — see
+    /// `CanvasBoardView.retileForWindowSize`.
+    var isFlying: Bool { flight != nil }
 
     /// Fit the whole board in the window — ⌘0, and what a window does when it opens.
     ///

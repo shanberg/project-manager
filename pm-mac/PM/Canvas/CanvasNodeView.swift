@@ -248,35 +248,130 @@ class CanvasNodeView: NSView {
     /// and not when this card does — a tile dragged from the end of a stack to the middle keeps
     /// everything about itself and loses two outer corners.
     var chromeRadii: CanvasTiling.Radii {
-        guard board.isTiled, let corners = board.tileCorners(node.id) else {
-            return .uniform(cornerRadius)
-        }
-        return corners.radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+        let card = CanvasTiling.Radii.uniform(cornerRadius)
+        guard let tile = tileRadii else { return card }
+        return CanvasTiling.Radii.mix(card, tile, at: board.tiledness)
     }
+
+    /// The corners a tile would have, or nil for a card that is not one and is not on its way back from
+    /// being one.
+    ///
+    /// **Remembered, because the mode flips before the paint does.** `leaveTiling` clears the session in
+    /// the frame you press the key — the board is a board again to every command in the app from that
+    /// moment — and `tileCorners` has nothing to answer with a moment later, while the corners are still
+    /// half way home. Held here rather than on the board because it is a per-card fact, and because the
+    /// card that keeps it is exactly the card that needs it.
+    private var tileRadii: CanvasTiling.Radii? {
+        if let corners = board.tileCorners(node.id) {
+            let radii = corners.radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+            lastTileRadii = radii
+            return radii
+        }
+        // Only while the crossing is still being drawn. A settled board has no tile corners and must
+        // not go on carrying a set: the next tiling may give this card different ones.
+        guard board.tiledness > 0.001 else {
+            lastTileRadii = nil
+            return nil
+        }
+        return lastTileRadii
+    }
+
+    private var lastTileRadii: CanvasTiling.Radii?
 
     /// The hairline this view wears. See `CanvasPalette.tileBorderKey` for why a tiled view says
     /// "this one" with its edge where a board says it with height.
+    ///
+    /// Mixed across the crossing like everything else here. The key/quiet choice is made at the tile
+    /// end only — a card's hairline does not have that distinction to make, because on a board being
+    /// picked is said with height.
     private var chromeBorder: NSColor {
-        guard board.isTiled else { return CanvasPalette.cardBorder }
-        let key = isEngaged || board.selection.contains(node.id)
-        return key ? CanvasPalette.tileBorderKey : CanvasPalette.tileBorder
+        let tile = isKey ? CanvasPalette.tileBorderKey : CanvasPalette.tileBorder
+        return CanvasPalette.hairline(card: CanvasPalette.cardBorder, tile: tile,
+                                      at: borderCrossing)
     }
 
-    /// The corners this view was last told to wear, so an arrangement that reshaped one tile doesn't
-    /// repaint the other five.
-    private var drawnRadii: CanvasTiling.Radii?
+    /// Whether this is the tile the arrows and Return are about. Only ever asked at the tile end —
+    /// see `chromeBorder`, and `CanvasPalette.tileBorderKey` for why the edge is what answers there.
+    private var isKey: Bool { isEngaged || board.selection.contains(node.id) }
 
-    /// The layout changed and may have changed this view's shape with it. Called for every card on
-    /// every pass of `CanvasBoardView.layoutNodeViews`, so the cheap answer has to be the common one.
+    /// How far *this card* is across, which is not the same as how far the board is.
+    ///
+    /// **A card the workspace does not show is not becoming a tile**, and it used to be drawn half as
+    /// though it were. `chromeRadii` asks `tileRadii` first, so those cards keep a card's corners the
+    /// whole way across; `chromeBorder` asked the board's `tiledness` outright and crossed their
+    /// hairlines to a tile's. Two answers about one card, and the corners had the right one.
+    ///
+    /// They agree now, and the agreement is what makes a crossing cheap. A card that is merely fading
+    /// stops depending on `tiledness` for anything it paints — same corners, same hairline, only the
+    /// alpha moving — so there is nothing for it to redraw on any of the twenty frames, and
+    /// `refreshChrome` can *see* that there isn't. See `CanvasBoardView.tilednessChanged`, which asks
+    /// every card on the board to reconsider itself on every one of those frames.
+    ///
+    /// Worth saying plainly what the change looks like: the hairline being crossed goes from alpha
+    /// 0.10 to 0.017, on a card that is itself on its way to alpha 0. What is given up is one of two
+    /// indistinguishable pictures.
+    private var borderCrossing: Double { tileRadii == nil ? 0 : board.tiledness }
+
+    /// The board crossed a little further between its two modes. Everything drawn against `tiledness`
+    /// is reconsidered; the shadow, which is a layer property rather than paint, is set rather than
+    /// drawn. Nothing is written that has not moved — see below, and `refreshChrome`.
+    ///
+    /// `fading` is for the cards a workspace is not showing: they are still on the board, so they go out
+    /// as the tiles come in rather than disappearing in the frame the key was pressed. See
+    /// `CanvasBoardView.fadingCards`.
+    func refreshTiledness(fading: Bool) {
+        let wanted = CGFloat(fading ? 1 - board.tiledness : 1)
+        let moved = abs(wanted - alphaValue) > 0.0005
+        // **Nothing is written that has not moved.** This used to set all four outright, which on a
+        // board of forty-three cards is forty-three full repaints and forty-three layout passes per
+        // frame, in service of the six that are actually changing. Alpha is a layer property and
+        // assigning it marks the layer for recompositing whether or not the number differs; a tile
+        // sits at 1 for the whole crossing, and a card that has finished fading sits at 0.
+        if moved { alphaValue = wanted }
+        // A card that is invisible and staying invisible has nothing left to say. Barely worth it
+        // during the crossing itself — a card is only hidden once its alpha has reached zero, which is
+        // the last frame — but this is also the path `CanvasBoardView.layoutNodeViews` takes, and in a
+        // settled workspace that runs for every card on the board on every frame of a divider drag,
+        // with the thirty-seven the workspace is not showing hidden at zero the whole time.
+        guard moved || !isHidden else { return }
+        refreshElevation()
+    }
+
+    /// What this view's paint is a function of.
+    ///
+    /// All three move for a tile, and none of them move for a card the workspace is not showing — see
+    /// `borderCrossing`, which is what makes that true. Held together so that one comparison can answer
+    /// "is there anything to redraw", which is a question asked of every card on every frame.
+    private struct Appearance: Equatable {
+        var radii: CanvasTiling.Radii
+        var key: Bool
+        var crossing: Double
+    }
+
+    /// What this view was last told to wear, so an arrangement that reshaped one tile doesn't repaint
+    /// the other five — and so a crossing repaints the tiles rather than the board.
+    private var drawn: Appearance?
+
+    /// The layout, the selection or the crossing changed and may have changed this view's paint with
+    /// it. Called for every card on every pass of `CanvasBoardView.layoutNodeViews` and on every frame
+    /// of a crossing, so the cheap answer has to be the common one.
     func refreshChrome() {
-        let radii = chromeRadii
-        guard radii != drawnRadii else { return }
-        drawnRadii = radii
+        let crossing = borderCrossing
+        // Off a tile, `chromeBorder` resolves to `cardBorder` whatever this says — being picked is said
+        // with height on a board, not with the edge — so it is held out of the comparison rather than
+        // invalidating every card in the selection for a change it cannot show. See `refreshElevation`.
+        let now = Appearance(radii: chromeRadii, key: crossing > 0 && isKey, crossing: crossing)
+        guard now != drawn else { return }
+        drawn = now
         needsLayout = true
         needsDisplay = true
     }
 
     override func draw(_ dirty: NSRect) {
+        FrameMeter.span("cardDraw") { drawBody() }
+    }
+
+    private func drawBody() {
         let path = CanvasNodeView.path(in: bounds.insetBy(dx: 0.5, dy: 0.5),
                                        radii: chromeRadii.inset(by: 0.5))
         CanvasPalette.card.setFill()
@@ -325,10 +420,22 @@ class CanvasNodeView: NSView {
     /// from the alpha of what was drawn into it, which is the rounded card — but the corner radius on
     /// the clip did not, and it is the one that has to change now.
     override func layout() {
+        FrameMeter.span("cardLayout") { layoutBody() }
+    }
+
+    private func layoutBody() {
         super.layout()
+        let radii = chromeRadii
+        // **Everything below is a function of these two**, and both of the paths it builds are four
+        // tangent arcs turned into a `CGPath` — an allocation each. `layout` runs on every frame of a
+        // divider drag, and `refreshTiledness` used to ask for one on every frame of a crossing for
+        // every card on the board, almost all of which were neither resizing nor reshaping. A card
+        // whose size and corners have not moved keeps the paths it already has.
+        let shape = Shape(bounds: bounds, radii: radii)
+        guard shape != shaped else { return }
+        shaped = shape
         // Concentric: a curve inset from another curve keeps a constant gap only when its radius is
         // reduced by that inset. Equal radii would leave the border pinching shut at the corners.
-        let radii = chromeRadii
         let inside = radii.inset(by: CanvasNodeView.hairline)
 
         if radii.isUniform {
@@ -361,6 +468,15 @@ class CanvasNodeView: NSView {
     /// layer rather than build one — `layout` runs on every frame of a divider drag.
     private var clipMask: CAShapeLayer?
 
+    /// The size and corners the paths in `layout` were built for. `clip` is pinned to this view by
+    /// constraints with a constant inset, so its bounds are a function of these and need not be kept.
+    private struct Shape: Equatable {
+        var bounds: NSRect
+        var radii: CanvasTiling.Radii
+    }
+
+    private var shaped: Shape?
+
     // MARK: Lifecycle the board drives
 
     /// The card, or the zoom, changed. Subclasses re-render whatever depends on either.
@@ -370,6 +486,7 @@ class CanvasNodeView: NSView {
     /// a scroll that crossed it without rebuilding would leave every visible card in the wrong form.
     func update(node: CanvasNode, scale: Double) {
         let wasSimplified = isSimplified
+        let sameNode = node == self.node
         self.scale = scale
         let changed = node.content != self.node.content && !isOwnEdit(node.content)
         let rezoomed = CanvasCardZoom.of(node) != contentZoom
@@ -381,6 +498,19 @@ class CanvasNodeView: NSView {
             contentZoomChanged()
         } else if wasSimplified != isSimplified {
             simplificationChanged()
+        } else if sameNode {
+            // **Nothing about this card moved, so nothing about it is redrawn.** This used to fall
+            // through to the two lines below whatever it had been handed, which is fine for the pass
+            // that follows an edit and ruinous for the pass that follows a *zoom*: the board is rebuilt
+            // on every frame of a flight (`CanvasScrollView.centre(on:)`), so entering a workspace ran
+            // this for all forty-three cards a dozen times, and every one of those invalidated a card
+            // that was drawing exactly what it had been drawing. Measured at a dozen full rebuilds
+            // inside a 350ms crossing.
+            //
+            // The scale is still taken, above — `isSimplified` is read from it and a card that crosses
+            // that threshold is caught by the branch before this one. Nothing else this view paints is
+            // a function of the zoom.
+            return
         }
         refreshAccessibility()
         needsDisplay = true
@@ -451,7 +581,7 @@ class CanvasNodeView: NSView {
     /// Say what this card is, to VoiceOver.
     ///
     /// A board is a field of unlabelled rectangles otherwise. The description a card already writes for
-    /// its tooltip is the same sentence VoiceOver wants — what the card is and anything unusual about it
+    /// the header is the same sentence VoiceOver wants — what the card is and anything unusual about it
     /// — so there is one answer rather than two that can disagree. Cards that have no description fall
     /// back to what they hold, which for a text card is its text and for a web card its host.
     ///
@@ -466,15 +596,17 @@ class CanvasNodeView: NSView {
     /// What to say for a card with nothing to add — overridden where the content knows better.
     var accessibilityFallback: String { "Card" }
 
-    /// What this card says about itself when the pointer rests on it, or nil for a card that says
-    /// everything it has to say by being looked at.
+    /// What this card would say about itself if asked, or nil for a card that says everything it has to
+    /// say by being looked at.
     ///
     /// Cards carry no chrome: no strip naming the file, no capsule over the page saying how old it is.
-    /// The facts those carried are still worth having occasionally, and a tooltip is what macOS offers
-    /// for exactly that shape of fact — free until asked for, and asked for by lingering rather than by
-    /// clicking. Answered by the *board*, which is the view actually under the pointer: an unengaged
-    /// card returns nil from `hitTest`, so it never sees the mouse and could not own a tooltip if it
-    /// wanted one. See `CanvasBoardView.hovered`.
+    /// **Nor a tooltip**, and once there was one. A tooltip that appears a second after the pointer
+    /// stops is a caption on whatever your pointer happened to cross on the way somewhere else — on a
+    /// board, where the pointer crosses several cards to reach one, that is a caption you did not ask
+    /// for over the card you were not going to. The facts are still worth having, and the two places
+    /// that ask are the header, which says them for the card you have actually stepped into, and
+    /// VoiceOver, which is asking for exactly this sentence anyway. See `refreshAccessibility` and
+    /// `CanvasHeaderModel`.
     var cardDescription: String? { nil }
 
     /// Step into this card: a text card takes the caret, a web card takes its own scrolling.
@@ -508,19 +640,28 @@ class CanvasNodeView: NSView {
         // left to say which tile the arrows and Return are about. The edge says it now, which is a
         // thing a pane can do; see `CanvasPalette.tileBorderKey`.
         //
-        // Redrawn as well as re-lifted, because in a tiling the answer is *in* the drawing.
-        if board.isTiled {
-            layer?.shadowOpacity = 0
-            needsDisplay = true
-            return
-        }
+        // Redrawn as well as re-lifted, because in a tiling the answer is *in* the drawing. Asked of
+        // `refreshChrome` rather than set outright: a tiled board used to redraw every card here on
+        // every frame of a crossing, and the edge this is about only changes when the key tile does.
+        defer { refreshChrome() }
         switch (board.mode, picked, isEngaged) {
         case (.view, _, true): lift = (0.30, 17, 7)
         case (.view, true, _): lift = (0.22, 11, 4)
         default: lift = (0.13, 5, 1.5)
         }
-        layer?.shadowOpacity = lift.opacity
-        layer?.shadowRadius = lift.radius
+        // **The height is spent as the board crosses**, rather than switched off with the mode. Nothing
+        // else here is scaled by `tiledness`: the radius and the hairline are mixed between two values,
+        // and this one has only the one value and no tile end to mix towards — a tile has no shadow at
+        // all, which is the mode's whole claim.
+        //
+        // Written only when it moves, for the reason `refreshTiledness` guards its alpha: the opacity
+        // genuinely travels on every frame of a crossing, and the radius and the offset never do.
+        let wanted = Lift(opacity: lift.opacity * Float(1 - board.tiledness),
+                          radius: lift.radius, drop: lift.drop)
+        guard wanted != lifted else { return }
+        lifted = wanted
+        layer?.shadowOpacity = wanted.opacity
+        layer?.shadowRadius = wanted.radius
         // **Positive is down here.** A card sits in a flipped superview — `CanvasBoardView.isFlipped` —
         // and AppKit places a layer inside one by flipping the backing layer's geometry, which takes
         // the shadow offset with it. So the negative height that means "down" on an ordinary layer cast
@@ -529,8 +670,18 @@ class CanvasNodeView: NSView {
         // The superview's flippedness is what decides, not this view's own; `CanvasNoticeBar` is
         // flipped too and its shadow is spelled the other way round, correctly. See
         // `FlippedShadowTests`, which asserts all three cases against AppKit rather than against us.
-        layer?.shadowOffset = CGSize(width: 0, height: lift.drop)
+        layer?.shadowOffset = CGSize(width: 0, height: wanted.drop)
     }
+
+    /// The height this card was last set to. See `refreshElevation`, which is called for every card on
+    /// the board on every frame of a crossing and on every change of selection.
+    private struct Lift: Equatable {
+        var opacity: Float
+        var radius: Double
+        var drop: Double
+    }
+
+    private var lifted: Lift?
 
     /// About to be thrown away because it scrolled out of view. A web card stops loading here.
     func prepareForRemoval() {}

@@ -20,32 +20,25 @@ extension CanvasBoardView {
 
     // MARK: Entering and leaving
 
-    /// ⌘Return. Fill the window with the selection, or with what is on screen when nothing is selected.
+    /// ⌘Return. Make a workspace out of the selection — or, inside one, go back to the canvas.
     ///
-    /// Pressed *inside* a tiling it drills in rather than leaving: with one tile picked out of six, the
-    /// obvious next thing to want is that one filling the window, and Escape then comes back to the six
-    /// before it comes back to the board. That is the same command meaning the same thing at a third
-    /// scale — a card, a handful, the board — rather than a second key for going deeper.
+    /// **One meaning in each place, which it did not have.** Pressed inside a tiling this used to drill
+    /// in: with one tile picked out of six, the six went away and that one filled the window, and only
+    /// with nothing left to narrow to did the same key become the way out. So the key you press to
+    /// leave a workspace usually did not leave it. That is now the only thing it does there, and
+    /// looking at one tile on its own is `toggleMaximizeTile` — a different act, with a key of its own,
+    /// that puts the workspace back when you are done.
     ///
-    /// With nothing left to narrow to — one tile, or all of them picked — it is the way out, and it
-    /// goes all the way out. See `leaveTiling`, and `CanvasTiling.commandTitle`, which has been calling
-    /// this case "Leave Tiled View" the whole time.
+    /// **A workspace is made out of a selection or not at all.** Nothing selected used to tile whatever
+    /// was on screen. A tiled view was a way of looking and that was a fair thing for it to mean; a
+    /// workspace is a named thing that is saved and gets a tab, and making one out of whatever you
+    /// happen to be scrolled to is a surprise you then have to go and delete. See
+    /// `CanvasTiling.commandTitle`, which dims rather than guessing.
     @objc func tileSelection(_ sender: Any?) {
-        if let session = tiling {
-            let picked = selection.intersection(session.ids)
-            guard !picked.isEmpty, picked.count < session.ids.count else {
-                // Nothing left to drill into, so this is the other end of the command: the board.
-                // Not `untile`, which unwinds one level — from a card you had drilled into, that
-                // handed you back the tiling you came from, and the next press drilled straight into
-                // it again. ⌘↩ alternated between the two forever with the card still filling the
-                // window, which is the one way out of a tiling that has to work.
-                //
-                // **A change of tab, not a change to the board.** The tiles stay exactly as they are;
-                // the window shows its canvas. See `onGoToCanvas`.
-                return onGoToCanvas()
-            }
-            tilingHistory.append(session)
-            return tile(picked)
+        guard tiling == nil else {
+            // **A change of tab, not a change to the board.** The tiles stay exactly as they are; the
+            // window shows its canvas. See `onGoToCanvas`.
+            return onGoToCanvas()
         }
         let ids = tileTargets
         guard !ids.isEmpty else { return NSSound.beep() }
@@ -81,8 +74,7 @@ extension CanvasBoardView {
     }
 
     /// Hand this tiling to the window as a workspace, and say whether it took it. Only from a board
-    /// that is not already tiled — inside a tiling, ⌘↩ is a drill-in and belongs to the workspace you
-    /// are already in.
+    /// that is not already tiled — inside a workspace ⌘↩ is the way out, and there is nothing to make.
     func offerAsWorkspace(_ ids: Set<String>,
                           arrangement: CanvasTiling.Arrangement? = nil) -> Bool {
         guard tiling == nil, let plan = plannedTiling(for: ids, arrangement: arrangement) else {
@@ -106,23 +98,40 @@ extension CanvasBoardView {
             guard let node = document.node(id: id), node.isGroup else { continue }
             ids.formUnion(canvasCardsInside(node.frame, of: document))
         }
-        // Nothing selected: everything you can currently see. A board you have scrolled to a corner of
-        // is a selection you made with the scroll bar.
-        if ids.isEmpty {
-            let visible = canvasRect(visibleRect)
-            ids = Set(document.nodes.filter { !$0.isGroup && $0.frame.intersects(visible) }.map(\.id))
-        }
+        // **Nothing selected is nothing to make**, and it used to be everything on screen. A tiled
+        // view was a way of looking, so "fill the window with what I can see" was a fair reading of an
+        // empty selection; a workspace is saved, named and given a tab, and one made out of wherever
+        // the board happened to be scrolled is a thing you then have to go and delete. It also cost
+        // this property a scan of the visible region on every call — see `tileCommandTitle`, which had
+        // to route around it.
         return ids
     }
 
     /// What ⌘Return is called right now. See `CanvasTiling.commandTitle`, which owns the wording.
     var tileCommandTitle: String {
-        CanvasTiling.commandTitle(tiled: tiling?.ids.count,
-                                  picked: tiling.map { selection.intersection($0.ids).count } ?? 0,
-                                  // Not asked for when nothing is selected: `tileTargets` would scan
-                                  // the visible region to answer, and the wording does not use it.
-                                  targets: isTiled || selection.isEmpty ? 0 : tileTargets.count,
-                                  selected: !selection.isEmpty)
+        CanvasTiling.commandTitle(tiled: isTiled, targets: isTiled ? 0 : tileTargets.count)
+    }
+
+    /// Whether ⌘Return has anything to do: a workspace to make, or one to leave.
+    var canRunTileCommand: Bool { isTiled || !tileTargets.isEmpty }
+
+    /// What the header's tile capsule draws, or nil when there is no one tile to draw it for.
+    ///
+    /// **The conditions are decided here**, on the board, rather than in the capsule — a tile in a grid
+    /// has no master to become, and a tile in a grid of both rows and columns has no run to pin along,
+    /// and those are facts about the arrangement rather than about the chrome. The capsule is then a
+    /// drawing of a state instead of a second copy of these rules, which is what stops the header and
+    /// the contextual menu offering different verbs for the same tile.
+    ///
+    /// **Nil in a workspace of one tile**, which is the project-note view: nothing to promote, nothing
+    /// to pin, and a tile that already fills the room. A capsule there would be two controls that
+    /// cannot do anything.
+    var tileControls: CanvasHeaderModel.TileControls? {
+        guard let tiling, tiling.ids.count > 1, let id = focusedTile else { return nil }
+        return CanvasHeaderModel.TileControls(
+            isMaximized: tiling.maximized != nil,
+            canPromote: tiling.arrangement == .masterStack && tiling.ids.first != id,
+            pinTitle: pinnableTile == nil ? nil : pinTileTitle)
     }
 
     /// Tile these cards, whatever asked for it.
@@ -152,8 +161,10 @@ extension CanvasBoardView {
         // happens to inherit. Set before the area is measured: `tileableRect` is in canvas coordinates,
         // and how much canvas the window covers is exactly what just changed.
         let restoreZoom = tiling?.restoreZoom ?? Double(scrollView?.magnification ?? 1)
-        scrollView?.canvasScroll?.setZoom(1)
-        let area = tileableRect
+        // **Measured for 100%, then travelled to.** This used to set the zoom outright and measure
+        // afterwards, which is the same arithmetic with the journey missing — see
+        // `tileableRect(atZoom:)` and `CanvasScrollView.fly(to:centre:animated:)`.
+        let area = FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) }
         let order = remembered?.ids ?? CanvasTiling.order(cards)
         let session = CanvasTileSession(
             ids: order,
@@ -170,9 +181,80 @@ extension CanvasBoardView {
         // tile — which in master-and-stack is the master, the one you are most likely to mean.
         let kept = selection.intersection(ids)
         selection = kept.isEmpty ? [order[0]] : kept
+        // Started before the movement rather than with it, so the first frames — the most expensive
+        // ones, where every card is invalidated at once — are inside the measurement. See `FrameMeter`.
+        FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(order.count) tiles, "
+                              + "\(pagesLive.count) live)", on: self)
+        flyToTiles(of: session, animated: true)
         setLayout(session.layout, animated: true)
         onTilingChanged?()
         announceTiling()
+    }
+
+    /// Take the board to the zoom and the place a tiling is laid out for.
+    ///
+    /// **Not the area's own centre**, which is what this flew to at first and is wrong by half the
+    /// margins: the tiles are pushed down by the header's clearance and in by the sidebar, so the middle
+    /// of the tiles is not the middle of the window. `CanvasTiling.centre(framing:margins:)` is the
+    /// inverse of the measurement, and lives beside it for that reason.
+    ///
+    /// For a board entering its own workspace this is the centre it is already at, so nothing slides —
+    /// the flight is only about the zoom. For one posing as a workspace it borrowed from another pane
+    /// (`poseAsTiling`) it is the centre that frames those tiles the way that pane had them, which is
+    /// the whole point of the pose.
+    func flyToTiles(of session: CanvasTileSession, animated: Bool) {
+        let centre = CanvasTiling.centre(framing: session.area, margins: tileMargins(atZoom: 1))
+        scrollView?.canvasScroll?.fly(to: 1, centre: centre, animated: animated)
+    }
+
+    // MARK: Arriving from the pane before this one
+
+    /// What this board looks like at the moment the window stops showing it, for the board that is
+    /// about to take its place. See `CanvasArrival`.
+    var departure: CanvasArrival {
+        CanvasArrival(zoom: Double(scrollView?.magnification ?? 1),
+                      centre: canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)),
+                      tiling: tiling)
+    }
+
+    /// Stand exactly where the board before this one was standing, wearing the workspace it was wearing
+    /// — and do it in one frame, with nothing animated.
+    ///
+    /// **The pose, which is the whole trick.** Going from a workspace to the canvas is not one board
+    /// changing its mind, it is one *pane* being hidden and another shown (`ProjectContentPane.show`):
+    /// two boards, two sets of card views, on the same document. Nothing can fly across that seam. What
+    /// can happen is that the board arriving starts out identical to the one leaving — same zoom, same
+    /// centre, same tiles, same ground — so that the swap itself has nothing to show, and then leaves
+    /// the tiling in the ordinary way, which is a thing this board already knows how to animate.
+    ///
+    /// The restore point is overwritten with *this* board's own, because that is where leaving has to
+    /// put you: the tiles are borrowed, but the board underneath them is this pane's and it was already
+    /// looking somewhere.
+    func poseAsTiling(_ session: CanvasTileSession) {
+        var posed = session
+        posed.restoreZoom = Double(scrollView?.magnification ?? 1)
+        posed.restoreVisible = canvasRect(visibleRect)
+        tiling = posed
+        // Held rather than set: `tiling` starts the crossing fading *towards* tiles, and this board is
+        // to be found already there. See `CanvasFade.hold`.
+        holdTiledness(1)
+        setLayout(posed.layout, animated: false)
+        flyToTiles(of: posed, animated: false)
+    }
+
+    /// The same pose the other way round: the board as the canvas the pane before this one was showing.
+    ///
+    /// Leaving first, because a workspace pane that has been visited before is still tiled and has to
+    /// stop being, and because `leaveTiling` is where the tiles are let go of properly — the engaged
+    /// card stepped out of, the arrangement kept for next time.
+    func poseAsCanvas(zoom: Double, centre: CanvasPoint) {
+        // Kept across the leave: this pane's tab is still pinned to its workspace, and it is about to
+        // be tiled into it again a runloop turn from now.
+        let name = workspaceName
+        leaveTiling(animated: false)
+        workspaceName = name
+        holdTiledness(0)
+        scrollView?.canvasScroll?.fly(to: CGFloat(zoom), centre: centre, animated: false)
     }
 
     /// Put back the tiling a board was left in — see `CanvasViewState`.
@@ -184,24 +266,25 @@ extension CanvasBoardView {
     ///
     /// Cards that have gone since are dropped rather than treated as a reason to give up — a board you
     /// deleted one card from is still the board you were looking at.
-    func restoreTiling(_ remembered: CanvasViewState.Tiling, named name: String? = nil) {
+    /// `animated` is for the one case where there is something to watch: a board that is *already* on
+    /// screen showing its cards, being asked to make them into this workspace. A pane built to show a
+    /// workspace has nothing to animate from and passes false — see `CanvasPaneController.arrive(from:)`,
+    /// which is how a pane comes to have something to animate from after all.
+    func restoreTiling(_ remembered: CanvasViewState.Tiling, named name: String? = nil,
+                       animated: Bool = false) {
         let live = remembered.ids.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
         guard !live.isEmpty else { return }
         workspaceName = name
-        // Whatever you were drilled into belonged to the workspace being replaced. Left behind, Escape
-        // would hand you back a narrowing of a workspace you are no longer in.
-        tilingHistory.removeAll()
         // The zoom a tiling is shown at, and the fitted zoom to hand back on the way out — the same
         // two `tile` sets, arrived at the same way round. See there for why.
         let restoreZoom = Double(scrollView?.magnification ?? 1)
-        scrollView?.canvasScroll?.setZoom(1)
         let session = CanvasTileSession(ids: live,
                                         arrangement: remembered.arrangement,
                                         masterFraction: remembered.masterFraction,
                                         // Only for cards that are still here: a size left behind for a
                                         // deleted card would come back the moment its id was reused.
                                         sizes: (remembered.sizes ?? [:]).filter { live.contains($0.key) },
-                                        area: tileableRect,
+                                        area: FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) },
                                         // Where leaving puts you back. Not remembered: it is the region
                                         // the board would be showing anyway, which on one just opened
                                         // is the whole of it — the right place to be returned to.
@@ -210,7 +293,12 @@ extension CanvasBoardView {
         tiling = session
         lastTiling = memory(of: session)
         selection = [live[0]]
-        setLayout(session.layout, animated: false)
+        if animated {
+            FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(live.count) tiles, "
+                                  + "\(pagesLive.count) live)", on: self)
+        }
+        flyToTiles(of: session, animated: animated)
+        setLayout(session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
     }
@@ -246,41 +334,67 @@ extension CanvasBoardView {
         count >= 4 ? .masterStack : .grid
     }
 
-    /// Escape. Back out one level of drill-in — **and stop at the root.**
+    // MARK: Maximizing one tile
+
+    /// The tile filling the window on its own, if one is.
+    var maximizedTile: String? { tiling?.maximized }
+
+    /// Fill the room with one tile for a moment, or put the workspace back — **maximizing a window,
+    /// not drilling into a tiling.**
     ///
-    /// It used to keep going: at the root of the stack the next Escape left the tiled view altogether.
-    /// That was one step too far. A tiled view is where you are *working*, and Escape is the key that
-    /// dismisses a menu, cancels a field and steps out of a card — all of them smaller acts that
-    /// happen *inside* a workspace. Making the same key also close the workspace means every cancelled
-    /// edit is one keystroke away from tearing down a workspace you built by hand.
+    /// The difference is what happens next. Drilling in made a real tiling of the one card and pushed
+    /// the six you came from onto a history, so everything downstream had to reason about which of the
+    /// two you meant: ⌘Return meant "narrow further" until it didn't, Escape unwound a stack, and the
+    /// write-through to `CanvasWorkspaces` needed a guard to stop a workspace being reduced to the tile
+    /// you were reading. None of that is here. `maximized` is one field on the session, it is not in
+    /// `memory(of:)`, and restoring is the same layout you already had.
     ///
-    /// So at the root it does nothing, which is the right amount for a key with nothing left to cancel.
-    /// Leaving has its own three doors and always did: ⌘↩, the header's ✕, and stepping to a frame.
-    /// See `leaveTiling`.
-    func untile(animated: Bool) {
-        guard tiling != nil, let previous = tilingHistory.popLast() else { return }
-        tiling = previous
-        selection = selection.intersection(previous.ids)
-        setLayout(previous.layout, animated: animated)
+    /// **Maximize, not zoom**, though the Mac calls the green button Zoom: this board already has a
+    /// magnification, and cards have a content zoom of their own, and a third meaning of the word would
+    /// be one too many.
+    ///
+    /// Nothing to do in a workspace of one tile — it already fills the room.
+    func toggleMaximizeTile(_ id: String, animated: Bool = true) {
+        guard var session = tiling, session.ids.count > 1, session.ids.contains(id) else { return }
+        session.maximized = session.maximized == id ? nil : id
+        tiling = session
+        // The tile you are looking at is the tile the arrows and the menus are about. Maximizing one
+        // you had not picked would otherwise leave the selection on a tile that is no longer drawn.
+        if session.maximized != nil { selection = [id] }
+        setLayout(session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
     }
 
-    /// Leave the tiled view altogether, however deep into it you have drilled.
+    /// Put the workspace back, if a tile is filling it. Answers whether it had anything to do, because
+    /// Escape has somewhere else to go when it doesn't — see `cancelOperation`.
+    @discardableResult
+    func restoreMaximizedTile(animated: Bool = true) -> Bool {
+        guard let id = maximizedTile else { return false }
+        toggleMaximizeTile(id, animated: animated)
+        return true
+    }
+
+    /// Restore first, then act — for the commands that rearrange a workspace you cannot currently see.
     ///
-    /// **Escape unwinds; everything else leaves.** The drill-in is a stack and backing out of it one
-    /// level at a time is exactly what Escape is for — see `untile`. Every other way out means the
-    /// board and says so: ⌘↩ is one command at both ends, the header's ✕ is labelled "leave the
-    /// tiled view", and stepping to a frame is a request to go and look at somewhere else.
+    /// Promoting or removing a tile while one is maximized changes an order whose evidence is all off
+    /// screen, and leaves you looking at the same single tile with no sign anything happened. Putting
+    /// the workspace back first makes the change the thing you watch.
+    func restoringMaximized(_ work: () -> Void) {
+        restoreMaximizedTile(animated: false)
+        work()
+    }
+
+    /// Leave the tiled view altogether.
     ///
-    /// **What is kept is the workspace you built, not the card you left through.** The order you
-    /// dragged the tiles into and the widths you set are the deliberate work; a fullscreen card you
-    /// drilled into to read is not something to hand back the next time you tile those cards. So the
-    /// stack's root is the session that gets remembered — see `CanvasViewState.lastTiling`.
+    /// **What is kept is the workspace, not the tile you left through.** A maximized tile is a way of
+    /// looking at the workspace for a moment (see `toggleMaximizeTile`), so it is not in
+    /// `memory(of:)` and cannot be what comes back next time. This used to have to say that out loud:
+    /// the drill-in made a *real* tiling of one card, so leaving had to reach past a history to find
+    /// the session worth remembering. There is no history now, and the session in hand is the one.
     func leaveTiling(animated: Bool) {
-        guard let current = tiling else { return }
-        let session = tilingHistory.first ?? current
-        tilingHistory.removeAll()
+        guard let session = tiling else { return }
+        let current = session
         // Step out of whatever tile you were typing in. Engagement is the tiled view's own doing — see
         // `tileClicked` — and leaving it holding would hand back a board with one card open in an
         // editor, which is a state you never asked the board for.
@@ -288,15 +402,26 @@ extension CanvasBoardView {
         // Kept, not discarded — see `CanvasViewState.lastTiling`.
         lastTiling = memory(of: session)
         tiling = nil
-        // **The view first, then the cards.** Both halves of leaving change where a card is drawn: the
-        // zoom changes how canvas coordinates map to the window, and the layout changes which canvas
-        // coordinates each card has. Done the other way round — as this was — the cards are set
-        // animating toward frames measured in the old zoom, and the magnification changes out from
-        // under the animation while it runs. What lands is every card at its 100% size on a board that
-        // is now at 35%, which is one card filling the window and the rest somewhere off the edge of it.
-        scrollView?.canvasScroll?.setZoom(CGFloat(session.restoreZoom))
-        scrollView?.canvasScroll?.centre(on: CanvasPoint(x: session.restoreVisible.midX,
-                                                         y: session.restoreVisible.midY))
+        // **The view and the cards, started together and travelling together.** Both halves of leaving
+        // change where a card is drawn: the zoom changes how canvas coordinates map to the window, and
+        // the layout changes which canvas coordinates each card has. This used to set the view outright
+        // and then animate the cards, and the order mattered enormously — done the other way round, the
+        // cards were set animating toward frames measured in the old zoom and the magnification changed
+        // out from under the animation while it ran, landing every card at its 100% size on a board now
+        // at 35%.
+        //
+        // What makes the two safe to run at once is that neither is answering the other's question. The
+        // flight owns the zoom and the scroll — how the board is drawn and where — and the cards own
+        // their canvas frames, which the zoom does not enter into. Every frame has one answer for each.
+        // See `CanvasScrollView.fly(to:centre:animated:)`.
+        if animated {
+            FrameMeter.measure("tiles → canvas (\(nodeViews.count) views, \(current.ids.count) tiles, "
+                                   + "\(pagesLive.count) live)", on: self)
+        }
+        scrollView?.canvasScroll?.fly(to: CGFloat(session.restoreZoom),
+                                      centre: CanvasPoint(x: session.restoreVisible.midX,
+                                                          y: session.restoreVisible.midY),
+                                      animated: animated)
         setLayout(.document, animated: animated)
         announceTiling()
         onTilingChanged?()
@@ -315,18 +440,17 @@ extension CanvasBoardView {
     /// Put a card into the tiled view that is up. Nothing at all when there isn't one, which is what
     /// lets every add command call it unconditionally.
     ///
-    /// **Every level of the drill-in, not only the one you can see.** Drilled into one card and asked
-    /// for a link, you get two tiles; Escape then has to hand you back the six you came from *plus*
-    /// the new one. Adding only to the visible session would instead make the card vanish on the way
-    /// out — you would have added something to a view that was about to be discarded, which is the one
-    /// outcome nobody could have meant. `removeFromTiling` is symmetric for the same reason.
+    /// **The workspace, even while one tile is filling the room.** A card added while a tile is
+    /// maximized goes into the arrangement underneath, so restoring shows it in its place rather than
+    /// producing it out of nowhere. That falls out of there being one session: this used to have to
+    /// walk a stack of them, because a drill-in was a real tiling and a card added to the one you could
+    /// see would have vanished the moment you backed out of it.
     ///
     /// A frame is a container of cards rather than a card, so there is no tile it could be.
     func addToTiling(_ id: String) {
         guard var session = tiling, document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
         session.add(id)
         guard session != tiling else { return }
-        for index in tilingHistory.indices { tilingHistory[index].add(id) }
         tiling = session
         setLayout(session.layout, animated: true)
         onTilingChanged?()
@@ -347,7 +471,6 @@ extension CanvasBoardView {
         guard var session = tiling, let index = session.ids.firstIndex(of: id) else { return }
         guard session.ids.count > 1 else { return leaveTiling(animated: true) }
         session.remove(id)
-        for position in tilingHistory.indices { tilingHistory[position].remove(id) }
         tiling = session
         // Something has to stay focused, for the same reason entering a tiling focuses something: the
         // arrows and Return act on it. The tile that took this one's place, else the new last one.
@@ -376,14 +499,7 @@ extension CanvasBoardView {
         guard !gone.isEmpty else { return }
         guard gone.count < session.ids.count else { return leaveTiling(animated: true) }
         var next = session
-        for id in gone {
-            next.remove(id)
-            for index in tilingHistory.indices { tilingHistory[index].remove(id) }
-        }
-        // A level of the drill-in that has lost everything is a level Escape would back out *into*,
-        // which is a blank window. Unlike in `removeFromTiling`, where a level always keeps at least
-        // one card, a delete can empty one outright.
-        tilingHistory.removeAll { $0.ids.isEmpty }
+        for id in gone { next.remove(id) }
         tiling = next
         if selection.isDisjoint(with: next.ids) { selection = [next.ids[0]] }
         setLayout(next.layout, animated: true)
@@ -618,6 +734,25 @@ extension CanvasBoardView {
     /// you dragged a corner would be making the promise in past tense.
     func retileForWindowSize() {
         guard var session = tiling else { return }
+        // **Not while there is nothing to lay out into**, which is the state a tab that is not the one
+        // you are looking at spends its life in.
+        //
+        // A project window keeps every tab's pane mounted and hides the ones that are not up
+        // (`ProjectContentPane.show`), and a hidden view keeps its frame but reports an *empty*
+        // `visibleRect` — so `tileableRect`, which is built from it, collapses to its own 80pt floor at
+        // whatever origin the empty rect had. Auto Layout still resizes a hidden pane, so every window
+        // resize reached the workspaces you were not in and quietly re-tiled them into an 80×80 region
+        // off the side of the board. Switching to one then showed a board with no tiles on it, and
+        // resizing the window — the one thing that runs this again with a real rectangle — was what put
+        // them back. See `CanvasPaneController.paneBecameVisible`, which is the other half: a pane that
+        // was hidden through a resize has one waiting for it when it comes back.
+        guard !visibleRect.isEmpty else { return }
+        // **Nor mid-crossing.** The board is somewhere between two zooms while it flies into or out of a
+        // workspace (`CanvasScrollView.fly`), so `tileableRect` measured now describes a window nobody
+        // is looking at — and re-laying the tiles into it would retarget every card in mid-air. The
+        // flight lands at the zoom the tiles were measured for, which is the answer this would be
+        // looking for anyway.
+        guard scrollView?.canvasScroll?.isFlying != true else { return }
         session.area = tileableRect
         tiling = session
         setLayout(session.layout, animated: false)
@@ -718,4 +853,20 @@ extension CanvasBoardView {
         selection = canvasCardsInside(node.frame, of: document)
         scrollView?.canvasScroll?.zoom(toFit: node.frame.inset(by: 60))
     }
+}
+
+/// What one pane hands the next when a tab switch crosses between the canvas and one of its workspaces.
+///
+/// A window's tabs are separate panes with separate boards, hidden and shown rather than swapped in
+/// place, so the crossing the user sees is not something either board is doing — it is something the
+/// *window* is doing to two of them. This is the whole of what has to travel for the board arriving to
+/// be able to draw it: where the board before it was looking, how far in, and what it was showing.
+///
+/// See `CanvasBoardView.poseAsTiling`, `CanvasPaneController.arrive(from:)` and
+/// `ProjectSplitViewController.applySelectedTab`, which are the three ends of it.
+struct CanvasArrival {
+    var zoom: Double
+    var centre: CanvasPoint
+    /// The workspace the pane being left behind was showing, or nil when it was showing the canvas.
+    var tiling: CanvasTileSession?
 }
