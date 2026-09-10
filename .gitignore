@@ -28,3 +28,8 @@ scratch-note/
 
 # Python bytecode from the blocklist build scripts
 __pycache__/
+
+# Claude Code: the shipping/installing skill is shared and tracked; the local
+# permission file and any scratch worktrees are not.
+.claude/settings.local.json
+.claude/worktrees/
