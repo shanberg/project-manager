@@ -51,6 +51,7 @@
 		38D50873E609E8B9641DFADF /* CanvasSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01DF3405ADA2611E2DE1123 /* CanvasSummary.swift */; };
 		3962C95F533643BFDC9C53FA /* ProjectDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9FCB322CC884666C6E5DC /* ProjectDetails.swift */; };
 		396821A7CF9BC94AE29C9E43 /* ProjectSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B473BD75913801C69C0B4E4 /* ProjectSplitViewController.swift */; };
+		3986E63E25D78EFD62284A3A /* CrossingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */; };
 		3994652D43A118D738BDA647 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C0127A158FF1A3C19DE0375C /* AppIcon.icon */; };
 		3A4B1AAFE6A3DC06D3C081F0 /* QuickBarCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */; };
 		3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE496B1AB05F26705086349 /* TaskMenu.swift */; };
@@ -103,6 +104,7 @@
 		7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF1B5393B4FF9F362814CC03 /* SearchField.swift */; };
 		717B2F38C2DB89B572DDBB63 /* SessionNoteTakeover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BD74807560D1658286E39F5 /* SessionNoteTakeover.swift */; };
 		749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */; };
+		779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */; };
 		780D130EC97948646027446C /* WorkspaceNamePrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59F99BD09C494E1E7D6CC64 /* WorkspaceNamePrompt.swift */; };
 		788B84519EFA792C3B3E8523 /* MentionPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 829F0009E848C60888743B4B /* MentionPopover.swift */; };
 		7967712E9CD10FA654BD9D9B /* CanvasTileHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E675A538A5C14D2BBE362A01 /* CanvasTileHandleView.swift */; };
@@ -128,10 +130,6 @@
 		8A0D5F773B09992201E04086 /* TaskFieldCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */; };
 		8BEFC845AED6A37600C4823F /* NotesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7BC1A474E416FCA301CB2C /* NotesSettings.swift */; };
 		8D3DBFB46734C4922CCE8260 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE94A27BEC038FA8D6A21C77 /* Motion.swift */; };
-		B1F0A4C27E3D1A5590C4E118 /* FrameMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A2E9D14B60F3827AD5106C /* FrameMeter.swift */; };
-		E4C81B7D93A2F0165D3C7A20 /* DisplayTicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92D6E01A75C48B3E10F9247 /* DisplayTicker.swift */; };
-		A73E5C02D8149FB6207A31E5 /* CrossingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0851FA6C3927E4B16D8074B /* CrossingBench.swift */; };
-		C51A9F3E7B026D8419E4A067 /* CrossingTuning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8047DC2615EAF39027C51D3 /* CrossingTuning.swift */; };
 		8D78AC05BAE2816A0F9082C4 /* PMSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */; };
 		8E632C382A83B9B77D67DD7E /* SessionNoteMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFC44C3D28DC13A1B873AA /* SessionNoteMerge.swift */; };
 		8F59FB4BAAA0F7D86450D793 /* ScreenDim.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1790BA8BEC83A128B88521D /* ScreenDim.swift */; };
@@ -236,6 +234,7 @@
 		E4697A7B9163BFA9CB4411F2 /* CanvasNodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093983D4AB7BBC953B90AB3A /* CanvasNodeView.swift */; };
 		E6B127AADEDAC13C797897D4 /* ProjectRendererMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0473C3A97FAFD880BAE5EFD0 /* ProjectRendererMemory.swift */; };
 		E72FC312F57CA385A3CD74C8 /* CanvasContentBlocker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF0D38D9DB80542D10BF94C /* CanvasContentBlocker.swift */; };
+		E7E72625A1DDBBC28E057302 /* FrameMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E973D36CA5E6F39110E907DE /* FrameMeter.swift */; };
 		E92C2ABC0B2D13A5F728FF51 /* CanvasProjectNoteCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4246023F7864C429AC13E0AD /* CanvasProjectNoteCard.swift */; };
 		EAB471D09BB31B88D34EF1C2 /* CanvasCardSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9C91443C938A6F7527779 /* CanvasCardSession.swift */; };
 		EC5DDBD9CEB89DEDF27D7732 /* CanvasCrossingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F2A4FBB6B8F83FF368427D /* CanvasCrossingTests.swift */; };
@@ -243,6 +242,7 @@
 		ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D69731046CF949BED6A9B753 /* StatusItemController.swift */; };
 		EF13FDBC361FD2123FF4CD3D /* PMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A7709B2DE4D155EAE70CCF /* PMStore.swift */; };
 		F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */; };
+		F182CEE8CC666351A3216B55 /* CrossingTuning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */; };
 		F19CE5910A5384C7435BC6F3 /* AppDelegate+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E583F2A7FC849845365F2B /* AppDelegate+Commands.swift */; };
 		F27469EEBD6E0327BF8AD908 /* DisplayModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */; };
 		F4DFE1E6BF170E452D4945DE /* ProjectWindowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F585177DE07327A668755CF /* ProjectWindowState.swift */; };
@@ -381,6 +381,7 @@
 		8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickBarCommands.swift; sourceTree = "<group>"; };
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelController.swift; sourceTree = "<group>"; };
+		8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingTuning.swift; sourceTree = "<group>"; };
 		968289B8E6C1C7232AF29218 /* TaskViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewHelpers.swift; sourceTree = "<group>"; };
 		969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorClipboardTests.swift; sourceTree = "<group>"; };
 		96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutsideClick.swift; sourceTree = "<group>"; };
@@ -406,16 +407,13 @@
 		ADD9FCB322CC884666C6E5DC /* ProjectDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetails.swift; sourceTree = "<group>"; };
 		AE6BAFC48E0D0B7691DEF832 /* NoteImagePasteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImagePasteTests.swift; sourceTree = "<group>"; };
 		AE94A27BEC038FA8D6A21C77 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
-		C7A2E9D14B60F3827AD5106C /* FrameMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMeter.swift; sourceTree = "<group>"; };
-		F92D6E01A75C48B3E10F9247 /* DisplayTicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTicker.swift; sourceTree = "<group>"; };
-		D0851FA6C3927E4B16D8074B /* CrossingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingBench.swift; sourceTree = "<group>"; };
-		B8047DC2615EAF39027C51D3 /* CrossingTuning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingTuning.swift; sourceTree = "<group>"; };
 		AEB4BC2DF1073FE4608E2138 /* ProjectCodes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCodes.swift; sourceTree = "<group>"; };
 		AFE00BF85915F15AD2F5C24F /* CanvasGroupResize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasGroupResize.swift; sourceTree = "<group>"; };
 		B1790BA8BEC83A128B88521D /* ScreenDim.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenDim.swift; sourceTree = "<group>"; };
 		B1E01C208CC17DE6B8A683C8 /* CanvasSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelection.swift; sourceTree = "<group>"; };
 		B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigWatcher.swift; sourceTree = "<group>"; };
 		B358A62B026F88C33AA9FF42 /* MenubarRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarRing.swift; sourceTree = "<group>"; };
+		B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingBench.swift; sourceTree = "<group>"; };
 		B693908982BE1960D0F08898 /* CanvasBlockPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBlockPolicy.swift; sourceTree = "<group>"; };
 		BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSearch.swift; sourceTree = "<group>"; };
 		BB7B7013A93C4B219C107C6E /* CanvasWebDialogs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasWebDialogs.swift; sourceTree = "<group>"; };
@@ -431,6 +429,7 @@
 		C5C091CF8691F406FDF304F2 /* TaskEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditors.swift; sourceTree = "<group>"; };
 		C611BFA8DE3DED1B89E9683A /* CanvasViewStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewStateTests.swift; sourceTree = "<group>"; };
 		C6618A28A1B8350DC6699412 /* CanvasPageBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageBudgetTests.swift; sourceTree = "<group>"; };
+		C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTicker.swift; sourceTree = "<group>"; };
 		CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayModes.swift; sourceTree = "<group>"; };
 		CE1699D6F8A083D4F86EC247 /* RowSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowSelection.swift; sourceTree = "<group>"; };
 		CE7DA9F6A135FFC4CDB70C53 /* SessionNoteSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNoteSurface.swift; sourceTree = "<group>"; };
@@ -455,6 +454,7 @@
 		E675A538A5C14D2BBE362A01 /* CanvasTileHandleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTileHandleView.swift; sourceTree = "<group>"; };
 		E74CA79CC5C0C4EB37ED23A6 /* QuickBarModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickBarModel.swift; sourceTree = "<group>"; };
 		E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsControls.swift; sourceTree = "<group>"; };
+		E973D36CA5E6F39110E907DE /* FrameMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMeter.swift; sourceTree = "<group>"; };
 		E9B1046B02C6010B0334E290 /* PMContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMContract.swift; sourceTree = "<group>"; };
 		EB0B459EB3C100D07716A611 /* CanvasOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasOverlayView.swift; sourceTree = "<group>"; };
 		ED144519BADFC5F999653A16 /* CanvasSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelectionTests.swift; sourceTree = "<group>"; };
@@ -751,11 +751,11 @@
 		C45D0A400AC61A734FC20EFF /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */,
+				8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */,
 				CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */,
-				D0851FA6C3927E4B16D8074B /* CrossingBench.swift */,
-				B8047DC2615EAF39027C51D3 /* CrossingTuning.swift */,
-				F92D6E01A75C48B3E10F9247 /* DisplayTicker.swift */,
-				C7A2E9D14B60F3827AD5106C /* FrameMeter.swift */,
+				C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */,
+				E973D36CA5E6F39110E907DE /* FrameMeter.swift */,
 				AE94A27BEC038FA8D6A21C77 /* Motion.swift */,
 				2E52B44B7F4AC0E0782F167C /* MouseMonitors.swift */,
 				FB60AD5B8184499C07F2DC7B /* WindowChrome.swift */,
@@ -1034,7 +1034,10 @@
 				BF52B7D3FF969F904F67C091 /* CompletionController.swift in Sources */,
 				0D1260A2F525759E89387912 /* ConfigStore.swift in Sources */,
 				21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */,
+				3986E63E25D78EFD62284A3A /* CrossingBench.swift in Sources */,
+				F182CEE8CC666351A3216B55 /* CrossingTuning.swift in Sources */,
 				F27469EEBD6E0327BF8AD908 /* DisplayModes.swift in Sources */,
+				779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */,
 				C999074851038AB74E38F3D7 /* DueBadge.swift in Sources */,
 				C430A832C70639AA390BAC26 /* DueLabels.swift in Sources */,
 				7EB325A32AC77C001203D2BD /* FaviconLoader.swift in Sources */,
@@ -1042,6 +1045,7 @@
 				F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */,
 				ACB9FD4F00C994B9E09610E1 /* FocusPanelRequests.swift in Sources */,
 				D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */,
+				E7E72625A1DDBBC28E057302 /* FrameMeter.swift in Sources */,
 				DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,
 				60993D6807E881845F7EA185 /* HotKeyManager.swift in Sources */,
@@ -1056,10 +1060,6 @@
 				A31F5E7E03CD4DC12A3D4B47 /* MarkdownTextEditor.swift in Sources */,
 				8160DFD7CDF04EB531FD0223 /* MentionPopover.swift in Sources */,
 				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,
-				A73E5C02D8149FB6207A31E5 /* CrossingBench.swift in Sources */,
-				C51A9F3E7B026D8419E4A067 /* CrossingTuning.swift in Sources */,
-				E4C81B7D93A2F0165D3C7A20 /* DisplayTicker.swift in Sources */,
-				B1F0A4C27E3D1A5590C4E118 /* FrameMeter.swift in Sources */,
 				8D3DBFB46734C4922CCE8260 /* Motion.swift in Sources */,
 				1E225131408952F0B85493FE /* MouseMonitors.swift in Sources */,
 				C604CAD25A5756F4BDDB768A /* NoteImagePaste.swift in Sources */,
@@ -1284,7 +1284,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.33.0;
+				MARKETING_VERSION = 0.34.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1431,7 +1431,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.33.0;
+				MARKETING_VERSION = 0.34.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
