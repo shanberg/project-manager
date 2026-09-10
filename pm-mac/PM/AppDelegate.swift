@@ -368,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
     // pmpanel://waiting                → the cross-project Waiting list
     // pmpanel://settings               → the Settings window
+    // pmpanel://bench?spread=1&runs=&tiles= → dev only; inert unless the frame meter is on
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
@@ -412,10 +413,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 windows.openFocusedProject()
             }
+        // **Dev only, and silent unless the frame meter has been turned on for this machine** — see
+        // `CrossingBench`, which declines rather than acts. It is here because a crossing can only be
+        // started from inside the app, and measuring one by hand twenty times running is how you get
+        // twenty slightly different measurements. `?runs=` and `?tiles=` both have defaults.
+        case "bench":
+            // `?spread=1` walks every configuration in `CrossingTuning.spread`; without it the run is
+            // whatever the app currently ships.
+            if intParam(url, "spread") == 1 {
+                CrossingBench.runSpread(each: intParam(url, "runs") ?? 6,
+                                        tiles: intParam(url, "tiles") ?? 8,
+                                        all: intParam(url, "all") == 1)
+            } else {
+                CrossingBench.run(iterations: intParam(url, "runs") ?? 20,
+                                  tiles: intParam(url, "tiles") ?? 8)
+            }
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break
         }
+    }
+
+    /// Read a whole number off a control URL; nil when it isn't there or isn't one.
+    private func intParam(_ url: URL, _ name: String) -> Int? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value.flatMap(Int.init)
     }
 
     /// Read `?on=true|false|1|0` from a control URL; nil means "toggle".
