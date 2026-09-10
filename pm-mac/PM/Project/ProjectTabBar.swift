@@ -124,6 +124,23 @@ struct ProjectTabBar<AddMenu: View>: View {
                         Color.clear.preference(key: TabRowWidthKey.self, value: geometry.size.width)
                     }
                 }
+                // **The row carves itself out of the window drag a second time**, from in here.
+                //
+                // `HeaderCapsule` already puts a `WindowDragExcluder` behind every header item, which
+                // is what lets you click one in a band that is otherwise the titlebar. That excluder is
+                // a view *behind* the capsule's contents, and until this row scrolled that was the end
+                // of it: nothing else in a capsule is a real AppKit view. A `ScrollView` is — SwiftUI
+                // backs it with an `NSScrollView`, a clip view and a document view, all of them in
+                // front of the excluder and every one of them answering `mouseDownCanMoveWindow` with
+                // true. So the chips sat under a stack of views that had put the window drag back, and
+                // dragging a tab along the row moved the window instead of moving the tab.
+                //
+                // An overlay rather than a background, and inside the scroll view rather than around
+                // it: it has to be the last thing over the chips, in front of the focus rings the
+                // buttons bring with them, which are views of their own and say true as well. It takes
+                // no hit testing, so it is invisible to everything except the question of what a
+                // mouse-down in the titlebar band means.
+                .overlay { WindowDragExcluder().allowsHitTesting(false) }
             }
             .scrollIndicators(.hidden)
             // Its own height rather than the row's, which inside a scroll view has nothing to take one
@@ -219,7 +236,7 @@ struct ProjectTabBar<AddMenu: View>: View {
         HStack(spacing: 4) {
             if item.isCanvas {
                 // The one chip that is a glyph. Scattered rectangles rather than a grid of them,
-                // deliberately: the grid is `rectangle.split.2x2`, which is the button that *tiles*,
+                // deliberately: the grid is `rectangle.split.2x2`, which is the glyph for a *tiling*,
                 // and the canvas is what a tiling is a narrowing of.
                 Image(systemName: "rectangle.3.offgrid")
                     .font(.system(size: HeaderMetrics.iconSize - 1, weight: .medium))

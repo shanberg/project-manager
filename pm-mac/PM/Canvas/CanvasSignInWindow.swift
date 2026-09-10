@@ -56,6 +56,7 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
         // The opposite of a card: here, a page that asks for a window is asking for a good reason.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         web = WKWebView(frame: .zero, configuration: configuration)
+        CanvasWebSession.allowInspecting(web)
         site = url.host() ?? url.absoluteString
         self.onFinish = onFinish
 

@@ -68,9 +68,7 @@ extension View {
     /// a weight that changes with the window's state. Liquid Glass is still in the app where it earns
     /// its keep — the focus panel, a floating HUD over other apps' windows (see `GlassBackground`).
     func headerBacking(_ chrome: HeaderChrome, in shape: some Shape) -> some View {
-        background {
-            shape.fill(.regularMaterial).opacity(chrome.backingStrength)
-        }
+        background { HeaderBacking(chrome: chrome, shape: shape) }
     }
 
     /// The same, or nothing at all — for the one thing the glass is *for* not being true.
@@ -80,15 +78,44 @@ extension View {
     /// ground, and the header sits over the ground. Glass there is a second separation drawn on top of
     /// one that has already happened, which reads as two panels disagreeing about which is in front.
     ///
-    /// Routed through the modifier above rather than written out at the call site, because the two
-    /// headers drifted apart twice in a day the last time a piece of this was a convention.
-    @ViewBuilder
+    /// Drawing the glass through the same `HeaderBacking` the modifier above uses, rather than writing
+    /// it out here, because the two headers drifted apart twice in a day the last time a piece of this
+    /// was a convention.
+    ///
+    /// **It fades rather than cuts**, and the fade is in here rather than at the call site.
+    ///
+    /// Going to and from a workspace turns this off and on across four pieces of chrome at once, and
+    /// glass that vanishes in a frame reads as a redraw — the eye takes it as the window having
+    /// flinched rather than as one state becoming another. A crossfade is the one kind of animation
+    /// this header is allowed: a background changes nothing about the size of the thing it is behind,
+    /// so there is no width for Auto Layout and SwiftUI to disagree about. See
+    /// `CanvasHeaderTrailingChrome` for the rule and `HeaderChromeMotionTests` for the measurements.
+    ///
+    /// The animation is scoped to the background and cannot escape into the row. That matters: the
+    /// control capsule also *loses a button* when a workspace comes up, and an animation reaching that
+    /// change would animate the capsule's width, which is the failure this whole arrangement exists to
+    /// avoid.
+    ///
+    /// Removed rather than held at zero opacity when it is off. An invisible `.regularMaterial` is
+    /// still a material — it samples what is behind it every frame, and what is behind it here is a
+    /// grid of live web pages.
     func headerBacking(_ chrome: HeaderChrome, in shape: some Shape, showing: Bool) -> some View {
-        if showing {
-            headerBacking(chrome, in: shape)
-        } else {
-            self
+        background {
+            Group {
+                if showing { HeaderBacking(chrome: chrome, shape: shape) }
+            }
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: showing)
         }
+    }
+}
+
+/// The material itself, so the two `headerBacking` overloads cannot end up drawing different glass.
+struct HeaderBacking<S: Shape>: View {
+    let chrome: HeaderChrome
+    let shape: S
+
+    var body: some View {
+        shape.fill(.regularMaterial).opacity(chrome.backingStrength)
     }
 }
 
@@ -243,21 +270,39 @@ struct HeaderDivider: View {
 /// board's were the same code written twice, and were already a point apart.
 struct HeaderSymbolButton: View {
     let symbol: String
-    let help: String
+    /// The tooltip. **Empty for a control that should not have one** — a sentence that changes with
+    /// the selection cannot be read before you act on it, since it only appears a second after you
+    /// have stopped moving. Such a control still has a `label`.
+    var help: String = ""
+    /// What the control is called, for anyone who asks rather than hovers. Defaults to the tooltip,
+    /// which for most of these is the same sentence said once.
+    var label: String?
     var enabled = true
     let action: () -> Void
 
     var body: some View {
+        button
+            .disabled(!enabled)
+            .accessibilityLabel(Text(label ?? help))
+    }
+
+    @ViewBuilder private var button: some View {
+        if help.isEmpty { core } else { core.help(help) }
+    }
+
+    private var core: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
+                // A glyph that stands for a state — Reload/Stop, maximize/restore — swaps in place, and
+                // the swap is worth drawing: the button does not move, so the only thing saying the
+                // click landed is the mark changing. Free of the width rule for the same reason, since
+                // the hit area is `hitWidth` whatever is in it.
+                .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(enabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                 .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(help)
-        .accessibilityLabel(Text(help))
     }
 }

@@ -13,6 +13,21 @@ import PmLib
 /// project, and without this they are the same card twice. `StoreRegistry` refcounts, so both hold one
 /// store and stay in step with each other and with the window.
 ///
+/// **Four cards, not five flags.** This was five independent switches — brief, notes, tasks, completed,
+/// latest-only — and the arithmetic on that is unkind: three parts give seven legal combinations, times
+/// two filters that only sometimes apply, is twenty-one distinct renderings reachable from a six-item
+/// menu. Two of those items did nothing at all on some cards; most of the twenty-one were reachable
+/// only by accident. What people actually build with a card is a much shorter list, and it is this one.
+///
+/// The presets are not a smaller menu over the same switches — they answer *different questions*, and
+/// the pair in the middle is the point:
+///
+/// - `current` is **time**-scoped. "What happened last time I sat down, and everything still open."
+/// - `tasks` is **state**-scoped. "Everything still open, whenever I wrote it."
+///
+/// `current` is the six-projects-on-a-board card: the latest sitting's prose, and the open work from
+/// every sitting, because a task left behind three sessions ago is exactly the one you have forgotten.
+///
 /// **What a card shows is not what a card can do.** A card set to tasks can still start a session,
 /// write its note, and edit the brief — the brief simply appears while you are editing it and goes back
 /// to being hidden when you leave. This is a lens on one document, not a smaller version of the
@@ -22,73 +37,89 @@ import PmLib
 /// **Kept on the node, in the file**, which is the bargain `CanvasCardZoom`, `CanvasCardSession` and
 /// `CanvasCardMedia` all made before it, in the same words: this is something you *set*, and a card
 /// that forgot it every time the window closed would be worse than not offering the choice. It is a
-/// fact about a card rather than about a machine, it is a list of words rather than anything private,
-/// and a board opened in Obsidian carrying it is a feature.
-struct CanvasCardShows: Equatable {
-    /// The three things a card can be made of. A card must draw at least one of them, or it is a
-    /// rectangle with a title on it.
+/// fact about a card rather than about a machine, it is one word rather than anything private, and a
+/// board opened in Obsidian carrying it is a feature.
+enum CanvasCardShows: String, CaseIterable, Equatable {
+    /// The whole document — brief, every session, every task, finished ones included. What every
+    /// project card drew before any of this existed, and what a new one still draws.
+    case everything
+    /// Where this is now: the latest sitting's prose, and the open tasks from every sitting.
+    case current
+    /// What is left, whenever it was written. No brief, no prose, nothing ticked.
+    case tasks
+    /// The reference card: the brief alone, parked beside something else, changing only when the
+    /// project's shape does.
+    case brief
+
+    /// What the menu calls it. Here rather than in the menu, so the word a card is set by and the word
+    /// written into the file cannot drift apart.
+    var title: String {
+        switch self {
+        case .everything: return "Everything"
+        case .current: return "Current"
+        case .tasks: return "Tasks"
+        case .brief: return "Brief"
+        }
+    }
+
+    /// A card nobody has narrowed.
+    static let `default` = CanvasCardShows.everything
+
+    // MARK: What that means to draw
+
+    /// How much of the session prose a card draws.
     ///
-    /// Sessions are *two* parts and not one, because the two are read for different reasons: the prose
-    /// is what happened, and the tasks are what is left. A card of one without the other is a thing
-    /// people actually want, and it is most of what this setting is for.
-    enum Part: String, CaseIterable {
-        /// The summary, problem, goals, approach, links and learnings — the brief.
-        case brief
-        /// What was written in each session.
-        case notes
-        /// The checkboxes.
-        case tasks
+    /// `latest` is the whole reason this is a scope rather than a flag: it narrows the *prose* without
+    /// narrowing the tasks, which the old `latestOnly` could not do — it truncated the session list, so
+    /// hiding the older sittings' words also hid the work they left open.
+    enum ProseScope { case none, latest, all }
 
-        /// What the menu calls it. Here rather than in the menu, so the word a card is set by and the
-        /// word written into the file cannot drift apart.
-        var title: String {
-            switch self {
-            case .brief: return "Brief"
-            case .notes: return "Notes"
-            case .tasks: return "Tasks"
-            }
+    /// Which tasks a card draws. Not a scope over sessions: every sitting's tasks are drawn under their
+    /// own caption, and this says only whether the finished ones come with them.
+    enum TaskScope { case none, open, all }
+
+    /// Whether the summary, problem, goals, approach, links and learnings are drawn.
+    var brief: Bool {
+        switch self {
+        case .everything, .brief: return true
+        case .current, .tasks: return false
         }
     }
 
-    var brief = true
-    var notes = true
-    var tasks = true
-    /// Whether finished tasks are drawn beside the open ones. Independent of `tasks` in the same way
-    /// the window's Incomplete filter is independent of having a task list at all.
-    var completed = true
-    /// Only the most recent sitting, rather than the whole history. The narrowing you reach for when a
-    /// card is answering "where is this now", which is most of the time on a board.
-    var latestOnly = false
-
-    /// A card nobody has narrowed: the whole document, which is what every project card drew before
-    /// this existed and what a new one still draws.
-    static let everything = CanvasCardShows()
-
-    func shows(_ part: Part) -> Bool {
-        switch part {
-        case .brief: return brief
-        case .notes: return notes
-        case .tasks: return tasks
+    var prose: ProseScope {
+        switch self {
+        case .everything: return .all
+        case .current: return .latest
+        case .tasks, .brief: return .none
         }
     }
 
-    /// This card with `part` on or off — or **nil when that would leave it showing nothing**, which is
-    /// the one arrangement of these five flags that is not a view of a project.
-    ///
-    /// Refused here rather than in the menu, so the rule has one home and the menu can *ask* about it:
-    /// an item that would refuse is dimmed, which is better than a click that silently does nothing.
-    func setting(_ part: Part, to on: Bool) -> CanvasCardShows? {
-        var out = self
-        switch part {
-        case .brief: out.brief = on
-        case .notes: out.notes = on
-        case .tasks: out.tasks = on
+    var tasks: TaskScope {
+        switch self {
+        case .everything: return .all
+        case .current, .tasks: return .open
+        case .brief: return .none
         }
-        return out.isEmpty ? nil : out
     }
 
-    /// Nothing to draw but the title.
-    var isEmpty: Bool { !brief && !notes && !tasks }
+    /// Whether this card draws the prose of the sitting at `index`, where 0 is the most recent —
+    /// `addSession` inserts at the front, so the newest sitting is the first one.
+    func showsProse(ofSessionAt index: Int) -> Bool {
+        switch prose {
+        case .none: return false
+        case .latest: return index == 0
+        case .all: return true
+        }
+    }
+
+    /// Whether this card draws `checked`.
+    func showsTask(checked: Bool) -> Bool {
+        switch tasks {
+        case .none: return false
+        case .open: return !checked
+        case .all: return true
+        }
+    }
 
     // MARK: On the node
 
@@ -96,47 +127,53 @@ struct CanvasCardShows: Equatable {
     static let key = "pmShows"
 
     /// What this card shows, as the file says — or everything, which is both the default and what a
-    /// list PM cannot make sense of falls back to.
+    /// value PM cannot make sense of falls back to.
     ///
     /// The fallback is deliberate and it is not "trust the file": a `.canvas` is hand-editable and
-    /// syncs between machines, so `pmShows: "task"` is a typo somebody will make, and the honest
-    /// recovery from "this names no part of a project" is to show the project rather than a blank
-    /// rectangle nobody can work out how to fix.
+    /// syncs between machines, so `pmShows: "currnet"` is a typo somebody will make, and the honest
+    /// recovery from "this names nothing" is to show the project rather than a blank rectangle nobody
+    /// can work out how to fix.
     static func of(_ node: CanvasNode) -> CanvasCardShows {
-        guard case .string(let raw)? = node.extra[key] else { return everything }
+        guard case .string(let raw)? = node.extra[key] else { return .default }
         return parse(raw)
     }
 
     static func parse(_ raw: String) -> CanvasCardShows {
-        let tokens = Set(raw.lowercased()
-            .split(separator: ",")
+        let trimmed = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        if let preset = CanvasCardShows(rawValue: trimmed) { return preset }
+        return nearest(toLegacy: trimmed)
+    }
+
+    /// A card written by the five-flag version of this setting, snapped to the preset that answers the
+    /// nearest question.
+    ///
+    /// **Cards in the wild outlive the code that wrote them.** A `.canvas` is a file on somebody's
+    /// disk and in somebody's sync folder, and one narrowed a year ago should keep meaning roughly what
+    /// it meant rather than silently springing back to the whole document — so the old comma-separated
+    /// token lists are still read, just no longer written.
+    ///
+    /// The order of these tests is the mapping: anything scoped to the latest sitting was asking "where
+    /// is this now", whatever else it said, and that is `current`. `brief` and `tasks` are the two
+    /// single-part cards. Everything else — including the brief-plus-tasks card, which has no preset —
+    /// widens to the whole project, on the same principle as the typo above: showing more than you
+    /// asked for is recoverable in one click, and showing less looks like the card is broken.
+    private static func nearest(toLegacy raw: String) -> CanvasCardShows {
+        let tokens = Set(raw.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty })
-        var out = CanvasCardShows(brief: tokens.contains(Part.brief.rawValue),
-                                  notes: tokens.contains(Part.notes.rawValue),
-                                  tasks: tokens.contains(Part.tasks.rawValue),
-                                  completed: tokens.contains(completedToken),
-                                  latestOnly: tokens.contains(latestToken))
-        if out.isEmpty { out = everything }
-        return out
+        guard !tokens.isEmpty else { return .default }
+        if tokens.contains("latest") { return .current }
+        let hasBrief = tokens.contains("brief")
+        let hasNotes = tokens.contains("notes")
+        let hasTasks = tokens.contains("tasks")
+        if hasBrief, !hasNotes, !hasTasks { return .brief }
+        if hasTasks, !hasBrief, !hasNotes { return .tasks }
+        return .default
     }
 
     /// Put this on a card — as the absence of the key when it is showing everything, so a card narrowed
     /// and widened again leaves the file exactly as it found it.
     static func set(_ shows: CanvasCardShows, on node: inout CanvasNode) {
-        node.extra[key] = shows == everything ? nil : .string(shows.written)
+        node.extra[key] = shows == .default ? nil : .string(shows.rawValue)
     }
-
-    /// The tokens, in a fixed order, so a card written twice with the same setting produces the same
-    /// bytes and a `.canvas` under git does not churn.
-    var written: String {
-        var tokens: [String] = []
-        for part in Part.allCases where shows(part) { tokens.append(part.rawValue) }
-        if completed { tokens.append(Self.completedToken) }
-        if latestOnly { tokens.append(Self.latestToken) }
-        return tokens.joined(separator: ",")
-    }
-
-    private static let completedToken = "completed"
-    private static let latestToken = "latest"
 }

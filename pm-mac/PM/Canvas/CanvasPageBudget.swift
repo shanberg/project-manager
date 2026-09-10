@@ -102,4 +102,26 @@ enum CanvasPageBudget {
     static func liveWhileTiled(among cards: [Candidate]) -> Set<String> {
         Set(cards.filter { $0.wantsPage && ($0.isVisible || $0.isEngaged) }.map(\.id))
     }
+
+    /// Which cards keep running once you have looked away — the window is no longer the key one, but
+    /// PM is still on screen.
+    ///
+    /// **The card you are standing in, and nothing else.** The idle pause exists because a board left
+    /// behind your work is renderers that are all cost and no benefit, and that is true of every card
+    /// on it *except* the one you had stepped into. Freezing that one is the trade rule one of
+    /// `live(among:)` already refuses to make, and it costs more here than under the budget: waking a
+    /// card builds a new web view and restores it from `interactionState`, which restores where the
+    /// page had got to and not what it was holding. A form half filled in, a sign-in waiting on a
+    /// code — anything the page kept in memory rather than in its address is gone. The snapshot is
+    /// what makes that unforgivable rather than merely annoying: the card goes on looking exactly as
+    /// you left it while being none of it.
+    ///
+    /// **On screen is the whole condition.** Hidden, minimised or completely covered, PM is not
+    /// something you are in the middle of using and the pause should take everything — that is what
+    /// the timer is for. Visible but not key is the case this exists for, and it is the ordinary one:
+    /// a board sitting beside the window you are typing in is still a board you are working with.
+    static func liveWhileAway(among cards: [Candidate], onScreen: Bool) -> Set<String> {
+        guard onScreen else { return [] }
+        return Set(cards.filter { $0.wantsPage && $0.isEngaged }.map(\.id))
+    }
 }

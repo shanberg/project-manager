@@ -1,0 +1,24 @@
+# Hosts whose requests are never filtered, whatever the lists say.
+#
+# Each entry becomes an `ignore-previous-rules` rule appended to *every* shipped list — every one,
+# because `ignore-previous-rules` only cancels rules earlier in its own list and never reaches
+# across lists. EasyList already carries exceptions of this kind for *apple.com and *icloud.com;
+# EasyPrivacy does not, which is the whole of the bug below.
+#
+# Keyed to the *request* URL rather than to a page domain. A content blocker matches `if-domain`
+# against the document, and the requests that matter here are made from an identity provider's
+# iframe inside somebody else's page — so the document is the site you are signing in to, not the
+# host being exempted.
+#
+# The bar for adding one is a break somebody actually hit, not a suspicion: every entry is real
+# protection given up on a real host. Filter lists block telemetry endpoints deliberately and that
+# is normally harmless. It stops being harmless when the page's own code doesn't guard the request.
+
+# EasyPrivacy blocks /appleauth/jslog. Apple's common-header.js `log()` doesn't guard that XHR, so
+# WebKit's refusal — which reaches the page as a CORS failure — throws inside the auth widget's
+# dispatch chain and aborts two-factor sign-in. The code is never sent anywhere, and the widget
+# reports it as an incorrect verification code.
+idmsa.apple.com
+
+# The same widget, served for "Sign in with Apple" rather than for iCloud itself.
+appleid.apple.com

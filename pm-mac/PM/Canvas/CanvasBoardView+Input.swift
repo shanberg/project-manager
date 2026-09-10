@@ -36,7 +36,9 @@ extension CanvasBoardView {
             return
         }
 
-        if isTiled { return tiledMouseDown(at: where_, extending: extending) }
+        if isTiled {
+            return tiledMouseDown(at: where_, extending: extending, clicks: event.clickCount)
+        }
 
         switch hitTester.hit(where_) {
         case .handle(let id, let handle):
@@ -90,9 +92,14 @@ extension CanvasBoardView {
     /// The handlebar is asked first because it is drawn *inside* a tile, so a hit test on the card
     /// would answer for it; the boundary is asked next because it lies in the gap, where the card's own
     /// band would otherwise catch it.
-    private func tiledMouseDown(at where_: CanvasPoint, extending: Bool) {
+    private func tiledMouseDown(at where_: CanvasPoint, extending: Bool, clicks: Int) {
         if let id = tileHandle(at: where_), let frame = tiling?.layout.frames[id] {
             selection = [id]
+            // **Double-clicking the bar maximizes the tile**, because the bar is the tile's title bar
+            // and double-clicking a title bar is how a window is zoomed on this platform. The gesture
+            // is already in people's hands; this is only the tiled reading of it. See
+            // `toggleMaximizeTile`.
+            if clicks == 2 { return toggleMaximizeTile(id) }
             gesture = .reorderTile(id, grab: CanvasPoint(x: where_.x - frame.minX,
                                                          y: where_.y - frame.minY),
                                    displaced: nil)
@@ -647,18 +654,28 @@ extension CanvasBoardView {
 
     // MARK: Keys
 
-    /// Escape backs out one step at a time, the way it does everywhere: out of a drill-in first, and
-    /// only then out of a selection.
+    /// Escape backs out one step at a time, the way it does everywhere: out of a maximized tile first,
+    /// and only then out of a selection.
     ///
-    /// **It stops at the root of a tiled view rather than leaving it** — see `untile`, which owns that
-    /// argument. Nor does it clear the selection there: in a tiled view the selection is which tile the
-    /// arrows and Return are about, and a tiling deliberately never has none (see `tile`).
+    /// **It never leaves a workspace.** A workspace is where you are *working*, and Escape is the key
+    /// that dismisses a menu, cancels a field and steps out of a card — all of them smaller acts that
+    /// happen inside one. Making the same key also close the workspace would put every cancelled edit
+    /// one keystroke away from tearing down something you built by hand. Leaving is ⌘↩ and the canvas
+    /// tab, both of which say so.
+    ///
+    /// Nor does it clear the selection in a tiled view: there the selection is which tile the arrows
+    /// and Return are about, and a tiling deliberately never has none (see `tile`).
+    ///
+    /// **This used to unwind a stack** — the drill-in, one level per press. The stack is gone with the
+    /// drill-in, and what is left is the same instinct with a floor under it: one bounded thing to
+    /// cancel, which is the amount of undoing a person expects from this key.
     ///
     /// Here rather than only in `keyDown` because Escape reaches the board two ways. A page card hands
     /// the key to WebKit, which sends it back as this command rather than as a key event, and a card
     /// that isn't engaged passes it up to us.
     override func cancelOperation(_ sender: Any?) {
-        if isTiled { untile(animated: true) } else { selection = [] }
+        if restoreMaximizedTile() { return }
+        if !isTiled { selection = [] }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -767,6 +784,11 @@ extension CanvasBoardView {
         // window manager means by them in that state: show me the next one. In the board's own reading
         // order, so cycling through a board is walking across it rather than shuffling it.
         if let tiling, tiling.ids.count == 1 { return cycleFullscreen(direction) }
+        // The same sentence for a tile maximized out of several, and it is the *workspace* it walks
+        // rather than the board — the six cards you put in it are the list you are looking through.
+        // Without this the arrows would move the focus between tiles that are not drawn: `moveFocus`
+        // only considers cards the layout shows, so every press would land on nothing and beep.
+        if maximizedTile != nil { return cycleMaximizedTile(direction) }
         let candidates = focusCandidates
         guard !candidates.isEmpty else { return }
         let current = selection.compactMap { id in candidates.first { $0.id == id }?.frame }
@@ -794,6 +816,23 @@ extension CanvasBoardView {
         let next = all[(index + (forward ? 1 : all.count - 1)) % all.count]
         selection = [next]
         tile([next])
+    }
+
+    /// Step the maximization on to the next tile in the workspace — ⌥ arrows while one fills the room.
+    ///
+    /// **A cut rather than a move.** The two tiles occupy the same rectangle, so there is no distance
+    /// for an animation to cover; sliding one out while the other slides into the identical frame reads
+    /// as a flicker. Switching which window is maximized does not animate on a desktop either.
+    private func cycleMaximizedTile(_ direction: CanvasNavigation.Direction) {
+        guard var session = tiling, let showing = session.maximized,
+              let index = session.ids.firstIndex(of: showing), session.ids.count > 1 else { return }
+        let forward = direction == .right || direction == .down
+        let next = session.ids[(index + (forward ? 1 : session.ids.count - 1)) % session.ids.count]
+        session.maximized = next
+        tiling = session
+        selection = [next]
+        setLayout(session.layout, animated: false)
+        onTilingChanged?()
     }
 
     /// Every card the focus can land on, with the frame it is actually drawn at — so this follows a

@@ -374,15 +374,45 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Build (or reveal) the content for the tab that is up, and tell everyone what changed.
     func applySelectedTab() {
         let tab = tabs.selected
+        // Read before the swap, because after it this pane is hidden and its board is no longer where
+        // the window is looking. See `handOver`.
+        let leaving = canvasPane
+        let pose = leaving?.departure
         if let existing = contentPane.content(for: tab.id) {
             contentPane.show(existing, for: tab.id)
         } else {
             let made = makeContent(for: tab)
             contentPane.show(made, for: tab.id)
         }
+        handOver(pose, from: leaving)
         canvasPane?.focusBoard()
         refreshTabModel()
         onRendererChanged?()
+    }
+
+    /// Let the pane now on screen draw the crossing the tab switch just made.
+    ///
+    /// **Only between the canvas and one of its workspaces**, which is the one switch where the two
+    /// tabs are showing the same cards arranged two ways — the crossing is *about* those cards, so it
+    /// is worth watching them make it. Every other switch shows you different content: another
+    /// workspace is a different six cards, the notes are a different card, and a board on another file
+    /// is another board. A transition there would be decoration over a cut, and slower than the cut.
+    ///
+    /// Tabs decide it, not the boards, because that is the sentence: between a workspace and the canvas.
+    /// A pane that happens to be tiled for some other reason is not what this is about.
+    private func handOver(_ pose: CanvasArrival?, from leaving: CanvasPaneController?) {
+        guard let pose, let leaving, let arriving = canvasPane, arriving !== leaving,
+              arriving.store.url == leaving.store.url,
+              crossesBetweenCanvasAndWorkspace(leaving.focus, arriving.focus)
+        else { return }
+        arriving.arrive(from: pose)
+    }
+
+    private func crossesBetweenCanvasAndWorkspace(_ from: CanvasFocus, _ to: CanvasFocus) -> Bool {
+        switch (from, to) {
+        case (.whole, .workspace), (.workspace, .whole): return true
+        default: return false
+        }
     }
 
     /// The controller a tab needs, made fresh.

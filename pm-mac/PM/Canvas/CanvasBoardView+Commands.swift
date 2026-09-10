@@ -477,29 +477,25 @@ extension CanvasBoardView {
     /// reason: the whole project is right for nearly every card ever made, and this is the setting for
     /// the boards where it isn't — six projects up at once, or two cards on one project showing
     /// different halves of it.
+    ///
+    /// **One radio list, and nothing else.** This was three checkboxes and two more settings under two
+    /// separators, and the shape lied twice over: Completed Tasks did nothing on a card not showing
+    /// tasks, and the twenty-one arrangements those five controls could reach were not twenty-one
+    /// cards anybody wanted. Four named cards is the whole vocabulary — see `CanvasCardShows`, which
+    /// also explains why `current` and `tasks` are both here rather than one being a filter on the
+    /// other.
     private func addShowsMenu(_ menu: NSMenu) {
         let cards = selectedProjectCards
         guard !cards.isEmpty else { return }
         let shows = NSMenu(title: "Shows")
-        for part in CanvasCardShows.Part.allCases {
-            let entry = add(shows, part.title, #selector(toggleShownPart(_:)))
-            entry.representedObject = part.rawValue
+        for preset in CanvasCardShows.allCases {
+            let entry = add(shows, preset.title, #selector(setShowsPreset(_:)))
+            entry.representedObject = preset.rawValue
             // Ticked only when every selected card agrees, which is how a mixed selection reads as
-            // mixed rather than as whatever the first card happened to say.
-            entry.state = cards.allSatisfy { $0.shows.shows(part) } ? .on : .off
+            // mixed rather than as whatever the first card happened to say. A radio list showing no
+            // tick at all is the honest picture of six cards set six ways.
+            entry.state = cards.allSatisfy { $0.shows == preset } ? .on : .off
         }
-        shows.addItem(.separator())
-        let completed = add(shows, "Completed Tasks", #selector(toggleCompletedTasks(_:)))
-        completed.state = cards.allSatisfy(\.shows.completed) ? .on : .off
-        shows.addItem(.separator())
-        // A pair rather than one "Latest Session Only" tick, because this is a choice between two
-        // scopes and a checkbox would leave the unticked state unnamed.
-        let all = add(shows, "All Sessions", #selector(setSessionScope(_:)))
-        all.representedObject = "all"
-        all.state = cards.allSatisfy { !$0.shows.latestOnly } ? .on : .off
-        let latest = add(shows, "Latest Session Only", #selector(setSessionScope(_:)))
-        latest.representedObject = "latest"
-        latest.state = cards.allSatisfy(\.shows.latestOnly) ? .on : .off
 
         let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
         item.submenu = shows
@@ -613,9 +609,20 @@ extension CanvasBoardView {
     private func addTileSection(_ menu: NSMenu, id: String) {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tile"))
-        // The block `buildCardMenu` was told to skip: fill the window with this one, pin its length,
-        // and — since ⌘↩ means the first of those here rather than the last — leave. The header is the
-        // separator, so it doesn't want a second one above it.
+        // **First, because it is the one you reach for**: fill the room with this tile for a moment and
+        // put the workspace back afterwards. The header's tile capsule offers the same item, and the
+        // handlebar's double-click is the gesture — see `toggleMaximizeTile`.
+        //
+        // Absent in a workspace of one tile, which already fills the room. A menu can simply not carry
+        // an item; that is the whole reason these verbs are in a menu rather than in a row of buttons
+        // that would have to twitch or sit dimmed.
+        if tiling.ids.count > 1 {
+            let item = add(menu, maximizeTileTitle, #selector(maximizeMenuTile(_:)))
+            item.keyEquivalent = "\r"
+            item.keyEquivalentModifierMask = [.command, .option]
+        }
+        // The block `buildCardMenu` was told to skip: the way out, and this tile's pinned length. The
+        // header is the separator, so it doesn't want a second one above it.
         addTiling(menu, separated: false)
 
         // Only where it means something: a grid has no master, and the master is already the master.
@@ -645,7 +652,28 @@ extension CanvasBoardView {
     /// and the menu bar, which can only be about the thing that is focused.
     @objc func promoteMenuTile(_ sender: Any?) {
         guard let id = menuTile else { return }
-        promoteInTiling(id)
+        restoringMaximized { promoteInTiling(id) }
+    }
+
+    /// What Maximize is called right now: which way the toggle goes.
+    var maximizeTileTitle: String { maximizedTile == nil ? "Maximize Tile" : "Restore Tile" }
+
+    /// ⌥⌘Return — fill the room with the focused tile, or put the workspace back.
+    ///
+    /// **Restoring does not need a tile named.** Whichever one is filling the room is the one to put
+    /// back, and asking for a focused tile first would make the key dead in exactly the state it is
+    /// most obviously meant for.
+    @objc func maximizeTile(_ sender: Any?) {
+        if restoreMaximizedTile() { return }
+        guard let id = focusedTile else { return NSSound.beep() }
+        toggleMaximizeTile(id)
+    }
+
+    /// The right-clicked tile's half of the same command — see `promoteMenuTile` for why the two exist.
+    @objc func maximizeMenuTile(_ sender: Any?) {
+        if restoreMaximizedTile() { return }
+        guard let id = menuTile else { return }
+        toggleMaximizeTile(id)
     }
 
     /// The tile a menu-bar command acts on: the focused one, and only when it is on its own.
@@ -664,13 +692,13 @@ extension CanvasBoardView {
     /// a contextual menu is searched for key equivalents — it was drawn and never dispatched.
     @objc func promoteTile(_ sender: Any?) {
         guard let id = focusedTile else { return NSSound.beep() }
-        promoteInTiling(id)
+        restoringMaximized { promoteInTiling(id) }
     }
 
     /// Take the focused tile out of the view — the menu bar's half of `removeMenuTile`.
     @objc func removeTile(_ sender: Any?) {
         guard let id = focusedTile else { return NSSound.beep() }
-        removeFromTiling(id)
+        restoringMaximized { removeFromTiling(id) }
     }
 
     /// Take the right-clicked tile out of the view. Like `promoteMenuTile`, it acts on the tile you
@@ -680,7 +708,7 @@ extension CanvasBoardView {
     /// nothing to say about it).
     @objc func removeMenuTile(_ sender: Any?) {
         guard let id = menuTile else { return }
-        removeFromTiling(id)
+        restoringMaximized { removeFromTiling(id) }
     }
 
     /// **Show the canvas** — the way out of a tiled view, wherever a menu offers one.
@@ -779,20 +807,9 @@ extension CanvasBoardView {
         // one, or a layout would stop responding to its window one adjustment at a time without
         // anybody having asked for that. See `togglePinTile`.
         if pinnableTile != nil { add(menu, pinTileTitle, #selector(togglePinTileSize(_:))) }
-        addLeaveTiling(menu)
-    }
-
-    /// The way out, wherever a tiled view offers a menu at all.
-    ///
-    /// ⌘↩ above is the way out *only when there is nothing left to narrow to* — with one tile of six
-    /// picked it reads "Fill Window with This Tile", and while that is what it says there was no item
-    /// anywhere on this menu that left the tiled view. Escape used to cover for that and deliberately
-    /// no longer does (see `CanvasBoardView.untile`), which makes this the item that has to exist.
-    ///
-    /// Skipped when ⌘↩ *is* already the way out, so the menu never says it twice.
-    private func addLeaveTiling(_ menu: NSMenu) {
-        guard isTiled, tileCommandTitle != "Show Canvas" else { return }
-        add(menu, "Show Canvas", #selector(goToCanvasCommand(_:)))
+        // **A separate "Show Canvas" item used to live here**, because ⌘↩ was only the way out when
+        // there was nothing left to drill into, and the menu needed one item that always left. ⌘↩ is
+        // always the way out now, so a second item saying so would be the menu saying it twice.
     }
 
     @discardableResult
@@ -1011,53 +1028,27 @@ extension CanvasBoardView {
         projectCommandTarget(for: sender)?.projectCommands.requestNewTask()
     }
 
-    /// Show or hide one part of the project on every selected card.
+    /// Set every selected card to one of the four cards a project card can be.
     ///
-    /// One direction for the whole selection, on the media toggles' rule: a mixed selection turns *on*,
-    /// because the tick was off and the item said so. A card that cannot take the change — the part
-    /// being turned off is the last one it draws — keeps what it had rather than going blank.
-    @objc func toggleShownPart(_ sender: Any?) {
+    /// **No toggling, and no refusals.** The three-checkbox version had to ask whether a change would
+    /// leave a card drawing nothing, and had to decide which direction a mixed selection moved in. A
+    /// radio list has neither problem: the item names the card you get, and it means the same thing to
+    /// one card and to six.
+    @objc func setShowsPreset(_ sender: Any?) {
         guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
-              let part = CanvasCardShows.Part(rawValue: raw) else { return }
+              let preset = CanvasCardShows(rawValue: raw) else { return }
         let cards = selectedProjectCards
         guard !cards.isEmpty else { return }
-        let on = !cards.allSatisfy { $0.shows.shows(part) }
-        setShows(cards, actionName: on ? "Show \(part.title)" : "Hide \(part.title)") { current in
-            current.setting(part, to: on) ?? current
-        }
-    }
-
-    @objc func toggleCompletedTasks(_ sender: Any?) {
-        let cards = selectedProjectCards
-        guard !cards.isEmpty else { return }
-        let on = !cards.allSatisfy(\.shows.completed)
-        setShows(cards, actionName: on ? "Show Completed Tasks" : "Hide Completed Tasks") { current in
-            var out = current
-            out.completed = on
-            return out
-        }
-    }
-
-    @objc func setSessionScope(_ sender: Any?) {
-        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
-        let latest = raw == "latest"
-        let cards = selectedProjectCards
-        guard !cards.isEmpty else { return }
-        setShows(cards, actionName: latest ? "Show Latest Session" : "Show All Sessions") { current in
-            var out = current
-            out.latestOnly = latest
-            return out
-        }
+        setShows(cards, actionName: "Show \(preset.title)", preset)
     }
 
     /// Write a display setting to every one of these cards, as one undoable change — the same shape as
     /// `setMedia`, and undoable for the same reason: it is an edit to the document.
     private func setShows(_ cards: [CanvasFileNodeView], actionName: String,
-                          _ change: (CanvasCardShows) -> CanvasCardShows) {
+                          _ wanted: CanvasCardShows) {
         let ids = Set(cards.map(\.node.id))
         store.change(actionName) { doc in
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
-                let wanted = change(CanvasCardShows.of(doc.nodes[index]))
                 CanvasCardShows.set(wanted, on: &doc.nodes[index])
             }
         }
@@ -1440,12 +1431,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     /// same sense.
     ///
     /// It costs nothing to say it for all of them, because a tiled board's own zoom is fixed — so this
-    /// was every tiled view where the key did nothing at all, not just one of them. And it buys the
-    /// thing a tiled view most needed: **a way out that is always a keystroke.** ⌘↩ is the way out only
-    /// when there is nothing left to narrow to, which stops being true the moment you click a tile
-    /// (a click selects it, so ⌘↩ then means "fill the window with this one"); Escape unwinds the
-    /// drill-in and deliberately stops at the root; and the pill's ✕ needs a pointer. See `untile`
-    /// and `leaveTiling`.
+    /// was every tiled view where the key did nothing at all, not just one of them. It also used to be
+    /// the *only* keystroke that reliably left: ⌘↩ was the way out only when there was nothing left to
+    /// drill into, which stopped being true the moment you clicked a tile. ⌘↩ always leaves now, so
+    /// this is a second door rather than the one that had to work. See `leaveTiling`.
     @objc func zoomOut(_ sender: Any?) {
         guard !zoomEngagedCard(by: -1) else { return }
         guard !isTiled else { return onGoToCanvas() }
@@ -1562,11 +1551,17 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.state = mode == .connect ? .on : .off
             return true
         case #selector(tileSelection(_:)):
-            // The one command that says what it will do rather than being dimmed when it can't: with a
-            // selection it tiles that, with none it tiles what you can see, and once tiled it is the way
-            // back out. Only a board with nothing on it has nothing for it to mean.
+            // Retitled rather than fixed, because it is two commands in two places: on the canvas it
+            // says what it would make and how many cards would be in it, and inside a workspace it is
+            // the way out. Dim on a canvas with nothing selected — a workspace is made out of a
+            // selection or not at all. See `CanvasTiling.commandTitle`.
             (item as? NSMenuItem)?.title = tileCommandTitle
-            return isTiled || document.nodes.contains { !$0.isGroup }
+            return canRunTileCommand
+        case #selector(maximizeTile(_:)):
+            (item as? NSMenuItem)?.title = maximizeTileTitle
+            // Live whenever there is something to put back, or a tile picked out of several to fill
+            // the room with. A workspace of one tile already fills it.
+            return maximizedTile != nil || (focusedTile != nil && (tiling?.ids.count ?? 0) > 1)
         case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)),
              #selector(duplicateWorkspace(_:)):
             // All three act on the workspace you are in, so all three want one with a name. Retitled
@@ -1637,19 +1632,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Still not, and alone in that. A frame is a container of cards rather than a card, so
             // there is no tile it could become — it would be an edit made entirely behind the view.
             return !isTiled
-        case #selector(toggleShownPart(_:)):
-            guard let raw = (item as? NSMenuItem)?.representedObject as? String,
-                  let part = CanvasCardShows.Part(rawValue: raw) else { return false }
-            let cards = selectedProjectCards
-            guard !cards.isEmpty else { return false }
-            let on = !cards.allSatisfy { $0.shows.shows(part) }
-            // Dim rather than a click that does nothing. The last part a card draws cannot be turned
-            // off, and an item that would refuse should look like it will.
-            return cards.contains { $0.shows.setting(part, to: on) != nil }
-        case #selector(toggleCompletedTasks(_:)):
-            // Nothing to filter on a card that isn't showing tasks at all.
-            return selectedProjectCards.contains(where: \.shows.tasks)
-        case #selector(setSessionScope(_:)):
+        case #selector(setShowsPreset(_:)):
+            // Every preset is available on every project card. The old menu had two items that could
+            // do nothing from where you were standing and had to be dimmed to say so; naming the four
+            // cards outright means there is no such state left to guard against.
             return !selectedProjectCards.isEmpty
         case #selector(newSession(_:)), #selector(newTask(_:)), #selector(editProjectDetails(_:)):
             return hasProjectCommandTarget

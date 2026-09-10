@@ -85,7 +85,22 @@ enum CanvasCardMedia {
     /// frame cannot be scripted from the app or from its parent; what it can always be sent is a
     /// `postMessage`, so each copy of the script listens for one and passes it on to its own children.
     /// A frame that appears *after* the last toggle would miss the broadcast, so a frame asks its
-    /// parent for the current position as soon as it starts. Between the two, every frame is right.
+    /// parent for the current position — but **only once it has media of its own to be wrong about**.
+    ///
+    /// **A frame with nothing to mute never speaks, and that matters more than it sounds.** This used
+    /// to post to its parent unconditionally at document start, which meant PM announced itself to
+    /// every iframe on the web: ad slots, comment widgets, and — the reason this changed — an
+    /// identity provider's sign-in widget, which uses cross-frame `postMessage` as its own control
+    /// channel and was handed ours before it had finished wiring up its own. A handler that assumes a
+    /// shape throws on a message shaped like something else; the throw is synchronous and inside
+    /// somebody else's listener, so nothing reaches the console and nothing reaches the network, and
+    /// it surfaces as a form that quietly refuses to submit. Muting is not worth being audible on a
+    /// page that has no sound in it.
+    ///
+    /// The ask is raised instead by the sweep that finds media and by `play` itself — late enough to
+    /// be honest about what the frame is, early enough to be useful. Nothing is lost by waiting: the
+    /// opening position is baked into the script, so a frame is already right unless mute was toggled
+    /// after its page began, which is the only case the ask was ever for.
     ///
     /// **Only elements this muted are unmuted.** A page that muted its own preview meant it, and
     /// coming off mute should not turn that on. `muted` rather than `volume`, so unmuting does not
@@ -99,14 +114,21 @@ enum CanvasCardMedia {
           var mine = '__pmMutedByPM'
           var muted = \(muted)
           var observer = null
+          var asked = false
           var hush = function (el) {
             try {
               if (muted) { if (!el.muted) { el.muted = true; el[mine] = true } }
               else if (el[mine]) { el[mine] = false; el.muted = false }
             } catch (e) {}
           }
+          var ask = function () {
+            if (asked || window.parent === window) return
+            asked = true
+            try { parent.postMessage({ pmMutedAsk: 1 }, '*') } catch (e) {}
+          }
           var sweep = function () {
             var media = document.querySelectorAll('video, audio')
+            if (media.length) ask()
             for (var i = 0; i < media.length; i++) hush(media[i])
           }
           var apply = function () {
@@ -137,14 +159,11 @@ enum CanvasCardMedia {
           var proto = window.HTMLMediaElement && HTMLMediaElement.prototype
           if (proto && proto.play) {
             var play = proto.play
-            proto.play = function () { hush(this); return play.apply(this, arguments) }
+            proto.play = function () { ask(); hush(this); return play.apply(this, arguments) }
           }
-          document.addEventListener('play', function (e) { hush(e.target) }, true)
+          document.addEventListener('play', function (e) { ask(); hush(e.target) }, true)
           apply()
           document.addEventListener('DOMContentLoaded', apply)
-          if (window.parent !== window) {
-            try { parent.postMessage({ pmMutedAsk: 1 }, '*') } catch (e) {}
-          }
         })()
         """, injectionTime: .atDocumentStart, forMainFrameOnly: false)
     }

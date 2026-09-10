@@ -166,6 +166,28 @@ enum CanvasWebSession {
         configuration.applicationNameForUserAgent = applicationName
     }
 
+    /// Let Safari's Web Inspector attach to a card, a sign-in window or a popup — on the same switch
+    /// the log uses.
+    ///
+    /// **Because the alternative is guessing.** A card is a real browser showing a real site, so the
+    /// things that go wrong in one are the things that go wrong in any browser: a request that was
+    /// refused, a cookie that wasn't sent, a script that threw on line four hundred. Every one of
+    /// those is a minute's work with an inspector attached and unfalsifiable speculation without one,
+    /// and until now PM offered no way to look — `isInspectable` has defaulted to false since macOS
+    /// 13.3, so a notarised build was opaque even to the person who wrote it.
+    ///
+    /// **On `Log.isEnabled`, not a switch of its own.** It is the same question — "I am chasing
+    /// something, tell me what you know" — and answering it in two places would mean a copy of PM that
+    /// writes a log and refuses an inspector. It is off in a release build for the reason the log is:
+    /// an inspectable web view is one any process running as you can attach to and drive, which is a
+    /// door worth keeping shut on a card that is signed in to your mail. Debug builds get it outright.
+    ///
+    /// Turn it on for an installed copy the same way — `defaults write com.stuarthanberg.pm
+    /// PMLogEnabled -bool YES` — then relaunch and look under Safari's Develop menu.
+    static func allowInspecting(_ web: WKWebView) {
+        web.isInspectable = Log.isEnabled
+    }
+
     /// Everything one site has stored — its cookies, and the local storage a modern login also uses.
     ///
     /// Matched on the registrable domain, which is what WebKit files a record under: signing out of

@@ -117,4 +117,40 @@ final class CanvasPageBudgetTests: XCTestCase {
         XCTAssertEqual(once, CanvasPageBudget.live(among: tied.reversed()))
         XCTAssertEqual(once.count, CanvasPageBudget.livePages)
     }
+
+    // MARK: Looking away
+
+    /// The bug this rule exists for. Clicking another window is not finishing with a card, and the
+    /// idle pause used to take every page on the board regardless — including the one being typed
+    /// into. Waking it restores where the page had got to and not what it was holding, and the
+    /// snapshot means it still looks right, so the loss is silent.
+    func testLookingAwayKeepsTheCardYouAreStandingIn() {
+        let live = CanvasPageBudget.liveWhileAway(among: [card("typing", distance: 0, engaged: true),
+                                                          card("beside", distance: 200),
+                                                          card("away", distance: 4000, visible: false)],
+                                                  onScreen: true)
+        XCTAssertEqual(live, ["typing"], "the rest of the board pauses; this one does not")
+    }
+
+    /// Nothing is engaged, so looking away costs the whole board — which is what the timer is for.
+    func testLookingAwayFromABoardNobodyIsInPausesAllOfIt() {
+        let cards = (0..<5).map { card("\($0)", distance: Double($0) * 100) }
+        XCTAssertTrue(CanvasPageBudget.liveWhileAway(among: cards, onScreen: true).isEmpty)
+    }
+
+    /// Hidden, minimised or completely covered is not "in the middle of using it".
+    func testOffScreenPausesEvenTheEngagedCard() {
+        let live = CanvasPageBudget.liveWhileAway(among: [card("typing", distance: 0, engaged: true)],
+                                                  onScreen: false)
+        XCTAssertTrue(live.isEmpty)
+    }
+
+    /// A card that has stopped wanting a page — zoomed out past the threshold, or with no address —
+    /// has no renderer to spare, engaged or not.
+    func testACardWithNoPageIsNotSpared() {
+        let live = CanvasPageBudget.liveWhileAway(among: [card("empty", distance: 0, engaged: true,
+                                                               wants: false)],
+                                                  onScreen: true)
+        XCTAssertTrue(live.isEmpty)
+    }
 }

@@ -3,8 +3,8 @@ import PmLib
 
 /// A tiled view of some of a board's cards: what is in it, how it is arranged, and how to get out.
 ///
-/// Entered on ⌘Return with a selection, left on Escape. It is a *view* — the file is untouched, and
-/// leaving puts every card back where the board says it belongs. See `CanvasLayout`.
+/// Entered on ⌘Return with a selection, left on ⌘Return again. It is a *view* — the file is untouched,
+/// and leaving puts every card back where the board says it belongs. See `CanvasLayout`.
 struct CanvasTileSession: Equatable {
     /// The cards in the tiling, in the order they are laid out — reading order of where they sit on the
     /// board, so an arrangement preserves the relationships you built rather than scrambling them.
@@ -30,11 +30,36 @@ struct CanvasTileSession: Equatable {
     /// see `CanvasScrollView.setZoom` — and this is what leaving hands back.
     var restoreZoom: Double = 1
 
+    /// The tile filling the area on its own, if one is — see `CanvasBoardView.toggleMaximizeTile`.
+    ///
+    /// **A flag, not a stack**, which is the whole difference between this and the drill-in it
+    /// replaced. Drilling in made a *real* tiling of the cards you picked and pushed the one you came
+    /// from onto a history, so ⌘Return inside a workspace meant "narrow further" and only meant "leave"
+    /// once there was nothing left to narrow — which is why pressing it to get out gave you one tile
+    /// filling the window instead. Maximizing is what it says: one tile fills the room for a moment,
+    /// and restoring puts back exactly what was there.
+    ///
+    /// **Not part of what a workspace is.** `CanvasBoardView.memory(of:)` names the fields it keeps and
+    /// this is not one of them, so a maximized tile cannot be written through to `CanvasWorkspaces` by
+    /// `keepNamedWorkspaceUpToDate` and cannot come back tomorrow as the workspace. The drill-in needed
+    /// a guard to fake that guarantee; this one has it by construction.
+    var maximized: String?
+
     /// What each tile is asking for, in the order they are laid out.
     var run: [CanvasTiling.Size] { ids.map { sizes[$0] ?? .even } }
 
     /// The layout this session produces.
+    ///
+    /// **A maximized tile is a layout of one**, and the rest of the tiles are simply not in it. That
+    /// is what `CanvasLayout.visible` is for, and it means maximizing needs no z-order and no hiding of
+    /// its own: the covered tiles stop being drawn, and stop costing anything — `applyPageBudget` reads
+    /// what is *drawn* rather than where the file says a card is, so their pages pause the same turn.
     var layout: CanvasLayout {
+        if let maximized, ids.contains(maximized) {
+            let frames = CanvasTiling.frames(arrangement, sizes: [.even], in: area,
+                                             masterFraction: masterFraction)
+            return CanvasLayout(frames: [maximized: frames[0]], visible: [maximized])
+        }
         let frames = CanvasTiling.frames(arrangement, sizes: run, in: area,
                                          masterFraction: masterFraction)
         return CanvasLayout(frames: Dictionary(uniqueKeysWithValues: zip(ids, frames)),
@@ -68,6 +93,10 @@ struct CanvasTileSession: Equatable {
         guard let index = ids.firstIndex(of: id) else { return }
         ids.remove(at: index)
         sizes[id] = nil
+        // A tile that has gone cannot be the one filling the window. Left behind, `layout` would fall
+        // through to the arrangement anyway — but `isMaximized` would go on answering yes, and the
+        // menu would offer to restore a tile that is not there.
+        if maximized == id { maximized = nil }
     }
 
     /// Put `id` where `other` is and vice versa — a drag inside a tiled view.

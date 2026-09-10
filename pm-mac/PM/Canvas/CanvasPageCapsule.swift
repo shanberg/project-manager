@@ -9,6 +9,21 @@ import SwiftUI
 /// capsule grows away from it leftward, which is the whole point of splitting them — stepping into a
 /// card must not move Add and the options menu. Two separately-constrained views would have to agree
 /// about a gap and about which of them collapses, and that agreement is what an `HStack` already is.
+///
+/// **And so a capsule arrives and leaves in one frame, without a transition.** It had one — a blur
+/// replace, over an animated row — and the animation was doing the exact thing the split was there to
+/// prevent. A stack lays its children out from its leading edge, and that edge is what moves when the
+/// row changes width: Auto Layout takes the origin from `intrinsicContentSize`, which is the settled
+/// size and arrives in one step, while SwiftUI interpolates the offsets over the duration. Two clocks
+/// for one number. Measured, because it is not obvious from either side — switching between a project
+/// tile and a web tile threw the whole row 174 points sideways and slid it back over a fifth of a
+/// second. See `HeaderChromeMotionTests`, which also measures the way out that would have kept the
+/// animation: a fixed box with the capsules right-aligned in it never moves, and hit-tests the whole
+/// band, which is the thing this header is islands to avoid.
+///
+/// The rule that follows, and it holds one level down too: **nothing in this chrome animates a change
+/// that alters its own width.** Opacity, a swapped glyph, a colour — those are free, and they are what
+/// is left.
 struct CanvasHeaderTrailingChrome: View {
     @ObservedObject var model: CanvasHeaderModel
 
@@ -19,11 +34,17 @@ struct CanvasHeaderTrailingChrome: View {
         HStack(alignment: .bottom, spacing: HeaderMetrics.capsuleGap) {
             if let page = model.page {
                 CanvasPageCapsule(model: model, page: page)
-                    .transition(.blurReplace)
+            }
+            // **Between the two, so the scopes widen toward the window's edge**: the page inside a
+            // card, then the tile that card is in, then the board they are all on. In a tiled view the
+            // focused tile *is* the engaged card (`CanvasBoardView.tileClicked` selects and engages
+            // together), so on a web tile both of these are up at once and are about the same object at
+            // two scales — which is the order to read them in.
+            if let tile = model.focusedTile {
+                CanvasTileCapsule(model: model, tile: tile)
             }
             CanvasControlCapsule(model: model)
         }
-        .animation(Motion.animation(.snappy(duration: 0.22)), value: model.page == nil)
         // The drop belongs to the row, not to either capsule in it. See `TitlebarDrop`.
         .modifier(TitlebarDrop(model: model))
     }
@@ -59,11 +80,15 @@ struct CanvasPageCapsule: View {
             // arriving?" — and a card answers it nowhere else. A card is drawn as its *old* page until
             // the new one paints, so without this the only sign that a click did anything is the page
             // eventually changing.
-            if page.isLoading {
-                HeaderSymbolButton(symbol: "xmark", help: "Stop loading", action: model.pageStop)
-            } else {
-                HeaderSymbolButton(symbol: "arrow.clockwise", help: "Reload", action: model.pageReload)
-            }
+            //
+            // **One button in the source too**, and it was two behind an `if`. Two views swapped by a
+            // condition are two identities, so the change was a removal and an insertion — a cut, no
+            // matter what animation was in scope. The same button with a different symbol on it is one
+            // identity, which is what lets the mark itself do the swap; see the content transition in
+            // `HeaderSymbolButton`. It is the same hit area either way, so this costs the row nothing.
+            HeaderSymbolButton(symbol: page.isLoading ? "xmark" : "arrow.clockwise",
+                               help: page.isLoading ? "Stop loading" : "Reload",
+                               action: page.isLoading ? model.pageStop : model.pageReload)
 
             HeaderGap()
             CanvasAddressField(page: page, width: model.room.addressWidth,
@@ -83,10 +108,11 @@ struct CanvasPageCapsule: View {
             }
         }
         .onHover { hovering = $0 }
+        // Opacity and a swapped glyph only. Home and Pin arriving, and the address field changing
+        // width with the window, both change the capsule's width — and a capsule that animates its own
+        // width throws the row it is in sideways. See `CanvasHeaderTrailingChrome`.
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: page.wandered)
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: page.isLoading)
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Page controls, " + page.host))
     }
@@ -121,7 +147,19 @@ private struct CanvasAddressField: View {
     @State private var hovering = false
 
     var body: some View {
-        Group {
+        ZStack {
+            // **A crossfade, and the box it happens in is a fixed width.** That is the whole licence
+            // for animating here: everything else in this capsule is forbidden to move because the row
+            // is pinned to the window's trailing edge and grows leftward, but the address field is
+            // `width` points wide whatever is inside it, so what happens in here stays in here.
+            //
+            // Worth drawing because the two states are not the same sentence. Clicking the chip
+            // replaces `example.com` with the whole address, selected — a cut makes that read as the
+            // page having navigated somewhere, which is precisely the thing it must not read as while
+            // you are looking at a hostname to decide whether to type a password into it.
+            //
+            // A `ZStack` because that is what is being asked for: one box, two things in it, briefly
+            // both. It was a `Group`, which said the same thing only by implication.
             if editing { field } else { chip }
         }
         .frame(width: width, height: HeaderMetrics.itemHeight)
@@ -140,6 +178,9 @@ private struct CanvasAddressField: View {
         .onHover { hovering = $0 }
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: page.wandered)
         .animation(Motion.animation(.easeOut(duration: 0.12)), value: hovering)
+        // Quick. The field it fades in is one you are about to type into, and a control that is still
+        // arriving when your first keystroke lands is a control you have to wait for.
+        .animation(Motion.animation(.easeOut(duration: 0.1)), value: editing)
         // ⌘L lands here: the same thing clicking the chip does, so there is one way in and one state
         // to be in afterwards.
         .onChange(of: openToken) { _, _ in openForEditing() }

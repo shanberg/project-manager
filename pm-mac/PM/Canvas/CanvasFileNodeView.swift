@@ -8,7 +8,8 @@ import PmLib
 ///
 /// **The card is the file's contents and nothing else.** It used to carry a header strip naming the
 /// file, which was doing two jobs. Identifying the card is the smaller one, and the note's own first
-/// heading usually does it better; what is left of it is on the tooltip, and zoomed out the filename
+/// heading usually does it better; what is left of it is what the card tells the header and VoiceOver,
+/// and zoomed out the filename
 /// becomes the card's whole content, because at that size the name genuinely is the most informative
 /// thing about it.
 ///
@@ -97,8 +98,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         setContent(preview(for: location, path: path, subpath: subpath))
     }
 
-    /// What the card says about itself when you linger on it: which file, which heading, and whether
-    /// PM had to go looking for it. See `CanvasNodeView.cardDescription`.
+    /// What the card says about itself when asked: which file, which heading, and whether PM had to go
+    /// looking for it. See `CanvasNodeView.cardDescription`.
     override var cardDescription: String? {
         let (path, subpath) = stored
         guard !path.isEmpty else { return nil }

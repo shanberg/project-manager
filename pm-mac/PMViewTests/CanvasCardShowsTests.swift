@@ -21,8 +21,7 @@ final class CanvasCardShowsTests: XCTestCase {
     /// widened again leaves the file exactly as it found it.
     func testShowingEverythingAgainTakesTheKeyOutOfTheFile() {
         var node = card()
-        CanvasCardShows.set(CanvasCardShows(brief: false, notes: false, tasks: true,
-                                            completed: false, latestOnly: true), on: &node)
+        CanvasCardShows.set(.tasks, on: &node)
         XCTAssertNotNil(node.extra[CanvasCardShows.key])
         CanvasCardShows.set(.everything, on: &node)
         XCTAssertNil(node.extra[CanvasCardShows.key])
@@ -30,81 +29,105 @@ final class CanvasCardShowsTests: XCTestCase {
 
     // MARK: What gets written
 
-    func testASettingRoundTripsThroughTheNode() {
-        let wanted = CanvasCardShows(brief: true, notes: false, tasks: true,
-                                     completed: false, latestOnly: true)
+    func testEveryPresetRoundTripsThroughTheNode() {
+        for preset in CanvasCardShows.allCases {
+            var node = card()
+            CanvasCardShows.set(preset, on: &node)
+            XCTAssertEqual(CanvasCardShows.of(node), preset, "\(preset.title)")
+        }
+    }
+
+    /// One word, and a word a person reading the `.canvas` in Obsidian can act on.
+    func testACardWritesItsPresetAsOneWord() {
         var node = card()
-        CanvasCardShows.set(wanted, on: &node)
-        XCTAssertEqual(CanvasCardShows.of(node), wanted)
+        CanvasCardShows.set(.current, on: &node)
+        XCTAssertEqual(node.extra[CanvasCardShows.key], .string("current"))
     }
 
-    /// The tokens are written in a fixed order, so a card set the same way twice produces the same
-    /// bytes and a `.canvas` under git doesn't churn.
-    func testTheTokensAreWrittenInAFixedOrder() {
-        let shows = CanvasCardShows(brief: true, notes: true, tasks: true,
-                                    completed: true, latestOnly: true)
-        XCTAssertEqual(shows.written, "brief,notes,tasks,completed,latest")
+    // MARK: What each card is made of
+
+    func testEverythingDrawsTheWholeDocument() {
+        let shows = CanvasCardShows.everything
+        XCTAssertTrue(shows.brief)
+        XCTAssertTrue(shows.showsProse(ofSessionAt: 3))
+        XCTAssertTrue(shows.showsTask(checked: true))
     }
 
-    func testATasksOnlyCardWritesOneWord() {
-        let shows = CanvasCardShows(brief: false, notes: false, tasks: true,
-                                    completed: false, latestOnly: false)
-        XCTAssertEqual(shows.written, "tasks")
+    /// The point of the pair: `current` narrows the *prose* to the latest sitting without narrowing the
+    /// tasks to it, which the old `latestOnly` flag could not express — it truncated the session list,
+    /// so hiding an older sitting's words also hid the work it left open.
+    func testCurrentDrawsTheLatestProseAndEverySittingsOpenWork() {
+        let shows = CanvasCardShows.current
+        XCTAssertTrue(shows.showsProse(ofSessionAt: 0))
+        XCTAssertFalse(shows.showsProse(ofSessionAt: 1))
+        XCTAssertTrue(shows.showsTask(checked: false), "an open task from a sitting three back")
+        XCTAssertFalse(shows.showsTask(checked: true))
+        XCTAssertFalse(shows.brief)
+    }
+
+    func testTasksDrawsOpenWorkAndNothingElse() {
+        let shows = CanvasCardShows.tasks
+        XCTAssertFalse(shows.brief)
+        XCTAssertFalse(shows.showsProse(ofSessionAt: 0))
+        XCTAssertTrue(shows.showsTask(checked: false))
+        XCTAssertFalse(shows.showsTask(checked: true))
+    }
+
+    func testBriefDrawsTheBriefAlone() {
+        let shows = CanvasCardShows.brief
+        XCTAssertTrue(shows.brief)
+        XCTAssertFalse(shows.showsProse(ofSessionAt: 0))
+        XCTAssertFalse(shows.showsTask(checked: false))
+    }
+
+    /// Every preset draws something. The five-flag version could reach "nothing at all" and had to
+    /// refuse it in three places; naming the cards outright means the state does not exist.
+    func testNoPresetIsABlankRectangle() {
+        for preset in CanvasCardShows.allCases {
+            XCTAssertTrue(preset.brief
+                            || preset.showsProse(ofSessionAt: 0)
+                            || preset.showsTask(checked: false),
+                          "\(preset.title) draws nothing")
+        }
     }
 
     // MARK: Reading a file somebody else touched
 
-    func testUnknownWordsAreIgnored() {
-        XCTAssertEqual(CanvasCardShows.parse("tasks, sparkles"),
-                       CanvasCardShows(brief: false, notes: false, tasks: true,
-                                       completed: false, latestOnly: false))
-    }
-
     func testSpacingAndCaseDoNotMatter() {
-        XCTAssertEqual(CanvasCardShows.parse("  Brief , TASKS "),
-                       CanvasCardShows(brief: true, notes: false, tasks: true,
-                                       completed: false, latestOnly: false))
+        XCTAssertEqual(CanvasCardShows.parse("  Current "), .current)
+        XCTAssertEqual(CanvasCardShows.parse("BRIEF"), .brief)
     }
 
-    /// A `.canvas` is hand-editable, so `pmShows: "task"` is a typo somebody will make. Naming no part
-    /// of a project is not a card showing nothing — it is a card PM cannot read, and the honest
+    /// A `.canvas` is hand-editable, so `pmShows: "currnet"` is a typo somebody will make. Naming
+    /// nothing PM knows is not a card showing nothing — it is a card PM cannot read, and the honest
     /// recovery is the project.
-    func testAListNamingNoPartFallsBackToTheWholeProject() {
-        XCTAssertEqual(CanvasCardShows.parse("task"), .everything)
+    func testAValueNamingNoCardFallsBackToTheWholeProject() {
+        XCTAssertEqual(CanvasCardShows.parse("currnet"), .everything)
         XCTAssertEqual(CanvasCardShows.parse(""), .everything)
-        XCTAssertEqual(CanvasCardShows.parse("completed,latest"), .everything)
+        XCTAssertEqual(CanvasCardShows.parse("completed"), .everything)
     }
 
-    // MARK: The one arrangement that isn't a view of a project
+    // MARK: Cards written by the five-flag version
 
-    func testTurningOffTheLastPartIsRefused() {
-        let onlyTasks = CanvasCardShows(brief: false, notes: false, tasks: true,
-                                        completed: true, latestOnly: false)
-        XCTAssertNil(onlyTasks.setting(.tasks, to: false))
+    /// Anything scoped to the latest sitting was asking "where is this now", whatever else it said.
+    func testALegacyLatestOnlyCardBecomesCurrent() {
+        XCTAssertEqual(CanvasCardShows.parse("notes,tasks,latest"), .current)
+        XCTAssertEqual(CanvasCardShows.parse("brief,notes,tasks,completed,latest"), .current)
+        XCTAssertEqual(CanvasCardShows.parse("tasks,latest"), .current)
     }
 
-    func testTurningOffAPartThatIsNotTheLastOneIsFine() {
-        let two = CanvasCardShows(brief: false, notes: true, tasks: true,
-                                  completed: true, latestOnly: false)
-        XCTAssertEqual(two.setting(.tasks, to: false)?.tasks, false)
-        XCTAssertEqual(two.setting(.tasks, to: false)?.notes, true)
+    func testTheLegacySinglePartCardsKeepTheirMeaning() {
+        XCTAssertEqual(CanvasCardShows.parse("brief"), .brief)
+        XCTAssertEqual(CanvasCardShows.parse("brief,completed"), .brief)
+        XCTAssertEqual(CanvasCardShows.parse("tasks"), .tasks)
+        XCTAssertEqual(CanvasCardShows.parse("tasks,completed"), .tasks)
     }
 
-    /// The refusal is about emptiness, not about the part: turning one *on* can never be refused, even
-    /// on a card that is already showing only that one.
-    func testTurningAPartOnIsNeverRefused() {
-        let onlyBrief = CanvasCardShows(brief: true, notes: false, tasks: false,
-                                        completed: true, latestOnly: false)
-        XCTAssertEqual(onlyBrief.setting(.brief, to: true), onlyBrief)
-        XCTAssertNotNil(onlyBrief.setting(.notes, to: true))
-    }
-
-    /// Completed is a filter on the tasks, not a part of the card — hiding finished work does not make
-    /// a card empty, and never had to be refused.
-    func testHidingCompletedTasksIsNotHidingAPart() {
-        var shows = CanvasCardShows(brief: false, notes: false, tasks: true,
-                                    completed: true, latestOnly: false)
-        shows.completed = false
-        XCTAssertFalse(shows.isEmpty)
+    /// The combinations with no preset widen rather than narrowing. Showing more than you asked for is
+    /// one click from fixed; showing less looks like the card is broken.
+    func testALegacyCardWithNoPresetWidensToTheWholeProject() {
+        XCTAssertEqual(CanvasCardShows.parse("brief,tasks,completed"), .everything)
+        XCTAssertEqual(CanvasCardShows.parse("brief,notes"), .everything)
+        XCTAssertEqual(CanvasCardShows.parse("notes"), .everything)
     }
 }

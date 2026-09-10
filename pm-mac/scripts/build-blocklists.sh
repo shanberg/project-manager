@@ -23,6 +23,10 @@
 #     canary CanvasContentBlocker checks at launch: a list can compile, attach, and still not be
 #     applied, and nothing in the API will say so.
 #
+# Every list also carries the exceptions in scripts/never-filter.txt, appended after the canary —
+# hosts where a list blocks something the page's own code does not survive losing. Editing that file
+# needs no regeneration and no network: scripts/apply-exceptions.py rewrites what is committed.
+#
 # Usage:  scripts/build-blocklists.sh [path-to-SafariConverterLib-checkout]
 set -euo pipefail
 

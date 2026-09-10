@@ -282,10 +282,18 @@ enum MainMenu {
     /// Photos all use, and because it reads as an intensifier of Return, which on this board steps into
     /// a card.
     private static func canvasTilingItems(_ menu: NSMenu) {
-        let tile = menu.addItem(withTitle: "Fill Window with Selection",
+        let tile = menu.addItem(withTitle: "Create Workspace",
                                 action: #selector(CanvasBoardView.tileSelection(_:)),
                                 keyEquivalent: "\r")
         tile.keyEquivalentModifierMask = [.command]
+        // **The temporary one.** ⌘↩ makes a workspace or leaves one; this fills the room with a single
+        // tile for as long as you want it and puts the workspace back afterwards — maximizing a window
+        // rather than narrowing the view. ⌥⌘↩ reads as the tile's ⌘↩, and the ⌥ layer is one of the
+        // few web pages do not claim, which matters on a board whose tiles are web apps.
+        let maximize = menu.addItem(withTitle: "Maximize Tile",
+                                    action: #selector(CanvasBoardView.maximizeTile(_:)),
+                                    keyEquivalent: "\r")
+        maximize.keyEquivalentModifierMask = [.command, .option]
         let arrange = NSMenu(title: "Arrange Tiles")
         for arrangement in CanvasTiling.Arrangement.allCases {
             let entry = arrange.addItem(withTitle: arrangement.title,

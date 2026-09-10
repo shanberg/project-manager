@@ -42,7 +42,9 @@ extension CanvasBoardView {
     /// Empty for a grid of more than one row *and* one column: there, a boundary is a whole column's or
     /// row's, shared by tiles that were never asked — see `CanvasTiling.grid`.
     var tileDividers: [CanvasTileDivider] {
-        guard let tiling, tiling.ids.count > 1 else { return [] }
+        // Nothing to divide while one tile fills the room — the boundaries belong to an arrangement
+        // that is not on screen, and a drag on one would resize tiles you cannot see.
+        guard let tiling, tiling.maximized == nil, tiling.ids.count > 1 else { return [] }
         let frames = tiling.layout.frames
         let half = CanvasTiling.gap / 2
 
@@ -108,7 +110,10 @@ extension CanvasBoardView {
     /// one of the two side edges is a boundary you can drag — the stack's leading edge, against the
     /// master — the bar takes the other one, so a bar and a divider never share a band.
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect, edge: Edge)? {
-        guard let tiling, tiling.ids.count > 1, let index = tiling.ids.firstIndex(of: id),
+        // A maximized tile has no order to be dragged along, and the bar sits in a gap that is not
+        // there. Restoring is Escape, the double-click that got you here, or the menu.
+        guard let tiling, tiling.maximized == nil, tiling.ids.count > 1,
+              let index = tiling.ids.firstIndex(of: id),
               let frame = tiling.layout.frames[id] else { return nil }
         let edge: Edge
         switch tiling.arrangement {

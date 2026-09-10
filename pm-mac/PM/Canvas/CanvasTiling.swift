@@ -127,6 +127,19 @@ enum CanvasTiling {
 
         /// The same rule outward, for a ring drawn around the thing rather than inside it.
         func grown(by distance: Double) -> Radii { inset(by: -distance) }
+
+        /// Part way from one set of corners to another, for a card turning into a tile — see
+        /// `CanvasBoardView.tiledness`. Corner by corner, because that is the point: a card's four equal
+        /// radii do not all arrive at the same number.
+        static func mix(_ from: Radii, _ to: Radii, at fraction: Double) -> Radii {
+            guard fraction > 0.001 else { return from }
+            guard fraction < 0.999 else { return to }
+            func step(_ a: Double, _ b: Double) -> Double { a + (b - a) * fraction }
+            return Radii(topLeft: step(from.topLeft, to.topLeft),
+                         topRight: step(from.topRight, to.topRight),
+                         bottomRight: step(from.bottomRight, to.bottomRight),
+                         bottomLeft: step(from.bottomLeft, to.bottomLeft))
+        }
     }
 
     /// The room the tiles themselves get: what was on screen, less the margin at the frame.
@@ -136,6 +149,48 @@ enum CanvasTiling {
     /// `inset(by: -edgeGap)` is a second answer, and the symptom would be a tiling whose outer corners
     /// were all tight.
     static func space(of area: CanvasRect) -> CanvasRect { area.inset(by: -edgeGap) }
+
+    // MARK: The window, and the part of it tiles get
+
+    /// What stands between everything a window can show and the region its tiles are laid into: the
+    /// sidebar the board runs underneath, and the room the floating header needs at the top.
+    ///
+    /// In canvas points rather than view points, because everything on this side of the board is — the
+    /// same inset is worth twice as many canvas points at 50% as it is at 100%.
+    struct Margins: Equatable {
+        var leading: Double = 0
+        var trailing: Double = 0
+        var top: Double = 0
+    }
+
+    /// The region tiles are laid out in, out of everything the window can show.
+    static func area(of visible: CanvasRect, margins: Margins) -> CanvasRect {
+        CanvasRect(x: visible.minX + margins.leading,
+                   y: visible.minY + margins.top,
+                   width: max(minimumArea, visible.width - margins.leading - margins.trailing),
+                   height: max(minimumArea, visible.height - margins.top))
+    }
+
+    /// **The inverse: where the window has to be looking for that area to be framed as it was measured.**
+    ///
+    /// Written here, beside the thing it inverts, because it exists at all only as the other half of
+    /// `area(of:margins:)` — and the first version of it was not, which cost exactly what leaving two
+    /// halves of one piece of arithmetic in two files costs. Entering a workspace measures the area for
+    /// the zoom it is about to travel to and then flies the board there, and flying it to the *area's*
+    /// centre put every tiling half the header clearance too high and half the sidebar too far left. The
+    /// area is not centred in the window: it is pushed down and inward by margins that are only on two
+    /// of its four sides, so its middle is not the window's middle.
+    ///
+    /// Exact except in a window too small to tile, where `minimumArea` has clamped the area and there is
+    /// no size left to invert. What is drawn there is wrong by whatever the clamp took, which is the
+    /// least of that window's problems.
+    static func centre(framing area: CanvasRect, margins: Margins) -> CanvasPoint {
+        CanvasPoint(x: area.midX + (margins.trailing - margins.leading) / 2,
+                    y: area.midY - margins.top / 2)
+    }
+
+    /// The floor on a tiled region, for a window too narrow or too short to honour the margins.
+    static let minimumArea: Double = 80
 
     // MARK: What you chose last time
 
@@ -177,37 +232,37 @@ enum CanvasTiling {
     /// What ⌘Return will do next, in words.
     ///
     /// Here rather than on the board because it is a decision about wording, it is pure arithmetic on
-    /// four counts, and three places now have to say it: the View menu, the contextual menu and the
-    /// header button. Three copies of a sentence is three chances for the board to promise one thing in
-    /// one menu and something else in another — which it already did, by saying "Show Canvas" for
-    /// a ⌘Return that was about to drill in.
+    /// two counts, and three places have to say it: the View menu, the contextual menu and the header
+    /// button. Three copies of a sentence is three chances for the board to promise one thing in one
+    /// menu and something else in another.
+    ///
+    /// **One meaning per place, and that is new.** This used to fork four ways, because ⌘Return meant
+    /// "narrow further" inside a tiled view: with two tiles of six picked it read "Fill Window with
+    /// These 2 Tiles", and it only became the way out once there was nothing left to narrow to. So the
+    /// key you press to leave a workspace usually did not leave it — it drilled you further in, which
+    /// is the one thing a person pressing it at that moment cannot mean. Inside a workspace this is
+    /// now always the way out, and the way to look at one tile on its own is Maximize, which is a
+    /// different act with a different key and puts everything back afterwards.
     ///
     /// It says the count out loud — "These 6 Cards" rather than "Selection" — because the command's
-    /// one real hazard is tiling more than you meant to. A frame tiles what is inside it and an empty
-    /// selection tiles everything on screen, and both are worth being told before you commit rather
-    /// than after the board has rearranged itself.
+    /// one real hazard is making a workspace out of more than you meant. A frame opens out into the
+    /// cards inside it, and being told how many that came to is worth more before you commit than
+    /// after.
+    ///
+    /// **A workspace is made out of a selection or not at all.** With nothing selected this used to
+    /// tile whatever was on screen; a workspace is a named thing that persists, and making one out of
+    /// "whatever you happen to be scrolled to" is a surprise with a name attached. The command is dim
+    /// instead, and says what it would make rather than nothing.
     ///
     /// - Parameters:
-    ///   - tiled: how many tiles are up, or nil when the board is showing itself.
-    ///   - picked: how many of those tiles are selected. Meaningless when nothing is tiled.
-    ///   - targets: how many cards a selection would end up tiling, after frames are opened out.
-    ///     Consulted only when `selected`.
-    ///   - selected: whether anything is selected at all.
-    static func commandTitle(tiled: Int?, picked: Int, targets: Int, selected: Bool) -> String {
-        if let tiled {
-            // All of the tiles, or none of them, is not a narrowing — so ⌘Return is the way back out,
-            // and the menu has to admit that rather than offering to fill the window again.
-            guard picked > 0, picked < tiled else { return "Show Canvas" }
-            return picked == 1 ? "Fill Window with This Tile"
-                               : "Fill Window with These \(picked) Tiles"
-        }
-        // Nothing selected, so the fallback is whatever is on screen — and that is deliberately *not*
-        // counted. The number changes as you scroll, and a title that has to be recomputed on every
-        // scroll tick to stay honest is one that will eventually be caught lying. "Visible Cards" is
-        // exact at every scroll position, and this is not the case where the count is the useful part.
-        guard selected, targets > 0 else { return "Fill Window with Visible Cards" }
-        return targets == 1 ? "Fill Window with This Card"
-                            : "Fill Window with These \(targets) Cards"
+    ///   - tiled: whether a tiled view is up.
+    ///   - targets: how many cards a selection would end up in the workspace, after frames are opened
+    ///     out. Zero means nothing is selected, and the command is unavailable.
+    static func commandTitle(tiled: Bool, targets: Int) -> String {
+        guard !tiled else { return "Show Canvas" }
+        guard targets > 0 else { return "Create Workspace" }
+        return targets == 1 ? "Create Workspace from This Card"
+                            : "Create Workspace from These \(targets) Cards"
     }
 
     /// The order cards tile in: reading order of where they actually sit on the board.

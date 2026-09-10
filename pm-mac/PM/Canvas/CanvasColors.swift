@@ -75,6 +75,28 @@ enum CanvasPalette {
         appearance.isDark ? NSColor(white: 0.110, alpha: 1) : NSColor(white: 0.910, alpha: 1)
     }
 
+    /// The ground a board is on partway between the two — see `CanvasBoardView.tiledness`.
+    ///
+    /// **Still a dynamic colour in the middle**, which is why this is a mix of two resolutions rather
+    /// than a mix of two colours. `board` is `windowBackgroundColor` and follows the appearance, the
+    /// contrast setting and whatever tint the system is wearing; blending it eagerly would resolve it
+    /// once, against whichever appearance happened to be current when the crossing started, and hand
+    /// back a constant. The window would then keep that constant until the next crossing — and a board
+    /// that stopped following Dark Mode until you next made a workspace is a bug nobody would ever
+    /// connect to this. So the mixing happens inside the block, per appearance, every time it is asked.
+    ///
+    /// The two ends answer with the real colours rather than a blend of one part, so a board that is
+    /// not mid-crossing — which is a board almost always — is exactly what it was before any of this.
+    static func ground(tiled: Double) -> NSColor {
+        if tiled <= 0.001 { return board }
+        if tiled >= 0.999 { return tileGround }
+        return NSColor(name: nil) { appearance in
+            let from = board.resolved(in: appearance)
+            let to = tileGround.resolved(in: appearance)
+            return from.blended(withFraction: tiled, of: to) ?? to
+        }
+    }
+
     /// A tile's hairline: about a sixth of `cardBorder`, in both appearances.
     ///
     /// Not none at all. At these alphas the border is doing almost nothing on a tile's long edges,
@@ -86,6 +108,29 @@ enum CanvasPalette {
     /// reason it does there, one sixth of the way down.
     static let tileBorder = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor(white: 1, alpha: 0.025) : NSColor(white: 0, alpha: 0.017)
+    }
+
+    /// A card's hairline on its way to being a tile's, or back — see `CanvasBoardView.tiledness`.
+    ///
+    /// Dynamic in the middle, and resolved per appearance inside the block, for the reason
+    /// `ground(tiled:)` is: these are constants, but they are constants *per appearance* — a light
+    /// board draws a dark line and a dark board draws a light one — and a blend made eagerly would
+    /// freeze whichever appearance happened to be current when the crossing began.
+    ///
+    /// **Alpha is most of what travels here**, which is worth knowing before touching this:
+    /// `cardBorder` is a dark line at 0.1 and `tileBorder` one at 0.017, so what the crossing mostly
+    /// does is fade the line out rather than change its colour. `blended(withFraction:of:)` does carry
+    /// alpha through — measured, because the name suggests compositing and the documentation is quiet
+    /// about it; see `CanvasCrossingTests`, which pins the number so a future implementation cannot
+    /// quietly stop.
+    static func hairline(card: NSColor, tile: NSColor, at tiled: Double) -> NSColor {
+        if tiled <= 0.001 { return card }
+        if tiled >= 0.999 { return tile }
+        return NSColor(name: nil) { appearance in
+            let from = card.resolved(in: appearance)
+            let to = tile.resolved(in: appearance)
+            return from.blended(withFraction: tiled, of: to) ?? to
+        }
     }
 
     /// The key tile's hairline — the tile the arrows and Return are about.
@@ -149,5 +194,22 @@ extension NSAppearance {
     /// Whether this appearance is one of the dark ones — asked by every dynamic colour above.
     var isDark: Bool {
         bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+}
+
+extension NSColor {
+    /// This colour as it actually is in a given appearance, in a space it can be mixed in.
+    ///
+    /// A dynamic `NSColor` answers `redComponent` and `blended(withFraction:of:)` for whatever
+    /// appearance is current at the moment it is asked, which inside a colour block is not the
+    /// appearance the block was called for. Drawing it is fine; *arithmetic* on it needs the resolution
+    /// made explicit, and a conversion to a component space, because two colours in different spaces do
+    /// not blend at all — `blended` answers nil.
+    func resolved(in appearance: NSAppearance) -> NSColor {
+        var answer = self
+        appearance.performAsCurrentDrawingAppearance {
+            answer = usingColorSpace(.sRGB) ?? self
+        }
+        return answer
     }
 }

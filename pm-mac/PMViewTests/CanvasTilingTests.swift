@@ -207,54 +207,40 @@ final class CanvasTilingTests: XCTestCase {
     // MARK: What the command is called
 
     /// The wording the View menu, the contextual menu and the header button all share. Worth pinning
-    /// down because it is the only part of the command a person reads before committing to it, and
-    /// because the version it replaces got the most consequential case wrong.
-    func testAnUntiledBoardOffersToTileWhatIsSelected() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 6, selected: true),
-                       "Fill Window with These 6 Cards")
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 1, selected: true),
-                       "Fill Window with This Card")
+    /// down because it is the only part of the command a person reads before committing to it.
+    func testAnUntiledBoardOffersToMakeAWorkspaceOfTheSelection() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 6),
+                       "Create Workspace from These 6 Cards")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 1),
+                       "Create Workspace from This Card")
     }
 
     /// The count is the *target* count, not the selection's: selecting one frame that holds nine cards
     /// says nine. That is the whole reason the number is in the title.
     func testAFrameIsCountedByWhatIsInside() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0, targets: 9, selected: true),
-                       "Fill Window with These 9 Cards")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 9),
+                       "Create Workspace from These 9 Cards")
     }
 
-    /// Nothing selected falls back to the visible region, which is deliberately not counted — the
-    /// number would change under you as you scrolled.
-    func testNothingSelectedNamesTheVisibleCardsWithoutCountingThem() {
-        for targets in [0, 1, 40] {
-            XCTAssertEqual(CanvasTiling.commandTitle(tiled: nil, picked: 0,
-                                                     targets: targets, selected: false),
-                           "Fill Window with Visible Cards")
+    /// **Nothing selected is nothing to make.** This used to name the visible cards and tile them,
+    /// which was a fair reading while a tiling was only a way of looking. A workspace is saved, named
+    /// and given a tab, so one made out of wherever the board happened to be scrolled is a surprise you
+    /// then have to go and delete. The command says what it *would* make and is dim — see
+    /// `CanvasBoardView.canRunTileCommand`.
+    func testNothingSelectedHasNoWorkspaceToOffer() {
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 0), "Create Workspace")
+    }
+
+    /// **Inside a workspace this is the way out, whatever is picked.**
+    ///
+    /// It used to fork: with some of the tiles selected it drilled in and said so, and only with all or
+    /// none of them did it leave. So the key you press to get out of a workspace usually did not get
+    /// you out — it filled the window with the tile you had picked. Looking at one tile on its own is
+    /// Maximize now, which is a different command and puts the workspace back.
+    func testInsideAWorkspaceTheCommandIsAlwaysTheWayOut() {
+        for targets in [0, 1, 6] {
+            XCTAssertEqual(CanvasTiling.commandTitle(tiled: true, targets: targets), "Show Canvas")
         }
-    }
-
-    /// Inside a tiling with some of the tiles picked, ⌘Return drills in — and now says so. It used to
-    /// say "Show Canvas" here, which was the menu promising the opposite of what would happen.
-    func testPickingSomeOfTheTilesOffersToDrillIn() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 2, targets: 0, selected: true),
-                       "Fill Window with These 2 Tiles")
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 1, targets: 0, selected: true),
-                       "Fill Window with This Tile")
-    }
-
-    /// All of them, or none of them, is not a narrowing — so the command is the way back out, and both
-    /// of those have to say so.
-    func testTakingAllOrNoneOfTheTilesIsTheWayOut() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 6, targets: 0, selected: true),
-                       "Show Canvas")
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 6, picked: 0, targets: 0, selected: false),
-                       "Show Canvas")
-    }
-
-    /// A tiling of one is already as far in as it goes.
-    func testAFullscreenTileCanOnlyBeLeft() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: 1, picked: 1, targets: 0, selected: true),
-                       "Show Canvas")
     }
 
     // MARK: Pinning one and stretching the rest
@@ -425,6 +411,68 @@ final class CanvasTilingTests: XCTestCase {
         session.add("d")
         session.remove("d")
         XCTAssertEqual(session, before)
+    }
+
+    // MARK: Maximizing one tile
+
+    /// **A maximized tile is a layout of one**, and that is the whole mechanism.
+    ///
+    /// `CanvasLayout.visible` already decides which cards a layout draws, so maximizing needs no
+    /// z-order and no hiding of its own — the covered tiles simply are not in the layout. It is also
+    /// what makes them cheap: `applyPageBudget` reads what is *drawn*, so their pages pause the same
+    /// turn rather than after the off-screen grace.
+    func testAMaximizedTileIsTheOnlyOneInTheLayout() {
+        var session = row(["a", "b", "c"])
+        let shared = session.layout
+
+        session.maximized = "b"
+        let full = session.layout
+
+        XCTAssertEqual(full.visible, ["b"])
+        XCTAssertFalse(full.shows("a"))
+        XCTAssertFalse(full.shows("c"))
+        XCTAssertNotNil(full.frames["b"])
+        XCTAssertGreaterThan(full.frames["b"]!.width, shared.frames["b"]!.width,
+                             "it fills the room the three were sharing")
+        XCTAssertEqual(full.frames["b"], CanvasTiling.space(of: session.area),
+                       "the whole tile space, which is why all four of its corners are outside ones")
+    }
+
+    /// Restoring is the layout that was already there — there is no second copy of it to drift.
+    func testRestoringPutsTheSameLayoutBack() {
+        var session = row(["a", "b", "c"])
+        let before = session.layout
+        session.maximized = "b"
+        session.maximized = nil
+        XCTAssertEqual(session.layout, before)
+    }
+
+    /// A tile that has gone cannot be the one filling the window. Without this the session would go on
+    /// answering "yes, maximized" and the menu would offer to restore a tile that is not there.
+    func testRemovingTheMaximizedTileClearsIt() {
+        var session = row(["a", "b", "c"])
+        session.maximized = "b"
+        session.remove("b")
+        XCTAssertNil(session.maximized)
+        XCTAssertEqual(session.layout.visible, ["a", "c"])
+    }
+
+    /// Removing a *different* tile leaves the maximized one filling the room — you took something out
+    /// of an arrangement you are not currently looking at, which is exactly what it says.
+    func testRemovingAnotherTileLeavesTheMaximizedOneUp() {
+        var session = row(["a", "b", "c"])
+        session.maximized = "b"
+        session.remove("c")
+        XCTAssertEqual(session.maximized, "b")
+        XCTAssertEqual(session.layout.visible, ["b"])
+    }
+
+    /// **A name that is not in the tiling is not a maximized tile.** The session is a value and can be
+    /// handed one; `layout` falls through to the arrangement rather than drawing an empty window.
+    func testAStaleMaximizedNameFallsBackToTheArrangement() {
+        var session = row(["a", "b", "c"])
+        session.maximized = "gone"
+        XCTAssertEqual(session.layout.visible, ["a", "b", "c"])
     }
 
     // MARK: Reordering under the hand

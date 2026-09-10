@@ -25,3 +25,6 @@ pm-mac/.build-dev/
 
 # Scratch vault used by manual testing
 scratch-note/
+
+# Python bytecode from the blocklist build scripts
+__pycache__/

@@ -125,11 +125,14 @@ struct CanvasProjectNote: View {
     ///
     /// The index travels with the session rather than being the position in this list, because
     /// everything downstream is addressed by it — which tasks belong to a sitting, which note a
-    /// double-click opens. `prefix(1)` is the latest one because `addSession` inserts at the front.
+    /// double-click opens. Index 0 is the most recent, because `addSession` inserts at the front.
+    ///
+    /// **Every sitting, always.** Narrowing happens in `blocks(for:at:)`, one block at a time, and it
+    /// has to: a card scoped to the latest sitting's *prose* still draws the open tasks of every
+    /// sitting before it, so there is no prefix of this list that describes what such a card shows. A
+    /// session that ends up contributing nothing loses its caption on its own — see `session_`.
     private var shownSessions: [(index: Int, session: Session)] {
-        let all = notes?.sessions ?? []
-        return (shows.latestOnly ? Array(all.prefix(1)) : all)
-            .enumerated().map { (index: $0.offset, session: $0.element) }
+        (notes?.sessions ?? []).enumerated().map { (index: $0.offset, session: $0.element) }
     }
 
     /// Every visible task row's key, in the order the card is drawing them — what a ⇧-click ranges
@@ -469,7 +472,7 @@ struct CanvasProjectNote: View {
             // session" on a card that is about to show you six.
             if notes?.sessions.isEmpty != false {
                 startRow("Start a session", symbol: "calendar.badge.plus", action: beginCurrentSession)
-            } else if store.todos.isEmpty, shows.tasks {
+            } else if store.todos.isEmpty, shows.tasks != .none {
                 startRow("Add a task", symbol: "plus") { activeEditor = Self.quickAdd }
             }
         }
@@ -858,12 +861,13 @@ struct CanvasProjectNote: View {
         activeEditor = EditorTarget(key: PMStore.key(for: todo), kind: kind)
     }
 
-    /// The session's body, cut where its tasks are.
+    /// The session's body, cut where its tasks are, and narrowed to what this card shows.
     ///
-    /// Every task is visible here — a card has no Incomplete filter and no find bar to narrow it, so
-    /// the closure that exists in the window to answer "is this row being drawn" always says yes. The
-    /// id is built the way the window builds it, raw line plus occurrence, because two identical task
-    /// lines in one session are two rows and `ForEach` misbehaves on duplicate ids.
+    /// **Both narrowings land here, and they are asked separately** — `showsProse(ofSessionAt:)` takes
+    /// the index, `showsTask(checked:)` takes the task — which is what lets one card draw the latest
+    /// sitting's words alongside every sitting's open work. The id is built the way the window builds
+    /// it, raw line plus occurrence, because two identical task lines in one session are two rows and
+    /// `ForEach` misbehaves on duplicate ids.
     private func blocks(for session: Session, at index: Int) -> [SessionBlock] {
         var seen: [String: Int] = [:]
         let all = SessionBody.blocks(body: session.body,
@@ -872,12 +876,15 @@ struct CanvasProjectNote: View {
             // yes, there being no Incomplete filter and no find bar to narrow it. Now the card has a
             // narrowing of its own, and this is where it lands. Every task is still *passed in*, hidden
             // or not, or the walk loses its place against the body's lines.
-            guard shows.tasks, shows.completed || !todo.checked, self.matches(todo) else { return nil }
+            //
+            // The find comes last because it is the cheap test that most often fails on a card nobody
+            // is searching: `matches` short-circuits to true when there is no query.
+            guard shows.showsTask(checked: todo.checked), self.matches(todo) else { return nil }
             let n = seen[todo.rawLine, default: 0]
             seen[todo.rawLine] = n + 1
             return IdentifiedTodo(id: "\(index)/\(todo.rawLine)#\(n)", todo: todo)
         }
-        guard !shows.notes else { return all }
+        guard !shows.showsProse(ofSessionAt: index) else { return all }
         return all.filter { if case .prose = $0 { return false } else { return true } }
     }
 }
@@ -948,7 +955,7 @@ final class CanvasProjectCardCommands: ObservableObject {
 /// looking at while you look at it.
 @MainActor
 final class CanvasProjectCardDisplay: ObservableObject {
-    @Published var shows = CanvasCardShows.everything
+    @Published var shows = CanvasCardShows.default
 
     /// What the board's find is looking for, while this is the card you are standing in.
     ///

@@ -90,6 +90,9 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         // question has already been answered.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         web = WKWebView(frame: .zero, configuration: configuration)
+        // The popup most of all: single sign-on is the flow that goes wrong, and the window it goes
+        // wrong in is this one.
+        CanvasWebSession.allowInspecting(web)
 
         let size = Self.size(asked: features, over: parent)
         sheet = NSWindow(contentRect: NSRect(origin: .zero, size: size),

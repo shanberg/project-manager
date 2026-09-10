@@ -39,11 +39,18 @@ final class CanvasHeaderModel: ObservableObject {
     /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
     /// contextual menu use. See `CanvasTiling.commandTitle`.
     ///
-    /// Published rather than asked for on demand because it depends on the selection, and the button
-    /// that carries it has a tooltip that has to be right before you click rather than after.
-    /// Defaulted to the empty-selection wording rather than a placeholder, because that is the true
-    /// answer for a board nobody has clicked yet — the state this starts in.
-    @Published var tileTitle = "Fill Window with Visible Cards"
+    /// **The button no longer wears this as a tooltip**, and did. A tooltip that changes with the
+    /// selection is one you cannot have read before you act on it: it appears a second after you have
+    /// stopped moving, by which time you have either clicked or gone somewhere else. What it was
+    /// telling you — how many cards are about to become a workspace — the menus say in a place you are
+    /// already reading. This is now the title of that menu item and nothing else.
+    @Published var tileTitle = "Create Workspace"
+    /// Whether ⌘Return has anything to do. Dim on a canvas with nothing selected — a workspace is made
+    /// out of a selection or not at all.
+    @Published var canTile = false
+    /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
+    /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
+    @Published var focusedTile: TileControls?
     /// The arrangement in force, or nil when the board is showing itself.
     @Published var arrangement: CanvasTiling.Arrangement?
     @Published var titlebar = TitlebarButtonMetrics.unmeasured
@@ -121,6 +128,21 @@ final class CanvasHeaderModel: ObservableObject {
         var age: String?
     }
 
+    /// What the header knows about the one tile the commands are about.
+    ///
+    /// A view model of `CanvasBoardView.focusedTile` and the three questions its verbs ask — a tile in a
+    /// grid has no master to become, and a tile in a grid of both rows and columns has no run to pin
+    /// along. The conditions live here rather than in the capsule so the capsule is a drawing of a
+    /// state rather than a second copy of the board's rules.
+    struct TileControls: Equatable {
+        var isMaximized = false
+        /// Whether Make This the Master Tile means anything: master-and-stack, and not already it.
+        var canPromote = false
+        /// What Pin is called, or nil where there is no run to pin along. See
+        /// `CanvasBoardView.pinTileTitle`.
+        var pinTitle: String?
+    }
+
     struct Find: Equatable {
         var isShowing = false
         var query = ""
@@ -169,6 +191,11 @@ final class CanvasHeaderModel: ObservableObject {
     var findCommitted: () -> Void = {}
     var tile: () -> Void = {}
     var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
+    /// The focused tile's verbs — see `CanvasTileCapsule`.
+    var maximizeTile: () -> Void = {}
+    var promoteTile: () -> Void = {}
+    var pinTile: () -> Void = {}
+    var removeTile: () -> Void = {}
 }
 
 // MARK: - The pill
@@ -191,18 +218,48 @@ struct CanvasTitlePill: View {
 
     private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
+    /// Whether a workspace is up. The pill is the same pill either way; what changes is whether it is
+    /// wearing anything.
+    private var tiled: Bool { model.tiling != nil }
+
     var body: some View {
         Text(model.title)
             .font(.system(size: 13, weight: .semibold))
             .lineLimit(1)
             .truncationMode(.middle)
             .opacity(chrome.contentOpacity)
-            .padding(.horizontal, HeaderMetrics.pillInset.horizontal)
+            // **The leading inset moves to the trailing side rather than going away.**
+            //
+            // Without glass around it the inset is not padding, it is a name that starts fourteen
+            // points inside its own island while every other piece of chrome in the band starts at
+            // its edge. So the name goes flush. But the pill's *width* has to be the same number in
+            // both states, because the tab row is pinned to its trailing anchor — take fourteen points
+            // off each side and that is a change of `intrinsicContentSize`, which Auto Layout settles
+            // in one frame: the whole row of chips jumps twenty-eight points leftward and the name's
+            // animation is lost with it, since SwiftUI does not interpolate a layout whose hosting
+            // view is being resized under it. Both halves of that are measured in
+            // `HeaderChromeMotionTests`.
+            //
+            // Total horizontal inset is `pillInset.horizontal * 2` whatever mode is up. What that buys
+            // is the whole transition: nothing in the header moves, and the name is free to slide
+            // inside a box that is standing still.
+            .padding(.leading, tiled ? 0 : HeaderMetrics.pillInset.horizontal)
+            .padding(.trailing, HeaderMetrics.pillInset.horizontal * (tiled ? 2 : 1))
+            // Vertical stays symmetric and stays put. It is invisible without the capsule — `TitlebarDrop`
+            // centres this view on the traffic lights whatever it measures — so removing it would move
+            // nothing and cost the pill its hit area.
             .padding(.vertical, HeaderMetrics.pillInset.vertical)
-            .headerBacking(chrome, in: Capsule())
+            // **No glass over a tiled board**, for the reason the control capsule drops its own: tiles
+            // are panels with their own edges on a plain ground, so the separation the backing exists
+            // to draw has already been made. The canvas keeps it — there the name sits over cards
+            // panning under it. It crossfades; see `headerBacking(_:in:showing:)`.
+            .headerBacking(chrome, in: Capsule(), showing: !tiled)
             .contentShape(Capsule())
             .onHover { hovering = $0 }
             .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+            // Safe *because* of the arithmetic above: this animates where the name sits inside the
+            // pill, not how wide the pill is.
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: tiled)
             .accessibilityLabel(Text(model.title))
             .modifier(TitlebarDrop(model: model))
     }
@@ -212,8 +269,8 @@ struct CanvasTitlePill: View {
 
 /// Everything you do to the board.
 ///
-/// Reading order is how you are looking at it, then what you can do to it: the mode, tile, find, add,
-/// and the view options that hold the mode and the zoom commands.
+/// Reading order is how you are looking at it, then what you can do to it: the mode, find, add, and
+/// the view options that hold the mode, the tiling and the zoom commands.
 ///
 /// The page you have stepped into used to be in here too, as a group of items behind a divider. It is
 /// its own capsule now — see `CanvasPageCapsule` — for two reasons. Everything left in this capsule acts
@@ -247,18 +304,6 @@ struct CanvasControlCapsule: View {
                     .headerCaption()
                     .help("Cards are showing the dots you drag lines from")
             }
-            // The way *in* to a tiled view, and until now the only thing this feature had no way in
-            // from. The window carried one piece of tiling chrome — the ✕ in the pill — which is to
-            // say the only control on screen was the one that leaves, and you cannot learn a feature
-            // exists from its dismiss button.
-            //
-            // Permanent rather than appearing with a selection, which was the obvious objection and
-            // turns out not to apply: with nothing selected ⌘Return tiles what is on screen, so on any
-            // board with a card on it this button is live and means something. There is no state where
-            // it would sit dimmed, and so no reason to make the row twitch by hiding it. It keeps its
-            // place at every width for the same reason Add and the options menu do — it is a command,
-            // not a readout, and the readout is the pill's job.
-            HeaderSymbolButton(symbol: "rectangle.split.2x2", help: model.tileTitle, action: model.tile)
             HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
                 model.find.isShowing = true
                 model.find.focusToken &+= 1
@@ -267,10 +312,11 @@ struct CanvasControlCapsule: View {
             optionsMenu
         }
         .onHover { hovering = $0 }
+        // Opacity only. Find opening and the field narrowing with the window both change this
+        // capsule's width — and a capsule that animates its own width throws its own glyphs sideways
+        // for a fifth of a second, out from under the pointer on its way to one of them. Which is the failure this capsule was split out to fix, arriving by another
+        // door. See `CanvasHeaderTrailingChrome` and `HeaderChromeMotionTests`.
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: model.find.isShowing)
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.room)
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.tiling == nil)
     }
 
     // MARK: Find
@@ -336,7 +382,7 @@ struct CanvasControlCapsule: View {
             // This menu is called View options and holds the mode and the four zooms, all of which it
             // turns off while tiled — so the one view option big enough to disable the others was the
             // one thing not in it. First, because it is the largest of them.
-            Button(model.tileTitle, action: model.tile)
+            Button(model.tileTitle, action: model.tile).disabled(!model.canTile)
             Menu("Arrange Tiles") {
                 ForEach(CanvasTiling.Arrangement.allCases, id: \.self) { arrangement in
                     Toggle(arrangement.title, isOn: Binding(get: { model.arrangement == arrangement },

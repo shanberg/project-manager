@@ -435,7 +435,71 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     func goToWorkspace(named name: String) {
         guard !tabModel.selectWorkspace(name) else { return }
         guard let tiling = CanvasWorkspaces.tiling(named: name, of: store.url) else { return }
-        scroll.board.restoreTiling(tiling, named: name)
+        // A pane built for this workspace applies it a runloop turn or more after it is shown — after
+        // the fit, because tiles are laid out into a region the window can show. So the pose the window
+        // handed it on the way in is picked up *here* rather than in `arrive(from:)`: this is the first
+        // moment there is a tiling to arrive into. See `arrival`.
+        let pose = takeArrivalFromTheCanvas()
+        if let pose { scroll.board.poseAsCanvas(zoom: pose.zoom, centre: pose.centre) }
+        scroll.board.restoreTiling(tiling, named: name, animated: pose != nil)
+    }
+
+    // MARK: Taking over from another pane
+
+    /// What the window hands the next pane when the tab it is switching to crosses between the canvas
+    /// and one of its workspaces — see `CanvasArrival`.
+    var departure: CanvasArrival { scroll.board.departure }
+
+    /// The pose to come in from, held until there is a board ready to come in *to*.
+    ///
+    /// Consumed exactly once, by whichever gets there first: `runArrival` for a pane that already has
+    /// its board, or `goToWorkspace` for one that is still building it.
+    private var arrival: CanvasArrival?
+
+    /// Take over from the pane the window was showing, and draw the crossing rather than cut it.
+    func arrive(from pose: CanvasArrival) {
+        arrival = pose
+        // A pane that has not fitted yet has nothing to pose with — no measured region, and in a moment
+        // a workspace to lay out into it. It picks the pose up in `goToWorkspace` instead.
+        guard isSettled else { return }
+        runArrival()
+    }
+
+    /// Pose the board as the one before it, then let it cross in the ordinary way.
+    ///
+    /// A turn later, both times, because posing is a layout: the frames the cards are to fly *from* are
+    /// only really theirs once AppKit has laid them out there, and an animation started in the same
+    /// pass simply starts from wherever they already were.
+    private func runArrival() {
+        guard let pose = arrival else { return }
+        arrival = nil
+        // Annotated, because `CanvasScrollView.board` is implicitly unwrapped and a bare `let` would
+        // bind it as an optional.
+        let board: CanvasBoardView = scroll.board
+        switch (pose.tiling, board.tiling) {
+        case let (theirs?, nil):
+            // The canvas, taking over from a workspace: wear its tiles, then leave them.
+            board.poseAsTiling(theirs)
+            afterCurrentUpdate { board.leaveTiling(animated: true) }
+        case let (nil, mine?):
+            // A workspace you have been in before, taking over from the canvas: stand where the canvas
+            // was, then make the tiles again — the same act as making them the first time, which is
+            // what `restoreTiling` animates.
+            let name = board.workspaceName
+            let remembered = board.memory(of: mine)
+            board.poseAsCanvas(zoom: pose.zoom, centre: pose.centre)
+            afterCurrentUpdate { board.restoreTiling(remembered, named: name, animated: true) }
+        default:
+            // Not a crossing after all — two workspaces, or two boards. Nothing to draw.
+            break
+        }
+    }
+
+    /// The pose, if the pane being taken over from was showing the canvas rather than a workspace.
+    private func takeArrivalFromTheCanvas() -> CanvasArrival? {
+        guard let pose = arrival, pose.tiling == nil else { return nil }
+        arrival = nil
+        return pose
     }
 
     /// A workspace was renamed from somewhere else in this window — a chip's menu, on this tab or
@@ -450,14 +514,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// workspace as you do it. No Save, no dirty mark, no Revert — the same decision `DetailsEditor`
     /// made for the brief, for the same reason (docs/canvas-workspaces.md §7b).
     ///
-    /// **Only at the root of the tiling**, which is the guard that makes the rest safe. Drilling into
-    /// one tile of a six-tile workspace is a temporary narrowing that Escape unwinds; writing it
-    /// through would reduce the workspace to that one tile, permanently and with nothing to undo it
-    /// with. `leaveTiling` already reasons this way about what is worth keeping — it remembers the
-    /// root of the drill-in stack rather than the tile you left through.
+    /// **What is written is the workspace, and a maximized tile is not part of it.** This used to need
+    /// a guard: the drill-in made a real tiling of the one card you were reading, so writing through
+    /// blind would have reduced a six-tile workspace to that one tile, permanently and with nothing to
+    /// undo it with. `CanvasTileSession.maximized` is not a field `memory(of:)` keeps, so there is
+    /// nothing here to guard against any more — the shape of the data says it.
     private func keepNamedWorkspaceUpToDate() {
         guard let name = scroll.board.workspaceName,
-              scroll.board.tilingHistory.isEmpty,
               let tiling = scroll.board.tilingMemory
         else { return }
         CanvasWorkspaces.save(tiling, as: name, for: store.url)
@@ -541,6 +604,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// pages for as long as it is open. That is what a dashboard is, and it is bounded by the tiling —
     /// a handful of cards that fit the window at a readable size, not the forty on the board. Leaving
     /// the tiled view hands it straight back to the budget.
+    ///
+    /// **And the pause spares the card you are standing in.** Resigning key is not evidence that you
+    /// have finished with a card — clicking another window, or a page opening a sheet, is enough — so
+    /// the card you had stepped into keeps running for as long as PM is on screen at all. See
+    /// `CanvasPageBudget.liveWhileAway`.
     @objc private func windowResignedKey() {
         idleTimer?.invalidate()
         idleTimer = nil
@@ -551,7 +619,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
                 // another window's command between the two, and pausing the tiles of a view somebody
                 // has just built is the one outcome this must not have.
                 guard let self, !self.scroll.board.isTiled else { return }
-                self.scroll.board.pauseAllPages()
+                self.scroll.board.pauseIdlePages()
             }
         }
     }
@@ -714,6 +782,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
+        // The focused tile's verbs, routed to the same commands the menu bar and the contextual menu
+        // send — so a tile cannot be told one thing from the header and another from a menu.
+        header.maximizeTile = { [weak self] in self?.scroll.board.maximizeTile(nil) }
+        header.promoteTile = { [weak self] in self?.scroll.board.promoteTile(nil) }
+        header.pinTile = { [weak self] in self?.scroll.board.togglePinTileSize(nil) }
+        header.removeTile = { [weak self] in self?.scroll.board.removeTile(nil) }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —
@@ -959,6 +1033,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// so this doesn't have to run at the rate a trackpad reports. See `CanvasTiling.commandTitle`.
     private func refreshTileCommand() {
         header.tileTitle = scroll.board.tileCommandTitle
+        header.canTile = scroll.board.canRunTileCommand
+        // Assigned only on a change: this runs on every selection change, and the capsule animates
+        // itself in and out on this value.
+        let controls = scroll.board.tileControls
+        if header.focusedTile != controls { header.focusedTile = controls }
     }
 
     // MARK: Undo, on a board that can hold two kinds of document
@@ -1185,6 +1264,13 @@ extension CanvasPaneController: ProjectTabContent {
     /// every card frozen until something happens to it.
     func paneBecameVisible() {
         scroll.board.settlePageBudget()
+        // **Lay the tiles out for the window this pane is coming back to.**
+        //
+        // A hidden pane cannot be re-tiled — it has no visible rectangle to fill, and
+        // `retileForWindowSize` declines rather than laying the workspace out into an empty one. So a
+        // window resized, or a sidebar opened, while you were in another tab is a resize this pane
+        // never got, and without this it would come back filling the window it was last visible in.
+        if scroll.board.isTiled { scroll.board.retileForWindowSize() }
         focusBoard()
     }
 

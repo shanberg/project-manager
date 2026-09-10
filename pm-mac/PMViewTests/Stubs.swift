@@ -12,7 +12,13 @@ import PmLib
 // launch the real app: `applicationDidFinishLaunching` opens windows, reads the projects folder, and
 // can trip a TCC prompt. A view test should not be able to touch somebody's notes.
 
-enum Log { static func write(_ s: String) {} }
+// `isEnabled` is the real switch's shape and always off here: a test bundle is not a copy of PM
+// somebody is chasing something in, and the one thing it gates — an inspectable web view —
+// should not be opened by running the tests.
+enum Log {
+    static let isEnabled = false
+    static func write(_ s: String) {}
+}
 
 /// Codes shown, which is the app's default.
 enum ProjectCodes {
