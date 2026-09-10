@@ -131,6 +131,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         NotificationCenter.default.addObserver(
             self, selector: #selector(blockingHealthChanged),
             name: CanvasContentBlocker.healthChanged, object: nil)
+        // How many pages a board keeps live is a number in Settings, and a board already open should
+        // act on it while the pane is still in front of you — not the next time you happen to scroll.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(pageSettingsChanged),
+            name: CanvasPageBudget.didChange, object: nil)
         notice.onDismissedByUser = { [weak self] in self?.hidBlockingNotice = true }
         // Asked once here because the document is already in the store: a board that opens without its
         // project note has to offer it from the first time the `+` is pulled down, not from the first
@@ -602,8 +607,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     ///
     /// It is a real cost and worth stating: a tiled board left behind your work goes on running its
     /// pages for as long as it is open. That is what a dashboard is, and it is bounded by the tiling —
-    /// a handful of cards that fit the window at a readable size, not the forty on the board. Leaving
-    /// the tiled view hands it straight back to the budget.
+    /// a handful of cards that fit the window at a readable size, not the forty on the board. The cards
+    /// *behind* the tiling are warm for a while rather than frozen on the spot, so stepping into a
+    /// workspace and back out doesn't cost you the board; they are off screen as far as the budget is
+    /// concerned and time out on the same clock, which puts a settled workspace back to just its tiles.
+    /// Leaving the tiled view hands it straight back to the budget.
     ///
     /// **And the pause spares the card you are standing in.** Resigning key is not evidence that you
     /// have finished with a card — clicking another window, or a page opening a sheet, is enough — so
@@ -1096,6 +1104,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard case .file(let path, _) = node.content else { return false }
             return store.resolver.resolve(path).hasMoved
         }
+    }
+
+    @objc private func pageSettingsChanged() {
+        scroll.board.pageSettingsChanged()
     }
 
     @objc private func blockingHealthChanged() { updateNotice() }

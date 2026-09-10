@@ -766,6 +766,19 @@ final class CanvasBoardView: NSView {
     /// flying to the zoom a tiling is laid out at.
     var isCrossing: Bool { tiledFade.isMoving || scrollView?.canvasScroll?.isFlying == true }
 
+    /// The page settings changed under the board — the number of pages kept live, or whether link
+    /// cards run pages at all.
+    ///
+    /// Both are read where they are used rather than cached, so the number takes effect the moment the
+    /// budget is next applied; the switch needs the cards asked again, because a card only reconsiders
+    /// whether it *wants* a page when its own zoom or address moves, and neither of those has.
+    /// Immediate rather than settled: this is a deliberate act in a settings window, not a gesture that
+    /// might still be going.
+    func pageSettingsChanged() {
+        for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reconsiderLoading() }
+        applyPageBudget()
+    }
+
     /// Decide again which pages are live, at the end of the current run loop pass.
     func reviewPageBudget() {
         // **Not during a crossing**, which is exactly the case `settlePageBudget` was written for and
@@ -797,7 +810,7 @@ final class CanvasBoardView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
     }
 
-    private func applyPageBudget() {
+    func applyPageBudget() {
         FrameMeter.span("pageBudget") { applyPageBudgetBody() }
     }
 

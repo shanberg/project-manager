@@ -187,6 +187,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
         reconsiderLoading(scale: board.liveScale)
     }
 
+    /// Ask again at the zoom the board is actually at — for when the answer changed underneath the
+    /// card rather than because of it, which is what flipping the web-cards switch in Settings is.
+    func reconsiderLoading() { reconsiderLoading(scale: board.liveScale) }
+
     /// Say whether this card would like to be running, and let the board decide.
     private func reconsiderLoading(scale: Double) {
         let wants = Self.loadsPages && scale >= CanvasDetail.pagesLoadAbove && url != nil

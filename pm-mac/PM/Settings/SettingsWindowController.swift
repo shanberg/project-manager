@@ -25,6 +25,8 @@ final class SettingsWindowController: NSWindowController {
                                      symbol: "folder", identifier: "projects"))
         tabs.addTabViewItem(Self.tab(NotesSettingsView(), title: "Notes",
                                      symbol: "note.text", identifier: "notes"))
+        tabs.addTabViewItem(Self.tab(BoardsSettingsView(), title: "Boards",
+                                     symbol: "rectangle.3.group", identifier: "boards"))
         tabs.addTabViewItem(Self.tab(ShortcutsSettingsView(), title: "Shortcuts",
                                      symbol: "keyboard", identifier: "shortcuts"))
         tabs.addTabViewItem(Self.tab(NotificationSettingsView(), title: "Notifications",
@@ -42,7 +44,7 @@ final class SettingsWindowController: NSWindowController {
     /// The panes, named so a command can ask for one by name rather than by index — an index would
     /// silently point at the wrong pane the next time the order changes.
     enum Pane: String {
-        case general, windows, projects, notes, shortcuts, notifications
+        case general, windows, projects, notes, boards, shortcuts, notifications
     }
 
     func show(selecting pane: Pane? = nil) {

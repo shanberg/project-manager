@@ -104,6 +104,58 @@ struct WindowsSettingsView: View {
     }
 }
 
+/// Boards: how much of the web a canvas is allowed to run at once.
+///
+/// One number and one switch, because that is genuinely the whole policy. A card showing a live page
+/// is a browser tab — a renderer process, its own memory, its own timers, its own network — and a
+/// dashboard of a dozen embeds is a dozen of them. Everything else a board does is free by comparison,
+/// which is why this pane is about the web cards and nothing else.
+struct BoardsSettingsView: View {
+    @AppStorage(CanvasLinkNodeView.defaultsKey) private var loadsPages = true
+    @AppStorage(CanvasPageBudget.defaultsKey) private var livePages = CanvasPageBudget.defaultLivePages
+    @AppStorage(CanvasPageBudget.graceDefaultsKey)
+    private var offScreenGrace = CanvasPageBudget.defaultOffScreenGrace
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Show live pages in link cards", isOn: $loadsPages)
+                Stepper("Pages kept live: \(livePages)", value: $livePages,
+                        in: CanvasPageBudget.allowed)
+                    .disabled(!loadsPages)
+                Picker("Pause a card left off screen", selection: $offScreenGrace) {
+                    ForEach(CanvasPageBudget.graceChoices, id: \.self) { seconds in
+                        Text(after(seconds)).tag(seconds)
+                    }
+                    Divider()
+                    Text("Never").tag(TimeInterval(0))
+                }
+                .disabled(!loadsPages)
+            } header: {
+                Text("Web Cards")
+            } footer: {
+                // The honest version of the trade, because the number is only meaningful next to what
+                // a page costs — and nothing else in PM has a per-item cost anywhere near this.
+                Text("A live page is a real browser tab, and a heavy site can hold a few hundred megabytes of memory on its own. Cards past the limit keep a picture of the page and wake up when you come back to them.\n\nScrolling a card out of the window doesn't pause it, and neither does hiding it behind a workspace — a board keeps more running than it is showing, and the ones you looked at most recently keep their place in the queue. The timeout is only for a card you have well and truly left: it stops a board you wandered away from holding pages all afternoon. Every tile in a workspace runs, whatever the limit says.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .onChange(of: livePages) { _ in CanvasPageBudget.changed() }
+        .onChange(of: loadsPages) { _ in CanvasPageBudget.changed() }
+        .onChange(of: offScreenGrace) { _ in CanvasPageBudget.changed() }
+    }
+
+    /// The choices read as the tail of the row's own label — "Pause a card left off screen: 10 minutes".
+    private func after(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes >= 60 { return minutes == 60 ? "1 hour" : "\(minutes / 60) hours" }
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+    }
+}
+
 /// Notifications: which nudges PM schedules, plus a way out to the system's own permission switch
 /// (which is the one that actually decides whether anything is delivered).
 struct NotificationSettingsView: View {
