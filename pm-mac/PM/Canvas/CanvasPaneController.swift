@@ -28,6 +28,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private var pill: NSHostingView<CanvasTitlePill>!
     private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
     private var tabBar: NSHostingView<CanvasTabBar>!
+    /// The soft edge between the header and the board. See `CanvasEdgeView`.
+    private let edge = CanvasEdgeView()
     /// Which part of the board this pane is pinned to. `.whole` is a plain board and behaves exactly as
     /// one; the other two are a tab that was opened *at* something.
     var focus: CanvasFocus = .whole
@@ -71,6 +73,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.onRenameWorkspace = { [weak tabs] name in tabs?.renameWorkspace(name) }
         scroll.board.onGoToWorkspace = { [weak self] name in self?.goToWorkspace(named: name) }
         scroll.board.workspaceNames = { [weak self] in self?.workspaceNames() ?? [] }
+        scroll.board.workspacesHolding = { [weak self] ids in
+            guard let self else { return [] }
+            return CanvasWorkspaces.names(holdingAnyOf: ids, of: self.store.url)
+        }
         scroll.board.onDuplicateWorkspace = { [weak tabs] name in tabs?.duplicateWorkspace(name) }
         // ⌘↩ on an untiled board: the tiling it is about to make is a workspace, and a workspace is a
         // tab. See `ProjectSplitViewController.tileAsWorkspace`.
@@ -399,11 +405,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// The name to put on a tab pinned to this frame.
     func frameName(_ id: String) -> String? { scroll.board.frameLabel(id) }
 
-    /// Every frame the add menu could offer, in reading order.
-    func frames() -> [ProjectTabItem] {
-        scroll.board.frameChoices.map { ProjectTabItem(id: $0.id, name: $0.name) }
-    }
-
     /// Every named workspace on this board.
     func workspaceNames() -> [String] { CanvasWorkspaces.names(of: store.url) }
 
@@ -447,6 +448,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         let pose = takeArrivalFromTheCanvas()
         if let pose { scroll.board.poseAsCanvas(zoom: pose.zoom, centre: pose.centre) }
         scroll.board.restoreTiling(tiling, named: name, animated: pose != nil)
+        // A workspace of the project's own card and nothing else is the notes, however it was named —
+        // and the notes are stepped into from the start, for the reason `goToProjectNote` gives. This
+        // is what a new project's seeded Notes workspace is.
+        if tiling.ids.count == 1, let id = tiling.ids.first,
+           let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url),
+           CanvasProjectNoteCard.id(on: store.document, notes: notes, resolver: store.resolver) == id {
+            afterCurrentUpdate { [weak self] in self?.scroll.board.engage(cardWithID: id) }
+        }
     }
 
     // MARK: Taking over from another pane
@@ -672,6 +681,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         notice.translatesAutoresizingMaskIntoConstraints = false
 
         container.addSubview(scroll)
+        // Over the board and under everything else: the edge softens cards, never the chrome.
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(edge)
         container.addSubview(notice)
         container.addSubview(pill)
         container.addSubview(tabBar)
@@ -697,6 +709,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            // The board's full width, sidebar included — the board runs under the sidebar, so its
+            // edge does too.
+            edge.topAnchor.constraint(equalTo: container.topAnchor),
+            edge.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            edge.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            edge.heightAnchor.constraint(equalToConstant: CanvasEdgeView.height),
 
             pill.topAnchor.constraint(equalTo: container.topAnchor),
             pillLeading,
@@ -1275,6 +1294,9 @@ extension CanvasPaneController: ProjectTabContent {
     /// switched away from ten minutes ago has had neither — so without this a board comes back with
     /// every card frozen until something happens to it.
     func paneBecameVisible() {
+        // The pages the tab you came from was running for these cards come with you, as they were —
+        // before the crossing starts, so the tiles fly in already showing them. See `CanvasPageHandover`.
+        scroll.board.reclaimPages()
         scroll.board.settlePageBudget()
         // **Lay the tiles out for the window this pane is coming back to.**
         //

@@ -64,8 +64,18 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// that all showed up in use: a page with a strict CSP could refuse the read, a card that had been
     /// paused came back with **no history**, so Back was dead through no fault of yours, and it meant
     /// injecting script into a page to ask it where it was. This is one synchronous property.
-    private var resumeState: Any?
-    private var resumeURL: URL?
+    ///
+    /// **Kept for the card, not for this view** — see `CanvasPageHandover`. The canvas and a workspace
+    /// each have a view of the card, and a page paused in one should wake in the other where you left
+    /// it.
+    private var resumeState: Any? {
+        get { CanvasPageHandover.resumes[pageKey]?.state }
+        set { CanvasPageHandover.resumes[pageKey, default: .init()].state = newValue }
+    }
+    private var resumeURL: URL? {
+        get { CanvasPageHandover.resumes[pageKey]?.url }
+        set { CanvasPageHandover.resumes[pageKey, default: .init()].url = newValue }
+    }
     /// Set while a snapshot is in flight, so a second pause request doesn't start a second one.
     private var freezing = false
     /// When what the card is showing arrived — the moment the page finished, and still the answer
@@ -88,7 +98,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
         super.init(node: node, board: board, scale: scale)
         setContent(face)
         showPlaceholder()
+        Self.cards.add(self)
         reconsiderLoading(scale: scale)
+        // A card built into a board you have just switched to — a tile the workspace had not needed
+        // until now — comes up showing the page the tab behind was running, not a globe.
+        reclaimPage()
     }
 
     override var isPageCard: Bool { true }
@@ -204,11 +218,135 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// The board's answer to `wantsPage`.
     override func setPageLive(_ live: Bool) {
         if live {
-            guard web == nil, Self.loadsPages, let target = resumeURL ?? url else { return }
-            showPage(target)
+            guard web == nil, Self.loadsPages else { return }
+            let holder = holder
+            switch CanvasPageHandover.decide(inSight: boardInSight,
+                                             holder: holder.map { $0.boardInSight ? .inSight : .outOfSight }) {
+            case .adopt: if let holder { adopt(from: holder) }
+            case .start: if let target = resumeURL ?? url { showPage(target) }
+            case .wait: break
+            }
         } else {
             freeze()
         }
+    }
+
+    // MARK: One page, whichever board is showing it
+
+    /// Every web card alive, for finding this card on the other boards showing it. Weak, so a card
+    /// thrown away leaves without having to say so.
+    private static let cards = NSHashTable<CanvasLinkNodeView>.weakObjects()
+
+    /// This card, on any board. See `CanvasPageHandover`.
+    private var pageKey: String { CanvasPageHandover.key(canvas: board.store.url, card: node.id) }
+
+    /// Whether this card's board is somewhere you can see it: in a window, and not in a tab behind
+    /// another one. A card the board itself has hidden under a tiling still counts — it is that board's
+    /// to wake and freeze, which is what `CanvasPageBudget.liveWhileTiled` is for.
+    private var boardInSight: Bool { board.window != nil && !board.isHiddenOrHasHiddenAncestor }
+
+    /// The same card on another board, if it has the page running.
+    ///
+    /// The address and the jar as well as the id, though the boards share one document: a page is only
+    /// the same page if it was loaded from the same place, as the same person. The live page is checked
+    /// first, which is also what keeps this from reaching a board through a card that has outlived it.
+    private var holder: CanvasLinkNodeView? {
+        Self.cards.allObjects.first {
+            $0 !== self && $0.web != nil && $0.pageKey == pageKey
+                && $0.address == address && $0.profile == profile
+        }
+    }
+
+    /// Take this card's page from the tab you have just left, if that tab has it — without asking the
+    /// budget.
+    ///
+    /// Called as a board comes forward and as a card is built, which is what lets a tile fly in already
+    /// showing its page rather than a globe that turns into one a second after the crossing lands. It
+    /// can skip the budget because it adds nothing: the renderer exists already, and this only changes
+    /// which board draws it. The budget has its say on the next pass, as it does for every page.
+    /// Never *starts* one — that is the budget's decision.
+    func reclaimPage() {
+        guard wanted, web == nil, boardInSight, let holder, !holder.boardInSight else { return }
+        adopt(from: holder)
+    }
+
+    /// What a card hands over with its page: the page, and what the card knew about it.
+    private struct Handover {
+        let web: WKWebView
+        let revealed: Bool
+        let loadedAt: Date?
+        let capturingTitle: Bool
+    }
+
+    /// Move `donor`'s running page into this card, exactly as it is.
+    private func adopt(from donor: CanvasLinkNodeView) {
+        guard let handover = donor.giveUpPage() else { return }
+        // The page is running, so there is nothing to resume — and a state left behind would be what
+        // the next card to start this page from scratch went back to, older than where it is now.
+        resumeState = nil
+        resumeURL = nil
+        let view = handover.web
+        view.navigationDelegate = self
+        view.uiDelegate = self
+        (view as? CanvasPageView)?.dropFallback = board
+        web = view
+        capturingTitle = handover.capturingTitle
+        watchTitle(of: view)
+        applyContentZoom()
+        refilterWhenReady(view)
+        fill(face, with: view, below: frozen ?? placeholder)
+        if handover.revealed {
+            // Shown already, so shown now: no cross-fade and no Loading… over a page that has loaded,
+            // and the freshness is the page's, not the moment it changed boards.
+            revealed = true
+            loadedAt = handover.loadedAt
+            uncover()
+            describeYourself()
+        } else {
+            if frozen == nil { say("Loading…") }
+            waitForIt()
+        }
+        if isEngaged {
+            window?.makeFirstResponder(view)
+        } else if (window?.firstResponder as? NSView)?.isDescendant(of: view) == true {
+            // You were typing into it on the board you left. Here you have not stepped in yet.
+            window?.makeFirstResponder(board)
+        }
+        board.pageStateChanged()
+    }
+
+    /// Give this card's running page to another board's copy of the card, and keep a picture of it.
+    ///
+    /// Not `tearDownPage`, which stops the page: the whole point is that it goes on exactly as it was.
+    /// The delegates are left for the new owner to replace in the same turn, so nothing the page reports
+    /// in between is lost. The picture is `freeze`'s, for `freeze`'s reason — this card is out of sight,
+    /// and if you come back to it zoomed out too far to run pages it should still say what it showed.
+    private func giveUpPage() -> Handover? {
+        guard let running = web else { return nil }
+        let handover = Handover(web: running, revealed: revealed, loadedAt: loadedAt,
+                                capturingTitle: capturingTitle)
+        if revealed {
+            let configuration = WKSnapshotConfiguration()
+            configuration.afterScreenUpdates = false
+            running.takeSnapshot(with: configuration) { [weak self] image, _ in
+                guard let self, let image, web == nil else { return }
+                showFrozen(image)
+                placeholder?.isHidden = true
+            }
+        }
+        giveUp?.cancel()
+        giveUp = nil
+        titleWatch?.invalidate()
+        titleWatch = nil
+        capturingTitle = false
+        // A pause in flight is abandoned: its snapshot finds the page gone and stops there.
+        freezing = false
+        running.removeFromSuperview()
+        web = nil
+        revealed = false
+        placeholder?.isHidden = false
+        board.pageStateChanged()
+        return handover
     }
 
     /// Stop running, and leave a picture of the page behind.
@@ -463,7 +601,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // this just spares the card a half-painted frame at the moment of the reveal.
         configuration.suppressesIncrementalRendering = true
 
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = CanvasPageView(frame: .zero, configuration: configuration)
+        // A link dropped on the page makes a card, unless there is a field under it to type into.
+        view.dropFallback = board
         CanvasWebSession.allowInspecting(view)
         view.navigationDelegate = self
         view.uiDelegate = self
@@ -496,16 +636,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         capturingTitle = url == self.url
         watchTitle(of: view)
         applyContentZoom()
-        // The lists take about ten seconds to compile on the first launch after an update, and a
-        // canvas restored at startup can open well inside that window. A card built before they were
-        // ready gets one chance to notice and start again, rather than staying unfiltered until
-        // something else happens to reload it.
-        if !CanvasContentBlocker.isReady {
-            CanvasContentBlocker.onReady { [weak self, weak view] in
-                guard let self, let view, web === view else { return }
-                reapplyFiltering()
-            }
-        }
+        refilterWhenReady(view)
 
         // Under whatever is standing in for the page — the picture from the last time it ran, or the
         // placeholder. Waking up should not flash anything.
@@ -513,6 +644,19 @@ final class CanvasLinkNodeView: CanvasNodeView {
         if isEngaged { window?.makeFirstResponder(view) }
         if frozen == nil { say("Loading…") }
         waitForIt()
+    }
+
+    /// The lists take about ten seconds to compile on the first launch after an update, and a canvas
+    /// restored at startup can open well inside that window. A card built before they were ready gets
+    /// one chance to notice and start again, rather than staying unfiltered until something else
+    /// happens to reload it. Asked again by a card that adopts a page, since the chance belongs to
+    /// whichever card holds the page when the lists arrive.
+    private func refilterWhenReady(_ view: WKWebView) {
+        guard !CanvasContentBlocker.isReady else { return }
+        CanvasContentBlocker.onReady { [weak self, weak view] in
+            guard let self, let view, web === view else { return }
+            reapplyFiltering()
+        }
     }
 
     /// A page that never finishes is shown anyway after a while.
@@ -551,23 +695,23 @@ final class CanvasLinkNodeView: CanvasNodeView {
                 context.duration = Motion.duration(Self.revealDuration)
                 context.allowsImplicitAnimation = true
                 for view in going { view.animator().alphaValue = 0 }
-            } completionHandler: { [weak self] in
-                guard let self else { return }
-                // Hidden rather than removed, because the placeholder is the card's fallback: a page
-                // that later fails, or a card that is frozen and woken, comes back through it. Its
-                // alpha is put back at the same time, or it would come back invisible.
-                placeholder?.isHidden = true
-                placeholder?.alphaValue = 1
-                frozen?.removeFromSuperview()
-                frozen = nil
-            }
+            } completionHandler: { [weak self] in self?.uncover() }
         } else {
-            placeholder?.isHidden = true
-            placeholder?.alphaValue = 1
-            frozen?.removeFromSuperview()
-            frozen = nil
+            uncover()
         }
         board.pageStateChanged()
+    }
+
+    /// Take the placeholder and the picture out from over the page.
+    ///
+    /// Hidden rather than removed, because the placeholder is the card's fallback: a page that later
+    /// fails, or a card that is frozen and woken, comes back through it. Its alpha is put back at the
+    /// same time, or it would come back invisible.
+    private func uncover() {
+        placeholder?.isHidden = true
+        placeholder?.alphaValue = 1
+        frozen?.removeFromSuperview()
+        frozen = nil
     }
 
     private func tearDownPage() {

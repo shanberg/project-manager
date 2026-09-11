@@ -27,27 +27,19 @@ struct CanvasTileCapsule: View {
     @ObservedObject var model: CanvasHeaderModel
     let tile: CanvasHeaderModel.TileControls
     @Environment(\.controlActiveState) private var controlActiveState
-    @State private var hovering = false
-
-    private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        // Bare over a tiled board, like both of its neighbours — see `CanvasControlCapsule`. Which is
-        // to say: always, since this capsule only exists over a tiled board. Written the same way
-        // anyway, so the three cannot drift into disagreeing about their own backing.
-        HeaderCapsule(chrome: chrome, backed: model.tiling == nil) {
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState)) {
             HeaderSymbolButton(symbol: tile.isMaximized ? "arrow.down.right.and.arrow.up.left"
                                                         : "arrow.up.left.and.arrow.down.right",
                                help: maximizeHelp,
                                action: model.maximizeTile)
             overflow
         }
-        .onHover { hovering = $0 }
-        // Both of these are safe to animate because neither changes the capsule's width: an opacity,
-        // and a glyph swapped inside a hit area that is the same size either way. Nothing here may
-        // animate a change that alters the width — see `CanvasHeaderTrailingChrome`. Which the two
-        // fixed slots above were already the design for, and is now also the reason.
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+        // Safe to animate because it doesn't change the capsule's width: a glyph swapped inside a hit
+        // area that is the same size either way. Nothing here may animate a change that alters the
+        // width — see `CanvasHeaderTrailingChrome`. Which the two fixed slots above were already the
+        // design for, and is now also the reason.
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: tile.isMaximized)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Tile controls"))
@@ -83,6 +75,7 @@ struct CanvasTileCapsule: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
+        .headerHoverHighlight()
         .help("What this tile can be told")
     }
 }

@@ -49,10 +49,12 @@ final class CanvasSnappingTests: XCTestCase {
     }
 
     /// The moving card's *right* edge finding another card's *left* edge — cards butted up in a row,
-    /// which the naive "compare left to left" rule never catches.
+    /// which the naive "compare left to left" rule never catches. A row of two, because butting up
+    /// against a *lone* card is the one placement the board steers you away from — see
+    /// `testALoneCardIsOfferedOneUnitOfRoomRatherThanATouch`.
     func testARightEdgeSnapsToALeftEdge() {
         let result = CanvasSnapping.move(rect(0, 0), by: (dx: 497, dy: 0),
-                                         against: [rect(700, 0)], reach: reach)
+                                         against: [rect(700, 0), rect(1000, 0)], reach: reach)
         XCTAssertEqual(result.frame.maxX, 700)
     }
 
@@ -171,6 +173,52 @@ final class CanvasSnappingTests: XCTestCase {
                                          against: [rect(0, -60, 200, 560)], reach: reach,
                                          showReach: show, snapsToGrid: false)
         XCTAssertNil(result.ghost)
+    }
+
+    // MARK: Beside a lone card
+
+    /// **With one other card on the board, the offer beside it is a unit of room, not a touch.** Flush
+    /// is where the ghost's outline lies across the other card, and a second card is almost always
+    /// meant to sit next to the first rather than be glued to it. So the card that would have snapped
+    /// its right edge onto the lone card's left edge (at 700) is offered 690 instead — and, three points
+    /// from 690, takes it.
+    func testALoneCardIsOfferedOneUnitOfRoomRatherThanATouch() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 493, dy: 0),
+                                         against: [rect(700, 0)], reach: reach, showReach: show)
+        XCTAssertEqual(result.frame.maxX, 690, "one grid unit short of the other card")
+        XCTAssertEqual(result.ghost?.frame, rect(490, 0))
+        XCTAssertEqual(result.ghost?.sources, [rect(700, 0)], "and says which card it is keeping clear of")
+    }
+
+    /// The flush position is withdrawn, not merely outbid: arriving a point from touching, the card is
+    /// still carried out to the unit of room rather than into contact.
+    func testALoneCardNoLongerOffersTheFlushPosition() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 499, dy: 0),
+                                         against: [rect(700, 0)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.frame.maxX, 690)
+    }
+
+    /// On either side, and on either axis — it is the same sentence read four ways.
+    func testTheUnitOfRoomIsOfferedOnEverySide() {
+        let lone = rect(1000, 1000)
+        let right = CanvasSnapping.move(rect(0, 1000), by: (dx: 1206, dy: 0), against: [lone],
+                                        reach: reach, snapsToGrid: false)
+        XCTAssertEqual(right.frame.minX, 1210, "clear of its right edge")
+        let below = CanvasSnapping.move(rect(1000, 0), by: (dx: 0, dy: 1106), against: [lone],
+                                        reach: reach, snapsToGrid: false)
+        XCTAssertEqual(below.frame.minY, 1110, "clear of its bottom edge")
+        let above = CanvasSnapping.move(rect(1000, 0), by: (dx: 0, dy: 886), against: [lone],
+                                        reach: reach, snapsToGrid: false)
+        XCTAssertEqual(above.frame.maxY, 990, "clear of its top edge")
+    }
+
+    /// Only beside it. A card below-and-right of the lone one, whose left edge lines up with the lone
+    /// card's right edge, is keeping a column — the two do not touch, and nothing is withdrawn.
+    func testALoneCardStillLendsItsEdgesToACardNotBesideIt() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 697, dy: 0),
+                                         against: [rect(500, 0)], reach: reach)
+        XCTAssertEqual(result.frame.minX, 700)
     }
 
     /// A gap is offered on the same terms as everything else — from the show radius, long before the
@@ -444,5 +492,111 @@ final class CanvasSnappingTests: XCTestCase {
         XCTAssertEqual(result.frame.width, 340, "the width snapped")
         XCTAssertEqual(result.frame.height, 310, "the height did not")
         XCTAssertEqual(result.ghost?.frame, rect(0, 0, 340, 340))
+    }
+
+    // MARK: When the outline is drawn
+
+    /// **The outline is a claim about the whole frame**, and a match on one axis only decides half of
+    /// it: the other coordinate is wherever your hand is. So the offer is up, and not complete.
+    func testAMatchOnOneAxisIsNotACompleteLanding() {
+        let result = CanvasSnapping.move(rect(0, 500), by: (dx: 70, dy: 0),
+                                         against: [rect(100, 0)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertNotNil(result.ghost)
+        XCTAssertEqual(result.ghost?.isComplete, false)
+    }
+
+    func testAMatchOnBothAxesIsACompleteLanding() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 97, dy: 297),
+                                         against: [rect(100, 300)], reach: reach, showReach: show,
+                                         snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.isComplete, true)
+    }
+
+    /// A resize is complete once every axis the grip moves is matched: one for a side grip, both for a
+    /// corner — the axis a side grip doesn't move is already decided by the card itself.
+    func testAResizeIsCompleteOnceEveryMovingAxisIsMatched() {
+        let other = rect(900, 900, 340, 300)
+        let side = CanvasSnapping.resize(rect(0, 0, 337, 100), handle: .right, against: [other],
+                                         reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(side.ghost?.isComplete, true, "a side grip moves one axis, and it matched")
+        let corner = CanvasSnapping.resize(rect(0, 0, 337, 100), handle: .bottomRight, against: [other],
+                                           reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertNotNil(corner.ghost, "the width is still offered")
+        XCTAssertEqual(corner.ghost?.isComplete, false, "but the height is still yours")
+    }
+
+    // MARK: Crowded lines
+
+    /// **Crowded lines offer from closer in.** Two cards whose left edges are 30pt apart: from 20pt out
+    /// either could be meant, so neither is offered until the card is plainly nearer one — within half
+    /// the 30. A line on its own offers from the full radius; see `testAnOfferIsUpLongBeforeTheCardMoves`.
+    func testACrowdedLineIsOfferedFromCloserIn() {
+        let others = [rect(100, 5000), rect(130, 6000)]
+        func offer(at dx: Double) -> CanvasGhost? {
+            CanvasSnapping.move(rect(0, 0), by: (dx: dx, dy: 0), against: others, reach: reach,
+                                showReach: show, snapsToGrid: false).ghost
+        }
+        XCTAssertNil(offer(at: 80), "20pt from 100, and 130 only 30 beyond it")
+        XCTAssertEqual(offer(at: 88)?.frame.minX, 100, "12pt out, it is plainly the nearest")
+    }
+
+    /// Crowding shortens the offer and never the snap: lines 12pt apart still pull a card 7pt away.
+    func testCrowdingNeverShortensTheSnap() {
+        let result = CanvasSnapping.move(rect(0, 0), by: (dx: 93, dy: 0),
+                                         against: [rect(100, 5000), rect(112, 6000)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.frame.minX, 100)
+    }
+
+    // MARK: What is marked
+
+    /// **A card level with the landing is one mark, not three.** Its top, centre and bottom all agree
+    /// with yours, which is one fact — the two are level — and one mark on the side facing you.
+    func testACardLevelWithTheLandingIsOneMatch() {
+        let neighbour = rect(0, 0)
+        let result = CanvasSnapping.move(rect(500, 40), by: (dx: 0, dy: -37),
+                                         against: [neighbour, rect(2000, 3000)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.frame, rect(500, 0))
+        XCTAssertEqual(result.ghost?.matches, [.level(neighbour, horizontal: false)])
+    }
+
+    /// Every card on the matched line is marked, not only the one the search reached first — a left edge
+    /// landing on a line two cards share is landing on both.
+    func testEveryCardOnTheMatchedLineIsMarked() {
+        let near = rect(100, 0, 150, 60), far = rect(100, 400, 300, 60)
+        let result = CanvasSnapping.move(rect(0, 150, 180, 60), by: (dx: 96, dy: 0),
+                                         against: [near, far, rect(3000, 3000)], reach: reach,
+                                         showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.matches, [.edge(near, horizontal: true, part: .lead),
+                                               .edge(far, horizontal: true, part: .lead)])
+    }
+
+    /// A continued run marks every gap along it — the row the card is joining, not only the pair the
+    /// search compared — and the row's shared top is not marked again: the gaps already name each card.
+    func testAContinuedRunMarksEveryGapAlongIt() {
+        let row = [rect(0, 0), rect(220, 0), rect(440, 0)]
+        let result = CanvasSnapping.move(rect(0, 300), by: (dx: 655, dy: -300), against: row,
+                                         reach: reach, showReach: show, snapsToGrid: false)
+        XCTAssertEqual(result.ghost?.frame, rect(660, 0))
+        let gaps = (result.ghost?.matches ?? []).compactMap { match -> CanvasGap? in
+            if case .gap(let gap) = match { return gap }
+            return nil
+        }
+        XCTAssertEqual(gaps.map(\.lead), [200, 420, 640])
+        XCTAssertEqual(gaps.map(\.trail), [220, 440, 660])
+        XCTAssertEqual(result.ghost?.matches.count, 3)
+        XCTAssertEqual(result.ghost?.isComplete, true)
+    }
+
+    // MARK: Tidiness
+
+    /// The share of cards lined up with another, per axis. A column sharing a left edge at uneven
+    /// heights is tidy across and not down.
+    func testTidinessCountsCardsLinedUpWithAnother() {
+        XCTAssertEqual(CanvasSnapping.tidiness(of: [rect(0, 0), rect(0, 137), rect(0, 300)]), 0.5)
+        XCTAssertEqual(CanvasSnapping.tidiness(of: [rect(0, 0), rect(333, 157), rect(701, 419)]), 0)
+        XCTAssertEqual(CanvasSnapping.tidiness(of: [rect(0, 0)]), 0, "one card is not a board")
     }
 }

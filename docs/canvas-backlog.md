@@ -117,11 +117,15 @@ loud.
 ### 6. Dropping files on the board — verify, then polish
 
 Mostly built already: the board takes `.fileURL`, `.string`, `.URL` and image types, and a dropped
-file becomes a file card at the drop point
-([CanvasBoardView+Commands.swift:76](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:76)). So the
-first job is to try it with a markdown file and find out what is actually missing. Suspected gaps:
+file becomes a file card centred on the drop point
+([CanvasDrop.swift](../pm-mac/PM/Canvas/CanvasDrop.swift)). So the first job is to try it with a
+markdown file and find out what is actually missing. Suspected gaps:
 
-- no visible feedback while dragging over the board — the drop lands with no indication of where,
+- ~~no visible feedback while dragging over the board~~ — built, 2026-09-10: over the board a drag
+  turns into the card it will make, with the move guides around it, and settles into the snapped place
+  ([CanvasBoardView+Dropping.swift](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift)). Links
+  dragged out of web and text cards arrive as link cards; a web card keeps a drop only over a field
+  ([CanvasPageView.swift](../pm-mac/PM/Canvas/CanvasPageView.swift)),
 - a file from outside the vault is stored as an absolute path
   ([CanvasBoardView+Commands.swift:159](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:159)),
   which Obsidian cannot resolve. Copy it in, or say so,

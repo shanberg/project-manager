@@ -2,7 +2,8 @@ import AppKit
 import PmLib
 
 /// Everything drawn *over* the cards: the ghost a drag is being offered, selection grips, connection
-/// dots, the sweep rectangle, and the line being dragged out of a card.
+/// dots, the sweep rectangle, and the line being dragged out of a card. (The ghost is drawn here but
+/// clipped to read as lying beneath every card that isn't moving — see `tuckBeneathStandingCards`.)
 ///
 /// Not the tile handlebars, which are the one piece of board chrome that belongs *under* the cards —
 /// see `CanvasTileHandleView`.
@@ -25,8 +26,27 @@ final class CanvasOverlayView: NSView {
     /// offer is being made against. One rectangle per moving card — see `CanvasGhost`, which owns the
     /// argument for all of this.
     struct Ghost: Equatable {
+        /// One outline per card being placed.
         var frames: [CanvasRect]
-        var sources: [CanvasRect]
+        /// The box those cards land in: what the matches were found for, and what the landing's own
+        /// marks are drawn on. The same as the one frame when a single card is moving.
+        var landing: CanvasRect
+        var matches: [CanvasMatch]
+        /// Whether the landing outline is drawn — see `CanvasGhost.isComplete`.
+        var isComplete: Bool
+        /// The cards standing still on screen, which the outline is drawn *beneath*. See `drawGhost`.
+        var beneath: [CanvasRect]
+        /// How tidy those cards are, which sets how far a mark on a distant card carries — see `fade`.
+        var tidiness: Double
+
+        init(_ ghost: CanvasGhost, frames: [CanvasRect], beneath: [CanvasRect]) {
+            self.frames = frames
+            landing = ghost.frame
+            matches = ghost.matches
+            isComplete = ghost.isComplete
+            self.beneath = beneath
+            tidiness = CanvasSnapping.tidiness(of: beneath)
+        }
     }
 
     /// The offer in front of you, or nil for "nothing is on offer".
@@ -38,13 +58,24 @@ final class CanvasOverlayView: NSView {
     var ghost: Ghost? {
         didSet {
             guard ghost != oldValue else { return }
-            if let ghost { drawnGhost = ghost }
+            if let ghost {
+                // An offer arriving out of nothing arrives with its outline or without it. Fading from
+                // whatever the last drag left behind would draw a ring nobody has earned yet.
+                if ghostFade.isVisible { ringFade.set(ghost.isComplete) }
+                else { ringFade.hold(ghost.isComplete ? 1 : 0) }
+                drawnGhost = ghost
+            }
             ghostFade.set(ghost != nil)
             needsDisplay = true
         }
     }
     private var drawnGhost: Ghost?
     private lazy var ghostFade = CanvasFade(rise: 0.1, fall: 0.16, on: self) { [weak self] in
+        self?.needsDisplay = true
+    }
+    /// The landing outline, which comes and goes *within* an offer as the second axis is caught or
+    /// lost — a cross-fade with the marks that stand in for it, rather than a ring blinking on.
+    private lazy var ringFade = CanvasFade(rise: 0.12, fall: 0.12, on: self) { [weak self] in
         self?.needsDisplay = true
     }
 
@@ -66,7 +97,8 @@ final class CanvasOverlayView: NSView {
         drawMarquee(board, scale)
     }
 
-    /// The outline of where the cards being placed would land.
+    /// The outline of where the cards being placed would land, and the marks that say what it agrees
+    /// with.
     ///
     /// **One thing governs how present it is: the fade.** There used to be a second, a `nearness` the
     /// alpha was multiplied by, so that the outline grew as the card approached its match. It read as
@@ -82,71 +114,311 @@ final class CanvasOverlayView: NSView {
     /// sizing a card *down*, the offered frame is inside the card's current bounds, where a mark on the
     /// border would have nothing to stand on at all.
     ///
-    /// **The cards being agreed with glow instead.** They were a thinner copy of the same offset band,
-    /// on the argument that one shape twice was one vocabulary — but the two marks are not saying the
-    /// same kind of thing, and drawing them alike made the board look like it was offering two slots.
-    /// A band stands *off* a frame, which is what makes it read as a place a card is going. A glow sits
-    /// *on* the card, hugging its own edge with no gap to cross, and that is the whole difference: this
-    /// card is not moving, it is the reason. Softness does the work the reduced weight used to do —
-    /// there is no line to compete with the outline, only a card that has been lit.
+    /// **The outline is only drawn once the landing is decided** — see `CanvasGhost.isComplete`. Until
+    /// then the landing carries marks of its own on the sides that matched, and the two cross-fade as
+    /// the second axis is caught or lost (`ringFade`).
     ///
-    /// They rise and fall on the same fade as the ghost, so the attribution arrives with the offer
-    /// rather than with the snap. That is the whole difference between this and the bands it replaced:
-    /// those were drawn once the match was made, when there was nothing left to decide.
+    /// **The marks are pieces of the outline.** They used to be a glow round each card being agreed
+    /// with, on the argument that a glow sits *on* a card and so reads as "this card is the reason"
+    /// rather than "a card is going here". It did, and it said nothing about *what* on that card was
+    /// the reason — and beside a crisp band a soft glow was a second material that nothing else on the
+    /// board is made of. So a mark is now the same band, at the same standoff and strength, cut to the
+    /// side or the centre or the gap that makes the match: see `drawMatches`. A bracket on a card whose
+    /// edge you are matching stands exactly in line with the outline's side, which is the match drawn.
+    ///
+    /// **And never over the outline.** The marks are drawn on a layer of their own, the outline's band
+    /// is cut out of that layer, and only then is it laid down — so a mark reaching the outline stops
+    /// at its edge, whatever the two alphas are, rather than darkening where they cross.
     private func drawGhost(_ board: CanvasBoardView, _ scale: Double) {
         guard ghostFade.isVisible, let drawnGhost else { return }
         let presence = ghostFade.presence
-        guard presence > 0.001 else { return }
+        guard presence > 0.001, let context = NSGraphicsContext.current else { return }
+        context.saveGraphicsState()
+        defer { context.restoreGraphicsState() }
+        tuckBeneathStandingCards(drawnGhost, board, scale)
 
+        let ring = ringFade.presence
+        let outlines = drawnGhost.frames.map { outline(around: $0, board, scale) }
+        if ring > 0.001 {
+            CanvasPalette.guide(Self.ghostAlpha * presence * ring).setStroke()
+            for outline in outlines { outline.stroke() }
+        }
+
+        guard !drawnGhost.matches.isEmpty else { return }
+        let layer = context.cgContext
+        layer.beginTransparencyLayer(auxiliaryInfo: nil)
+        drawMatches(drawnGhost, board, scale, presence: presence, landing: 1 - ring)
+        if ring > 0.001 {
+            // Cut as deep as the outline is present, so a mark half-way through the cross-fade is
+            // half-trimmed rather than suddenly short.
+            context.saveGraphicsState()
+            context.compositingOperation = .destinationOut
+            NSColor(white: 0, alpha: ring).setStroke()
+            for outline in outlines { outline.stroke() }
+            context.restoreGraphicsState()
+        }
+        layer.endTransparencyLayer()
+    }
+
+    /// The band around one landing frame.
+    ///
+    /// Concentric with the card inside it: a curve offset from another curve keeps an even gap only
+    /// when its radius grows by the offset. Left at the card's own radius the outline would pinch
+    /// tight at the corners and bulge along the sides.
+    private func outline(around slot: CanvasRect, _ board: CanvasBoardView,
+                         _ scale: Double) -> NSBezierPath {
         let standoff = Self.ghostStandoff / scale
-        // Concentric with the card inside it: a curve offset from another curve keeps an even gap only
-        // when its radius grows by the offset. Left at the card's own radius the outline would pinch
-        // tight at the corners and bulge along the sides.
-        func band(around slot: CanvasRect, width: Double, alpha: Double) {
-            let rect = board.viewRect(slot).insetBy(dx: -standoff, dy: -standoff)
-            let radius = CanvasNodeView.cornerRadius(for: slot) + standoff
-            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-            path.lineWidth = width / scale
-            CanvasPalette.guide(alpha * presence).setStroke()
+        let rect = board.viewRect(slot).insetBy(dx: -standoff, dy: -standoff)
+        let radius = CanvasNodeView.cornerRadius(for: slot) + standoff
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        path.lineWidth = Self.ghostWidth / scale
+        return path
+    }
+
+    /// The marks on the cards the landing agrees with — and on the landing itself, where the outline
+    /// isn't up to speak for it.
+    ///
+    /// - An **edge** is a bracket: the side of the card's own ring the edge is on and the two corners
+    ///   either end of it, standing exactly in line with the landing's.
+    /// - A **centre** is a notch: a short piece of band across the middle of the side facing the
+    ///   landing.
+    /// - A **gap** is a bridge from standoff to standoff across it — into the outline, on the landing's
+    ///   side — once for every gap keeping the pitch.
+    /// - A **length** brackets the side that measures it, on both cards: the bottom for a width, the
+    ///   right for a height.
+    /// - A card **level** with the landing is one bracket, on its side facing the landing — unless the
+    ///   two are close enough that the outline is already touching it, which says the same thing.
+    ///
+    /// Each piece is its own open stroke with round ends. Never a stretch of a whole ring clipped to one
+    /// side: a clip leaves the band with square, sheared ends, which is the one hard edge in the
+    /// vocabulary and the first thing the eye finds.
+    ///
+    /// `own` is how strongly the landing's own pieces are drawn: fully while the outline is down, and
+    /// not at all once it is up, since a second stroke over the outline's side only draws seams.
+    private func drawMatches(_ ghost: Ghost, _ board: CanvasBoardView, _ scale: Double,
+                             presence: Double, landing own: Double) {
+        let standoff = Self.ghostStandoff / scale
+        let landing = board.viewRect(ghost.landing)
+        // `viewRect` is a translation, so a canvas coordinate is this plus the origin.
+        let origin = board.viewPoint(CanvasPoint(x: 0, y: 0))
+        let seen = board.visibleRect
+        let diagonal = hypot(seen.width, seen.height)
+
+        func fade(_ card: CanvasRect) -> Double {
+            Self.fade(distance: Self.distance(board.viewRect(card), landing), across: diagonal,
+                      tidiness: ghost.tidiness)
+        }
+        func stroke(_ path: NSBezierPath, _ strength: Double) {
+            let alpha = Self.ghostAlpha * strength * presence
+            guard alpha > 0.001 else { return }
+            path.lineWidth = Self.ghostWidth / scale
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            CanvasPalette.guide(alpha).setStroke()
             path.stroke()
         }
+        func bracket(_ card: CanvasRect, _ side: CanvasSide, _ strength: Double) {
+            let rect = board.viewRect(card).insetBy(dx: -standoff, dy: -standoff)
+            stroke(Self.bracket(rect, radius: CanvasNodeView.cornerRadius(for: card) + standoff,
+                                side: side), strength)
+        }
+        func pill(_ from: NSPoint, _ to: NSPoint, _ strength: Double) {
+            let path = NSBezierPath()
+            path.move(to: from)
+            path.line(to: to)
+            stroke(path, strength)
+        }
+        /// A centre's notch across `line`, standing off `edge` on the side `outward` points to.
+        func notch(across line: CGFloat, off edge: CGFloat, outward: CGFloat, horizontal: Bool,
+                   _ strength: Double) {
+            let at = edge + outward * standoff, half = Self.notchLength / 2 / scale
+            if horizontal {
+                pill(NSPoint(x: line - half, y: at), NSPoint(x: line + half, y: at), strength)
+            } else {
+                pill(NSPoint(x: at, y: line - half), NSPoint(x: at, y: line + half), strength)
+            }
+        }
 
-        // A halo hugging the card's own frame, spilling outward only: the fill that casts it is
-        // clipped away, so what is left is the shadow's spill and the card's face is untouched. Drawn
-        // from the card's own corner radius, since the glow starts where the card ends.
-        func glow(on card: CanvasRect) {
-            guard let context = NSGraphicsContext.current else { return }
-            context.saveGraphicsState()
-            defer { context.restoreGraphicsState() }
+        // Edges and centres, gathered by the line they share, so the landing's own piece is drawn
+        // once per line however many cards are on it.
+        var lines: [(horizontal: Bool, at: Double, cards: [(card: CanvasRect, part: CanvasSpanPart)])] = []
+        for case .edge(let card, horizontal: let horizontal, part: let part) in ghost.matches {
+            let at = part.value(in: card, horizontal: horizontal)
+            if let index = lines.firstIndex(where: { $0.horizontal == horizontal && abs($0.at - at) < 0.01 }) {
+                lines[index].cards.append((card: card, part: part))
+            } else {
+                lines.append((horizontal: horizontal, at: at, cards: [(card: card, part: part)]))
+            }
+        }
+        for line in lines {
+            let horizontal = line.horizontal
+            let at = horizontal ? origin.x + line.at : origin.y + line.at
+            let across = horizontal ? landing.midY : landing.midX
+            var before = false, after = false
+            for (card, part) in line.cards {
+                let rect = board.viewRect(card)
+                let isBefore = (horizontal ? rect.midY : rect.midX) < across
+                if isBefore { before = true } else { after = true }
+                if part == .middle {
+                    let facing = isBefore ? (horizontal ? rect.maxY : rect.maxX)
+                                          : (horizontal ? rect.minY : rect.minX)
+                    notch(across: at, off: facing, outward: isBefore ? 1 : -1, horizontal: horizontal,
+                          fade(card))
+                } else {
+                    bracket(card, Self.side(part, horizontal: horizontal), fade(card))
+                }
+            }
+            guard own > 0.001 else { continue }
+            if abs(line.at - CanvasSpanPart.middle.value(in: ghost.landing, horizontal: horizontal)) < 0.01 {
+                if before {
+                    notch(across: at, off: horizontal ? landing.minY : landing.minX, outward: -1,
+                          horizontal: horizontal, own)
+                }
+                if after {
+                    notch(across: at, off: horizontal ? landing.maxY : landing.maxX, outward: 1,
+                          horizontal: horizontal, own)
+                }
+            } else {
+                let lead = CanvasSpanPart.lead.value(in: ghost.landing, horizontal: horizontal)
+                bracket(ghost.landing,
+                        Self.side(abs(line.at - lead) < 0.01 ? .lead : .trail, horizontal: horizontal), own)
+            }
+        }
 
+        for case .gap(let gap) in ghost.matches {
+            let from = gap.lead + standoff, to = gap.trail - standoff
+            guard to - from >= 1 / scale else { continue }
+            let middle = (gap.crossLead + gap.crossTrail) / 2
+            if gap.horizontal {
+                pill(NSPoint(x: origin.x + from, y: origin.y + middle),
+                     NSPoint(x: origin.x + to, y: origin.y + middle), fade(gap.far))
+            } else {
+                pill(NSPoint(x: origin.x + middle, y: origin.y + from),
+                     NSPoint(x: origin.x + middle, y: origin.y + to), fade(gap.far))
+            }
+        }
+
+        var measured: [Bool] = []
+        for case .length(let card, horizontal: let horizontal) in ghost.matches {
+            let side: CanvasSide = horizontal ? .bottom : .right
+            if own > 0.001, !measured.contains(horizontal) {
+                measured.append(horizontal)
+                bracket(ghost.landing, side, own)
+            }
+            bracket(card, side, fade(card))
+        }
+
+        for case .level(let card, horizontal: let horizontal) in ghost.matches {
             let rect = board.viewRect(card)
+            let side: CanvasSide = horizontal ? (rect.midY < landing.midY ? .bottom : .top)
+                                              : (rect.midX < landing.midX ? .right : .left)
+            if Self.clearance(rect, side, landing) > 2 * standoff + 1 / scale {
+                bracket(card, side, fade(card))
+            }
+            if own > 0.001 { bracket(ghost.landing, side.opposite, own) }
+        }
+    }
+
+    /// How present a mark on a card is, by how far that card is from the landing: full beside it,
+    /// easing down across the window to a floor.
+    ///
+    /// **Governed by how tidy the board on screen is** — see `CanvasSnapping.tidiness(of:)`. On a tidy
+    /// board a landing agrees with half the cards in view, and marking all of them at one strength is
+    /// a board lit up for a placement that is only about the few beside it; so the fade reaches a
+    /// quarter of the window and falls to nothing. On an untidy one a match is news wherever it is, so
+    /// the fade reaches most of the window and never goes below a trace.
+    ///
+    /// In proportion to the window rather than in points, so zooming out does not dim the marks on a
+    /// board that has not changed.
+    private static func fade(distance: Double, across diagonal: Double, tidiness: Double) -> Double {
+        let reach = (0.75 - 0.5 * tidiness) * diagonal
+        let floor = 0.15 * (1 - tidiness)
+        let t = reach > 0 ? min(1, distance / reach) : 1
+        return 1 - (1 - floor) * t * t * (3 - 2 * t)
+    }
+
+    /// The gap between two rectangles — zero if they touch or overlap.
+    private static func distance(_ a: NSRect, _ b: NSRect) -> Double {
+        hypot(max(0, a.minX - b.maxX, b.minX - a.maxX), max(0, a.minY - b.maxY, b.minY - a.maxY))
+    }
+
+    /// How much room there is between a card's `side` and the landing it faces.
+    private static func clearance(_ card: NSRect, _ side: CanvasSide, _ landing: NSRect) -> Double {
+        switch side {
+        case .right: landing.minX - card.maxX
+        case .left: card.minX - landing.maxX
+        case .bottom: landing.minY - card.maxY
+        case .top: card.minY - landing.maxY
+        }
+    }
+
+    private static func side(_ part: CanvasSpanPart, horizontal: Bool) -> CanvasSide {
+        horizontal ? (part == .lead ? .left : .right) : (part == .lead ? .top : .bottom)
+    }
+
+    /// One side of a ring and the corner at either end of it, as an open path — the ring `rect` with
+    /// corner `radius` would have, for `side` only.
+    private static func bracket(_ rect: NSRect, radius: Double, side: CanvasSide) -> NSBezierPath {
+        let x = rect.minX, y = rect.minY, w = rect.width, h = rect.height
+        // The same clamp `NSBezierPath(roundedRect:)` makes, so the piece is exactly the ring's.
+        let r = CGFloat(min(radius, Double(w) / 2, Double(h) / 2))
+        let path = NSBezierPath()
+        switch side {
+        case .left:
+            path.move(to: NSPoint(x: x + r, y: y))
+            path.appendArc(from: NSPoint(x: x, y: y), to: NSPoint(x: x, y: y + r), radius: r)
+            path.line(to: NSPoint(x: x, y: y + h - r))
+            path.appendArc(from: NSPoint(x: x, y: y + h), to: NSPoint(x: x + r, y: y + h), radius: r)
+        case .right:
+            path.move(to: NSPoint(x: x + w - r, y: y))
+            path.appendArc(from: NSPoint(x: x + w, y: y), to: NSPoint(x: x + w, y: y + r), radius: r)
+            path.line(to: NSPoint(x: x + w, y: y + h - r))
+            path.appendArc(from: NSPoint(x: x + w, y: y + h), to: NSPoint(x: x + w - r, y: y + h),
+                           radius: r)
+        case .top:
+            path.move(to: NSPoint(x: x, y: y + r))
+            path.appendArc(from: NSPoint(x: x, y: y), to: NSPoint(x: x + r, y: y), radius: r)
+            path.line(to: NSPoint(x: x + w - r, y: y))
+            path.appendArc(from: NSPoint(x: x + w, y: y), to: NSPoint(x: x + w, y: y + r), radius: r)
+        case .bottom:
+            path.move(to: NSPoint(x: x, y: y + h - r))
+            path.appendArc(from: NSPoint(x: x, y: y + h), to: NSPoint(x: x + r, y: y + h), radius: r)
+            path.line(to: NSPoint(x: x + w - r, y: y + h))
+            path.appendArc(from: NSPoint(x: x + w, y: y + h), to: NSPoint(x: x + w, y: y + h - r),
+                           radius: r)
+        }
+        return path
+    }
+
+    /// Clip every card that isn't moving out of what follows, so the ghost reads as drawn on the ground
+    /// beneath them.
+    ///
+    /// **Beneath the cards standing still, above the ones being placed.** The outline stands off the
+    /// frame it offers, so a card landing flush against another puts that ring across the neighbour's
+    /// face — which reads as a mark *on* the neighbour and is plainly wrong. Under the cards is where
+    /// it belongs. But not under the card in your hand: during an approach the ghost is at most a
+    /// `showReach` away from it and mostly covered by it, and sizing a card down puts the offer wholly
+    /// inside it. A real view below the cards would hide the offer exactly when you are steering by it.
+    ///
+    /// So the overlay keeps drawing it and cuts out the standing cards' shapes — the same corners the
+    /// cards are drawn with. The frames (groups) are not cut out: they are ground, painted by the board
+    /// under everything, and a ghost vanishing into one would hide in the one place a card can go.
+    /// Only cards the marks can reach are clipped, which on a busy board is a handful rather than all.
+    private func tuckBeneathStandingCards(_ ghost: Ghost, _ board: CanvasBoardView, _ scale: Double) {
+        let marks = (ghost.frames + [ghost.landing] + ghost.matches.map(\.card)).map { board.viewRect($0) }
+        guard var reach = marks.first else { return }
+        for mark in marks.dropFirst() { reach = reach.union(mark) }
+        let margin = (Self.ghostStandoff + Self.ghostWidth + Self.notchLength) / scale
+        reach = reach.insetBy(dx: -margin, dy: -margin)
+
+        for card in ghost.beneath {
+            let rect = board.viewRect(card)
+            guard rect.intersects(reach) else { continue }
             let corner = CanvasNodeView.cornerRadius(for: card)
-            let shape = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
-
-            let spread = Self.sourceGlow / scale
-            let outside = NSBezierPath(rect: rect.insetBy(dx: -spread * 3, dy: -spread * 3))
-            outside.append(shape)
-            outside.windingRule = .evenOdd
-            outside.setClip()
-
-            let halo = NSShadow()
-            halo.shadowBlurRadius = spread
-            halo.shadowOffset = .zero
-            halo.shadowColor = CanvasPalette.guide(Self.sourceAlpha * presence)
-            halo.set()
-            // Opaque, because the alpha that matters is the shadow colour's — this fill is only the
-            // shape the blur is taken from, and it never survives the clip.
-            CanvasPalette.guide(1).setFill()
-            shape.fill()
-        }
-
-        // Sources first, so that a ghost landing on top of one of them — which is what a gap being
-        // closed looks like — is the mark that survives the overlap.
-        for card in drawnGhost.sources {
-            glow(on: card)
-        }
-        for slot in drawnGhost.frames {
-            band(around: slot, width: Self.ghostWidth, alpha: 0.30)
+            let cutout = NSBezierPath(rect: bounds.union(rect))
+            cutout.append(NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner))
+            cutout.windingRule = .evenOdd
+            cutout.addClip()
         }
     }
 
@@ -158,17 +430,12 @@ final class CanvasOverlayView: NSView {
     private static let ghostStandoff: Double = 5
     private static let ghostWidth: Double = 5
 
-    /// The glow on a card the offer is being made against: **8 view points** of spread, over the zoom
-    /// like everything else here.
-    ///
-    /// Its alpha is not comparable to a stroke's and is not derived from one. A blur spreads the same
-    /// ink across the whole 8 points, so the brightest part of the halo — right against the card's
-    /// edge — is already a fraction of the number below, and it falls off to nothing from there. The
-    /// figure that makes a 2.5pt line quietly present makes a glow that is not there at all. Quiet is
-    /// still the target: this answers a question you only sometimes ask, and it is up during every drag
-    /// that catches on anything.
-    private static let sourceGlow: Double = 8
-    private static let sourceAlpha: Double = 0.38
+    /// The band's strength — the outline's and every mark's, which are one material.
+    private static let ghostAlpha: Double = 0.30
+
+    /// How long a centre's notch is along the line it marks, in view points over the zoom: long enough
+    /// to read as a piece of band and not a dot, short enough not to read as an edge.
+    private static let notchLength: Double = 24
 
     /// The two tiles a drop would exchange, while a tiled view is being rearranged.
     ///

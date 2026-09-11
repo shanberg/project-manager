@@ -208,18 +208,13 @@ final class CanvasTilingTests: XCTestCase {
 
     /// The wording the View menu, the contextual menu and the header button all share. Worth pinning
     /// down because it is the only part of the command a person reads before committing to it.
+    /// One title however many are picked — it sits above the Workspaces submenu, and reads as the
+    /// fixed "make one" beside the list of ones there are. See `CanvasTiling.commandTitle`.
     func testAnUntiledBoardOffersToMakeAWorkspaceOfTheSelection() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 6),
-                       "Create Workspace from These 6 Cards")
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 1),
-                       "Create Workspace from This Card")
-    }
-
-    /// The count is the *target* count, not the selection's: selecting one frame that holds nine cards
-    /// says nine. That is the whole reason the number is in the title.
-    func testAFrameIsCountedByWhatIsInside() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 9),
-                       "Create Workspace from These 9 Cards")
+        for targets in [1, 6, 9] {
+            XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: targets),
+                           "Create Workspace from Selection")
+        }
     }
 
     /// **Nothing selected is nothing to make.** This used to name the visible cards and tile them,

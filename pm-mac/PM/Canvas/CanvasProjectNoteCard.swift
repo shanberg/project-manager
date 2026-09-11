@@ -73,6 +73,33 @@ enum CanvasProjectNoteCard {
         }?.id
     }
 
+    /// What a new project's first workspace is called.
+    static let notesWorkspaceName = "Notes"
+
+    /// Keep a workspace of this board's project card alone, as `notesWorkspaceName`, and say what it
+    /// was called — or nil when there was nothing to seed: a board with no project card on it (a
+    /// project outside a vault gets an empty canvas), or one that already has a workspace by that
+    /// name, which is somebody's and is not replaced. See `ProjectWindowController.seedNotesWorkspace`.
+    ///
+    /// Handed the document rather than opening it, so this file stays free of the store registry and
+    /// compiles into the hostless test bundle.
+    static func seedNotesWorkspace(on document: CanvasDocument, at url: URL,
+                                   resolver: CanvasFileResolver) -> String? {
+        let name = notesWorkspaceName
+        guard !CanvasWorkspaces.exists(name, of: url),
+              let notes = notes(forCanvasAt: url),
+              let card = id(on: document, notes: notes, resolver: resolver)
+        else { return nil }
+        // The arrangement you last chose, so the first card you tile in beside the notes lands the way
+        // your other workspaces do. One tile looks the same in any of them.
+        let tiling = CanvasViewState.Tiling(ids: [card],
+                                            arrangement: CanvasTiling.savedArrangement ?? .masterStack,
+                                            masterFraction: CanvasTiling.savedMasterFraction,
+                                            sizes: nil)
+        CanvasWorkspaces.save(tiling, as: name, for: url)
+        return name
+    }
+
     /// The card itself, centred on `at`.
     static func node(for notes: URL, at where_: CanvasPoint,
                      resolver: CanvasFileResolver) -> CanvasNode {

@@ -74,7 +74,9 @@ final class CanvasBoardView: NSView {
     /// This used to add 18pt on three sides as well, which `CanvasTiling.frames` then inset again — two
     /// margins asked the same question and answering it twice, for 32pt at the edges. The tiling owns
     /// the whole answer now; see `CanvasTiling.edgeGap`, which is where to go if it wants adjusting.
-    private static let headerClearance: Double = 40
+    ///
+    /// Read by `CanvasEdgeView` too, which fades to nothing exactly where the tiles start.
+    static let headerClearance: Double = 40
 
     /// The board's extent in canvas coordinates: everything on it, plus room to drag things outside it.
     /// The view's own size, and the origin every conversion subtracts.
@@ -154,6 +156,8 @@ final class CanvasBoardView: NSView {
     var onRenameWorkspace: (String) -> Void = { _ in }
     /// The board's named workspaces, for the menus that list them.
     var workspaceNames: () -> [String] = { [] }
+    /// The named workspaces holding any of these cards — the contextual menu's Workspaces submenu.
+    var workspacesHolding: (Set<String>) -> [String] = { _ in [] }
 
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {
@@ -280,6 +284,8 @@ final class CanvasBoardView: NSView {
     }
 
     var nodeViews: [String: CanvasNodeView] = [:]
+    /// The drag over the board right now, if there is one. See `CanvasBoardView+Dropping`.
+    var dropSession: CanvasDropSession?
     let overlay = CanvasOverlayView()
     /// The tile handlebars, at the bottom of the stack — above the board's own drawing and below
     /// every card. See `CanvasTileHandleView`.
@@ -422,6 +428,10 @@ final class CanvasBoardView: NSView {
         // below the grips for the life of the board without anything having to re-sort them.
         addSubview(tileHandleView)
         addSubview(overlay)
+        // Without this AppKit offers the board no drag at all, and the only drops that ever reached it
+        // were the ones a web card's page handed on — so a link carried off a card onto open ground
+        // went back to being a link, and nothing dropped on the ground made a card.
+        registerForDrops()
         setAccessibilityRole(.group)
         setAccessibilityLabel("Canvas")
         recomputeContent()
@@ -777,6 +787,12 @@ final class CanvasBoardView: NSView {
     func pageSettingsChanged() {
         for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reconsiderLoading() }
         applyPageBudget()
+    }
+
+    /// Bring over the pages the tab you just left was running for this board's cards — see
+    /// `CanvasLinkNodeView.reclaimPage`. Before the budget, which then decides about them like any other.
+    func reclaimPages() {
+        for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reclaimPage() }
     }
 
     /// Decide again which pages are live, at the end of the current run loop pass.

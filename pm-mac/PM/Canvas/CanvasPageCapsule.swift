@@ -10,9 +10,9 @@ import SwiftUI
 /// card must not move Add and the options menu. Two separately-constrained views would have to agree
 /// about a gap and about which of them collapses, and that agreement is what an `HStack` already is.
 ///
-/// **And so a capsule arrives and leaves in one frame, without a transition.** It had one — a blur
-/// replace, over an animated row — and the animation was doing the exact thing the split was there to
-/// prevent. A stack lays its children out from its leading edge, and that edge is what moves when the
+/// **A capsule arrives by materializing, and the row never animates.** It had a transition once — a
+/// blur replace, over an animated row — and the animation was doing the exact thing the split was there
+/// to prevent. A stack lays its children out from its leading edge, and that edge is what moves when the
 /// row changes width: Auto Layout takes the origin from `intrinsicContentSize`, which is the settled
 /// size and arrives in one step, while SwiftUI interpolates the offsets over the duration. Two clocks
 /// for one number. Measured, because it is not obvious from either side — switching between a project
@@ -22,30 +22,44 @@ import SwiftUI
 /// band, which is the thing this header is islands to avoid.
 ///
 /// The rule that follows, and it holds one level down too: **nothing in this chrome animates a change
-/// that alters its own width.** Opacity, a swapped glyph, a colour — those are free, and they are what
-/// is left.
+/// that alters its own width.** Opacity, a swapped glyph, a colour, glass coming in — those are free, and
+/// they are what is left. So a capsule that comes and goes is a `HeaderPresence`: the row snaps to make
+/// room, and then the capsule materializes where it already stands.
 struct CanvasHeaderTrailingChrome: View {
     @ObservedObject var model: CanvasHeaderModel
+    @State private var page = HeaderPresence<CanvasHeaderModel.Page>()
+    @State private var tile = HeaderPresence<CanvasHeaderModel.TileControls>()
 
     var body: some View {
-        // Bottom-aligned, so the two capsules share a baseline whatever they turn out to be. They are
-        // the same height today — one row of `itemHeight` in the same inset — and centring them would
-        // hide it the day one of them isn't.
-        HStack(alignment: .bottom, spacing: HeaderMetrics.capsuleGap) {
-            if let page = model.page {
-                CanvasPageCapsule(model: model, page: page)
+        // **One container for the three pieces of glass**, because glass cannot sample other glass and
+        // pieces in separate containers render inconsistently beside one another. Its spacing is the
+        // gap *inside* a capsule, well under the gap between them, so the three stay three at rest
+        // rather than pooling into one blob.
+        GlassEffectContainer(spacing: HeaderMetrics.gap) {
+            // Bottom-aligned, so the capsules share a baseline whatever they turn out to be. They are
+            // the same height today — one row of `itemHeight` in the same inset — and centring them
+            // would hide it the day one of them isn't.
+            HStack(alignment: .bottom, spacing: HeaderMetrics.capsuleGap) {
+                if let shown = page.shown {
+                    CanvasPageCapsule(model: model, page: shown)
+                        .headerMaterialized(page.materialized)
+                }
+                // **Between the two, so the scopes widen toward the window's edge**: the page inside a
+                // card, then the tile that card is in, then the board they are all on. In a tiled view
+                // the focused tile *is* the engaged card (`CanvasBoardView.tileClicked` selects and
+                // engages together), so on a web tile both of these are up at once and are about the
+                // same object at two scales — which is the order to read them in.
+                if let shown = tile.shown {
+                    CanvasTileCapsule(model: model, tile: shown)
+                        .headerMaterialized(tile.materialized)
+                }
+                CanvasControlCapsule(model: model)
             }
-            // **Between the two, so the scopes widen toward the window's edge**: the page inside a
-            // card, then the tile that card is in, then the board they are all on. In a tiled view the
-            // focused tile *is* the engaged card (`CanvasBoardView.tileClicked` selects and engages
-            // together), so on a web tile both of these are up at once and are about the same object at
-            // two scales — which is the order to read them in.
-            if let tile = model.focusedTile {
-                CanvasTileCapsule(model: model, tile: tile)
-            }
-            CanvasControlCapsule(model: model)
+            // On the row, which is always there — see `HeaderPresence`.
+            .headerPresence(of: model.page, in: $page)
+            .headerPresence(of: model.focusedTile, in: $tile)
         }
-        // The drop belongs to the row, not to either capsule in it. See `TitlebarDrop`.
+        // The drop belongs to the row, not to any capsule in it. See `TitlebarDrop`.
         .modifier(TitlebarDrop(model: model))
     }
 }
@@ -65,13 +79,9 @@ struct CanvasPageCapsule: View {
     @ObservedObject var model: CanvasHeaderModel
     let page: CanvasHeaderModel.Page
     @Environment(\.controlActiveState) private var controlActiveState
-    @State private var hovering = false
-
-    private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
 
     var body: some View {
-        // Bare over a tiled board, with the board's own capsule — see `CanvasControlCapsule`.
-        HeaderCapsule(chrome: chrome, backed: model.tiling == nil) {
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState)) {
             HeaderSymbolButton(symbol: "chevron.left", help: "Back",
                                enabled: page.canGoBack, action: model.pageBack)
             HeaderSymbolButton(symbol: "chevron.right", help: "Forward",
@@ -107,11 +117,9 @@ struct CanvasPageCapsule: View {
                                    action: model.pageAdoptAddress)
             }
         }
-        .onHover { hovering = $0 }
-        // Opacity and a swapped glyph only. Home and Pin arriving, and the address field changing
-        // width with the window, both change the capsule's width — and a capsule that animates its own
-        // width throws the row it is in sideways. See `CanvasHeaderTrailingChrome`.
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+        // A swapped glyph only. Home and Pin arriving, and the address field changing width with the
+        // window, both change the capsule's width — and a capsule that animates its own width throws
+        // the row it is in sideways. See `CanvasHeaderTrailingChrome`.
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: page.isLoading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Page controls, " + page.host))
@@ -276,8 +284,12 @@ private struct CanvasAddressTextField: NSViewRepresentable {
         return field
     }
 
+    /// The field's own height, not the item's. A text field's cell draws from the top of its frame
+    /// rather than centring in it, so a field stretched to `itemHeight` puts the address a few points
+    /// above where the chip had it, and clicking the chip reads as the text jumping. At its natural
+    /// height the field is centred by the box around it, the same box that centres the chip.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSTextField, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 0, height: HeaderMetrics.itemHeight)
+        CGSize(width: proposal.width ?? 0, height: nsView.intrinsicContentSize.height)
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {

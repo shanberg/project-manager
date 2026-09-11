@@ -1093,6 +1093,23 @@ nothing writes the field again. Every board answers it exactly once and nil for 
 what keeps it from becoming the second store answering "which workspace was I in" that §7h took a
 section to remove.
 
+## 7j. A new project opens on a Notes workspace — **built**
+
+§7d kept the note-only view a *tab* rather than a workspace, so the app would not have two names for
+one shape. §7i then made every other chip in the row a workspace, and that left the notes tab the odd
+one out: the only chip that closed, the only one you could not rename, and the only one you could not
+tile a second card into. Once the tab bar lost its "+", closing it also left File ▸ New Tab as the
+only way back.
+
+So a board PM makes for a project — `PMStore.openableCanvasPath` reports when it wrote the file —
+comes with a named workspace, **Notes**, holding the project's own card and nothing else
+(`CanvasProjectNoteCard.seedNotesWorkspace`). The notes tab the new window opened on becomes that
+workspace's chip rather than gaining a twin (`ProjectWindowController.seedNotesWorkspace`). Any
+workspace of the project card alone steps into the card on arrival, as the notes tab always did.
+
+**New projects only.** A project that already has a board keeps its tabs, and `.notes` / `.note` still
+exist and still open. A board that already has a workspace called Notes is left alone.
+
 ## 8. What this does to the backlog
 
 - **New, and first:** the card is the project (§§2–5). The complaint that started this.

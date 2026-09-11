@@ -244,10 +244,11 @@ enum CanvasTiling {
     /// now always the way out, and the way to look at one tile on its own is Maximize, which is a
     /// different act with a different key and puts everything back afterwards.
     ///
-    /// It says the count out loud — "These 6 Cards" rather than "Selection" — because the command's
-    /// one real hazard is making a workspace out of more than you meant. A frame opens out into the
-    /// cards inside it, and being told how many that came to is worth more before you commit than
-    /// after.
+    /// **"Selection", and it used to be a count** — "These 6 Cards" — on the grounds that making a
+    /// workspace out of more than you meant is the command's one hazard. It reads as one fixed command
+    /// now, because in the contextual menu it sits above a Workspaces submenu listing the ones that
+    /// already hold these cards, and a title that changed with every selection made the pair read as
+    /// two variable things rather than "make one" beside "the ones there are".
     ///
     /// **A workspace is made out of a selection or not at all.** With nothing selected this used to
     /// tile whatever was on screen; a workspace is a named thing that persists, and making one out of
@@ -260,9 +261,7 @@ enum CanvasTiling {
     ///     out. Zero means nothing is selected, and the command is unavailable.
     static func commandTitle(tiled: Bool, targets: Int) -> String {
         guard !tiled else { return "Show Canvas" }
-        guard targets > 0 else { return "Create Workspace" }
-        return targets == 1 ? "Create Workspace from This Card"
-                            : "Create Workspace from These \(targets) Cards"
+        return targets > 0 ? "Create Workspace from Selection" : "Create Workspace"
     }
 
     /// The order cards tile in: reading order of where they actually sit on the board.

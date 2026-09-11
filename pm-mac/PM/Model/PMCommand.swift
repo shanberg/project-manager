@@ -40,7 +40,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     case openInEditor
     case editDetails
     case addLink
-    case renameProject
+    case projectSettings
     case archiveProject
     case unarchiveProject
 
@@ -57,7 +57,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     ///
     /// Ellipses follow the Mac convention rather than the surface: a command that opens an editor,
     /// a prompt or a form to finish the job takes one; a command that just happens is bare. That's
-    /// why Complete and Dive In have none and Rename Project does.
+    /// why Complete and Dive In have none and Project Settings does.
     var title: String {
         switch self {
         case .complete: return "Complete Focused Task"
@@ -81,7 +81,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .openInEditor: return "Open in Editor"
         case .editDetails: return "Edit Project Details…"
         case .addLink: return "Add Link…"
-        case .renameProject: return "Rename Project…"
+        case .projectSettings: return "Project Settings…"
         case .archiveProject: return "Archive Project"
         case .unarchiveProject: return "Unarchive Project"
         case .newProject: return "New Project…"
@@ -121,7 +121,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .openInEditor: return "chevron.left.forwardslash.chevron.right"
         case .editDetails: return "text.justify.left"
         case .addLink: return "link"
-        case .renameProject: return "square.and.pencil"
+        case .projectSettings: return "slider.horizontal.3"
         case .archiveProject: return "archivebox"
         case .unarchiveProject: return "arrow.up.bin"
         case .newProject: return "plus.square"
@@ -146,7 +146,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
              .editTask, .setDue, .wrapTask:
             return .task
         case .startSession, .sessionNote, .openWindow, .openInFinder, .openInObsidian, .openInEditor,
-             .editDetails, .addLink, .renameProject, .archiveProject, .unarchiveProject:
+             .editDetails, .addLink, .projectSettings, .archiveProject, .unarchiveProject:
             return .project
         case .newProject, .settings:
             return nil
@@ -158,7 +158,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     var startsMenuGroup: Bool {
         switch self {
         case .diveIn, .narrowFocus, .setDue,             // Task: act, navigate, add around, schedule
-             .openWindow, .editDetails, .renameProject:  // Project: open, edit, manage
+             .openWindow, .editDetails, .projectSettings:  // Project: open, edit, manage
             return true
         default:
             return false
@@ -174,6 +174,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .complete: return ("\r", [.command, .shift])
         case .diveIn: return ("d", [.command, .shift])
         case .openInFinder: return ("r", [.command, .shift])
+        // Finder's Get Info, which is the same question asked of a file.
+        case .projectSettings: return ("i", [.command])
         default: return nil
         }
     }
@@ -189,7 +191,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .narrowFocus, .addAfter, .addBefore, .editTask, .setDue, .wrapTask:
             return .add
-        case .openInFinder, .openInObsidian, .openInEditor, .openWindow, .renameProject,
+        case .openInFinder, .openInObsidian, .openInEditor, .openWindow, .projectSettings,
              .sessionNote, .startSession, .addLink, .editDetails, .archiveProject, .unarchiveProject:
             return .project
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
@@ -273,7 +275,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .openInEditor: return ["code", "editor", "cursor", "vscode", "zed", "xcode"]
         case .editDetails: return ["summary", "problem", "goals", "approach", "learnings", "brief"]
         case .addLink: return ["url", "bookmark"]
-        case .renameProject: return ["title"]
+        case .projectSettings: return ["rename", "title", "icon", "emoji", "symbol", "info"]
         case .archiveProject: return ["archive", "shelve", "done"]
         case .unarchiveProject: return ["unarchive", "restore", "reopen"]
         case .newProject: return ["create", "start"]

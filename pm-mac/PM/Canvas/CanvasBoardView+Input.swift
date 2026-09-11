@@ -196,15 +196,16 @@ extension CanvasBoardView {
             // dragged cards is a shape none of them has, and an outline you cannot match a card to is
             // not a target. The same translation the cards are getting, applied to where they are now.
             //
-            // The sources take no translation at all — they are cards standing still, and they are
-            // where they are.
+            // The matches take no translation at all — they are about cards standing still, and those
+            // are where they are.
             overlay.ghost = snap.ghost.map { ghost in
                 let gdx = ghost.frame.minX - box.minX, gdy = ghost.frame.minY - box.minY
                 return CanvasOverlayView.Ghost(
+                    ghost,
                     frames: frames.keys.sorted().compactMap { frames[$0] }.map {
                         CanvasRect(x: $0.x + gdx, y: $0.y + gdy, width: $0.width, height: $0.height)
                     },
-                    sources: ghost.sources)
+                    beneath: standingCards(excluding: Set(frames.keys)))
             }
             showGrid(snapsToGrid(event))
             store.change("Move Card") { doc in
@@ -231,8 +232,9 @@ extension CanvasBoardView {
             overlay.ghost = snap.ghost.map { ghost in
                 let fitted = CanvasGroupResize.frames(originals, from: box, to: ghost.frame)
                 return CanvasOverlayView.Ghost(
+                    ghost,
                     frames: fitted.keys.sorted().compactMap { fitted[$0] },
-                    sources: ghost.sources)
+                    beneath: standingCards(excluding: Set(originals.keys)))
             }
             showGrid(snapsToGrid(event))
             let settled = CanvasGroupResize.frames(originals, from: box, to: snap.frame)
@@ -374,10 +376,21 @@ extension CanvasBoardView {
     /// Restricted to the visible region — generously, but restricted. Aligning to a card five thousand
     /// points off screen is an agreement nobody asked for and can't see, and the guide drawn for it
     /// would reach off the window in both directions saying nothing.
-    private func snapCandidates(excluding moving: Set<String>) -> [CanvasRect] {
+    func snapCandidates(excluding moving: Set<String>) -> [CanvasRect] {
         let region = canvasRect(visibleRect).inset(by: 400)
         return document.nodes
             .filter { !moving.contains($0.id) && $0.frame.intersects(region) }
+            .map(\.frame)
+    }
+
+    /// The cards the ghost is drawn beneath: every card on screen that isn't being placed.
+    ///
+    /// Not the frames. A frame is ground, painted by the board under everything, cards included — see
+    /// `CanvasOverlayView.tuckBeneathStandingCards`.
+    func standingCards(excluding moving: Set<String>) -> [CanvasRect] {
+        let region = canvasRect(visibleRect)
+        return document.nodes
+            .filter { !$0.isGroup && !moving.contains($0.id) && $0.frame.intersects(region) }
             .map(\.frame)
     }
 

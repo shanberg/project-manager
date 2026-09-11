@@ -90,76 +90,18 @@ extension CanvasBoardView {
         paste(at: nil)
     }
 
-    // MARK: Dropping
-
-    /// A drop is a paste that names its own place, so it goes through the same reading of the
-    /// pasteboard. Registering for the types here rather than in the board's initialiser keeps the
-    /// list beside the code that interprets it.
-    func registerForDrops() {
-        registerForDraggedTypes([.fileURL, .string, .URL] + NoteImagePasteboard.imageTypes)
-    }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canAccept(sender.draggingPasteboard) ? .copy : []
-    }
-
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canAccept(sender.draggingPasteboard) ? .copy : []
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let at = canvasPoint(convert(sender.draggingLocation, from: nil))
-        return accept(sender.draggingPasteboard, at: at)
-    }
-
-    private func canAccept(_ pasteboard: NSPasteboard) -> Bool {
-        pasteboard.availableType(from: [.fileURL, .string, .URL] + NoteImagePasteboard.imageTypes) != nil
-            || pasteboard.data(forType: Self.pasteboardType) != nil
-    }
-
     /// Paste whatever is on the pasteboard, as the kind of card it deserves.
-    ///
-    /// The order is most-specific first, and it matters at every step: a copied *image file* has to be
-    /// caught before the image bytes some apps put down beside it, or the board gets a second copy of
-    /// a picture already in the vault; a file URL has to be caught before the string form of that URL,
-    /// or a dragged note becomes a card containing the text `file:///Users/…`.
     func paste(at where_: CanvasPoint?) {
         _ = accept(NSPasteboard.general, at: where_ ?? centreOfVisibleBoard)
     }
 
-    /// Read `pasteboard` and put whatever is on it on the board at `at`.
-    ///
-    /// The order is most-specific first, and it matters at every step: a copied *image file* has to be
-    /// caught before the image bytes some apps put down beside it, or the board gets a second copy of
-    /// a picture already in the vault; a file URL has to be caught before the string form of that URL,
-    /// or a dragged note becomes a card containing the text `file:///Users/…`.
+    /// Read `pasteboard` and put whatever is on it on the board, centred at `at`. A drop is a paste
+    /// that names its own place, and reads the pasteboard the same way — see `CanvasDrop`, which owns
+    /// the order things are recognised in, and `CanvasBoardView+Dropping`.
     @discardableResult
     func accept(_ pasteboard: NSPasteboard, at: CanvasPoint) -> Bool {
-        if let data = pasteboard.data(forType: Self.pasteboardType),
-           let copied = try? CanvasDocument.parse(data) {
-            insert(copied, at: at, actionName: "Paste")
-            return true
-        }
-        if let files = NoteImagePasteboard.imageFiles(on: pasteboard) {
-            addFileCards(for: files, at: at)
-            return true
-        }
-        if let image = NoteImagePasteboard.imageData(on: pasteboard), let saved = save(image) {
-            addFileCards(for: [saved], at: at)
-            return true
-        }
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
-           !files.isEmpty {
-            addFileCards(for: files, at: at)
-            return true
-        }
-        if let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !text.isEmpty {
-            addCard(for: text, at: at)
-            return true
-        }
-        return false
+        guard let drop = CanvasDrop.read(pasteboard, cardsType: Self.pasteboardType) else { return false }
+        return commit(drop, frames: drop.frames(centredOn: at))
     }
 
     /// Write a pasted picture into the vault's attachments folder, beside where a note's would go.
@@ -176,30 +118,35 @@ extension CanvasBoardView {
         }
     }
 
-    private func addFileCards(for files: [URL], at where_: CanvasPoint) {
-        var nodes: [CanvasNode] = []
-        for (index, url) in files.enumerated() {
-            let path = store.resolver.storablePath(for: url) ?? url.path
-            let tall = isMarkdownImagePath(url.path) || url.pathExtension.lowercased() == "pdf"
-            nodes.append(CanvasNode(content: .file(path: path, subpath: nil),
-                                    frame: CanvasRect(x: where_.x + Double(index) * 30,
-                                                      y: where_.y + Double(index) * 30,
-                                                      width: 400, height: tall ? 400 : 300)))
+    /// Make the cards `drop` describes, at `frames` — one per card, in the order `CanvasDrop` makes
+    /// them. False when there turned out to be nothing to make, which for a picture with no file means
+    /// the vault would not take it.
+    @discardableResult
+    func commit(_ drop: CanvasDrop, frames: [CanvasRect]) -> Bool {
+        func cards(_ contents: [CanvasContent]) -> CanvasDocument {
+            CanvasDocument(nodes: zip(contents, frames).map { CanvasNode(content: $0, frame: $1) })
         }
-        insert(CanvasDocument(nodes: nodes), at: nil,
-               actionName: files.count > 1 ? "Add Files" : "Add File")
-    }
-
-    /// A pasted string: an address becomes a link card, anything else becomes prose.
-    private func addCard(for text: String, at where_: CanvasPoint) {
-        let looksLikeAddress = !text.contains(where: \.isWhitespace)
-            && (text.hasPrefix("http://") || text.hasPrefix("https://"))
-        let content: CanvasContent = looksLikeAddress ? .link(url: text) : .text(text)
-        let size = looksLikeAddress
-            ? CanvasRect(x: where_.x - 200, y: where_.y - 200, width: 400, height: 400)
-            : CanvasRect(x: where_.x - 125, y: where_.y - 60, width: 250, height: 120)
-        insert(CanvasDocument(nodes: [CanvasNode(content: content, frame: size)]), at: nil,
-               actionName: "Paste")
+        func file(_ url: URL) -> CanvasContent {
+            .file(path: store.resolver.storablePath(for: url) ?? url.path, subpath: nil)
+        }
+        switch drop {
+        case .cards(var copied):
+            for index in copied.nodes.indices where index < frames.count {
+                copied.nodes[index].frame = frames[index]
+            }
+            insert(copied, at: nil, actionName: "Paste")
+        case .files(let files):
+            insert(cards(files.map(file)), at: nil, actionName: files.count > 1 ? "Add Files" : "Add File")
+        case .image(let data, let ext):
+            guard let saved = save((data: data, ext: ext)) else { return false }
+            insert(cards([file(saved)]), at: nil, actionName: "Add File")
+        case .links(let addresses):
+            insert(cards(addresses.map { .link(url: $0) }), at: nil,
+                   actionName: addresses.count > 1 ? "Add Links" : "Add Link")
+        case .text(let text):
+            insert(cards([.text(text)]), at: nil, actionName: "Paste")
+        }
+        return true
     }
 
     // MARK: Duplicating
@@ -803,6 +750,7 @@ extension CanvasBoardView {
         let item = add(menu, tileCommandTitle, #selector(tileSelection(_:)))
         item.keyEquivalent = "\r"
         item.keyEquivalentModifierMask = [.command]
+        addWorkspacesHoldingSelection(menu)
         // The deliberate half of pinning, and the only half: a drag can change a pin but never make
         // one, or a layout would stop responding to its window one adjustment at a time without
         // anybody having asked for that. See `togglePinTile`.
@@ -810,6 +758,26 @@ extension CanvasBoardView {
         // **A separate "Show Canvas" item used to live here**, because ⌘↩ was only the way out when
         // there was nothing left to drill into, and the menu needed one item that always left. ⌘↩ is
         // always the way out now, so a second item saying so would be the menu saying it twice.
+    }
+
+    /// The workspaces the selected cards are already in, as a submenu beside the command that makes
+    /// a new one — so "make a workspace of these" is asked with the ones that exist in view, and a
+    /// duplicate is something you choose rather than something you didn't know you were making.
+    ///
+    /// Only on the canvas: inside a workspace the command beside it is the way out, not a way to make
+    /// one. Left out rather than dimmed when there are none, because an empty submenu is a place to go
+    /// that has nothing in it.
+    private func addWorkspacesHoldingSelection(_ menu: NSMenu) {
+        guard !isTiled else { return }
+        let names = workspacesHolding(tileTargets)
+        guard !names.isEmpty else { return }
+        let list = NSMenu()
+        for name in names {
+            let entry = add(list, name, #selector(goToListedWorkspace(_:)))
+            entry.representedObject = name
+        }
+        let parent = menu.addItem(withTitle: "Workspaces", action: nil, keyEquivalent: "")
+        parent.submenu = list
     }
 
     @discardableResult
@@ -1365,6 +1333,13 @@ extension CanvasBoardView {
         onGoToWorkspace(name)
     }
 
+    /// The same act from the contextual menu's Workspaces submenu. A selector of its own because
+    /// `goToWorkspace` is validated by slot — its items are numbered rows of the View menu, retitled
+    /// from `tag` — and these are named rows that already say which workspace they are.
+    @objc func goToListedWorkspace(_ sender: Any?) {
+        goToWorkspace(sender)
+    }
+
     /// Duplicate a named workspace — **the ordinary way a second one comes to exist**.
     ///
     /// You have built a six-tile workspace and want a variant of it. Before this the only answer was
@@ -1593,6 +1568,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             entry.representedObject = names[entry.tag]
             entry.state = names[entry.tag] == workspaceName ? .on : .off
             return true
+        case #selector(goToListedWorkspace(_:)):
+            return (item as? NSMenuItem)?.representedObject is String
         case #selector(setTileArrangement(_:)):
             (item as? NSMenuItem).map { entry in
                 entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue

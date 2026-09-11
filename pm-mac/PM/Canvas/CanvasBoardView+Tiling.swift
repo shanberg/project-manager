@@ -835,15 +835,6 @@ extension CanvasBoardView {
         return (label?.isEmpty == false) ? label : "Untitled Frame"
     }
 
-    /// Every frame on the board, in reading order, as (id, name) — what the add menu offers.
-    var frameChoices: [(id: String, name: String)] {
-        frames.map { node in
-            var name = "Untitled Frame"
-            if case .group(let label, _, _) = node.content, let label, !label.isEmpty { name = label }
-            return (node.id, name)
-        }
-    }
-
     /// Show a frame: fit it in the window and select what is in it. The same act as ⌃1…9, addressed by
     /// id rather than by position, because a tab holds the frame rather than the slot it happened to
     /// be in when the tab was made.

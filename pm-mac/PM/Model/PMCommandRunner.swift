@@ -63,10 +63,10 @@ enum PMCommandRunner {
             WindowManager.shared.openFocusedProject().editDetails()
         case .addLink:
             ProjectPrompts.addLink(store: store)
-        case .renameProject:
+        case .projectSettings:
             guard let name = store.projectName else { return }
-            ProjectPrompts.rename(projectNamed: name,
-                                  isArchived: PMCommand.Context.isArchived(key: store.projectKey))
+            ProjectSettings.present(projectNamed: name,
+                                    isArchived: PMCommand.Context.isArchived(key: store.projectKey))
         case .archiveProject, .unarchiveProject:
             guard let name = store.projectName else { return }
             do {

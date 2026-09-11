@@ -53,6 +53,22 @@ enum CanvasWorkspaces {
         of(url).keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
+    /// The names of the workspaces that hold any of these cards, in menu order.
+    ///
+    /// Any rather than all: right-clicking three cards is asking "where else do these live", and a
+    /// workspace holding two of the three is an answer to that, not a near miss.
+    static func names(holdingAnyOf ids: Set<String>, of url: URL) -> [String] {
+        names(holdingAnyOf: ids, in: of(url))
+    }
+
+    /// `names(holdingAnyOf:of:)` over workspaces already read — pure, so it can be pinned in a test.
+    static func names(holdingAnyOf ids: Set<String>,
+                      in all: [String: CanvasViewState.Tiling]) -> [String] {
+        guard !ids.isEmpty else { return [] }
+        return all.filter { !ids.isDisjoint(with: $0.value.ids) }.keys
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     static func tiling(named name: String, of url: URL) -> CanvasViewState.Tiling? {
         of(url)[name]
     }
