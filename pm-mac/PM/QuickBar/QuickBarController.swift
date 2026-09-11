@@ -942,7 +942,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// these commands were given a global shortcut for in the first place.
     private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
         switch command {
-        case .openWindow, .settings, .newProject, .renameProject, .addLink, .editDetails: return true
+        case .openWindow, .settings, .newProject, .projectSettings, .addLink, .editDetails: return true
         // Given text it just writes the note; given none it opens the place that edits it.
         case .sessionNote: return argument.isEmpty
         default: return false
@@ -1123,8 +1123,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             PMContract.performAffordance("app.openInObsidian", store: store)
         case .editDetails:
             WindowManager.shared.openFocusedProject().editDetails()
-        case .renameProject:
-            renameFocusedProject(store)
+        case .projectSettings:
+            showFocusedProjectSettings(store)
         case .archiveProject, .unarchiveProject:
             // Synchronous, and it either threw or it didn't — so this is the one receipt that doesn't
             // wait on a store re-read to know whether it has something true to say.
@@ -1210,11 +1210,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func renameFocusedProject(_ store: PMStore?) {
+    private func showFocusedProjectSettings(_ store: PMStore?) {
         guard let store, let name = store.projectName, let key = store.projectKey else { return }
         // Archived or not is a question about where the folder lives, which the key already answers.
         let isArchived = (try? loadConfigAndPaths()).map { key.hasPrefix("\($0.1.archivePath):") } ?? false
-        ProjectPrompts.rename(projectNamed: name, isArchived: isArchived)
+        ProjectSettings.present(projectNamed: name, isArchived: isArchived)
     }
 
     // MARK: Window

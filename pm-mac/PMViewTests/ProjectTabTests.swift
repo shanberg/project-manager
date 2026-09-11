@@ -373,4 +373,19 @@ final class TabsSelectByIndexTests: XCTestCase {
         tabs.select(at: .max)
         XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
     }
+
+    /// **A new project's notes tab becomes its Notes workspace, in place** — the row
+    /// `ProjectWindowController.seedNotesWorkspace` builds. Retargeted rather than joined by a second
+    /// chip, so seeding the workspaces afterwards finds the chip already there, and the window stays on
+    /// the tab it opened on.
+    func testANewProjectsNotesTabBecomesItsNotesWorkspace() {
+        var tabs = ProjectTabSet()
+        let notes = tabs.tabs[1].id
+        tabs.retarget(notes, to: .board(.workspace("Notes")))
+        tabs.include(workspaces: ["Notes"])
+        XCTAssertEqual(tabs.tabs.map(\.view), [.board(.whole), .board(.workspace("Notes"))])
+        XCTAssertEqual(tabs.selectedID, notes)
+        // And a workspace chip does not close — which the notes tab did.
+        XCTAssertFalse(tabs.close(notes))
+    }
 }

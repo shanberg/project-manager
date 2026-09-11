@@ -27,7 +27,8 @@ import SwiftUI
 @MainActor
 final class HeaderChromeMotionTests: XCTestCase {
     private var window: NSWindow!
-    private var host: NSHostingView<Row>!
+    /// The row under test — `Row`, or `MaterializingRow` — as the plain view the marker walk needs.
+    private var host: NSView!
     private var pill: NSHostingView<Pill>!
     /// Stands in for the tab row, which is pinned to the pill's trailing anchor and so is the thing
     /// that moves if the pill's width ever depends on which mode is up.
@@ -106,38 +107,39 @@ final class HeaderChromeMotionTests: XCTestCase {
                           + "fixed-box row would now be an option, and with it the animation")
     }
 
-    // MARK: The pill, at the other end of the band
+    // MARK: The way a capsule comes and goes now (docs/header-chrome.md P1)
 
-    /// **The name slides flush and nothing else moves.**
-    ///
-    /// The pill is the one piece of this header that may animate a change to what is inside it, and it
-    /// may only because its own width is the same number in both modes: the leading inset it drops
-    /// going into a workspace is added back on the trailing side. The tab row is pinned to its trailing
-    /// anchor and is the thing that would show it if that ever stopped being true.
-    func testTheNameSlidesWithoutMovingTheTabRow() throws {
-        try openPill(holdsWidth: true)
-        let start = try XCTUnwrap(titleFrame(), "SwiftUI never built the title")
-        let startNeighbour = neighbour.convert(neighbour.bounds, to: nil)
-        let samples = trackPill(for: 0.5) { self.model.tiled = true }
-        reportPill("holding width", from: start, neighbour: startNeighbour, samples: samples)
-
-        let rowDrift = samples.map { abs($0.neighbour.minX - startNeighbour.minX) }.max() ?? 0
-        XCTAssertLessThan(rowDrift, 1,
-                          "the tab row moved when the pill went flush — the pill's two insets no "
-                              + "longer add up to the same number in both modes")
-        let travelled = (samples.last.map { start.minX - $0.title.minX }) ?? 0
-        XCTAssertEqual(travelled, 14, accuracy: 1,
-                       "the name did not end up flush with the pill's leading edge")
-        // And it got there by moving, which is the other half of the claim: a hosting view whose width
-        // holds still is one SwiftUI can lay out a frame at a time, so the name is measurable somewhere
-        // in between rather than only at both ends.
-        let midway = samples.filter { $0.title.minX < start.minX - 2 && $0.title.minX > start.minX - 12 }
-        XCTAssertFalse(midway.isEmpty,
-                       "the name jumped rather than slid; nothing was ever measured between the two "
-                           + "positions")
+    /// **A capsule that materializes out leaves the row exactly where it was**, and does leave in its
+    /// own time: it fades in place for a while before the row closes up, which is what separates this
+    /// from the cut it replaces. `HeaderPresence` is the real one, not a model of it.
+    func testAMaterializingCapsuleLeavesWithoutMovingTheRow() throws {
+        try openRow(animated: false, materializing: true)
+        let before = try XCTUnwrap(capsules().last, "no capsules on screen")
+        let track = sample(for: 0.6) { self.model.showsPage = false }
+        report("materializing out", before: before, track: track)
+        XCTAssertLessThan(drift(of: .last, from: before, in: track), 1,
+                          "a capsule materializing out moved the capsule beside it")
+        XCTAssertGreaterThan(track.filter { $0.count == 3 }.count, 2,
+                             "the capsule was cut rather than faded out where it stood")
+        XCTAssertEqual(track.last?.count, 2, "the capsule never left")
     }
 
-    /// **The obvious version, which is why the inset moves rather than leaving.**
+    /// **And arriving, the same**: the row snaps to make room in one frame, and the capsule comes in
+    /// where it already stands.
+    func testAMaterializingCapsuleArrivesWithoutMovingTheRow() throws {
+        try openRow(animated: false, materializing: true, startsShowing: false)
+        let before = try XCTUnwrap(capsules().last, "no capsules on screen")
+        let track = sample(for: 0.6) { self.model.showsPage = true }
+        report("materializing in", before: before, track: track)
+        XCTAssertLessThan(drift(of: .last, from: before, in: track), 1,
+                          "a capsule materializing in moved the capsule beside it")
+        XCTAssertEqual(track.last?.count, 3, "the capsule never arrived")
+    }
+
+    // MARK: The pill, at the other end of the band
+
+    /// **Why the pill keeps its inset over a tiled board**, where there is no glass for it to be the
+    /// inset of.
     ///
     /// Taking it off both sides narrows the pill by twenty-eight points. That is a change of
     /// `intrinsicContentSize`, so Auto Layout resizes the hosting view — and the whole change then
@@ -146,7 +148,7 @@ final class HeaderChromeMotionTests: XCTestCase {
     /// — the animation lost outright, and a row of tab chips jumping twenty-eight points sideways to
     /// pay for it.
     func testDroppingTheInsetOnBothSidesJumpsTheTabRow() throws {
-        try openPill(holdsWidth: false)
+        try openPill()
         let start = try XCTUnwrap(titleFrame(), "SwiftUI never built the title")
         let startNeighbour = neighbour.convert(neighbour.bounds, to: nil)
         let samples = trackPill(for: 0.5) { self.model.tiled = true }
@@ -212,17 +214,38 @@ final class HeaderChromeMotionTests: XCTestCase {
         }
     }
 
+    /// The row the header draws now: the leading capsule comes and goes through the real
+    /// `HeaderPresence`, and nothing about the row is animated.
+    struct MaterializingRow: View {
+        @ObservedObject var model: RowModel
+        @State private var page = HeaderPresence<Bool>()
+
+        var body: some View {
+            HStack(alignment: .bottom, spacing: 8) {
+                if page.shown != nil {
+                    capsule(width: 340).headerMaterialized(page.materialized)
+                }
+                capsule(width: 60)
+                capsule(width: 120)
+            }
+            .headerPresence(of: model.showsPage ? true : nil, in: $page)
+        }
+
+        private func capsule(width: CGFloat) -> some View {
+            Color.gray.opacity(0.2)
+                .frame(width: width, height: 28)
+                .background(Marker())
+        }
+    }
+
     /// The pill at the other end of the band, modelled the same way: a name in an intrinsically-sized
     /// hosting view, with the tab row pinned to its trailing anchor.
     ///
     /// Going to a workspace takes the glass off it, and a name that starts fourteen points inside its
-    /// own island with nothing drawn around it wants to go flush. The question this measures is where
-    /// those fourteen points go.
+    /// own island with nothing drawn around it looks like it wants to go flush. This is that version,
+    /// which `CanvasTitlePill` does not take.
     struct Pill: View {
         @ObservedObject var model: RowModel
-        /// The scheme in `CanvasTitlePill`: the leading inset moves to the trailing side, so the box
-        /// stays one width. False models the obvious version, which takes it off both sides.
-        var holdsWidth = true
 
         private let inset: CGFloat = 14
 
@@ -231,15 +254,9 @@ final class HeaderChromeMotionTests: XCTestCase {
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .background(Marker())
-                .padding(.leading, model.tiled ? 0 : inset)
-                .padding(.trailing, trailingInset)
+                .padding(.horizontal, model.tiled ? 0 : inset)
                 .padding(.vertical, 7)
                 .animation(.easeOut(duration: 0.18), value: model.tiled)
-        }
-
-        private var trailingInset: CGFloat {
-            guard holdsWidth else { return model.tiled ? 0 : inset }
-            return inset * (model.tiled ? 2 : 1)
         }
     }
 
@@ -258,18 +275,24 @@ final class HeaderChromeMotionTests: XCTestCase {
 
     /// Built the way `CanvasPaneController.buildContent` builds the real one: intrinsic size, no safe
     /// area, pinned to the trailing edge and free to grow leftward.
-    private func openRow(animated: Bool, growing: Bool = false) throws {
+    private func openRow(animated: Bool, growing: Bool = false, materializing: Bool = false,
+                         startsShowing: Bool = true) throws {
         TestApp.start()
         model = RowModel()
         model.animated = animated
         model.growing = growing
+        model.showsPage = startsShowing
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 120),
                           styleMask: [.titled], backing: .buffered, defer: false)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 120))
         window.contentView = container
-        host = NSHostingView(rootView: Row(model: model))
-        host.sizingOptions = [.intrinsicContentSize]
-        host.safeAreaRegions = []
+        func hosting<V: View>(_ root: V) -> NSView {
+            let view = NSHostingView(rootView: root)
+            view.sizingOptions = [.intrinsicContentSize]
+            view.safeAreaRegions = []
+            return view
+        }
+        host = materializing ? hosting(MaterializingRow(model: model)) : hosting(Row(model: model))
         host.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(host)
         NSLayoutConstraint.activate([
@@ -278,19 +301,19 @@ final class HeaderChromeMotionTests: XCTestCase {
         ])
         window.makeKeyAndOrderFront(nil)
         settle(0.5)
-        XCTAssertEqual(capsules().count, 3, "SwiftUI never built the three capsules")
+        XCTAssertEqual(capsules().count, startsShowing ? 3 : 2, "SwiftUI never built the capsules")
     }
 
     /// Built the way `CanvasPaneController.buildContent` builds the leading half: an intrinsically-sized
     /// pill pinned to the leading edge, and the tab row pinned to *its* trailing anchor.
-    private func openPill(holdsWidth: Bool) throws {
+    private func openPill() throws {
         TestApp.start()
         model = RowModel()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 120),
                           styleMask: [.titled], backing: .buffered, defer: false)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 120))
         window.contentView = container
-        pill = NSHostingView(rootView: Pill(model: model, holdsWidth: holdsWidth))
+        pill = NSHostingView(rootView: Pill(model: model))
         pill.sizingOptions = [.intrinsicContentSize]
         pill.safeAreaRegions = []
         pill.translatesAutoresizingMaskIntoConstraints = false

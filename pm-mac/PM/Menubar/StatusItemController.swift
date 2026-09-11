@@ -61,10 +61,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let p = store.progress
         let fraction = p.total > 0 ? Double(p.done) / Double(p.total) : 0
+        // Once: `staleTint` writes the task clock the first time it sees a newly focused task.
+        let tint = staleTint()
         let ring = MenubarRing.image(fraction: fraction, hasProject: store.projectName != nil,
-                                     showsProgress: store.kind.showsProgress, tint: staleTint())
+                                     showsProgress: store.kind.showsProgress, tint: tint)
         let content = MenubarTitleContent(
             ring: ring,
+            icon: store.icon,
+            tint: tint,
             task: currentTaskGlyph(),
             project: store.projectName.map { truncate(projectTitle($0), 24) } ?? "",
             move: store.focusMove,
@@ -210,7 +214,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Glance: title + progress bar (custom view — the native menu can't draw one).
         let p = store.progress
         menu.addItem(headerHostItem(title: store.notes?.title ?? ProjectCodes.display(name),
-                                    done: p.done, total: p.total))
+                                    done: p.done, total: p.total, icon: store.icon))
 
         // Constant action: complete the focused task, with ⌥ Undo.
         if let focused = store.focusedTodo {
@@ -411,10 +415,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: Custom row / header items
 
-    private func headerHostItem(title: String, done: Int, total: Int) -> NSMenuItem {
+    private func headerHostItem(title: String, done: Int, total: Int, icon: ProjectIcon?) -> NSMenuItem {
         let item = NSMenuItem()
         item.view = MenuStaticView(width: Self.menuWidth, fallbackHeight: 30) {
-            MenuHeaderContent(title: title, done: done, total: total)
+            MenuHeaderContent(title: title, done: done, total: total, icon: icon)
         }
         return item
     }

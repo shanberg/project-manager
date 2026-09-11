@@ -1,122 +1,71 @@
 import AppKit
 import SwiftUI
 
-/// What a floating header's glass is doing right now: absent in a background window, present once the
-/// window is active, and lit while the pointer is in it. Two inputs, three states — hover wins over the
-/// window's state, so reaching for a control in a window you haven't clicked into yet still shows you
-/// what you're reaching for.
+/// Whether a floating header belongs to the window you are working in. docs/header-chrome.md §3.
 ///
-/// One type rather than a pair of booleans read at each call site, because the pieces in a strip have
-/// to agree: two pieces of glass in the same header disagreeing about whether they exist is worse than
-/// either choice made consistently.
+/// **Two states, and there were three.** A third, *engaged*, lit the glass while the pointer was over a
+/// capsule — which meant something while the backing was a material with a strength to turn up, and
+/// nothing once it became glass, which has one strength. The pointer's one response is now the
+/// highlight behind the control under it (`HeaderHoverHighlight`), which is the response a Mac toolbar
+/// gives.
 ///
-/// Shared by the task list's header and the board's, which is the whole point — the canvas was asked to
-/// follow the pattern of the main window, and following it means using the same components rather than a
-/// second set that looks like them and drifts.
+/// Shared by every header in the app, so the pieces of one strip cannot disagree about which window
+/// they are in.
 enum HeaderChrome: Equatable {
-    /// Another window has the focus. No glass at all, and the content behind it recedes.
+    /// Another window has the focus. The content recedes; the glass is whatever the system draws for a
+    /// window that is not key.
     case dormant
-    /// This window is active, the pointer is elsewhere. Backed, at rest.
-    case resting
-    /// The pointer is in the header strip. Backed at full strength.
-    case engaged
+    /// This window is the one you are working in.
+    case active
 
-    init(active: ControlActiveState, hovering: Bool) {
-        if hovering {
-            self = .engaged
-        } else if active == .inactive {
-            self = .dormant
-        } else {
-            self = .resting
-        }
+    init(active: ControlActiveState) {
+        self = active == .inactive ? .dormant : .active
     }
 
-    /// How strongly the backing renders, 0–1.
-    ///
-    /// Nothing here goes to zero. An earlier pass had the dormant state drop its backing entirely, on
-    /// the theory that a background window's chrome should get out of the way — but there's no bar
-    /// behind these headers, so "nothing" meant the content scrolled up into the title and made it
-    /// unreadable. Receding is a job for less contrast, not for none, and the floor is set by what
-    /// stays legible rather than by how quiet it would be nice to be.
-    var backingStrength: Double {
-        switch self {
-        case .dormant: return 0.7
-        case .resting: return 0.85
-        case .engaged: return 1
-        }
-    }
-
-    /// How strongly the *content* renders. Dimmed in a background window, but only slightly: this is
-    /// the same legibility problem from the other side, and text at half strength over a half-strength
-    /// backing is no easier to read than text over nothing.
+    /// How strongly the content renders. Dimmed in a background window, slightly — "subdued and seem
+    /// visually farther away", in the HIG's words, and receding is a job for less contrast rather than
+    /// for none.
     var contentOpacity: Double { self == .dormant ? 0.85 : 1 }
 }
 
 extension View {
-    /// Backs a piece of header chrome at the strength its state calls for. One modifier for every piece
-    /// in both windows, so they can't drift apart.
+    /// Puts a group of header controls on Liquid Glass. One modifier for every piece in every header, so
+    /// they can't drift apart.
     ///
-    /// A plain material, not Liquid Glass, after trying both. `glassEffect` has no intensity control —
-    /// its two variants are `.regular` and `.clear`, and `.clear` is the *media* variant, brighter and
-    /// more present over a plain window rather than quieter. The only way to turn glass down is to fade
-    /// the layer, which means putting it in a background so the title above keeps its own opacity — and
-    /// glass in a background inside a `GlassEffectContainer` renders over its sibling content, which hid
-    /// the very titles it was supposed to be backing.
+    /// **The same glass in every state** (docs/header-chrome.md R5). It used to go off over a tiled
+    /// workspace, which made one set of controls two different materials depending on what happened to
+    /// be under them — and read as two different sets of controls. What glass was being asked to do
+    /// there, keep the header distinct from a board scrolling under it, is the board's own edge's job
+    /// now (`CanvasEdgeView`). Glass says one thing: *these belong together, and you can press
+    /// them*. So it is on controls and never on a title.
     ///
-    /// A material has the dial built in and composites the ordinary way, which is the whole requirement
-    /// here: this chrome exists to hold a title legible over content that scrolls or pans beneath it, at
-    /// a weight that changes with the window's state. Liquid Glass is still in the app where it earns
-    /// its keep — the focus panel, a floating HUD over other apps' windows (see `GlassBackground`).
-    func headerBacking(_ chrome: HeaderChrome, in shape: some Shape) -> some View {
-        background { HeaderBacking(chrome: chrome, shape: shape) }
-    }
-
-    /// The same, or nothing at all — for the one thing the glass is *for* not being true.
+    /// The one time it is not `.regular` is while a capsule is arriving or leaving — see
+    /// `HeaderPresence`, which is the only writer of `headerMaterialized`.
     ///
-    /// The backing exists to hold a control legible over content that scrolls or pans beneath it, and
-    /// a tiled board is not that content: the tiles are panels with their own edges, laid on a plain
-    /// ground, and the header sits over the ground. Glass there is a second separation drawn on top of
-    /// one that has already happened, which reads as two panels disagreeing about which is in front.
-    ///
-    /// Drawing the glass through the same `HeaderBacking` the modifier above uses, rather than writing
-    /// it out here, because the two headers drifted apart twice in a day the last time a piece of this
-    /// was a convention.
-    ///
-    /// **It fades rather than cuts**, and the fade is in here rather than at the call site.
-    ///
-    /// Going to and from a workspace turns this off and on across four pieces of chrome at once, and
-    /// glass that vanishes in a frame reads as a redraw — the eye takes it as the window having
-    /// flinched rather than as one state becoming another. A crossfade is the one kind of animation
-    /// this header is allowed: a background changes nothing about the size of the thing it is behind,
-    /// so there is no width for Auto Layout and SwiftUI to disagree about. See
-    /// `CanvasHeaderTrailingChrome` for the rule and `HeaderChromeMotionTests` for the measurements.
-    ///
-    /// The animation is scoped to the background and cannot escape into the row. That matters: the
-    /// control capsule also *loses a button* when a workspace comes up, and an animation reaching that
-    /// change would animate the capsule's width, which is the failure this whole arrangement exists to
-    /// avoid.
-    ///
-    /// Removed rather than held at zero opacity when it is off. An invisible `.regularMaterial` is
-    /// still a material — it samples what is behind it every frame, and what is behind it here is a
-    /// grid of live web pages.
-    func headerBacking(_ chrome: HeaderChrome, in shape: some Shape, showing: Bool) -> some View {
-        background {
-            Group {
-                if showing { HeaderBacking(chrome: chrome, shape: shape) }
-            }
-            .animation(Motion.animation(.easeOut(duration: 0.18)), value: showing)
-        }
+    /// **Not `.interactive()`**, which was tried as the system's hover (docs/header-chrome.md P2) and
+    /// shows nothing when the pointer is over it: on the Mac it answers presses, not hovering. The
+    /// pointer's answer is `HeaderHoverHighlight`.
+    func headerBacking(in shape: some Shape) -> some View {
+        modifier(HeaderBacking(shape: shape))
     }
 }
 
-/// The material itself, so the two `headerBacking` overloads cannot end up drawing different glass.
-struct HeaderBacking<S: Shape>: View {
-    let chrome: HeaderChrome
+private struct HeaderBacking<S: Shape>: ViewModifier {
     let shape: S
+    @Environment(\.headerMaterialized) private var materialized
 
-    var body: some View {
-        shape.fill(.regularMaterial).opacity(chrome.backingStrength)
+    func body(content: Content) -> some View {
+        // `.identity` rather than a condition around the modifier: the same view either way, so nothing
+        // inside is rebuilt, and the glass itself animates in or out under whatever transaction changed
+        // it — which `HeaderPresence` sees to is one with no layout in it.
+        content.glassEffect(materialized ? .regular : .identity, in: shape)
     }
+}
+
+extension EnvironmentValues {
+    /// Whether the glass under this piece of chrome is all the way in. False only for the moment a
+    /// `HeaderPresence` is bringing a capsule in or taking one out.
+    @Entry var headerMaterialized = true
 }
 
 /// Where a window's traffic lights are, for a header that runs up into the titlebar to sit level with
@@ -225,10 +174,6 @@ extension View {
 /// cannot drift.
 struct HeaderCapsule<Content: View>: View {
     let chrome: HeaderChrome
-    /// Whether the row wears its glass. Off over a tiled board — see `headerBacking(_:in:showing:)`.
-    /// The inset stays either way: it is what keeps the items off the window's edge, and it is not the
-    /// backing's padding even though the backing is what makes it visible.
-    var backed = true
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -236,9 +181,139 @@ struct HeaderCapsule<Content: View>: View {
             .opacity(chrome.contentOpacity)
             .padding(.horizontal, HeaderMetrics.capsuleInset.horizontal)
             .padding(.vertical, HeaderMetrics.capsuleInset.vertical)
-            .headerBacking(chrome, in: Capsule(), showing: backed)
+            .headerBacking(in: Capsule())
             // A click on a control is a click on that control, not the start of a window drag.
             .background(WindowDragExcluder())
+            // A window going to the background is a change people expect to see happen smoothly (HIG,
+            // Designing for macOS). Opacity only, so it may animate — see `HeaderPresence` for why
+            // nothing else here does.
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+    }
+}
+
+/// A capsule that comes and goes — the page's, the tile's, the tab bar at one tab ↔ two. It
+/// **materializes**: the row takes its new width in one frame, and then the capsule's glass and its
+/// contents come in where it already stands. Going, the reverse — it fades out in place, and only then
+/// does the row close up.
+///
+/// **Why by hand, and not `.transition` or `.glassEffectTransition(.materialize)`.** Both run under the
+/// transaction that inserts the view, and an animated insertion animates the row's layout as well:
+/// Auto Layout gives the hosting view its new width in one step while SwiftUI slides the capsules to
+/// theirs over the duration, so for a fifth of a second everything in the row is somewhere neither of
+/// them meant — 174pt out, measured (`HeaderChromeMotionTests`). So the two halves go on two
+/// transactions. Insert with none, and the layout snaps; *then* animate the one thing that changes no
+/// geometry — the glass from `.identity` to `.regular`, and the contents' opacity. Which is also what
+/// Apple's `materialize` is described as doing: fading the content and animating the material in,
+/// without matching geometry.
+///
+/// **State in the parent, tracking on the row.** The parent holds a `HeaderPresence` and draws
+/// `if let shown = presence.shown { … .headerMaterialized(presence.materialized) }`; the row that
+/// always exists carries `.headerPresence(of:in:)`. Not a wrapper view, which is the obvious shape and
+/// does not work: a wrapper that is showing nothing *is* nothing, and SwiftUI attaches modifiers to the
+/// views a body produces — so its `onChange` would never hear the value come back.
+struct HeaderPresence<Value: Equatable> {
+    /// What is on screen, which outlives the value for as long as it takes to fade out.
+    fileprivate(set) var shown: Value?
+    fileprivate(set) var materialized = false
+    /// Bumped by every arrival and departure, so a departure's completion that lands after the value
+    /// has come back doesn't take away the capsule that has just returned.
+    fileprivate var generation = 0
+
+    init() {}
+
+    static var animation: Animation? { Motion.animation(.easeOut(duration: 0.2)) }
+}
+
+extension View {
+    /// Keep `presence` following `value` — see `HeaderPresence`. Put it on a view that is always there.
+    func headerPresence<Value: Equatable>(of value: Value?,
+                                          in presence: Binding<HeaderPresence<Value>>) -> some View {
+        modifier(HeaderPresenceTracker(value: value, presence: presence))
+    }
+
+    /// Draw a capsule as far in as its presence says: its contents faded, its glass thinned toward
+    /// `.identity`, and no clicks until it is all the way there.
+    func headerMaterialized(_ materialized: Bool) -> some View {
+        opacity(materialized ? 1 : 0)
+            .environment(\.headerMaterialized, materialized)
+            .allowsHitTesting(materialized)
+    }
+}
+
+private struct HeaderPresenceTracker<Value: Equatable>: ViewModifier {
+    let value: Value?
+    @Binding var presence: HeaderPresence<Value>
+
+    func body(content: Content) -> some View {
+        content
+            // Present when the header is built — a window opening — is present, not arriving.
+            .onAppear {
+                presence.shown = value
+                presence.materialized = value != nil
+            }
+            .onChange(of: value) { _, new in change(to: new) }
+    }
+
+    private func change(to new: Value?) {
+        presence.generation &+= 1
+        let arrival = presence.generation
+        let binding = $presence
+        guard let new else {
+            guard presence.shown != nil else { return }
+            withAnimation(HeaderPresence<Value>.animation) {
+                binding.wrappedValue.materialized = false
+            } completion: {
+                guard binding.wrappedValue.generation == arrival else { return }
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { binding.wrappedValue.shown = nil }
+            }
+            return
+        }
+        let arriving = presence.shown == nil || !presence.materialized
+        presence.shown = new
+        guard arriving else { return }
+        // A turn later: the insertion has to have been laid out, in a transaction of its own, before
+        // anything animates — otherwise the two share one and the row slides. Not `afterCurrentUpdate`,
+        // whose job is AppKit re-entrancy; this is a SwiftUI transaction boundary, and it has to stay
+        // compilable in the test bundle that measures it.
+        DispatchQueue.main.async {
+            guard binding.wrappedValue.generation == arrival else { return }
+            withAnimation(HeaderPresence<Value>.animation) { binding.wrappedValue.materialized = true }
+        }
+    }
+}
+
+
+/// A soft capsule behind a header control while the pointer is over it.
+///
+/// **The pointer's one response in a header** (docs/header-chrome.md L4). The glass says a group is
+/// controls; this says which one of them the click will land on — the way a toolbar button on this Mac
+/// does. The system has no hover of its own to offer custom glass (P2), and there is no capsule-wide
+/// hover state any more (`HeaderChrome`).
+///
+/// The same capsule, at a lighter weight, as the current tab's backing (`ProjectTabBar`), so the two
+/// read as one family: the tab is where you are, the hover is where you are about to be.
+struct HeaderHoverHighlight: ViewModifier {
+    var enabled = true
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                Capsule()
+                    .fill(.primary.opacity(0.07))
+                    .opacity(hovering && enabled ? 1 : 0)
+            }
+            .onHover { hovering = $0 }
+            .animation(Motion.animation(.easeOut(duration: 0.12)), value: hovering)
+    }
+}
+
+extension View {
+    /// See `HeaderHoverHighlight`.
+    func headerHoverHighlight(enabled: Bool = true) -> some View {
+        modifier(HeaderHoverHighlight(enabled: enabled))
     }
 }
 
@@ -304,5 +379,6 @@ struct HeaderSymbolButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .headerHoverHighlight(enabled: enabled)
     }
 }

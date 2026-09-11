@@ -100,6 +100,9 @@ struct MenubarTitleContent: View {
     struct Task: Equatable { let key: String; let text: String; let due: String?; let overdue: Bool }
 
     let ring: NSImage
+    /// Chosen in Project Settings, and drawn in the ring's place — in the stale tint when there is one.
+    var icon: ProjectIcon? = nil
+    var tint: NSColor? = nil
     let task: Task?
     let project: String
     let move: FocusMove
@@ -109,7 +112,11 @@ struct MenubarTitleContent: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(nsImage: ring)   // template ring tints to the label color; a stale (colored) ring draws as-is
+            if let icon, ProjectIconMark.canDraw(icon) {
+                ProjectIconMark(icon: icon, size: 13, tint: tint.map { Color(nsColor: $0) })
+            } else {
+                Image(nsImage: ring)   // template ring tints to the label color; a stale (colored) ring draws as-is
+            }
             if let task {
                 taskView(task)
                     .id("\(task.key)|\(task.text)")
@@ -277,12 +284,16 @@ struct MenuHeaderContent: View {
     let title: String
     let done: Int
     let total: Int
+    var icon: ProjectIcon? = nil
 
     private var fraction: CGFloat { total > 0 ? CGFloat(done) / CGFloat(total) : 0 }
+    private var drawsIcon: Bool { icon.map(ProjectIconMark.canDraw) ?? false }
 
     var body: some View {
         HStack(spacing: 7) {
-            if total > 0 {
+            if let icon, drawsIcon {
+                ProjectIconMark(icon: icon, size: 13).frame(width: 15, height: 15)
+            } else if total > 0 {
                 ProgressRing(fraction: fraction).frame(width: 13, height: 13)
             }
             Text(title)
@@ -290,10 +301,17 @@ struct MenuHeaderContent: View {
                 .lineLimit(1)
             Spacer(minLength: 6)
             if total > 0 {
-                Text("\(done)/\(total)")
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    // A project with an icon gave its ring up on the button, so this is where its
+                    // progress shows: the ring moves over beside the count.
+                    if drawsIcon {
+                        ProgressRing(fraction: fraction).frame(width: 11, height: 11)
+                    }
+                    Text("\(done)/\(total)")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.horizontal, 12)

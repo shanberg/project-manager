@@ -46,7 +46,7 @@ struct ProjectTabItem: Identifiable, Equatable {
 /// in a row, the current one lifted onto a soft backing that slides between them. That switch had two
 /// positions and named a project's two faces; this has as many as you have opened and names them all,
 /// which is what a project turned out to have instead of two faces.
-struct ProjectTabBar<AddMenu: View>: View {
+struct ProjectTabBar: View {
     let items: [ProjectTabItem]
     let selectedID: String
     let chrome: HeaderChrome
@@ -61,7 +61,6 @@ struct ProjectTabBar<AddMenu: View>: View {
     /// A label edited in place, by tab id and the typed name. Naming or renaming, depending on what the
     /// chip was — see `ProjectSplitViewController.renameTab`.
     var renameTab: (String, String) -> Void
-    @ViewBuilder var addMenu: () -> AddMenu
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
     /// each carrying a permanent × is a row of things to click by accident — **the current one
@@ -77,23 +76,49 @@ struct ProjectTabBar<AddMenu: View>: View {
     @State private var draft = ""
     @FocusState private var editorFocused: Bool
     @Namespace private var backing
+    /// The bar itself coming and going, at one tab ↔ two. See `HeaderPresence`.
+    @State private var presence = HeaderPresence<[ProjectTabItem]>()
+
+    /// The chips' labels, and the field that edits one — the same face, so that double-clicking a name
+    /// does not change its size as well as making it editable.
+    ///
+    /// 12pt, and it was `.caption`, which on the Mac is 10: a size for a readout under something else,
+    /// not for the names of the places you move between. This is a notch under the pill's 13pt
+    /// semibold, so the project still reads as the title and the tabs as what is in it.
+    static let labelFont = Font.system(size: 12)
+
+    /// The current tab's highlight moving, and the row scrolling to it: the 0.3s the board takes to fly
+    /// between the canvas and a workspace (`CanvasScrollView.fly`). Reordering keeps its quicker snap —
+    /// a drag is frequent and the board doesn't move for it.
+    static var selectionAnimation: Animation? { Motion.animation(.easeInOut(duration: 0.3)) }
 
     var body: some View {
-        HeaderCapsule(chrome: chrome) {
-            // Nothing but the "+" while the window has one tab. One tab is still no tabs — a chip
-            // saying "1 of 1" reports nothing — but the *way to get a second* is not nothing, and it
-            // was the one thing this control hid: at one tab the bar drew itself away entirely, taking
-            // the only visible offer of another view with it.
-            if !items.isEmpty {
-                row
-                HeaderGap()
+        // **No "+"**, and nothing at all while the window has one tab — one tab is no tabs. The notes
+        // and the board's frames still open in a tab from File ▸ New Tab and a frame's own menu; the
+        // "+" beside the row was a third door to them, and a second "+" in a header that already had
+        // one meaning *add to this board*.
+        //
+        // **One capsule for every tab** — the canvas and each workspace — so the row reads as one group
+        // of places, apart from the controls. docs/header-chrome.md L1.
+        //
+        // A `ZStack` that is always there, holding the capsule while it is present, so the tracking
+        // has something to hang on (see `HeaderPresence`). Alone in its hosting view, so an empty one
+        // costs no spacing.
+        ZStack {
+            if let shown = presence.shown {
+                HeaderCapsule(chrome: chrome) {
+                    row(shown)
+                }
+                .headerMaterialized(presence.materialized)
+                // On the board's clock: every tab is a view of the board, so a switch is a board
+                // moving, and the highlight lands when the board does (docs/header-chrome.md R1, Q5).
+                .animation(Self.selectionAnimation, value: selectedID)
+                .animation(Motion.animation(.snappy(duration: 0.2)), value: items)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text("Tabs"))
             }
-            addMenu()
         }
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: selectedID)
-        .animation(Motion.animation(.snappy(duration: 0.2)), value: items)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(items.isEmpty ? "New Tab" : "Tabs"))
+        .headerPresence(of: items.isEmpty ? nil : items, in: $presence)
     }
 
     /// The chips, which **scroll** once the window has run out of room for them.
@@ -111,12 +136,20 @@ struct ProjectTabBar<AddMenu: View>: View {
     ///
     /// The selection is scrolled to, because a tab you switched to with ⌃⇥ that stayed off the end of
     /// the row would be a switch you have to go looking for.
-    private var row: some View {
+    ///
+    /// Drawn from the items it is handed rather than `items`, because while the bar fades out on the
+    /// way to one tab, `items` is already empty and the capsule would collapse under its own fade.
+    private func row(_ items: [ProjectTabItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: HeaderMetrics.gap) {
                     ForEach(items) { item in
-                        chip(item)
+                        chip(item, in: items)
+                            // **A new chip fades in where it lands**, and a deleted one fades out. The
+                            // bar itself cannot grow to meet it: its width snaps to the new row on the
+                            // first frame, measured (`TabBarGrowthTests`), so the stretch there would be
+                            // nothing to see — docs/header-chrome.md Q4, option B.
+                            .transition(.opacity)
                     }
                 }
                 .background {
@@ -154,7 +187,7 @@ struct ProjectTabBar<AddMenu: View>: View {
                 naturalWidth = width > 0 ? width : nil
             }
             .onChange(of: selectedID) { _, id in
-                withAnimation(Motion.animation(.snappy(duration: 0.2))) {
+                withAnimation(Self.selectionAnimation) {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
@@ -162,7 +195,7 @@ struct ProjectTabBar<AddMenu: View>: View {
         }
     }
 
-    private func chip(_ item: ProjectTabItem) -> some View {
+    private func chip(_ item: ProjectTabItem, in items: [ProjectTabItem]) -> some View {
         let current = item.id == selectedID
         let showsClose = item.closable && hovering == item.id
         return Group {
@@ -239,12 +272,12 @@ struct ProjectTabBar<AddMenu: View>: View {
                 // deliberately: the grid is `rectangle.split.2x2`, which is the glyph for a *tiling*,
                 // and the canvas is what a tiling is a narrowing of.
                 Image(systemName: "rectangle.3.offgrid")
-                    .font(.system(size: HeaderMetrics.iconSize - 1, weight: .medium))
+                    .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
             } else if editing == item.id {
                 editor(item)
             } else {
                 Text(item.name)
-                    .font(.caption)
+                    .font(Self.labelFont)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -285,17 +318,36 @@ struct ProjectTabBar<AddMenu: View>: View {
     /// Return commits and Escape abandons, and so does clicking away — committing, because that is what
     /// an editable label on this Mac does and because the alternative is losing what you typed to a
     /// click you did not mean as a decision.
+    ///
+    /// **Exactly as wide as what is typed**, which a bare `TextField` is not. The row is a horizontal
+    /// scroll view, so a field inside it is offered unlimited width and picks its own — and the chip
+    /// jumped to that the moment the edit began, then again as the row re-measured itself. So the
+    /// width comes from a hidden copy of the text in the same face, which is the width the label had
+    /// before you double-clicked it, and which grows a character at a time as you type. Never
+    /// narrower than the name it started from, so clearing the field to retype does not collapse the
+    /// chip under the caret.
     private func editor(_ item: ProjectTabItem) -> some View {
-        TextField("", text: $draft)
-            .textFieldStyle(.plain)
-            .font(.caption)
-            .focused($editorFocused)
-            .frame(minWidth: 56)
-            .onSubmit { endEditing(item, keeping: true) }
-            .onExitCommand { endEditing(item, keeping: false) }
-            .onChange(of: editorFocused) { _, focused in
-                if !focused { endEditing(item, keeping: true) }
-            }
+        // The field is an overlay so it takes the texts' width rather than contributing its own.
+        ZStack(alignment: .leading) {
+            Text(item.name)
+            Text(draft)
+        }
+        .hidden()
+        // Room for the caret after the last character, which a `Text` does not measure.
+        .padding(.trailing, 2)
+        .fixedSize()
+        .overlay(alignment: .leading) {
+            TextField("", text: $draft)
+                .textFieldStyle(.plain)
+                .focused($editorFocused)
+                .onSubmit { endEditing(item, keeping: true) }
+                .onExitCommand { endEditing(item, keeping: false) }
+                .onChange(of: editorFocused) { _, focused in
+                    if !focused { endEditing(item, keeping: true) }
+                }
+        }
+        .font(Self.labelFont)
+        .lineLimit(1)
     }
 
     private func beginEditing(_ item: ProjectTabItem) {
@@ -379,11 +431,6 @@ private struct TabReorder: DropDelegate {
 final class ProjectTabModel: ObservableObject {
     @Published var items: [ProjectTabItem] = []
     @Published var selectedID: String = ""
-    /// The frames the board could open in a tab, for the add menu. Empty while the window is showing
-    /// something that isn't a board, and empty for a board with no frames on it. The workspaces used to
-    /// be listed beside them and are not: every one of them has a chip (§7i), so offering to open one
-    /// would be offering to open what is open.
-    @Published var frames: [ProjectTabItem] = []
 
     /// One tab is no tabs — see `ProjectTabSet.showsBar`.
     var showsBar: Bool { items.count > 1 }
@@ -417,63 +464,23 @@ final class ProjectTabModel: ObservableObject {
     var tileAsWorkspace: (CanvasViewState.Tiling) -> Bool = { _ in false }
 }
 
-/// The bar as both headers put it on screen: the window's tabs, and the menu that adds one.
-///
-/// **No chips while the window has a single tab, and always the "+".** One tab is no tabs — the window
-/// this app has always had — and a chip reporting "1 of 1" beside it is chrome with nothing to say.
-/// That was taken one step too far: the whole control went away with the chips, so a window with one
-/// tab offered nothing at all that said another view was possible. The two ways in it was documented as
-/// leaving that job to were File ▸ New Tab, which is in a menu nobody opens to discover a feature, and
-/// "Open in New Tab" on a frame, which had no menu item at all — `openSelectedFrameInTab` sat in this
-/// app with zero callers for as long as it had existed. Both are real now; so is the "+".
+/// The bar as the board's header puts it on screen: the window's tabs, or nothing while there is only
+/// one.
 struct ProjectTabBarHost: View {
     @ObservedObject var model: ProjectTabModel
     @Environment(\.controlActiveState) private var controlActiveState
-    @State private var hovering = false
 
     var body: some View {
         ProjectTabBar(items: model.showsBar ? model.items : [],
                       selectedID: model.selectedID,
-                      chrome: HeaderChrome(active: controlActiveState, hovering: hovering),
+                      chrome: HeaderChrome(active: controlActiveState),
                       select: model.select,
                       close: model.close,
                       move: model.move,
                       renameWorkspace: model.renameWorkspace,
                       duplicateWorkspace: model.duplicateWorkspace,
                       deleteWorkspace: model.deleteWorkspace,
-                      renameTab: model.renameTab,
-                      addMenu: { addMenu })
-            .onHover { hovering = $0 }
-    }
-
-    /// What "+" offers, which is **the two things that do not have a chip already**.
-    ///
-    /// The canvas has a permanent one and every workspace has one (docs/canvas-workspaces.md §7i), so
-    /// listing either here would be offering to open what is open — a menu whose items all mean
-    /// "switch", which is what the row beside it is for. What is left is the project's notes and the
-    /// frames on the board, both of which are places you can be that only become a tab by asking.
-    private var addMenu: some View {
-        Menu {
-            Button("Notes", action: model.openNotes)
-            if !model.frames.isEmpty {
-                Section("Frames") {
-                    ForEach(model.frames) { frame in
-                        Button(frame.name) { model.openFrame(frame.id) }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("New Tab")
-        .accessibilityLabel(Text("New Tab"))
+                      renameTab: model.renameTab)
     }
 }
 

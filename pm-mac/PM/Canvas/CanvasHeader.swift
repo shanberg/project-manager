@@ -211,55 +211,28 @@ final class CanvasHeaderModel: ObservableObject {
 ///
 /// What is left has one useful property: it never changes width, so nothing in the header moves when
 /// you switch between the board and a workspace.
+///
+/// **And no glass, in any state.** "Non-interactive items like custom titles… should avoid the glass
+/// material" (WWDC25, *Build an AppKit app with the new design*): glass in this header means *these are
+/// controls*, and a name is not one. What keeps it legible over cards panning under it is the board's
+/// soft edge (`CanvasEdgeView`). So the pill is identical on the board and in every workspace —
+/// same inset, same place, same nothing behind it — which is what the first complaint about this header
+/// asked for. docs/header-chrome.md Q1.
 struct CanvasTitlePill: View {
     @ObservedObject var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
-    @State private var hovering = false
-
-    private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
-
-    /// Whether a workspace is up. The pill is the same pill either way; what changes is whether it is
-    /// wearing anything.
-    private var tiled: Bool { model.tiling != nil }
 
     var body: some View {
         Text(model.title)
             .font(.system(size: 13, weight: .semibold))
             .lineLimit(1)
             .truncationMode(.middle)
-            .opacity(chrome.contentOpacity)
-            // **The leading inset moves to the trailing side rather than going away.**
-            //
-            // Without glass around it the inset is not padding, it is a name that starts fourteen
-            // points inside its own island while every other piece of chrome in the band starts at
-            // its edge. So the name goes flush. But the pill's *width* has to be the same number in
-            // both states, because the tab row is pinned to its trailing anchor — take fourteen points
-            // off each side and that is a change of `intrinsicContentSize`, which Auto Layout settles
-            // in one frame: the whole row of chips jumps twenty-eight points leftward and the name's
-            // animation is lost with it, since SwiftUI does not interpolate a layout whose hosting
-            // view is being resized under it. Both halves of that are measured in
-            // `HeaderChromeMotionTests`.
-            //
-            // Total horizontal inset is `pillInset.horizontal * 2` whatever mode is up. What that buys
-            // is the whole transition: nothing in the header moves, and the name is free to slide
-            // inside a box that is standing still.
-            .padding(.leading, tiled ? 0 : HeaderMetrics.pillInset.horizontal)
-            .padding(.trailing, HeaderMetrics.pillInset.horizontal * (tiled ? 2 : 1))
-            // Vertical stays symmetric and stays put. It is invisible without the capsule — `TitlebarDrop`
-            // centres this view on the traffic lights whatever it measures — so removing it would move
-            // nothing and cost the pill its hit area.
+            .opacity(HeaderChrome(active: controlActiveState).contentOpacity)
+            // A text inset rather than the pill's old island inset: with nothing drawn around the name,
+            // fourteen points was a gap beside the traffic lights with no reason to be there.
+            .padding(.horizontal, HeaderMetrics.textInset)
             .padding(.vertical, HeaderMetrics.pillInset.vertical)
-            // **No glass over a tiled board**, for the reason the control capsule drops its own: tiles
-            // are panels with their own edges on a plain ground, so the separation the backing exists
-            // to draw has already been made. The canvas keeps it — there the name sits over cards
-            // panning under it. It crossfades; see `headerBacking(_:in:showing:)`.
-            .headerBacking(chrome, in: Capsule(), showing: !tiled)
-            .contentShape(Capsule())
-            .onHover { hovering = $0 }
-            .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
-            // Safe *because* of the arithmetic above: this animates where the name sits inside the
-            // pill, not how wide the pill is.
-            .animation(Motion.animation(.easeOut(duration: 0.18)), value: tiled)
+            .animation(Motion.animation(.easeOut(duration: 0.18)), value: controlActiveState)
             .accessibilityLabel(Text(model.title))
             .modifier(TitlebarDrop(model: model))
     }
@@ -280,19 +253,20 @@ struct CanvasTitlePill: View {
 struct CanvasControlCapsule: View {
     @ObservedObject var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
-    @State private var hovering = false
-
-    private var chrome: HeaderChrome { HeaderChrome(active: controlActiveState, hovering: hovering) }
+    /// The find field coming and going — see `HeaderPresence`. Opening, the capsule snaps to make room
+    /// and the field materializes in it; closing, the field fades where it stands and only then does
+    /// the capsule close up and the magnifier come back. docs/header-chrome.md Q2.
+    @State private var find = HeaderPresence<Bool>()
 
     var body: some View {
-        // **No glass over a tiled board.** The backing is there to hold these glyphs legible over cards
-        // panning under them; tiles are panels with their own edges on a plain ground, so the header is
-        // over the ground and the separation has already been made. A second one on top of it reads as
-        // two surfaces arguing about which is in front. See `headerBacking(_:in:showing:)`.
-        HeaderCapsule(chrome: chrome, backed: model.tiling == nil) {
-            if model.find.isShowing {
-                findField
-                HeaderDivider()
+        // The same glass over the board and over a workspace — see `headerBacking(in:)`.
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState)) {
+            if find.shown != nil {
+                Group {
+                    findField
+                    HeaderDivider()
+                }
+                .headerMaterialized(find.materialized)
             }
             if model.mode == .connect, model.room.showsModeLabel {
                 // A word rather than a segmented control, and only in the mode that isn't the default.
@@ -304,19 +278,23 @@ struct CanvasControlCapsule: View {
                     .headerCaption()
                     .help("Cards are showing the dots you drag lines from")
             }
-            HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
-                model.find.isShowing = true
-                model.find.focusToken &+= 1
+            // Gone while the field is up: the field is find, and a button beside it that opens find is
+            // a second control for the thing you are already doing. ⌘F still pulls the keyboard back.
+            // Back only once the field has gone, so the two are never in the capsule together.
+            if find.shown == nil {
+                HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
+                    model.find.isShowing = true
+                    model.find.focusToken &+= 1
+                }
             }
             addMenu
             optionsMenu
         }
-        .onHover { hovering = $0 }
-        // Opacity only. Find opening and the field narrowing with the window both change this
-        // capsule's width — and a capsule that animates its own width throws its own glyphs sideways
-        // for a fifth of a second, out from under the pointer on its way to one of them. Which is the failure this capsule was split out to fix, arriving by another
-        // door. See `CanvasHeaderTrailingChrome` and `HeaderChromeMotionTests`.
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: chrome)
+        // Nothing here animates its width. Find opening and the field narrowing with the window both
+        // change it, and a capsule that animates its own width throws its own glyphs sideways for a
+        // fifth of a second, out from under the pointer on its way to one of them. The capsule snaps;
+        // the field materializes where it lands. See `HeaderChromeMotionTests`.
+        .headerPresence(of: model.find.isShowing ? true : nil, in: $find)
     }
 
     // MARK: Find
@@ -374,6 +352,7 @@ struct CanvasControlCapsule: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
+        .headerHoverHighlight()
         .help("Add to this canvas")
     }
 
@@ -407,6 +386,7 @@ struct CanvasControlCapsule: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
+        .headerHoverHighlight()
         .help("View options")
     }
 
