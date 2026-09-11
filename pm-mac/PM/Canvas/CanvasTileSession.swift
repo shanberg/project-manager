@@ -159,10 +159,9 @@ struct CanvasTileSession: Equatable {
             let whole = CanvasTiling.frames(of: [.init([.init(tile.cards, showing: tile.showing)])], in: area)
             return [(tile, whole[0][0])]
         }
-        let shown = withRoomForPlacement
         var placed: [(tile: CanvasTiling.Tile, frame: CanvasRect)] = []
-        for (column, rows) in zip(shown.columns, CanvasTiling.frames(of: shown.columns, in: area)) {
-            for (tile, frame) in zip(column.tiles, rows) where tile.shown != Self.ghost {
+        for (column, rows) in zip(columns, CanvasTiling.frames(of: columns, in: area)) {
+            for (tile, frame) in zip(column.tiles, rows) {
                 placed.append((tile, frame))
             }
         }
@@ -178,27 +177,19 @@ struct CanvasTileSession: Equatable {
         return frames
     }
 
-    /// Where the place the next card is going is drawn — the room the tiles have moved aside for.
+    /// Where the place the next card is going is marked — on the tiles as they stand, which is the mark
+    /// a drag already uses (`dropMark`): a new column as the side of the whole column, above or below as
+    /// half the tile, a tab as its top band.
+    ///
+    /// **Nothing moves until a card arrives.** This used to be the layout the change *would* produce,
+    /// with the tiles drawn aside around a stand-in. Marking instead is what the drag settled on and for
+    /// the same reason — what you are aiming at should not move while you aim — and it saves the pages
+    /// in those tiles a reflow on every change of place.
     var placementFrame: CanvasRect? {
-        guard maximizedTile == nil, let preselection else { return nil }
-        // As a tab there is no room to make: the place is the top of the tile it joins.
-        if preselection.side == .tab { return tileFrames[preselection.target].map(Self.tabBand) }
-        return withRoomForPlacement.arrangedFrames[Self.ghost]
+        guard maximizedTile == nil, let preselection, position(of: preselection.target) != nil
+        else { return nil }
+        return dropMark(.beside(preselection.side), on: preselection.target)
     }
-
-    /// These columns with a card-shaped stand-in where the next card is going — or just these columns,
-    /// when nothing has been chosen, or the card is joining a tile's tabs and needs no room of its own.
-    private var withRoomForPlacement: CanvasTileSession {
-        guard let preselection, preselection.side != .tab, position(of: preselection.target) != nil
-        else { return self }
-        var shown = self
-        shown.preselection = nil
-        shown.insert(.init(Self.ghost), preselection)
-        return shown
-    }
-
-    /// What the stand-in for a card nobody has chosen yet is drawn under. Never a card's id.
-    static let ghost = "\u{0}next card"
 
     // MARK: The master
 
@@ -674,9 +665,9 @@ struct CanvasTileSession: Equatable {
     /// tiles down every column. None while one tile fills the room — the boundaries belong to an
     /// arrangement that is not on screen, and a drag on one would resize tiles you cannot see.
     var dividers: [CanvasTileDivider] {
-        // Nor while a place is chosen for the next card: the tiles are drawn moved aside for it, and a
-        // boundary measured off the columns would be somewhere the tiles are not.
-        guard maximizedTile == nil, preselection == nil, ids.count > 1 else { return [] }
+        // A place chosen for the next card is no longer a reason to withdraw them: it is marked on the
+        // tiles as they stand, so every boundary is still where the columns put it.
+        guard maximizedTile == nil, ids.count > 1 else { return [] }
         let frames = CanvasTiling.frames(of: columns, in: area)
         let room = CanvasTiling.space(of: area)
         let half = CanvasTiling.gap / 2

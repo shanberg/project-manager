@@ -629,8 +629,9 @@ extension CanvasBoardView {
 
     /// ⌥N: choose where the next card goes, starting from where it would go anyway.
     ///
-    /// **The choice waits until a card arrives** — bspwm's preselection — and is drawn the whole time:
-    /// the tiles move aside and the room they leave is marked (`CanvasTileSession.placementFrame`).
+    /// **The choice waits until a card arrives** — bspwm's preselection — and is marked the whole time,
+    /// on the tiles as they stand (`CanvasTileSession.placementFrame`). Nothing moves until the card
+    /// does, which is where the drag ended up too.
     /// While choosing, a plain arrow picks the side, ⌥ arrows pick another tile, Return is done and
     /// offers the cards that could go there, and Escape forgets it.
     ///

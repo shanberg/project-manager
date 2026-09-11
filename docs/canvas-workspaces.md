@@ -1186,9 +1186,12 @@ different tile, and Return opens the board to pick the card. The choice waits un
 it is not saved — `memory(of:)` names what a workspace keeps, and this is not one of them, for the reason
 `maximized` isn't.
 
-**While you choose with ⌥N, the other tiles move aside.** What is drawn is the layout the change would
-produce, so a new column opens as a full-height gap even when the tile beside it shares its column with
-others — which a half-tile highlight got wrong in the first version of the playground.
+**While you choose with ⌥N, the place is marked and nothing moves** — **decided**, after using it. It
+used to draw the layout the change would produce, with the tiles moved aside around a stand-in. That is
+what the drag gave up (below), and choosing with the keys gives it up for the same reason, so the mark is
+the drag's: a new column as the side of the whole column — which is what a half-tile highlight got wrong
+in the first version of the playground — above or below as half the tile, a tab as its top band. The
+boundaries stay live while you choose, since every tile is still where the columns put it.
 
 **A drag moves nothing until you let go** — **decided**, after using it. Dragging a tile by its
 handlebar or its tab carries a small proxy of the card; the tile it came from stays where it is,
@@ -1291,8 +1294,8 @@ The layout arithmetic is nothing — twenty tiles is microseconds — and the ru
 already the board's: move the views that exist, never rebuild them. The cost is elsewhere.
 
 - **A page re-lays itself out every time its tile changes size.** An animation that resizes six web cards
-  is six pages reflowing on every frame, and ⌥N's preview adds one each time the place changes. A drag adds
-  none: it reflows once, on the drop. **Measure
+  is six pages reflowing on every frame. Neither ⌥N nor a drag adds any: both mark where the card would
+  go and leave the tiles alone, and a drag reflows once, on the drop. **Measure
   first**, with `FrameMeter`, on a real board of pages. If it is bad, the answer is to give each page its
   final size at once and animate a picture of it, putting the live page back when the tiles land. The
   frozen-page snapshot in `CanvasLinkNodeView` is half of that already.
@@ -1323,7 +1326,7 @@ Each step ships on its own once the first is in.
      equal rather than putting back the split you usually drag it to.
    - Unpinning a tile leaves it the size it was, rather than jumping to an even share.
    **Built.**
-2. **Keys**, and where the next card goes: the automatic side, ⌥N, and the preview. **Built** — the
+2. **Keys**, and where the next card goes: the automatic side, ⌥N, and the mark. **Built** — the
    keys for tabs and the board (⌥T, ⌥[ ⌥], ⌥B) arrive with those steps.
 3. **Tabs.** **Built**:
    - **The strip is the layout's.** A tile of several cards is laid out whole and its card is drawn
@@ -1384,11 +1387,11 @@ Each step ships on its own once the first is in.
   card and every text field on every page. As `keyDown` they reach the board only when nothing that
   types wanted them — which is how ⌥ arrows always worked, and why the table in *The keys* needs no
   second modifier (`CanvasBoardView.tilingTakes`).
-- **The chosen place is the session's, and its layout draws it.** `CanvasTileSession.preselection` is
-  a field like `maximized`: not saved, and while it is set `layout` is the columns with a stand-in
-  where the card will go. So everything that lays the tiles out — a window resize included — shows the
-  room without knowing there is any. The boundaries are off while it is up, since they are measured
-  off the columns and the tiles are drawn moved aside.
+- **The chosen place is the session's, and the overlay marks it.** `CanvasTileSession.preselection` is
+  a field like `maximized`: not saved, and while it is set `placementFrame` says where the card would
+  go, measured off the tiles as they stand. It drew the *room* at first — `layout` was the columns with
+  a stand-in inserted — and that went the way the drag's live reflow went, for the same reason. The
+  boundaries stay live while it is up, since nothing is drawn anywhere but where the columns put it.
 - **Return offers the cards.** Finishing a choice opens the board to pick from (step 4 — until then it
   opened Add Card from Canvas at the place). Any other way a card arrives — a new card, a paste, a
   followed link — goes there too, and uses the place up.

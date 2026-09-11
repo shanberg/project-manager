@@ -940,23 +940,23 @@ final class CanvasTilingTests: XCTestCase {
         XCTAssertEqual(session.ids.last, "d")
     }
 
-    /// **The chosen place is shown, not only kept**: the tiles move aside, and the room they leave is
-    /// where the next card lands.
-    func testAChosenPlaceMovesTheOthersAsideAndTheNextCardFillsIt() {
+    /// **The chosen place is marked, not made**: nothing moves aside while you choose, the mark is the
+    /// one a drag uses, and the card still lands there.
+    func testAChosenPlaceIsMarkedOnTheTilesAsTheyStand() {
         var session = row(["a", "b"])
-        let before = session.layout.frames["b"]!.width
+        let before = session.layout.frames
         session.preselection = .init(target: "b", side: .right)
 
-        XCTAssertLessThan(session.layout.frames["b"]!.width, before, "made room")
-        XCTAssertEqual(session.layout.visible, ["a", "b"], "the stand-in is not a card")
+        XCTAssertEqual(session.layout.frames, before, "nothing moves until the card arrives")
+        XCTAssertEqual(session.layout.visible, ["a", "b"])
         let place = try! XCTUnwrap(session.placementFrame)
-        for frame in session.layout.frames.values {
-            XCTAssertFalse(frame.inset(by: -1).intersects(place.inset(by: -1)))
-        }
+        XCTAssertEqual(place, session.dropMark(.beside(.right), on: "b"), "the drag's mark")
+        XCTAssertEqual(place.maxX, before["b"]!.maxX, accuracy: 0.5, "down b's right-hand side")
+        XCTAssertFalse(session.dividers.isEmpty, "the boundaries stay live")
 
         session.add("n", at: session.preselection)
-        XCTAssertEqual(session.layout.frames["n"]!.minX, place.minX, accuracy: 0.5)
-        XCTAssertEqual(session.layout.frames["n"]!.width, place.width, accuracy: 0.5)
+        XCTAssertGreaterThan(session.layout.frames["n"]!.minX, session.layout.frames["b"]!.minX,
+                             "and the card lands where the mark was")
     }
 
     /// Where you were about to put something is not part of what you built.
@@ -965,7 +965,6 @@ final class CanvasTilingTests: XCTestCase {
         let saved = session.memory
         session.preselection = .init(target: "b", side: .below)
         XCTAssertEqual(session.memory, saved)
-        XCTAssertTrue(session.dividers.isEmpty, "no boundaries while the tiles are drawn moved aside")
     }
 
     func testTakingOutItsTileForgetsThePlace() {
