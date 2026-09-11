@@ -797,6 +797,11 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 /// Every one of them edits through the normal text-change path (`shouldChangeText`/`didChangeText`), so
 /// it's a single undoable step and the delegate re-highlights afterward, and every one of them is a
 /// pure PmLib transform over (text, selection) — this class decides *when*, never *what*.
+extension NSPasteboard.PasteboardType {
+    /// A link's name, beside the link in `public.url` — the pair a browser puts down for a dragged link.
+    static let urlName = NSPasteboard.PasteboardType("public.url-name")
+}
+
 final class ShortcutTextView: NSTextView {
     /// Invoked on ⌘↩ to commit and close the editor.
     var onSubmit: (() -> Void)?
@@ -1266,6 +1271,56 @@ final class ShortcutTextView: NSTextView {
         guard insert(snippet, at: NSRange(location: at, length: 0)) else { return false }
         window?.makeFirstResponder(self)
         return true
+    }
+
+    // MARK: dragged links
+
+    /// A link dragged out of a note travels as a link, not only as the markdown that spells it.
+    ///
+    /// `NSTextView` drags a selection as its text, and the text of a link is `[label](url)` — which a
+    /// canvas can only make a card of prose from, and a browser or the Finder can do nothing with at all.
+    /// So a drag whose selection is one web link also carries the link itself, the way a browser puts
+    /// one down: the address as `public.url` and the label as its name. The text is left as it was, so
+    /// dropping into another note still writes markdown.
+    ///
+    /// **The drag pasteboard only.** `copy(_:)` comes through here too, and a URL on the clipboard
+    /// changes what ⌘V means in every app that prefers a URL to text — Mail would paste a live link where
+    /// the markdown was copied. A drag lands somewhere that chose to take it; a paste doesn't choose.
+    override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard super.writeSelection(to: pboard, types: types) else { return false }
+        if pboard.name == .drag, let link = selectedWebLink {
+            pboard.addTypes([.URL, .urlName], owner: nil)
+            pboard.setString(link.address, forType: .URL)
+            pboard.setString(link.label ?? link.address, forType: .urlName)
+        }
+        return true
+    }
+
+    /// The web link the selection *is*, if it is one: a bare address, or a `[label](url)` selected from
+    /// anywhere inside it so long as all of the label is — which is what you can see of a link while its
+    /// syntax is hidden, and so what a drag across it takes. Whitespace either side doesn't count
+    /// against it; anything else in the selection makes it prose.
+    var selectedWebLink: (address: String, label: String?)? {
+        let text = string
+        guard var selection = Range(selectedRange(), in: text) else { return nil }
+        while selection.lowerBound < selection.upperBound, text[selection.lowerBound].isWhitespace {
+            selection = text.index(after: selection.lowerBound)..<selection.upperBound
+        }
+        while selection.lowerBound < selection.upperBound,
+              text[text.index(before: selection.upperBound)].isWhitespace {
+            selection = selection.lowerBound..<text.index(before: selection.upperBound)
+        }
+        guard !selection.isEmpty else { return nil }
+        for link in markdownLinks(in: text)
+        where link.range.lowerBound <= selection.lowerBound && selection.upperBound <= link.range.upperBound
+            && selection.lowerBound <= link.labelRange.lowerBound
+            && link.labelRange.upperBound <= selection.upperBound {
+            guard isWebAddress(link.destination) else { return nil }
+            let label = String(text[link.labelRange])
+            return (link.destination, label.isEmpty ? nil : label)
+        }
+        let selected = String(text[selection])
+        return isWebAddress(selected) ? (selected, nil) : nil
     }
 
     // MARK: following links

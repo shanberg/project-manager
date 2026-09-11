@@ -368,12 +368,48 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         store.openableCanvasPath { [weak self] result in
             guard let self else { return }
             makingCanvas = false
-            // On success the path publishes, and the watch above rebuilds the tab onto the board.
-            if case .failure = result { split.canvasCouldNotBeMade() }
+            // On success the path publishes, and the watch above rebuilds the tab onto the board — a
+            // turn later, which is what lets a new project's tabs be seeded first.
+            switch result {
+            case .success(let canvas):
+                if canvas.made { seedNotesWorkspace(onCanvasAt: canvas.path) }
+            case .failure:
+                split.canvasCouldNotBeMade()
+            }
         }
     }
 
     private var makingCanvas = false
+
+    /// **A new project opens on a Notes workspace**: its own card, tiled alone, as a named workspace
+    /// with a chip like any other.
+    ///
+    /// It used to open on a notes *tab* — the same board tiled to the same card, but a tab rather than
+    /// a workspace, which §7d chose on the grounds that naming the view would give it a second name.
+    /// In practice it was the one chip in the row that closed, that could not be renamed, and that had
+    /// nothing you could add to it; with the tab bar's "+" gone, closing it left File ▸ New Tab as the
+    /// only way back. A workspace is kept, renamed and grown like the others, and the row is then only
+    /// the canvas and its workspaces, which is the row §7i describes.
+    ///
+    /// **New projects only**, which is to say boards PM has just made. A project that already has a
+    /// board keeps the tabs it has; the notes tab still exists and still opens.
+    ///
+    /// The notes tab a new window opened on becomes the workspace's chip rather than getting one beside
+    /// it — two chips saying "Notes" would be two names for one thing.
+    private func seedNotesWorkspace(onCanvasAt path: String) {
+        let url = URL(fileURLWithPath: path)
+        guard let board = try? CanvasStoreRegistry.store(for: url),
+              let name = CanvasProjectNoteCard.seedNotesWorkspace(on: board.document, at: url,
+                                                                  resolver: board.resolver)
+        else { return }
+        var tabs = split.tabs
+        if let notes = tabs.first(showing: .notes) {
+            tabs.retarget(notes.id, to: .board(.workspace(name)))
+        }
+        tabs.include(workspaces: CanvasWorkspaces.names(of: url))
+        split.setTabs(tabs)
+        ProjectTabMemory.remember(tabs, for: projectKey)
+    }
 
     /// This project's canvas is there and will not open. Put a readable one in its place, and say where
     /// the old file went so the pane can offer it.
@@ -398,7 +434,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         store.openableCanvasPath { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success:
+            case .success(let canvas):
+                if canvas.made { seedNotesWorkspace(onCanvasAt: canvas.path) }
                 setRenderer(.canvas)
             case .failure(let error):
                 let alert = NSAlert()

@@ -374,7 +374,7 @@ struct ProjectSidebar: View {
                 ProjectMenu(targets: targets,
                             onActivate: { openProject($0, inNewWindow: false) },
                             onOpenInNewWindow: { openProject($0, inNewWindow: true) },
-                            onRename: { ProjectPrompts.rename(projectNamed: $0.name, isArchived: $0.isArchived) })
+                            onSettings: { ProjectSettings.present(projectNamed: $0.name, isArchived: $0.isArchived) })
             }
         } primaryAction: { keys in
             // The first click of the double already switched (see `selectionChanged`), so this only
@@ -985,7 +985,7 @@ private struct ProjectMenu: View {
     let targets: [PMStore.ProjectEntry]
     let onActivate: (PMStore.ProjectEntry) -> Void
     let onOpenInNewWindow: (PMStore.ProjectEntry) -> Void
-    let onRename: (PMStore.ProjectEntry) -> Void
+    let onSettings: (PMStore.ProjectEntry) -> Void
 
     private var isMulti: Bool { targets.count > 1 }
 
@@ -1003,7 +1003,7 @@ private struct ProjectMenu: View {
             // all call the same act. This item was the one place it was called opening, which left the
             // app with two verbs for one thing and the odd one out on the surface people use most.
             //
-            // Named by kind, like Rename below: an area is not a project, and the menu already knows
+            // Named by kind, like Settings below: an area is not a project, and the menu already knows
             // which one it was opened on.
             Button { onActivate(only) } label: {
                 Label("Go to \(only.kind.displayName)", systemImage: "arrow.right.circle")
@@ -1024,8 +1024,8 @@ private struct ProjectMenu: View {
         .keyboardShortcut("c", modifiers: .command)
         if let only = targets.first, !isMulti {
             Divider()
-            Button { onRename(only) } label: {
-                Label("Rename \(only.kind.displayName)…", systemImage: "pencil")
+            Button { onSettings(only) } label: {
+                Label("\(only.kind.displayName) Settings…", systemImage: "slider.horizontal.3")
             }
         }
         if let isArchived = archiveDirection {
@@ -1090,7 +1090,12 @@ private struct KindMark: View {
     let total: Int
 
     var body: some View {
-        if entry.showsProgress {
+        if let icon = entry.icon, ProjectIconMark.canDraw(icon) {
+            // A chosen icon stands in for either mark. The count the ring gave up is still in the
+            // row's tooltip, and in the menu bar's menu when this is the focused project.
+            ProjectIconMark(icon: icon, size: 13)
+                .frame(width: 16, height: 16)
+        } else if entry.showsProgress {
             // The ring is a template image, so it takes the row's foreground color, the same way the
             // menubar recolors it.
             Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))

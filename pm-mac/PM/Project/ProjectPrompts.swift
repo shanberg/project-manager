@@ -139,41 +139,6 @@ enum ProjectPrompts {
         }
     }
 
-    // MARK: Rename
-
-    /// Takes the folder name rather than a sidebar row, so the menu bar item — which only ever has a
-    /// store — can offer the same command.
-    static func rename(projectNamed name: String, isArchived: Bool) {
-        let config = (try? loadConfig()) ?? nil
-        let parts = try? parseProjectPrefixAndTitle(folderName: name,
-                                                    domainCodes: Array(config?.domains.keys ?? [:].keys))
-        let currentTitle = parts?.title ?? name
-
-        let field = NSTextField(string: currentTitle)
-        field.placeholderString = "Project title"
-
-        let alert = NSAlert()
-        alert.messageText = "Rename Project"
-        // Say what *won't* change: the folder keeps its code and number, and only the title moves.
-        alert.informativeText = parts.map { "“\($0.prefix)” stays the same — only the title changes." }
-            ?? "The domain and number stay the same — only the title changes."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        alert.accessoryView = stack([field])
-        alert.window.initialFirstResponder = field
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let title = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, title != currentTitle else { return }
-
-        do {
-            try ProjectLifecycle.rename(projectNamed: name, to: title, isArchived: isArchived)
-        } catch {
-            ProjectLifecycle.present(error, doing: "Couldn't rename “\(name)”")
-        }
-    }
-
     // MARK: Add link
 
     /// Append a link to a project's Links section — the details brief's list, reached without opening

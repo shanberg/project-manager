@@ -131,9 +131,7 @@ struct SessionNoteTakeover: View {
     @State private var hostWindow: NSWindow?
     /// The bar's measured height, fed to the editor as its text-container top inset.
     @State private var barHeight: CGFloat = 0
-    /// Whether the pointer is in the header strip, and whether this window is the active one — the two
-    /// inputs to `HeaderChrome`, exactly as in the task column's header.
-    @State private var headerHovering = false
+    /// Whether this window is the active one — what `HeaderChrome` reads.
     @Environment(\.controlActiveState) private var controlActiveState
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
@@ -225,15 +223,12 @@ struct SessionNoteTakeover: View {
         }
         .opacity(chrome.contentOpacity)
         .modifier(SessionNoteHeaderInset(placement: placement))
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.18)) { headerHovering = hovering }
-        }
         .animation(.easeOut(duration: 0.18), value: controlActiveState)
     }
 
-    /// What this header's glass is doing right now — the same three states the task column uses.
+    /// Whether this header's window is the one you are working in — see `HeaderChrome`.
     private var chrome: HeaderChrome {
-        HeaderChrome(active: controlActiveState, hovering: headerHovering)
+        HeaderChrome(active: controlActiveState)
     }
 
     /// Back to the task list. Its own circle of glass at the leading edge, separate from the pill, the
@@ -249,7 +244,7 @@ struct SessionNoteTakeover: View {
         }
         .buttonStyle(.plain)
         .padding(4)
-        .headerBacking(chrome, in: Circle())
+        .headerBacking(in: Circle())
         .background(WindowDragExcluder())
         .help("Back to tasks")
     }
@@ -269,7 +264,7 @@ struct SessionNoteTakeover: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
-        .headerBacking(chrome, in: Capsule())
+        .headerBacking(in: Capsule())
         .background(WindowDragExcluder())
     }
 

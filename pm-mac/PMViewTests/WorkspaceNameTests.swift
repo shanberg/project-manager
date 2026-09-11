@@ -59,3 +59,23 @@ final class WorkspaceFreshNameTests: XCTestCase {
                        "Workspace 2")
     }
 }
+
+/// The contextual menu's Workspaces submenu — see `CanvasWorkspaces.names(holdingAnyOf:in:)`.
+final class WorkspacesHoldingCardsTests: XCTestCase {
+    private func tiling(_ ids: [String]) -> CanvasViewState.Tiling {
+        CanvasViewState.Tiling(ids: ids, arrangement: .masterStack, masterFraction: 0.5, sizes: nil)
+    }
+
+    /// Any of the cards, not all of them: a workspace holding two of three is an answer to "where
+    /// else do these live". Listed in menu order, and the ones holding none are left out.
+    func testWorkspacesHoldingAnyOfTheCardsAreListedInMenuOrder() {
+        let all = ["Zeta": tiling(["a", "b"]), "alpha": tiling(["c"]),
+                   "Beta": tiling(["x", "y"]), "Gamma 10": tiling(["b"]), "Gamma 2": tiling(["a"])]
+        XCTAssertEqual(CanvasWorkspaces.names(holdingAnyOf: ["a", "b", "c"], in: all),
+                       ["alpha", "Gamma 2", "Gamma 10", "Zeta"])
+    }
+
+    func testNoCardsHoldNoWorkspaces() {
+        XCTAssertEqual(CanvasWorkspaces.names(holdingAnyOf: [], in: ["A": tiling(["a"])]), [])
+    }
+}

@@ -69,6 +69,9 @@ final class PMStore: ObservableObject {
     /// exactly as long as it could not ask this question.
     @Published private(set) var hasResolvedCanvasPath = false
     @Published private(set) var notes: ProjectNotes?
+    /// The icon chosen in Project Settings, read from the notes' frontmatter at each load. Nil draws
+    /// the progress ring.
+    @Published private(set) var icon: ProjectIcon?
     @Published private(set) var todos: [Todo] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
@@ -282,6 +285,7 @@ final class PMStore: ObservableObject {
             // Nothing to look for and nothing to wait on: there is no project here.
             hasResolvedCanvasPath = true
             notes = nil
+            icon = nil
             todos = []
             lastEditedAt = nil
             focusedKey = nil
@@ -302,7 +306,7 @@ final class PMStore: ObservableObject {
             // Resolve the project directory once (this is the protected-folder access), then reuse
             // the handle for both the notes read and the cached notes path.
             Log.write("reload start: name=\(name)")
-            let result = Result { () -> (NotesShowOutput, String, String, Date?) in
+            let result = Result { () -> (NotesShowOutput, String, String, Date?, ProjectIcon?) in
                 let cfg = try? loadConfig()
                 Log.write("config: useObsidianCLI=\(cfg?.useObsidianCLI ?? false)")
                 let handle = try resolveNotesHandle(project: name)
@@ -313,14 +317,18 @@ final class PMStore: ObservableObject {
                 if isOpening, let n = try? pruneEmptySessions(handle: handle), n > 0 {
                     Log.write("pruned \(n) empty session(s)")
                 }
-                let output = try notesShow(handle: handle)
+                // Read the bytes here rather than through `notesShow(handle:)`, because the icon lives
+                // in frontmatter the parsed notes don't carry — one read, handed to both.
+                let raw = try handle.io.readContent(path: handle.notesPath)
+                let output = try notesShow(rawText: raw)
                 Log.write("notesShow ok: todos=\(output.todos.count)")
                 // Set here, on the IO queue, rather than beside the published state: a batch reads it
                 // from the same queue, so it always sees the newest read that has actually finished.
                 self?.seenRevision.value = output.revision
                 // After the prune above, which is a write of our own — read before it, the file's
                 // date would be the moment *this* load touched it rather than the last real edit.
-                return (output, handle.notesPath, handle.projectPath, notesLastEdited(path: handle.notesPath))
+                return (output, handle.notesPath, handle.projectPath, notesLastEdited(path: handle.notesPath),
+                        projectIcon(rawText: raw))
             }
             if case .failure(let error) = result {
                 let ns = error as NSError
@@ -329,7 +337,7 @@ final class PMStore: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 switch result {
-                case .success(let (output, path, projectPath, lastEdited)):
+                case .success(let (output, path, projectPath, lastEdited, icon)):
                     // Classify how the hero task moved since the last load, but never animate across a
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
@@ -342,6 +350,7 @@ final class PMStore: ObservableObject {
                     self.notesPath = path
                     self.projectPath = projectPath
                     self.notes = output.notes
+                    self.icon = icon
                     self.todos = output.todos
                     self.resolveWaits()
                     self.lastEditedAt = lastEdited
@@ -402,7 +411,10 @@ final class PMStore: ObservableObject {
     /// project is assumed to have a canvas, so opening one is never a two-step ceremony of "make it,
     /// then open it". Resolution happens again here rather than trusting `canvasPath`, because the
     /// published value is a snapshot and the answer to "should I write a file" deserves the live one.
-    func openableCanvasPath(_ done: @escaping @MainActor (Result<String, Error>) -> Void) {
+    ///
+    /// Says whether it *made* the board, because a board made just now is a new project's, and a new
+    /// project opens on a Notes workspace — see `ProjectWindowController.seedNotesWorkspace`.
+    func openableCanvasPath(_ done: @escaping @MainActor (Result<OpenableCanvas, Error>) -> Void) {
         guard let projectPath else {
             // A window made a moment ago by the menu command itself: the store's first load is still in
             // flight, so there is no project folder to answer about yet. Wait for it rather than doing
@@ -421,17 +433,28 @@ final class PMStore: ObservableObject {
         }
         let notesPath = self.notesPath
         io.async { [weak self] in
-            let result = Result {
-                try resolveProjectCanvasPath(projectPath: projectPath)
-                    ?? createProjectCanvas(projectPath: projectPath, notesPath: notesPath)
+            let result = Result { () -> OpenableCanvas in
+                if let found = try resolveProjectCanvasPath(projectPath: projectPath) {
+                    return OpenableCanvas(path: found, made: false)
+                }
+                return OpenableCanvas(path: try createProjectCanvas(projectPath: projectPath,
+                                                                    notesPath: notesPath),
+                                      made: true)
             }
             Task { @MainActor in
-                if case .success(let path) = result, self?.projectPath == projectPath {
-                    self?.canvasPath = path
+                if case .success(let canvas) = result, self?.projectPath == projectPath {
+                    self?.canvasPath = canvas.path
                 }
                 done(result)
             }
         }
+    }
+
+    /// What `openableCanvasPath` found.
+    struct OpenableCanvas {
+        let path: String
+        /// Whether the file was written just now rather than found.
+        let made: Bool
     }
 
     /// Write the *global* focused project — `focused.json` plus the recent list — which the CLI,

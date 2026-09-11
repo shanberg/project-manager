@@ -70,6 +70,9 @@ final class ProjectIndex: ObservableObject {
         /// Earliest due among its open tasks, for due grouping.
         let nextDue: String?
         let detailsLoaded: Bool
+        /// What the row shows in place of its ring, from the notes' frontmatter — see `ProjectIcon`.
+        /// Nil draws the ring (or an area's dotted circle).
+        var icon: ProjectIcon? = nil
         var id: String { projectKey }
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
         /// Whether a completion ring means anything here — the kind's answer, forwarded so a view can
@@ -133,11 +136,12 @@ final class ProjectIndex: ObservableObject {
 
         /// Complete this listing with the values a notes read produces (or the zeroes that stand in
         /// until one lands).
-        func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool) -> ProjectEntry {
+        func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool,
+                   icon: ProjectIcon? = nil) -> ProjectEntry {
             ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
                          shortName: shortName, domain: domain, kind: kind, isArchived: isArchived,
                          modified: modified, notesPath: notesPath, done: done, total: total,
-                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded)
+                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded, icon: icon)
         }
     }
 
@@ -352,18 +356,20 @@ final class ProjectIndex: ObservableObject {
             var warmed: [ProjectEntry] = []
             var tasks: [TaskEntry] = []
             for (index, item) in listing.enumerated() {
-                guard index < Self.maxDetailWarm, let out = try? notesShow(project: item.name) else {
+                guard index < Self.maxDetailWarm, let read = Self.readDetails(of: item.name) else {
                     warmed.append(item.entry(done: 0, total: 0, nextTask: nil, nextDue: nil,
                                              detailsLoaded: false))
                     continue
                 }
+                let out = read.output
                 warmed.append(item.entry(done: out.todos.filter { $0.checked }.count,
                                          total: out.todos.count,
                                          nextTask: Self.heroTaskText(out.todos,
                                                                      shorteningCodes: shortening,
                                                                      in: groups),
                                          nextDue: Self.earliestDue(out.todos),
-                                         detailsLoaded: true))
+                                         detailsLoaded: true,
+                                         icon: read.icon))
                 tasks += Self.openTasks(of: out.todos, in: item, shorteningCodes: shortening,
                                         resolvingIn: groups)
             }
@@ -389,6 +395,15 @@ final class ProjectIndex: ObservableObject {
     }
 
     // MARK: Filesystem scans (off-main only)
+
+    /// One project's notes as the sidebar needs them, plus its icon. The icon lives in frontmatter,
+    /// which `notesShow` doesn't report, so the raw text is read once here and handed to both.
+    private nonisolated static func readDetails(of name: String) -> (output: NotesShowOutput, icon: ProjectIcon?)? {
+        guard let handle = try? resolveNotesHandle(project: name),
+              let raw = try? handle.io.readContent(path: handle.notesPath),
+              let output = try? notesShow(rawText: raw) else { return nil }
+        return (output, projectIcon(rawText: raw))
+    }
 
     /// Every project in the active and archive folders, ordered by notes-file mtime (newest first,
     /// falling back to folder mtime) across both. Does protected-folder IO, so only ever call this off
