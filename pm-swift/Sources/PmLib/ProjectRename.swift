@@ -64,7 +64,8 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
         notes.title = trimmed
         // Update only the title line, preserving all other formatting. Fall back to the full
         // serializer if the title line can't be spliced (e.g. no `# ` heading).
-        let content = (try writeNotesPreservingFormat(rawText: raw, incoming: notes, kind: ProjectKind.of(notesPath: canonical))) ?? serializeNotes(notes, kind: ProjectKind.of(notesPath: canonical))
+        let content = (try writeNotesPreservingFormat(rawText: raw, incoming: notes, kind: ProjectKind.of(notesPath: canonical)))
+            ?? carryingFrontmatter(from: raw, into: serializeNotes(notes, kind: ProjectKind.of(notesPath: canonical)))
         if resolved == canonical {
             try ioResolved.writeContent(path: canonical, content: content)
         } else {

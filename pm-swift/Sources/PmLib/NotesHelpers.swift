@@ -112,7 +112,11 @@ public func writeNotesFile(notesPath: String, notes: ProjectNotes, notesIO: Note
     // The kind is a fact about the folder, so it's read from the path rather than threaded through
     // every caller — one more place to pass it is one more place to pass the wrong one.
     let content = serializeNotes(notes, kind: ProjectKind.of(notesPath: notesPath))
-    try io.writeContent(path: notesPath, content: content)
+    // The model has no field for frontmatter, so put back whatever the file already opened with — a
+    // whole-file write would otherwise take the project's icon with it. See `carryingFrontmatter`.
+    let existing = try? io.readContent(path: notesPath)
+    try io.writeContent(path: notesPath,
+                        content: existing.map { carryingFrontmatter(from: $0, into: content) } ?? content)
 }
 
 /// Resolve notes template content: if template path is set, file must exist and is used (with {{title}} replaced); otherwise use the built-in template for the kind.

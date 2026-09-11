@@ -104,6 +104,31 @@ final class MarkdownHighlightTests: XCTestCase {
         XCTAssertTrue(markdownLinks(in: "see [[note]] there").isEmpty)
     }
 
+    func testWebAddresses() {
+        XCTAssertTrue(isWebAddress("https://x.dev/a?b=c"))
+        XCTAssertTrue(isWebAddress("  HTTP://x.dev \n"))
+        XCTAssertFalse(isWebAddress("https://"), "no host")
+        XCTAssertFalse(isWebAddress("mailto:someone@x.dev"))
+        XCTAssertFalse(isWebAddress("file:///Users/me/a.md"))
+        XCTAssertFalse(isWebAddress("https://x.dev and more"))
+        XCTAssertFalse(isWebAddress(""))
+    }
+
+    func testSoleWebLinkIsTheWholeTextOrNothing() {
+        XCTAssertEqual(soleWebLink(in: " https://x.dev/a ")?.address, "https://x.dev/a")
+        XCTAssertNil(soleWebLink(in: "https://x.dev/a")?.label)
+
+        let link = soleWebLink(in: "\n[the docs](https://x.dev/docs)  ")
+        XCTAssertEqual(link?.address, "https://x.dev/docs")
+        XCTAssertEqual(link?.label, "the docs")
+        XCTAssertNil(soleWebLink(in: "[](https://x.dev)")?.label, "an empty label is no name")
+
+        XCTAssertNil(soleWebLink(in: "see [the docs](https://x.dev/docs)"), "a sentence with a link in it")
+        XCTAssertNil(soleWebLink(in: "[a](https://x.dev) [b](https://y.dev)"), "two links")
+        XCTAssertNil(soleWebLink(in: "[note](../notes/b.md)"), "a link, but not to a page")
+        XCTAssertNil(soleWebLink(in: "https://x.dev and more"))
+    }
+
     func testListMarker() {
         XCTAssertEqual(pieces("- item", .listMarker), ["- "])
         XCTAssertEqual(pieces("1. item", .listMarker), ["1. "])

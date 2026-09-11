@@ -186,6 +186,34 @@ public func markdownLinks(in text: String) -> [MarkdownLink] {
     return out
 }
 
+/// Whether `string` is the address of a web page: one unbroken `http://` or `https://` token with a
+/// host. Narrower than `isPastableURL` on purpose — a `mailto:` or a `file:` is a link, but not one to
+/// a page anything could show.
+public func isWebAddress(_ string: String) -> Bool {
+    let s = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard s.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+          let url = URL(string: s), let scheme = url.scheme?.lowercased(),
+          scheme == "http" || scheme == "https" else { return false }
+    return !(url.host ?? "").isEmpty
+}
+
+/// The web page `text` is a link to, when a link is all it is: a bare `https://…`, or one
+/// `[label](https://…)` with nothing either side of it but whitespace. `label` is nil for a bare
+/// address and for a link whose label is empty.
+///
+/// All or nothing, because the caller is deciding what the text *is*. A sentence with a link in it is
+/// a sentence; a link with a word after it is too.
+public func soleWebLink(in text: String) -> (address: String, label: String?)? {
+    let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if isWebAddress(s) { return (s, nil) }
+    let links = markdownLinks(in: s)
+    guard links.count == 1, let link = links.first,
+          link.range == s.startIndex..<s.endIndex,
+          isWebAddress(link.destination) else { return nil }
+    let label = String(s[link.labelRange])
+    return (link.destination, label.isEmpty ? nil : label)
+}
+
 // MARK: - Formatting shortcuts (pure, testable)
 
 /// Toggle a symmetric inline marker (e.g. `**` for bold, `*` for italic) around `selection`. Removes the
