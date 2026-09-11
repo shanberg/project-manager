@@ -71,6 +71,8 @@ struct ProjectTabBar: View {
     @State private var naturalWidth: CGFloat?
     /// The chip being dragged along the row, if one is.
     @State private var dragging: String?
+    /// Each chip's width, for `TabReorder` to find its middle by.
+    @State private var widths: [String: CGFloat] = [:]
     /// The chip whose label is being typed into, if one is.
     @State private var editing: String?
     @State private var draft = ""
@@ -224,13 +226,20 @@ struct ProjectTabBar: View {
                 })
                 // The canvas does not travel — see `ProjectTabSet.move`.
                 .onDrag(if: !item.isCanvas) {
-                    dragging = item.id
-                    return NSItemProvider(object: item.id as NSString)
+                    let dragged = item.id
+                    dragging = dragged
+                    // Let go anywhere, the row stops thinking a chip is in flight — not only when the
+                    // drop lands on a chip, which was the one ending `performDrop` ever heard about.
+                    return ProjectTabDrag.itemProvider(for: dragged) { [dragging = $dragging] in
+                        if dragging.wrappedValue == dragged { dragging.wrappedValue = nil }
+                    }
                 }
             }
         }
-        .onDrop(of: [.text],
-                delegate: TabReorder(target: item, items: items, dragging: $dragging, move: move))
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths[item.id] = $0 }
+        .onDrop(of: [ProjectTabDrag.type],
+                delegate: TabReorder(target: item, width: widths[item.id] ?? 0, items: items,
+                                     dragging: $dragging, move: move))
         // **A workspace's commands live on the workspace.** Right-click is where a Mac keeps the verbs
         // for the thing under the pointer, and it keeps them off the board's tile menu, which is for
         // what you do to a tile — docs/canvas-workspaces.md §7c. Offered on every workspace chip and
@@ -393,31 +402,95 @@ private struct TabRowWidthKey: PreferenceKey {
     }
 }
 
+/// What a chip carries while it is dragged.
+///
+/// **A type of its own, and nothing else.** The chip used to carry its id as plain text, which is what
+/// a board takes a text card from — so a reorder drag that strayed a few points below the header and
+/// was let go there made a card whose text was a UUID, drawn over the tiles of whatever workspace you
+/// were in. A tab's id means nothing anywhere but this row, so nothing anywhere else is offered it: the
+/// board, the notes, and other apps all decline a drag that has no type they read.
+enum ProjectTabDrag {
+    /// Declared in the app's `Info.plist` (`UTExportedTypeDeclarations`, from `project.yml`), beside
+    /// `TaskPasteboard.taskKeysType`.
+    static let type = UTType(exportedAs: "com.stuarthanberg.pm.tab", conformingTo: .data)
+
+    /// Associated-object key holding a drag's end sentinel on its item provider — see `DragEndSentinel`.
+    private nonisolated(unsafe) static var sentinelKey: UInt8 = 0
+
+    /// A provider for dragging the chip `id`, which calls `onEnd` when the drag is over however it
+    /// ended — the only notice `.onDrag` gives of that is the provider being let go.
+    static func itemProvider(for id: String, onEnd: @escaping () -> Void) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: type.identifier,
+                                            visibility: .ownProcess) { completion in
+            completion(Data(id.utf8), nil)
+            return nil
+        }
+        objc_setAssociatedObject(provider, &sentinelKey, DragEndSentinel(onEnd: onEnd),
+                                 .OBJC_ASSOCIATION_RETAIN)
+        return provider
+    }
+}
+
 /// Dragging a chip along the row, which is how a row of tabs gets an order that is yours.
 ///
-/// The move happens as the drag crosses a chip rather than when it is let go, so the row shows the
-/// order you are making instead of promising it with an insertion line — `ProjectTabSet.move` is
-/// already "that one goes *there*", and the bar's own animation carries it across.
-private struct TabReorder: DropDelegate {
+/// The move happens during the drag rather than when it is let go, so the row shows the order you are
+/// making instead of promising it with an insertion line — `ProjectTabSet.move` is already "that one
+/// goes *there*", and the bar's own animation carries it across.
+///
+/// **At a chip's middle, not its edge.** This used to move the moment the pointer entered a chip, and
+/// chips are as wide as their names: drag a short one onto a long one and the long one slides into the
+/// short one's place — still under the pointer, which entering it again read as a request to move back.
+/// The row flipped between the two orders for as long as you held still. Crossing the middle is a
+/// question the swap settles for good: the chip that slid moved its middle *away* from the pointer by
+/// the dragged chip's whole width, so the pointer is on the far side of it and staying there.
+struct TabReorder: DropDelegate {
     let target: ProjectTabItem
+    /// The target chip's width, which `DropInfo.location` is measured across.
+    let width: CGFloat
     let items: [ProjectTabItem]
     @Binding var dragging: String?
     var move: (String, Int) -> Void
 
-    func dropEntered(info: DropInfo) {
-        guard let dragging, dragging != target.id,
-              let to = items.firstIndex(where: { $0.id == target.id })
-        else { return }
-        move(dragging, to)
-    }
+    /// Only a drag this row started. A chip dragged out of another window carries the same type and
+    /// means nothing here.
+    func validateDrop(info: DropInfo) -> Bool { dragging != nil }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func dropEntered(info: DropInfo) { reorder(info) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        reorder(info)
+        return DropProposal(operation: .move)
+    }
 
     /// Nothing is read out of the drop: the row was reordered on the way in, and the id it carries was
     /// only ever how a chip says which one it is.
     func performDrop(info: DropInfo) -> Bool {
         dragging = nil
         return true
+    }
+
+    private func reorder(_ info: DropInfo) {
+        guard let dragging,
+              let to = Self.destination(of: dragging, over: target.id, at: info.location.x,
+                                        width: width, in: items.map(\.id))
+        else { return }
+        move(dragging, to)
+    }
+
+    /// Where the chip `dragged` goes with the pointer `x` points into the chip `target`, which is
+    /// `width` wide — or nil for staying put.
+    ///
+    /// The target's place, once the pointer is past its middle in the direction the dragged chip is
+    /// travelling: rightwards over a chip to its right, leftwards over one to its left.
+    static func destination(of dragged: String, over target: String, at x: CGFloat,
+                            width: CGFloat, in ids: [String]) -> Int? {
+        guard dragged != target,
+              let from = ids.firstIndex(of: dragged),
+              let to = ids.firstIndex(of: target)
+        else { return nil }
+        let middle = width / 2
+        return (from < to ? x > middle : x < middle) ? to : nil
     }
 }
 

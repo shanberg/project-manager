@@ -29,6 +29,12 @@ enum ProjectCodes {
     }
 }
 
+/// The tab bar hangs one of these on a drag's item provider. The real one lives beside the task
+/// column's drop code, which this bundle does not compile.
+final class DragEndSentinel {
+    init(onEnd: @escaping () -> Void) {}
+}
+
 func afterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
     DispatchQueue.main.async { MainActor.assumeIsolated(work) }
 }

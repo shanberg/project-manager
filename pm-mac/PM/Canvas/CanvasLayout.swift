@@ -30,4 +30,18 @@ struct CanvasLayout: Equatable {
         frames[id] ?? document.node(id: id)?.frame
     }
     func shows(_ id: String) -> Bool { visible?.contains(id) ?? true }
+
+    /// Whether a card's view is taken off screen altogether, given whether it is one of the cards a
+    /// crossing into or out of a workspace is fading, and how far that fade has got.
+    ///
+    /// **A card this layout does not show is hidden unless it is on its way.** The cards a crossing
+    /// fades stay drawn until they reach nothing, so you see them go. Every other card the layout
+    /// leaves out is hidden outright — which this used to leave to the alpha alone, and a card only has
+    /// a fading alpha if it was on the board when the crossing began. One made afterwards — dropped,
+    /// pasted, or added through another tab's view of the same board — sat at full strength, where the
+    /// board says it is, over the tiles of a workspace it was never part of.
+    func hides(_ id: String, fading: Bool, alpha: Double) -> Bool {
+        guard !shows(id) else { return false }
+        return !fading || alpha <= 0.001
+    }
 }

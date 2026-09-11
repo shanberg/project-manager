@@ -277,6 +277,7 @@
 		F4DFE1E6BF170E452D4945DE /* ProjectWindowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F585177DE07327A668755CF /* ProjectWindowState.swift */; };
 		F620D94113D96BFDDEE77367 /* SettingsPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E52CC55119B4E41DFD8F4EC /* SettingsPanes.swift */; };
 		F624F9A34622007F9CBBB703 /* WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE12AF236B77E3727D0F3C5F /* WindowManager.swift */; };
+		F762E435E788D3F0722C1D73 /* TabDragTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF7D1664371AF585E7945B80 /* TabDragTests.swift */; };
 		F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C83138169424E7CE3A881B7 /* Stubs.swift */; };
 		F84D6B08F2E7262AA2A19BAB /* ReadableWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26660B6F22EE1F010BE34485 /* ReadableWidth.swift */; };
 		FCDE322644D4597C60281FFC /* OutsideClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86409A4FB029771F2F9B1738 /* OutsideClickTests.swift */; };
@@ -481,6 +482,7 @@
 		CF1B5393B4FF9F362814CC03 /* SearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchField.swift; sourceTree = "<group>"; };
 		CF329F5E6B1828CCC5F30A89 /* CanvasAddressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAddressTests.swift; sourceTree = "<group>"; };
 		CF58C252062677FA46208D2B /* ProjectSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSettings.swift; sourceTree = "<group>"; };
+		CF7D1664371AF585E7945B80 /* TabDragTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDragTests.swift; sourceTree = "<group>"; };
 		D1C48657562CC9C603C6F6D3 /* MainMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
 		D28E7B370599FD42B5FD57EA /* ImmersiveStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersiveStage.swift; sourceTree = "<group>"; };
 		D2ADA066EB499AE0DB3E79E8 /* PMViewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PMViewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -908,6 +910,7 @@
 				A683751482352094B3CF8AC6 /* SidebarClickTests.swift */,
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
 				CD9C0FB324B53991D5DEEEB1 /* TabBarGrowthTests.swift */,
+				CF7D1664371AF585E7945B80 /* TabDragTests.swift */,
 				52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */,
 				4D0994A8009F7E1F0FCCF13F /* TokenDrawingTests.swift */,
 				20BF0FED02E7A58488B3E521 /* WorkspaceNameTests.swift */,
@@ -1318,6 +1321,7 @@
 				2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */,
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				31AD6AAB106EC029FD8151CE /* TabBarGrowthTests.swift in Sources */,
+				F762E435E788D3F0722C1D73 /* TabDragTests.swift in Sources */,
 				8A0D5F773B09992201E04086 /* TaskFieldCompletionTests.swift in Sources */,
 				0FAD7CF6F384B7406B86113E /* TokenDrawingTests.swift in Sources */,
 				28BB1DFA9E040E25661D78D7 /* TokenLayoutManager.swift in Sources */,
@@ -1384,7 +1388,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.37.0;
+				MARKETING_VERSION = 0.38.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1531,7 +1535,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.37.0;
+				MARKETING_VERSION = 0.38.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

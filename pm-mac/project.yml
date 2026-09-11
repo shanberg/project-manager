@@ -111,6 +111,11 @@ targets:
           - UTTypeIdentifier: com.stuarthanberg.pm.task-keys
             UTTypeDescription: PM Task Selection
             UTTypeConformsTo: [public.data]
+          # A tab chip being dragged along the row, and nothing a board or another app can take.
+          # See Project/ProjectTabBar.swift, `ProjectTabDrag`.
+          - UTTypeIdentifier: com.stuarthanberg.pm.tab
+            UTTypeDescription: PM Tab
+            UTTypeConformsTo: [public.data]
         # Speakable aliases so Siri can recognize App Shortcut phrases — the bundle name "PM" is a
         # homophone of "p.m." and doesn't work as a spoken trigger. Say e.g. "Show Project Manager
         # panel", "Complete my Project Manager task".

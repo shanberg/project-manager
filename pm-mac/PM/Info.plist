@@ -75,6 +75,16 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.stuarthanberg.pm.task-keys</string>
 		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>PM Tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.stuarthanberg.pm.tab</string>
+		</dict>
 	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>

@@ -625,7 +625,7 @@ final class CanvasBoardView: NSView {
     private func applyPresence(to view: CanvasNodeView, id: String) {
         let fading = fadingCards.contains(id)
         view.refreshTiledness(fading: fading)
-        view.isHidden = !layout.shows(id) && view.alphaValue <= 0.001
+        view.isHidden = layout.hides(id, fading: fading, alpha: view.alphaValue)
     }
 
     func layoutNodeViews() {
