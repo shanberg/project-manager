@@ -302,7 +302,38 @@ final class ProjectSplitViewController: NSSplitViewController {
         canvasUnavailable = false
         triedReplacingCanvas = false
         tabs = next
+        adoptNotesTab()
         applySelectedTab()
+    }
+
+    /// **The notes are the Notes workspace wherever there is a board to keep one** (§7j). Turn a notes
+    /// tab — a new window's default, or a row stored before this — into that workspace's chip, making
+    /// the workspace if the board hasn't got one, and drop the panes built for what the tabs were.
+    ///
+    /// The notes tab was the one chip that closed, could not be renamed and could not take a second
+    /// card. It used to be converted only on boards PM had just made, which left every existing
+    /// project's window with the odd one out. Quiet when there is nothing to adopt into — no board yet,
+    /// or none with the project's card on it — which leaves the tab as it was; the next path change
+    /// asks again.
+    ///
+    /// Returns whether anything changed. The caller applies the selection.
+    @discardableResult
+    private func adoptNotesTab() -> Bool {
+        guard tabs.holdsNotesTab, let url = canvasSource().url, let name = notesWorkspace()
+        else { return false }
+        let changed = tabs.adoptNotes(as: name)
+        tabs.include(workspaces: CanvasWorkspaces.names(of: url))
+        for id in changed { contentPane.drop(tab: id) }
+        return true
+    }
+
+    /// The Notes workspace for this window's board, found or made. See
+    /// `CanvasProjectNoteCard.notesWorkspace`.
+    private func notesWorkspace() -> String? {
+        guard let url = canvasSource().url, let board = try? CanvasStoreRegistry.store(for: url)
+        else { return nil }
+        return CanvasProjectNoteCard.notesWorkspace(on: board.document, at: url,
+                                                    resolver: board.resolver)
     }
 
     /// Set while a board tab has nothing to show *yet* — as opposed to nothing to show.
@@ -349,6 +380,10 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// makes for a project that already has a window, and under docs/canvas-workspaces.md §7c it is
     /// what lets the bar be read as the list of what you have open.
     func openTab(_ view: ProjectTabView) {
+        // Asking for the notes is asking for the Notes workspace wherever there is one to go to (§7j),
+        // so View ▸ New Tab cannot bring back the chip that closed.
+        let view = view.isNotesTab
+            ? notesWorkspace().map { ProjectTabView.board(.workspace($0)) } ?? view : view
         if let existing = tabs.first(showing: view) {
             tabs.select(existing.id)
         } else {
@@ -753,9 +788,15 @@ final class ProjectSplitViewController: NSSplitViewController {
     func canvasPathChanged() {
         canvasUnavailable = false
         triedReplacingCanvas = false
+        // A board that has just appeared is the first chance to put the notes in their workspace —
+        // which is how a new project's window opens on Notes rather than on a notes tab.
+        let adopted = adoptNotesTab()
         let wantsBoard = tabs.selected.view.isBoard || tabs.selected.view == .notes
-        guard wantsBoard, !(contentPane.current is CanvasPaneController) else { return }
-        contentPane.drop(tab: tabs.selectedID)
+        if wantsBoard, !(contentPane.current is CanvasPaneController) {
+            contentPane.drop(tab: tabs.selectedID)
+        } else if !adopted {
+            return
+        }
         applySelectedTab()
     }
 

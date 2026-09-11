@@ -62,7 +62,69 @@ final class CanvasTileHandleView: NSView {
 
     override func draw(_ dirty: NSRect) {
         guard let board else { return }
+        drawTabStrips(board, board.liveScale)
         drawTileHandles(board, board.liveScale)
+    }
+
+    /// The tabs across the top of a tile holding more than one card (docs/canvas-workspaces.md §7k).
+    ///
+    /// **Here, under the cards**, for the reason the handlebars are: the band is the tile's own — the
+    /// room the layout leaves above the card that is showing — and the only thing that should ever
+    /// pass over it is a tile being carried across. Drawn a little way down under the card as well, so
+    /// the card's own top corners round off into the strip rather than onto the ground behind it.
+    private func drawTabStrips(_ board: CanvasBoardView, _ scale: Double) {
+        guard let session = board.tiling, !board.isPicking else { return }
+        let space = CanvasTiling.space(of: session.area)
+        for strip in session.tabStrips {
+            let outer = CanvasTiling.corners(of: strip.band, in: space)
+            var radii = CanvasTiling.Corners(topLeft: outer.topLeft, topRight: outer.topRight,
+                                             bottomRight: false, bottomLeft: false)
+                .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+            radii.bottomLeft = 0
+            radii.bottomRight = 0
+            var band = board.viewRect(strip.band)
+            band.size.height += CanvasTiling.outerRadius
+            CanvasPalette.card.setFill()
+            CanvasNodeView.path(in: band, radii: radii).fill()
+
+            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+            for (index, (card, chip)) in zip(strip.cards, chips).enumerated() {
+                drawTab(card, in: board.viewRect(chip), showing: index == strip.showing, board, scale)
+            }
+        }
+    }
+
+    /// One tab: the card's icon and name, as the zoomed-out board and Add Card from Canvas call it, so a
+    /// card is recognisable by the same two things wherever it is listed.
+    private func drawTab(_ card: String, in rect: NSRect, showing: Bool,
+                         _ board: CanvasBoardView, _ scale: Double) {
+        if showing {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 6 / scale, yRadius: 6 / scale).fill()
+        }
+        guard let described = board.document.node(id: card).flatMap(CanvasExistingCards.card) else { return }
+        let side = 14 / scale
+        var textLeft = rect.minX + 8 / scale
+        if let icon = CanvasBoardView.menuIcon(for: described.kind) {
+            icon.draw(in: NSRect(x: textLeft, y: rect.midY - side / 2, width: side, height: side),
+                      from: .zero, operation: .sourceOver, fraction: showing ? 1 : 0.6,
+                      respectFlipped: true, hints: nil)
+            textLeft += side + 6 / scale
+        }
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let font = NSFont.systemFont(ofSize: 12 / scale, weight: showing ? .semibold : .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: showing ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .paragraphStyle: style,
+        ]
+        let height = font.boundingRectForFont.height
+        let text = NSRect(x: textLeft, y: rect.midY - height / 2,
+                          width: max(0, rect.maxX - textLeft - 8 / scale), height: height)
+        (described.name as NSString).draw(with: text, options: [.usesLineFragmentOrigin,
+                                                                 .truncatesLastVisibleLine],
+                                          attributes: attributes)
     }
 
     /// The bar that says a tile can be moved, and is what you take hold of to move it.

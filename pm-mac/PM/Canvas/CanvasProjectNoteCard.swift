@@ -73,31 +73,48 @@ enum CanvasProjectNoteCard {
         }?.id
     }
 
-    /// What a new project's first workspace is called.
+    /// What the project's notes workspace is called when one has to be made.
     static let notesWorkspaceName = "Notes"
 
-    /// Keep a workspace of this board's project card alone, as `notesWorkspaceName`, and say what it
-    /// was called — or nil when there was nothing to seed: a board with no project card on it (a
-    /// project outside a vault gets an empty canvas), or one that already has a workspace by that
-    /// name, which is somebody's and is not replaced. See `ProjectWindowController.seedNotesWorkspace`.
+    /// The workspace of this board's project card alone, **made if there isn't one** — what a notes
+    /// tab becomes (§7j). Nil when there is nothing for it to show: a board with no project card on it
+    /// (a project outside a vault gets an empty canvas), or a canvas that is not a project's.
     ///
     /// Handed the document rather than opening it, so this file stays free of the store registry and
-    /// compiles into the hostless test bundle.
-    static func seedNotesWorkspace(on document: CanvasDocument, at url: URL,
-                                   resolver: CanvasFileResolver) -> String? {
-        let name = notesWorkspaceName
-        guard !CanvasWorkspaces.exists(name, of: url),
-              let notes = notes(forCanvasAt: url),
+    /// compiles into the hostless test bundle. See `ProjectSplitViewController.adoptNotesTab`.
+    static func notesWorkspace(on document: CanvasDocument, at url: URL,
+                               resolver: CanvasFileResolver) -> String? {
+        guard let notes = notes(forCanvasAt: url),
               let card = id(on: document, notes: notes, resolver: resolver)
         else { return nil }
+        let found = notesWorkspace(for: card, in: CanvasWorkspaces.of(url))
+        guard found.isNew else { return found.name }
         // The arrangement you last chose, so the first card you tile in beside the notes lands the way
         // your other workspaces do. One tile looks the same in any of them.
         let tiling = CanvasViewState.Tiling(ids: [card],
                                             arrangement: CanvasTiling.savedArrangement ?? .masterStack,
                                             masterFraction: CanvasTiling.savedMasterFraction,
                                             sizes: nil)
-        CanvasWorkspaces.save(tiling, as: name, for: url)
-        return name
+        CanvasWorkspaces.save(tiling, as: found.name, for: url)
+        return found.name
+    }
+
+    /// Which workspace that is, and whether it has to be made — pure, so it can be pinned in a test.
+    ///
+    /// **One that already shows the card alone is the answer, whatever it is called**, so a Notes
+    /// workspace you renamed is not joined by a second. Otherwise it is made as Notes — or Notes 2, past
+    /// a workspace of yours called Notes that holds something else, which is somebody's and is not
+    /// replaced.
+    static func notesWorkspace(for card: String, in all: [String: CanvasViewState.Tiling])
+        -> (name: String, isNew: Bool) {
+        let alone = all.filter { $0.value.ids == [card] }.keys
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        if alone.contains(notesWorkspaceName) { return (notesWorkspaceName, false) }
+        if let name = alone.first { return (name, false) }
+        var name = notesWorkspaceName
+        var n = 2
+        while all[name] != nil { name = "\(notesWorkspaceName) \(n)"; n += 1 }
+        return (name, true)
     }
 
     /// The card itself, centred on `at`.

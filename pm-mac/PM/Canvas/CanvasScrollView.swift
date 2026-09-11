@@ -81,7 +81,8 @@ final class CanvasScrollView: NSScrollView {
     /// card takes the event long before this view is asked, and an unengaged one is handed it by the
     /// board on the way past (`CanvasBoardView.scrollWheel`). Tiled or not, a card scrolls.
     override func scrollWheel(with event: NSEvent) {
-        guard !board.isTiled else { return }
+        // Picking cards on the board is the board, and scrolls like it — see `CanvasBoardView.showsTiles`.
+        guard !board.showsTiles else { return }
         guard !event.modifierFlags.contains(.command) else { return zoom(with: event) }
         super.scrollWheel(with: event)
     }
@@ -129,7 +130,7 @@ final class CanvasScrollView: NSScrollView {
     }
 
     override func magnify(with event: NSEvent) {
-        guard !board.isTiled else { return }
+        guard !board.showsTiles else { return }
         super.magnify(with: event)
     }
 
@@ -183,6 +184,16 @@ final class CanvasScrollView: NSScrollView {
         magnification = wanted
         board.magnificationChanged()
         centre(on: CanvasPoint(x: rect.midX, y: rect.midY))
+    }
+
+    /// `zoom(toFit:)` as a journey: ease to the zoom that fits `rect` in the window — never past 100% —
+    /// centred on it. How a workspace zooms out to the board to pick its cards.
+    func fly(toFit rect: CanvasRect, animated: Bool) {
+        let available = contentView.frame.size
+        guard rect.width > 0, rect.height > 0, available.width > 0, available.height > 0 else { return }
+        let zoom = min(1, available.width / rect.width, available.height / rect.height)
+        fly(to: max(zoom, Self.minimumZoom), centre: CanvasPoint(x: rect.midX, y: rect.midY),
+            animated: animated)
     }
 
     func zoomToActualSize() { setZoom(1) }
@@ -363,7 +374,7 @@ final class CanvasClipView: NSClipView {
     /// the one thing the rule must not do there is move the clip out from under them.
     private var held: NSRect? {
         guard let board = documentView as? CanvasBoardView else { return documentView?.frame }
-        guard !board.isTiled, let cards = board.document.bounds else { return board.frame }
+        guard !board.showsTiles, let cards = board.document.bounds else { return board.frame }
         return board.viewRect(cards)
     }
 }

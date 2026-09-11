@@ -29,16 +29,28 @@ final class ProjectTabTests: XCTestCase {
     /// belongs beside that board.
     func testOpensAfterTheCurrentTabAndSelectsIt() {
         var set = ProjectTabSet()
-        let workspace = set.open(.board(.workspace("Review")))
+        let notes = set.tabs[1].id
         let frame = set.open(.board(.frame("group-1")))
-        XCTAssertEqual(set.tabs.map(\.id),
-                       [set.canvasID, set.tabs[1].id, workspace.id, frame.id])
+        XCTAssertEqual(set.tabs.map(\.id), [set.canvasID, notes, frame.id])
         XCTAssertEqual(set.selectedID, frame.id)
 
         // Going back to the canvas and opening again puts the new one second, not last.
         set.select(set.canvasID)
-        let another = set.open(.board(.workspace("Standup")))
+        let another = set.open(.board(.frame("group-2")))
         XCTAssertEqual(set.tabs[1].id, another.id)
+    }
+
+    /// **A workspace goes last**, wherever you made it from. The row is the list of workspaces, and
+    /// you usually tile from the canvas — which is first, so "after the current tab" put every new one
+    /// ahead of the ones you already had.
+    func testANewWorkspaceGoesAtTheEndOfTheRow() {
+        var set = ProjectTabSet()
+        let notes = set.tabs[1].id
+        let review = set.open(.board(.workspace("Review")))
+        set.select(set.canvasID)
+        let standup = set.open(.board(.workspace("Standup")))
+        XCTAssertEqual(set.tabs.map(\.id), [set.canvasID, notes, review.id, standup.id])
+        XCTAssertEqual(set.selectedID, standup.id)
     }
 
     /// Closing the tab you are on goes right — the direction you were travelling.
@@ -374,18 +386,35 @@ final class TabsSelectByIndexTests: XCTestCase {
         XCTAssertEqual(tabs.selected.view, .board(.workspace("Dashboard")))
     }
 
-    /// **A new project's notes tab becomes its Notes workspace, in place** — the row
-    /// `ProjectWindowController.seedNotesWorkspace` builds. Retargeted rather than joined by a second
-    /// chip, so seeding the workspaces afterwards finds the chip already there, and the window stays on
-    /// the tab it opened on.
-    func testANewProjectsNotesTabBecomesItsNotesWorkspace() {
+    /// **A notes tab becomes the Notes workspace's chip, in place** — the row
+    /// `ProjectSplitViewController.adoptNotesTab` builds, for a new project and an old one alike.
+    /// Retargeted rather than joined by a second chip, so seeding the workspaces afterwards finds the
+    /// chip already there, and the window stays on the tab it opened on.
+    func testTheNotesTabBecomesTheNotesWorkspace() {
         var tabs = ProjectTabSet()
         let notes = tabs.tabs[1].id
-        tabs.retarget(notes, to: .board(.workspace("Notes")))
+        XCTAssertTrue(tabs.holdsNotesTab)
+        XCTAssertEqual(tabs.adoptNotes(as: "Notes"), [notes])
         tabs.include(workspaces: ["Notes"])
         XCTAssertEqual(tabs.tabs.map(\.view), [.board(.whole), .board(.workspace("Notes"))])
         XCTAssertEqual(tabs.selectedID, notes)
+        XCTAssertFalse(tabs.holdsNotesTab)
         // And a workspace chip does not close — which the notes tab did.
         XCTAssertFalse(tabs.close(notes))
+    }
+
+    /// A row that already has the workspace's chip keeps that one, where it is — the notes tab goes,
+    /// and the window follows it to the chip that stayed.
+    func testANotesTabBesideItsWorkspacesChipLeavesOne() throws {
+        var tabs = ProjectTabSet(tabs: [ProjectTab(.board(.workspace("Notes"))),
+                                        ProjectTab(.board(.frame("g"))), ProjectTab(.notes)],
+                                 selectedID: nil)
+        let kept = tabs.tabs[1].id
+        let notes = try XCTUnwrap(tabs.first(showing: .notes)).id
+        tabs.select(notes)
+        XCTAssertEqual(Set(tabs.adoptNotes(as: "Notes")), [notes])
+        XCTAssertEqual(tabs.tabs.map(\.view),
+                       [.board(.whole), .board(.workspace("Notes")), .board(.frame("g"))])
+        XCTAssertEqual(tabs.selectedID, kept)
     }
 }

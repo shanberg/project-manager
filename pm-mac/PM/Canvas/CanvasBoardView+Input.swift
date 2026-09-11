@@ -34,6 +34,27 @@ extension CanvasBoardView {
         let where_ = point(event)
         let extending = event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.command)
 
+        // **Picking cards on the board, a click is a card going in or coming out** — see `pick`. Before
+        // everything else, links included: nothing here is moved, selected, opened or followed, and a
+        // double-click is still one pick rather than an add and a take-out.
+        if isPicking {
+            guard event.clickCount == 1 else { return }
+            // Peeking, the card brought close answers as Return does, and anywhere else puts it back.
+            if let peek = peeking {
+                switch hitTester.hit(where_) {
+                case .node(let id), .handle(let id, _), .anchor(let id, _):
+                    id == peek.card ? finishPeek() : endPeek()
+                case .edge, .board: endPeek()
+                }
+                return
+            }
+            switch hitTester.hit(where_) {
+            case .node(let id), .handle(let id, _), .anchor(let id, _): pick(id)
+            case .edge, .board: break
+            }
+            return
+        }
+
         // **A link is the pointer's before it is the card's** — stepped in or not, tiled or not. Asked
         // before the double-click, so the second click of a pair on a link is still the link's rather
         // than a request to open the card under it. See `CanvasLinkZones`.
@@ -110,16 +131,28 @@ extension CanvasBoardView {
     /// would answer for it; the boundary is asked next because it lies in the gap, where the card's own
     /// band would otherwise catch it.
     private func tiledMouseDown(at where_: CanvasPoint, extending: Bool, clicks: Int) {
-        if let id = tileHandle(at: where_), let frame = tiling?.layout.frames[id] {
+        // A tile's tab strip is its title bar. A click on a tab shows it; a drag on one pulls that card
+        // out, or carries the tile when it is the only tab; and the rest of the strip carries the tile,
+        // like the handlebar. Asked first, because the strip is not a card and nothing else answers
+        // for it.
+        if let owner = tabStrip(at: where_) {
+            let chip = tabChip(at: where_)
+            let id = chip?.card ?? owner
+            if chip != nil { showTab(id) } else { selection = [id] }
+            if clicks == 2 { return toggleMaximizeTile(id) }
+            guard tiling?.tileFrames[id] != nil else { return }
+            gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil,
+                                 pulling: (chip?.count ?? 0) > 1)
+            return
+        }
+        if let id = tileHandle(at: where_), tiling?.tileFrames[id] != nil {
             selection = [id]
             // **Double-clicking the bar maximizes the tile**, because the bar is the tile's title bar
             // and double-clicking a title bar is how a window is zoomed on this platform. The gesture
             // is already in people's hands; this is only the tiled reading of it. See
             // `toggleMaximizeTile`.
             if clicks == 2 { return toggleMaximizeTile(id) }
-            gesture = .reorderTile(id, grab: CanvasPoint(x: where_.x - frame.minX,
-                                                         y: where_.y - frame.minY),
-                                   displaced: nil)
+            gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
         }
         if let divider = tileDivider(at: where_) {
@@ -142,15 +175,7 @@ extension CanvasBoardView {
     /// honour them. Dragging from the numbers that were *asked for* rather than the ones you can see
     /// would make the tile jump on the first pixel of the gesture.
     private func lengths(of divider: CanvasTileDivider) -> [Double] {
-        guard let tiling else { return [] }
-        if divider.isMasterSplit {
-            guard let master = tiling.layout.frames[tiling.ids[0]] else { return [] }
-            return [master.width, tiling.area.inset(by: -CanvasTiling.edgeGap).width
-                        - CanvasTiling.gap - master.width]
-        }
-        return divider.run.compactMap { index in
-            tiling.layout.frames[tiling.ids[index]].map { divider.isVertical ? $0.width : $0.height }
-        }
+        tiling?.lengths(of: divider.run) ?? []
     }
 
     // MARK: Dragging
@@ -173,30 +198,32 @@ extension CanvasBoardView {
 
         case .resizeTiles(let divider, let from, let lengths):
             dragTileDivider(divider, from: from, to: now, lengths: lengths)
+            // A page squeezed too narrow to read says so while the boundary is moving.
+            overlay.needsDisplay = true
 
-        case .reorderTile(let id, let grab, let displaced):
-            // The card comes with you. Held off its slot rather than animating into each new one: what
-            // is being dragged is the card, and a card that stayed in the grid while the pointer moved
-            // would be a gesture you have to take on trust. Only this card moves on this event — see
-            // `layoutCarriedCard`, and the tiles it deliberately leaves in flight.
-            if let frame = tiling?.layout.frames[id] {
-                reordering = (id, CanvasRect(x: now.x - grab.x, y: now.y - grab.y,
-                                             width: frame.width, height: frame.height))
-                layoutCarriedCard()
+        case .placeTile(let id, let base, let drop, let pulling):
+            // **A proxy comes with you, and nothing else moves.** The tile stays in its slot, dimmed,
+            // and the tiles around it stay where they are until you let go — a board rearranging
+            // itself under the pointer was a target that moved while you aimed at it (docs/canvas-
+            // workspaces.md §7k). So only the overlay redraws on this event.
+            dragPoint = now
+            overlay.needsDisplay = true
+            // What letting go here would do: near a tile's edge is a place beside it, the top band is
+            // its tabs, and the middle is a swap. Marked on the tiles as they stand, and remarked only
+            // when the answer changes.
+            //
+            // A tab pulled out of a tile of several can land beside the tile it came from — that is
+            // the commonest place for it — but not back into its own tabs, which is where it already
+            // is. Its middle joins a tile's tabs rather than swapping, since one card is not a tile.
+            let under = base.first { ($0.key != id || pulling) && $0.value.contains(x: now.x, y: now.y) }
+            var next = under.map {
+                (target: $0.key, drop: CanvasTileSession.drop(at: now, on: $0.value,
+                                                              middle: pulling ? .beside(.tab) : .swap))
             }
-            // The tile under the pointer decides where this one goes. Applied as you cross rather than
-            // on the drop, so the arrangement rearranges itself under your hand and the order you are
-            // making is the one you can see — but only once per crossing, which is
-            // `CanvasTileSession.reorder`'s whole subject and the reason a drag held still over the
-            // middle of the window no longer flickers.
-            var over: String?
-            if case .node(let hit) = hitTester.hit(now) { over = hit }
-            let step = CanvasTileSession.reorder(carrying: id, over: over, displaced: displaced)
-            if step.displaced != displaced {
-                gesture = .reorderTile(id, grab: grab, displaced: step.displaced)
-            }
-            guard let onto = step.displace, let index = tiling?.ids.firstIndex(of: onto) else { break }
-            moveInTiling(id, to: index)
+            if next?.target == id, next?.drop == .beside(.tab) { next = nil }
+            guard next?.target != drop?.target || next?.drop != drop?.drop else { break }
+            gesture = .placeTile(id, base: base, drop: next, pulling: pulling)
+            previewDrop(of: id, next, pulling: pulling)
 
         case .move(let from, let frames):
             let wanted = (dx: now.x - from.x, dy: now.y - from.y)
@@ -335,11 +362,12 @@ extension CanvasBoardView {
             }
         case .resizeTiles(let divider, _, _):
             rememberTileSizes(divider)
+            overlay.needsDisplay = true
 
-        case .reorderTile:
-            // Let go: the card springs back into the slot it has already been given.
-            reordering = nil
-            settleIntoLayout()
+        case .placeTile(let id, _, let drop, let pulling):
+            // Let go: what the mark said happens, and the tiles move — once, now.
+            dragPoint = nil
+            finishDrop(of: id, drop, pulling: pulling)
         case .move(let from, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)
@@ -656,6 +684,8 @@ extension CanvasBoardView {
             // is drawn a layer below the cards.
             if mode.showsConnectionAnchors { overlay.needsDisplay = true }
             if isTiled { refreshTileHandles() }
+            // Picking, the card under the pointer is ringed in the colour of what a click will do.
+            if isPicking { overlay.needsDisplay = true }
         }
         // A line is a thin thing to aim at, so it says when the pointer has found it. Only the two
         // curves involved are redrawn rather than the whole board — this runs on every mouse-moved
@@ -783,6 +813,11 @@ extension CanvasBoardView {
     /// the key to WebKit, which sends it back as this command rather than as a key event, and a card
     /// that isn't engaged passes it up to us.
     override func cancelOperation(_ sender: Any?) {
+        // Picking cards on the board: out of a peek first, then back into the workspace, keeping
+        // whatever was picked.
+        if isPicking { return peeking != nil ? endPeek() : endPicking() }
+        // Where the next card was going, first: the smallest thing there is to cancel.
+        if cancelPlacement() { return }
         if restoreMaximizedTile() { return }
         if !isTiled { selection = [] }
     }
@@ -801,6 +836,26 @@ extension CanvasBoardView {
             editor.keyDown(with: event)
             return
         }
+        // Picking cards on the board takes the keyboard whole. Space peeks at the card under the pointer;
+        // Escape, Return and ⌥B go back to the workspace — or, peeking, Space and Escape put the card
+        // back and Return adds it. Nothing else means anything: ⌫ there would delete a card off the
+        // board you are only choosing from.
+        if isPicking {
+            let key = event.charactersIgnoringModifiers?.lowercased()
+            if key == " ", event.isARepeat { return }
+            if event.modifierFlags.contains(.option), key == "b" {
+                endPicking()
+            } else if peeking != nil {
+                if key == " " || key == "\u{1b}" { endPeek() } else if key == "\r" { finishPeek() }
+            } else if key == " " {
+                if let id = hovered { beginPeek(id) } else { NSSound.beep() }
+            } else if key == "\u{1b}" || key == "\r" {
+                endPicking()
+            }
+            return
+        }
+        // The workspace's own keys — see `tilingTakes`.
+        if isTiled, tilingTakes(event) { return }
         // A project card you are standing in is a list, and a list answers three of these keys. See
         // `projectCardTakes`.
         if projectCardTakes(event) { return }
@@ -862,6 +917,81 @@ extension CanvasBoardView {
             commands.stepRows(1, extending: extending)
         default:
             return false
+        }
+        return true
+    }
+
+    /// The workspace's keys (docs/canvas-workspaces.md §7k): ⌥ with the arrows, =, −, 0, `, [, ], T, N,
+    /// B and ⌫, and while ⌥N is choosing, the plain arrows, T and Return.
+    ///
+    /// **Here, and not as menu key equivalents**, because a key equivalent is taken before the view you
+    /// are typing in ever sees it — and in a text card ⌥= is ≠, ⌥⇧← selects a word, and ⌥N starts a
+    /// tilde. A key only reaches the board when nothing that types wanted it, which is exactly when it
+    /// can safely mean the workspace. ⌥ arrows have always worked this way.
+    private func tilingTakes(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.command), !flags.contains(.control) else { return false }
+        let option = flags.contains(.option), shift = flags.contains(.shift)
+        let direction: CanvasNavigation.Direction?
+        switch event.specialKey {
+        case .leftArrow: direction = .left
+        case .rightArrow: direction = .right
+        case .upArrow: direction = .up
+        case .downArrow: direction = .down
+        default: direction = nil
+        }
+
+        if isChoosingPlacement, !option {
+            if let direction {
+                switch direction {
+                case .left: choosePlacement(.left)
+                case .right: choosePlacement(.right)
+                case .up: choosePlacement(.above)
+                case .down: choosePlacement(.below)
+                }
+                return true
+            }
+            if event.charactersIgnoringModifiers == "\r" {
+                confirmPlacement()
+                return true
+            }
+            // T: into the tile's tabs, rather than beside it.
+            if event.charactersIgnoringModifiers?.lowercased() == "t" {
+                choosePlacement(.tab)
+                return true
+            }
+        }
+        guard option else { return false }
+
+        if let direction {
+            if shift {
+                moveTile(direction)
+            } else {
+                moveFocus(direction, extending: false)
+                // Choosing where the next card goes, the place follows the focus onto the next tile.
+                if isChoosingPlacement { retargetPlacement() }
+            }
+            return true
+        }
+        if event.specialKey == .delete {
+            removeTile(nil)
+            return true
+        }
+        // Shift changes the character these report, not only the flags: ⌥⇧= arrives as "+".
+        switch event.charactersIgnoringModifiers {
+        case "=", "+": growTile(vertically: shift, by: Self.tileStep)
+        case "-", "_": growTile(vertically: shift, by: -Self.tileStep)
+        case "0": balanceTiles()
+        case ")": sizeTilesToContent()
+        case "b", "B": beginPicking()
+        case "`": focusPreviousTile()
+        case "[": stepTab(by: -1)
+        case "]": stepTab(by: 1)
+        case "t", "T":
+            if let id = focusedTile { pullTabOut(id) } else { NSSound.beep() }
+        case "n", "N":
+            if isChoosingPlacement { cancelPlacement() } else { beginPlacing() }
+        default: return false
         }
         return true
     }
@@ -1017,6 +1147,11 @@ extension CanvasBoardView {
 
     func selectionChanged(from previous: Set<String>) {
         guard selection != previous else { return }
+        // What ⌥` goes back to: the tile you were on before this one.
+        if isTiled, previous.count == 1, selection.count == 1, let old = previous.first,
+           tiling?.position(of: old) != nil {
+            previousTile = old
+        }
         for id in previous.union(selection) { nodeViews[id]?.selectionChanged() }
         overlay.needsDisplay = true
         // A selected tile shows its handlebar, and that is drawn under the cards.

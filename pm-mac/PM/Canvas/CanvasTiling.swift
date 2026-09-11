@@ -7,11 +7,16 @@ import PmLib
 /// argument in `CanvasLayout`: a canvas is a spatial document and its positions mean something, so
 /// tiling is a way of looking rather than a rewrite. This produces the frames a look is made of.
 ///
-/// **Only two arrangements, and both earn it.** A grid, for "show me these nine at once". And a
-/// master-stack — one large card with the rest down the side — because that is the literal shape of a
-/// dashboard: the thing you are working in, plus the things you are watching. BSP, which is what most
-/// tiling managers default to, is deliberately absent: it is a scheme for windows that arrive one at a
-/// time and split whatever had focus, and a board's cards all exist already.
+/// **A workspace is columns of tiles** — a row of columns, each a stack of tiles, each tile a card or
+/// several as tabs (docs/canvas-workspaces.md §7k). Two levels and no deeper: enough to say "beside
+/// this one" and "below this one", which is every question a tiling manager is asked about place, and
+/// nothing a tree would have to be stored for. BSP is absent for that reason rather than the one it
+/// used to be, which was that a board's cards all exist already.
+///
+/// **Grid and master-and-stack are the two ways to fill the columns** — commands, not modes. A grid,
+/// for "show me these nine at once", and a master and stack, because that is the literal shape of a
+/// dashboard: the thing you are working in, plus the things you are watching. After either has run,
+/// the columns are yours to change.
 enum CanvasTiling {
     enum Arrangement: String, CaseIterable, Codable {
         case grid, masterStack
@@ -192,6 +197,29 @@ enum CanvasTiling {
     /// The floor on a tiled region, for a window too narrow or too short to honour the margins.
     static let minimumArea: Double = 80
 
+    // MARK: Peeking
+
+    /// How much of the window is left round a card being peeked at, in window points — enough that it
+    /// reads as a card on the board brought close rather than as the window.
+    static let peekRoom: Double = 32
+
+    /// **Where to look to peek at a card** (docs/canvas-workspaces.md §7k): the zoom that shows it whole
+    /// at a size you can read — its own size where the window has room, smaller where it hasn't, and
+    /// never larger, since a card blown up past 100% is not easier to read, only blurrier — and the
+    /// centre that puts it in the middle of what the sidebar and the header leave.
+    ///
+    /// `window` and `margins` are in window points, since the zoom is what is being decided; the centre
+    /// is in the board's.
+    static func peek(at card: CanvasRect, in window: (width: Double, height: Double),
+                     margins: Margins) -> (zoom: Double, centre: CanvasPoint) {
+        let room = (width: window.width - margins.leading - margins.trailing - 2 * peekRoom,
+                    height: window.height - margins.top - 2 * peekRoom)
+        let zoom = max(0.01, min(1, room.width / max(1, card.width), room.height / max(1, card.height)))
+        let scaled = Margins(leading: margins.leading / zoom, trailing: margins.trailing / zoom,
+                             top: margins.top / zoom)
+        return (zoom, centre(framing: card, margins: scaled))
+    }
+
     // MARK: What you chose last time
 
     /// The arrangement and the split you last set, remembered app-wide.
@@ -366,90 +394,135 @@ enum CanvasTiling {
         }
     }
 
-    /// The frames these tiles get inside `area`.
-    static func frames(_ arrangement: Arrangement, sizes: [Size], in area: CanvasRect,
-                       masterFraction: Double) -> [CanvasRect] {
-        let count = sizes.count
+    // MARK: The shape a workspace has
+
+    /// One tile: a card, or several sharing the slot as tabs, and which of them is showing.
+    ///
+    /// **Tabs are in the shape before anything can make one** (docs/canvas-workspaces.md §7k). This is
+    /// what a workspace is saved as, and a shape that grew the field later would be a second
+    /// conversion of everything saved in between.
+    struct Tile: Codable, Equatable, Sendable {
+        var cards: [String]
+        var showing: Int
+        /// How long it is down its column. The tile's, not the card's: see `CanvasTileSession.columns`.
+        var height: Size
+
+        init(_ cards: [String], showing: Int = 0, height: Size = .even) {
+            self.cards = cards
+            self.showing = showing
+            self.height = height
+        }
+
+        init(_ card: String, height: Size = .even) { self.init([card], height: height) }
+
+        /// The card that is drawn. Clamped, so an index left stale by a card going away draws the
+        /// nearest one rather than nothing.
+        var shown: String {
+            cards.isEmpty ? "" : cards[min(max(0, showing), cards.count - 1)]
+        }
+    }
+
+    /// A column: how wide it is, and the tiles stacked down it, top to bottom.
+    struct Column: Codable, Equatable, Sendable {
+        var width: Size
+        var tiles: [Tile]
+
+        init(width: Size = .even, _ tiles: [Tile]) {
+            self.width = width
+            self.tiles = tiles
+        }
+    }
+
+    /// How tall a tile's tab strip is, when it holds more than one card.
+    static let tabStrip: Double = 28
+    /// The widest a tab gets. Two tabs on a wide tile don't want to be two half-tile buttons.
+    static let longestTab: Double = 220
+
+    /// Where each tab sits in a strip: side by side from the leading edge, sharing the width, none
+    /// wider than `longestTab`. What the strip is drawn by and what a click on it is read against, so
+    /// the two cannot disagree.
+    static func tabs(in band: CanvasRect, count: Int) -> [CanvasRect] {
         guard count > 0 else { return [] }
+        let inset = 4.0
+        let width = min(longestTab, (band.width - inset * 2 - gap * Double(count - 1)) / Double(count))
+        return (0..<count).map {
+            CanvasRect(x: band.minX + inset + Double($0) * (width + gap), y: band.minY + 3,
+                       width: max(0, width), height: max(0, band.height - 6))
+        }
+    }
+
+    /// Where every tile goes inside `area`: a list of frames per column, in the columns' order.
+    ///
+    /// `run` twice — once across the width for the columns, once down each column for its tiles — so
+    /// pinning and sharing mean exactly what they meant when there was one run.
+    static func frames(of columns: [Column], in area: CanvasRect) -> [[CanvasRect]] {
+        guard !columns.isEmpty else { return [] }
         let inner = space(of: area)
-        guard inner.width > gap, inner.height > gap else { return Array(repeating: area, count: count) }
-        guard count > 1 else { return [inner] }
+        guard inner.width > gap, inner.height > gap else {
+            return columns.map { $0.tiles.map { _ in area } }
+        }
+        let widths = run(columns.map(\.width), across: inner.width - gap * Double(columns.count - 1))
+        return zip(zip(offsets(widths, from: inner.minX), widths), columns).map { place, column in
+            let heights = run(column.tiles.map(\.height),
+                              across: inner.height - gap * Double(max(0, column.tiles.count - 1)))
+            return zip(offsets(heights, from: inner.minY), heights).map {
+                CanvasRect(x: place.0, y: $0, width: place.1, height: $1)
+            }
+        }
+    }
+
+    /// Fill columns with these tiles the way `arrangement` lays them out.
+    ///
+    /// **A command, not a mode.** What comes back is columns like any others, and nothing remembers
+    /// which arrangement made them — which is what lets a tile be moved across afterwards without
+    /// the arrangement snapping it back.
+    ///
+    /// The tiles come in reading order and keep their cards and tabs; their sizes are not kept, which
+    /// is what makes arranging an even start. `sizes` is for the one caller with lengths to honour: a
+    /// workspace saved before columns existed, whose lengths were kept per card. They are honoured
+    /// where that arrangement honoured them — along a run — and ignored where it didn't.
+    static func columns(_ arrangement: Arrangement, of tiles: [Tile], in area: CanvasRect,
+                        masterFraction: Double, sizes: [String: Size] = [:]) -> [Column] {
+        func plain(_ tile: Tile) -> Tile { Tile(tile.cards, showing: tile.showing) }
+        func sized(_ tile: Tile) -> Tile {
+            Tile(tile.cards, showing: tile.showing, height: sizes[tile.shown] ?? .even)
+        }
+        guard tiles.count > 1 else { return tiles.map { Column([plain($0)]) } }
 
         switch arrangement {
-        case .grid: return grid(sizes: sizes, in: inner)
-        case .masterStack: return masterStack(sizes: sizes, in: inner, fraction: masterFraction)
-        }
-    }
-
-    /// Rows and columns, as square as the area allows.
-    ///
-    /// The column count is chosen against the area's own proportions rather than being `ceil(sqrt(n))`:
-    /// six cards in a wide window want three across and two down, and the same six in a tall one want
-    /// two across and three down. A tiling that ignores the shape of the space it is filling produces
-    /// letterboxed tiles in one dimension and cramped ones in the other.
-    /// **A grid of one row, or one column, is a run** — and gets the sizes, because that is what two or
-    /// three cards side by side is, and it is where pinning one and stretching the others is most of the
-    /// point. A grid of more than one of each keeps even cells and ignores them: a width in a real grid
-    /// is a *column's* width, shared by every row, and one tile cannot be given it without either
-    /// breaking the columns or resizing cards you never touched.
-    static func grid(sizes: [Size], in area: CanvasRect) -> [CanvasRect] {
-        let count = sizes.count
-        let columns = max(1, min(count, Int((Double(count) * area.width / max(area.height, 1))
-            .squareRoot().rounded())))
-        let rows = Int((Double(count) / Double(columns)).rounded(.up))
-        if rows == 1 {
-            let widths = run(sizes, across: area.width - gap * Double(count - 1))
-            return zip(offsets(widths, from: area.minX), widths).map {
-                CanvasRect(x: $0, y: area.minY, width: $1, height: area.height)
+        case .grid:
+            // As square as the room allows. The column count is chosen against the area's own
+            // proportions rather than being ceil(sqrt(n)): six tiles in a wide window want three
+            // across, and the same six in a tall one want two.
+            let room = space(of: area)
+            let count = tiles.count
+            let across = max(1, min(count, Int((Double(count) * room.width / max(room.height, 1))
+                .squareRoot().rounded())))
+            // Dealt out a row at a time, so a full grid reads in the order the board does. A short last
+            // row leaves the columns past its end one tile shorter, and their tiles taller.
+            var columns = (0..<across).map { column in
+                Column(stride(from: column, to: count, by: across).map { plain(tiles[$0]) })
             }
-        }
-        if columns == 1 {
-            let heights = run(sizes, across: area.height - gap * Double(count - 1))
-            return zip(offsets(heights, from: area.minY), heights).map {
-                CanvasRect(x: area.minX, y: $0, width: area.width, height: $1)
+            // One row, or one column, is a run, and gets the lengths it was given. A grid of both keeps
+            // even cells, as it always has: a width there was a column's, never one tile's.
+            if across == count {
+                for index in columns.indices {
+                    columns[index].width = sizes[columns[index].tiles[0].shown] ?? .even
+                }
+            } else if across == 1 {
+                columns[0].tiles = tiles.map(sized)
             }
-        }
-        let cellWidth = (area.width - gap * Double(columns - 1)) / Double(columns)
-        let cellHeight = (area.height - gap * Double(rows - 1)) / Double(rows)
+            return columns
 
-        return (0..<count).map { index in
-            let row = index / columns
-            let column = index % columns
-            // The last row is centred rather than left-aligned when it is short. Seven cards in a
-            // three-column grid leaves one tile alone under two, and pushed to the left it reads as a
-            // mistake; centred it reads as the end of a list.
-            let inRow = min(columns, count - row * columns)
-            let indent = (area.width - (Double(inRow) * cellWidth + gap * Double(inRow - 1))) / 2
-            return CanvasRect(x: area.minX + indent + Double(column) * (cellWidth + gap),
-                              y: area.minY + Double(row) * (cellHeight + gap),
-                              width: cellWidth, height: cellHeight)
+        case .masterStack:
+            // The master against the stack is a fraction of the window, unless the master was pinned,
+            // in which case it is points like anything else.
+            let fraction = min(0.85, max(0.3, masterFraction))
+            var master = Size.flexible(fraction)
+            if case .pinned? = sizes[tiles[0].shown] { master = sizes[tiles[0].shown]! }
+            return [Column(width: master, [plain(tiles[0])]),
+                    Column(width: .flexible(1 - fraction), tiles.dropFirst().map(sized))]
         }
     }
 
-    /// One large tile, and the rest in a column beside it.
-    ///
-    /// The stack goes on the trailing side and runs top to bottom, which is the arrangement every
-    /// manager that offers this uses — and, more to the point, the one that leaves the master tile
-    /// starting at the same corner the board's reading order starts at.
-    static func masterStack(sizes: [Size], in area: CanvasRect, fraction: Double) -> [CanvasRect] {
-        // The master against the stack is itself a run of two — the master, and the stack as one thing.
-        // Pinning the master is a width in points; leaving it flexible is the fraction the divider has
-        // always meant, which is why that is what an undragged master falls back to.
-        let across = area.width - gap
-        let masterWidth: Double
-        if case .pinned(let points) = sizes[0] {
-            masterWidth = min(across - minimumTile, max(minimumTile, points))
-        } else {
-            masterWidth = across * min(0.85, max(0.3, fraction))
-        }
-        let master = CanvasRect(x: area.minX, y: area.minY,
-                                width: masterWidth, height: area.height)
-        let stackWidth = across - masterWidth
-        let stack = Array(sizes.dropFirst())
-        let heights = run(stack, across: area.height - gap * Double(stack.count - 1))
-
-        return [master] + zip(offsets(heights, from: area.minY), heights).map {
-            CanvasRect(x: area.maxX - stackWidth, y: $0, width: stackWidth, height: $1)
-        }
-    }
 }

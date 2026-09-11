@@ -229,6 +229,10 @@ final class CanvasBoardView: NSView {
     /// Pose the crossing without animating it — see `CanvasFade.hold` and `arrive(from:)`.
     func holdTiledness(_ value: Double) { tiledFade.hold(value) }
 
+    /// Cross to tiles or back to the board without the tiling itself going anywhere — the board as the
+    /// picker, which is a workspace drawn as a board. See `beginPicking`.
+    func showTiledness(_ shown: Bool) { tiledFade.set(shown) }
+
     /// The watch that hands the keyboard to the tile you click into. Only while one is up — see
     /// `watchTileClicks`.
     var tileClickWatch: Any?
@@ -263,12 +267,13 @@ final class CanvasBoardView: NSView {
         /// they were when the drag began, so every frame is computed from the start of the gesture
         /// rather than from the frame before it — which is what stops a slow drag accumulating drift.
         case resizeTiles(CanvasTileDivider, from: CanvasPoint, lengths: [Double])
-        /// Inside a tiled view: dragging a tile's handlebar to move it along the order. `grab` is
-        /// where inside the tile the bar was taken hold of, so the card can follow the pointer from
-        /// the point it was picked up by rather than jumping its own corner under it. `displaced` is
-        /// the tile the order was last changed against — see `CanvasBoardView+Input`, which uses it to
-        /// spend one move per crossing.
-        case reorderTile(String, grab: CanvasPoint, displaced: String?)
+        /// Inside a tiled view: dragging a tile by its handlebar or its tab to put it somewhere else.
+        /// Nothing moves while it is carried — a proxy follows the pointer (`dragPoint`) and where it
+        /// would land is marked — so `base`, where every tile is, holds for the whole gesture. `drop` is
+        /// what letting go would do now. `pulling` is a tab taken from a tile of several: the one card
+        /// comes out, rather than the tile.
+        case placeTile(String, base: [String: CanvasRect],
+                       drop: (target: String, drop: CanvasTileSession.Drop)?, pulling: Bool)
         /// A press on a link drawn on a card: let go where it started and it opens, move and it is
         /// carried off as a drag the board — or anywhere else — can drop. See `CanvasLinkZones`.
         case link(URL, from: CanvasPoint)
@@ -281,7 +286,7 @@ final class CanvasBoardView: NSView {
         var pansTheBoard: Bool {
             switch self {
             case .move, .marquee, .connect: return true
-            case .resize, .swap, .resizeTiles, .reorderTile, .link: return false
+            case .resize, .swap, .resizeTiles, .placeTile, .link: return false
             }
         }
     }
@@ -337,6 +342,24 @@ final class CanvasBoardView: NSView {
     /// rather than the selection because a tile command names *this* tile — "make this the master" has
     /// no reading against four selected at once.
     var menuTile: String?
+    /// The tile that had the focus before this one, for ⌥` — see `focusPreviousTile`.
+    var previousTile: String?
+    /// Whether ⌥N is choosing where the next card goes, which is what lets the plain arrows and Return
+    /// choose. See `beginPlacing`.
+    var isChoosingPlacement = false
+    /// Where a tile carried by its handlebar would land if let go now, and what it would do there.
+    /// See `previewDrop`.
+    var dropMark: (rect: CanvasRect, title: String)?
+    /// Whether the workspace is zoomed out to the board so you can pick its cards (⌥B). The tiling is
+    /// still up — nothing about the workspace is set aside — and only what is drawn, and what a click
+    /// means, changes. See `beginPicking` and `showsTiles`.
+    var isPicking = false
+    /// The card Space brought close while picking, and where the board was looking before it did, so
+    /// that putting it back is exact. See `beginPeek`.
+    var peeking: (card: String, zoom: CGFloat, centre: CanvasPoint)?
+    /// Where the pointer is while a tile is dragged, which is where its proxy is drawn. See
+    /// `CanvasOverlayView.drawCarried`.
+    var dragPoint: CanvasPoint?
     /// Which match ⌘G steps to next.
     var findCursor = 0
     /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
@@ -497,7 +520,7 @@ final class CanvasBoardView: NSView {
             var wanted = NSRect(origin: NSPoint(x: clip.bounds.origin.x + shift.x,
                                                 y: clip.bounds.origin.y + shift.y),
                                 size: clip.bounds.size)
-            if !isTiled, let cards = document.bounds,
+            if !showsTiles, let cards = document.bounds,
                let settled = CanvasPanBounds.constrain(wanted, holding: viewRect(cards)) {
                 wanted = settled
             }
@@ -600,13 +623,6 @@ final class CanvasBoardView: NSView {
     /// Internal because a drag calls it directly: a card being carried is repositioned on every
     /// mouse-moved event, and going through `setLayout` would be asking the board to reconsider a
     /// layout that has not changed.
-    /// The cards a layout is *not* showing, or nil for one that shows everything.
-    private func hiddenCards(of layout: CanvasLayout) -> Set<String>? {
-        guard let visible = layout.visible else { return nil }
-        let hidden = Set(document.nodes.map(\.id)).subtracting(visible)
-        return hidden.isEmpty ? nil : hidden
-    }
-
     /// The cards the current crossing is fading out or in — the ones a workspace leaves behind. Kept
     /// because `layout` stops being able to answer the question halfway through; see `setLayout`.
     private(set) var fadingCards: Set<String> = []
@@ -647,10 +663,6 @@ final class CanvasBoardView: NSView {
             // of a stack into the middle keeps its size and loses two of them. Cheap when it hasn't,
             // which is every frame of a card being dragged around a board.
             view.refreshChrome()
-            if let reordering, reordering.id == id {
-                view.frame = viewRect(reordering.frame)
-                continue
-            }
             let wanted = viewRect(layout.frame(of: node))
             if animatesLayout, view.frame != wanted, !view.isHidden {
                 view.animator().frame = wanted
@@ -660,35 +672,6 @@ final class CanvasBoardView: NSView {
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
-    }
-
-    /// Move only the card being carried, and leave the arrangement to travel at its own pace.
-    ///
-    /// A reorder drag reports a new pointer position on every mouse-moved event, and the carried card
-    /// has to follow it on every one of them. A full `layoutNodeViews` for that would hand every
-    /// *other* tile its frame outright, sixty times a second — cancelling the slide `moveInTiling`
-    /// just started and snapping the arrangement into place one frame after the crossing. The carried
-    /// card is the only one whose position this event decides.
-    func layoutCarriedCard() {
-        guard let reordering, let view = nodeViews[reordering.id] else { return }
-        view.frame = viewRect(reordering.frame)
-        refreshTileHandles()
-        tileHandleView.needsDisplay = true
-    }
-
-    /// The tile being dragged by its handlebar, and where the pointer is holding it.
-    ///
-    /// A card under the hand is not where the arrangement says it is, and it is the one card that must
-    /// not animate — an animation is a card catching up with a decision, and this one is being carried.
-    /// See `layoutNodeViews`.
-    var reordering: (id: String, frame: CanvasRect)? {
-        didSet {
-            // Lifted over its neighbours while it is out of its slot. By layer rather than by moving
-            // the view in the hierarchy: re-adding a subview takes a web card out of the window for an
-            // instant, which is a page torn down and started again for the sake of a z-order.
-            if let old = oldValue?.id, old != reordering?.id { nodeViews[old]?.layer?.zPosition = 0 }
-            if let id = reordering?.id { nodeViews[id]?.layer?.zPosition = 1 }
-        }
     }
 
     /// Set while cards should slide to their new places rather than appear there — entering and leaving
@@ -702,13 +685,18 @@ final class CanvasBoardView: NSView {
     /// grid says nothing about which card went where, and six cards flying there says all of it — and
     /// it is the same argument in reverse on the way out.
     func setLayout(_ next: CanvasLayout, animated: Bool) {
-        guard next != layout else { return }
+        // **While picking, the board is what is shown**, whatever the tiling would lay out. Every change
+        // to the workspace a click makes there comes through here with the tiles' layout, and taking it
+        // would fly the cards back into tiles in the middle of choosing them.
+        let shown = isPicking ? CanvasLayout.document : next
+        guard shown != layout else { return }
         // Whoever is out of the picture at either end of this change is out of it at both, as far as the
         // fade is concerned: going in they are the cards the workspace does not show, and coming out
         // they are the same cards arriving back. Worked out here because a moment later the layout
         // cannot say — on the way out every card is in the layout again the instant it is set.
-        fadingCards = hiddenCards(of: next) ?? hiddenCards(of: layout) ?? []
-        layout = next
+        fadingCards = CanvasLayout.fading(from: layout, to: shown,
+                                          among: Set(document.nodes.map(\.id)))
+        layout = shown
         // Built first, placed second — and when the move is animated, placed inside the animation.
         // See `buildNodeViews`, which is the half that must not touch a card that is about to fly.
         buildNodeViews()
@@ -839,7 +827,7 @@ final class CanvasBoardView: NSView {
         guard window != nil else { return }
         let candidates = pageCandidates()
         // A tiled view is not a budget problem — every tile runs. See `CanvasPageBudget.liveWhileTiled`.
-        let live = isTiled ? CanvasPageBudget.liveWhileTiled(among: candidates)
+        let live = showsTiles ? CanvasPageBudget.liveWhileTiled(among: candidates)
                            : CanvasPageBudget.live(among: candidates)
         if live != pagesLive {
             Log.write("canvas pages live: \(live.count) of \(candidates.count)")

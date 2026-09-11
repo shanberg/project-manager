@@ -51,6 +51,9 @@ enum ProjectTabView: Codable, Equatable, Hashable {
     /// `ProjectTabSet`. It is the view a workspace is a narrowing *of*, so it is the one tab that
     /// cannot be closed, cannot be dragged out of first place, and is never tiled.
     var isCanvas: Bool { self == .board(.whole) }
+
+    /// The notes as a tab of their own — see `ProjectTabSet.adoptNotes(as:)`.
+    var isNotesTab: Bool { self == .notes || self == .board(.note) }
 }
 
 /// Which part of a board a tab is pinned to.
@@ -171,12 +174,37 @@ struct ProjectTabSet: Codable, Equatable {
     /// — a frame from its board, the notes from beside them — is related to it, and putting it at the
     /// far end of the bar throws that away. This is what every browser does with a link opened in a
     /// tab, and for the same reason.
+    ///
+    /// **Except a workspace, which goes last.** The row is the project's workspaces (§7i), so a new one
+    /// is a new entry in a list rather than a place opened from where you are — and since the canvas is
+    /// always first and usually the tab you tiled from, "after the current tab" put every new workspace
+    /// at the head of the row, ahead of the ones you already had.
     @discardableResult
     mutating func open(_ view: ProjectTabView) -> ProjectTab {
         let tab = ProjectTab(view)
-        tabs.insert(tab, at: selectedIndex + 1)
+        tabs.insert(tab, at: view.workspaceName == nil ? selectedIndex + 1 : tabs.endIndex)
         selectedID = tab.id
         return tab
+    }
+
+    /// Whether a tab here is showing the project's notes as a *tab* — `.notes`, or the `.note` focus
+    /// that means the same thing — rather than as the Notes workspace (§7j).
+    var holdsNotesTab: Bool { tabs.contains { $0.view.isNotesTab } }
+
+    /// **Turn the notes tab into a workspace's chip**, in place, and report every tab that changed —
+    /// retargeted or closed as a duplicate — so the window can drop the panes built for what they were.
+    ///
+    /// A notes tab was the one chip in the row that closed, could not be renamed, and could not take a
+    /// second card; a workspace of the project card alone shows the same thing and is none of those.
+    /// Retargeted rather than replaced, so the row keeps its order and the window stays on the tab it
+    /// was on. A workspace that already had its own chip keeps it — the leftmost survives, as in
+    /// `collapseDuplicates`.
+    @discardableResult
+    mutating func adoptNotes(as workspace: String) -> [String] {
+        let view = ProjectTabView.board(.workspace(workspace))
+        let retargeted = tabs.filter(\.view.isNotesTab).map(\.id)
+        for id in retargeted { retarget(id, to: view) }
+        return retargeted + collapseDuplicates()
     }
 
     /// **The row is the project's workspaces.** Put a chip on every one that hasn't got a chip, and
@@ -312,8 +340,8 @@ struct ProjectTabSet: Codable, Equatable {
 
     /// Take a tab out of the row and put it back at `index` — what a drag along the bar does.
     ///
-    /// The same operation, spelled the same way, as `CanvasTileSession.move`: this is "that one goes
-    /// *there*", which is what builds an order, rather than a swap, which only corrects one.
+    /// This is "that one goes *there*", which is what builds an order, rather than a swap, which only
+    /// corrects one.
     ///
     /// **The canvas holds its place at both ends** — it cannot be dragged, and nothing can be dropped
     /// in front of it. It is the row's fixed point, and a row whose fixed point moves is a row with two

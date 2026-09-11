@@ -147,6 +147,9 @@ and whether it is the 10pt grid.
 
 ### 8. Swap the card in a tile
 
+**Folded into [canvas-workspaces.md](canvas-workspaces.md) §7k**, as tabs in a tile — and the picker is
+the board itself.
+
 In a tiled view, a way to say "this slot, different card" — a control on the tile that raises a
 picker of the cards on the board that are not currently up.
 
@@ -161,6 +164,8 @@ and does nothing else, deliberately, and every other tile command has moved off 
 menus.
 
 ### 11. BSP layouts
+
+**Answered by [canvas-workspaces.md](canvas-workspaces.md) §7k**: columns of tiles rather than a tree.
 
 `CanvasTiling` currently offers a grid and a master-stack, and rules BSP out in its own doc comment:
 "a scheme for windows that arrive one at a time and split whatever had focus, and a board's cards all

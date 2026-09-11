@@ -90,8 +90,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
-            header.arrangement = scroll.board.tiling?.arrangement
             refreshTileCommand()
+            refreshExistingCards()
             rememberViewState()
             keepNamedWorkspaceUpToDate()
             // Derived rather than declared. It used to be set once, on the way in, which was fine
@@ -794,6 +794,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.addLink = { [weak self] in self?.scroll.board.addLinkCard(at: nil) }
         header.addFile = { [weak self] in self?.scroll.board.addFileCard(at: nil) }
         header.addProjectNote = { [weak self] in self?.scroll.board.addProjectNoteCard(at: nil) }
+        header.addExistingCard = { [weak self] id in self?.scroll.board.addExistingCard(withID: id) }
         header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
         header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
         header.zoomOut = { [weak self] in self?.scroll.zoom(by: 1 / 1.25) }
@@ -827,6 +828,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard !scroll.board.offerAsWorkspace(targets, arrangement: arrangement) else { return }
             scroll.board.tile(targets, arrangement: arrangement)
         }
+        header.sizeColumnsToContent = { [weak self] in self?.scroll.board.sizeTilesToContent() }
         header.findCommitted = { [weak self] in
             guard let self else { return }
             view.window?.makeFirstResponder(scroll.board)
@@ -1040,6 +1042,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // selection changing at all.
         refreshTileCommand()
         refreshProjectNoteOffer()
+        refreshExistingCards()
     }
 
     /// Keep the `+` menu's fifth item in step with the board.
@@ -1051,6 +1054,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private func refreshProjectNoteOffer() {
         let offers = scroll.board.offersProjectNoteCard
         if header.offersProjectNote != offers { header.offersProjectNote = offers }
+    }
+
+    /// Keep the `+` menu's Add Card from Canvas in step with the board, for the same reason — from the
+    /// two things that change the list: the document, and which cards are tiles.
+    ///
+    /// A page that loads and learns its title renames its card here only at the next of those. The
+    /// contextual menus and the View menu are built as they open and are always current.
+    private func refreshExistingCards() {
+        let sections = scroll.board.existingCardSections
+        if header.existingCards != sections { header.existingCards = sections }
     }
 
     /// Keep the header's tiling button saying what it would actually do.

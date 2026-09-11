@@ -159,7 +159,7 @@ extension CanvasBoardView {
         // `insert` selects what it made. In document order, so several go up in the order they were
         // dropped.
         if isTiled {
-            for node in document.nodes where selection.contains(node.id) { addToTiling(node.id) }
+            addToTiling(document.nodes.filter { selection.contains($0.id) }.map(\.id))
         }
         return true
     }
@@ -223,6 +223,8 @@ extension CanvasBoardView {
     // MARK: The right-click menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        // Picking cards on the board, a click is a pick and nothing else — including this one.
+        guard !isPicking else { return nil }
         let where_ = canvasPoint(convert(event.locationInWindow, from: nil))
         let menu = NSMenu()
         // Where a "Paste" or a "New Card" from this menu should land. Kept because the menu is
@@ -523,33 +525,37 @@ extension CanvasBoardView {
     /// same argument as a right-click on a window divider anywhere else — the divider is a control, and
     /// controls have menus.
     private func buildDividerMenu(_ menu: NSMenu, _ divider: CanvasTileDivider) {
-        guard let tiling, let sides = tiles(of: divider) else { return }
-        let before = divider.isVertical ? "Left" : "Above"
-        let after = divider.isVertical ? "Right" : "Below"
-
-        // The master's boundary has a tile on one side and the whole stack on the other, and the stack
-        // is not a tile — pinning "the right-hand side" of it would mean pinning a column's width by
-        // way of one of the cards in it, which is not what the click said.
-        add(menu, pinTitle(sides.before, side: divider.isMasterSplit ? "Master" : before),
-            #selector(pinTileBeforeDivider(_:)))
-        if !divider.isMasterSplit {
-            add(menu, pinTitle(sides.after, side: after), #selector(pinTileAfterDivider(_:)))
-        }
+        guard tiling != nil else { return }
+        // A boundary between columns is about the two columns, and one between tiles about the two
+        // tiles — so the pins say which, rather than naming a card that only happens to be beside it.
+        let before = divider.isVertical ? "Left Column" : "Tile Above"
+        let after = divider.isVertical ? "Right Column" : "Tile Below"
+        add(menu, pinTitle(divider, divider.before, side: before), #selector(pinTileBeforeDivider(_:)))
+        add(menu, pinTitle(divider, divider.before + 1, side: after), #selector(pinTileAfterDivider(_:)))
 
         menu.addItem(.separator())
-        add(menu, divider.isMasterSplit ? "Reset Split" : "Even Out These Tiles",
+        add(menu, divider.isVertical ? "Even Out Columns" : "Even Out These Tiles",
             #selector(evenOutTiles(_:)))
 
         menu.addItem(.separator())
+        addArrange(menu)
+        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
+    }
+
+    /// Arrange's commands. None is ticked: an arrangement deals the tiles out into columns and is then
+    /// forgotten, and sizing to content sets the widths once, so there is no state for a tick to report
+    /// (docs/canvas-workspaces.md §7k).
+    private func addArrange(_ menu: NSMenu) {
         let arrange = NSMenu()
         for option in CanvasTiling.Arrangement.allCases {
-            let item = add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
-                                                                  : #selector(arrangeAsMasterStack(_:)))
-            item.state = tiling.arrangement == option ? .on : .off
+            add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
+                                                       : #selector(arrangeAsMasterStack(_:)))
         }
-        let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
-        item.submenu = arrange
-        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
+        if isTiled {
+            arrange.addItem(.separator())
+            add(arrange, "Size Columns to Content", #selector(sizeColumnsToContent(_:)))
+        }
+        menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "").submenu = arrange
     }
 
     /// What a right-click on a *tile* can say about the tile, as opposed to about the card in it.
@@ -587,21 +593,23 @@ extension CanvasBoardView {
         // header is the separator, so it doesn't want a second one above it.
         addTiling(menu, separated: false)
 
-        // Only where it means something: a grid has no master, and the master is already the master.
-        if tiling.arrangement == .masterStack, tiling.ids.first != id {
+        // Only where it means something: a workspace not shaped as a master and a stack has no master,
+        // and the master is already the master.
+        // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
+        if tiling.hasTabs(id) {
+            add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
+        }
+        if tiling.canPromote(id) {
             let promote = add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:)))
             promote.keyEquivalent = "\r"
             promote.keyEquivalentModifierMask = [.command, .shift]
         }
+        // Here as well as on the board's own menu, because the board's is reached by right-clicking a
+        // gap between tiles, and the gaps are four points wide.
+        addExistingCards(menu)
+        add(menu, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
 
-        let arrange = NSMenu()
-        for option in CanvasTiling.Arrangement.allCases {
-            let item = add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
-                                                                  : #selector(arrangeAsMasterStack(_:)))
-            item.state = tiling.arrangement == option ? .on : .off
-        }
-        let item = menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "")
-        item.submenu = arrange
+        addArrange(menu)
 
         add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
 
@@ -612,6 +620,17 @@ extension CanvasBoardView {
     /// Make the right-clicked tile the master. `promoteTile` is the same command with no pointer
     /// behind it — the difference between a contextual menu, which is about the thing you pointed at,
     /// and the menu bar, which can only be about the thing that is focused.
+    /// ⌥B, in the menus: the board, to pick the workspace's cards on — or, while there, the way back.
+    @objc func pickCardsOnBoard(_ sender: Any?) { togglePicking() }
+
+    /// What that command is called: which way it goes.
+    var pickCardsTitle: String { isPicking ? "Back to Workspace" : "Pick Cards on Board" }
+
+    @objc func pullMenuTabOut(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        pullTabOut(id)
+    }
+
     @objc func promoteMenuTile(_ sender: Any?) {
         guard let id = menuTile else { return }
         restoringMaximized { promoteInTiling(id) }
@@ -680,40 +699,29 @@ extension CanvasBoardView {
     /// and the tiles stay exactly as they are behind you.
     @objc func goToCanvasCommand(_ sender: Any?) { onGoToCanvas() }
 
-    private func pinTitle(_ id: String, side: String) -> String {
-        "\(isTilePinned(id) ? "Unpin" : "Pin") \(side) Tile"
-    }
-
-    /// The two tiles a boundary separates.
-    func tiles(of divider: CanvasTileDivider) -> (before: String, after: String)? {
-        guard let tiling, divider.before + 1 < divider.run.count else { return nil }
-        return (tiling.ids[divider.run[divider.before]], tiling.ids[divider.run[divider.before + 1]])
+    private func pinTitle(_ divider: CanvasTileDivider, _ index: Int, side: String) -> String {
+        "\(tiling?.isPinned(divider.run, at: index) == true ? "Unpin" : "Pin") \(side)"
     }
 
     @objc func pinTileBeforeDivider(_ sender: Any?) {
-        guard let divider = menuDivider, let sides = tiles(of: divider) else { return }
-        togglePinTile(sides.before)
+        guard let divider = menuDivider else { return }
+        togglePin(divider.run, at: divider.before)
     }
 
     @objc func pinTileAfterDivider(_ sender: Any?) {
-        guard let divider = menuDivider, let sides = tiles(of: divider) else { return }
-        togglePinTile(sides.after)
+        guard let divider = menuDivider else { return }
+        togglePin(divider.run, at: divider.before + 1)
     }
 
     /// Put this run back to sharing equally — the way out of an arrangement you have over-adjusted,
     /// and the only thing a drag genuinely cannot express.
     @objc func evenOutTiles(_ sender: Any?) {
-        guard let divider = menuDivider, var session = tiling else { return }
-        if divider.isMasterSplit {
-            session.sizes[session.ids[0]] = nil
-            session.masterFraction = CanvasTiling.savedMasterFraction
-        } else {
-            for index in divider.run { session.sizes[session.ids[index]] = nil }
-        }
-        tiling = session
-        setLayout(session.layout, animated: true)
-        onTilingChanged?()
+        guard let divider = menuDivider else { return }
+        evenOut(divider.run)
     }
+
+    /// ⌥⇧0's menu item — see `sizeTilesToContent`.
+    @objc func sizeColumnsToContent(_ sender: Any?) { sizeTilesToContent() }
 
     @objc func arrangeAsGrid(_ sender: Any?) { chooseArrangement(.grid) }
     @objc func arrangeAsMasterStack(_ sender: Any?) { chooseArrangement(.masterStack) }
@@ -735,6 +743,7 @@ extension CanvasBoardView {
         if offersProjectNoteCard {
             add(menu, CanvasAddCommand.projectNote.title, #selector(newProjectNoteHere))
         }
+        addExistingCards(menu)
         menu.addItem(.separator())
         // Enabled or not is `validateUserInterfaceItem`'s answer, not one set here: this menu
         // autoenables, so anything written onto `isEnabled` at build time is overwritten before the
@@ -795,6 +804,18 @@ extension CanvasBoardView {
         parent.submenu = list
     }
 
+    /// Add Card from Canvas, as a submenu — the cards on the board this tiled view isn't showing.
+    ///
+    /// Only in a tiled view, and left out rather than dimmed when every card is already up, for the
+    /// reason `addWorkspacesHoldingSelection` gives.
+    private func addExistingCards(_ menu: NSMenu) {
+        guard isTiled else { return }
+        let list = NSMenu()
+        fillExistingCardsMenu(list)
+        guard !list.items.isEmpty else { return }
+        menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = list
+    }
+
     @discardableResult
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector) -> NSMenuItem {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
@@ -837,8 +858,8 @@ extension CanvasBoardView {
     /// change rather than five. It used to be five copies of `store.change` and `select`, and a tiled
     /// view was handled by dimming four of them and having the fifth apologise.
     ///
-    /// The card goes on the end of the tiling — see `CanvasTileSession.add`, which argues that — and
-    /// its position *on the board* is stepped clear of whatever is already there. That second part
+    /// The card goes where the next card goes — see `nextPlacement` — and its position *on the board*
+    /// is stepped clear of whatever is already there. That second part
     /// matters only while tiled, and only because of what tiled means: the point you appear to be
     /// looking at is a region of the board the tiles are drawn over, so a card dropped at it would land
     /// on top of the cards that live there — damage you cannot see, done to the layout you cannot see.
@@ -1238,16 +1259,14 @@ extension CanvasBoardView {
             doc.nodes.append(node)
             doc.edges.append(edge)
         }
-        // Up on screen with the rest, on the end of the order. This used to report "added to the board,
+        // Up on screen with the rest, beside the tile it was followed from. This used to report "added to the board,
         // behind this tiled view" — honest about where the card had gone and no use at all, since
         // following a link is a request to *read* the page and the tiled view is what you were reading
         // in. Revealing is the untiled half of the same sentence: put the new card where I can see it.
+        // Placed before it is selected, while the tile it came from is still the focused one.
+        if isTiled { addToTiling(node.id) }
         select([node.id])
-        if isTiled {
-            addToTiling(node.id)
-        } else {
-            (scrollView as? CanvasScrollView)?.reveal(node.id)
-        }
+        if !isTiled { (scrollView as? CanvasScrollView)?.reveal(node.id) }
     }
 
     /// The first empty spot to the right of `frame`, at the same size.
@@ -1446,9 +1465,6 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     var pinnableTile: String? {
         guard let tiling, tiling.ids.count > 1, selection.count == 1, let id = selection.first,
               tiling.ids.contains(id) else { return nil }
-        // A grid of rows *and* columns has no run: a width there belongs to a column, shared with
-        // tiles nobody selected. See `CanvasTiling.grid`.
-        if tiling.arrangement == .grid, gridRunIsHorizontal == nil { return nil }
         return id
     }
 
@@ -1586,11 +1602,12 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         case #selector(goToListedWorkspace(_:)):
             return (item as? NSMenuItem)?.representedObject is String
         case #selector(setTileArrangement(_:)):
-            (item as? NSMenuItem).map { entry in
-                entry.state = (entry.representedObject as? String) == tiling?.arrangement.rawValue
-                    ? .on : .off
-            }
+            // Commands, not a setting, so nothing is ticked — see `addArrange`.
+            (item as? NSMenuItem)?.state = .off
             return true
+        case #selector(sizeColumnsToContent(_:)):
+            // One column has the whole width whatever it holds.
+            return (tiling?.columns.count ?? 0) > 1
         case #selector(goToFrame(_:)):
             guard let entry = item as? NSMenuItem else { return false }
             let frames = self.frames
@@ -1620,6 +1637,12 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // and answered by `addCard`, which steps the card clear and puts a tile up for it. The
             // right-click that reaches these while tiled is one on a gap that isn't a divider.
             return true
+        case #selector(addExistingCard(_:)):
+            guard let id = (item as? NSMenuItem)?.representedObject as? String else { return false }
+            return tiling.map { !$0.cards.contains(id) } ?? false
+        case #selector(pickCardsOnBoard(_:)):
+            (item as? NSMenuItem)?.title = pickCardsTitle
+            return isTiled
         case #selector(newFrameHere):
             // Still not, and alone in that. A frame is a container of cards rather than a card, so
             // there is no tile it could become — it would be an edit made entirely behind the view.
@@ -1638,8 +1661,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         case #selector(promoteTile(_:)):
             // Only where it means something, which is what the contextual menu says by leaving the
             // item out altogether: a grid has no master, and the master is already the master.
-            guard let id = focusedTile, tiling?.arrangement == .masterStack else { return false }
-            return tiling?.ids.first != id
+            guard let id = focusedTile else { return false }
+            return tiling?.canPromote(id) == true
         case #selector(goToCanvasCommand(_:)):
             return isTiled
         case #selector(togglePinTileSize(_:)):

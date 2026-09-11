@@ -412,8 +412,7 @@ final class PMStore: ObservableObject {
     /// then open it". Resolution happens again here rather than trusting `canvasPath`, because the
     /// published value is a snapshot and the answer to "should I write a file" deserves the live one.
     ///
-    /// Says whether it *made* the board, because a board made just now is a new project's, and a new
-    /// project opens on a Notes workspace — see `ProjectWindowController.seedNotesWorkspace`.
+    /// Says whether it *made* the board, which is to say whether this is a new project's.
     func openableCanvasPath(_ done: @escaping @MainActor (Result<OpenableCanvas, Error>) -> Void) {
         guard let projectPath else {
             // A window made a moment ago by the menu command itself: the store's first load is still in

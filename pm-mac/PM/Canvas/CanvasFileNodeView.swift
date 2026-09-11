@@ -91,7 +91,7 @@ final class CanvasFileNodeView: CanvasNodeView {
         // Pictures are the exception and keep rendering: an image is *more* legible small than any
         // text, and at this zoom it is usually the only thing on the board you can identify.
         if isSimplified, !isPicture(path) {
-            setContent(summaryView(shortName(for: path), symbol: symbol(for: path)))
+            setContent(summaryView(canvasFileCardName(path), symbol: canvasFileSymbol(path)))
             return
         }
 
@@ -119,18 +119,6 @@ final class CanvasFileNodeView: CanvasNodeView {
         return "moved to " + (where_ ?? parent.lastPathComponent)
     }
 
-    /// What the card is called when the board is too far out to read it.
-    ///
-    /// A project's notes file is named for the project, so the `Notes - ` prefix is the one part of the
-    /// filename that says nothing — and at this zoom the card is one line of text, which makes eight
-    /// wasted characters a third of it. Every board of projects otherwise reads as a row of cards all
-    /// starting with the same word.
-    private func shortName(for path: String) -> String {
-        let name = ((path as NSString).deletingPathExtension as NSString).lastPathComponent
-        guard projectFolder(ofNotesPath: path) != nil, name.hasPrefix("Notes - ") else { return name }
-        return String(name.dropFirst("Notes - ".count))
-    }
-
     /// The project this card's file belongs to, if it is a project's notes. What the menu's Open
     /// Project acts on.
     var projectFolderName: String? {
@@ -150,15 +138,6 @@ final class CanvasFileNodeView: CanvasNodeView {
     private func isPicture(_ path: String) -> Bool {
         ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"]
             .contains((path as NSString).pathExtension.lowercased())
-    }
-
-    private func symbol(for path: String) -> String {
-        switch (path as NSString).pathExtension.lowercased() {
-        case "md", "markdown", "txt": return "doc.text"
-        case "png", "jpg", "jpeg", "gif", "heic", "webp", "tiff": return "photo"
-        case "pdf": return "doc.richtext"
-        default: return "doc"
-        }
     }
 
     /// The card's body: the file, drawn as the kind of thing it is.

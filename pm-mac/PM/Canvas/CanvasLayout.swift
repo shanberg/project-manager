@@ -44,4 +44,19 @@ struct CanvasLayout: Equatable {
         guard !shows(id) else { return false }
         return !fading || alpha <= 0.001
     }
+
+    /// The cards a change from `old` to `next` fades — out on the way into a workspace, back in on the
+    /// way out — among the board's `cards`. See `CanvasBoardView.setLayout`.
+    ///
+    /// **Only the way out borrows the old layout's answer.** Leaving to the document, every card is in
+    /// the layout the instant it is set, so the ones arriving back can only be read off the layout being
+    /// left. A tiling that happens to show every card is not that — a maximized tile put back, or a
+    /// switch into a workspace holding the whole board — and borrowing there marked the tiles it shows
+    /// as fading. A fading card is drawn at `1 - tiledness`, which in a workspace is zero, so they sat
+    /// in their slots invisible until a resize re-laid the board and asked again.
+    static func fading(from old: CanvasLayout, to next: CanvasLayout,
+                       among cards: Set<String>) -> Set<String> {
+        if let visible = next.visible { return cards.subtracting(visible) }
+        return old.visible.map { cards.subtracting($0) } ?? []
+    }
 }

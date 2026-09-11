@@ -52,13 +52,24 @@ struct CanvasViewState: Codable, Equatable {
     /// The order is stored because the order is the placement. Swapping two tiles and promoting one to
     /// master are edits to nothing but this list, so a restore that re-derived it from where the cards
     /// sit on the board would silently undo every one of them.
+    ///
+    /// **Two shapes, one type** (docs/canvas-workspaces.md §7k). A workspace is `columns` now, and
+    /// the fields above it are what it was before: a list, an arrangement to lay the list out by, and
+    /// lengths kept per card. They go on being *written* — every card column by column in reading
+    /// order, an arrangement read off the shape — so a build from before columns can still open a
+    /// workspace saved by one after, and lay it out its own way. A tiling with no `columns` was saved
+    /// before them, and becomes columns when it is restored: `CanvasTileSession.init(restoring:)`,
+    /// which is at restore rather than at decode because a grid's column count comes from the window.
     struct Tiling: Codable, Equatable {
         var ids: [String]
         var arrangement: CanvasTiling.Arrangement
         var masterFraction: Double
         /// What each tile was holding — a pinned length, or a share. Optional so a tiling written
-        /// before sizes existed still decodes; absent means every tile was sharing evenly.
+        /// before sizes existed still decodes; absent means every tile was sharing evenly. Read only
+        /// from a tiling with no `columns`, and never written by one that has them.
         var sizes: [String: CanvasTiling.Size]?
+        /// The workspace itself, or nil for one saved before columns existed.
+        var columns: [CanvasTiling.Column]?
     }
 
     /// A board nobody has done anything to. Stored as nothing at all rather than as a row saying so.

@@ -51,8 +51,6 @@ final class CanvasHeaderModel: ObservableObject {
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
     @Published var focusedTile: TileControls?
-    /// The arrangement in force, or nil when the board is showing itself.
-    @Published var arrangement: CanvasTiling.Arrangement?
     @Published var titlebar = TitlebarButtonMetrics.unmeasured
     /// How much of the window the controls can spend. See `CanvasHeaderModel.Room`.
     @Published var room = Room.full
@@ -164,6 +162,10 @@ final class CanvasHeaderModel: ObservableObject {
     /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
     /// question (`CanvasBoardView.offersProjectNoteCard`).
     @Published var offersProjectNote = false
+    /// What the `+` menu's Add Card from Canvas lists — the cards a tiled view isn't showing, and
+    /// nothing while there is no tiled view. Kept in step by `CanvasPaneController.refreshExistingCards`
+    /// for the reason `offersProjectNote` is.
+    @Published var existingCards: [CanvasExistingCards.Section] = []
 
     // MARK: What the controls do. Supplied by the window controller.
 
@@ -172,6 +174,7 @@ final class CanvasHeaderModel: ObservableObject {
     var addLink: () -> Void = {}
     var addFile: () -> Void = {}
     var addProjectNote: () -> Void = {}
+    var addExistingCard: (String) -> Void = { _ in }
     var setMode: (CanvasMode) -> Void = { _ in }
     var zoomIn: () -> Void = {}
     var zoomOut: () -> Void = {}
@@ -191,6 +194,7 @@ final class CanvasHeaderModel: ObservableObject {
     var findCommitted: () -> Void = {}
     var tile: () -> Void = {}
     var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
+    var sizeColumnsToContent: () -> Void = {}
     /// The focused tile's verbs — see `CanvasTileCapsule`.
     var maximizeTile: () -> Void = {}
     var promoteTile: () -> Void = {}
@@ -346,6 +350,20 @@ struct CanvasControlCapsule: View {
             if model.offersProjectNote {
                 Button(CanvasAddCommand.projectNote.title, action: model.addProjectNote)
             }
+            // The cards already on the board that the tiled view isn't showing. Absent rather than dim
+            // when there are none, like the board's own menus — see `CanvasExistingCards`.
+            if !model.existingCards.isEmpty {
+                Divider()
+                Menu(CanvasExistingCards.title) {
+                    ForEach(Array(model.existingCards.enumerated()), id: \.offset) { _, section in
+                        if let frame = section.frame {
+                            Section(frame) { existingCardButtons(section.cards) }
+                        } else {
+                            existingCardButtons(section.cards)
+                        }
+                    }
+                }
+            }
         } label: {
             Image(systemName: "plus")
         }
@@ -356,6 +374,19 @@ struct CanvasControlCapsule: View {
         .help("Add to this canvas")
     }
 
+    /// One item per card, with the icon the board's menus give it.
+    private func existingCardButtons(_ cards: [CanvasExistingCards.Card]) -> some View {
+        ForEach(cards, id: \.id) { card in
+            Button { model.addExistingCard(card.id) } label: {
+                Label {
+                    Text(card.name)
+                } icon: {
+                    if let icon = CanvasBoardView.menuIcon(for: card.kind) { Image(nsImage: icon) }
+                }
+            }
+        }
+    }
+
     private var optionsMenu: some View {
         Menu {
             // This menu is called View options and holds the mode and the four zooms, all of which it
@@ -363,10 +394,14 @@ struct CanvasControlCapsule: View {
             // one thing not in it. First, because it is the largest of them.
             Button(model.tileTitle, action: model.tile).disabled(!model.canTile)
             Menu("Arrange Tiles") {
+                // Commands rather than a setting, so nothing is ticked — see
+                // `CanvasBoardView.setArrangement`.
                 ForEach(CanvasTiling.Arrangement.allCases, id: \.self) { arrangement in
-                    Toggle(arrangement.title, isOn: Binding(get: { model.arrangement == arrangement },
-                                                            set: { _ in model.setArrangement(arrangement) }))
+                    Button(arrangement.title) { model.setArrangement(arrangement) }
                 }
+                Divider()
+                Button("Size Columns to Content", action: model.sizeColumnsToContent)
+                    .disabled(model.tiling == nil)
             }
             Divider()
             Toggle("Connect Cards", isOn: Binding(get: { model.mode == .connect },

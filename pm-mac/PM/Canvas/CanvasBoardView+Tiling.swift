@@ -18,6 +18,14 @@ extension CanvasBoardView {
 
     var isTiled: Bool { tiling != nil }
 
+    /// Whether the tiles are what is on screen: tiled, and not zoomed out to the board to pick cards.
+    ///
+    /// **Two questions, and they used to be one.** `isTiled` is about the workspace — the commands,
+    /// what a new card is added to, what is saved. This is about the screen — whether a card takes its
+    /// own clicks, whether the board scrolls and zooms, which rule the page budget runs by. Picking is
+    /// the one state where they differ: the workspace is up and the board is showing.
+    var showsTiles: Bool { isTiled && !isPicking }
+
     // MARK: Entering and leaving
 
     /// ⌘Return. Make a workspace out of the selection — or, inside one, go back to the canvas.
@@ -37,7 +45,9 @@ extension CanvasBoardView {
     @objc func tileSelection(_ sender: Any?) {
         guard tiling == nil else {
             // **A change of tab, not a change to the board.** The tiles stay exactly as they are; the
-            // window shows its canvas. See `onGoToCanvas`.
+            // window shows its canvas. See `onGoToCanvas`. Picking is over either way — coming back to
+            // this tab is coming back to the workspace, not to a board half-way through choosing.
+            if isPicking { endPicking(animated: false) }
             return onGoToCanvas()
         }
         let ids = tileTargets
@@ -65,12 +75,15 @@ extension CanvasBoardView {
         // dragged into, the widths, the pin. Matched on the set rather than the order, because the
         // order is one of the things being remembered.
         let remembered = lastTiling.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
+        if arrangement == nil, let remembered { return remembered }
+        // Asking for an arrangement is asking for the tiles to be dealt out again, so what was kept of
+        // their columns and sizes is set aside. The order is kept: it is where the cards were.
         return CanvasViewState.Tiling(
             ids: remembered?.ids ?? CanvasTiling.order(cards),
             arrangement: arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
                 ?? preferredArrangement(for: cards.count),
             masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction,
-            sizes: remembered?.sizes)
+            sizes: nil)
     }
 
     /// Hand this tiling to the window as a workspace, and say whether it took it. Only from a board
@@ -130,7 +143,7 @@ extension CanvasBoardView {
         guard let tiling, tiling.ids.count > 1, let id = focusedTile else { return nil }
         return CanvasHeaderModel.TileControls(
             isMaximized: tiling.maximized != nil,
-            canPromote: tiling.arrangement == .masterStack && tiling.ids.first != id,
+            canPromote: tiling.canPromote(id),
             pinTitle: pinnableTile == nil ? nil : pinTileTitle)
     }
 
@@ -165,25 +178,34 @@ extension CanvasBoardView {
         // afterwards, which is the same arithmetic with the journey missing — see
         // `tileableRect(atZoom:)` and `CanvasScrollView.fly(to:centre:animated:)`.
         let area = FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) }
-        let order = remembered?.ids ?? CanvasTiling.order(cards)
-        let session = CanvasTileSession(
-            ids: order,
-            arrangement: arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
-                ?? preferredArrangement(for: cards.count),
-            masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction,
-            sizes: remembered?.sizes ?? [:],
-            area: area,
-            restoreVisible: tiling?.restoreVisible ?? visible,
-            restoreZoom: restoreZoom)
+        let restoreVisible = tiling?.restoreVisible ?? visible
+        let session: CanvasTileSession
+        if arrangement == nil, let remembered,
+           let restored = CanvasTileSession(restoring: remembered, keeping: { ids.contains($0) },
+                                            area: area, restoreVisible: restoreVisible,
+                                            restoreZoom: restoreZoom) {
+            session = restored
+        } else {
+            // Dealt out afresh: in the order the cards were last in, if they have been up before, else
+            // the order they sit in on the board.
+            let order = remembered?.ids.filter { ids.contains($0) } ?? CanvasTiling.order(cards)
+            session = CanvasTileSession(
+                columns: CanvasTiling.columns(
+                    arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
+                        ?? preferredArrangement(for: cards.count),
+                    of: order.map { CanvasTiling.Tile($0) }, in: area,
+                    masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction),
+                area: area, restoreVisible: restoreVisible, restoreZoom: restoreZoom)
+        }
         tiling = session
         // Something has to be focused on the way in, or the arrows and Return have nothing to act on
         // and the first thing you try does nothing. Whatever of the selection survived, else the first
         // tile — which in master-and-stack is the master, the one you are most likely to mean.
         let kept = selection.intersection(ids)
-        selection = kept.isEmpty ? [order[0]] : kept
+        selection = kept.isEmpty ? [session.ids[0]] : kept
         // Started before the movement rather than with it, so the first frames — the most expensive
         // ones, where every card is invalidated at once — are inside the measurement. See `FrameMeter`.
-        FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(order.count) tiles, "
+        FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(session.ids.count) tiles, "
                               + "\(pagesLive.count) live)", on: self)
         flyToTiles(of: session, animated: true)
         setLayout(session.layout, animated: true)
@@ -212,9 +234,11 @@ extension CanvasBoardView {
     /// What this board looks like at the moment the window stops showing it, for the board that is
     /// about to take its place. See `CanvasArrival`.
     var departure: CanvasArrival {
+        // A board picking cards looks like the canvas, so it is handed over as one: the pane taking over
+        // arrives at this zoom with nothing to pose as.
         CanvasArrival(zoom: Double(scrollView?.magnification ?? 1),
                       centre: canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)),
-                      tiling: tiling)
+                      tiling: isPicking ? nil : tiling)
     }
 
     /// Stand exactly where the board before this one was standing, wearing the workspace it was wearing
@@ -272,29 +296,23 @@ extension CanvasBoardView {
     /// which is how a pane comes to have something to animate from after all.
     func restoreTiling(_ remembered: CanvasViewState.Tiling, named name: String? = nil,
                        animated: Bool = false) {
-        let live = remembered.ids.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
-        guard !live.isEmpty else { return }
-        workspaceName = name
         // The zoom a tiling is shown at, and the fitted zoom to hand back on the way out — the same
         // two `tile` sets, arrived at the same way round. See there for why.
         let restoreZoom = Double(scrollView?.magnification ?? 1)
-        let session = CanvasTileSession(ids: live,
-                                        arrangement: remembered.arrangement,
-                                        masterFraction: remembered.masterFraction,
-                                        // Only for cards that are still here: a size left behind for a
-                                        // deleted card would come back the moment its id was reused.
-                                        sizes: (remembered.sizes ?? [:]).filter { live.contains($0.key) },
-                                        area: FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) },
-                                        // Where leaving puts you back. Not remembered: it is the region
-                                        // the board would be showing anyway, which on one just opened
-                                        // is the whole of it — the right place to be returned to.
-                                        restoreVisible: canvasRect(visibleRect),
-                                        restoreZoom: restoreZoom)
+        guard let session = CanvasTileSession(
+            restoring: remembered,
+            keeping: { document.node(id: $0).map { !$0.isGroup } ?? false },
+            area: FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) },
+            // Where leaving puts you back. Not remembered: it is the region the board would be showing
+            // anyway, which on one just opened is the whole of it — the right place to be returned to.
+            restoreVisible: canvasRect(visibleRect),
+            restoreZoom: restoreZoom) else { return }
+        workspaceName = name
         tiling = session
         lastTiling = memory(of: session)
-        selection = [live[0]]
+        selection = [session.ids[0]]
         if animated {
-            FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(live.count) tiles, "
+            FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(session.ids.count) tiles, "
                                   + "\(pagesLive.count) live)", on: self)
         }
         flyToTiles(of: session, animated: animated)
@@ -304,11 +322,7 @@ extension CanvasBoardView {
     }
 
     /// What is worth remembering about a tiling: everything except where the window happened to be.
-    func memory(of session: CanvasTileSession) -> CanvasViewState.Tiling {
-        CanvasViewState.Tiling(ids: session.ids, arrangement: session.arrangement,
-                               masterFraction: session.masterFraction,
-                               sizes: session.sizes.isEmpty ? nil : session.sizes)
-    }
+    func memory(of session: CanvasTileSession) -> CanvasViewState.Tiling { session.memory }
 
     /// The workspace this board would carry into another session: the one that is up, or the last one
     /// there was.
@@ -394,6 +408,11 @@ extension CanvasBoardView {
     /// the session worth remembering. There is no history now, and the session in hand is the one.
     func leaveTiling(animated: Bool) {
         guard let session = tiling else { return }
+        isChoosingPlacement = false
+        dropMark = nil
+        // Picking ends with the workspace it was picking for, and must end first: while it is set every
+        // layout is the board's, and leaving is a layout.
+        isPicking = false
         let current = session
         // Step out of whatever tile you were typing in. Engagement is the tiled view's own doing — see
         // `tileClicked` — and leaving it holding would hand back a board with one card open in an
@@ -427,18 +446,26 @@ extension CanvasBoardView {
         onTilingChanged?()
     }
 
-    /// Swap the arrangement without leaving the tiling.
+    /// Deal the tiles out again the way `arrangement` lays them out, without leaving the tiling.
+    ///
+    /// **A command, not a mode** (docs/canvas-workspaces.md §7k): it rewrites the columns and nothing
+    /// remembers that it did, so running the one that made them is how you put back an arrangement you
+    /// have moved things around in. The tiles go in the order you read them off the screen, so the card
+    /// you read first is the one that becomes the master.
     func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
-        guard var session = tiling, session.arrangement != arrangement else { return }
+        guard var session = tiling else { return }
         CanvasTiling.savedArrangement = arrangement
-        session.arrangement = arrangement
+        session.columns = CanvasTiling.columns(arrangement, of: session.readingOrder, in: session.area,
+                                               masterFraction: CanvasTiling.savedMasterFraction)
+        guard session != tiling else { return }
         tiling = session
         setLayout(session.layout, animated: true)
         onTilingChanged?()
     }
 
-    /// Put a card into the tiled view that is up. Nothing at all when there isn't one, which is what
-    /// lets every add command call it unconditionally.
+    /// Put a card into the tiled view that is up, where the next card goes — see `nextPlacement`.
+    /// Nothing at all when there isn't one, which is what lets every add command call it
+    /// unconditionally.
     ///
     /// **The workspace, even while one tile is filling the room.** A card added while a tile is
     /// maximized goes into the arrangement underneath, so restoring shows it in its place rather than
@@ -447,9 +474,23 @@ extension CanvasBoardView {
     /// see would have vanished the moment you backed out of it.
     ///
     /// A frame is a container of cards rather than a card, so there is no tile it could be.
-    func addToTiling(_ id: String) {
-        guard var session = tiling, document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
-        session.add(id)
+    func addToTiling(_ id: String) { addToTiling([id]) }
+
+    /// Several at once — a paste, a drop — **one beside the next, in order.** Each placed beside the
+    /// same tile would split it again and land in reverse; beside the one before, they read the way
+    /// they arrived. A card placed to the left or above goes first, and the rest follow it rightwards
+    /// or down.
+    func addToTiling(_ ids: [String]) {
+        guard var session = tiling else { return }
+        var placement = nextPlacement
+        for id in ids where document.node(id: id).map({ !$0.isGroup }) ?? false {
+            session.add(id, at: placement)
+            if let side = placement?.side, session.position(of: id) != nil {
+                placement = .init(target: id, side: side == .left ? .right : side == .above ? .below : side)
+            }
+        }
+        // Done choosing, if you were: the card that arrived used the place up (`add(_:at:)`).
+        isChoosingPlacement = false
         guard session != tiling else { return }
         tiling = session
         setLayout(session.layout, animated: true)
@@ -468,8 +509,10 @@ extension CanvasBoardView {
     /// with no way to say what it was — so removing the only tile means leaving, which is also what
     /// anybody doing it was asking for.
     func removeFromTiling(_ id: String) {
-        guard var session = tiling, let index = session.ids.firstIndex(of: id) else { return }
-        guard session.ids.count > 1 else { return leaveTiling(animated: true) }
+        // Counted in cards, not tiles: a workspace of one tile holding two tabs has one to spare.
+        guard var session = tiling, session.cards.contains(id) else { return }
+        guard session.cards.count > 1 else { return leaveTiling(animated: true) }
+        let index = session.ids.firstIndex(of: id) ?? 0
         session.remove(id)
         tiling = session
         // Something has to stay focused, for the same reason entering a tiling focuses something: the
@@ -495,9 +538,10 @@ extension CanvasBoardView {
     /// nothing is not a state.
     func pruneTilingOfDeletedCards() {
         guard let session = tiling else { return }
-        let gone = session.ids.filter { document.node(id: $0) == nil }
+        // Every card, the tabs not showing included: a tab is a tile-shaped hole too, one click away.
+        let gone = session.cards.filter { document.node(id: $0) == nil }
         guard !gone.isEmpty else { return }
-        guard gone.count < session.ids.count else { return leaveTiling(animated: true) }
+        guard gone.count < session.cards.count else { return leaveTiling(animated: true) }
         var next = session
         for id in gone { next.remove(id) }
         tiling = next
@@ -505,6 +549,407 @@ extension CanvasBoardView {
         setLayout(next.layout, animated: true)
         onTilingChanged?()
         announceTiling()
+    }
+
+    // MARK: Adding a card that is already on the board
+
+    /// The cards this tiled view could take, grouped for a menu. Empty when no tiling is up, or when
+    /// every card on the board is already a tile. See `CanvasExistingCards`.
+    var existingCardSections: [CanvasExistingCards.Section] {
+        guard let tiling else { return [] }
+        return CanvasExistingCards.sections(of: document, showing: tiling.cards)
+    }
+
+    /// Fill `menu` with Add Card from Canvas's list: a header per frame, an item per card.
+    ///
+    /// One builder for the contextual menus and for the View menu, which fills itself from here each
+    /// time it opens — see `CanvasExistingCardsMenu`.
+    func fillExistingCardsMenu(_ menu: NSMenu) {
+        let sections = existingCardSections
+        // Asked for now so the next opening has them: a menu is built synchronously and draws only the
+        // icons that have already arrived. See `FaviconLoader.cached`.
+        FaviconLoader.shared.warm(hosts: sections.flatMap(\.cards).compactMap { card -> String? in
+            if case .page(let host) = card.kind { return host }
+            return nil
+        })
+        for section in sections {
+            if let frame = section.frame { menu.addItem(.sectionHeader(title: frame)) }
+            for card in section.cards {
+                let item = menu.addItem(withTitle: card.name, action: #selector(addExistingCard(_:)),
+                                        keyEquivalent: "")
+                item.target = self
+                item.representedObject = card.id
+                item.image = Self.menuIcon(for: card.kind)
+            }
+        }
+    }
+
+    /// The icon beside a card in the list: the site's own for a page when the app has it, else the
+    /// symbol the card draws when it is zoomed out to one line.
+    static func menuIcon(for kind: CanvasExistingCards.Card.Kind) -> NSImage? {
+        switch kind {
+        case .page(let host):
+            return FaviconLoader.shared.menuIcon(for: host)
+                ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+        case .file(let symbol):
+            return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        case .text:
+            return NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+        }
+    }
+
+    /// The card a menu item names, up as a tile.
+    @objc func addExistingCard(_ sender: Any?) {
+        guard let id = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        addExistingCard(withID: id)
+    }
+
+    /// Put a card that is already on the board up as a tile, on the end of the arrangement, and focus
+    /// it.
+    ///
+    /// **Restoring first if a tile is maximized.** `addToTiling` puts a card into the workspace
+    /// underneath one, which is right for a card you have just made — it shows up in its place when you
+    /// restore — and wrong for one you went looking for, which would be added somewhere you can't see.
+    func addExistingCard(withID id: String) {
+        guard let tiling, !tiling.cards.contains(id),
+              document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
+        restoringMaximized { addToTiling(id) }
+        select([id])
+    }
+
+    // MARK: Where the next card goes
+
+    /// Where a card added now would go: where ⌥N said, else next to the focused tile along its longer
+    /// side (`CanvasTileSession.automaticPlacement`), else — with no one tile focused — the end.
+    var nextPlacement: CanvasTileSession.Placement? {
+        guard let tiling else { return nil }
+        if let chosen = tiling.preselection, tiling.position(of: chosen.target) != nil { return chosen }
+        return focusedTile.flatMap(tiling.automaticPlacement(beside:))
+    }
+
+    /// ⌥N: choose where the next card goes, starting from where it would go anyway.
+    ///
+    /// **The choice waits until a card arrives** — bspwm's preselection — and is drawn the whole time:
+    /// the tiles move aside and the room they leave is marked (`CanvasTileSession.placementFrame`).
+    /// While choosing, a plain arrow picks the side, ⌥ arrows pick another tile, Return is done and
+    /// offers the cards that could go there, and Escape forgets it.
+    ///
+    /// The board takes the keyboard for it. Plain arrows are what a page scrolls with and a text view
+    /// moves through, and the choosing is modal enough that stepping out of a card is the cheaper
+    /// surprise.
+    func beginPlacing() {
+        restoreMaximizedTile(animated: false)
+        guard var session = tiling,
+              let placement = nextPlacement ?? session.ids.first.flatMap(session.automaticPlacement(beside:))
+        else { return NSSound.beep() }
+        session.preselection = placement
+        isChoosingPlacement = true
+        selection = [placement.target]
+        window?.makeFirstResponder(self)
+        showPlacement(session)
+    }
+
+    /// An arrow while choosing: that side of the tile.
+    func choosePlacement(_ side: CanvasTileSession.Side) {
+        guard var session = tiling, var placement = session.preselection, placement.side != side else { return }
+        placement.side = side
+        session.preselection = placement
+        showPlacement(session)
+    }
+
+    /// The focus moved while choosing — ⌥ arrows — and the place goes with it, on the same side.
+    func retargetPlacement() {
+        guard var session = tiling, var placement = session.preselection,
+              let id = focusedTile, id != placement.target else { return }
+        placement.target = id
+        session.preselection = placement
+        showPlacement(session)
+    }
+
+    /// Return while choosing: done. The place is kept until a card arrives, and the board opens to pick
+    /// it from (`beginPicking`) — the first card you click there goes to the place you chose.
+    func confirmPlacement() {
+        isChoosingPlacement = false
+        overlay.needsDisplay = true
+        beginPicking()
+    }
+
+    // MARK: The board as the picker
+
+    /// ⌥B: zoom the workspace out to the board, to pick its cards where they sit
+    /// (docs/canvas-workspaces.md §7k).
+    ///
+    /// **The workspace stays up.** This is `leaveTiling`'s journey — the tiles fly home, the other cards
+    /// fade in, the ground lightens — with nothing left: the session, its name and its tab are all
+    /// where they were, and only what is drawn and what a click means change (`showsTiles`). So picking
+    /// costs nothing to come back from, and every card clicked in or out is an ordinary change to the
+    /// workspace, saved like any other.
+    ///
+    /// **The board is the thumbnails.** There is nothing to render for it: it is the board at the zoom
+    /// you would look at it anyway, and the pages on it freeze to their pictures as they do on any
+    /// board zoomed out that far.
+    func beginPicking() {
+        guard isTiled, !isPicking else { return }
+        restoreMaximizedTile(animated: false)
+        isChoosingPlacement = false
+        dropMark = nil
+        // Out of whatever you were typing in, as leaving does: a card open in an editor is a card that
+        // takes the click meant to pick it.
+        for id in tiling?.cards ?? [] { nodeViews[id]?.engage(false) }
+        isPicking = true
+        window?.makeFirstResponder(self)
+        showTiledness(false)
+        scrollView?.canvasScroll?.showsScrollers(true)
+        FrameMeter.measure("tiles → picking (\(nodeViews.count) views, \(pagesLive.count) live)", on: self)
+        if let cards = document.bounds {
+            scrollView?.canvasScroll?.fly(toFit: cards.inset(by: 60), animated: true)
+        }
+        setLayout(.document, animated: true)
+        refreshTileHandles()
+        overlay.needsDisplay = true
+    }
+
+    /// Back into the workspace: the tiles fly in from wherever their cards are, as entering one does.
+    func endPicking(animated: Bool = true) {
+        guard isPicking, var session = tiling else { return }
+        isPicking = false
+        peeking = nil
+        scrollView?.canvasScroll?.showsScrollers(false)
+        // Laid out where they were, unless the window changed shape while the board was up — the one
+        // thing a resize could not reach while picking (`retileForWindowSize`).
+        let area = tileableRect(atZoom: 1)
+        if area.width != session.area.width || area.height != session.area.height {
+            session.area = area
+            tiling = session
+        }
+        showTiledness(true)
+        if animated {
+            FrameMeter.measure("picking → tiles (\(nodeViews.count) views, \(session.ids.count) tiles)",
+                               on: self)
+        }
+        flyToTiles(of: session, animated: animated)
+        setLayout(session.layout, animated: animated)
+        refreshTileHandles()
+        overlay.needsDisplay = true
+    }
+
+    func togglePicking() { isPicking ? endPicking() : beginPicking() }
+
+    /// A click on the board while picking.
+    ///
+    /// **A card not in the workspace goes in; one that is comes out.** It goes where the next card goes
+    /// (`nextPlacement`) — the place ⌥N chose, else beside the tile you were on — and is then the tile
+    /// the next one goes beside, so a run of clicks lays the cards out in the order you picked them.
+    ///
+    /// **A frame is its cards.** Clicking one puts in every card inside it that isn't in yet, in the
+    /// order they sit, or takes them all out when they all are — the same reading of a frame as
+    /// ⌘Return on one (`tileTargets`). Never the last card out: a workspace of nothing is not a state.
+    func pick(_ id: String) {
+        guard let session = tiling, let node = document.node(id: id) else { return }
+        var ids = [id]
+        if node.isGroup {
+            let inside = canvasCardsInside(node.frame, of: document)
+            ids = CanvasTiling.order(document.nodes.filter { inside.contains($0.id) }
+                                        .map { (id: $0.id, frame: $0.frame) })
+        }
+        switch session.pick(ids) {
+        case .add(let new):
+            addToTiling(new)
+            if let last = new.last { selection = [last] }
+        case .remove(let gone):
+            for card in gone { removeFromTiling(card) }
+        case .refuse:
+            NSSound.beep()
+        }
+        overlay.needsDisplay = true
+    }
+
+    /// Space on a card while picking: **a peek, which is a zoom** (§7k). The board flies onto the card
+    /// at a size you can read (`CanvasTiling.peek`), and Space or Escape flies it back to the board you
+    /// were choosing from.
+    ///
+    /// **The card itself, not a copy of it.** Drawing a second one over the board would mean a second
+    /// view, and a web card given a new parent view is a page torn down and loaded again. Brought close
+    /// instead, it is the page it was already running, woken by the page budget like any card you zoom
+    /// into — so a peek loads nothing that zooming in by hand would not.
+    ///
+    /// Not a frame: a frame is its cards, and there is nothing in one to read.
+    func beginPeek(_ id: String) {
+        guard isPicking, peeking == nil, let node = document.node(id: id), !node.isGroup,
+              let scroll = scrollView?.canvasScroll else { return NSSound.beep() }
+        let covered = scrollView?.safeAreaInsets ?? NSEdgeInsets()
+        let window = scroll.contentView.frame.size
+        let view = CanvasTiling.peek(at: layout.frame(of: node),
+                                     in: (width: Double(window.width), height: Double(window.height)),
+                                     margins: .init(leading: Double(covered.left),
+                                                    trailing: Double(covered.right),
+                                                    top: Self.headerClearance))
+        peeking = (id, scroll.magnification, canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)))
+        scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true)
+        overlay.needsDisplay = true
+    }
+
+    /// Back from a peek to the board exactly as it was.
+    func endPeek() {
+        guard let peek = peeking else { return }
+        peeking = nil
+        scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true)
+        overlay.needsDisplay = true
+    }
+
+    /// Return on a peek, or a click on the card. **A card not in the workspace goes in**, where a click
+    /// on it would have put it, and the board goes back to the choosing. **One already in is shown**
+    /// rather than taken out — you went and looked at it, which is not asking for it to go — so the
+    /// workspace comes back with its tile on that card.
+    func finishPeek() {
+        guard let peek = peeking, let session = tiling else { return }
+        if session.cards.contains(peek.card) {
+            peeking = nil
+            showTab(peek.card)
+            endPicking()
+        } else {
+            endPeek()
+            pick(peek.card)
+        }
+    }
+
+    /// Forget where the next card was going. Answers whether there was anything to forget, because
+    /// Escape has somewhere else to go when there wasn't — see `cancelOperation`.
+    @discardableResult
+    func cancelPlacement() -> Bool {
+        guard var session = tiling, isChoosingPlacement || session.preselection != nil else { return false }
+        isChoosingPlacement = false
+        session.preselection = nil
+        showPlacement(session)
+        return true
+    }
+
+    /// Put up a session whose chosen place changed. Not `onTilingChanged`: where the next card goes is
+    /// not part of the workspace, so there is nothing for anyone to write down.
+    private func showPlacement(_ session: CanvasTileSession) {
+        tiling = session
+        setLayout(session.layout, animated: true)
+        overlay.needsDisplay = true
+    }
+
+    // MARK: Tabs
+
+    /// Bring a tab to the front of its tile, and focus it — a click on the tab, or the keys.
+    func showTab(_ card: String) {
+        guard var session = tiling else { return }
+        if session.showTab(card) {
+            tiling = session
+            // A cut, not a slide: the two cards occupy the same rectangle, and there is no distance
+            // for an animation to cover. Switching tabs does not animate anywhere else either.
+            setLayout(session.layout, animated: false)
+            onTilingChanged?()
+        }
+        selection = [card]
+    }
+
+    /// ⌥[ and ⌥]: the tab before or after the one showing in the focused tile.
+    func stepTab(by step: Int) {
+        guard let id = focusedTile, var session = tiling, let next = session.stepTab(of: id, by: step)
+        else { return NSSound.beep() }
+        tiling = session
+        setLayout(session.layout, animated: false)
+        onTilingChanged?()
+        selection = [next]
+    }
+
+    /// ⌥T: take the card showing in a tile of several out into a tile of its own, beside the one it
+    /// came from — along that tile's longer side, as any new card would go.
+    func pullTabOut(_ id: String) {
+        guard var session = tiling, session.hasTabs(id),
+              let placement = session.automaticPlacement(beside: id) else { return NSSound.beep() }
+        restoringMaximized {
+            session.maximized = nil
+            session.pull(id, to: placement)
+            commitTiling(session)
+        }
+        selection = [id]
+    }
+
+    /// The tab under a point, if it is on a tab strip — and how many the strip holds.
+    func tabChip(at point: CanvasPoint) -> (card: String, count: Int)? {
+        guard let tiling else { return nil }
+        for strip in tiling.tabStrips {
+            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+            if let index = chips.firstIndex(where: { $0.contains(x: point.x, y: point.y) }) {
+                return (strip.cards[index], strip.cards.count)
+            }
+        }
+        return nil
+    }
+
+    /// The tile whose tab strip is under a point, by the card it is showing.
+    func tabStrip(at point: CanvasPoint) -> String? {
+        tiling?.tabStrips.first { $0.band.contains(x: point.x, y: point.y) }.map { $0.cards[$0.showing] }
+    }
+
+    // MARK: The workspace's keys
+
+    /// How far ⌥= and ⌥− move a boundary, in points.
+    static let tileStep: Double = 64
+
+    /// ⌥`: back to the tile you were on before this one — and again, to come back. See
+    /// `selectionChanged`, which keeps the answer.
+    func focusPreviousTile() {
+        guard let previous = previousTile, var session = tiling, session.ids.contains(previous)
+        else { return NSSound.beep() }
+        // With a tile filling the room, the one filling it is the one you go back to.
+        if session.maximized != nil {
+            session.maximized = previous
+            tiling = session
+            setLayout(session.layout, animated: false)
+            onTilingChanged?()
+        }
+        selection = [previous]
+    }
+
+    /// ⌥⇧ arrows: move the focused tile — across into the next column, or up and down its own.
+    func moveTile(_ direction: CanvasNavigation.Direction) {
+        guard let id = focusedTile else { return NSSound.beep() }
+        restoringMaximized {
+            guard var session = tiling else { return }
+            let moved: Bool
+            switch direction {
+            case .left: moved = session.moveAcross(id, by: -1)
+            case .right: moved = session.moveAcross(id, by: 1)
+            case .up: moved = session.moveWithin(id, by: -1)
+            case .down: moved = session.moveWithin(id, by: 1)
+            }
+            guard moved else { return NSSound.beep() }
+            commitTiling(session)
+        }
+    }
+
+    /// ⌥= and ⌥−: the focused tile's column wider or narrower — or, with ⇧, the tile taller or shorter.
+    func growTile(vertically: Bool, by delta: Double) {
+        guard let id = focusedTile, var session = tiling, session.maximized == nil,
+              session.grow(id, vertically: vertically, by: delta) else { return NSSound.beep() }
+        commitTiling(session)
+    }
+
+    /// ⌥0: every column and tile back to sharing equally.
+    func balanceTiles() {
+        guard var session = tiling else { return }
+        session.balance()
+        commitTiling(session)
+    }
+
+    /// ⌥⇧0, and Arrange ▸ Size Columns to Content: each column as wide as what it holds reads at,
+    /// shared out to fit the window — see `CanvasTileSession.sizeToContent`.
+    ///
+    /// **A command, like Balance, not a mode.** A mode would have to decide what a boundary drag means
+    /// while it is on — fight the drag, or quietly switch itself off at the first one — and either way
+    /// the widths would no longer be what you last did. Done once, it is one more way to set them.
+    func sizeTilesToContent() {
+        guard var session = tiling else { return }
+        session.sizeToContent { [document] id in
+            document.node(id: id).map(CanvasTileSession.contentWidth) ?? 320
+        }
+        commitTiling(session)
     }
 
     // MARK: Which tile has the keyboard
@@ -558,7 +1003,7 @@ extension CanvasBoardView {
     }
 
     private func tileClicked(_ event: NSEvent) {
-        guard event.window === window,
+        guard event.window === window, !isPicking,
               let hit = window?.contentView?.hitTest(event.locationInWindow) else { return }
         // AppKit's own answer to "whose click is this". A press on the band the board keeps along a
         // tile's edge, on a boundary, or in a gap hit-tests to the board itself and walks up to nothing
@@ -575,14 +1020,28 @@ extension CanvasBoardView {
         card.engage(true)
     }
 
-    /// Move a tile along the order — the handlebar's drag. See `CanvasTileSession.move`.
-    func moveInTiling(_ id: String, to index: Int) {
+    /// A tile being dragged is over `drop` now: mark where it would land, on the tiles as they stand.
+    /// **Nothing moves** — see `CanvasTileSession.dropMark`, and `finishDrop`, which is the one change.
+    func previewDrop(of id: String, _ drop: (target: String, drop: CanvasTileSession.Drop)?,
+                     pulling: Bool) {
+        dropMark = drop.flatMap { drop in
+            tiling?.dropMark(drop.drop, on: drop.target).map { (rect: $0, title: drop.drop.title) }
+        }
+        overlay.needsDisplay = true
+    }
+
+    /// Let go of a carried tile: what the preview showed happens, and the card settles into its place.
+    func finishDrop(of id: String, _ drop: (target: String, drop: CanvasTileSession.Drop)?,
+                    pulling: Bool) {
+        dropMark = nil
         guard var session = tiling else { return }
-        session.move(id, to: index)
-        guard session != tiling else { return }
+        if let drop { session.land(id, on: drop.target, drop.drop, pulling: pulling) }
+        let changed = session != tiling
         tiling = session
+        // The one time the tiles move for a drag: now, all at once, to where the mark said.
         setLayout(session.layout, animated: true)
-        onTilingChanged?()
+        overlay.needsDisplay = true
+        if changed { onTilingChanged?() }
     }
 
     /// Drag a boundary: the two tiles either side of it change length, and nothing else moves.
@@ -600,37 +1059,13 @@ extension CanvasBoardView {
     /// the window is too small to honour, and rewriting it would bake the squeeze in permanently.
     func dragTileDivider(_ divider: CanvasTileDivider, from: CanvasPoint, to now: CanvasPoint,
                          lengths: [Double]) {
-        guard var session = tiling, lengths.count == divider.run.count,
-              divider.before + 1 < lengths.count else { return }
+        guard var session = tiling, divider.before + 1 < lengths.count else { return }
         let before = divider.before, after = before + 1
         let pair = lengths[before] + lengths[after]
         let floor = min(CanvasTiling.minimumTile, pair / 2)
         let delta = divider.isVertical ? now.x - from.x : now.y - from.y
         let grown = min(pair - floor, max(floor, lengths[before] + delta))
-
-        // The master against the stack is a proportion of the window rather than two lengths — it is
-        // the one boundary whose meaning is "how much of this window", and it stays that unless the
-        // master has been pinned, at which point it is points like everything else.
-        if divider.isMasterSplit, case .pinned? = session.sizes[session.ids[0]] {
-            session.sizes[session.ids[0]] = .pinned(grown)
-            tiling = session
-            setLayout(session.layout, animated: false)
-            return
-        }
-        if divider.isMasterSplit { return setMasterFraction(grown / max(1, pair)) }
-
-        for (position, index) in divider.run.enumerated() {
-            let id = session.ids[index]
-            let length = position == before ? grown
-                       : position == after ? pair - grown
-                       : lengths[position]
-            if case .pinned? = session.sizes[id] {
-                guard position == before || position == after else { continue }
-                session.sizes[id] = .pinned(length)
-            } else {
-                session.sizes[id] = .flexible(length)
-            }
-        }
+        session.resize(divider.run, before: before, lengths: lengths, to: grown)
         tiling = session
         setLayout(session.layout, animated: false)
     }
@@ -641,32 +1076,39 @@ extension CanvasBoardView {
     /// if dragging pinned things, every tile you ever adjusted would stop responding to the window and
     /// the arrangement would gradually turn into a fixed layout without anyone asking for it.
     func togglePinTile(_ id: String) {
-        guard var session = tiling, let frame = session.layout.frames[id] else { return }
-        if case .pinned? = session.sizes[id] {
-            session.sizes[id] = nil
-        } else {
-            session.sizes[id] = .pinned(tileRunIsVertical(id) ? frame.height : frame.width)
-        }
+        guard var session = tiling else { return }
+        session.togglePin(id)
+        commitTiling(session)
+    }
+
+    /// A pin on one side of a boundary — the boundary's own menu, which is about the column or the tile
+    /// either side of it rather than about a card.
+    func togglePin(_ run: CanvasTileDivider.Run, at index: Int) {
+        guard var session = tiling else { return }
+        session.togglePin(run, at: index)
+        commitTiling(session)
+    }
+
+    /// Put a run back to sharing equally. See `CanvasTileSession.evenOut`.
+    func evenOut(_ run: CanvasTileDivider.Run) {
+        guard var session = tiling else { return }
+        session.evenOut(run)
+        commitTiling(session)
+    }
+
+    private func commitTiling(_ session: CanvasTileSession) {
+        guard session != tiling else { return }
         tiling = session
         setLayout(session.layout, animated: true)
         onTilingChanged?()
     }
 
-    /// Whether this tile's run flows top to bottom — so whether pinning it holds its height rather
-    /// than its width. The stack does; a row of tiles doesn't.
-    func tileRunIsVertical(_ id: String) -> Bool {
-        guard let tiling, let index = tiling.ids.firstIndex(of: id) else { return false }
-        switch tiling.arrangement {
-        case .masterStack: return index > 0
-        case .grid: return gridRunIsHorizontal == false
-        }
-    }
+    /// Whether pinning this tile holds its height rather than its width: a tile sharing its column
+    /// holds its height, and one with the column to itself holds the column's width.
+    func tileRunIsVertical(_ id: String) -> Bool { tiling?.runIsVertical(id) ?? false }
 
     /// Whether this tile is holding a length of its own.
-    func isTilePinned(_ id: String) -> Bool {
-        if case .pinned? = tiling?.sizes[id] { return true }
-        return false
-    }
+    func isTilePinned(_ id: String) -> Bool { tiling?.isPinned(id) ?? false }
 
     /// Make the focused card the master tile — ⌘⇧Return, the View menu, and the tile's own menu.
     ///
@@ -693,14 +1135,6 @@ extension CanvasBoardView {
         onTilingChanged?()
     }
 
-    /// Drag the divider between the master tile and the stack.
-    func setMasterFraction(_ fraction: Double) {
-        guard var session = tiling, session.arrangement == .masterStack else { return }
-        session.masterFraction = min(0.85, max(0.3, fraction))
-        tiling = session
-        setLayout(session.layout, animated: false)
-    }
-
     /// Let go of a boundary. Where you dragged it to is part of the arrangement now, so it gets written
     /// down — see `CanvasPaneController.rememberViewState`, which listens on `onTilingChanged` precisely
     /// because there is no reliable moment on the way out to write on instead.
@@ -720,8 +1154,8 @@ extension CanvasBoardView {
         guard let tiling else { return }
         // The one boundary with a preference behind it as well as a layout: a divider you drag back to
         // the same place on every board is a setting you have already made.
-        if divider.isMasterSplit, tiling.arrangement == .masterStack {
-            CanvasTiling.savedMasterFraction = tiling.masterFraction
+        if divider.run == .columns, divider.before == 0, let share = tiling.masterShare {
+            CanvasTiling.savedMasterFraction = share
         }
         onTilingChanged?()
     }
@@ -747,6 +1181,9 @@ extension CanvasBoardView {
         // them back. See `CanvasPaneController.paneBecameVisible`, which is the other half: a pane that
         // was hidden through a resize has one waiting for it when it comes back.
         guard !visibleRect.isEmpty else { return }
+        // **Nor while picking**, when the window is looking at the whole board at whatever zoom fits
+        // it. The tiles are measured again on the way back in — see `endPicking`.
+        guard !isPicking else { return }
         // **Nor mid-crossing.** The board is somewhere between two zooms while it flies into or out of a
         // workspace (`CanvasScrollView.fly`), so `tileableRect` measured now describes a window nobody
         // is looking at — and re-laying the tiles into it would retarget every card in mid-air. The
@@ -803,9 +1240,9 @@ extension CanvasBoardView {
     var tilingSummary: (long: String, short: String)? {
         guard let tiling else { return nil }
         let total = document.nodes.filter { !$0.isGroup }.count
-        let long = tiling.ids.count == 1 ? "1 card of \(total)"
-                                         : "\(tiling.ids.count) of \(total) cards"
-        return (long, "\(tiling.ids.count)/\(total)")
+        let count = tiling.cards.count
+        let long = count == 1 ? "1 card of \(total)" : "\(count) of \(total) cards"
+        return (long, "\(count)/\(total)")
     }
 }
 
@@ -818,6 +1255,35 @@ func canvasCardsInside(_ frame: CanvasRect, of document: CanvasDocument) -> Set<
     Set(document.nodes.filter { node in
         !node.isGroup && frame.contains(x: node.frame.midX, y: node.frame.midY)
     }.map(\.id))
+}
+
+// MARK: - Add Card from Canvas, in the menu bar
+
+/// The View menu's Add Card from Canvas. A menu bar is built once and this list is the board's, so it
+/// fills itself each time it opens, from whichever board the keyboard is in — the same responder chain
+/// every other tile command in that menu goes through.
+final class CanvasExistingCardsMenu: NSObject, NSMenuDelegate {
+    static let shared = CanvasExistingCardsMenu()
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let board = NSApp.target(forAction: #selector(CanvasBoardView.addExistingCard(_:)),
+                                 to: nil, from: nil) as? CanvasBoardView
+        board?.fillExistingCardsMenu(menu)
+        // Never an empty submenu: the menu bar can't leave the item out the way a contextual menu does,
+        // so it says why there is nothing in it instead.
+        if menu.items.isEmpty {
+            menu.addItem(withTitle: "No Cards to Add", action: nil, keyEquivalent: "")
+        }
+    }
+
+    /// Nothing in here has a key equivalent. Saying so stops AppKit filling the list to search it every
+    /// time the menu bar is asked about a keystroke.
+    func menuHasKeyEquivalent(_ menu: NSMenu, for event: NSEvent,
+                              target: AutoreleasingUnsafeMutablePointer<AnyObject?>,
+                              action: UnsafeMutablePointer<Selector?>) -> Bool {
+        false
+    }
 }
 
 // MARK: - Frames a tab can be pinned to

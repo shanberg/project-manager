@@ -1,23 +1,6 @@
 import AppKit
 import PmLib
 
-/// One draggable boundary between two tiles.
-struct CanvasTileDivider: Equatable {
-    /// True for a vertical line — one you drag left and right. The tiles it separates are laid out
-    /// along x; a horizontal divider separates tiles laid out along y.
-    var isVertical: Bool
-    /// Where the line is, on the axis it moves along.
-    var position: Double
-    /// The run this belongs to, as positions in the session's `ids`, and which of them the line is
-    /// after. A run is the set of tiles that share out one length — the stack, a single-row grid, or
-    /// the master and the stack taken as two things.
-    var run: [Int]
-    var before: Int
-    /// The master/stack split, which is a fraction of the window rather than two lengths — unless the
-    /// master has been pinned, in which case it is points like anything else.
-    var isMasterSplit: Bool
-}
-
 /// The chrome a tiled view puts on its tiles: the boundaries you drag to resize, and the handlebar you
 /// drag to reorder.
 ///
@@ -37,64 +20,17 @@ extension CanvasBoardView {
     /// edge that resizes rather than picks. The lap is the number worth holding still; the gap is not.
     static var dividerReach: Double { CanvasTiling.gap / 2 + 4.5 }
 
-    /// Every boundary in the current tiled view.
-    ///
-    /// Empty for a grid of more than one row *and* one column: there, a boundary is a whole column's or
-    /// row's, shared by tiles that were never asked — see `CanvasTiling.grid`.
-    var tileDividers: [CanvasTileDivider] {
-        // Nothing to divide while one tile fills the room — the boundaries belong to an arrangement
-        // that is not on screen, and a drag on one would resize tiles you cannot see.
-        guard let tiling, tiling.maximized == nil, tiling.ids.count > 1 else { return [] }
-        let frames = tiling.layout.frames
-        let half = CanvasTiling.gap / 2
+    /// Every boundary in the current tiled view: between each pair of columns, and between each pair of
+    /// tiles down every column. See `CanvasTileSession.dividers`.
+    var tileDividers: [CanvasTileDivider] { tiling?.dividers ?? [] }
 
-        switch tiling.arrangement {
-        case .masterStack:
-            var dividers: [CanvasTileDivider] = []
-            if let master = frames[tiling.ids[0]] {
-                dividers.append(CanvasTileDivider(isVertical: true, position: master.maxX + half,
-                                                  run: [0, 1], before: 0, isMasterSplit: true))
-            }
-            let stack = Array(1..<tiling.ids.count)
-            for (n, index) in stack.dropLast().enumerated() {
-                guard let rect = frames[tiling.ids[index]] else { continue }
-                dividers.append(CanvasTileDivider(isVertical: false, position: rect.maxY + half,
-                                                  run: stack, before: n, isMasterSplit: false))
-            }
-            return dividers
-
-        case .grid:
-            guard let horizontal = gridRunIsHorizontal else { return [] }
-            let run = Array(tiling.ids.indices)
-            return run.dropLast().compactMap { index in
-                guard let rect = frames[tiling.ids[index]] else { return nil }
-                return CanvasTileDivider(isVertical: horizontal,
-                                         position: (horizontal ? rect.maxX : rect.maxY) + half,
-                                         run: run, before: index, isMasterSplit: false)
-            }
-        }
-    }
-
-    /// Whether the grid on screen is a single row (`true`), a single column (`false`), or a real grid
-    /// of both (`nil`).
-    ///
-    /// Read off the frames rather than recomputed, so this cannot disagree with what was actually laid
-    /// out — `CanvasTiling.grid` picks its column count from the shape of the window, and a second
-    /// copy of that arithmetic here would be a second answer to look for the bug in.
-    var gridRunIsHorizontal: Bool? {
-        guard let tiling, tiling.arrangement == .grid, tiling.ids.count > 1 else { return nil }
-        let rects = tiling.ids.compactMap { tiling.layout.frames[$0] }
-        guard rects.count == tiling.ids.count, let first = rects.first else { return nil }
-        if rects.allSatisfy({ abs($0.minY - first.minY) < 0.5 }) { return true }
-        if rects.allSatisfy({ abs($0.minX - first.minX) < 0.5 }) { return false }
-        return nil
-    }
-
-    /// The boundary the pointer is on, if it is on one.
+    /// The boundary the pointer is on, if it is on one: near the line, and alongside the stretch of it
+    /// that is there. A boundary between two tiles is only as long as their column is wide.
     func tileDivider(at point: CanvasPoint) -> CanvasTileDivider? {
         let reach = Self.dividerReach / liveScale
         return tileDividers.first { divider in
             abs((divider.isVertical ? point.x : point.y) - divider.position) <= reach
+                && divider.span.contains(divider.isVertical ? point.y : point.x)
         }
     }
 
@@ -112,13 +48,17 @@ extension CanvasBoardView {
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect, edge: Edge)? {
         // A maximized tile has no order to be dragged along, and the bar sits in a gap that is not
         // there. Restoring is Escape, the double-click that got you here, or the menu.
-        guard let tiling, tiling.maximized == nil, tiling.ids.count > 1,
-              let index = tiling.ids.firstIndex(of: id),
+        guard let tiling, !isPicking, tiling.maximized == nil, tiling.ids.count > 1,
+              let at = tiling.position(of: id),
               let frame = tiling.layout.frames[id] else { return nil }
+        // Below a tile with its column to itself, which moves left and right; beside one sharing its
+        // column, which moves up and down — on the first column's leading side and every other's
+        // trailing one, which puts it on the window's edge wherever the column has one.
         let edge: Edge
-        switch tiling.arrangement {
-        case .masterStack: edge = index == 0 ? .below : .trailing
-        case .grid: edge = gridRunIsHorizontal == false ? .leading : .below
+        if tiling.columns[at.column].tiles.count == 1 {
+            edge = .below
+        } else {
+            edge = at.column == 0 ? .leading : .trailing
         }
 
         let length = Self.handleLength / liveScale
@@ -162,7 +102,9 @@ extension CanvasBoardView {
     /// the one being dragged — which is the same tile, but stops the grip blinking out at the moment
     /// the pointer leaves the tile it belongs to and enters the gap the bar sits in.
     func showsTileHandle(_ id: String) -> Bool {
-        if case .reorderTile(let moving, _, _)? = gesture { return moving == id }
+        // None while a tile is being carried: the grips belong to where tiles are, and a drag's
+        // preview is drawing them where they would be.
+        if case .placeTile? = gesture { return false }
         return hovered == id || selection.contains(id)
     }
 

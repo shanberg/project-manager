@@ -143,4 +143,34 @@ final class TabDragTests: XCTestCase {
         let layout = CanvasLayout(visible: ["tile"])
         XCTAssertTrue(layout.hides("stray", fading: false, alpha: 1))
     }
+
+    // MARK: Which cards a crossing fades
+
+    func testGoingIntoAWorkspaceFadesWhatItLeavesOut() {
+        XCTAssertEqual(CanvasLayout.fading(from: .document, to: CanvasLayout(visible: ["a"]),
+                                           among: ["a", "b", "c"]), ["b", "c"])
+    }
+
+    /// On the way out every card is in the layout again, so the ones arriving back are read off the
+    /// workspace being left.
+    func testComingOutFadesTheSameCardsBackIn() {
+        XCTAssertEqual(CanvasLayout.fading(from: CanvasLayout(visible: ["a"]), to: .document,
+                                           among: ["a", "b", "c"]), ["b", "c"])
+    }
+
+    /// **The invisible tiles.** Putting a maximized tile back, in a workspace holding every card on the
+    /// board, is a tiling that shows everything — not a way out. The tiles coming back were marked
+    /// fading, drawn at `1 - tiledness` = 0, and stayed that way until a resize.
+    func testPuttingBackAMaximizedTileFadesNothingItShows() {
+        XCTAssertEqual(CanvasLayout.fading(from: CanvasLayout(visible: ["a"]),
+                                           to: CanvasLayout(visible: ["a", "b"]),
+                                           among: ["a", "b"]), [])
+    }
+
+    /// The same switch between two workspaces, one of which holds the whole board.
+    func testSwitchingToAWorkspaceOfTheWholeBoardFadesNothing() {
+        XCTAssertEqual(CanvasLayout.fading(from: CanvasLayout(visible: ["b"]),
+                                           to: CanvasLayout(visible: ["a", "b", "c"]),
+                                           among: ["a", "b", "c"]), [])
+    }
 }

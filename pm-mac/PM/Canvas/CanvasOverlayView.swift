@@ -94,7 +94,221 @@ final class CanvasOverlayView: NSView {
         drawGrips(board, scale)
         drawConnectionInFlight(board, scale)
         drawSwapInFlight(board, scale)
+        drawTileMark(board, scale)
+        drawNarrowPages(board, scale)
+        drawCarried(board, scale)
+        drawPicker(board, scale)
         drawMarquee(board, scale)
+    }
+
+    /// Picking cards on the board (⌥B): the workspace's cards ringed and numbered in the order the
+    /// workspace reads them in, the card under the pointer ringed in the colour of what a click on it
+    /// will do — in, or out — and a line saying how to get back.
+    ///
+    /// Sized in screen points rather than the board's: the board is zoomed out to fit here, and a ring
+    /// or a number drawn at the board's scale would be a hairline and a speck.
+    private func drawPicker(_ board: CanvasBoardView, _ scale: Double) {
+        guard board.isPicking, let session = board.tiling else { return }
+        if let peek = board.peeking { return drawPeek(peek.card, session, board, scale) }
+        let accent = NSColor.controlAccentColor
+        for (id, number) in session.tileNumbers {
+            guard let node = board.document.node(id: id) else { continue }
+            let rect = board.viewRect(board.layout.frame(of: node))
+            ring(rect, accent.withAlphaComponent(0.9), width: 3 / scale, scale)
+            let text = NSAttributedString(string: "\(number)", attributes: [
+                .font: NSFont.systemFont(ofSize: 12 / scale, weight: .bold),
+                .foregroundColor: NSColor.white,
+            ])
+            let size = text.size()
+            let height = 20 / scale
+            let badge = NSRect(x: rect.maxX - max(height, size.width + 10 / scale) + 6 / scale,
+                               y: rect.minY - 6 / scale,
+                               width: max(height, size.width + 10 / scale), height: height)
+            accent.setFill()
+            NSBezierPath(roundedRect: badge, xRadius: height / 2, yRadius: height / 2).fill()
+            text.draw(at: NSPoint(x: badge.midX - size.width / 2, y: badge.midY - size.height / 2))
+        }
+        if let id = board.hovered, let node = board.document.node(id: id) {
+            let inside = node.isGroup ? Array(canvasCardsInside(node.frame, of: board.document)) : [id]
+            let takesOut = !inside.isEmpty && inside.allSatisfy(session.cards.contains)
+            let rect = board.viewRect(board.layout.frame(of: node)).insetBy(dx: -5 / scale, dy: -5 / scale)
+            ring(rect, (takesOut ? NSColor.systemRed : accent).withAlphaComponent(0.6), width: 2 / scale, scale)
+        }
+        drawHint("Click a card to add it or take it out · Space to Peek · ⌥B or Esc to Go Back", board, scale)
+    }
+
+    /// A peek (⌥B, then Space): the board dimmed round the card brought close, and a line saying what
+    /// Return does with it — which depends on whether it is in the workspace already (`finishPeek`).
+    private func drawPeek(_ id: String, _ session: CanvasTileSession, _ board: CanvasBoardView, _ scale: Double) {
+        guard let node = board.document.node(id: id) else { return }
+        let shade = NSBezierPath(rect: bounds)
+        shade.append(NSBezierPath(rect: board.viewRect(board.layout.frame(of: node))))
+        shade.windingRule = .evenOdd
+        NSColor.black.withAlphaComponent(0.38).setFill()
+        shade.fill()
+        drawHint(session.cards.contains(id)
+                    ? "Return to Show It in the Workspace · Space or Esc to Put It Back"
+                    : "Return to Add It · Space or Esc to Put It Back", board, scale)
+    }
+
+    /// The line at the top of the window saying what the keys do while picking.
+    private func drawHint(_ string: String, _ board: CanvasBoardView, _ scale: Double) {
+        let hint = NSAttributedString(string: string,
+                                      attributes: [.font: NSFont.systemFont(ofSize: 13 / scale, weight: .medium),
+                                                   .foregroundColor: NSColor.labelColor])
+        let size = hint.size()
+        let pad = 8 / scale
+        let visible = board.visibleRect
+        let pill = NSRect(x: visible.midX - size.width / 2 - pad * 1.5,
+                          y: visible.minY + (CanvasBoardView.headerClearance + 10) / scale,
+                          width: size.width + pad * 3, height: size.height + pad * 2)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        hint.draw(at: NSPoint(x: pill.minX + pad * 1.5, y: pill.minY + pad))
+    }
+
+    /// A tile being dragged: the tile it came from, dimmed where it stands, and a small proxy of the card
+    /// under the pointer — its icon and name, the way a tab and Add Card from Canvas show it.
+    ///
+    /// **A proxy, not the card.** Carrying the whole tile put a pane the size of a third of the window
+    /// between you and what you were aiming at, and moving it meant moving a page. The proxy sits just
+    /// below the pointer, so the spot the drop is read at is never under it.
+    private func drawCarried(_ board: CanvasBoardView, _ scale: Double) {
+        guard case .placeTile(let id, _, _, _)? = board.gesture, let point = board.dragPoint,
+              let session = board.tiling else { return }
+        if let source = session.tileFrames[id] {
+            NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
+            NSBezierPath(roundedRect: board.viewRect(source), xRadius: CanvasTiling.innerRadius,
+                         yRadius: CanvasTiling.innerRadius).fill()
+        }
+        guard let described = board.document.node(id: id).flatMap(CanvasExistingCards.card) else { return }
+        let title = NSAttributedString(string: described.name, attributes: [
+            .font: NSFont.systemFont(ofSize: 13 / scale, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        let icon = CanvasBoardView.menuIcon(for: described.kind)
+        let side = 16 / scale, pad = 10 / scale
+        let textWidth = min(title.size().width, 220 / scale)
+        let width = pad * 2 + (icon == nil ? 0 : side + 8 / scale) + textWidth
+        let height = 36 / scale
+        let at = board.viewPoint(point)
+        let proxy = NSRect(x: at.x - width / 2, y: at.y + 14 / scale, width: width, height: height)
+
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+        shadow.shadowBlurRadius = 12 / scale
+        shadow.shadowOffset = NSSize(width: 0, height: -4 / scale)
+        shadow.set()
+        CanvasPalette.card.setFill()
+        NSBezierPath(roundedRect: proxy, xRadius: 8 / scale, yRadius: 8 / scale).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+        let outline = NSBezierPath(roundedRect: proxy, xRadius: 8 / scale, yRadius: 8 / scale)
+        outline.lineWidth = 1.5 / scale
+        outline.stroke()
+
+        var left = proxy.minX + pad
+        if let icon {
+            icon.draw(in: NSRect(x: left, y: proxy.midY - side / 2, width: side, height: side),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            left += side + 8 / scale
+        }
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let size = title.size()
+        let text = NSMutableAttributedString(attributedString: title)
+        text.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: text.length))
+        text.draw(with: NSRect(x: left, y: proxy.midY - size.height / 2, width: textWidth, height: size.height),
+                  options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+
+        // What letting go here would do — "New Column", "As a Tab", "Swap" — under the proxy, where it
+        // travels with the pointer and nothing can cover it. Nothing when the pointer is over nowhere.
+        guard let action = board.dropMark?.title else { return }
+        let caption = NSAttributedString(string: action, attributes: [
+            .font: NSFont.systemFont(ofSize: 11 / scale, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let captionSize = caption.size()
+        let captionPad = 7 / scale
+        let pill = NSRect(x: proxy.midX - captionSize.width / 2 - captionPad,
+                          y: proxy.maxY + 5 / scale,
+                          width: captionSize.width + captionPad * 2,
+                          height: captionSize.height + captionPad * 0.8)
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        caption.draw(at: NSPoint(x: pill.minX + captionPad, y: pill.midY - captionSize.height / 2))
+    }
+
+    /// A boundary being dragged: every page it has squeezed below the width a page stops reading at
+    /// (`CanvasTileSession.narrowestPage`) says how wide it is, in orange. Only while dragging, since that
+    /// is when you are choosing a width — a page left narrow on purpose shouldn't carry a warning forever.
+    private func drawNarrowPages(_ board: CanvasBoardView, _ scale: Double) {
+        guard case .resizeTiles(_, _, _)? = board.gesture, let session = board.tiling else { return }
+        for (id, frame) in session.layout.frames where frame.width < CanvasTileSession.narrowestPage {
+            guard case .link? = board.document.node(id: id)?.content else { continue }
+            let text = NSAttributedString(string: "\(Int(frame.width.rounded())) pt · Narrow for a Page",
+                                          attributes: [.font: NSFont.systemFont(ofSize: 11 / scale, weight: .semibold),
+                                                       .foregroundColor: NSColor.white])
+            let size = text.size()
+            let pad = 7 / scale
+            let rect = board.viewRect(frame)
+            let pill = NSRect(x: rect.midX - size.width / 2 - pad,
+                              y: rect.maxY - size.height - pad * 0.8 - 12 / scale,
+                              width: size.width + pad * 2, height: size.height + pad * 0.8)
+            NSColor.systemOrange.setFill()
+            NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+            text.draw(at: NSPoint(x: pill.minX + pad, y: pill.midY - size.height / 2))
+        }
+    }
+
+    private func ring(_ rect: NSRect, _ color: NSColor, width: Double, _ scale: Double) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: 10 / scale, yRadius: 10 / scale)
+        path.lineWidth = width
+        color.setStroke()
+        path.stroke()
+    }
+
+    /// Where the next card goes — the room ⌥N has moved the other tiles aside for — or where a tile
+    /// being dragged would land, marked on the tiles as they stand, since a drag moves nothing until it
+    /// is let go (`CanvasTileSession.dropMark`). ⌥N's mark says what it is; a drag's says it under the
+    /// proxy instead (`drawCarried`).
+    private func drawTileMark(_ board: CanvasBoardView, _ scale: Double) {
+        guard let session = board.tiling, !board.isPicking else { return }
+        let mark: (rect: CanvasRect, title: String)
+        if let drop = board.dropMark {
+            mark = drop
+        } else if let rect = session.placementFrame, let side = session.preselection?.side {
+            mark = (rect, board.isChoosingPlacement
+                        ? "\(side.title) · Arrows to Move · Return to Choose a Card" : side.title)
+        } else {
+            return
+        }
+        let rect = board.viewRect(mark.rect)
+        let radii = CanvasTiling.corners(of: mark.rect, in: CanvasTiling.space(of: session.area))
+            .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+        let path = CanvasNodeView.path(in: rect, radii: radii)
+        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+        path.fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+        path.lineWidth = 2 / scale
+        path.stroke()
+
+        // A drag says what it will do under its proxy instead (`drawCarried`), which is the one thing
+        // on screen always in sight and always on top — a label in the mark could sit under the proxy,
+        // or off the part of a tile you are looking at.
+        guard board.dropMark == nil else { return }
+        let text = NSAttributedString(string: mark.title, attributes: [
+            .font: NSFont.systemFont(ofSize: 12 / scale, weight: .semibold),
+            .foregroundColor: NSColor.controlAccentColor,
+        ])
+        let size = text.size()
+        let pad = 6 / scale
+        let pill = NSRect(x: rect.midX - size.width / 2 - pad * 1.5, y: rect.midY - size.height / 2 - pad,
+                          width: size.width + pad * 3, height: size.height + pad * 2)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        text.draw(at: NSPoint(x: pill.minX + pad * 1.5, y: pill.minY + pad))
     }
 
     /// The outline of where the cards being placed would land, and the marks that say what it agrees

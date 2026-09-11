@@ -38,9 +38,10 @@ question, a row that could not hold what §7g put in it, two stores answering on
 that vanished exactly when they were needed — and every one of them is a thing an earlier section made
 true and did not go back to. **§7i is built**: every workspace has a name and every tiling is one, the
 canvas is a permanent tab at the head of the row rather than a chip that other chips can turn into, and
-a tab stopped following its board — which is what the header's reflow was made of. **This page is
-built.** What is left of it is the one question under Open,
-which is not a task.
+a tab stopped following its board — which is what the header's reflow was made of. **§7k is
+built**, all six steps: a workspace is columns of tiles, grid and master-and-stack are two ways of
+filling them, and it has keys, tabs, the board as a picker, peek and Size Columns to Content. What is
+left is the one question under Open, which is not a task.
 
 ## 1. What a project card can and cannot do today
 
@@ -1101,14 +1102,308 @@ one out: the only chip that closed, the only one you could not rename, and the o
 tile a second card into. Once the tab bar lost its "+", closing it also left File ▸ New Tab as the
 only way back.
 
-So a board PM makes for a project — `PMStore.openableCanvasPath` reports when it wrote the file —
-comes with a named workspace, **Notes**, holding the project's own card and nothing else
-(`CanvasProjectNoteCard.seedNotesWorkspace`). The notes tab the new window opened on becomes that
-workspace's chip rather than gaining a twin (`ProjectWindowController.seedNotesWorkspace`). Any
-workspace of the project card alone steps into the card on arrival, as the notes tab always did.
+So wherever there is a board with the project's own card on it, **the notes are a named workspace**
+holding that card and nothing else. A notes tab — a new window's default, or one in a row stored
+before this — becomes that workspace's chip rather than gaining a twin, and asking for the notes
+(View ▸ New Tab, the renderer switch) goes to it (`ProjectSplitViewController.adoptNotesTab`). The
+workspace is found rather than duplicated: one of the card alone is the notes whatever it is called,
+and only when there is none is one made, as **Notes** — or Notes 2, past a Notes of yours that holds
+something else (`CanvasProjectNoteCard.notesWorkspace`). Any workspace of the project card alone steps
+into the card on arrival, as the notes tab always did.
 
-**New projects only.** A project that already has a board keeps its tabs, and `.notes` / `.note` still
-exist and still open. A board that already has a workspace called Notes is left alone.
+**Every project, not only new ones** — this shipped for new projects first, and that left every
+existing window with a closable Notes chip beside a row of workspaces that don't close. `.notes` /
+`.note` remain only as the fallback for a project whose board has no card to show.
+
+## 7k. A workspace is columns of tiles — **built**
+
+Add Card from Canvas answered the request it was built for and showed where the model stops. A workspace
+is a list of card ids, laid out by one of two formulas, so the only thing that can be said about where a
+card goes is its index — and the only place a new one can go is the end. Every capability a tiling
+manager is expected to have is a question about *place*: this tile beside that one, this one below,
+these two sharing a slot. A list can't answer any of them.
+
+This section was worked out in a playground before a line of it was written here — a working model of
+the whole design on example cards, keys and drags included:
+[Workspace Tiling Playground](https://claude.ai/code/artifact/cfc421a3-bf11-400f-81c9-62df098ebf56).
+
+### What tiling managers agree on
+
+i3 and sway, bspwm, Hyprland, niri, and on the Mac AeroSpace, yabai and Amethyst, disagree about a great
+deal and agree about this:
+
+- **Every act has a key.** Focus in a direction, move in a direction, grow and shrink, even everything
+  out, and go back to the last window. This board has the first of those (⌥ arrows) and does the rest
+  with the mouse or not at all.
+- **You say where the next window goes.** Beside the focused one by default, or at a place marked in
+  advance — bspwm's *preselection*.
+- **Several windows can share a slot** — i3's tabbed and stacked containers — which is what stops a
+  layout from breaking up into slivers.
+- **A window can be summoned without joining the layout** — the scratchpad.
+- **Layouts are either computed from a list** (dwm, xmonad, and this board today), **or a tree you split**
+  (i3, bspwm), **or columns on a strip** (niri, PaperWM).
+
+### The shape: columns, tiles, cards
+
+**A workspace is a row of columns. A column is a stack of tiles. A tile holds one card, or several as
+tabs, and shows one of them.** Two levels, not a tree. That is the whole model, and the rest of this
+section is what it makes possible.
+
+Two levels covers nearly everything people build with i3 or bspwm splits, and it is what answers backlog
+11. BSP was ruled out in `CanvasTiling`'s own doc comment as a scheme for windows that arrive one at a
+time, and the backlog's reply was that a tree you *build* doesn't have that problem — but it has another:
+under a tree, "the end" is not a place, so adding a card needs a second grammar that names a tile to
+split and a direction. Columns have that grammar built in and cost nothing to store: left and right are
+a new column, above and below are a new tile in this one.
+
+**Grid and master-and-stack stop being modes and become commands** that fill in columns. After one runs,
+the layout is yours: move a tile across and nothing snaps it back. The arithmetic is `CanvasTiling.run`,
+which already shares a length among flexible and pinned things, run twice — once across the width for
+the columns, once down each column for its tiles.
+
+### A width belongs to its column — **decided**
+
+Today a size belongs to the card (`sizes` is keyed by card id), so a tile carries its width wherever it
+goes. Here a column's width is the column's, and a tile's height is the tile's, so a tile moved into
+another column takes that column's width, and two swapped tiles swap cards while the sizes stay where
+they were.
+
+That is a real change, and it is the right one for this shape. A width that followed a card into a column
+of three would have to be either ignored — the column already has a width — or imposed on the two tiles
+already there, which is resizing cards you never touched. It is the argument `CanvasTiling.grid` already
+makes for why a real grid ignores sizes, taken to its conclusion.
+
+### Where the next card goes
+
+**Next to the tile you are on, splitting it along its longer side** — a wide tile gets a new column
+beside it, a tall one a new tile below. This replaces "on the end", whose argument in `add(_:)` was that
+the end is the one position you can predict without learning anything. That was true of a list. In a set
+of columns there is no end to predict, and "beside the thing I'm looking at" is the prediction everybody
+already makes.
+
+**⌥N chooses instead.** An arrow picks a side, T puts the card in the tile as a tab, ⌥ arrows pick a
+different tile, and Return opens the board to pick the card. The choice waits until a card arrives, and
+it is not saved — `memory(of:)` names what a workspace keeps, and this is not one of them, for the reason
+`maximized` isn't.
+
+**While you choose with ⌥N, the other tiles move aside.** What is drawn is the layout the change would
+produce, so a new column opens as a full-height gap even when the tile beside it shares its column with
+others — which a half-tile highlight got wrong in the first version of the playground.
+
+**A drag moves nothing until you let go** — **decided**, after using it. Dragging a tile by its
+handlebar or its tab carries a small proxy of the card; the tile it came from stays where it is,
+dimmed; and where it would land is marked on the tiles as they stand — a new column as the side of the
+whole column, a tile above or below as half of the tile, a tab as its top band, a swap as the tile
+itself (`CanvasTileSession.dropMark`). What the drop would do is written under the proxy, which
+travels with the pointer and is always on top, rather than in the mark, which the proxy could cover.
+The layout changes once, on the drop. The first version reflowed
+the tiles under the pointer as it moved, the way the playground does, and in the app that was
+unpredictable, took precision, and disoriented: the target kept moving because the tiles did.
+
+### The board is the picker
+
+**⌥B zooms the workspace out to the board.** Each tile flies back to where its card sits, the workspace's
+cards stay outlined and numbered, and a click adds a card or takes it out. Escape goes back in.
+
+This is the visual picker Add Card from Canvas was asked to be, and it has no thumbnails to make. It is
+the board at the zoom you would look at it anyway, so a thousand cards cost what the board already costs,
+and you find a card by where you put it rather than by reading names. Nearly all of it exists: leaving a
+workspace already flies the tiles home and fades the other cards in. The picker is that, zoomed to fit,
+with a click that toggles membership instead of selecting and an Escape that runs the way in.
+
+Add Card from Canvas stays in the menus, for the keyboard and for when you know the name.
+
+### Tabs in a tile
+
+**Several cards share a tile and one shows.** Web cards are the case: a ticket beside the dashboard it is
+about, two documents you flip between. ⌥[ and ⌥] step through them. A tab that isn't showing is left out
+of the layout's `visible` — the mechanism a maximized tile already uses — so switching tabs changes which
+card is drawn and does not reload anything.
+
+**Dragging a tab pulls that one card out**, to beside any tile, including the one it came from, or into
+another tile's tabs. ⌥T does it from the keyboard, beside the tile it came from. Backlog 8 — "swap the
+card in a tile" — is this: add the new card as a tab and take the old one out.
+
+**⌥⌫ takes out the card that is showing, not the tile** — **decided**. Taking a tile out is taking out
+each of its cards, and the one you are looking at is the one the command can see.
+
+### Peek is a zoom, not a copy
+
+On the board, Space on a card opens it at a size you can read, and Space or Escape puts it back without
+it joining anything. The playground draws a second copy of the card over everything, and the app can't:
+a web card moved to a different parent view is a page torn down and started again (`reordering`'s note
+in `CanvasBoardView` says so, and it is why a lifted card is raised by layer rather than by re-adding
+it). So a peek **zooms the board onto the card** — its own view, the page it is already running, woken
+by the budget like any card you zoom into. Return adds it.
+
+### Sizes from what's in them
+
+A window manager can't know what is in a window; the board knows every card's kind. **Size Columns to
+Content** gives each column the share of the width the widest card it holds reads at — a page 1024pt, a
+PDF 720, a note or a project's card 640, an image 560, a text card 320. Shares, not pins: the columns
+still fit the window. A page narrower than 380pt is marked while you drag a boundary, since that is
+where a page stops reading and it is the width pinning exists to protect. (The playground had this as a
+switch that stayed on; built, it is a command — see step 6 below.)
+
+### The keys — **decided**
+
+**⌥ is the tiling key**, because ⌥ arrows already are, and everything else follows from that: ⇧ moves
+the tile that plain ⌥ would move focus to; the zoom keys with ⌥ in place of ⌘ size the tile instead of
+the board.
+
+| | |
+|---|---|
+| ⌥ ← → ↑ ↓ | Focus the next tile over |
+| ⌥` | Back to the last tile |
+| ⌥[ ⌥] | Previous and next tab |
+| ⌥⇧ ← → | Into the next column, or a new one at the edge |
+| ⌥⇧ ↑ ↓ | Up and down the column |
+| ⌥T | Pull the showing tab out |
+| ⌥= ⌥− | Widen and narrow the column |
+| ⌥⇧= ⌥⇧− | Taller and shorter tile |
+| ⌥0 | Balance |
+| ⌥⇧0 | Size the columns to what's in them |
+| ⌥N | Choose where the next card goes |
+| ⌥B | The board, to pick cards |
+| ⌥⌫ | Take out the card that is showing |
+
+**They are the board's only when the board has the keyboard.** In a text card you are typing in, ⌥= types
+≠, ⌥[ types “ and ⌥T types †, as they do everywhere else on the Mac, and taking them away from a text
+view would be taking three characters away from somebody's writing. That is the rule the card's
+keyboard already works by — a text view is first responder while you type, so none of the board's keys
+are reached — and it is why the table needs no second modifier.
+
+### What is saved
+
+`CanvasViewState.Tiling` gains `columns`, beside the fields it has. The old fields go on being
+**written** — `ids` column by column, an `arrangement` read off the shape, `masterFraction` — so a build
+from before this section still opens a workspace saved by one after it, and lays it out its own way. A
+tiling saved before this section has no `columns`, and is converted once when it is restored, by running
+its arrangement: that needs the window, because a grid's column count comes from the window's shape,
+which is why it happens at restore and not at decode.
+
+`CanvasTileSession` loses `arrangement` and `sizes`. `CanvasTiling.savedArrangement` stays, as the
+command a new workspace is filled in by.
+
+### What it costs
+
+The layout arithmetic is nothing — twenty tiles is microseconds — and the rule that keeps it that way is
+already the board's: move the views that exist, never rebuild them. The cost is elsewhere.
+
+- **A page re-lays itself out every time its tile changes size.** An animation that resizes six web cards
+  is six pages reflowing on every frame, and ⌥N's preview adds one each time the place changes. A drag adds
+  none: it reflows once, on the drop. **Measure
+  first**, with `FrameMeter`, on a real board of pages. If it is bad, the answer is to give each page its
+  final size at once and animate a picture of it, putting the live page back when the tiles land. The
+  frozen-page snapshot in `CanvasLinkNodeView` is half of that already.
+- **The picker drops every page below `pagesLoadAbove`**, so they freeze to their pictures. They keep
+  their renderers for the off-screen grace, so going back into the workspace reloads nothing, and the
+  budget pass already waits for the crossing to land (`isCrossing`). The first frame of a board of forty
+  cards is what zooming the board out costs today, and is worth one measurement.
+- **Hidden tabs hold live pages.** A tile of five web tabs could hold five of the eight. The budget
+  already treats a card that isn't drawn as not visible, so hidden tabs give their slots up first and
+  freeze after the grace. Probably right as it stands; worth a test.
+
+### The order it is built in
+
+Each step ships on its own once the first is in.
+
+1. **The shape.** Columns in `CanvasTileSession` and `CanvasViewState.Tiling`; grid and master-and-stack
+   as commands; dividers, pinning, promote, swap, the handlebar and maximize on columns; the conversion
+   of saved tilings. Deliberately no new gestures, so what changes on screen is only what the shape
+   changes:
+   - A grid whose last row is short has shorter columns of taller tiles, rather than a centred short row.
+   - A grid keeps its columns when the window changes shape. Arranging it again fits it to the new one.
+   - Arrange's two items are commands, and neither is ticked.
+   - Every boundary in a grid can be dragged. A grid of rows *and* columns used to have none.
+   - Swapping two tiles swaps the cards; the sizes stay where they were.
+   - Taking out the master leaves the stack filling the window, rather than promoting the next tile.
+   - A boundary's menu pins the column or the tile either side of it — Pin Left Column, Pin Tile
+     Above — rather than naming a card, and Even Out on the master's boundary makes the two columns
+     equal rather than putting back the split you usually drag it to.
+   - Unpinning a tile leaves it the size it was, rather than jumping to an even share.
+   **Built.**
+2. **Keys**, and where the next card goes: the automatic side, ⌥N, and the preview. **Built** — the
+   keys for tabs and the board (⌥T, ⌥[ ⌥], ⌥B) arrive with those steps.
+3. **Tabs.** **Built**:
+   - **The strip is the layout's.** A tile of several cards is laid out whole and its card is drawn
+     below a band across its top (`CanvasTileSession.tabStrips`, `belowTabs`), so everything that reads
+     where cards are — hit testing, the handlebars, the page budget — is right without knowing about
+     tabs. The band is drawn under the cards, with the handlebars (`CanvasTileHandleView`).
+   - **The strip is the tile's title bar.** A click on a tab shows it, a drag on one pulls that card out,
+     and a drag on the rest of the strip carries the tile, as the handlebar does. Double-clicking it
+     maximizes, as a title bar's double-click does.
+   - **The top of every tile is its tabs.** Dropping a tile or a tab on a tile's top band joins its tabs.
+     A tab pulled out joins them from the middle too, since one card is not a tile to swap with.
+   - **Maximizing keeps the tabs.** The strip stays on the tile filling the room, and ⌥[ ⌥] step through
+     it with the maximize following the card that shows.
+   - **Pull Out of Tabs** is on a tabbed tile's own menu, beside ⌥T.
+4. **The board as the picker.** **Built**:
+   - **The workspace stays up.** Picking is a way of drawing it, not a way out of it: `isTiled` (the
+     workspace — commands, what a card is added to, what is saved) and `showsTiles` (the screen —
+     whether cards take their own clicks, whether the board scrolls and zooms, which rule the page
+     budget runs by) came apart for it, and they differ only while picking. So nothing is set aside,
+     each pick is an ordinary change to the workspace saved like any other, and the tab never leaves.
+   - **A pick goes where the next card goes**, and is then the tile the next pick goes beside, so a run
+     of clicks lays the cards out in the order you picked them. ⌥N's Return opens the picker, so the
+     place you chose is where the first click lands.
+   - **A frame is its cards**: clicking one puts in every card inside it that isn't in yet, or takes
+     them all out when they all are — never the last card.
+   - **The keyboard is the picker's.** Escape, Return and ⌥B go back; nothing else means anything,
+     because ⌫ there would delete a card off the board you are only choosing from.
+   - Also **Pick Cards on Board** in the View menu and a tile's menu, retitled to the way back while it
+     is up.
+5. **Peek**, as a zoom. **Built**:
+   - **Space on a card, while picking.** The board flies onto the card — its own size if the window has
+     room, never larger, in the middle of what the sidebar and the header leave (`CanvasTiling.peek`) —
+     and the rest of the board is dimmed round it. Space or Escape flies back to exactly where the board
+     was, and so does a click anywhere but the card.
+   - **Return, or a click on the card, is what a pick would have been**: in, where the next card goes,
+     and back to choosing. Except that a card already in the workspace is not taken out but shown — you
+     went and looked at it, which is not asking for it to go — and the workspace comes back on its tile.
+   - **Not a frame.** A frame is its cards and there is nothing in one to read, so Space over one beeps.
+   - **A look, not a visit.** The card still doesn't take its own clicks and the wheel still moves the
+     board, as everywhere in the picker; reading further down a page is zooming in by hand.
+6. **Size by Content.** **Built**, as **Size Columns to Content** (⌥⇧0, and in every Arrange menu):
+   - **A command, like Balance, not a mode.** A mode would have to decide what a boundary drag means
+     while it is on — fight the drag, or quietly switch itself off at the first one — and either way the
+     widths would stop being what you last did. Done once, it is one more way to set them, and Arrange
+     stays a menu with nothing ticked.
+   - **The widest card a column holds**, tabs that aren't showing included, gives the column its share
+     (`CanvasTileSession.contentWidth`): a page 1024, a PDF 720, a note 640 — a project's card is its
+     notes and its tasks together, and sized as the notes — an image 560, a text card 320. A pinned
+     column keeps its pin. Heights are left alone.
+   - **The mark for a narrow page is shown while a boundary is dragged**: a page under 380pt says its
+     width in orange. That is when you are choosing a width; a page left narrow on purpose shouldn't
+     carry a warning for as long as it stays that way.
+
+### What step 2 decided on the way
+
+- **The keys are the board's `keyDown`, not menu key equivalents.** A key equivalent is taken before
+  the view you are typing in sees it, so ⌥= as a menu shortcut would have taken ≠ away from every text
+  card and every text field on every page. As `keyDown` they reach the board only when nothing that
+  types wanted them — which is how ⌥ arrows always worked, and why the table in *The keys* needs no
+  second modifier (`CanvasBoardView.tilingTakes`).
+- **The chosen place is the session's, and its layout draws it.** `CanvasTileSession.preselection` is
+  a field like `maximized`: not saved, and while it is set `layout` is the columns with a stand-in
+  where the card will go. So everything that lays the tiles out — a window resize included — shows the
+  room without knowing there is any. The boundaries are off while it is up, since they are measured
+  off the columns and the tiles are drawn moved aside.
+- **Return offers the cards.** Finishing a choice opens the board to pick from (step 4 — until then it
+  opened Add Card from Canvas at the place). Any other way a card arrives — a new card, a paste, a
+  followed link — goes there too, and uses the place up.
+- **Several cards at once go one beside the next.** A paste of three placed beside the same tile would
+  split it three times and land in reverse; beside the one before, they read in the order they came.
+- **A drag never reflows the tiles** (see *Where the next card goes*): it marks where the card would
+  land and changes the layout once, on the drop. That retired the handlebar's one-move-per-crossing rule
+  (`CanvasTileSession.reorder`), which existed only because the order changed under a pointer still
+  being read against it — and, on a second pass, the live preview that had replaced it.
+
+### Left out on purpose
+
+- **A strip that scrolls past the window.** Every workspace fits its window, for now.
+- **Workspaces that fill themselves** from a frame or a search. A workspace stays a list you control.
+- **Rules that place a card by its kind.** Size by Content is as far as that goes.
 
 ## 8. What this does to the backlog
 
@@ -1126,6 +1421,10 @@ exist and still open. A board that already has a workspace called Notes is left 
   pill's tiled readout, which stops being a readout — and answers 9's remaining question with *both*:
   it was a real gap **and** a discoverability one, and they had the same cause.
 - **13** — suggest the project's links — gets its open question answered by §5.
+- **8** — swap the card in a tile — is **folded into §7k** as tabs in a tile: add the new card as a tab
+  and take the old one out. Its picker is the board itself, which also answers its thumbnail question.
+- **11** — BSP layouts — is **answered by §7k**: not a tree, but columns of tiles, which have the
+  splitting grammar a tree needs and cost nothing to store.
 
 ## Open
 
@@ -1136,8 +1435,15 @@ a frame is not one), and `CanvasViewState.Tiling` (why the type kept its name wh
 new one). `CanvasFocusCodingTests` is what holds the wire format still, since nothing else in the code
 would notice it moving.
 
-**Whether a workspace can span boards.** Everything above keeps a workspace inside one board, because a
-tiling is a list of card ids and cards live in a `.canvas`. "Slack and Google Docs, no project notes"
-is a workspace with nothing project-shaped in it, which raises the question of which board it belongs to
-at all. Left open deliberately: the answer is probably "the board you made it on, and that is fine",
-but it is worth being sure before the word *workspace* is promoted to the thing tabs are made of.
+**A workspace cannot span boards — decided.** Everything above already kept one inside a single board,
+and this settles that it stays that way. **A board is one `.canvas` file**: the document PmLib parses
+out of it (`CanvasDocument` — nodes, edges, and the keys it carries through untouched), which one
+`CanvasBoardView` draws, and which every view memory is keyed by (`CanvasViewMemory`, keyed by the file
+rather than by the project, because a board is one document however you reached it). A tiling is a list
+of card ids; a card id means something only inside the file it was written in. So a workspace spanning
+two boards would be a list whose ids come from two documents, with nothing to say which one an id
+belongs to — and the workspace would break the moment either file was opened on its own.
+
+"Slack and Google Docs, no project notes" is still a workspace with nothing project-shaped in it, and
+the answer is the one that was already likely: it belongs to the board you made it on. That board may
+hold nothing but web cards, which is a perfectly ordinary `.canvas`.

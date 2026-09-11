@@ -305,6 +305,11 @@ enum MainMenu {
                                         keyEquivalent: "")
             entry.representedObject = arrangement.rawValue
         }
+        // ⌥⇧0 is the board's key rather than this item's equivalent, for the reason every ⌥ tiling key
+        // is — see `CanvasBoardView.tilingTakes`.
+        arrange.addItem(.separator())
+        arrange.addItem(withTitle: "Size Columns to Content",
+                        action: #selector(CanvasBoardView.sizeColumnsToContent(_:)), keyEquivalent: "")
         let arrangeItem = menu.addItem(withTitle: "Arrange Tiles", action: nil, keyEquivalent: "")
         arrangeItem.submenu = arrange
 
@@ -322,6 +327,16 @@ enum MainMenu {
                      keyEquivalent: "")
         menu.addItem(withTitle: "Remove from Tiled View",
                      action: #selector(CanvasBoardView.removeTile(_:)),
+                     keyEquivalent: "")
+        // Remove's other half. Its list is the board's, so it is filled as it opens rather than here —
+        // see `CanvasExistingCardsMenu`.
+        let existing = NSMenu(title: CanvasExistingCards.title)
+        existing.delegate = CanvasExistingCardsMenu.shared
+        menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = existing
+        // The same, by where the cards sit rather than by name — ⌥B on the board itself. Retitled by
+        // `validateUserInterfaceItem` to be the way back while it is up.
+        menu.addItem(withTitle: "Pick Cards on Board",
+                     action: #selector(CanvasBoardView.pickCardsOnBoard(_:)),
                      keyEquivalent: "")
         menu.addItem(withTitle: "Show Canvas",
                      action: #selector(CanvasBoardView.goToCanvasCommand(_:)),

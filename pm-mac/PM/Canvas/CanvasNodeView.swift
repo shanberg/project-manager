@@ -195,7 +195,7 @@ class CanvasNodeView: NSView {
     /// drop every character into it — which is what a task row on a project tile did. The second half
     /// is `CanvasBoardView.tileClicked`, which listens for these clicks without taking them and
     /// engages the tile they landed in. One tile at a time, because the keyboard is one thing.
-    var takesItsOwnClicks: Bool { isEngaged || board.isTiled }
+    var takesItsOwnClicks: Bool { isEngaged || board.showsTiles }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard takesItsOwnClicks else { return nil }

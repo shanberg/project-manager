@@ -124,4 +124,33 @@ final class CanvasProjectNoteCardTests: XCTestCase {
         XCTAssertNil(subpath)
         XCTAssertEqual(node.frame, CanvasRect(x: -100, y: -140, width: 400, height: 400))
     }
+
+    // MARK: Which workspace the notes are
+
+    private func tiling(_ ids: [String]) -> CanvasViewState.Tiling {
+        CanvasViewState.Tiling(ids: ids, arrangement: .masterStack, masterFraction: 0.5, sizes: nil)
+    }
+
+    func testABoardWithNoWorkspacesMakesNotes() {
+        let found = CanvasProjectNoteCard.notesWorkspace(for: "card", in: [:])
+        XCTAssertEqual(found.name, "Notes")
+        XCTAssertTrue(found.isNew)
+    }
+
+    /// A workspace of the card alone is the notes whatever it is called, so renaming Notes does not
+    /// get you a second one the next time the window opens.
+    func testAWorkspaceOfTheCardAloneIsTheNotesWhateverItsName() {
+        let found = CanvasProjectNoteCard.notesWorkspace(
+            for: "card", in: ["Journal": tiling(["card"]), "Review": tiling(["card", "other"])])
+        XCTAssertEqual(found.name, "Journal")
+        XCTAssertFalse(found.isNew)
+    }
+
+    /// A workspace of yours called Notes that holds something else is somebody's, and is not replaced.
+    func testANotesWorkspaceHoldingSomethingElseIsLeftAlone() {
+        let found = CanvasProjectNoteCard.notesWorkspace(
+            for: "card", in: ["Notes": tiling(["other"]), "Notes 2": tiling(["card", "other"])])
+        XCTAssertEqual(found.name, "Notes 3")
+        XCTAssertTrue(found.isNew)
+    }
 }
