@@ -1296,13 +1296,15 @@ already the board's: move the views that exist, never rebuild them. The cost is 
 - **A page re-lays itself out every time its tile changes size.** An animation that resizes six web cards
   is six pages reflowing on every frame. Neither ⌥N nor a drag adds any: both mark where the card would
   go and leave the tiles alone, and a drag reflows once, on the drop. **Measure
-  first**, with `FrameMeter`, on a real board of pages. If it is bad, the answer is to give each page its
+  first**, with `FrameMeter` — the drop is measured where it happens, and `pmpanel://bench?journey=…`
+  repeats it — on a real board of pages. If it is bad, the answer is to give each page its
   final size at once and animate a picture of it, putting the live page back when the tiles land. The
   frozen-page snapshot in `CanvasLinkNodeView` is half of that already.
 - **The picker drops every page below `pagesLoadAbove`**, so they freeze to their pictures. They keep
   their renderers for the off-screen grace, so going back into the workspace reloads nothing, and the
   budget pass already waits for the crossing to land (`isCrossing`). The first frame of a board of forty
-  cards is what zooming the board out costs today, and is worth one measurement.
+  cards is what zooming the board out costs today, and is worth one measurement —
+  `pmpanel://bench?journey=picking`, with `peek` and `maximize` beside it.
 - **Hidden tabs hold live pages.** A tile of five web tabs could hold five of the eight. The budget
   already treats a card that isn't drawn as not visible, so hidden tabs give their slots up first and
   freeze after the grace. Probably right as it stands; worth a test.

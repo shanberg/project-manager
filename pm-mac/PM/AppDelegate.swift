@@ -368,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
     // pmpanel://waiting                → the cross-project Waiting list
     // pmpanel://settings               → the Settings window
-    // pmpanel://bench?spread=1&runs=&tiles= → dev only; inert unless the frame meter is on
+    // pmpanel://bench?spread=1&runs=&tiles=&journey= → dev only; inert unless the frame meter is on
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
@@ -424,6 +424,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 CrossingBench.runSpread(each: intParam(url, "runs") ?? 6,
                                         tiles: intParam(url, "tiles") ?? 8,
                                         all: intParam(url, "all") == 1)
+            } else if let journey = stringParam(url, "journey")
+                        .flatMap(CrossingBench.Journey.init(rawValue:)), journey != .crossing {
+                // `?journey=picking|peek|maximize` measures the workspace's own journeys instead of the
+                // crossing in and out of the canvas — see `CrossingBench.Journey`.
+                CrossingBench.runJourney(journey, iterations: intParam(url, "runs") ?? 20,
+                                         tiles: intParam(url, "tiles") ?? 8)
             } else {
                 CrossingBench.run(iterations: intParam(url, "runs") ?? 20,
                                   tiles: intParam(url, "tiles") ?? 8)
@@ -432,6 +438,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break
         }
+    }
+
+    /// Read a word off a control URL; nil when it isn't there.
+    private func stringParam(_ url: URL, _ name: String) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value
     }
 
     /// Read a whole number off a control URL; nil when it isn't there or isn't one.

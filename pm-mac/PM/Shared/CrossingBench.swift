@@ -63,6 +63,9 @@ enum CrossingBench {
         guard FrameMeter.isEnabled else { return declineWithoutTheMeter() }
         guard !screenIsLocked else { return Log.write("BENCH declined: the screen is locked") }
         guard let board = frontBoard() else { return Log.write("BENCH declined: no board in front") }
+        guard !isHidden(board) else {
+            return Log.write("BENCH declined: the window is not on screen — bring it to the front")
+        }
         guard let plan = prepare(board: board, tiles: tiles) else { return }
         guard board.onTileAsWorkspace(plan) else {
             return Log.write("BENCH declined: this window will not keep a workspace")
@@ -105,15 +108,26 @@ enum CrossingBench {
 
     /// The workspace the run bounces through, saved under our own name so the same cards resume the
     /// same workspace across runs and builds. Nil when the board cannot supply one.
+    ///
+    /// **Saved as columns, the way the app writes one.** This used to save `ids` and an arrangement and
+    /// nothing else — the shape from before §7k — so every benched crossing came back through the
+    /// legacy conversion in `CanvasTileSession.init(restoring:)`, which runs the arrangement into
+    /// columns against the window. That is a path a workspace saved today never takes, and it is extra
+    /// work besides, so the bench was measuring a journey the app does not make.
     private static func prepare(board: CanvasBoardView, tiles: Int) -> CanvasViewState.Tiling? {
         let cards = board.document.nodes.filter { !$0.isGroup }.prefix(tiles).map(\.id)
         guard cards.count >= 2 else {
             Log.write("BENCH declined: \(cards.count) cards on the board")
             return nil
         }
+        let columns = CanvasTiling.columns(.grid, of: cards.map { CanvasTiling.Tile($0) },
+                                           in: board.tileableRect(atZoom: 1),
+                                           masterFraction: CanvasTiling.savedMasterFraction)
+        // The old fields go on being written for the reason `CanvasTileSession.memory` writes them: a
+        // build from before columns can still open what this saved.
         let plan = CanvasViewState.Tiling(ids: Array(cards), arrangement: .grid,
                                           masterFraction: CanvasTiling.savedMasterFraction,
-                                          sizes: nil)
+                                          sizes: nil, columns: columns)
         CanvasWorkspaces.save(plan, as: workspaceName, for: board.store.url)
         return plan
     }
@@ -130,25 +144,80 @@ enum CrossingBench {
             Log.write("BENCH declined: no board in front")
             return finished?() ?? ()
         }
-        let cards = board.document.nodes.filter { !$0.isGroup }.prefix(tiles).map(\.id)
-        guard cards.count >= 2 else {
-            return Log.write("BENCH declined: \(cards.count) cards on the board")
-        }
         // Saved under our own name *before* the window is asked to make the workspace, so that
         // `ProjectSplitViewController.tileAsWorkspace` finds one with this exact card set already
         // there and opens a tab on it rather than minting `Workspace 2`. See its note on why the
-        // same cards resume the same workspace.
-        let plan = CanvasViewState.Tiling(ids: Array(cards), arrangement: .grid,
-                                          masterFraction: CanvasTiling.savedMasterFraction,
-                                          sizes: nil)
-        CanvasWorkspaces.save(plan, as: workspaceName, for: board.store.url)
+        // same cards resume the same workspace, and `prepare` for why it is saved as columns.
+        guard let plan = prepare(board: board, tiles: tiles) else { return finished?() ?? () }
         // Opens its tab, which is what the alternation below needs: with no tab on the workspace,
         // `goToWorkspace(named:)` lays the tiles into the pane it is already in and nothing crosses.
         guard board.onTileAsWorkspace(plan) else {
             return Log.write("BENCH declined: this window will not keep a workspace")
         }
-        Log.write("BENCH \(iterations) crossings of \(cards.count) tiles, \(interval)s apart")
+        Log.write("BENCH \(iterations) crossings of \(plan.ids.count) tiles, \(interval)s apart")
         step(0, of: iterations, then: finished)
+    }
+
+    /// What a run repeats.
+    ///
+    /// **The crossing is no longer the only journey that lays every tile out again.** §7k added three
+    /// more, each of which moves every tile on screen and so costs what a crossing costs: the board as
+    /// the picker (⌥B), a peek's zoom onto one card, and maximizing a tile. Each is measured where it
+    /// happens — see `CanvasBoardView.beginPicking`, `beginPeek` and `toggleMaximizeTile` — and this is
+    /// what drives them enough times for the numbers to mean something.
+    enum Journey: String {
+        case crossing, picking, peek, maximize
+    }
+
+    /// Repeat one of the workspace's own journeys, rather than crossing in and out of the canvas.
+    static func runJourney(_ journey: Journey, iterations: Int, tiles: Int) {
+        guard FrameMeter.isEnabled else { return declineWithoutTheMeter() }
+        guard !screenIsLocked else { return Log.write("BENCH declined: the screen is locked") }
+        guard let board = frontBoard() else { return Log.write("BENCH declined: no board in front") }
+        guard !isHidden(board) else {
+            return Log.write("BENCH declined: the window is not on screen — bring it to the front")
+        }
+        guard let plan = prepare(board: board, tiles: tiles) else { return }
+        guard board.onTileAsWorkspace(plan) else {
+            return Log.write("BENCH declined: this window will not keep a workspace")
+        }
+        Log.write("BENCH \(iterations) \(journey.rawValue) journeys of \(plan.ids.count) tiles, "
+            + "\(interval)s apart")
+        travel(0, of: iterations, journey)
+    }
+
+    /// One journey, then the next. Each step asks the board what state it is in rather than counting
+    /// parity: a peek has to open the picker first, and a step that could not act would otherwise
+    /// leave every later step going the wrong way.
+    private static func travel(_ index: Int, of total: Int, _ journey: Journey) {
+        guard index < total else { return Log.write("BENCH done") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
+            MainActor.assumeIsolated {
+                guard !screenIsLocked else {
+                    return Log.write("BENCH stopped: the screen locked mid-run")
+                }
+                guard let board = tiledBoard() else { return Log.write("BENCH stopped: no board") }
+                guard !isHidden(board) else {
+                    return Log.write("BENCH stopped: the window went behind something mid-run")
+                }
+                switch journey {
+                case .crossing:
+                    if index.isMultiple(of: 2) { board.onGoToCanvas() }
+                    else { board.onGoToWorkspace(workspaceName) }
+                case .picking:
+                    board.togglePicking()
+                case .peek:
+                    // A peek is only reachable from the picker, so the run opens it once and then
+                    // alternates the peek itself, which is the zoom being measured.
+                    if !board.isPicking { board.beginPicking() }
+                    else if board.peeking == nil { board.tiling?.cards.first.map(board.beginPeek) }
+                    else { board.endPeek() }
+                case .maximize:
+                    board.tiling?.ids.first.map { board.toggleMaximizeTile($0) }
+                }
+                travel(index + 1, of: total, journey)
+            }
+        }
     }
 
     /// One crossing, then the next. Recursive rather than a repeating timer so a step that cannot find
@@ -190,6 +259,39 @@ enum CrossingBench {
     private static var screenIsLocked: Bool {
         guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
         return session["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
+    /// The board showing the workspace — **not simply the first one in the front window.**
+    ///
+    /// A window holds more than one board at a time: the canvas pane and a workspace pane both stay
+    /// alive, and `frontBoard` returns whichever comes first in the view tree. The crossing journey can
+    /// live with that because a crossing *is* a pane swap and it wants whatever is in front now. The
+    /// journeys §7k added act on the tiled board in place, and picking one at random gave a run whose
+    /// three measurements reported 8 views, then 0, then 1 — three different boards, none of them
+    /// measured twice.
+    private static func tiledBoard() -> CanvasBoardView? {
+        let windows = ([WindowManager.shared.frontmost?.window].compactMap { $0 } + NSApp.windows)
+        for window in windows {
+            if let board = window.contentView.map(everyBoard)?.first(where: \.isTiled) { return board }
+        }
+        return frontBoard()
+    }
+
+    private static func everyBoard(_ view: NSView) -> [CanvasBoardView] {
+        if let board = view as? CanvasBoardView { return [board] }
+        return view.subviews.flatMap(everyBoard)
+    }
+
+    /// Whether this board's window is actually being presented — **the other condition that makes a run
+    /// silently worthless.**
+    ///
+    /// `CADisplayLink` does not tick for a window nobody can see, so every measurement is abandoned
+    /// after 0 frames, which reads in the log like a bench firing too fast rather than like a window
+    /// behind another app. That is the same failure the screen lock produces and it deserves the same
+    /// treatment: say so and decline, rather than write down numbers that describe nothing.
+    private static func isHidden(_ board: CanvasBoardView) -> Bool {
+        guard let window = board.window else { return true }
+        return window.isMiniaturized || !window.occlusionState.contains(.visible)
     }
 
     /// The board in the front window, wherever it is in its view tree.

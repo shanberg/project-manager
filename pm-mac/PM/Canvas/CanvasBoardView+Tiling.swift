@@ -375,6 +375,13 @@ extension CanvasBoardView {
         // The tile you are looking at is the tile the arrows and the menus are about. Maximizing one
         // you had not picked would otherwise leave the selection on a tile that is no longer drawn.
         if session.maximized != nil { selection = [id] }
+        // One tile growing to fill the room, or every other one coming back, is every tile laid out
+        // again — the same cost a crossing pays. See `CrossingBench.Journey`.
+        if animated {
+            FrameMeter.measure(session.maximized == nil
+                                ? "restore (\(session.ids.count) tiles)"
+                                : "maximize (\(session.ids.count) tiles)", on: self)
+        }
         setLayout(session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
@@ -786,6 +793,9 @@ extension CanvasBoardView {
                                                     trailing: Double(covered.right),
                                                     top: Self.headerClearance))
         peeking = (id, scroll.magnification, canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)))
+        // A zoom flight with a page at the end of it — the card wakes as it arrives, on the budget's
+        // settling pass, which is inside the meter's window.
+        FrameMeter.measure("peek in (\(nodeViews.count) views, \(pagesLive.count) live)", on: self)
         scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true)
         overlay.needsDisplay = true
     }
@@ -794,6 +804,7 @@ extension CanvasBoardView {
     func endPeek() {
         guard let peek = peeking else { return }
         peeking = nil
+        FrameMeter.measure("peek out (\(nodeViews.count) views)", on: self)
         scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true)
         overlay.needsDisplay = true
     }
@@ -936,6 +947,8 @@ extension CanvasBoardView {
     func balanceTiles() {
         guard var session = tiling else { return }
         session.balance()
+        guard session != tiling else { return }
+        FrameMeter.measure("balance (\(session.columns.count) columns)", on: self)
         commitTiling(session)
     }
 
@@ -950,6 +963,9 @@ extension CanvasBoardView {
         session.sizeToContent { [document] id in
             document.node(id: id).map(CanvasTileSession.contentWidth) ?? 320
         }
+        guard session != tiling else { return }
+        // Every column changes width at once, which is every page in them re-laying itself out.
+        FrameMeter.measure("size to content (\(session.columns.count) columns)", on: self)
         commitTiling(session)
     }
 
@@ -1039,7 +1055,10 @@ extension CanvasBoardView {
         if let drop { session.land(id, on: drop.target, drop.drop, pulling: pulling) }
         let changed = session != tiling
         tiling = session
-        // The one time the tiles move for a drag: now, all at once, to where the mark said.
+        // The one time the tiles move for a drag: now, all at once, to where the mark said. Measured
+        // because it is the reflow §7k's cost note is about — every page in a tile that changed size
+        // lays itself out again, and this is the moment they all do.
+        if changed { FrameMeter.measure("drop (\(session.ids.count) tiles)", on: self) }
         setLayout(session.layout, animated: true)
         overlay.needsDisplay = true
         if changed { onTilingChanged?() }
