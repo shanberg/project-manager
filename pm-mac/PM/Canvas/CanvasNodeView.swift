@@ -201,7 +201,34 @@ class CanvasNodeView: NSView {
         guard takesItsOwnClicks else { return nil }
         let local = convert(point, from: superview)
         guard !canvasBoardKeeps(local, in: bounds, scale: board.liveScale) else { return nil }
+        // A link is the board's to follow or carry off, stepped in or not — see `CanvasLinkZones`.
+        guard link(at: point) == nil else { return nil }
         return super.hitTest(point)
+    }
+
+    // MARK: Links
+
+    /// Where the links on this card are drawn, as its SwiftUI reports them. See `CanvasLinkZones`.
+    let linkZones = CanvasLinkZones()
+
+    /// The view `linkZones` is measured in: the card's content, which is the hosting view for every
+    /// card that can draw a link.
+    private weak var linkSpace: NSView?
+
+    /// The link under `point`, in the superview's coordinates — the same ones `hitTest` takes.
+    ///
+    /// Nil while the board is too far out to read: a simplified card draws its name, not its links.
+    /// And nil outside the card's scroll view, where a link scrolled up out of sight still has a place
+    /// in the layout and would otherwise answer for whatever is drawn over it.
+    func link(at point: NSPoint) -> URL? {
+        guard !isSimplified, let space = linkSpace else { return nil }
+        let local = space.convert(point, from: superview)
+        guard space.bounds.contains(local), let url = linkZones.link(at: local) else { return nil }
+        if let scroller = CanvasNodeView.scroller(in: space),
+           !scroller.bounds.contains(scroller.convert(point, from: superview)) {
+            return nil
+        }
+        return url
     }
 
     /// Escape steps back out.
@@ -730,6 +757,10 @@ class CanvasNodeView: NSView {
     /// the clip is already inset by is taken off here.
     func setContent(_ view: NSView, insets: NSEdgeInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)) {
         clip.subviews.forEach { $0.removeFromSuperview() }
+        // The links the old content reported went with it — a hosting view taken out of the window
+        // cannot be relied on to say goodbye through `onDisappear`. The new content reports its own.
+        linkZones.removeAll()
+        linkSpace = view
         let hairline = CanvasNodeView.hairline
         view.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(view)
@@ -847,6 +878,7 @@ final class CanvasTextNodeView: CanvasNodeView {
                     .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .canvasLinkZones(linkZones)
         )
         view.setAccessibilityLabel(text.isEmpty ? "Empty card" : text)
         hosting = view

@@ -123,6 +123,16 @@ extension CanvasBoardView {
     /// the vault would not take it.
     @discardableResult
     func commit(_ drop: CanvasDrop, frames: [CanvasRect]) -> Bool {
+        // **In a tiled view the drop goes up as tiles**, which is what `addCard` does for every other
+        // way of adding a card — a link carried out of one tile and let go in the window is a request
+        // to read it beside the others. Until this, it went onto the board behind the tiles, where
+        // nothing showed it had arrived. The point you let go at is a region of the board the tiles
+        // are drawn over, so the cards are stepped clear of what lives there first — as one set, so
+        // several keep their arrangement.
+        var frames = frames
+        if isTiled, let box = Self.bounds(of: frames) {
+            frames = Self.shifted(frames, onto: freeFrame(from: box), from: box)
+        }
         func cards(_ contents: [CanvasContent]) -> CanvasDocument {
             CanvasDocument(nodes: zip(contents, frames).map { CanvasNode(content: $0, frame: $1) })
         }
@@ -145,6 +155,11 @@ extension CanvasBoardView {
                    actionName: addresses.count > 1 ? "Add Links" : "Add Link")
         case .text(let text):
             insert(cards([.text(text)]), at: nil, actionName: "Paste")
+        }
+        // `insert` selects what it made. In document order, so several go up in the order they were
+        // dropped.
+        if isTiled {
+            for node in document.nodes where selection.contains(node.id) { addToTiling(node.id) }
         }
         return true
     }

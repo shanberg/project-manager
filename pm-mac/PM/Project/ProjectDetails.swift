@@ -515,6 +515,8 @@ private struct LinksBlock: View {
                     .truncationMode(.middle)
             }
             .help(urlStr)
+            // The whole row, favicon included, is the link a board follows — see `CanvasLinkZones`.
+            .reportsLinkZone(url)
         } else {
             let text = (!label.isEmpty && !urlStr.isEmpty) ? "\(label): \(urlStr)" : (label.isEmpty ? urlStr : label)
             Text(text).font(.system(size: 12)).foregroundStyle(.secondary)

@@ -37,9 +37,13 @@ struct RenderedNote: View {
             ForEach(Array(markdownNoteSegments(in: prose).enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case .prose(let text):
-                    Text(renderedMarkdown(text, base: font, baseColor: color, note: noteURL))
+                    // Marked and reported so a board can follow a link without stepping into the card
+                    // it is on — see `CanvasLinkZones`. Drawn the same either way, and off a board
+                    // nothing is reported.
+                    linkMarkedText(renderedMarkdown(text, base: font, baseColor: color, note: noteURL))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .reportsLinkZones()
                 case .image(let destination, let alt, let width):
                     NoteImage(destination: destination, alt: alt, width: width, noteURL: noteURL,
                               font: font, maxHeight: maxImageHeight)

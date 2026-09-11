@@ -180,6 +180,8 @@ targets:
       - path: PM/Canvas/CanvasLayout.swift
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Canvas/CanvasDrop.swift
+      - path: PM/Canvas/CanvasLinkZones.swift
+      - path: PM/Project/RenderedNote.swift
       - path: PM/Canvas/CanvasPageView.swift
       - path: PM/Task/CompletingTextField.swift
       - path: PM/Task/OutsideClick.swift

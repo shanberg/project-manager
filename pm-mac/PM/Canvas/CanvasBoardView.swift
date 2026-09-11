@@ -269,6 +269,9 @@ final class CanvasBoardView: NSView {
         /// the tile the order was last changed against — see `CanvasBoardView+Input`, which uses it to
         /// spend one move per crossing.
         case reorderTile(String, grab: CanvasPoint, displaced: String?)
+        /// A press on a link drawn on a card: let go where it started and it opens, move and it is
+        /// carried off as a drag the board — or anywhere else — can drop. See `CanvasLinkZones`.
+        case link(URL, from: CanvasPoint)
 
         /// Whether the board should scroll to follow this gesture past the edge of the window.
         ///
@@ -278,7 +281,7 @@ final class CanvasBoardView: NSView {
         var pansTheBoard: Bool {
             switch self {
             case .move, .marquee, .connect: return true
-            case .resize, .swap, .resizeTiles, .reorderTile: return false
+            case .resize, .swap, .resizeTiles, .reorderTile, .link: return false
             }
         }
     }

@@ -195,7 +195,8 @@ final class CanvasFileNodeView: CanvasNodeView {
                                       onOpenProject: { folder in
                                           WindowManager.shared.open(named: folder)
                                       },
-                                      commands: projectCommands, display: projectDisplay))
+                                      commands: projectCommands, display: projectDisplay)
+                        .canvasLinkZones(linkZones))
             }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
@@ -208,7 +209,8 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .padding(.horizontal, 11)
                         .padding(.vertical, 9)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                })
+                }
+                .canvasLinkZones(linkZones))
 
         default:
             let label = NSTextField(labelWithString: url.lastPathComponent)

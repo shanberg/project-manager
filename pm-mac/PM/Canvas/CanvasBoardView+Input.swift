@@ -1,6 +1,15 @@
 import AppKit
 import PmLib
 
+/// A link dragged off a card. A copy wherever it goes — the card it came from keeps it — and a link as
+/// well outside the app, which is what a browser's address bar asks for. See `dragLink`.
+extension CanvasBoardView: NSDraggingSource {
+    func draggingSession(_ session: NSDraggingSession,
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .copy : [.copy, .link]
+    }
+}
+
 /// The board's mouse and keyboard.
 ///
 /// One gesture at a time, decided on mouse-down by asking the hit tester what is under the pointer and
@@ -24,6 +33,14 @@ extension CanvasBoardView {
         window?.makeFirstResponder(self)
         let where_ = point(event)
         let extending = event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.command)
+
+        // **A link is the pointer's before it is the card's** — stepped in or not, tiled or not. Asked
+        // before the double-click, so the second click of a pair on a link is still the link's rather
+        // than a request to open the card under it. See `CanvasLinkZones`.
+        if let pressed = link(at: convert(event.locationInWindow, from: nil)) {
+            gesture = .link(pressed.url, from: where_)
+            return
+        }
 
         // **A tiled view has no second meaning for a second click**, so the double-click branch is the
         // board's alone. Reached while tiled it answered from the *document's* hit test, which knows
@@ -270,6 +287,15 @@ extension CanvasBoardView {
             gesture = .connect(from: id, side: side, to: now)
             overlay.needsDisplay = true
 
+        case .link(let url, let from):
+            // Past the slop a press on a link is a drag of the link. Handed to AppKit as a real drag,
+            // so it can go anywhere a link can — and when it comes back down on this board the drop
+            // reads it like any other and makes it a card, or in a tiled view a tile.
+            let slop = 3 / liveScale
+            guard abs(now.x - from.x) > slop || abs(now.y - from.y) > slop else { break }
+            gesture = nil
+            dragLink(url, with: event)
+
         case nil:
             break
         }
@@ -321,8 +347,75 @@ extension CanvasBoardView {
             store.endInteraction()
         case .connect(let id, let side, _):
             finishConnection(from: id, side: side, at: point(event))
+        case .link(let url, _):
+            // Let go without going anywhere: follow it. The first click of a run only — a
+            // double-click on a link is one link, opened once.
+            if event.clickCount == 1 { NSWorkspace.shared.open(url) }
         case .marquee, nil:
             break
+        }
+    }
+
+    // MARK: Links
+
+    /// The link under `point`, in the board's coordinates, on the card a press there would go to.
+    ///
+    /// Only in view mode: connecting is wiring cards together, and the whole of a card is the thing
+    /// being wired. And never on a tiled view's own chrome — the handlebar and the boundaries answer
+    /// first there, as they do for every other press.
+    func link(at point: NSPoint) -> (card: String, url: URL)? {
+        guard mode == .view else { return nil }
+        let where_ = canvasPoint(point)
+        if isTiled, tileHandle(at: where_) != nil || tileDivider(at: where_) != nil { return nil }
+        guard case .node(let id) = hitTester.hit(where_),
+              let url = nodeViews[id]?.link(at: point) else { return nil }
+        return (id, url)
+    }
+
+    /// Carry a link off the card it is drawn on.
+    ///
+    /// Written the way a browser writes a dragged link — the address as `public.url` and again as text
+    /// — so a browser, a text field and this board all read it; a link to a file goes as the file, so
+    /// it lands as a file card rather than a card of its `file://` address. See `CanvasDrop.read`.
+    private func dragLink(_ url: URL, with event: NSEvent) {
+        let item = NSPasteboardItem()
+        if url.isFileURL {
+            item.setString(url.absoluteString, forType: .fileURL)
+        } else {
+            item.setString(url.absoluteString, forType: .URL)
+            item.setString(url.absoluteString, forType: .string)
+        }
+        let dragging = NSDraggingItem(pasteboardWriter: item)
+        let picture = Self.linkDragPicture(url)
+        let at = convert(event.locationInWindow, from: nil)
+        dragging.setDraggingFrame(NSRect(x: at.x - picture.size.width / 2,
+                                         y: at.y - picture.size.height / 2,
+                                         width: picture.size.width, height: picture.size.height),
+                                  contents: picture)
+        beginDraggingSession(with: [dragging], event: event, source: self)
+    }
+
+    /// What a dragged link looks like until it is over a board, which turns it into the card it will be
+    /// (`carry`): the page's host, or the file's name, on a capsule.
+    private static func linkDragPicture(_ url: URL) -> NSImage {
+        let name = url.isFileURL ? url.lastPathComponent : (url.host() ?? url.absoluteString)
+        let label = NSAttributedString(string: name, attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        let text = label.size()
+        let size = NSSize(width: ceil(min(text.width, 280)) + 24, height: 24)
+        return NSImage(size: size, flipped: false) { rect in
+            let capsule = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+                                       xRadius: rect.height / 2, yRadius: rect.height / 2)
+            NSColor.windowBackgroundColor.setFill()
+            capsule.fill()
+            NSColor.separatorColor.setStroke()
+            capsule.stroke()
+            label.draw(with: NSRect(x: 12, y: (rect.height - text.height) / 2,
+                                    width: rect.width - 24, height: text.height),
+                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            return true
         }
     }
 
@@ -636,6 +729,9 @@ extension CanvasBoardView {
         }
         guard let position = window?.mouseLocationOutsideOfEventStream else { return }
         let where_ = canvasPoint(convert(position, from: nil))
+        // A link says so, the way one does everywhere else on the Mac — and on a card you have not
+        // stepped into, it is the only thing under the pointer that is not the open hand.
+        if link(at: convert(position, from: nil)) != nil { return NSCursor.pointingHand.set() }
         if isTiled {
             if tileHandle(at: where_) != nil { return NSCursor.openHand.set() }
             if let divider = tileDivider(at: where_) {
