@@ -23,9 +23,9 @@ import AppKit
 enum MainMenu {
     static func install(target: AppDelegate) {
         // `PageFirstMenu`, not `NSMenu`: while you are standing in a web card the page is offered a
-        // keystroke before this bar claims it, so ⌘R renames a Figma frame instead of reloading the
-        // card out from under you. Everything the page doesn't want comes straight back here — see
-        // `CanvasPageKeys`.
+        // keystroke before this bar claims it, so ⌘Z is the page's undo rather than the board's.
+        // Everything the page doesn't want comes straight back here, and Reload waits for a second
+        // press — see `CanvasPageKeys` and `DoubleTap`.
         let mainMenu = PageFirstMenu()
         mainMenu.addItem(appMenuItem(target: target))
         mainMenu.addItem(fileMenuItem(target: target))

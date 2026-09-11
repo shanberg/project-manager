@@ -15,8 +15,8 @@ final class CanvasPageKeysTests: XCTestCase {
                                     keyboardIsInAPage: inPage, alreadyOffered: handedBack)
     }
 
-    /// The complaint this exists for: ⌘R in a Figma tile renamed nothing and reloaded the card.
-    func testTheKeyFigmaWantsGoesToFigmaFirst() {
+    /// Reload is offered like anything else: a page that answers ⌘R gets it.
+    func testReloadGoesToThePageFirst() {
         XCTAssertTrue(offers("r", [.command]))
     }
 
@@ -87,5 +87,146 @@ final class CanvasPageKeysTests: XCTestCase {
                                        characters: "Z", charactersIgnoringModifiers: "Z",
                                        isARepeat: false, keyCode: 6)
         XCTAssertEqual(CanvasPageKeys.key(of: try XCTUnwrap(shifted)), "z")
+    }
+
+    // MARK: Twice, not once
+
+    /// The complaint this began with: Figma in a tile leaves ⌘R alone, so it came back and reloaded.
+    func testReloadHandedBackWaitsForASecondPress() {
+        XCTAssertTrue(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command]))
+        XCTAssertTrue(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command, .capsLock]))
+    }
+
+    /// Everything else a page declines is answered at once, as it always was.
+    func testOnlyReloadWaits() {
+        XCTAssertFalse(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command, .shift]))
+        XCTAssertFalse(CanvasPageKeys.asksForASecondPress(key: "z", modifiers: [.command]))
+        XCTAssertFalse(CanvasPageKeys.asksForASecondPress(key: "[", modifiers: [.command]))
+    }
+
+    /// The hint's name for the item comes from the menu bar's own item, so it must find the right one.
+    func testAKeystrokeFindsItsMenuItem() {
+        let reload = NSMenuItem(title: "Reload Page", action: nil, keyEquivalent: "r")
+        XCTAssertTrue(CanvasPageKeys.matches(reload, key: "r", modifiers: [.command]))
+        XCTAssertFalse(CanvasPageKeys.matches(reload, key: "r", modifiers: [.command, .shift]))
+        XCTAssertFalse(CanvasPageKeys.matches(reload, key: "e", modifiers: [.command]))
+        let noKey = NSMenuItem(title: "Back to Card's Address", action: nil, keyEquivalent: "")
+        XCTAssertFalse(CanvasPageKeys.matches(noKey, key: "", modifiers: [.command]))
+    }
+
+    func testTheHintWritesTheKeyTheWayTheMenuBarDoes() {
+        XCTAssertEqual(CanvasPageKeys.glyphs(key: "r", modifiers: [.command]), "⌘R")
+        XCTAssertEqual(CanvasPageKeys.glyphs(key: "z", modifiers: [.shift, .command]), "⇧⌘Z")
+        XCTAssertEqual(CanvasPageKeys.glyphs(key: "r", modifiers: [.command, .capsLock]), "⌘R")
+    }
+}
+
+/// The double tap, on a window short enough to wait out.
+///
+/// What can go wrong — one press that reloads, two that don't, a reload twice, a second press in
+/// another page that reloads the wrong one — is all in the counting, so it is asserted here. That a
+/// held key's repeats never arrive as presses is the menu bar's job; see `PageFirstMenu`.
+@MainActor
+final class DoubleTapTests: XCTestCase {
+    private var shown: [String?] = []
+    private var confirmed = 0
+    private let hint = "Press ⌘R again to Reload Page"
+    private let page = ObjectIdentifier(NSObject.self)
+    private let otherPage = ObjectIdentifier(NSView.self)
+
+    private func makeTap() -> DoubleTap {
+        DoubleTap(window: 0.15) { [weak self] in self?.shown.append($0) }
+    }
+
+    private func press(_ tap: DoubleTap, in page: ObjectIdentifier? = nil) {
+        tap.pressed(hint: hint, in: page ?? self.page) { self.confirmed += 1 }
+    }
+
+    private func wait(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    override func setUp() {
+        shown = []
+        confirmed = 0
+    }
+
+    /// The accident: pressed once.
+    func testOnePressOnlyShowsTheHint() {
+        let tap = makeTap()
+        press(tap)
+        XCTAssertEqual(confirmed, 0)
+        XCTAssertEqual(shown, [hint])
+        wait(0.4)
+        XCTAssertEqual(confirmed, 0, "still nothing once the hint has gone")
+        XCTAssertEqual(shown, [hint, nil], "shown, then gone on its own")
+    }
+
+    func testASecondPressReloadsOnce() {
+        let tap = makeTap()
+        press(tap)
+        wait(0.05)
+        press(tap)
+        XCTAssertEqual(confirmed, 1)
+        XCTAssertEqual(shown, [hint, nil], "the hint goes when it's answered")
+        wait(0.4)
+        XCTAssertEqual(confirmed, 1)
+        XCTAssertEqual(shown, [hint, nil], "and the expired timer doesn't hide it a second time")
+    }
+
+    /// The press after a reload is a new first press, not a third that reloads again.
+    func testAThirdPressStartsOver() {
+        let tap = makeTap()
+        press(tap)
+        press(tap)
+        press(tap)
+        XCTAssertEqual(confirmed, 1)
+        XCTAssertEqual(shown, [hint, nil, hint])
+    }
+
+    func testASecondPressAfterTheHintHasGoneIsAFirstPress() {
+        let tap = makeTap()
+        press(tap)
+        wait(0.3)
+        press(tap)
+        XCTAssertEqual(confirmed, 0)
+        XCTAssertEqual(shown, [hint, nil, hint])
+    }
+
+    /// ⌘R in one tile, a click into another, ⌘R again: that page never got its first press.
+    func testASecondPressInAnotherPageIsAFirstPress() {
+        let tap = makeTap()
+        press(tap, in: page)
+        press(tap, in: otherPage)
+        XCTAssertEqual(confirmed, 0)
+        press(tap, in: otherPage)
+        XCTAssertEqual(confirmed, 1, "the other page's own second press does count")
+    }
+}
+
+/// Where the hint appears, asserted as a frame rather than as `isVisible`, which is true wherever the
+/// panel happens to be.
+@MainActor
+final class KeyHintTests: XCTestCase {
+    func testTheHintSitsOverTheMiddleOfTheWindowAndIgnoresTheMouse() throws {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 900, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let hint = KeyHint()
+        hint.show("Press ⌘R again to Reload Page", over: window)
+        let panel = try XCTUnwrap(hint.panel)
+        XCTAssertTrue(panel.parent === window, "rides along with the window")
+        XCTAssertEqual(panel.frame.midX, window.frame.midX, accuracy: 1)
+        XCTAssertEqual(panel.frame.midY, window.frame.midY, accuracy: 1)
+        XCTAssertLessThan(panel.frame.width, window.frame.width)
+        XCTAssertGreaterThan(panel.frame.width, 200, "wide enough for the sentence, not collapsed")
+        XCTAssertTrue(panel.ignoresMouseEvents, "never takes a click meant for the page")
+
+        hint.hide()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertNil(panel.parent, "gone once it has faded")
     }
 }
