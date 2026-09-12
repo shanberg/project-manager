@@ -320,20 +320,44 @@ final class KeyHint {
         }
     }
 
+    /// How long the hint takes to go, and the deadline it goes on regardless.
+    private static let fade: TimeInterval = 0.25
+
     func hide() {
         guard let panel, panel.parent != nil else { return }
         generation += 1
         let fading = generation
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.25
+            context.duration = Self.fade
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.generation == fading else { return }
-                panel.parent?.removeChildWindow(panel)
-                panel.orderOut(nil)
-            }
+            MainActor.assumeIsolated { self?.takeDown(ifStill: fading) }
         })
+        // **And on a deadline, because the completion handler is not a promise.** A window's
+        // `animator().alphaValue` is animated by machinery the application's own event loop drives,
+        // and where that loop is not running the animation does not start, does not finish, and never
+        // calls back — measured under `xctest`, where the alpha stays exactly where it was and the
+        // handler above never runs at all. The hint is a *timed* thing rather than an animated one:
+        // it says a sentence and then it goes, and the fade is how it goes rather than why.
+        //
+        // So the taking-down is hung on the clock, and the callback is left in as the tidier of the
+        // two paths — it lands on the frame the fade actually ends. Whichever gets there first does
+        // the work; `takeDown` is written so the second is a no-op.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fade + 0.05) { [weak self] in
+            MainActor.assumeIsolated { self?.takeDown(ifStill: fading) }
+        }
+    }
+
+    /// Off the window and off the screen — once per hide, whichever path arrives first.
+    ///
+    /// `generation` is what makes a late arrival harmless: a hint shown again while the last one was
+    /// fading has bumped it, and this then belongs to a hide that has been overtaken. The alpha is set
+    /// outright rather than left where the fade got to, since the fade may not have run.
+    private func takeDown(ifStill fading: Int) {
+        guard generation == fading, let panel, panel.parent != nil else { return }
+        panel.alphaValue = 0
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
     }
 
     private func makePanel() -> NSPanel {
