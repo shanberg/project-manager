@@ -98,11 +98,44 @@ final class CanvasDropTests: XCTestCase {
                        [CanvasRect(x: -100, y: -100, width: 400, height: 400)])
     }
 
-    func testSeveralLinksCascadeFromTheFirst() {
+    /// **Several are a block, not a pile.** Two links are a row, centred on the point as one card is,
+    /// with the 20pt gutter between them.
+    func testSeveralLinksAreLaidOutSideBySide() {
         let links = ["https://a.dev", "https://b.dev"].map { CanvasDroppedLink(address: $0) }
         XCTAssertEqual(CanvasDrop.links(links).frames(centredOn: CanvasPoint(x: 100, y: 100)),
-                       [CanvasRect(x: -100, y: -100, width: 400, height: 400),
-                        CanvasRect(x: -70, y: -70, width: 400, height: 400)])
+                       [CanvasRect(x: -310, y: -100, width: 400, height: 400),
+                        CanvasRect(x: 110, y: -100, width: 400, height: 400)])
+    }
+
+    /// Five go two across and then down — `ceil(sqrt(5))` is 3, so three across — in the order they
+    /// arrived, and the whole block is centred on the point rather than starting at it.
+    func testAHandfulGoesAcrossThenDownInOrder() {
+        let links = (1...5).map { CanvasDroppedLink(address: "https://\($0).dev") }
+        let frames = CanvasDrop.links(links).frames(centredOn: CanvasPoint(x: 0, y: 0))
+
+        // Three columns, two rows: 3*400 + 2*20 across, 2*400 + 20 down.
+        XCTAssertEqual(frames.map(\.x), [-620, -200, 220, -620, -200])
+        XCTAssertEqual(frames.map(\.y), [-410, -410, -410, 10, 10])
+        // Centred: the block's own middle is the point.
+        let left = frames.map(\.x).min() ?? 0, right = frames.map { $0.x + $0.width }.max() ?? 0
+        let top = frames.map(\.y).min() ?? 0, bottom = frames.map { $0.y + $0.height }.max() ?? 0
+        XCTAssertEqual((left + right) / 2, 0, accuracy: 0.01)
+        XCTAssertEqual((top + bottom) / 2, 0, accuracy: 0.01)
+    }
+
+    /// A row is pitched by its own tallest card, because a file's card is 400 or 300 depending on what
+    /// it holds — a fixed pitch would overlap the tall ones or leave a hole under the short ones.
+    func testARowOfMixedHeightsDoesNotOverlapTheRowBelow() {
+        let files = [URL(fileURLWithPath: "/tmp/a.md"), URL(fileURLWithPath: "/tmp/shot.png"),
+                     URL(fileURLWithPath: "/tmp/b.md")]
+        let frames = CanvasDrop.files(files).frames(centredOn: CanvasPoint(x: 0, y: 0))
+
+        XCTAssertEqual(frames.map(\.height), [300, 400, 300])
+        // Two columns for three cards; the first row holds the 400-tall one, so the second starts
+        // below *that* rather than below the 300.
+        let firstRowBottom = max(frames[0].y + frames[0].height, frames[1].y + frames[1].height)
+        XCTAssertGreaterThanOrEqual(frames[2].y, firstRowBottom,
+                                    "the second row is drawn over the first")
     }
 
     func testAPictureGetsASquareCardAndANoteDoesNot() {

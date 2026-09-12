@@ -164,8 +164,14 @@ markdown file and find out what is actually missing. Suspected gaps:
   the runloop, because the call comes from inside `performDragOperation` and a modal session started
   there is a nested loop inside AppKit's own drag loop. See `askWhereOutsidersGo` and
   `copyNoteAttachment`,
-- several files cascade by 30pt rather than laying out — still true
-  ([CanvasDrop.swift:74](../pm-mac/PM/Canvas/CanvasDrop.swift:74)), and the same for several links.
+- ~~several files cascade by 30pt rather than laying out~~ — **built**, 2026-09-12, and for links too:
+  several of a kind are laid out as a block, reading order across then down, `ceil(sqrt(n))` columns
+  and a 20pt gutter on the lattice, the whole thing centred on the pointer the way one card already
+  was ([CanvasDrop.block](../pm-mac/PM/Canvas/CanvasDrop.swift)). A cascade is the right shape for
+  windows, where the top one is the one you asked for; a board's cards are all equally present, so six
+  files meant six cards each hiding the one behind it. Rows are pitched by their own tallest card,
+  since a file's card is 400 or 300 tall depending on what it holds. The drag preview shows the same
+  block, for free — it asks the same `frames(centredOn:)`, which is what that value is for.
 
 ### 7. Tidy
 

@@ -69,17 +69,9 @@ enum CanvasDrop {
     ///
     /// **Centred on the point**, which a drag makes non-negotiable: the card is shown under the pointer
     /// on the way in, and a card that then landed with its corner there would have moved the moment you
-    /// let go. Several of a kind cascade from the first by 30pt. Copied cards keep the arrangement they
-    /// were copied in, moved as one so that the middle of the set is at the point.
+    /// let go. Several of a kind are laid out as a block — see `block`. Copied cards keep the
+    /// arrangement they were copied in, moved as one so that the middle of the set is at the point.
     func frames(centredOn point: CanvasPoint) -> [CanvasRect] {
-        func cascade(_ count: Int, width: Double, height: (Int) -> Double) -> [CanvasRect] {
-            (0..<count).map { index in
-                let h = height(index)
-                return CanvasRect(x: point.x - width / 2 + Double(index) * 30,
-                                  y: point.y - h / 2 + Double(index) * 30,
-                                  width: width, height: h)
-            }
-        }
         switch self {
         case .cards(let document):
             guard let bounds = document.bounds else { return document.nodes.map(\.frame) }
@@ -88,13 +80,66 @@ enum CanvasDrop {
                 CanvasRect(x: $0.frame.x + dx, y: $0.frame.y + dy, width: $0.frame.width, height: $0.frame.height)
             }
         case .files(let files):
-            return cascade(files.count, width: 400) { Self.isTall(files[$0]) ? 400 : 300 }
+            return Self.block(files.count, width: 400, centredOn: point) {
+                Self.isTall(files[$0]) ? 400 : 300
+            }
         case .image:
-            return cascade(1, width: 400) { _ in 400 }
+            return Self.block(1, width: 400, centredOn: point) { _ in 400 }
         case .links(let links):
-            return cascade(links.count, width: 400) { _ in 400 }
+            return Self.block(links.count, width: 400, centredOn: point) { _ in 400 }
         case .text:
-            return cascade(1, width: 250) { _ in 120 }
+            return Self.block(1, width: 250, centredOn: point) { _ in 120 }
+        }
+    }
+
+    /// `count` cards of one kind, laid out as a block centred on `point`.
+    ///
+    /// **They used to cascade, 30pt down and right from the first, and a cascade is a pile.** It is the
+    /// right shape for windows, where the one on top is the one you asked for and the rest are
+    /// evidence that they are still there. It is the wrong shape for cards: a board's cards are all
+    /// equally present, and dropping six files left six cards each obscuring the one behind it and six
+    /// drags to do by hand before the drop had told you anything.
+    ///
+    /// So: reading order across and then down, in the order the files arrived, the whole block centred
+    /// on the pointer — which is what `frames` promises for one card and has no reason to stop
+    /// promising for six.
+    ///
+    /// **About as square as the count allows**, and that follows from being centred: a row of six
+    /// 400pt cards is 2.5 metres of board, so the pointer would end up in the middle of a line whose
+    /// ends are off screen in both directions. `ceil(sqrt(n))` columns gives 2 for a pair, 3 for five,
+    /// 4 for a dozen, and keeps the thing you dropped inside the window you dropped it in.
+    ///
+    /// A 20pt gutter, on the 10pt lattice a drag snaps to, so a block lands agreeing with the grid
+    /// rather than two points off it. Rows are pitched by their own tallest card, since a file's card
+    /// is 400 tall or 300 depending on what it holds, and a fixed pitch would either overlap them or
+    /// leave a gap under every short row.
+    ///
+    /// A short last row is left-aligned under the others rather than centred: a grid with a centred
+    /// last row reads as a pyramid, and these are cards in rows.
+    private static func block(_ count: Int, width: Double, centredOn point: CanvasPoint,
+                              height: (Int) -> Double) -> [CanvasRect] {
+        guard count > 1 else {
+            let tall = count == 1 ? height(0) : 0
+            return count == 1 ? [CanvasRect(x: point.x - width / 2, y: point.y - tall / 2,
+                                            width: width, height: tall)] : []
+        }
+        let gutter: Double = 20
+        let columns = max(1, Int(Double(count).squareRoot().rounded(.up)))
+        let heights = (0..<count).map(height)
+        let rows = (count + columns - 1) / columns
+        /// The tallest card in each row, which is what that row is pitched by.
+        let rowHeights = (0..<rows).map { row in
+            heights[(row * columns)..<min(count, (row + 1) * columns)].max() ?? 0
+        }
+        let across = Double(columns) * width + Double(columns - 1) * gutter
+        let down = rowHeights.reduce(0, +) + Double(rows - 1) * gutter
+        let left = point.x - across / 2
+        let top = point.y - down / 2
+        return (0..<count).map { index in
+            let row = index / columns, column = index % columns
+            let above = rowHeights.prefix(row).reduce(0, +) + Double(row) * gutter
+            return CanvasRect(x: left + Double(column) * (width + gutter),
+                              y: top + above, width: width, height: heights[index])
         }
     }
 
