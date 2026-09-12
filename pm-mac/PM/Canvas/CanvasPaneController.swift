@@ -807,6 +807,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageGo = { [weak self] address in self?.engagedCard?.go(to: address) }
         header.pageHome = { [weak self] in self?.engagedCard?.goHome() }
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
+        header.pageBackTo = { [weak self] steps in self?.engagedCard?.goBack(steps) }
+        header.pageCopyAddress = { [weak self] in self?.engagedCard?.copyAddress() }
+        header.pageOpenInBrowser = { [weak self] in self?.engagedCard?.openInBrowser() }
+        header.pageSignIn = { [weak self] in self?.engagedCard?.signIn() }
+        header.pageSignOut = { [weak self] in self?.engagedCard?.signOut() }
+        header.pageSetFiltered = { [weak self] on in
+            self?.engagedCard?.setFiltered(on)
+            self?.pageStateChanged()
+        }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
@@ -852,20 +861,62 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     func pageStateChanged() {
+        // Whatever find is about to search, said in the field rather than assumed. Kept here because
+        // this runs whenever you step into or out of a card, which is exactly when the answer changes.
+        header.find.scope = findScope
         guard let card = engagedCard else {
-            header.page = nil
+            if header.page != nil { header.page = nil }
             return
         }
-        header.page = CanvasHeaderModel.Page(
+        // **Assigned only on a change**, for the reason `refreshTileCommand` does it: this runs on every
+        // navigation, every step of a load, every favicon that lands and every turn of the board's
+        // twenty-second heartbeat, and observation announces on assignment whether or not the value
+        // moved. A capsule that re-renders for a value identical to the one it is already drawing is
+        // the cheapest kind of flash to have and the easiest to stop having.
+        let page = CanvasHeaderModel.Page(
             host: card.liveHost,
             liveAddress: card.liveURL?.absoluteString ?? card.address,
             savedAddress: card.address,
             wandered: card.hasWandered,
             canGoBack: card.canGoBack,
             canGoForward: card.canGoForward,
-            isLoading: card.isLoading,
-            age: card.loadedAt.map { canvasFreshnessLabel(for: $0) })
+            isLoading: card.showsLoad,
+            age: card.loadedAt.map { canvasFreshnessLabel(for: $0) },
+            progress: card.loadProgress,
+            isSecure: card.isSecure,
+            icon: icon(for: card.liveHost),
+            back: card.backSteps.map { .init(title: $0.title, address: $0.address) },
+            site: card.siteName,
+            isFiltered: card.isFiltered)
+        if header.page != page { header.page = page }
     }
+
+    private var findScope: CanvasHeaderModel.Find.Scope {
+        if engagedCard != nil { return .page }
+        return scroll.board.engagedProjectCard != nil ? .tasks : .canvas
+    }
+
+    /// The site's own icon, if the loader already has it.
+    ///
+    /// **Only what is in hand, plus one nudge.** The header is rebuilt on every navigation and every
+    /// step of a load, so it cannot wait for anything — it draws the icon it has and asks once for the
+    /// one it hasn't, and the fetch that lands calls back through here. `FaviconLoader` remembers its
+    /// misses, so a host with no icon is asked once and never again; the same switch that turns icons
+    /// off beside a project's links turns this off too, and then this is permanently nil.
+    private func icon(for host: String) -> NSImage? {
+        guard !host.isEmpty else { return nil }
+        if let cached = FaviconLoader.shared.cached(for: host) { return cached }
+        guard FaviconLoader.isEnabled, askedFavicons.insert(host).inserted else { return nil }
+        Task { [weak self] in
+            guard await FaviconLoader.shared.favicon(for: host) != nil else { return }
+            self?.pageStateChanged()
+        }
+        return nil
+    }
+
+    /// Hosts already asked for this window, so a header rebuilt a hundred times during a load starts
+    /// one fetch rather than a hundred.
+    private var askedFavicons: Set<String> = []
 
     // MARK: Finding
 
@@ -898,15 +949,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// the counting on its next pass, and reading straight after writing would put yesterday's answer
     /// in the field on every keystroke. So the field follows the card rather than asking it.
     private weak var searchedCard: CanvasFileNodeView?
-    private var searchedCardMatches: AnyCancellable?
+    private var searchedCardMatches: ObservationRelay?
 
     private func watchMatches(of card: CanvasFileNodeView) {
         guard searchedCard !== card else { return }
         searchedCard = card
-        searchedCardMatches = card.projectDisplay.$matches
-            // `@Published` fires *before* the value lands, so the read has to be a turn later.
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.showMatchCount(of: card) }
+        // Observation announces a change *before* the value lands, so the read has to be a turn later;
+        // a relay is that deferral, and re-arms itself so the field keeps following past the first
+        // keystroke.
+        searchedCardMatches = ObservationRelay(tracking: { [weak card] in _ = card?.projectDisplay.matches },
+                                               then: { [weak self] in self?.showMatchCount(of: card) })
     }
 
     private func showMatchCount(of card: CanvasFileNodeView) {

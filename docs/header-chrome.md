@@ -6,7 +6,7 @@ this says what the parts add up to. When the two disagree, fix whichever one is 
 here first.
 
 Scope: the canvas header in a project window — the title pill, the tab bar, and the trailing chrome
-(page capsule, tile capsule, control capsule). The session-note header is out of scope for now.
+(the focused-tile capsule and the control capsule). The session-note header is out of scope for now.
 
 ## 0. Why this exists
 
@@ -70,6 +70,17 @@ containers behaves inconsistently. Toolbar items that belong together share one 
 → The trailing chrome (page, tile, controls) is one hosting view and becomes one container. The pill
 and the tab bar are separate hosting views and cannot share it — acceptable, since they are far enough
 apart never to touch.
+
+**A shape in a container has to say which shape it is.** `glassEffectID(_:in:)` associates a piece of
+glass with an identity inside its container's namespace, which is how the container knows the shape it
+is being handed now is the one it drew last time.
+
+→ **Every capsule carries one** (`headerBacking(in:id:)`, the namespace set on the trailing container).
+Without it a capsule whose *contents* change arrives as a shape the container has never seen, at a
+different width, and its material is built again from nothing — which is a flash, and was the one you
+got moving between tiles of different kinds, since a web tile brings a whole run of page controls that
+a project tile doesn't. An identity changes no geometry and schedules no animation, so it costs R3
+nothing: the row still takes its new width in one frame, and only the glass is carried across it.
 
 **Hide the whole item, not what's in it.** Hiding only the view leaves an empty glass item.
 
@@ -151,10 +162,20 @@ canvas or workspace, key or not (P3 decides what the system does to it in a back
 pill never does. So a control looks the same wherever you meet it, and glass means one thing: *these
 controls belong together, and you can press them*.
 
-**Grouping is one capsule per group.** The tabs — the canvas chip and every workspace — are one
-capsule. The page, the tile and the board's controls are one capsule each. Between capsules,
-`HeaderMetrics.capsuleGap` (10pt); inside one, `gap` (2pt). The trailing `GlassEffectContainer`'s
-spacing stays below the capsule gap, so the three never blend into one blob at rest.
+**Grouping is one capsule per group, and a group is a scope you can act on.** The tabs — the canvas
+chip and every workspace — are one capsule. The trailing pair is the other two: **what you are standing
+in**, and **the board**. Between capsules, `HeaderMetrics.capsuleGap` (10pt); inside one, `gap` (2pt).
+The trailing `GlassEffectContainer`'s spacing stays below the capsule gap, so they never blend into one
+blob at rest.
+
+The page's controls had a capsule of their own and no longer do — **the split was at the wrong joint.**
+In a workspace the focused tile *is* the engaged card (`tileClicked` selects and engages together), so
+on a web tile two capsules were up at once describing one object at two scales, and each ended in an
+`…` of its own: two overflow buttons a few points apart, which is a menu nobody can aim at. A tile and
+the thing inside it are one place. So the focused-tile capsule reads **per-kind run, then the tile's own
+verbs, then one menu** — scopes widening left to right, which is the rule the whole row already follows.
+Only a web tile has a per-kind run today; a project tile or an image card would bring its own into the
+same slot.
 
 **L2 — Islands (which capsules exist).**
 
@@ -162,8 +183,7 @@ spacing stays below the capsule gap, so the three never blend into one blob at r
 |---|---|---|
 | Pill | always | never — the edge behind it does the work (Q1) |
 | Tab bar | more than one tab | always |
-| Page capsule | Page ≠ none | always |
-| Tile capsule | Tile ≠ none | always (it only exists in a workspace) |
+| Focused-tile capsule | Page ≠ none **or** Tile ≠ none | always |
 | Control capsule | always | always |
 
 Layout **snaps** to the new set in one frame. An arriving capsule **materializes** where it lands; a
@@ -180,7 +200,23 @@ may animate; everything else is instant.
 | Tab label being renamed | instant, one character at a time |
 | Magnifier ↔ find field | magnifier leaves as a whole item; the field materializes at its final width; row snaps |
 | "Connecting" label, Home / Pin | instant |
+| A load starting or ending | **nothing under 0.4s** — see below |
 | Window key ↔ not key | labels and glyphs to the system's inactive treatment; smooth |
+
+**A load is only reported once it has lasted.** A live page is not only the page you asked for: an app
+shell polls, a socket reconnects, a dashboard re-fetches itself every few seconds, and each of those is
+a real main-frame load. Answered honestly, the chrome became a metronome — Reload to Stop and back, the
+progress bar up and out along the address field, every few seconds, for as long as the card was open.
+So nothing is said about a load until it has been running 0.4s (`CanvasPageLoad`), which is under the
+point where a wait starts to feel like one and over everything a page does to itself while you read it.
+The card is never in doubt — `isLoading` is unchanged and Stop stops it the moment the button is there;
+this is only about what is *drawn*. The card nudges the header at the threshold, because a load that is
+**stuck** is exactly the one that will send no further progress to notice it on.
+
+**And the header is only republished when it has changed.** `pageStateChanged` runs on every
+navigation, every step of a load, every favicon that lands and every turn of the board's 20-second
+heartbeat, and `@Published` publishes on assignment whether or not the value moved. Assigning only on a
+change is what stops a capsule re-rendering for a value identical to the one it is already drawing.
 
 **L4 — Pointer.** One response: a soft capsule behind the control under the pointer, 0.12s
 (`HeaderHoverHighlight`). No island-level hover state: `HeaderChrome.engaged` is gone. The system's
@@ -193,10 +229,10 @@ What each act does, layer by layer. "—" means that layer does nothing.
 | Act | L1 surface | L2 islands | L3 contents |
 |---|---|---|---|
 | Canvas → workspace | — | tile capsule materializes if 2+ tiles (focus lands on the first) | backing slides to the chip |
-| Workspace → canvas | — | tile capsule, and page capsule if up, materialize out | backing slides |
-| Workspace → workspace | — | tile capsule in/out by tile count | backing slides |
-| Step into a web card / focus a web tile | — | page capsule materializes | — |
-| Step out / focus a non-web tile | — | page capsule materializes out | — |
+| Workspace → canvas | — | focused-tile capsule materializes out unless a card is engaged | backing slides |
+| Workspace → workspace | — | capsule in/out by tile count | backing slides |
+| Step into a web card on the canvas | — | focused-tile capsule materializes (page run only) | — |
+| Focus a web tile ↔ a non-web tile | — | — | the page run appears or goes; width snaps, glass carries across (§2) |
 | Focus a different tile | — | — | tile verbs update in place |
 | Maximize / restore a tile | — | — | symbol replace |
 | ⌘F | — | — | field materializes, magnifier goes |
@@ -234,7 +270,7 @@ All on 2026-09-10.
    are gone.
 2. The glass never fades: `headerBacking(in:showing:)` and every `backed:` parameter are gone, and each
    control group is glassed unconditionally.
-3. The trailing chrome is one `GlassEffectContainer`. The page and tile capsules, the find field and
+3. The trailing chrome is one `GlassEffectContainer`. The focused-tile capsule, the find field and
    the tab bar itself come and go through `HeaderPresence`, which inserts with no animation and
    materializes a turn later — by hand rather than `.glassEffectTransition(.materialize)`, because
    that runs under the inserting transaction and would animate the row (P1).

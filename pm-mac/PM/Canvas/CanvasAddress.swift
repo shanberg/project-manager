@@ -26,4 +26,23 @@ enum CanvasAddress {
         let guessed = "https://" + text
         return URL(string: guessed) == nil ? nil : guessed
     }
+
+    /// Whether a page at this address is one to warn about.
+    ///
+    /// **The header marks the bad answer, not the good one.** The address is drawn there because of a
+    /// single argument — during a sign-on you are handed between hosts, and a password field is only
+    /// safe to type into if you can see whose it is — and "nobody encrypted this" is the other half of
+    /// it. A lock on every https page would be furniture, and furniture is not read.
+    ///
+    /// **A machine on this Mac is not a warning.** Plain HTTP to `localhost` is how local development
+    /// works and how half the cards on a developer's board are pointed; marking those would train the
+    /// mark to be ignored, which costs exactly the one page it exists for. Anything that isn't http —
+    /// `about:`, `data:`, a card that has never loaded — has no connection to be honest about and is
+    /// not warned about either.
+    static func isEncrypted(_ address: String) -> Bool {
+        guard let url = URL(string: address), let scheme = url.scheme?.lowercased() else { return true }
+        guard scheme == "http" else { return true }
+        let host = url.host()?.lowercased() ?? ""
+        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local")
+    }
 }

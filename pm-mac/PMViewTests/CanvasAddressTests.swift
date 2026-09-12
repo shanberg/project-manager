@@ -37,4 +37,31 @@ final class CanvasAddressTests: XCTestCase {
     func testAllowsThisMachine() {
         XCTAssertEqual(CanvasAddress.normalized("localhost:3000"), "https://localhost:3000")
     }
+
+    // MARK: What the header marks
+
+    func testPlainHttpIsWorthAMark() {
+        XCTAssertFalse(CanvasAddress.isEncrypted("http://tracker.example.com/board"))
+    }
+
+    func testHttpsIsNot() {
+        XCTAssertTrue(CanvasAddress.isEncrypted("https://tracker.example.com/board"))
+    }
+
+    /// Plain HTTP to a machine on this Mac is how local development works, and half the cards on a
+    /// developer's board are pointed at one. A mark on every one of those is a mark nobody reads —
+    /// which costs exactly the one page it exists for.
+    func testThisMachineIsNotAWarning() {
+        for address in ["http://localhost:3000/app", "http://127.0.0.1:8080",
+                        "http://mini.local/status"] {
+            XCTAssertTrue(CanvasAddress.isEncrypted(address), address)
+        }
+    }
+
+    /// A card that has never loaded, and the schemes with no connection to be honest about.
+    func testSomethingWithNoConnectionIsNotWarnedAbout() {
+        for address in ["", "about:blank", "data:text/html,hi"] {
+            XCTAssertTrue(CanvasAddress.isEncrypted(address), address)
+        }
+    }
 }

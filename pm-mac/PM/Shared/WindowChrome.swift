@@ -45,20 +45,41 @@ extension View {
     /// **Not `.interactive()`**, which was tried as the system's hover (docs/header-chrome.md P2) and
     /// shows nothing when the pointer is over it: on the Mac it answers presses, not hovering. The
     /// pointer's answer is `HeaderHoverHighlight`.
-    func headerBacking(in shape: some Shape) -> some View {
-        modifier(HeaderBacking(shape: shape))
+    /// `id` names this piece of glass inside its `GlassEffectContainer` — see `HeaderBacking`. Omit it
+    /// for a capsule that stands on its own, where there is nothing to be told apart from.
+    func headerBacking(in shape: some Shape, id: AnyHashable? = nil) -> some View {
+        modifier(HeaderBacking(shape: shape, id: id))
     }
 }
 
 private struct HeaderBacking<S: Shape>: ViewModifier {
     let shape: S
+    let id: AnyHashable?
     @Environment(\.headerMaterialized) private var materialized
+    @Environment(\.headerGlassNamespace) private var namespace
 
     func body(content: Content) -> some View {
         // `.identity` rather than a condition around the modifier: the same view either way, so nothing
         // inside is rebuilt, and the glass itself animates in or out under whatever transaction changed
         // it — which `HeaderPresence` sees to is one with no layout in it.
-        content.glassEffect(materialized ? .regular : .identity, in: shape)
+        let glass = content.glassEffect(materialized ? .regular : .identity, in: shape)
+        // **And the shape says which shape it is, which is what stops it flashing.**
+        //
+        // A `GlassEffectContainer` renders its shapes together, and without an identity it has no way
+        // to know that the capsule it is being handed now is the one it drew last time: a capsule whose
+        // contents change — stepping from a web tile to a project tile takes a whole run of controls
+        // out of it — arrives as a *different* shape at a different size, and the material is built
+        // again from nothing rather than carried across. That rebuild is the flash.
+        //
+        // `glassEffectID` is the framework's answer and the one Apple's own guidance points at
+        // (docs/header-chrome.md §2, "Applying Liquid Glass to custom views"). It changes no geometry
+        // and schedules no animation, so it costs the rule in `CanvasHeaderTrailingChrome` nothing —
+        // the row still takes its new width in one frame. It only means: same glass, new size.
+        if let id, let namespace {
+            glass.glassEffectID(id, in: namespace)
+        } else {
+            glass
+        }
     }
 }
 
@@ -66,6 +87,9 @@ extension EnvironmentValues {
     /// Whether the glass under this piece of chrome is all the way in. False only for the moment a
     /// `HeaderPresence` is bringing a capsule in or taking one out.
     @Entry var headerMaterialized = true
+    /// The `GlassEffectContainer` the capsules in this header are tracked in, set by whoever owns that
+    /// container. Nil where a capsule stands alone and has nothing to be told apart from.
+    @Entry var headerGlassNamespace: Namespace.ID?
 }
 
 /// Where a window's traffic lights are, for a header that runs up into the titlebar to sit level with
@@ -174,6 +198,9 @@ extension View {
 /// cannot drift.
 struct HeaderCapsule<Content: View>: View {
     let chrome: HeaderChrome
+    /// Which piece of glass this is, for the container it lives in — see `headerBacking`. A capsule
+    /// whose contents change shape needs one; a capsule that stands alone doesn't.
+    var glass: AnyHashable?
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -181,7 +208,7 @@ struct HeaderCapsule<Content: View>: View {
             .opacity(chrome.contentOpacity)
             .padding(.horizontal, HeaderMetrics.capsuleInset.horizontal)
             .padding(.vertical, HeaderMetrics.capsuleInset.vertical)
-            .headerBacking(in: Capsule())
+            .headerBacking(in: Capsule(), id: glass)
             // A click on a control is a click on that control, not the start of a window drag.
             .background(WindowDragExcluder())
             // A window going to the background is a change people expect to see happen smoothly (HIG,

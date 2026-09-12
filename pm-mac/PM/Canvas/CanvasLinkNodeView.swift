@@ -46,6 +46,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private var status: NSTextField?
     /// Told when the page renames itself. See `titleChanged`.
     private var titleWatch: NSKeyValueObservation?
+    /// Told as the load advances, for the header's progress hairline. See `watchTitle`.
+    private var progressWatch: NSKeyValueObservation?
     /// Whether a title arriving now is a name for *this card's* address.
     ///
     /// True from the moment the card sends the page to its own address, and false again as soon as you
@@ -88,6 +90,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// is not a reason to take the page away.
     private var revealed = false
     private var giveUp: DispatchWorkItem?
+    /// When the load now running started, or nil when nothing is. Only the chrome reads it — see
+    /// `showsLoad`.
+    private var loadingSince: Date?
     /// Asking, every so often, whether the page has painted — see `probeForPaint`. Alive only between
     /// the page committing and the card being revealed, which is a second or two at most.
     private var paintProbe: Timer?
@@ -226,7 +231,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     /// Ask again at the zoom the board is actually at — for when the answer changed underneath the
     /// card rather than because of it, which is what flipping the web-cards switch in Settings is.
-    func reconsiderLoading() { reconsiderLoading(scale: board.liveScale) }
+    override func reconsiderLoading() { reconsiderLoading(scale: board.liveScale) }
 
     /// Say whether this card would like to be running, and let the board decide.
     private func reconsiderLoading(scale: Double) {
@@ -288,7 +293,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// can skip the budget because it adds nothing: the renderer exists already, and this only changes
     /// which board draws it. The budget has its say on the next pass, as it does for every page.
     /// Never *starts* one — that is the budget's decision.
-    func reclaimPage() {
+    override func reclaimPage() {
         guard wanted, web == nil, boardInSight, let holder, !holder.boardInSight else { return }
         adopt(from: holder)
     }
@@ -366,6 +371,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         giveUp = nil
         titleWatch?.invalidate()
         titleWatch = nil
+        progressWatch?.invalidate()
+        progressWatch = nil
         capturingTitle = false
         // A pause in flight is abandoned: its snapshot finds the page gone and stops there.
         freezing = false
@@ -605,6 +612,15 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private func watchTitle(of view: WKWebView) {
         titleWatch = view.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
             MainActor.assumeIsolated { self?.titleChanged(view.title) }
+        }
+        // And how far the load has got, for the hairline under the header's address field. The
+        // delegate cannot say this: `didStartProvisionalNavigation` and `didFinish` are the two ends
+        // and there is nothing in between but this property.
+        //
+        // Cheap because `loadProgress` rounds to twentieths — the header's `Page` is `Equatable`, so
+        // a value that hasn't moved a step costs one comparison and no redraw at all.
+        progressWatch = view.observe(\.estimatedProgress) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.board.pageStateChanged() }
         }
     }
 
@@ -862,6 +878,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // crash, and a page being torn down is about to report a title of nothing.
         titleWatch?.invalidate()
         titleWatch = nil
+        progressWatch?.invalidate()
+        progressWatch = nil
         capturingTitle = false
         web?.stopLoading()
         web?.navigationDelegate = nil
@@ -1004,8 +1022,72 @@ final class CanvasLinkNodeView: CanvasNodeView {
     var canGoForward: Bool { web?.canGoForward ?? false }
     /// Mid-navigation, for the header's Reload button to become a Stop.
     var isLoading: Bool { web?.isLoading ?? false }
+
+    /// **Whether a load has been going long enough to be worth saying anything about.**
+    ///
+    /// A live page is not only the page you asked for: an app shell polls, a socket reconnects, a
+    /// dashboard re-fetches itself every few seconds, and each of those is a real main-frame load that
+    /// starts and ends before you could read anything about it. Reported honestly, they turned the
+    /// chrome into a metronome — Reload became Stop and back, and the progress bar faded up and out
+    /// along the address field, every few seconds, for as long as the card was open.
+    ///
+    /// Nothing about that was information. The two things the readout is for are a load you started
+    /// and a load that is stuck, and both last: `loadWorthReporting` is below the point where a person
+    /// would begin to wonder, and above everything a page does to itself while you read it. Which is
+    /// the same rule a browser follows — Safari does not flash its progress bar for a load that is
+    /// already over.
+    ///
+    /// The card goes on knowing it is loading (`isLoading` is unchanged, and Stop still stops it the
+    /// moment the button is there). This is only what the *chrome* is told.
+    var showsLoad: Bool {
+        isLoading && CanvasPageLoad.isWorthReporting(startedAt: loadingSince)
+    }
     /// True once the page has wandered off the address the board saved for this card.
     var hasWandered: Bool { web != nil && url != nil && web?.url != url }
+
+    /// Whether what is on screen arrived over a connection nobody can read. The rule, and why it marks
+    /// only the bad answer, is `CanvasAddress.isEncrypted`.
+    var isSecure: Bool { CanvasAddress.isEncrypted(liveURL?.absoluteString ?? address) }
+
+    /// How far the current load has got, or zero when nothing is loading.
+    ///
+    /// Rounded to twentieths, which is what makes it cheap: the header's `Page` is an `Equatable`
+    /// struct rebuilt on every change, and an unrounded `estimatedProgress` changes on every packet —
+    /// so the readout would be a SwiftUI pass per packet for a bar two points tall.
+    var loadProgress: Double {
+        guard let web, web.isLoading, showsLoad else { return 0 }
+        return (web.estimatedProgress * 20).rounded(.down) / 20
+    }
+
+    /// Where Back would take you, nearest first — the list behind a press-and-hold.
+    ///
+    /// Capped, because a card left open on a wiki for a day has a back list nobody wants as a menu,
+    /// and the entries past the first handful are not a place you remember being.
+    var backSteps: [(title: String, address: String)] {
+        guard let web else { return [] }
+        return web.backForwardList.backList.reversed().prefix(12).map { item in
+            // A page WebKit has no title for — one never loaded in this session, or one that titled
+            // itself with nothing — is named by its host, which is what the card would call it too.
+            let named = item.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (title: named.isEmpty ? (item.url.host() ?? item.url.absoluteString) : named,
+                    address: item.url.absoluteString)
+        }
+    }
+
+    /// Go back `steps` pages at once. One is what Back does; more is what the menu behind it offers.
+    func goBack(_ steps: Int) {
+        guard let web, steps > 0 else { return }
+        let list = web.backForwardList.backList.reversed()
+        guard steps <= list.count else { return }
+        web.go(to: Array(list)[steps - 1])
+    }
+
+    /// Put the address on the clipboard — the page you are looking at, as everywhere else.
+    func copyAddress() {
+        guard let url = liveURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
 
     func goBack() { web?.goBack() }
     func goForward() { web?.goForward() }
@@ -1110,7 +1192,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// actually running is asked, so a refresh cadence never wakes a frozen renderer, and never a card
     /// you are inside: reloading the page under somebody's hands, mid-scroll or mid-form, is the one
     /// way an automatic refresh can cost you something.
-    func reloadIfStale(after interval: TimeInterval) {
+    override func reloadIfStale(after interval: TimeInterval) {
         guard let loadedAt, web != nil, !isEngaged, !isLoading,
               Date().timeIntervalSince(loadedAt) >= interval else { return }
         web?.reload()
@@ -1384,10 +1466,19 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     /// A card mid-navigation is otherwise indistinguishable from one sitting still — it goes on drawing
     /// the page it already had until the new one paints.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        // When it started, which is the whole of what `showsLoad` needs — and a nudge at the moment it
+        // becomes worth saying, because a load that is *stuck* is exactly the one that will send no
+        // further progress for the header to notice it on.
+        if loadingSince == nil { loadingSince = Date() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + CanvasPageLoad.worthReporting) { [weak self] in
+            guard let self, isLoading else { return }
+            board.pageStateChanged()
+        }
         board.pageStateChanged()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loadingSince = nil
         revealPage()
         board.pageStateChanged()
     }
@@ -1423,7 +1514,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
 
     /// A failure the card rides out — the page is still there — still ends the load, and the header is
     /// showing a Stop button that has nothing left to stop.
-    private func loadingEnded() { board.pageStateChanged() }
+    private func loadingEnded() {
+        loadingSince = nil
+        board.pageStateChanged()
+    }
 }
 
 // MARK: - Navigating

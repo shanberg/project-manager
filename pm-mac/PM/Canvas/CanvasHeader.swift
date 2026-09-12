@@ -18,24 +18,25 @@ import SwiftUI
 /// top 48 points of the board — including on the cards up there. A pill at one end and the capsules at
 /// the other leave the space between them as what it looks like: board.
 @MainActor
-final class CanvasHeaderModel: ObservableObject {
+@Observable
+final class CanvasHeaderModel {
     /// The board's name — the canvas file, without its extension.
-    @Published var title = ""
-    @Published var mode: CanvasMode = .view
+    var title = ""
+    var mode: CanvasMode = .view
     /// The web card you have stepped into, if any.
-    @Published var page: Page?
-    @Published var find = Find()
+    var page: Page?
+    var find = Find()
     /// Bumped by ⌘L to put the keyboard in the address field with the address selected, the way a
     /// browser does. A token rather than a flag, for the reason `Find.focusToken` is one: pressing it
     /// again while the field is already open has to mean something.
-    @Published var addressFocusToken = 0
+    var addressFocusToken = 0
     /// What a tiled view is showing, long and short — "6 of 43 cards" and "6/43". Nil when the board is
     /// showing itself.
     ///
     /// It has to say something. A board showing six of forty-three cards, with the rest hidden and the
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
-    @Published var tiling: (long: String, short: String)?
+    var tiling: (long: String, short: String)?
     /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
     /// contextual menu use. See `CanvasTiling.commandTitle`.
     ///
@@ -44,16 +45,39 @@ final class CanvasHeaderModel: ObservableObject {
     /// stopped moving, by which time you have either clicked or gone somewhere else. What it was
     /// telling you — how many cards are about to become a workspace — the menus say in a place you are
     /// already reading. This is now the title of that menu item and nothing else.
-    @Published var tileTitle = "Create Workspace"
+    var tileTitle = "Create Workspace"
     /// Whether ⌘Return has anything to do. Dim on a canvas with nothing selected — a workspace is made
     /// out of a selection or not at all.
-    @Published var canTile = false
+    var canTile = false
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
-    @Published var focusedTile: TileControls?
-    @Published var titlebar = TitlebarButtonMetrics.unmeasured
+    var focusedTile: TileControls?
+
+    /// The one capsule that is about what you are *in* — see `CanvasTileCapsule`.
+    ///
+    /// **Two facts, one piece of glass.** They were two capsules, and the split was drawn at the wrong
+    /// joint: a tile and the thing inside it are not two scopes you switch between, they are one place
+    /// described twice. On a web tile both were up at once, about the same object, each with its own
+    /// `…` menu — two overflow buttons four points apart, which is a menu nobody can aim at.
+    ///
+    /// Either half can be absent and the capsule is still there for the other: a page with no focused
+    /// tile is an engaged card on an untiled board, and a focused tile with no page is every tile that
+    /// isn't a web card. Nil only when both are, which is a board you are not standing in anything on.
+    var focus: Focus? {
+        guard page != nil || focusedTile != nil else { return nil }
+        return Focus(page: page, tile: focusedTile)
+    }
+
+    /// What the focused-tile capsule draws: the controls for whatever kind of thing you are in, and the
+    /// verbs the tile itself answers to.
+    struct Focus: Equatable {
+        var page: Page?
+        var tile: TileControls?
+    }
+
+    var titlebar = TitlebarButtonMetrics.unmeasured
     /// How much of the window the controls can spend. See `CanvasHeaderModel.Room`.
-    @Published var room = Room.full
+    var room = Room.full
 
     /// How much room the header's controls have, and therefore what they can afford to say.
     ///
@@ -124,6 +148,32 @@ final class CanvasHeaderModel: ObservableObject {
         var isLoading: Bool
         /// How old what you are looking at is, when the card knows.
         var age: String?
+        /// How far the load has got, 0…1, and zero when nothing is loading.
+        ///
+        /// Reload becoming Stop already says a load is happening; this says how it is going, which is
+        /// the difference between a card that is slow and a card that is stuck. Rounded by the card
+        /// before it gets here, so a value that hasn't moved a twentieth doesn't redraw the row.
+        var progress: Double = 0
+        /// Whether the page arrived over a connection nobody can read.
+        ///
+        /// Shown only when false — see `CanvasAddressField`. A lock on every page is furniture; the
+        /// state worth a mark is the one the password argument is about.
+        var isSecure: Bool = true
+        /// The site's own icon, if the app already has it. Nil is ordinary and draws nothing.
+        var icon: NSImage?
+        /// Where Back would take you, nearest first. Empty disables the menu behind the button and
+        /// leaves an ordinary Back.
+        var back: [Step] = []
+        /// The host the site-wide commands in the overflow menu are about — sign-in, ad blocking.
+        /// Those are per *site*, and the site is the card's rather than wherever it has wandered.
+        var site: String = ""
+        var isFiltered: Bool = false
+
+        /// One page in the back list.
+        struct Step: Equatable {
+            var title: String
+            var address: String
+        }
     }
 
     /// What the header knows about the one tile the commands are about.
@@ -147,6 +197,25 @@ final class CanvasHeaderModel: ObservableObject {
         var summary = ""
         /// Bumped to pull the keyboard back into the field — a second ⌘F is "search again".
         var focusToken = 0
+        /// What this search will actually look inside.
+        ///
+        /// **Find follows what you have stepped into** — the board, a page, or a project card's task
+        /// list — and the field said "Find on canvas" whichever of the three it was about to do. One
+        /// placeholder, three truths, and the two it was wrong about are the two where the answer
+        /// "nothing matches" would otherwise look like a broken search.
+        var scope: Scope = .canvas
+
+        enum Scope: Equatable {
+            case canvas, page, tasks
+
+            var placeholder: String {
+                switch self {
+                case .canvas: "Find on canvas"
+                case .page: "Find on page"
+                case .tasks: "Find in tasks"
+                }
+            }
+        }
     }
 
     /// **The pill has no readout, and had one.**
@@ -161,44 +230,87 @@ final class CanvasHeaderModel: ObservableObject {
     /// Whether the `+` offers the project's own note — true only on a project's board that hasn't got
     /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
     /// question (`CanvasBoardView.offersProjectNoteCard`).
-    @Published var offersProjectNote = false
+    var offersProjectNote = false
     /// What the `+` menu's Add Card from Canvas lists — the cards a tiled view isn't showing, and
     /// nothing while there is no tiled view. Kept in step by `CanvasPaneController.refreshExistingCards`
     /// for the reason `offersProjectNote` is.
-    @Published var existingCards: [CanvasExistingCards.Section] = []
+    var existingCards: [CanvasExistingCards.Section] = []
 
     // MARK: What the controls do. Supplied by the window controller.
 
+    @ObservationIgnored
     var addCard: () -> Void = {}
+    @ObservationIgnored
     var addFrame: () -> Void = {}
+    @ObservationIgnored
     var addLink: () -> Void = {}
+    @ObservationIgnored
     var addFile: () -> Void = {}
+    @ObservationIgnored
     var addProjectNote: () -> Void = {}
+    @ObservationIgnored
     var addExistingCard: (String) -> Void = { _ in }
+    @ObservationIgnored
     var setMode: (CanvasMode) -> Void = { _ in }
+    @ObservationIgnored
     var zoomIn: () -> Void = {}
+    @ObservationIgnored
     var zoomOut: () -> Void = {}
+    @ObservationIgnored
     var zoomToFit: () -> Void = {}
+    @ObservationIgnored
     var zoomActualSize: () -> Void = {}
+    @ObservationIgnored
     var pageBack: () -> Void = {}
+    @ObservationIgnored
     var pageForward: () -> Void = {}
+    @ObservationIgnored
     var pageReload: () -> Void = {}
+    @ObservationIgnored
     var pageStop: () -> Void = {}
+    @ObservationIgnored
     var pageHome: () -> Void = {}
+    @ObservationIgnored
     var pageAdoptAddress: () -> Void = {}
+    /// Back by more than one, from the menu behind the Back button. The argument is how many pages.
+    @ObservationIgnored
+    var pageBackTo: (Int) -> Void = { _ in }
+    /// The overflow menu's items. Each is a command the card already had somewhere else — see
+    /// `CanvasPageOverflow`, which explains why "somewhere else" stopped being good enough.
+    @ObservationIgnored
+    var pageCopyAddress: () -> Void = {}
+    @ObservationIgnored
+    var pageOpenInBrowser: () -> Void = {}
+    @ObservationIgnored
+    var pageSignIn: () -> Void = {}
+    @ObservationIgnored
+    var pageSignOut: () -> Void = {}
+    @ObservationIgnored
+    var pageSetFiltered: (Bool) -> Void = { _ in }
     /// Send the page to an address typed into the header's field. Navigation only — it does not touch
     /// what the board has saved for the card, which is what Pin is for.
+    @ObservationIgnored
     var pageGo: (String) -> Void = { _ in }
+    @ObservationIgnored
     var findChanged: (String) -> Void = { _ in }
+    @ObservationIgnored
     var findClosed: () -> Void = {}
+    @ObservationIgnored
     var findCommitted: () -> Void = {}
+    @ObservationIgnored
     var tile: () -> Void = {}
+    @ObservationIgnored
     var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
+    @ObservationIgnored
     var sizeColumnsToContent: () -> Void = {}
     /// The focused tile's verbs — see `CanvasTileCapsule`.
+    @ObservationIgnored
     var maximizeTile: () -> Void = {}
+    @ObservationIgnored
     var promoteTile: () -> Void = {}
+    @ObservationIgnored
     var pinTile: () -> Void = {}
+    @ObservationIgnored
     var removeTile: () -> Void = {}
 }
 
@@ -223,7 +335,7 @@ final class CanvasHeaderModel: ObservableObject {
 /// same inset, same place, same nothing behind it — which is what the first complaint about this header
 /// asked for. docs/header-chrome.md Q1.
 struct CanvasTitlePill: View {
-    @ObservedObject var model: CanvasHeaderModel
+    var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
@@ -249,13 +361,17 @@ struct CanvasTitlePill: View {
 /// Reading order is how you are looking at it, then what you can do to it: the mode, find, add, and
 /// the view options that hold the mode, the tiling and the zoom commands.
 ///
-/// The page you have stepped into used to be in here too, as a group of items behind a divider. It is
-/// its own capsule now — see `CanvasPageCapsule` — for two reasons. Everything left in this capsule acts
-/// on the board, and a hairline is too quiet a way to say that five of the items didn't. And the group
-/// appeared and disappeared *inside* the row, so stepping into a card slid Add and the options menu
-/// sideways under a pointer already on its way to one of them.
+/// The page you have stepped into used to be in here too, as a group of items behind a divider, for
+/// two reasons it isn't. Everything left in this capsule acts on the board, and a hairline is too quiet
+/// a way to say that five of the items didn't. And the group appeared and disappeared *inside* the row,
+/// so stepping into a card slid Add and the options menu sideways under a pointer already on its way to
+/// one of them.
+///
+/// It went to a capsule of its own, and from there into the focused tile's — see `CanvasTileCapsule`,
+/// which is the capsule for whatever you are standing in. This one is the board, and is the only one of
+/// the two that is always there.
 struct CanvasControlCapsule: View {
-    @ObservedObject var model: CanvasHeaderModel
+    var model: CanvasHeaderModel
     @Environment(\.controlActiveState) private var controlActiveState
     /// The find field coming and going — see `HeaderPresence`. Opening, the capsule snaps to make room
     /// and the field materializes in it; closing, the field fades where it stands and only then does
@@ -263,8 +379,10 @@ struct CanvasControlCapsule: View {
     @State private var find = HeaderPresence<Bool>()
 
     var body: some View {
-        // The same glass over the board and over a workspace — see `headerBacking(in:)`.
-        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState)) {
+        // The same glass over the board and over a workspace — see `headerBacking(in:)`. Named, because
+        // this capsule changes width too — ⌘F puts a field in it — and the container has to know it is
+        // still the same piece of glass afterwards.
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState), glass: "controls") {
             if find.shown != nil {
                 Group {
                     findField
@@ -312,7 +430,8 @@ struct CanvasControlCapsule: View {
     private var findField: some View {
         SearchField(text: Binding(get: { model.find.query },
                                   set: { model.find.query = $0; model.findChanged($0) }),
-                    placeholder: "Find on canvas",
+                    // What it will actually search, which is not always the canvas. See `Find.Scope`.
+                    placeholder: model.find.scope.placeholder,
                     focusToken: model.find.focusToken,
                     onCancel: model.findClosed,
                     onCommit: model.findCommitted)
@@ -439,7 +558,7 @@ struct CanvasControlCapsule: View {
 /// sitting lower, it is a row whose two halves disagree about where the top of the row is. The pill has
 /// its own because it is its own view, and taller.
 struct TitlebarDrop: ViewModifier {
-    @ObservedObject var model: CanvasHeaderModel
+    var model: CanvasHeaderModel
     @State private var height: CGFloat = 28
 
     func body(content: Content) -> some View {
