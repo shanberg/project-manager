@@ -17,6 +17,48 @@ enum TestApp {
     }
 }
 
+/// Turn the runloop, with a mouse-up always waiting at the head of the event queue.
+///
+/// **This is how a view test survives AppKit's tracking loops, and both of the ways a run has hung
+/// were one of them.** A drag (`NSCoreDragManager._dragUntilMouseUp:`) and a window resize
+/// (`NSWindow._runResizeTrackingLoop`) are the same shape: the main thread stops inside
+/// `nextEventMatchingMask:` and does not come out until it dequeues a mouse-up. A test that never
+/// sends one does not fail — it stops the whole bundle, which has no timeout of its own, and it stops
+/// it *somewhere else*, because both loops are entered from a runloop observer some time after the
+/// call that armed them. One was found still blocked nine and a half hours after it started.
+///
+/// So an armed loop is seen out where it was armed: the runloop is turned here, and a timer in the
+/// common modes — which include the event-tracking mode those loops run in — keeps an up at the head
+/// of the queue until one is taken. Then the spares are drained, so nothing is left in the queue for
+/// the next test to find.
+///
+/// `point` is in the window's coordinates and only has to be inside it; a tracking loop takes the
+/// first up it is offered wherever it is.
+@MainActor
+func seeOutAnyTrackingLoop(in window: NSWindow, at point: NSPoint, for seconds: TimeInterval = 0.5) {
+    let number = window.windowNumber
+    func up() -> NSEvent? {
+        NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [], timestamp: 0,
+                           windowNumber: number, context: nil, eventNumber: 0, clickCount: 1,
+                           pressure: 0)
+    }
+    if let first = up() { NSApp.postEvent(first, atStart: true) }
+    let insisting = Timer(timeInterval: 0.02, repeats: true) { _ in
+        MainActor.assumeIsolated {
+            guard let more = NSEvent.mouseEvent(with: .leftMouseUp, location: point,
+                                                modifierFlags: [], timestamp: 0,
+                                                windowNumber: number, context: nil, eventNumber: 0,
+                                                clickCount: 1, pressure: 0) else { return }
+            NSApp.postEvent(more, atStart: true)
+        }
+    }
+    RunLoop.main.add(insisting, forMode: .common)
+    RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    insisting.invalidate()
+    while NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast,
+                          inMode: .default, dequeue: true) != nil {}
+}
+
 /// The note editor, in a window, wired the way `MarkdownTextEditor.makeNSView` wires one.
 ///
 /// Built per test rather than shared: XCTest gives no order guarantee, and a fixture carried between

@@ -160,12 +160,20 @@ final class CanvasLinkDropTests: XCTestCase {
                                windowNumber: editor.window.windowNumber, context: nil,
                                eventNumber: 0, clickCount: 1, pressure: 1)!
         }
+        // **The drag has to be seen out, here, or it wedges the whole bundle.**
+        //
+        // `dragSelection` writes the pasteboard — which is everything this test asserts — and then
+        // hands off to AppKit, which starts the drag *asynchronously*: the blocking part,
+        // `_dragUntilMouseUp:`, is entered from a runloop observer some time later and waits for an
+        // up. One posted ahead of the call is usually the event it gets; when it isn't, nothing ever
+        // ends that loop. See `seeOutAnyTrackingLoop`, which is where the rest of this is argued.
         NSApp.postEvent(mouse(.leftMouseUp), atStart: true)
         let board = NSPasteboard(name: .drag)
         board.clearContents()
         XCTAssertTrue(view.dragSelection(with: mouse(.leftMouseDown), offset: .zero, slideBack: false))
         XCTAssertEqual(board.string(forType: .URL), "https://x.dev/docs")
         XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/docs"])
+        seeOutAnyTrackingLoop(in: editor.window, at: at)
     }
 
     /// The same selection, copied rather than dragged, stays text — see `writeSelection` for why.

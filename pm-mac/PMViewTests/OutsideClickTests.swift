@@ -76,6 +76,15 @@ final class OutsideClickTests: XCTestCase {
 
     /// Local monitors run from `sendEvent`, so the event has to go through `NSApp` rather than to the
     /// window directly.
+    ///
+    /// **And the click has to be finished before the test ends.** `sendEvent` is not the end of a
+    /// mouse-down's life: AppKit's gesture machinery can hold one back and re-send it from a runloop
+    /// observer later (`_NSGestureRecognizerSortAndSendDelayedEvents`), and a down at x:1 — the point
+    /// the first test here is *about* — reaches `NSThemeFrame` and starts a window-resize tracking
+    /// loop that blocks until it dequeues an up. Sent from a test that has long since finished, that
+    /// loop wedged whichever test happened to be turning the runloop when it arrived: this is the
+    /// second of the two hangs `seeOutAnyTrackingLoop` was written for, and it stopped the bundle in
+    /// `ScrollEdgeEffectTests`, three suites away.
     private func click(at pointInWindow: NSPoint) {
         guard let down = NSEvent.mouseEvent(with: .leftMouseDown, location: pointInWindow,
                                             modifierFlags: [], timestamp: 0,
@@ -83,5 +92,6 @@ final class OutsideClickTests: XCTestCase {
                                             eventNumber: 0, clickCount: 1, pressure: 1)
         else { return XCTFail("could not build a mouse-down") }
         NSApp.sendEvent(down)
+        seeOutAnyTrackingLoop(in: window, at: pointInWindow, for: 0.15)
     }
 }
