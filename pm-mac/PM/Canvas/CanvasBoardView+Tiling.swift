@@ -232,78 +232,48 @@ extension CanvasBoardView {
         CanvasTiling.centre(framing: session.area, margins: tileMargins(atZoom: 1))
     }
 
-    /// The whole of a crossing: the zoom, and the cards taking their new places.
+    /// The whole of a crossing: the zoom, and the cards taking their new places, as **one movement on a
+    /// curved path**.
     ///
-    /// **One clock, or two beats.** As it ships the two run together, which is safe for the reason
-    /// `leaveTiling` sets out at length — neither is answering the other's question — and is what every
-    /// journey that changes the magnification costs about half its frames doing. Under
-    /// `CrossingTuning.stagedZoom` they are separated instead, and the rule is that **the cards move at
-    /// whichever zoom shows the whole journey**: zooming in, they gather first and the window then
-    /// closes on what they made; zooming out, the window widens first and they fly home across a board
-    /// you can see all of. The zoom is then travelling alone, so it goes by the compositor.
+    /// **The two halves must not spend themselves at the same rate.** Run on one clock — which is how
+    /// this shipped until now — the cards and the magnification describe the same trajectory, the eye
+    /// reads one movement instead of two, and what is lost is the half that says which card went where.
+    /// Sequenced instead, in two beats, the cards become perfectly legible and the seam is all you see.
+    /// So they are offset in phase: both start together and end together over `curvedCrossing`, and the
+    /// leader is two thirds of the way there when the trailer is a tenth. Nothing stops, nothing starts,
+    /// and the pair trace a curve rather than a diagonal or a corner. See `Motion.Phase`.
     ///
-    /// **Or one movement on a curved path**, which is `CrossingTuning.curvedCrossing` and is what two
-    /// beats turned out to want to be. Both halves start together and end together, over a little longer
-    /// than a crossing used to take, and what differs is *when* each spends its movement: the leader is
-    /// two thirds done a third of the way through, where the trailer has barely begun. So there is no
-    /// handover to see — nothing stops and nothing starts — and the two are still not describing the
-    /// same trajectory, which is the whole of what made them cancel. The rule about which leads is the
-    /// staged rule unchanged: the cards move at whichever zoom shows the whole journey. See
-    /// `Motion.Phase`.
+    /// **The cards move at whichever zoom shows the whole journey.** Zooming in they lead, gathering
+    /// into the tile arrangement while the board is still wide enough to show every card's trip, and the
+    /// window closes on what they made; zooming out the view widens first and they follow it home.
     ///
-    /// Generation-counted like `settleIntoLayout`, because the second beat is a message to a board that
-    /// may have been asked for something else in the meantime — ⌥B twice in half a second — and the
-    /// stalest thing you can do to a crossing is finish the one before it.
+    /// **The zoom travels on the compositor**, which is not an optimisation here but the thing that
+    /// makes the rest legal: the magnification is final from the first frame, so a card's frame means
+    /// one thing for the whole crossing while the two curves disagree about the time. `leaveTiling`'s
+    /// warning — cards set flying toward frames measured in the old zoom, landing at their 100% size on
+    /// a board at 35% — is about the hazard this replaces, and it is why the two were welded to one
+    /// clock in the first place.
+    ///
+    /// Measured on the picker against every other way of doing it, three round trips apiece
+    /// interleaved: going in, one clock dropped 11, 10 and 9 frames of 22 and this 4, 4 and 2; coming
+    /// out, one clock 11, 8 and 10 and this 2, 1 and 2, worst frame 33ms against 43-50ms.
     func cross(to zoom: CGFloat, centre: CanvasPoint, layout next: CanvasLayout, animated: Bool) {
-        let scroll = scrollView?.canvasScroll
-        let tuning = CrossingTuning.current
-        guard animated, let scroll,
-              tuning.contains(.stagedZoom) || tuning.contains(.curvedCrossing) else {
-            scroll?.fly(to: zoom, centre: centre, animated: animated)
+        guard animated, let scroll = scrollView?.canvasScroll else {
+            scrollView?.canvasScroll?.fly(to: zoom, centre: centre, animated: animated)
             setLayout(next, animated: animated)
             return
         }
-        if tuning.contains(.curvedCrossing) {
-            // The board is going to arrive at its magnification in this frame and be drawn as if it
-            // hadn't, so a card's frame means the same thing for the whole crossing. That is what makes
-            // giving the two halves different curves safe — see `leaveTiling` on the hazard it replaces.
-            let widening = zoom < scroll.magnification
-            scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true,
-                       curve: widening ? .leads : .trails, seconds: Self.curvedCrossing)
-            setLayout(next, animated: true, seconds: Self.curvedCrossing,
-                      timing: widening ? Motion.Phase.trails.timing : Motion.spring)
-            return
-        }
-        crossingStage += 1
-        let generation = crossingStage
         let widening = zoom < scroll.magnification
-        if widening {
-            scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true)
-        } else {
-            setLayout(next, animated: true)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stageHandover) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.crossingStage == generation, self.window != nil else { return }
-                if widening {
-                    self.setLayout(next, animated: true)
-                } else {
-                    self.scrollView?.canvasScroll?.fly(to: zoom, centre: centre, animated: true,
-                                                       byTransform: true)
-                }
-            }
-        }
+        scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true,
+                   curve: widening ? .leads : .trails, seconds: Self.curvedCrossing)
+        setLayout(next, animated: true, seconds: Self.curvedCrossing,
+                  timing: widening ? Motion.Phase.trails.timing : Motion.spring)
     }
 
-    /// When the second beat of a staged crossing starts, as a fraction of the first — slightly before it
-    /// lands, so the crossing reads as one gesture in two parts rather than as a stop and a start. The
-    /// cards are on a spring and have all but arrived by here.
-    private static var stageHandover: Double { Motion.duration(0.3) * 0.8 }
-
-    /// How long a curved crossing takes. Longer than the 0.3s both halves used to share, because the
-    /// halves no longer overlap perfectly and the trailing one needs room to finish without hurrying —
-    /// and not much longer, because what was wrong with two beats of 0.3s was as much the 0.6 as the
-    /// two.
+    /// How long a crossing takes. Longer than the 0.3s the two halves used to share, because they no
+    /// longer overlap perfectly and the trailing one needs room to finish without hurrying — and not
+    /// much longer, because the version of this that ran two beats of 0.3s was wrong in the 0.6 as much
+    /// as in the two.
     private static let curvedCrossing = 0.42
 
     // MARK: Arriving from the pane before this one
@@ -863,7 +833,7 @@ extension CanvasBoardView {
     /// `CanvasScrollView.flyByTransform` instead of rescaling every layer on every frame. A peek is the
     /// one crossing where that is safe to ship: what makes the transform unshippable on the others is
     /// that a board scaled as one image says nothing about which card went where, and here no card is
-    /// going anywhere. See `CrossingTuning.zoomAsTransform`.
+    /// going anywhere. See `CanvasScrollView.flyByTransform`.
     func beginPeek(_ id: String) {
         guard isPicking, peeking == nil, let node = document.node(id: id), !node.isGroup,
               let scroll = scrollView?.canvasScroll else { return NSSound.beep() }

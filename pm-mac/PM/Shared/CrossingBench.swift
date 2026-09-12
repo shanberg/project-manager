@@ -36,67 +36,13 @@ enum CrossingBench {
     /// place rather than in the wake of the last one.
     private static let interval: TimeInterval = 2.0
 
-    /// The configuration the crossings being measured right now are running under — see `FrameMeter`,
-    /// which puts it on every line.
-    private(set) static var configurationName = "[shipping]"
-
-    /// Walk every configuration in `CrossingTuning.spread`, `rounds` round trips apiece —
-    /// **interleaved, not in blocks.**
+    /// One journey, then the next.
     ///
-    /// Running each configuration's crossings together is the obvious arrangement and it produced a
-    /// table that could not be read. A board does not sit still between crossings: the page budget
-    /// wakes and freezes renderers as the tiling comes and goes (`canvas pages live: 6 of 6` then
-    /// `1 of 6`, over and over), pages finish loading minutes after the window opens, and the machine
-    /// warms up. All of that drifts across a run, so in blocks it lands on whichever configuration
-    /// happened to be running at the time — and the first block, measured while the pages were still
-    /// frozen, came out best no matter what it was testing.
-    ///
-    /// Interleaved, the drift is shared. Each configuration takes one round trip and hands over, so a
-    /// slow minute costs every configuration a crossing rather than costing one configuration all of
-    /// them.
-    ///
-    /// **One configuration per round *trip*, not per crossing.** There are eight configurations and
-    /// the direction alternates, so rotating on every crossing would give each configuration the same
-    /// parity for ever — one would only ever be measured going in, another only coming out, and those
-    /// are not the same cost.
-    static func runSpread(each rounds: Int, tiles: Int, all: Bool = false,
-                          journey: Journey = .crossing) {
-        guard FrameMeter.isEnabled else { return declineWithoutTheMeter() }
-        guard !screenIsLocked else { return Log.write("BENCH declined: the screen is locked") }
-        guard let board = frontBoard() else { return Log.write("BENCH declined: no board in front") }
-        guard !isHidden(board) else {
-            return Log.write("BENCH declined: the window is not on screen — bring it to the front")
-        }
-        guard let plan = prepare(board: board, tiles: tiles) else { return }
-        guard board.onTileAsWorkspace(plan) else {
-            return Log.write("BENCH declined: this window will not keep a workspace")
-        }
-        walking = all ? CrossingTuning.spread : CrossingTuning.focused
-        let total = rounds * walking.count * 2
-        Log.write("BENCH spread interleaved: \(walking.count) configurations "
-            + "× \(rounds) round trips of \(plan.ids.count) tiles — \(total) \(journey.rawValue)s")
-        walk(0, of: total, journey, rotating: true)
-    }
-
-    /// The configurations this run is walking — the focused set, or all of them.
-    private static var walking: [(name: String, tuning: CrossingTuning)] = CrossingTuning.focused
-
-    /// One journey, then the next — rotating the configuration every round trip when a spread asked
-    /// for it, and leaving it alone when this is a plain run.
-    ///
-    /// **Every journey flies the board**, which is why the spread is worth pointing at more than the
-    /// crossing: the picker zooms out to fit, a peek zooms onto one card, and both go through
-    /// `CanvasScrollView.fly`, where `skipZoomFlight` decides whether the magnification travels or
-    /// arrives. So the lever that has only ever been measured against the crossing can now be measured
-    /// against the journeys §7k added.
-    private static func walk(_ index: Int, of total: Int, _ journey: Journey, rotating: Bool) {
-        guard index < total else {
-            if rotating {
-                CrossingTuning.current = .shipping
-                configurationName = "[shipping]"
-            }
-            return Log.write(rotating ? "BENCH spread done" : "BENCH done")
-        }
+    /// **Every journey flies the board**, which is why every one of them is worth a number: the picker
+    /// zooms out to fit, a peek zooms onto one card, entering a workspace closes on the tiles, and all
+    /// of them go through `CanvasScrollView.fly`, where the magnification is what a crossing costs.
+    private static func walk(_ index: Int, of total: Int, _ journey: Journey) {
+        guard index < total else { return Log.write("BENCH done") }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             MainActor.assumeIsolated {
                 guard !screenIsLocked else {
@@ -109,13 +55,8 @@ enum CrossingBench {
                 guard !isHidden(board) else {
                     return Log.write("BENCH stopped: the window went behind something mid-run")
                 }
-                if rotating {
-                    let entry = walking[(index / 2) % walking.count]
-                    CrossingTuning.current = entry.tuning
-                    configurationName = "[\(entry.name)]"
-                }
                 perform(journey, on: board, at: index)
-                walk(index + 1, of: total, journey, rotating: rotating)
+                walk(index + 1, of: total, journey)
             }
         }
     }
@@ -216,7 +157,7 @@ enum CrossingBench {
         }
         Log.write("BENCH \(iterations) \(journey.rawValue) journeys of \(plan.ids.count) tiles, "
             + "\(interval)s apart")
-        walk(0, of: iterations, journey, rotating: false)
+        walk(0, of: iterations, journey)
     }
 
 
@@ -255,7 +196,7 @@ enum CrossingBench {
     /// collects nothing and is abandoned by the next crossing. That reads in the log like a bench
     /// firing too fast rather than like a dead clock, and it costs a whole run to work out. Checked
     /// before a run and again at every step, because a screen that locks halfway through takes the
-    /// second half of the spread with it.
+    /// second half of the run with it.
     private static var screenIsLocked: Bool {
         guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
         return session["CGSSessionScreenIsLocked"] as? Bool ?? false

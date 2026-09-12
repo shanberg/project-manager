@@ -368,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://pin?on= | float?on=    → the panel's Raycast-shared settings
     // pmpanel://waiting                → the cross-project Waiting list
     // pmpanel://settings               → the Settings window
-    // pmpanel://bench?spread=1&runs=&tiles=&journey= → dev only; inert unless the frame meter is on
+    // pmpanel://bench?runs=&tiles=&journey= → dev only; inert unless the frame meter is on
     // pmpanel://tuning?zoom=transform|travel|none   → dev only; holds a crossing configuration to watch
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -419,18 +419,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // started from inside the app, and measuring one by hand twenty times running is how you get
         // twenty slightly different measurements. `?runs=` and `?tiles=` both have defaults.
         case "bench":
-            // `?spread=1` walks every configuration in `CrossingTuning.spread`; without it the run is
-            // whatever the app currently ships.
-            if intParam(url, "spread") == 1 {
-                // `?journey=` narrows the spread to one of the workspace's own journeys; without it the
-                // spread walks the crossing, as it always has.
-                CrossingBench.runSpread(each: intParam(url, "runs") ?? 6,
-                                        tiles: intParam(url, "tiles") ?? 8,
-                                        all: intParam(url, "all") == 1,
-                                        journey: stringParam(url, "journey")
-                                            .flatMap(CrossingBench.Journey.init(rawValue:)) ?? .crossing)
-            } else if let journey = stringParam(url, "journey")
-                        .flatMap(CrossingBench.Journey.init(rawValue:)), journey != .crossing {
+            if let journey = stringParam(url, "journey")
+                .flatMap(CrossingBench.Journey.init(rawValue:)), journey != .crossing {
                 // `?journey=picking|peek|maximize` measures the workspace's own journeys instead of the
                 // crossing in and out of the canvas — see `CrossingBench.Journey`.
                 CrossingBench.runJourney(journey, iterations: intParam(url, "runs") ?? 20,
@@ -439,26 +429,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 CrossingBench.run(iterations: intParam(url, "runs") ?? 20,
                                   tiles: intParam(url, "tiles") ?? 8)
             }
-        // **Dev only, and silent unless the frame meter is on**, like `bench` — and for a reason the
-        // bench cannot cover: a spread says what a configuration *costs*, and nothing says what it
-        // looks like. `?zoom=transform|staged|curved|none|travel` holds one until it is changed back, so a
-        // crossing can be watched rather than counted. See `CrossingTuning`.
-        case "tuning":
-            guard FrameMeter.isEnabled else { break }
-            switch stringParam(url, "zoom") {
-            case "transform": CrossingTuning.current = [.zoomAsTransform]
-            case "staged": CrossingTuning.current = [.stagedZoom]
-            case "curved": CrossingTuning.current = [.curvedCrossing]
-            case "none", "skip": CrossingTuning.current = [.skipZoomFlight]
-            case "travel", "off", "shipping": CrossingTuning.current = .shipping
-            default: break
-            }
-            let held = CrossingTuning.current
-            let zoom = held.contains(.curvedCrossing) ? "curved"
-                : held.contains(.stagedZoom) ? "staged"
-                : held.contains(.zoomAsTransform) ? "transform"
-                : held.contains(.skipZoomFlight) ? "none" : "travel (shipping)"
-            Log.write("TUNING zoom: \(zoom)")
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break

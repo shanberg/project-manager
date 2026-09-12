@@ -1310,58 +1310,64 @@ already the board's: move the views that exist, never rebuild them. The cost is 
   already treats a card that isn't drawn as not visible, so hidden tabs give their slots up first and
   freeze after the grace. Probably right as it stands; worth a test.
 
-**Measured, and it is the zoom.** The picker was benched both ways (`pmpanel://bench?spread=1&journey=
-picking`): as it ships it delivers about 57% of the frames in a crossing, and with the zoom flight
-skipped about 89%, the two sets of six not overlapping at all. Main-thread work is not what stands
-between them — taking 48ms of per-frame layout out of that same journey moved the frame count not at
-all — so the cost is `NSScrollView.magnification` travelling, which rescales every layer under it, web
-pages included. The answer that keeps the animation is to do the zoom as a layer transform and set the
-real magnification once at the end; `CrossingTuning.skipZoomFlight` is the probe that stands for it,
-and it is now measured on two journeys rather than one.
+**Measured, and it is the zoom.** The picker was benched both ways (`pmpanel://bench?journey=picking`):
+as it shipped it delivered about 57% of the frames in a crossing, and with the zoom flight skipped about
+89%, the two sets of six not overlapping at all. Main-thread work is not what stands between them —
+taking 48ms of per-frame layout out of that same journey moved the frame count not at all — so the cost
+is `NSScrollView.magnification` travelling, which rescales every layer under it, web pages included. The
+answer that keeps the animation is to do the zoom as a **layer transform**: arrive at the destination
+magnification in one frame, and ease a counter-transform on the board's layer back to identity, so the
+travel is the render server's work rather than a rescale per frame (`CanvasScrollView.flyByTransform`).
 
-**And it is built, behind `CrossingTuning.zoomAsTransform`.** Three configurations on the picker, six
-crossings apiece: shipping dropped 9 frames of 22 on average, skipping the flight 3.2, and the
-transform 2.8 — the animation kept, at the cost of not having one. It is not on, because a frame count
-cannot answer the question that decides it — and looking answered it against: **with the transform on, a
-canvas becoming a workspace reads as the board being scaled, not as cards gathering into tiles.** That
-is the one thing the animation is for. The measurements all say the movement is there — at the midpoint
-of a crossing a card's presented frame is identical under both configurations, and the board's layer sits
-at 0.869 where the curve wants 0.879 — so the geometry is right and the reading of it is wrong, probably
-because every card is rasterised wearing its destination face and then scaled, leaving a uniform scale as
-the whole of what the eye is given. So it is parked for the journeys where cards gather, not shipped and
-not deleted: `pmpanel://tuning?zoom=transform` still holds it on, and the numbers are in `CrossingTuning`
-for whoever tries this next. **The lever is real and the way to pull it is still open.**
+**Built, and on its own it is not a crossing.** It buys what removing the animation bought and keeps the
+animation — on the picker, six round trips apiece, the ticked flight dropped 11, 9, 9, 9, 6 and 10 frames
+of 22 where the transform dropped 4, 1, 5, 2, 3 and 2. But watched rather than counted, a canvas becoming
+a workspace **read as the board being scaled, not as cards gathering into tiles**, which is the one thing
+the animation is for. Every measurement said the movement was still there — at the midpoint of a crossing
+a card's presented frame is identical either way, and the board's layer sits at 0.869 where the curve
+wants 0.879 — so the geometry was right and the reading of it was wrong: every card is rasterised wearing
+its destination face and then uniformly scaled, and a uniform scale is then the whole of what the eye is
+given.
 
-**And it ships where nothing gathers.** A peek is a zoom and only a zoom — one card, no tiles being made
-— so there is nothing for a uniform scale to cancel, and it takes the transform unconditionally
-(`CanvasScrollView.fly(to:centre:animated:alone:)`). Six round trips per configuration on a board of
-eight cards: peeking in dropped 2, 3, 2, 1, 3 and 3 frames of 22 before, and 1, 1, 0, 0, 0 and 1 after.
-Peeking back out found a real bug on the way: the transform sets every card's zoom in one step, each card
-asks for the page budget to be reviewed, and `reviewPageBudget` defers that only while the board says it
-is crossing — which it did not yet, because the flight marked itself as under way *after* the jump. The
-review landed a frame into the flight and applied the budget synchronously: one 181ms pass inside a 350ms
-crossing, which is why the transform measured *worse* than the ticked flight on the way out. Marked
-before the jump, the pass goes back to the settle where the ticked flight has it, and the crossing out is
-clean.
+**What fixed that is phase, not arithmetic.** Two movements that describe the same trajectory read as
+one, whichever is drawn how. Sequencing them — cards first at the wide zoom, then the zoom — makes the
+cards perfectly legible and measures best of everything tried (into the picker, 0, 0 and 1 frames dropped
+of 22), and reads as exactly what it is: a movement that stops and a second that starts. So the two are
+offset **in phase** instead: both start together and end together over 0.42s, and at a third of the way
+through the leader is two thirds done where the trailer is a tenth. Nothing stops, nothing starts, and
+the pair trace a curve rather than a diagonal or a corner. Which half leads is the same rule either way —
+**the cards move at whichever zoom shows the whole journey**: zooming in they gather first and the window
+closes on what they made, zooming out the view widens first and they fly home across a board you can see
+all of. `Motion.Phase` holds the offset and `CanvasBoardView.cross` applies it.
 
-**And the page budget's pass went with it, because a peek stopped throwing the board away.** That 110ms
-was three renderers being *started*: at a peek's zoom the keep-alive region is about one card wide, so
-every other card on the board was torn down for the seconds you spent reading this one and built again on
-the way out — `peek in (8 views)` → `peek out (5 views)` in the meter's own labels, and `canvas pages
-live: 4 of 4` → `7 of 7` in the log, once per round trip. The board already knows exactly where it is
-going back to, so `buildNodeViews` now keeps that region as well as the visible one. Nothing is torn
-down, the pages never stop, and the budget has nothing to decide. **Thirty-six peeks, every configuration:
-22 of 22 frames in the crossing and 52 of 52 in the settle, worst frame 17ms, no page ever restarted.**
-The journey is finished; what is left in `CrossingTuning` is about the journeys where cards gather.
+The transform is what makes that legal, rather than merely cheap: the magnification is final from the
+first frame, so a card's frame means one thing for the whole crossing while the two curves disagree about
+the time. `leaveTiling`'s warning — cards set flying toward frames measured in the old zoom, landing at
+their 100% size on a board at 35% — is the hazard that welded the two to one clock, and it is the thing
+that has gone. Measured on the picker, three round trips apiece: going in, one clock dropped 11, 10 and 9
+frames of 22 and the curve 4, 4 and 2; coming out, one clock 11, 8 and 10 and the curve 2, 1 and 2, worst
+frame 33ms against 43-50ms.
 
-**Which leaves one thing, and it is the same thing.** Every journey has now been benched on the same
-board: peek 22 of 22 frames, maximize 22 of 22, restore 22 of 22 — and into the picker 12 of 22, back out
-13 of 22, canvas to workspace 15 of 23. **Everything that does not change the magnification runs at 60
-frames a second, and everything that does drops about half of them.** Main-thread work is not what
-separates the two lists: the journeys that stutter spend 35ms of their 350 on the main thread, less than
-the ones that don't. So there is exactly one cost left in the whole of §7k, it is `NSScrollView.magnification`
-travelling, and the way to pay it is known and parked for a reason that is about legibility rather than
-arithmetic. The next move on it is a choreography experiment, not another measurement.
+**A peek takes the transform bare**, because it is a zoom and only a zoom — one card, no tiles being made,
+nothing for a uniform scale to cancel. That turned up two things worth keeping. The transform sets every
+card's zoom in one step, each card asks for the page budget to be reviewed, and `reviewPageBudget` defers
+that only while the board says it is crossing — which it did not yet, because the flight marked itself as
+under way *after* the jump. The review landed a frame into the flight and applied the budget
+synchronously: one 181ms pass inside a 350ms crossing, and the reason peeking *out* measured worse under
+the transform than under the ticked flight. And the pass itself was three renderers being started: at a
+peek's zoom the keep-alive region is about one card wide, so every other card was torn down for the
+seconds you spent reading this one and built again on the way out — `peek in (8 views)` → `peek out (5
+views)` in the meter's own labels. The board knows exactly where it is going back to, so `buildNodeViews`
+keeps that region as well as the visible one. **Thirty-six peeks after both fixes: 22 of 22 frames in
+every crossing and 52 of 52 in every settle, worst frame 17ms, no page ever restarted.**
+
+**Where that leaves the section.** Every journey has been benched on the same board, and everything that
+does not change the magnification was already at 60 frames a second — peek, maximize and restore all 22
+of 22 — while everything that did dropped about half its frames while spending *less* time on the main
+thread. That was one cost, in one place, and it is now paid. The scaffolding that found it has gone with
+it: `CrossingTuning`, which held the flags, and the bench's spread, which walked them. What is left is
+`FrameMeter` and `pmpanel://bench?journey=…`, which measure the app that ships — the only thing left
+worth measuring.
 
 ### The order it is built in
 

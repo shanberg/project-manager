@@ -243,7 +243,7 @@ final class CanvasScrollView: NSScrollView {
     /// and uniformly scaled reads as a *scale*, so it says nothing about which card went where. Two
     /// callers can say that doesn't matter — a peek, where no card is moving at all, and a crossing that
     /// offsets the two movements in phase so they are not describing the same trajectory
-    /// (`CanvasBoardView.cross`). See `CrossingTuning`.
+    /// (`CanvasBoardView.cross`).
     ///
     /// `curve` and `seconds` are for that second caller: the zoom is one half of a movement whose halves
     /// must not spend themselves at the same rate. Left alone, this is the ease-out over 0.3s that every
@@ -263,15 +263,12 @@ final class CanvasScrollView: NSScrollView {
         // `DisplayTicker`.
         //
         // A view with no screen to tick against has nothing to animate in front of, and arrives
-        // outright down the same path Reduce Motion and a zero distance take — and so, under
-        // `CrossingTuning`, does a run measuring what the zoom flight costs.
-        let flies = !CrossingTuning.current.contains(.skipZoomFlight)
-        if flies, seconds > 0, from != wanted || at != point, board.layer != nil,
-           byTransform || CrossingTuning.current.contains(.zoomAsTransform) {
+        // outright down the same path Reduce Motion and a zero distance take.
+        if seconds > 0, from != wanted || at != point, board.layer != nil, byTransform {
             return flyByTransform(from: from, at: at, to: wanted, centre: point, seconds: seconds,
                                   curve: curve)
         }
-        guard flies, seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
+        guard seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
             magnification = wanted
             centre(on: point)
             board.magnificationChanged()
@@ -317,7 +314,7 @@ final class CanvasScrollView: NSScrollView {
         board.settlePageBudget()
     }
 
-    /// The flight as a layer transform — `CrossingTuning.zoomAsTransform`.
+    /// The flight as a layer transform.
     ///
     /// **Arrive first, then pretend you haven't.** The magnification is set once, which is one rescale
     /// of everything under the clip rather than one per frame, and the board is then drawn with a
@@ -329,6 +326,27 @@ final class CanvasScrollView: NSScrollView {
     /// **The transform is written about the layer's anchor**, which is where a first version went
     /// wrong: a transform is applied around the anchor point, so one composed in view coordinates lands
     /// offset by it unless it is conjugated as it is here.
+    ///
+    /// **What it is worth, and what it cost to find out.** Travelling the magnification rescales every
+    /// layer under the clip, web views included, on every frame; this rescales them once. Measured on
+    /// the picker six round trips apiece, the ticked flight dropped 11, 9, 9, 9, 6 and 10 frames of 22
+    /// where this dropped 4, 1, 5, 2, 3 and 2 — the same win as removing the animation outright, with
+    /// the animation kept. On a peek, which is a zoom and nothing else, it is the difference between 2
+    /// and 0 dropped frames and it simply ships.
+    ///
+    /// **On its own it is not a crossing, though**: a board rasterised at its destination and uniformly
+    /// scaled reads as a scale, and says nothing about which card went where — which is the one thing
+    /// the crossing's animation exists for. Every measurement said the card movement was still there (at
+    /// the midpoint of a crossing a card's presented frame is identical either way, and the board's
+    /// layer sits at 0.869 where the curve wants 0.879); the geometry was right and the reading of it
+    /// was wrong. What made it usable on a crossing was `CanvasBoardView.cross` offsetting the two
+    /// movements in phase, so they stopped describing the same trajectory. Callers ask for this by
+    /// name, and that is the bargain they are accepting.
+    ///
+    /// Two things it changes that no frame count shows: the content is rasterised at the destination
+    /// scale and transformed to the intermediate ones, so a long zoom *out* is soft on the way through;
+    /// and the cards are where they will be rather than where they are drawn, so a click mid-flight
+    /// reads the destination's geometry.
     private func flyByTransform(from: CGFloat, at: CanvasPoint, to wanted: CGFloat,
                                 centre point: CanvasPoint, seconds: Double,
                                 curve: Motion.Phase = .leads) {

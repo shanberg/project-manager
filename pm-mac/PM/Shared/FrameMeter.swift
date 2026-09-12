@@ -47,9 +47,7 @@ final class FrameMeter {
     /// and would be invisible to a meter that stopped when the cards did.
     static func measure(_ label: @autoclosure () -> String, on view: NSView, for seconds: Double = 1.2) {
         guard isEnabled else { return }
-        // Tagged with the configuration in force, because a run walks eight of them and a line that
-        // does not say which one it belongs to is a number with no meaning. See `CrossingTuning`.
-        let name = "\(CrossingBench.configurationName) \(label())"
+        let name = label()
         if let running = current {
             // The frame count is the diagnostic. A measurement abandoned with a sensible number of
             // frames behind it was simply interrupted; one abandoned with two or three was never

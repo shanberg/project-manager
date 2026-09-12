@@ -274,7 +274,6 @@
 		ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D69731046CF949BED6A9B753 /* StatusItemController.swift */; };
 		EF13FDBC361FD2123FF4CD3D /* PMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A7709B2DE4D155EAE70CCF /* PMStore.swift */; };
 		F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */; };
-		F182CEE8CC666351A3216B55 /* CrossingTuning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */; };
 		F19CE5910A5384C7435BC6F3 /* AppDelegate+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E583F2A7FC849845365F2B /* AppDelegate+Commands.swift */; };
 		F27469EEBD6E0327BF8AD908 /* DisplayModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */; };
 		F4DFE1E6BF170E452D4945DE /* ProjectWindowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F585177DE07327A668755CF /* ProjectWindowState.swift */; };
@@ -425,7 +424,6 @@
 		8C9F5218B9221DD81B4D35F2 /* QuickBarCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickBarCommands.swift; sourceTree = "<group>"; };
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelController.swift; sourceTree = "<group>"; };
-		8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingTuning.swift; sourceTree = "<group>"; };
 		968289B8E6C1C7232AF29218 /* TaskViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewHelpers.swift; sourceTree = "<group>"; };
 		969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorClipboardTests.swift; sourceTree = "<group>"; };
 		96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutsideClick.swift; sourceTree = "<group>"; };
@@ -821,7 +819,6 @@
 			isa = PBXGroup;
 			children = (
 				B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */,
-				8F88ABBFF4877818DCD55BBF /* CrossingTuning.swift */,
 				CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */,
 				C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */,
 				E973D36CA5E6F39110E907DE /* FrameMeter.swift */,
@@ -1124,7 +1121,6 @@
 				0D1260A2F525759E89387912 /* ConfigStore.swift in Sources */,
 				21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */,
 				3986E63E25D78EFD62284A3A /* CrossingBench.swift in Sources */,
-				F182CEE8CC666351A3216B55 /* CrossingTuning.swift in Sources */,
 				F27469EEBD6E0327BF8AD908 /* DisplayModes.swift in Sources */,
 				779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */,
 				C999074851038AB74E38F3D7 /* DueBadge.swift in Sources */,

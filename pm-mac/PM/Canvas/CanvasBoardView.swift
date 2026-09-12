@@ -723,7 +723,7 @@ final class CanvasBoardView: NSView {
         }
         // What a crossing actually handed to Core Animation. A crossing where every card is *placed*
         // rather than flown looks like a zoom with the cards already where they are going — see
-        // `settleIntoLayout`, and `CrossingTuning.zoomAsTransform`, which is how that came up.
+        // `settleIntoLayout`, and the transform flight, which is how that came up.
         if animatesLayout, FrameMeter.isEnabled {
             Log.write("LAYOUT \(flying) flying, \(placed) placed, \(hiddenNow) hidden")
         }
@@ -801,10 +801,6 @@ final class CanvasBoardView: NSView {
 
     /// Which settling pass is the current one — see the completion handler above.
     private var settling = 0
-
-    /// Which staged crossing is the current one, so the beat waiting to start belongs to it and not to
-    /// the one before. See `cross(to:centre:layout:animated:)`.
-    var crossingStage = 0
 
 
     /// Zoom changed: cards that render differently at different sizes get told.
