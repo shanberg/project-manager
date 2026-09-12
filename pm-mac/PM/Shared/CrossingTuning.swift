@@ -29,6 +29,14 @@ struct CrossingTuning: OptionSet {
     /// zoom as a layer transform, and it is here because leaving a workspace measured 70% of frames
     /// delivered with it against 13% without — the largest single lever found, and the only one that
     /// has not yet been either built or ruled out.
+    ///
+    /// **Confirmed on a second journey, 2026-09-11.** `pmpanel://bench?spread=1&journey=picking`, six
+    /// crossings per configuration on a board of eight cards, interleaved: shipping dropped 8, 9, 10,
+    /// 11, 11 and 10 frames of 22 (~57% delivered, worst frame 40-51ms); with the flight skipped it
+    /// dropped 3, 1, 5, 2, 1 and 0 (~89% delivered, worst frame mostly 33ms, one crossing complete at
+    /// 23 of 23). The two sets do not overlap. Main-thread work is not the constraint on either side —
+    /// the pass that removed 48ms of per-frame layout from this same journey changed the frame count
+    /// not at all (`CanvasBoardView.refreshVisibleCards`) — so what is left is the rescale itself.
     static let skipZoomFlight = CrossingTuning(rawValue: 1 << 0)
 
     /// What the app does when nobody is benching.

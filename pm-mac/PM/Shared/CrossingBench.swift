@@ -59,7 +59,8 @@ enum CrossingBench {
     /// the direction alternates, so rotating on every crossing would give each configuration the same
     /// parity for ever — one would only ever be measured going in, another only coming out, and those
     /// are not the same cost.
-    static func runSpread(each rounds: Int, tiles: Int, all: Bool = false) {
+    static func runSpread(each rounds: Int, tiles: Int, all: Bool = false,
+                          journey: Journey = .crossing) {
         guard FrameMeter.isEnabled else { return declineWithoutTheMeter() }
         guard !screenIsLocked else { return Log.write("BENCH declined: the screen is locked") }
         guard let board = frontBoard() else { return Log.write("BENCH declined: no board in front") }
@@ -73,36 +74,68 @@ enum CrossingBench {
         walking = all ? CrossingTuning.spread : CrossingTuning.focused
         let total = rounds * walking.count * 2
         Log.write("BENCH spread interleaved: \(walking.count) configurations "
-            + "× \(rounds) round trips of \(plan.ids.count) tiles — \(total) crossings")
-        cross(0, of: total)
+            + "× \(rounds) round trips of \(plan.ids.count) tiles — \(total) \(journey.rawValue)s")
+        walk(0, of: total, journey, rotating: true)
     }
 
     /// The configurations this run is walking — the focused set, or all of them.
     private static var walking: [(name: String, tuning: CrossingTuning)] = CrossingTuning.focused
 
-    /// One crossing, then the next, rotating the configuration every round trip.
-    private static func cross(_ index: Int, of total: Int) {
+    /// One journey, then the next — rotating the configuration every round trip when a spread asked
+    /// for it, and leaving it alone when this is a plain run.
+    ///
+    /// **Every journey flies the board**, which is why the spread is worth pointing at more than the
+    /// crossing: the picker zooms out to fit, a peek zooms onto one card, and both go through
+    /// `CanvasScrollView.fly`, where `skipZoomFlight` decides whether the magnification travels or
+    /// arrives. So the lever that has only ever been measured against the crossing can now be measured
+    /// against the journeys §7k added.
+    private static func walk(_ index: Int, of total: Int, _ journey: Journey, rotating: Bool) {
         guard index < total else {
-            CrossingTuning.current = .shipping
-            configurationName = "[shipping]"
-            return Log.write("BENCH spread done")
+            if rotating {
+                CrossingTuning.current = .shipping
+                configurationName = "[shipping]"
+            }
+            return Log.write(rotating ? "BENCH spread done" : "BENCH done")
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             MainActor.assumeIsolated {
                 guard !screenIsLocked else {
                     return Log.write("BENCH stopped: the screen locked mid-run")
                 }
-                guard let board = frontBoard() else { return Log.write("BENCH stopped: no board") }
-                let entry = walking[(index / 2) % walking.count]
-                CrossingTuning.current = entry.tuning
-                configurationName = "[\(entry.name)]"
-                if index.isMultiple(of: 2) {
-                    board.onGoToCanvas()
-                } else {
-                    board.onGoToWorkspace(workspaceName)
+                // A crossing swaps panes and wants whatever is in front now; the rest act on the tiled
+                // board in place. See `tiledBoard`.
+                let found = journey == .crossing ? frontBoard() : tiledBoard()
+                guard let board = found else { return Log.write("BENCH stopped: no board") }
+                guard !isHidden(board) else {
+                    return Log.write("BENCH stopped: the window went behind something mid-run")
                 }
-                cross(index + 1, of: total)
+                if rotating {
+                    let entry = walking[(index / 2) % walking.count]
+                    CrossingTuning.current = entry.tuning
+                    configurationName = "[\(entry.name)]"
+                }
+                perform(journey, on: board, at: index)
+                walk(index + 1, of: total, journey, rotating: rotating)
             }
+        }
+    }
+
+    /// What one step of a journey does. Each asks the board what state it is in rather than counting
+    /// parity: a peek has to open the picker first, and a step that could not act would otherwise leave
+    /// every later step going the wrong way.
+    private static func perform(_ journey: Journey, on board: CanvasBoardView, at index: Int) {
+        switch journey {
+        case .crossing:
+            if index.isMultiple(of: 2) { board.onGoToCanvas() }
+            else { board.onGoToWorkspace(workspaceName) }
+        case .picking:
+            board.togglePicking()
+        case .peek:
+            if !board.isPicking { board.beginPicking() }
+            else if board.peeking == nil { board.tiling?.cards.first.map(board.beginPeek) }
+            else { board.endPeek() }
+        case .maximize:
+            board.tiling?.ids.first.map { board.toggleMaximizeTile($0) }
         }
     }
 
@@ -183,42 +216,9 @@ enum CrossingBench {
         }
         Log.write("BENCH \(iterations) \(journey.rawValue) journeys of \(plan.ids.count) tiles, "
             + "\(interval)s apart")
-        travel(0, of: iterations, journey)
+        walk(0, of: iterations, journey, rotating: false)
     }
 
-    /// One journey, then the next. Each step asks the board what state it is in rather than counting
-    /// parity: a peek has to open the picker first, and a step that could not act would otherwise
-    /// leave every later step going the wrong way.
-    private static func travel(_ index: Int, of total: Int, _ journey: Journey) {
-        guard index < total else { return Log.write("BENCH done") }
-        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            MainActor.assumeIsolated {
-                guard !screenIsLocked else {
-                    return Log.write("BENCH stopped: the screen locked mid-run")
-                }
-                guard let board = tiledBoard() else { return Log.write("BENCH stopped: no board") }
-                guard !isHidden(board) else {
-                    return Log.write("BENCH stopped: the window went behind something mid-run")
-                }
-                switch journey {
-                case .crossing:
-                    if index.isMultiple(of: 2) { board.onGoToCanvas() }
-                    else { board.onGoToWorkspace(workspaceName) }
-                case .picking:
-                    board.togglePicking()
-                case .peek:
-                    // A peek is only reachable from the picker, so the run opens it once and then
-                    // alternates the peek itself, which is the zoom being measured.
-                    if !board.isPicking { board.beginPicking() }
-                    else if board.peeking == nil { board.tiling?.cards.first.map(board.beginPeek) }
-                    else { board.endPeek() }
-                case .maximize:
-                    board.tiling?.ids.first.map { board.toggleMaximizeTile($0) }
-                }
-                travel(index + 1, of: total, journey)
-            }
-        }
-    }
 
     /// One crossing, then the next. Recursive rather than a repeating timer so a step that cannot find
     /// a board stops the run instead of logging the same complaint every two seconds.

@@ -1309,6 +1309,15 @@ already the board's: move the views that exist, never rebuild them. The cost is 
   already treats a card that isn't drawn as not visible, so hidden tabs give their slots up first and
   freeze after the grace. Probably right as it stands; worth a test.
 
+**Measured, and it is the zoom.** The picker was benched both ways (`pmpanel://bench?spread=1&journey=
+picking`): as it ships it delivers about 57% of the frames in a crossing, and with the zoom flight
+skipped about 89%, the two sets of six not overlapping at all. Main-thread work is not what stands
+between them — taking 48ms of per-frame layout out of that same journey moved the frame count not at
+all — so the cost is `NSScrollView.magnification` travelling, which rescales every layer under it, web
+pages included. The answer that keeps the animation is to do the zoom as a layer transform and set the
+real magnification once at the end; `CrossingTuning.skipZoomFlight` is the probe that stands for it,
+and it is now measured on two journeys rather than one.
+
 ### The order it is built in
 
 Each step ships on its own once the first is in.

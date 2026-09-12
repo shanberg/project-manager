@@ -421,9 +421,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // `?spread=1` walks every configuration in `CrossingTuning.spread`; without it the run is
             // whatever the app currently ships.
             if intParam(url, "spread") == 1 {
+                // `?journey=` narrows the spread to one of the workspace's own journeys; without it the
+                // spread walks the crossing, as it always has.
                 CrossingBench.runSpread(each: intParam(url, "runs") ?? 6,
                                         tiles: intParam(url, "tiles") ?? 8,
-                                        all: intParam(url, "all") == 1)
+                                        all: intParam(url, "all") == 1,
+                                        journey: stringParam(url, "journey")
+                                            .flatMap(CrossingBench.Journey.init(rawValue:)) ?? .crossing)
             } else if let journey = stringParam(url, "journey")
                         .flatMap(CrossingBench.Journey.init(rawValue:)), journey != .crossing {
                 // `?journey=picking|peek|maximize` measures the workspace's own journeys instead of the
