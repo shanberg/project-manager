@@ -72,8 +72,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
         get { CanvasPageHandover.resumes[pageKey]?.state }
         set { CanvasPageHandover.resumes[pageKey, default: .init()].state = newValue }
     }
+    /// Where the page had got to, which outlives the session the state does not — see
+    /// `CanvasPageVisits`. The paused page's own answer first, because it is the newer of the two.
     private var resumeURL: URL? {
-        get { CanvasPageHandover.resumes[pageKey]?.url }
+        get { CanvasPageHandover.resumes[pageKey]?.url ?? CanvasPageVisits.of(pageKey) }
         set { CanvasPageHandover.resumes[pageKey, default: .init()].url = newValue }
     }
     /// Set while a snapshot is in flight, so a second pause request doesn't start a second one.
@@ -180,6 +182,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
     override func simplificationChanged() {}
 
     override func contentChanged() {
+        // A different address makes where the old one had wandered to meaningless — and the address
+        // being adopted from the page on screen means the card is no longer off its address at all.
+        // Both are true before the branch below, so this is above it.
+        CanvasPageVisits.forget(pageKey)
         // The address changed to the page this card is already displaying — see `adoptCurrentAddress`.
         // Nothing to rebuild; the card is already right, and rebuilding it would be the only thing the
         // user could see going wrong.
@@ -289,6 +295,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         view.navigationDelegate = self
         view.uiDelegate = self
         (view as? CanvasPageView)?.dropFallback = board
+        (view as? CanvasPageView)?.linkHost = self
         web = view
         capturingTitle = handover.capturingTitle
         watchTitle(of: view)
@@ -325,6 +332,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
         guard let running = web else { return nil }
         let handover = Handover(web: running, revealed: revealed, loadedAt: loadedAt,
                                 capturingTitle: capturingTitle)
+        // The page goes on running on the other board, which will record its own navigations from here
+        // — but this is the last moment *this* card can say where it was, and a handover at quitting
+        // time is the one that never gets a next navigation.
+        noteVisit()
         if revealed {
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = false
@@ -366,7 +377,30 @@ final class CanvasLinkNodeView: CanvasNodeView {
         giveUp = nil
         resumeState = web.interactionState
         resumeURL = web.url ?? resumeURL ?? url
+        noteVisit()
         snapshotThenStop(web)
+    }
+
+    /// Write down where the page has got to, so the card comes back here after a relaunch rather than
+    /// at the address the board has for it. See `CanvasPageVisits`.
+    ///
+    /// Asked as a navigation commits and as the card is paused, which between them cover every way a
+    /// page moves and every way a card stops: quitting the app freezes nothing, and `prepareForRemoval`
+    /// tears a card down without asking the page anything, so a capture that only ran on the way out
+    /// would run exactly never in the case this exists for. A page that rewrites its own URL in script
+    /// without navigating is not recorded until one of the two happens, which is the same blind spot
+    /// `capturingTitle` has and for the same reason.
+    ///
+    /// **A card on its own address is forgotten rather than recorded.** The board already says where
+    /// that is, so a row for it would be a second copy of a fact that can change underneath it — and it
+    /// is what makes Home a real erasure rather than a thing the next launch undoes.
+    private func noteVisit() {
+        guard let live = web?.url else { return }
+        if live == url {
+            CanvasPageVisits.forget(pageKey)
+        } else {
+            CanvasPageVisits.remember(live, for: pageKey)
+        }
     }
 
     private func snapshotThenStop(_ running: WKWebView) {
@@ -604,6 +638,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         let view = CanvasPageView(frame: .zero, configuration: configuration)
         // A link dropped on the page makes a card, unless there is a field under it to type into.
         view.dropFallback = board
+        // And a link right-clicked or middle-clicked can make one too.
+        view.linkHost = self
         CanvasWebSession.allowInspecting(view)
         view.navigationDelegate = self
         view.uiDelegate = self
@@ -1001,6 +1037,60 @@ final class CanvasLinkNodeView: CanvasNodeView {
     }
 }
 
+// MARK: - What a link on the page can become
+
+/// The two things a board can do with a link that a browser cannot, offered where a browser offers
+/// "Open in New Tab": put it on the board, and write it into the project.
+///
+/// ⌘-click already makes a card — see `decidePolicyFor` — and always did the more useful half of this.
+/// What it didn't do is announce itself. A gesture nobody is told about is a gesture for the person who
+/// wrote it, and the menu is where every browser has taught people to look for exactly this.
+///
+/// **The page is offered too, not just links.** A right-click on open ground has no link under it and
+/// still has an answer worth having: the page you are looking at is the thing you would want in the
+/// project's links, and by then you have usually followed three links to reach it.
+extension CanvasLinkNodeView: CanvasPageLinkHost {
+    func pageMenuItems(for link: PageLink?) -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+        if let link {
+            items.append(item("Open Link as New Card", #selector(openLinkAsCard), link))
+        }
+        if let project = board.boardProject {
+            // Whatever the click was on: the link under the pointer, or the page itself. The page's
+            // own name comes from the running view, which is the one place it is certainly current.
+            let target = link ?? liveURL.map { PageLink(url: $0, name: liveTitle) }
+            if let target {
+                let what = link == nil ? "Add Page to" : "Add Link to"
+                items.append(item("\(what) \(project.title)", #selector(addLinkToProject), target))
+            }
+        }
+        return items
+    }
+
+    func openInNewCard(_ link: PageLink) {
+        board.addLinkCard(link.url.absoluteString, beside: node.id)
+    }
+
+    private func item(_ title: String, _ action: Selector, _ link: PageLink) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        // The link travels on the item rather than in a property, because the menu outlives the press
+        // that built it and the pointer will have moved on by the time anything is chosen.
+        item.representedObject = link
+        return item
+    }
+
+    @objc private func openLinkAsCard(_ sender: NSMenuItem) {
+        guard let link = sender.representedObject as? PageLink else { return }
+        openInNewCard(link)
+    }
+
+    @objc private func addLinkToProject(_ sender: NSMenuItem) {
+        guard let link = sender.representedObject as? PageLink else { return }
+        board.addLinkToProject(link.url.absoluteString, named: link.name)
+    }
+}
+
 // MARK: - Loading
 
 extension CanvasLinkNodeView: WKNavigationDelegate {
@@ -1138,6 +1228,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     /// reason the address is shown at all: during a single sign-on you are handed between hosts, and a
     /// password field is only safe to type into if you can see whose it is.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        noteVisit()
         describeYourself()
         board.pageStateChanged()
     }

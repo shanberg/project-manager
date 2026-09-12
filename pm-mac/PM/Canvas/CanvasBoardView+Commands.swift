@@ -150,9 +150,15 @@ extension CanvasBoardView {
         case .image(let data, let ext):
             guard let saved = save((data: data, ext: ext)) else { return false }
             insert(cards([file(saved)]), at: nil, actionName: "Add File")
-        case .links(let addresses):
-            insert(cards(addresses.map { .link(url: $0) }), at: nil,
-                   actionName: addresses.count > 1 ? "Add Links" : "Add Link")
+        case .links(let links):
+            // The name the browser dropped beside the address, before the cards are built — so a card
+            // is named on the way up rather than after its page has loaded. Remembered where every
+            // card reads names from, so this also names the ones already on the board.
+            for link in links {
+                if let name = link.name { CanvasPageTitles.remember(name, for: link.address) }
+            }
+            insert(cards(links.map { .link(url: $0.address) }), at: nil,
+                   actionName: links.count > 1 ? "Add Links" : "Add Link")
         case .text(let text):
             insert(cards([.text(text)]), at: nil, actionName: "Paste")
         }
@@ -1267,6 +1273,44 @@ extension CanvasBoardView {
         if isTiled { addToTiling(node.id) }
         select([node.id])
         if !isTiled { (scrollView as? CanvasScrollView)?.reveal(node.id) }
+    }
+
+    // MARK: The project this board belongs to
+
+    /// The project whose folder this board's canvas sits in, and what to call it.
+    ///
+    /// **Not `engagedProjectCard`, which cannot answer this one.** That is the board's answer to "which
+    /// project" everywhere else, and it works because the thing you step into on a board is a project
+    /// card. This question is asked from *inside a web page*: you have stepped into a card and it is
+    /// not that kind of card, so nothing is engaged as a project and the aimed answer is nil at exactly
+    /// the moment it is wanted.
+    ///
+    /// Where the board lives is the answer that is left, and it is a good one — `CanvasProjectNoteCard`
+    /// already asks it, once, to decide whether to offer the project's own note back, so a board that
+    /// has a project has had one all along. A canvas elsewhere in the vault has none and is offered
+    /// nothing, which is right: it is a canvas, not a project's board.
+    var boardProject: (key: String, title: String)? {
+        guard let notes = CanvasProjectNoteCard.notes(forCanvasAt: store.url),
+              let key = CanvasProjectSource.projectKey(for: notes),
+              let folder = projectFolder(ofNotesPath: notes.path) else { return nil }
+        return (key, projectTitle(fromFolderName: (folder as NSString).lastPathComponent))
+    }
+
+    /// Write an address into this board's project's `## Links`, and say so.
+    ///
+    /// The other half of what a web card is for. A card is where you *put* a page while you are working
+    /// on something; the project's links are where a page goes when it turns out to matter past today,
+    /// and until now the only way across was to copy the address, find the project, and open a dialog.
+    ///
+    /// The project's store is acquired for the length of the write and given straight back — this is
+    /// the one thing a board asks of a project it isn't showing, and holding one open for the sake of a
+    /// menu item would be a project loaded per board. See `ProjectLinks.add(_:label:toProject:)`.
+    func addLinkToProject(_ address: String, named label: String?) {
+        guard let project = boardProject, let url = CanvasAddress.normalized(address) else { return }
+        ProjectLinks.add(url, label: label, toProject: project.key) { [weak self] added in
+            self?.report(added ? "Added to \(project.title)'s links."
+                               : "\(project.title) already links to that.")
+        }
     }
 
     /// The first empty spot to the right of `frame`, at the same size.

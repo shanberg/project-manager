@@ -799,6 +799,7 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 /// pure PmLib transform over (text, selection) — this class decides *when*, never *what*.
 extension NSPasteboard.PasteboardType {
     /// A link's name, beside the link in `public.url` — the pair a browser puts down for a dragged link.
+    /// Written here, and read by the board when a dropped link becomes a card (see `canvasLinks`).
     static let urlName = NSPasteboard.PasteboardType("public.url-name")
 }
 

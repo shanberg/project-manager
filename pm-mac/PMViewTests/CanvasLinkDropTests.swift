@@ -6,7 +6,7 @@ import PmLib
 /// a text card's editor, written onto the drag pasteboard the way the editor writes it.
 ///
 /// The board itself isn't in this bundle, so its half is asserted where it is decided: `accept` makes
-/// one link card per address `canvasLinkAddresses` answers with, and nothing else for a pasteboard it
+/// one link card per address `canvasLinks` answers with, and nothing else for a pasteboard it
 /// answers empty for. The editor's half is `writeSelection(to:types:)` — the call both a drag and a copy
 /// make — handed the drag pasteboard, which is what separates the two. Nothing here writes to the
 /// user's clipboard; `tearDown` checks.
@@ -43,7 +43,9 @@ final class CanvasLinkDropTests: XCTestCase {
         board.setString("https://x.dev/a", forType: .URL)
         board.setString("The A page", forType: .urlName)
         board.setString("https://x.dev/a", forType: .string)
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/a"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/a"])
+        // And the name beside it, which is what the card is called before it has loaded anything.
+        XCTAssertEqual(canvasLinks(on: board).map(\.name), ["The A page"])
     }
 
     /// The case that used to be accepted by the board and then produce nothing.
@@ -51,32 +53,32 @@ final class CanvasLinkDropTests: XCTestCase {
         let board = pasteboard()
         board.writeObjects([URL(string: "https://x.dev/a")! as NSURL])
         XCTAssertNil(board.string(forType: .string), "the premise: no text flavour at all")
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/a"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/a"])
     }
 
     func testSeveralLinksAreSeveralCards() {
         let board = pasteboard()
         board.writeObjects([URL(string: "https://x.dev/a")! as NSURL, URL(string: "https://y.dev/b")! as NSURL])
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/a", "https://y.dev/b"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/a", "https://y.dev/b"])
     }
 
     func testAMarkdownLinkCopiedAsTextIsALink() {
         let board = pasteboard()
         board.setString("  [the docs](https://x.dev/docs)\n", forType: .string)
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/docs"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/docs"])
     }
 
     func testProseWithALinkInItIsProse() {
         let board = pasteboard()
         board.setString("see [the docs](https://x.dev/docs) for more", forType: .string)
-        XCTAssertEqual(canvasLinkAddresses(on: board), [])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), [])
     }
 
     /// A file is the board's to read as a file, before it ever asks about links.
     func testAFileIsNotALink() {
         let board = pasteboard()
         board.writeObjects([URL(fileURLWithPath: "/tmp/a.md") as NSURL])
-        XCTAssertEqual(canvasLinkAddresses(on: board), [])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), [])
     }
 
     // MARK: What the editor writes
@@ -108,33 +110,33 @@ final class CanvasLinkDropTests: XCTestCase {
         XCTAssertEqual(board.string(forType: .urlName), "the docs")
         XCTAssertEqual(board.string(forType: .string), "[the docs](https://x.dev/docs)",
                        "the text is still the markdown, for a drop into another note")
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/docs"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/docs"])
     }
 
     /// What you can see of a link while its syntax is hidden, and so what a drag across it selects.
     func testDraggingItsLabelCarriesTheLink() {
         let board = drag(editor(selecting: "the docs"))
         XCTAssertEqual(board.string(forType: .URL), "https://x.dev/docs")
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/docs"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/docs"])
     }
 
     func testDraggingABareAddressCarriesIt() {
         let board = drag(editor(selecting: " https://x.dev/home"))
         XCTAssertEqual(board.string(forType: .URL), "https://x.dev/home")
         XCTAssertEqual(board.string(forType: .urlName), "https://x.dev/home")
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/home"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/home"])
     }
 
     func testDraggingPartOfALabelIsText() {
         let board = drag(editor(selecting: "docs"))
         XCTAssertNil(board.string(forType: .URL))
-        XCTAssertEqual(canvasLinkAddresses(on: board), [])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), [])
     }
 
     func testDraggingProseAroundALinkIsText() {
         let board = drag(editor(selecting: "see [the docs](https://x.dev/docs)"))
         XCTAssertNil(board.string(forType: .URL))
-        XCTAssertEqual(canvasLinkAddresses(on: board), [])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), [])
     }
 
     func testDraggingALinkToANoteIsText() {
@@ -163,7 +165,7 @@ final class CanvasLinkDropTests: XCTestCase {
         board.clearContents()
         XCTAssertTrue(view.dragSelection(with: mouse(.leftMouseDown), offset: .zero, slideBack: false))
         XCTAssertEqual(board.string(forType: .URL), "https://x.dev/docs")
-        XCTAssertEqual(canvasLinkAddresses(on: board), ["https://x.dev/docs"])
+        XCTAssertEqual(canvasLinks(on: board).map(\.address), ["https://x.dev/docs"])
     }
 
     /// The same selection, copied rather than dragged, stays text — see `writeSelection` for why.

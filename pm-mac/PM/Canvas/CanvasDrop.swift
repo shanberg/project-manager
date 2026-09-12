@@ -24,8 +24,8 @@ enum CanvasDrop {
     /// which the board writes into the vault when it lands, and not a moment before: a drag that is
     /// only passing over the board must not leave a file behind it.
     case image(data: Data, ext: String)
-    /// Web pages. See `canvasLinkAddresses`.
-    case links([String])
+    /// Web pages. See `canvasLinks`.
+    case links([CanvasDroppedLink])
     /// Anything else with words in it.
     case text(String)
 
@@ -45,7 +45,7 @@ enum CanvasDrop {
            !files.isEmpty {
             return .files(files)
         }
-        let links = canvasLinkAddresses(on: pasteboard)
+        let links = canvasLinks(on: pasteboard)
         if !links.isEmpty { return .links(links) }
         if let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
@@ -60,7 +60,7 @@ enum CanvasDrop {
         case .cards(let document): return document.nodes.count
         case .files(let files): return files.count
         case .image: return 1
-        case .links(let addresses): return addresses.count
+        case .links(let links): return links.count
         case .text: return 1
         }
     }
@@ -91,8 +91,8 @@ enum CanvasDrop {
             return cascade(files.count, width: 400) { Self.isTall(files[$0]) ? 400 : 300 }
         case .image:
             return cascade(1, width: 400) { _ in 400 }
-        case .links(let addresses):
-            return cascade(addresses.count, width: 400) { _ in 400 }
+        case .links(let links):
+            return cascade(links.count, width: 400) { _ in 400 }
         case .text:
             return cascade(1, width: 250) { _ in 120 }
         }
@@ -105,8 +105,20 @@ enum CanvasDrop {
     }
 }
 
-/// The web pages a pasteboard is carrying, when what it carries is links rather than words — one
-/// address per link, in the order they were put down, and empty when it is anything else.
+/// A link on a pasteboard: where it goes, and what the source called it.
+///
+/// The name is `public.url-name`, which every browser puts down beside the address and which the board
+/// used to read straight past. It is the page's own title, already fetched by the browser you dragged
+/// it out of — so a card made from a dropped link can be named the moment it lands rather than staying
+/// a globe and a hostname until it has loaded, which on a board of eleven is the difference between a
+/// board you can read and a board you have to wait for.
+struct CanvasDroppedLink: Equatable {
+    var address: String
+    var name: String? = nil
+}
+
+/// The web pages a pasteboard is carrying, when what it carries is links rather than words — in the
+/// order they were put down, and empty when it is anything else.
 ///
 /// **The URL flavour first, then the text.** A browser dragging a link puts it down several ways at
 /// once — `public.url`, the link's name, and the address again as plain text — but not every source is
@@ -121,13 +133,18 @@ enum CanvasDrop {
 ///
 /// File URLs are not links here. The board reads those before it gets to this, as files, and a page is
 /// the only thing a link card can show.
-func canvasLinkAddresses(on pasteboard: NSPasteboard) -> [String] {
-    let addresses = (pasteboard.pasteboardItems ?? [])
-        .compactMap { $0.string(forType: .URL)?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter(isWebAddress)
-    if !addresses.isEmpty { return addresses }
+func canvasLinks(on pasteboard: NSPasteboard) -> [CanvasDroppedLink] {
+    let links = (pasteboard.pasteboardItems ?? []).compactMap { item -> CanvasDroppedLink? in
+        guard let address = item.string(forType: .URL)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), isWebAddress(address) else { return nil }
+        let name = item.string(forType: .urlName)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return CanvasDroppedLink(address: address, name: name?.isEmpty == false ? name : nil)
+    }
+    if !links.isEmpty { return links }
+    // A markdown link copied as words carries its label in the text itself, which `soleWebLink` has
+    // already separated out — the one name on this path, and the one the writer chose.
     if let text = pasteboard.string(forType: .string), let link = soleWebLink(in: text) {
-        return [link.address]
+        return [CanvasDroppedLink(address: link.address, name: link.label)]
     }
     return []
 }

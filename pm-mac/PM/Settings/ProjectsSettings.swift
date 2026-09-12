@@ -329,19 +329,24 @@ struct ProjectsSettingsView: View {
 
     // MARK: Links
 
-    /// The one network call the app makes, and the switch for it.
+    /// The network calls a project's links make, and the switch for them.
     ///
     /// Worth a pane row rather than a silent default: the hosts reached are read out of a project's
     /// own notes, so an internal tracker or a client's staging box is exactly the kind of address that
     /// ends up in there. An app that touches the network nowhere else owes its user the sentence.
+    ///
+    /// **One switch for two fetches, because they are one claim.** `FaviconLoader` asks a linked site
+    /// for its icon and `LinkTitleLoader` asks the same site what the page is called — same host, same
+    /// moment, same reason, and neither says anything about you. A second toggle would be a second
+    /// decision about one thing, and would leave this sentence having to be true twice.
     @ViewBuilder
     private var links: some View {
         Section {
-            Toggle("Show site icons beside links", isOn: $fetchFavicons)
+            Toggle("Fetch site icons and page names for links", isOn: $fetchFavicons)
         } header: {
             Text("Links")
         } footer: {
-            Text("Fetches each linked site's own icon from that site, once per site, and keeps it for the session. Nothing else is sent and no third-party icon service is used — but it is the only time PM goes to the network, so it's here to turn off.")
+            Text("Asks each linked site for its own icon, and — for a link you add without typing a label — for what that page calls itself. Both go to the linked site and nowhere else: no third-party icon service, nothing sent, and each site asked once. It is the only time PM goes to the network on a project's behalf, so it's here to turn off.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

@@ -58,7 +58,26 @@ final class CanvasDropTests: XCTestCase {
         board.setString("[the docs](https://x.dev/docs)", forType: .string)
         board.setString("https://x.dev/docs", forType: .URL)
         guard case .links(let links)? = read(board) else { return XCTFail("\(String(describing: read(board)))") }
-        XCTAssertEqual(links, ["https://x.dev/docs"])
+        XCTAssertEqual(links.map(\.address), ["https://x.dev/docs"])
+    }
+
+    /// A browser drops the page's name beside the address, and the card is named by it before it loads.
+    func testALinkKeepsTheNameTheBrowserDroppedWithIt() {
+        let board = pasteboard()
+        board.declareTypes([.URL, .urlName], owner: nil)
+        board.setString("https://x.dev/docs", forType: .URL)
+        board.setString("The Docs", forType: .urlName)
+        guard case .links(let links)? = read(board) else { return XCTFail("\(String(describing: read(board)))") }
+        XCTAssertEqual(links.map(\.name), ["The Docs"])
+    }
+
+    /// A markdown link copied as words carries its label in the text, and that label is the name.
+    func testAMarkdownLinkIsNamedByItsLabel() {
+        let board = pasteboard()
+        board.setString("[the docs](https://x.dev/docs)", forType: .string)
+        guard case .links(let links)? = read(board) else { return XCTFail("\(String(describing: read(board)))") }
+        XCTAssertEqual(links.map(\.address), ["https://x.dev/docs"])
+        XCTAssertEqual(links.map(\.name), ["the docs"])
     }
 
     func testWordsAreText() {
@@ -80,7 +99,8 @@ final class CanvasDropTests: XCTestCase {
     }
 
     func testSeveralLinksCascadeFromTheFirst() {
-        XCTAssertEqual(CanvasDrop.links(["https://a.dev", "https://b.dev"]).frames(centredOn: CanvasPoint(x: 100, y: 100)),
+        let links = ["https://a.dev", "https://b.dev"].map { CanvasDroppedLink(address: $0) }
+        XCTAssertEqual(CanvasDrop.links(links).frames(centredOn: CanvasPoint(x: 100, y: 100)),
                        [CanvasRect(x: -100, y: -100, width: 400, height: 400),
                         CanvasRect(x: -70, y: -70, width: 400, height: 400)])
     }

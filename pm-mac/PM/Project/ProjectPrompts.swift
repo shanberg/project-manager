@@ -146,7 +146,9 @@ enum ProjectPrompts {
     static func addLink(store: PMStore) {
         guard store.projectName != nil else { return }
         let labelField = NSTextField(string: "")
-        labelField.placeholderString = "Label (optional)"
+        // "Optional" because it always was, and it now means the page is asked rather than the row
+        // going in nameless. See `ProjectLinks`.
+        labelField.placeholderString = "Label (optional — taken from the page)"
         let urlField = NSTextField(string: "")
         urlField.placeholderString = "https://…"
 
@@ -162,22 +164,7 @@ enum ProjectPrompts {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let url = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return }
-        let label = labelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        store.saveDetails { notes in
-            var out = notes
-            let entry = LinkEntry(label: label.isEmpty ? nil : label, url: url)
-            // The model carries one blank entry when a project has no links; fill that rather than
-            // leaving an empty row above the first real one.
-            if let blank = out.links.firstIndex(where: {
-                ($0.label ?? "").isEmpty && ($0.url ?? "").isEmpty && ($0.children ?? []).isEmpty
-            }) {
-                out.links[blank] = entry
-            } else {
-                out.links.append(entry)
-            }
-            return out
-        }
+        ProjectLinks.add(url, label: labelField.stringValue, to: store)
     }
 
     // MARK: Helpers

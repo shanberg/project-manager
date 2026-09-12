@@ -26,6 +26,10 @@ Open: what the earlier signal is. `didCommit` is too early — that is a blank f
 visually-non-empty layout is the honest one and WebKit only exposes it privately. A `estimatedProgress`
 threshold is the ugly, public, probably-good-enough version. Whichever it is, the 0.2s cross-fade stays.
 
+The other half of the same complaint — what a card shows *instead* of the page while it is stale — is
+in [web-cards.md](web-cards.md) under Open: three holes in the snapshot, none of them about timing.
+Worth taking together, since both are "what is on a card that isn't showing its page".
+
 ### 2. The alignment indicators, again — **rebuilt as a target, wants using**
 
 The complaint got specific, and it was not about which of the three bands: it was that all of them
@@ -196,6 +200,12 @@ Open: what "the current project" means on a board with six project cards on it �
 [canvas-workspaces.md](canvas-workspaces.md) §5**: it is the card you are stepped into. The window's
 project was the obvious answer and is nothing at all for a board opened from a file; the engaged card
 is an answer that board has too.
+
+The mirror half is **built**, from inside a page rather than from the board: right-click a link, or the
+page, and it goes into the project's `## Links`. That surface could not use the engaged-card answer —
+what you have stepped into is a web card — and takes the board's own folder instead; see
+[web-cards.md](web-cards.md). Which leaves this entry as the half that is still open: the *offer*, made
+at the add-a-link field, of the links the project already has.
 
 ### 14. Pin and reorder a project's links
 

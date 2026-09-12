@@ -24,12 +24,22 @@ final class CanvasPageViewTests: XCTestCase {
         <input type="text" style="position:absolute;left:300px;top:150px;width:200px;height:40px">
         <textarea readonly style="position:absolute;left:0;top:250px;width:200px;height:100px"></textarea>
         <div contenteditable style="position:absolute;left:300px;top:250px;width:200px;height:100px">edit</div>
+        <a href="mailto:someone@x.dev" style="position:absolute;left:0;top:110px;width:200px;height:30px">Mail</a>
+        <a href="https://x.dev/near" style="position:absolute;left:210px;top:10px;width:80px;height:40px">Near</a>
+        <a href="https://x.dev/docs" style="position:absolute;left:0;top:360px;width:200px;height:30px">
+           The   Docs </a>
+        <a href="https://x.dev/pictures" aria-label="Pictures"
+           style="position:absolute;left:300px;top:360px;width:200px;height:30px"
+           ><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+                 style="width:100%;height:30px"></a>
         <script>window.ready = true</script>
         </body></html>
         """
 
     private let textarea = NSPoint(x: 100, y: 50)
     private let paragraph = NSPoint(x: 400, y: 50)
+    private let link = NSPoint(x: 100, y: 375)
+    private let iconLink = NSPoint(x: 400, y: 375)
 
     override func setUp() async throws {
         try await super.setUp()
@@ -82,6 +92,74 @@ final class CanvasPageViewTests: XCTestCase {
         // (300, 150) is the paragraph unzoomed, and the middle of the textarea at 2×.
         let answer = await page.acceptsTyping(at: NSPoint(x: 300, y: 150))
         XCTAssertTrue(answer)
+    }
+
+    // MARK: What the page says the link under the pointer is
+
+    func testALinkIsFoundWithTheNameThePageGivesIt() async {
+        let found = await page.link(at: link)
+        XCTAssertEqual(found?.url.absoluteString, "https://x.dev/docs")
+        // Written across two lines and indented in the source, and it means one label.
+        XCTAssertEqual(found?.name, "The Docs")
+    }
+
+    /// Clicking the picture inside a link is clicking the link — `closest` is what makes that true.
+    func testTheImageInsideALinkIsTheLink() async {
+        let found = await page.link(at: iconLink)
+        XCTAssertEqual(found?.url.absoluteString, "https://x.dev/pictures")
+        // Nothing to read, so what it tells a screen reader is the name.
+        XCTAssertEqual(found?.name, "Pictures")
+    }
+
+    func testPlainTextIsNotALink() async {
+        let found = await page.link(at: paragraph)
+        XCTAssertNil(found)
+    }
+
+    /// A card is what every caller is about to make out of this, and `mailto:` is not a card.
+    func testOnlyWebLinksComeBack() async {
+        let found = await page.link(at: NSPoint(x: 100, y: 125))
+        XCTAssertNil(found)
+    }
+
+    /// The card zooms its page, and this question is asked in the page's own pixels too.
+    ///
+    /// A near link rather than one of the two above: at 2× the viewport is 300×200 of the page's own
+    /// pixels, and `elementFromPoint` answers nothing for a point outside it.
+    func testAZoomedPageIsAskedForLinksInItsOwnPixels() async {
+        page.pageZoom = 2
+        // (250, 30) in the page is drawn at twice that in the view.
+        let found = await page.link(at: NSPoint(x: 500, y: 60))
+        XCTAssertEqual(found?.url.absoluteString, "https://x.dev/near")
+    }
+
+    // MARK: The card's items on the page's menu
+
+    func testTheCardsItemsGoAboveWebKitsWithASeparator() {
+        let host = MenuHost()
+        page.linkHost = host
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Reload", action: nil, keyEquivalent: ""))
+        page.willOpenMenu(menu, with: NSEvent())
+        XCTAssertEqual(menu.items.map(\.title), ["Add Page to Something", "", "Reload"])
+        XCTAssertTrue(menu.items[1].isSeparatorItem)
+    }
+
+    /// A page with no card behind it is a page with WebKit's own menu, untouched.
+    func testAPageWithNoHostKeepsTheMenuItWasGiven() {
+        page.linkHost = nil
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Reload", action: nil, keyEquivalent: ""))
+        page.willOpenMenu(menu, with: NSEvent())
+        XCTAssertEqual(menu.items.map(\.title), ["Reload"])
+    }
+
+    private final class MenuHost: CanvasPageLinkHost {
+        func pageMenuItems(for link: PageLink?) -> [NSMenuItem] {
+            [NSMenuItem(title: "Add Page to Something", action: nil, keyEquivalent: "")]
+        }
+
+        func openInNewCard(_ link: PageLink) {}
     }
 
     // MARK: Who gets the drag

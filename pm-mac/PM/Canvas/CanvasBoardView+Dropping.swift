@@ -254,7 +254,7 @@ extension CanvasBoardView {
         case .cards(let document): return document.nodes.map { Self.face(for: $0.content) }
         case .files(let files): return files.map(Self.face(forFile:))
         case .image(let data, _): return [NSImage(data: data).map(ProtoFace.picture) ?? .blank(nil)]
-        case .links(let addresses): return addresses.map(Self.face(forPage:))
+        case .links(let links): return links.map { Self.face(forPage: $0.address) }
         case .text(let text): return [.prose(text)]
         }
     }
