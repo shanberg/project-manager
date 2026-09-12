@@ -133,10 +133,23 @@ markdown file and find out what is actually missing. Suspected gaps:
   ([CanvasBoardView+Dropping.swift](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift)). Links
   dragged out of web and text cards arrive as link cards; a web card keeps a drop only over a field
   ([CanvasPageView.swift](../pm-mac/PM/Canvas/CanvasPageView.swift)),
-- a file from outside the vault is stored as an absolute path
-  ([CanvasBoardView+Commands.swift:159](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:159)),
-  which Obsidian cannot resolve. Copy it in, or say so,
-- several files cascade by 30pt rather than laying out.
+- a file from outside the vault is stored as the absolute path it has
+  ([CanvasBoardView+Commands.swift:140](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:140)),
+  for want of a vault-relative one. **Half of this was worse than the entry said, and is fixed**
+  (2026-09-12): PM did not read those paths back either. An absolute path missed every literal step in
+  `CanvasFileResolver` and reached the match-by-name step, where the last component alone is matched
+  against the whole vault — so a `Salary.pdf` dropped from Downloads resolved to a *different*
+  `Salary.pdf` filed in some project, reported `.moved`, and the window offered to rewrite the card to
+  point at it. An absolute path is now the file it names or nothing at all, with one exception kept:
+  one that lands inside the vault is a vault-relative path spelled the long way and goes on through the
+  drift steps as one. See `CanvasFileResolverTests`, which pins the decoy.
+
+  **What is left is the half the entry was actually about, and it is still a question**: the path PM
+  writes is one Obsidian cannot resolve. Copy the file into the vault — which is what a pasted image
+  already gets, and a much larger act on somebody's file — or keep the link and say on the card that it
+  points outside. Not a thing to decide from here,
+- several files cascade by 30pt rather than laying out — still true
+  ([CanvasDrop.swift:74](../pm-mac/PM/Canvas/CanvasDrop.swift:74)), and the same for several links.
 
 ### 7. Tidy
 

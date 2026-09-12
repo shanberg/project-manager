@@ -111,8 +111,31 @@ public final class CanvasFileResolver {
     }
 
     private func locate(_ stored: String) -> CanvasFileLocation {
-        let path = stored.trimmingCharacters(in: .whitespaces)
+        var path = stored.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return .missing }
+
+        // 0. A path that says where it is absolutely, which the canvas format has no spelling for and
+        //    PM writes anyway: a file dropped on a board from outside the vault has no vault-relative
+        //    path to store, so `CanvasBoardView+Commands` falls back to `url.path`.
+        //
+        //    **Answered before the drift steps rather than through them, because those steps are about
+        //    a path that was true inside the vault and has come adrift, and this one was never inside
+        //    it.** Run through them, an absolute path missed every literal reading and reached step 4,
+        //    where the last component alone was matched against the whole vault — so a `Salary.pdf`
+        //    dropped from the Downloads folder silently resolved to a *different* `Salary.pdf` filed in
+        //    some project, was reported `.moved`, and the window offered to rewrite the card to point
+        //    at it. Being wrong about which file a card is was the worst outcome available, and it is
+        //    the one the generosity of the last step produced.
+        //
+        //    So: it is where it says, or it is nowhere. The one reading worth keeping is an absolute
+        //    path that lands *inside* the vault — a card written by hand, or by some other tool — which
+        //    is a vault-relative path spelled the long way and is handed on to the steps below as one.
+        if path.hasPrefix("/") {
+            let there = URL(fileURLWithPath: path)
+            if exists(there) { return .found(there) }
+            guard let inside = storablePath(for: there) else { return .missing }
+            path = inside
+        }
 
         // 1. What the file says, read the way the format defines it.
         if let vaultRoot {

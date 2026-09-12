@@ -155,6 +155,56 @@ final class CanvasFileResolverTests: XCTestCase {
                        .found(vault.appendingPathComponent("Projects/W-003 New/docs/Notes.md")))
     }
 
+    // MARK: A path from outside the vault
+
+    /// **A file dropped on a board from outside the vault is stored as the absolute path it has**, for
+    /// want of a vault-relative one (`CanvasBoardView+Commands`), and it has to resolve to the file it
+    /// names rather than to whatever the vault has by that name.
+    ///
+    /// The decoy is the whole test: the vault holds a `Salary.pdf` of its own, and the dropped one is
+    /// a different file with the same last component. Run through the drift steps, the dropped card
+    /// missed every literal reading, reached the match-by-name step and came back `.moved` — pointing
+    /// at the vault's file, and offering to rewrite itself to it.
+    func testAnAbsolutePathIsTheFileItNamesAndNotOneOfTheSameName() throws {
+        let outside = try outsideTheVault()
+        let dropped = outside.appendingPathComponent("Salary.pdf")
+        try "a different salary entirely".write(to: dropped, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(resolver().resolve(dropped.path), .found(dropped))
+    }
+
+    /// And one whose file has gone is gone. The generosity below step 2 is for a path that was true
+    /// *inside* the vault and came adrift as PM moved folders about; a path that says exactly where it
+    /// is was never in the vault, and nothing PM does can have moved it.
+    ///
+    /// Named for the one file the fixture holds exactly one of, since that is the condition the
+    /// match-by-name step answers under — with two of them it declines anyway and the test would pass
+    /// while proving nothing.
+    func testAnAbsolutePathToNothingIsMissingRatherThanGuessedAt() throws {
+        let outside = try outsideTheVault()
+        let gone = outside.appendingPathComponent("Pasted image 20250306.png")
+        XCTAssertEqual(resolver().resolve(gone.path), .missing, "matched a file in the vault by name")
+    }
+
+    /// The exception, and the reason this is a step rather than a refusal: an absolute path that lands
+    /// *inside* the vault is a vault-relative path spelled the long way — written by hand, or by some
+    /// other tool — so it goes on through the drift steps as one.
+    func testAnAbsolutePathInsideTheVaultStillFollowsTheProject() {
+        let written = vault.appendingPathComponent("Projects/W-002 Flexcompute/docs/Notes.md").path
+        XCTAssertEqual(
+            resolver().resolve(written),
+            .moved(vault.appendingPathComponent("Archive/W-002 Flexcompute/docs/Notes.md"),
+                   stored: written))
+    }
+
+    private func outsideTheVault() throws -> URL {
+        let outside = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pm-canvas-outside-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        return outside
+    }
+
     /// A canvas kept outside any vault has no vault-relative paths to resolve, and a relative path in
     /// one means what it says: beside the canvas. That reads as found, not moved.
     ///
