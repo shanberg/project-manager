@@ -229,7 +229,13 @@ final class CanvasScrollView: NSScrollView {
     /// scaled and where it is, that one decides where each card is *on* the board, and neither is
     /// trying to answer the other's question. What must never be split across the two is a single
     /// number, which is what `HeaderChromeMotionTests` is about at the other end of the window.
-    func fly(to zoom: CGFloat, centre point: CanvasPoint, animated: Bool) {
+    ///
+    /// **`alone` means no card is moving with it** — the zoom is the whole of the movement, as it is on
+    /// a peek. That is the one case where the flight can be handed to the compositor
+    /// (`flyByTransform`): what makes the transform unshippable elsewhere is that a board rasterised at
+    /// its destination and uniformly scaled reads as a scale rather than as cards gathering into tiles,
+    /// and where nothing is gathering there is nothing to read wrongly. See `CrossingTuning`.
+    func fly(to zoom: CGFloat, centre point: CanvasPoint, animated: Bool, alone: Bool = false) {
         ticker.stop()
         flight = nil
         let wanted = min(max(zoom, Self.minimumZoom), Self.maximumZoom)
@@ -247,7 +253,7 @@ final class CanvasScrollView: NSScrollView {
         // `CrossingTuning`, does a run measuring what the zoom flight costs.
         let flies = !CrossingTuning.current.contains(.skipZoomFlight)
         if flies, seconds > 0, from != wanted || at != point, board.layer != nil,
-           CrossingTuning.current.contains(.zoomAsTransform) {
+           alone || CrossingTuning.current.contains(.zoomAsTransform) {
             return flyByTransform(from: from, at: at, to: wanted, centre: point, seconds: seconds)
         }
         guard flies, seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
@@ -316,23 +322,26 @@ final class CanvasScrollView: NSScrollView {
         // counter-transform eases out, and the board has to keep the cards in it. See `travelling`.
         let travelledFrom = board.canvasRect(documentVisibleRect)
         travelling = travelledFrom
+        // **Before the jump, not after it.** Every card's zoom changes in this one step, and a card whose
+        // zoom changed asks for the budget to be reviewed — which `CanvasBoardView.reviewPageBudget`
+        // defers only while the board says it is crossing. Set at the end, the answer was no: the review
+        // landed a runloop turn later, in the second frame of the flight, and applied the budget
+        // synchronously there. That is the whole of why a peek *out* measured worse under the transform
+        // than under the ticked flight — one 181ms pass inside a 350ms crossing (2026-09-11), where the
+        // ticked flight had it arriving in the settle.
+        transformingUntil = CACurrentMediaTime() + seconds
         magnification = wanted
         centre(on: point)
         board.magnificationChanged()
         board.settlePageBudget()
         guard let layer = board.layer else { return }
 
-        // Where the board is looking now, and where it was looking, in the board's own points — which
-        // do not change with the zoom (`CanvasBoardView.viewRect`), so both are measurable after the
-        // jump.
-        let source = board.viewPoint(at)
+        // Where the board is going, in the board's own points — which do not change with the zoom
+        // (`CanvasBoardView.viewRect`), so it is measurable after the jump.
         let destination = board.viewPoint(point)
-        let scale = from / wanted
         let anchor = CGPoint(x: layer.anchorPoint.x * layer.bounds.width,
                              y: layer.anchorPoint.y * layer.bounds.height)
-        let start = counter(scale: scale, from: source, to: destination, about: anchor)
 
-        transformingUntil = CACurrentMediaTime() + seconds
         // **Sampled, not interpolated** — the whole movement, keyframe by keyframe.
         //
         // Core Animation interpolates a matrix linearly, component by component, and a zoom interpolated

@@ -1327,9 +1327,22 @@ is the one thing the animation is for. The measurements all say the movement is 
 of a crossing a card's presented frame is identical under both configurations, and the board's layer sits
 at 0.869 where the curve wants 0.879 — so the geometry is right and the reading of it is wrong, probably
 because every card is rasterised wearing its destination face and then scaled, leaving a uniform scale as
-the whole of what the eye is given. So it is parked, not shipped and not deleted:
-`pmpanel://tuning?zoom=transform` still holds it on, and the numbers are in `CrossingTuning` for whoever
-tries this next. **The lever is real and the way to pull it is still open.**
+the whole of what the eye is given. So it is parked for the journeys where cards gather, not shipped and
+not deleted: `pmpanel://tuning?zoom=transform` still holds it on, and the numbers are in `CrossingTuning`
+for whoever tries this next. **The lever is real and the way to pull it is still open.**
+
+**And it ships where nothing gathers.** A peek is a zoom and only a zoom — one card, no tiles being made
+— so there is nothing for a uniform scale to cancel, and it takes the transform unconditionally
+(`CanvasScrollView.fly(to:centre:animated:alone:)`). Six round trips per configuration on a board of
+eight cards: peeking in dropped 2, 3, 2, 1, 3 and 3 frames of 22 before, and 1, 1, 0, 0, 0 and 1 after.
+Peeking back out found a real bug on the way: the transform sets every card's zoom in one step, each card
+asks for the page budget to be reviewed, and `reviewPageBudget` defers that only while the board says it
+is crossing — which it did not yet, because the flight marked itself as under way *after* the jump. The
+review landed a frame into the flight and applied the budget synchronously: one 181ms pass inside a 350ms
+crossing, which is why the transform measured *worse* than the ticked flight on the way out. Marked
+before the jump, the pass goes back to the settle where the ticked flight has it, and the crossing out is
+clean. **What that 110ms pass in the settle costs is now the peek's largest remaining cost**, and it is
+the same page-budget question as the first bullet above rather than anything about the zoom.
 
 ### The order it is built in
 

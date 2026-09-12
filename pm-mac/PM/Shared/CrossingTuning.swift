@@ -66,6 +66,13 @@ struct CrossingTuning: OptionSet {
     /// face and then scaled, so a uniform scale is the whole of what the eye is given. Not shipped,
     /// and not deleted: what is wrong with it is a perception, and the next person to try this should
     /// see the numbers before spending the night finding them again.
+    ///
+    /// **Shipping where nothing gathers, without this flag.** The objection is about cards being read
+    /// against a scale, so it does not reach a journey where the zoom is the whole movement: a peek asks
+    /// for the transform outright (`CanvasScrollView.fly(to:centre:animated:alone:)`), and this flag is
+    /// only what turns it on for the journeys that also move cards. Measured on peek the same way, six
+    /// round trips apiece: peeking in dropped 2, 3, 2, 1, 3 and 3 frames of 22 on the ticked flight and
+    /// 1, 1, 0, 0, 0 and 1 on the transform.
     static let zoomAsTransform = CrossingTuning(rawValue: 1 << 1)
 
     /// What the app does when nobody is benching.

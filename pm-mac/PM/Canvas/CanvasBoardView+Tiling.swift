@@ -782,6 +782,12 @@ extension CanvasBoardView {
     /// into — so a peek loads nothing that zooming in by hand would not.
     ///
     /// Not a frame: a frame is its cards, and there is nothing in one to read.
+    ///
+    /// **The zoom travels on the compositor** — `alone: true`, which hands the flight to
+    /// `CanvasScrollView.flyByTransform` instead of rescaling every layer on every frame. A peek is the
+    /// one crossing where that is safe to ship: what makes the transform unshippable on the others is
+    /// that a board scaled as one image says nothing about which card went where, and here no card is
+    /// going anywhere. See `CrossingTuning.zoomAsTransform`.
     func beginPeek(_ id: String) {
         guard isPicking, peeking == nil, let node = document.node(id: id), !node.isGroup,
               let scroll = scrollView?.canvasScroll else { return NSSound.beep() }
@@ -796,16 +802,16 @@ extension CanvasBoardView {
         // A zoom flight with a page at the end of it — the card wakes as it arrives, on the budget's
         // settling pass, which is inside the meter's window.
         FrameMeter.measure("peek in (\(nodeViews.count) views, \(pagesLive.count) live)", on: self)
-        scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true)
+        scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true, alone: true)
         overlay.needsDisplay = true
     }
 
-    /// Back from a peek to the board exactly as it was.
+    /// Back from a peek to the board exactly as it was — on the compositor too, see `beginPeek`.
     func endPeek() {
         guard let peek = peeking else { return }
         peeking = nil
         FrameMeter.measure("peek out (\(nodeViews.count) views)", on: self)
-        scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true)
+        scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true, alone: true)
         overlay.needsDisplay = true
     }
 
