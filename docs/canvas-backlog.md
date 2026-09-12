@@ -97,27 +97,47 @@ cards around a real board and say whether the offer is up too often.
 
 ## Features
 
-### 3. ⇧ and ⌥ while resizing — **parked**
+### 3. The modifiers a board is missing, and the one collision under all of them
 
-The design-tool grammar: **⇧ keeps the aspect ratio, ⌥ resizes about the centre**, and together, both.
-Neither exists today — a resize is the dragged grip and nothing else
-([CanvasSnapping.resize](../pm-mac/PM/Canvas/CanvasSnapping.swift:94)).
+Three gestures are wanted and none exists: **⇧ keeps the aspect ratio while resizing, ⌥ resizes about
+the centre** — the design-tool grammar, where a resize today is the dragged grip and nothing else
+([CanvasSnapping.resize](../pm-mac/PM/Canvas/CanvasSnapping.swift:94)) — and **⌥-drag duplicates a
+card**, which is the Mac's own gesture and simply absent; `duplicate` exists as a command only.
 
-**Parked on the collision, which is real:** ⌥ already means *no snapping*, on both a move and a resize
-([CanvasBoardView+Input.swift:341](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:341)), and that is
-the standard Mac override — it is the reason snapping can be on by default. Giving ⌥ to "from centre"
-needs somewhere else for the escape hatch (⌘ is the other candidate, and is currently an
-extend-selection modifier on mouse-down). Not worth trading one muscle memory for another without
-deciding it deliberately, so this waits.
+These were two entries parked separately on what turns out to be one obstacle. **⌥ already means *no
+snapping*, on both a move and a resize**
+([CanvasBoardView+Input.swift:522](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:522)), and that is
+the override which lets snapping be on by default. ⌥ cannot mean three things, so this is one decision
+and it only has to be made once.
 
-### 4. ⌥-drag to duplicate a card
+**What is actually free, read rather than assumed.** During a drag the board reads **only ⌥** — the
+snapping reach and the guides, nothing else. ⇧ and ⌘ are read at *mouse-down*, by the selection path
+and by nothing else: `extending = shift || command`
+([CanvasBoardView+Input.swift:35](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:35)). So both are
+available mid-drag, and the only real cost of taking one is a press that both extends the selection and
+does the modifier's new job on the drag that follows.
 
-The Mac's own gesture, missing. `duplicate` already exists as a command, and the drag machinery in
-`CanvasBoardView+Input` already reads ⌥ for "don't snap" — which is the collision, and it is
-the same one 3 is parked on, met in a new place.
+**Recommendation: move the escape hatch to ⌘, and let ⌥ and ⇧ mean what they mean everywhere else.**
 
-Not free, then: ⌥ cannot mean both. Worth deciding both at once, since a person who has learnt ⌥-drag
-from Figma has also learnt ⌥ for no-snapping from everywhere else.
+| | today | proposed | why |
+|---|---|---|---|
+| ⇧ resizing | — | keep the aspect ratio | every design tool, and ⇧ is "constrain" across the system |
+| ⌥ resizing | no snapping | resize about the centre | the grammar this entry asked for |
+| ⌥ dragging | no snapping | duplicate | **the Mac's own copy-drag**, learnt in the Finder |
+| ⌘ dragging or resizing | extends selection, on the press | no snapping | Keynote, Pages and Numbers all suspend their guides on ⌘ |
+
+The case for it: ⌥ is the one modifier in that table whose meaning is not PM's to choose. "⌥ copies
+what you are dragging" is learnt from the Finder long before anyone meets a canvas, while "⌥ turns
+snapping off" is learnt from drawing apps — and the drawing apps a person arriving here has actually
+used are split on it, since Keynote's is ⌘. Trading a convention we share with some apps for one we
+share with the file manager is the better side of the trade.
+
+The cost, plainly: ⌘ already extends the selection on mouse-down, so a ⌘-click that becomes a drag
+would extend the selection *and* suspend snapping. The same overlap exists in Keynote and nobody trips
+over it, but it is the thing to watch if this feels wrong in the hand.
+
+Nothing here is built, deliberately. All three gestures fall out of the decision in an afternoon, and
+none of them can be built before it.
 
 ### 5. Cards that are just an image — **built**
 
@@ -142,12 +162,12 @@ Still open, and now the whole of what is left here: whether a resize should *off
 aspect ratio as a snap, which 2 would then have to say out loud — and which would make the fill
 something you land on deliberately rather than something that happens to be true.
 
-### 6. Dropping files on the board — verify, then polish
+### 6. Dropping files on the board — **verified, and mostly built**
 
-Mostly built already: the board takes `.fileURL`, `.string`, `.URL` and image types, and a dropped
-file becomes a file card centred on the drop point
-([CanvasDrop.swift](../pm-mac/PM/Canvas/CanvasDrop.swift)). So the first job is to try it with a
-markdown file and find out what is actually missing. Suspected gaps:
+The board takes `.fileURL`, `.string`, `.URL` and image types, and a dropped file becomes a file card
+centred on the drop point ([CanvasDrop.swift](../pm-mac/PM/Canvas/CanvasDrop.swift)). The instruction
+here was to try it and find out what was actually missing; that has been done, and the four suspected
+gaps turned out to be three real ones and one that was worse than suspected:
 
 - ~~no visible feedback while dragging over the board~~ — built, 2026-09-10: over the board a drag
   turns into the card it will make, with the move guides around it, and settles into the snapped place
@@ -300,7 +320,9 @@ for one act. Decide whether the Figma set replaces the ⌘ set or joins it befor
 
 ## Priority
 
-**First — the one that reads as broken:** 1 (reveal a page on an earlier signal than "finished").
+**Nothing here reads as broken any more.** 1 was that entry — a card kept its placeholder until the
+page finished loading — and it is built: the reveal is the first of painted, finished, or eight
+seconds.
 
 [canvas-workspaces.md](canvas-workspaces.md) is **built, and closed**. A card you have stepped into is
 the project and draws as much or as little of it as you set; the words go to the right things — frames
@@ -311,12 +333,19 @@ switching between them goes to, and what duplicating one makes another of. The o
 page is the question under its Open heading — whether a workspace can span boards — which is a question
 and not a task.
 
-**Then — find out before designing:** 6, which is the same instruction it has always been — drop a
-markdown file on a board and see what actually happens.
+**Waiting on one decision, which unblocks three gestures:** 3. The argument is written out and comes
+with a recommendation; what it needs is a yes or a no, not more thinking.
 
 **Then — design first, then build:** 13 (suggest the project's links), 14 (pin and reorder them), 17
-(the navigation grammar), 7 (tidy, the largest), 5 (image cards), 8 (the tile picker).
+(the navigation grammar), 7 (tidy, the largest), 8 (the tile picker).
 
-**Blocked on an argument, not on work:** 11 (BSP), which was sitting behind 18 and is now only behind
-its own question — whether a tree is one arrangement more or a different kind of thing — and 3 and 4,
-which are one ⌥ collision seen twice and want deciding together.
+**Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
+different kind of thing entirely.
+
+**What 6 has left** is the half that was always a question rather than a defect: a card pointing
+outside the vault now asks whether to copy the file in, and what remains is whether anything more is
+wanted for a *folder* dropped on a board.
+
+**Built since this list was last read:** 1 (the reveal), 5 (pictures fill a card that is nearly their
+shape, bar the aspect-ratio snap, which belongs with 2), and most of 6 — the drop feedback, the
+absolute-path resolution, the copy-in question, and the block layout for several files at once.
