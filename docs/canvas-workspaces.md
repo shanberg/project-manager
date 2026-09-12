@@ -1293,13 +1293,14 @@ command a new workspace is filled in by.
 The layout arithmetic is nothing — twenty tiles is microseconds — and the rule that keeps it that way is
 already the board's: move the views that exist, never rebuild them. The cost is elsewhere.
 
-- **A page re-lays itself out every time its tile changes size.** An animation that resizes six web cards
-  is six pages reflowing on every frame. Neither ⌥N nor a drag adds any: both mark where the card would
-  go and leave the tiles alone, and a drag reflows once, on the drop. **Measure
-  first**, with `FrameMeter` — the drop is measured where it happens, and `pmpanel://bench?journey=…`
-  repeats it — on a real board of pages. If it is bad, the answer is to give each page its
-  final size at once and animate a picture of it, putting the live page back when the tiles land. The
-  frozen-page snapshot in `CanvasLinkNodeView` is half of that already.
+- **A page re-lays itself out every time its tile changes size** — **measured, and it is free.**
+  `pmpanel://bench?journey=maximize` is the hardest case there is: one tile grows to fill the window and
+  three others give up their room, on a board of eight cards with seven pages live. Six round trips,
+  every one of them 22 of 22 frames in the crossing, worst frame 17ms, main-thread work 4ms of the 350
+  available. So the answer to "give each page its final size at once and animate a picture of it" is
+  that nothing needs it: a page reflowing is not what a resize costs. Neither ⌥N nor a drag adds any
+  reflow in the first place — both mark where the card would go and leave the tiles alone, and a drag
+  reflows once, on the drop.
 - **The picker drops every page below `pagesLoadAbove`**, so they freeze to their pictures. They keep
   their renderers for the off-screen grace, so going back into the workspace reloads nothing, and the
   budget pass already waits for the crossing to land (`isCrossing`). The first frame of a board of forty
@@ -1352,6 +1353,15 @@ going back to, so `buildNodeViews` now keeps that region as well as the visible 
 down, the pages never stop, and the budget has nothing to decide. **Thirty-six peeks, every configuration:
 22 of 22 frames in the crossing and 52 of 52 in the settle, worst frame 17ms, no page ever restarted.**
 The journey is finished; what is left in `CrossingTuning` is about the journeys where cards gather.
+
+**Which leaves one thing, and it is the same thing.** Every journey has now been benched on the same
+board: peek 22 of 22 frames, maximize 22 of 22, restore 22 of 22 — and into the picker 12 of 22, back out
+13 of 22, canvas to workspace 15 of 23. **Everything that does not change the magnification runs at 60
+frames a second, and everything that does drops about half of them.** Main-thread work is not what
+separates the two lists: the journeys that stutter spend 35ms of their 350 on the main thread, less than
+the ones that don't. So there is exactly one cost left in the whole of §7k, it is `NSScrollView.magnification`
+travelling, and the way to pay it is known and parked for a reason that is about legibility rather than
+arithmetic. The next move on it is a choreography experiment, not another measurement.
 
 ### The order it is built in
 
