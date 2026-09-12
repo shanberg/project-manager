@@ -1321,10 +1321,15 @@ and it is now measured on two journeys rather than one.
 **And it is built, behind `CrossingTuning.zoomAsTransform`.** Three configurations on the picker, six
 crossings apiece: shipping dropped 9 frames of 22 on average, skipping the flight 3.2, and the
 transform 2.8 — the animation kept, at the cost of not having one. It is not on, because a frame count
-cannot answer the two questions that decide it: whether a long zoom-out looks soft on the way through,
-since the content is rasterised at the destination scale, and whether a click mid-flight landing on the
-destination's geometry is ever noticed in a 0.3s movement. `pmpanel://tuning?zoom=transform` holds it
-on to be looked at.
+cannot answer the question that decides it — and looking answered it against: **with the transform on, a
+canvas becoming a workspace reads as the board being scaled, not as cards gathering into tiles.** That
+is the one thing the animation is for. The measurements all say the movement is there — at the midpoint
+of a crossing a card's presented frame is identical under both configurations, and the board's layer sits
+at 0.869 where the curve wants 0.879 — so the geometry is right and the reading of it is wrong, probably
+because every card is rasterised wearing its destination face and then scaled, leaving a uniform scale as
+the whole of what the eye is given. So it is parked, not shipped and not deleted:
+`pmpanel://tuning?zoom=transform` still holds it on, and the numbers are in `CrossingTuning` for whoever
+tries this next. **The lever is real and the way to pull it is still open.**
 
 ### The order it is built in
 

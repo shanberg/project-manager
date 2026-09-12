@@ -599,7 +599,13 @@ final class CanvasBoardView: NSView {
 
     private func buildNodeViewsBody() {
         let visible = canvasRect(visibleRect)
-        let keep = visible.inset(by: max(visible.width, visible.height) * 0.5)
+        var keep = visible.inset(by: max(visible.width, visible.height) * 0.5)
+        // A transform flight jumps the visible rect to where it is going and lets the compositor show
+        // the way there, so what is on screen is not what `visibleRect` says. Keep both — see
+        // `CanvasScrollView.travelling`.
+        if let travelling = scrollView?.canvasScroll?.travelling {
+            keep = keep.union(travelling)
+        }
 
         var wanted: Set<String> = []
         // While a layout is standing in for the document, every card it shows is wanted whatever the
@@ -668,8 +674,10 @@ final class CanvasBoardView: NSView {
         refreshTileHandles()
         if isTiled { tileHandleView.needsDisplay = true }
         let nodes = nodesByID
+        var flying = 0, placed = 0, hiddenNow = 0
         for (id, view) in nodeViews {
             guard let node = nodes[id] else { continue }
+            if view.isHidden { hiddenNow += 1 }
             // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
             // other thirty-seven and rebuild them on the way out — which for a board of web cards means
             // reloading every page you were watching, as the price of having glanced at six of them.
@@ -682,9 +690,17 @@ final class CanvasBoardView: NSView {
             let wanted = viewRect(layout.frame(of: node))
             if animatesLayout, view.frame != wanted, !view.isHidden {
                 view.animator().frame = wanted
+                flying += 1
             } else {
                 view.frame = wanted
+                if animatesLayout { placed += 1 }
             }
+        }
+        // What a crossing actually handed to Core Animation. A crossing where every card is *placed*
+        // rather than flown looks like a zoom with the cards already where they are going — see
+        // `settleIntoLayout`, and `CrossingTuning.zoomAsTransform`, which is how that came up.
+        if animatesLayout, FrameMeter.isEnabled {
+            Log.write("LAYOUT \(flying) flying, \(placed) placed, \(hiddenNow) hidden")
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
@@ -755,6 +771,7 @@ final class CanvasBoardView: NSView {
 
     /// Which settling pass is the current one — see the completion handler above.
     private var settling = 0
+
 
     /// Zoom changed: cards that render differently at different sizes get told.
     func magnificationChanged() {

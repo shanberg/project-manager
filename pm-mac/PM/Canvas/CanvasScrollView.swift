@@ -312,6 +312,10 @@ final class CanvasScrollView: NSScrollView {
                                 centre point: CanvasPoint, seconds: Double) {
         ticker.stop()
         flight = nil
+        // Measured before the jump: this is the region the compositor goes on showing while the
+        // counter-transform eases out, and the board has to keep the cards in it. See `travelling`.
+        let travelledFrom = board.canvasRect(documentVisibleRect)
+        travelling = travelledFrom
         magnification = wanted
         centre(on: point)
         board.magnificationChanged()
@@ -324,29 +328,76 @@ final class CanvasScrollView: NSScrollView {
         let source = board.viewPoint(at)
         let destination = board.viewPoint(point)
         let scale = from / wanted
-        let asItWas = CGAffineTransform(translationX: -source.x, y: -source.y)
-            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-            .concatenating(CGAffineTransform(translationX: destination.x, y: destination.y))
         let anchor = CGPoint(x: layer.anchorPoint.x * layer.bounds.width,
                              y: layer.anchorPoint.y * layer.bounds.height)
-        let start = CGAffineTransform(translationX: anchor.x, y: anchor.y)
-            .concatenating(asItWas)
-            .concatenating(CGAffineTransform(translationX: -anchor.x, y: -anchor.y))
+        let start = counter(scale: scale, from: source, to: destination, about: anchor)
 
         transformingUntil = CACurrentMediaTime() + seconds
-        let travel = CABasicAnimation(keyPath: "transform")
-        travel.fromValue = CATransform3DMakeAffineTransform(start)
-        travel.toValue = CATransform3DIdentity
+        // **Sampled, not interpolated** — the whole movement, keyframe by keyframe.
+        //
+        // Core Animation interpolates a matrix linearly, component by component, and a zoom interpolated
+        // linearly is the thing `fly(to:centre:)` refuses to do: from 0.35 to 1, half way along, linear
+        // says 0.68 where the geometric path says 0.60. The board then runs ahead of where the ticked
+        // flight would have it while the cards fly on their own timing, and the two movements cancel:
+        // the cards sit nearly still in the window and the crossing reads as a zoom with the tiles
+        // already made. So the curve is sampled here and handed over as values, and `.linear` between
+        // them is honest because the easing is already in the samples.
+        let steps = 24
+        let travel = CAKeyframeAnimation(keyPath: "transform")
+        travel.values = (0...steps).map { step -> CATransform3D in
+            let fraction = Double(step) / Double(steps)
+            let eased = 1 - pow(1 - fraction, 3)
+            // Exactly `stepFlight`'s two lines: the zoom travels as a ratio, the centre as a distance.
+            let zoom = from * pow(wanted / from, CGFloat(eased))
+            let looking = board.viewPoint(CanvasPoint(x: at.x + (point.x - at.x) * eased,
+                                                      y: at.y + (point.y - at.y) * eased))
+            return CATransform3DMakeAffineTransform(counter(scale: zoom / wanted, from: looking,
+                                                            to: destination, about: anchor))
+        }
+        travel.calculationMode = .linear
         travel.duration = seconds
-        // The same ease-out the ticked flight uses, so the two configurations are the same movement
-        // measured two ways rather than two movements.
-        travel.timingFunction = CAMediaTimingFunction(name: .easeOut)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.setAffineTransform(.identity)
         layer.add(travel, forKey: "canvasFlight")
         CATransaction.commit()
+
+        // Landed: the drawn region and the real one agree again, so the cards left behind can go.
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.travelling == travelledFrom else { return }
+                self.travelling = nil
+                self.board.refreshVisibleCards()
+                self.board.settlePageBudget()
+            }
+        }
     }
+
+    /// One frame of a transform flight: the board drawn `scale` of its true size, with `looking` — the
+    /// point the crossing has travelled to by now — sitting where the destination's centre is.
+    ///
+    /// **Conjugated by the anchor**, because a layer's transform is applied around its anchor point: a
+    /// matrix composed in view coordinates lands offset by it otherwise. On this board the anchor is
+    /// (0, 0) and the conjugation is a no-op, which is worth keeping rather than relying on.
+    private func counter(scale: CGFloat, from looking: NSPoint, to destination: NSPoint,
+                         about anchor: CGPoint) -> CGAffineTransform {
+        let asItWas = CGAffineTransform(translationX: -looking.x, y: -looking.y)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: destination.x, y: destination.y))
+        return CGAffineTransform(translationX: anchor.x, y: anchor.y)
+            .concatenating(asItWas)
+            .concatenating(CGAffineTransform(translationX: -anchor.x, y: -anchor.y))
+    }
+
+    /// The region the board is still *drawing* while a transform flight runs — the view it is
+    /// counter-transformed to look like — in canvas coordinates. Nil the rest of the time.
+    ///
+    /// **A flight that arrives first leaves behind the cards it flew past.** `buildNodeViews` keeps the
+    /// views near what is visible and throws the rest away, and this flight makes the visible rect the
+    /// destination's in its first frame while the compositor is still showing the source. So the cards
+    /// spread around a canvas were torn down as the crossing began and had nothing left to fly with:
+    /// they arrived in their tiles having never moved. While this is set the board keeps both regions.
+    private(set) var travelling: CanvasRect?
 
     /// When a transform flight is due to land, so `isFlying` can answer for it as well. Left set
     /// afterwards rather than cleared on a timer: it is a time in the past, which answers false.

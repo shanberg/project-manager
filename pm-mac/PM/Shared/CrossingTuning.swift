@@ -55,6 +55,17 @@ struct CrossingTuning: OptionSet {
     /// how it looks** — softness on the way through a long zoom-out, and a click landing on the
     /// destination's geometry — which no frame count can answer. `pmpanel://tuning?zoom=transform`
     /// holds it on so it can be watched.
+    ///
+    /// **Watched, and parked — it does not read as a crossing.** With it on, a canvas becoming a
+    /// workspace looks like the board being scaled, not like cards gathering into tiles, which is the
+    /// one thing the animation exists to say (§7k: "six cards appearing in a grid says nothing about
+    /// which card went where"). Every measurement says the movement is there: at the midpoint of a
+    /// crossing the card's presented frame is identical under both configurations, and the board's
+    /// layer is at 0.869 where the geometric curve wants 0.879. So the geometry is right and the
+    /// reading of it is wrong — most likely because every card is rasterised wearing its destination
+    /// face and then scaled, so a uniform scale is the whole of what the eye is given. Not shipped,
+    /// and not deleted: what is wrong with it is a perception, and the next person to try this should
+    /// see the numbers before spending the night finding them again.
     static let zoomAsTransform = CrossingTuning(rawValue: 1 << 1)
 
     /// What the app does when nobody is benching.
