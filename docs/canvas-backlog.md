@@ -119,19 +119,28 @@ the same one 3 is parked on, met in a new place.
 Not free, then: ⌥ cannot mean both. Worth deciding both at once, since a person who has learnt ⌥-drag
 from Figma has also learnt ⌥ for no-snapping from everywhere else.
 
-### 5. Cards that are just an image
+### 5. Cards that are just an image — **built**
 
-An image card letterboxes: `scaleProportionallyUpOrDown`
-([CanvasFileNodeView.swift:145](../pm-mac/PM/Canvas/CanvasFileNodeView.swift:145)), so a board of
-photographs is a board of grey margins in a dozen different proportions.
+An image card letterboxed every picture, so a board of photographs was a board of grey margins in a
+dozen different proportions.
 
-Sketch: when the card's aspect ratio is within some tolerance of the image's, fill instead of fit —
-the crop is invisible at that tolerance and the board tidies itself. Beyond the tolerance, keep
-fitting, because a deliberate wide crop of a tall picture is a decision.
+A card whose shape is within **8%** of the picture's now fills instead, and the overflow is clipped;
+beyond that it goes on fitting, because a card deliberately shaped against its picture is a decision
+and filling it would throw away the composition the card was made for. See
+[CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift) — built around `NSImageView` so a GIF
+still animates and the picture still names itself to VoiceOver, with the fill done by *layout*: the
+image view is given the smallest frame of the picture's own shape that covers the card, centred, and
+the card clips.
 
-Open: is the tolerance a preference, a per-card switch, or a constant nobody sees? Also whether a
-resize should *offer* the image's own aspect ratio as a snap, which 2 would then have to say out
-loud.
+The tolerance is **a constant nobody sees**, which was the open question. A preference is a question
+about every picture, asked once, in a window nobody opens, to change a thing you would rather judge
+per card; a per-card switch is a control on a card whose entire content is a picture, for a few per
+cent of its edges. The thing to do with a card that is the wrong shape for its picture is resize the
+card, and this follows.
+
+Still open, and now the whole of what is left here: whether a resize should *offer* the picture's own
+aspect ratio as a snap, which 2 would then have to say out loud — and which would make the fill
+something you land on deliberately rather than something that happens to be true.
 
 ### 6. Dropping files on the board — verify, then polish
 

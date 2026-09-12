@@ -146,8 +146,10 @@ final class CanvasFileNodeView: CanvasNodeView {
 
         switch url.pathExtension.lowercased() {
         case "png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp":
-            let image = NSImageView()
-            image.imageScaling = .scaleProportionallyUpOrDown
+            // Fitted, or filling the card when the card is nearly the picture's own shape — which is
+            // what keeps a board of photographs from being a board of grey margins. See
+            // `CanvasPictureView`, which owns that judgement and the reason it is not a setting.
+            let image = CanvasPictureView()
             image.image = NSImage(contentsOf: url)
             image.setAccessibilityLabel(url.lastPathComponent)
             return image
