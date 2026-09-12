@@ -1341,8 +1341,17 @@ is crossing — which it did not yet, because the flight marked itself as under 
 review landed a frame into the flight and applied the budget synchronously: one 181ms pass inside a 350ms
 crossing, which is why the transform measured *worse* than the ticked flight on the way out. Marked
 before the jump, the pass goes back to the settle where the ticked flight has it, and the crossing out is
-clean. **What that 110ms pass in the settle costs is now the peek's largest remaining cost**, and it is
-the same page-budget question as the first bullet above rather than anything about the zoom.
+clean.
+
+**And the page budget's pass went with it, because a peek stopped throwing the board away.** That 110ms
+was three renderers being *started*: at a peek's zoom the keep-alive region is about one card wide, so
+every other card on the board was torn down for the seconds you spent reading this one and built again on
+the way out — `peek in (8 views)` → `peek out (5 views)` in the meter's own labels, and `canvas pages
+live: 4 of 4` → `7 of 7` in the log, once per round trip. The board already knows exactly where it is
+going back to, so `buildNodeViews` now keeps that region as well as the visible one. Nothing is torn
+down, the pages never stop, and the budget has nothing to decide. **Thirty-six peeks, every configuration:
+22 of 22 frames in the crossing and 52 of 52 in the settle, worst frame 17ms, no page ever restarted.**
+The journey is finished; what is left in `CrossingTuning` is about the journeys where cards gather.
 
 ### The order it is built in
 

@@ -357,6 +357,22 @@ final class CanvasBoardView: NSView {
     /// The card Space brought close while picking, and where the board was looking before it did, so
     /// that putting it back is exact. See `beginPeek`.
     var peeking: (card: String, zoom: CGFloat, centre: CanvasPoint)?
+
+    /// The board a peek will return to, in canvas coordinates — the window as it will be at the zoom and
+    /// centre `peeking` recorded. Nil when there is no peek to come back from.
+    ///
+    /// Measured from the region the board can see *now*, whatever zoom that is, so it answers the same
+    /// rectangle whether it is asked mid-flight — where a transform flight has already jumped the
+    /// visible rect to the peek's own zoom — or after the peek has landed. See `buildNodeViews`.
+    private var peekOrigin: CanvasRect? {
+        guard let peeking else { return nil }
+        let visible = canvasRect(visibleRect)
+        let ratio = liveScale / max(0.0001, Double(peeking.zoom))
+        let width = visible.width * ratio
+        let height = visible.height * ratio
+        return CanvasRect(x: peeking.centre.x - width / 2, y: peeking.centre.y - height / 2,
+                          width: width, height: height)
+    }
     /// Where the pointer is while a tile is dragged, which is where its proxy is drawn. See
     /// `CanvasOverlayView.drawCarried`.
     var dragPoint: CanvasPoint?
@@ -605,6 +621,15 @@ final class CanvasBoardView: NSView {
         // `CanvasScrollView.travelling`.
         if let travelling = scrollView?.canvasScroll?.travelling {
             keep = keep.union(travelling)
+        }
+        // **A peek is an excursion with a return ticket.** At the zoom a peek arrives at, the keep-alive
+        // region is about one card wide, so every other card on the board was torn down for the two
+        // seconds you spent reading this one and built again on the way out — and a web card rebuilt is
+        // a renderer started. Measured: three of them, 110-180ms in the settle after a peek out, which
+        // was the largest thing left in that journey once the zoom went to the compositor. The board
+        // knows exactly where it is going back to (`peeking`), so it keeps that region as well.
+        if let peekOrigin {
+            keep = keep.union(peekOrigin)
         }
 
         var wanted: Set<String> = []
