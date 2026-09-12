@@ -115,4 +115,68 @@ final class MarkdownImagesTests: XCTestCase {
         XCTAssertEqual(markdownImageEmbed(for: file, relativeTo: note, alt: "Pasted image"),
                        "![Pasted image](attachments/Pasted%20image%201.png)")
     }
+
+    // MARK: Copying a file that is already one
+
+    /// A file dropped on a board from outside the vault, copied in: same folder as a pasted image,
+    /// but keeping its own name, which is most of what its card will show.
+    func testCopyingKeepsTheFilesOwnNameAndLeavesTheOriginal() throws {
+        let (vault, outside) = try twoFolders()
+        let note = vault.appendingPathComponent("Boards/board.canvas")
+        let original = outside.appendingPathComponent("Spec.md")
+        try "the spec".write(to: original, atomically: true, encoding: .utf8)
+
+        let copied = try copyNoteAttachment(original, forNoteAt: note)
+
+        XCTAssertEqual(copied.lastPathComponent, "Spec.md")
+        XCTAssertEqual(copied.deletingLastPathComponent().lastPathComponent, markdownAttachmentsFolder)
+        XCTAssertEqual(try String(contentsOf: copied, encoding: .utf8), "the spec")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path),
+                      "the file was moved rather than copied")
+    }
+
+    /// The same file twice is two files. Overwriting would quietly change what an existing card on the
+    /// board is pointing at, which is the one outcome worth ruling out here.
+    func testCopyingTheSameNameTwiceDoesNotOverwrite() throws {
+        let (vault, outside) = try twoFolders()
+        let note = vault.appendingPathComponent("Boards/board.canvas")
+        let first = outside.appendingPathComponent("Spec.md")
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        let second = outside.appendingPathComponent("elsewhere/Spec.md")
+        try FileManager.default.createDirectory(at: second.deletingLastPathComponent(),
+                                               withIntermediateDirectories: true)
+        try "second".write(to: second, atomically: true, encoding: .utf8)
+
+        let one = try copyNoteAttachment(first, forNoteAt: note)
+        let two = try copyNoteAttachment(second, forNoteAt: note)
+
+        XCTAssertEqual(one.lastPathComponent, "Spec.md")
+        XCTAssertEqual(two.lastPathComponent, "Spec-1.md")
+        XCTAssertEqual(try String(contentsOf: one, encoding: .utf8), "first")
+        XCTAssertEqual(try String(contentsOf: two, encoding: .utf8), "second")
+    }
+
+    /// A file with no extension — a `Makefile`, a folder someone dragged in — must not land with a
+    /// trailing dot on the end of its name.
+    func testAFileWithNoExtensionKeepsItsBareName() throws {
+        let (vault, outside) = try twoFolders()
+        let note = vault.appendingPathComponent("Boards/board.canvas")
+        let makefile = outside.appendingPathComponent("Makefile")
+        try "all:".write(to: makefile, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(try copyNoteAttachment(makefile, forNoteAt: note).lastPathComponent, "Makefile")
+        XCTAssertEqual(try copyNoteAttachment(makefile, forNoteAt: note).lastPathComponent, "Makefile-1")
+    }
+
+    private func twoFolders() throws -> (vault: URL, outside: URL) {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pm-copy-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let vault = root.appendingPathComponent("Vault")
+        let outside = root.appendingPathComponent("Downloads")
+        for folder in [vault.appendingPathComponent("Boards"), outside] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        return (vault, outside)
+    }
 }

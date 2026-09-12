@@ -180,3 +180,43 @@ public func saveNoteAttachment(_ data: Data, ext: String, baseName: String = pas
     try data.write(to: file, options: .atomic)
     return file
 }
+
+/// Copy a file that is *already* a file into the attachments folder beside `note`, keeping its own
+/// name, and say where it landed.
+///
+/// The same place and the same reasoning as `saveNoteAttachment` — one folder down from the document
+/// that refers to it, so the reference stays true wherever the vault is opened and whatever the
+/// project folder is renamed to. What differs is the name: a pasted image has none of its own and gets
+/// a timestamp, and a file dropped on a board is called something, which is most of what the card
+/// will show.
+///
+/// Nothing is moved and nothing is overwritten: `availableAttachmentURL` steps past whatever is there,
+/// so dropping the same file twice leaves `Spec.md` and `Spec-1.md` rather than one of them silently
+/// becoming the other.
+@discardableResult
+public func copyNoteAttachment(_ file: URL, forNoteAt note: URL) throws -> URL {
+    let folder = note.deletingLastPathComponent()
+        .appendingPathComponent(markdownAttachmentsFolder, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let name = file.deletingPathExtension().lastPathComponent
+    let base = name.isEmpty ? "File" : name
+    let ext = file.pathExtension
+    // A file with no extension at all — a `Makefile`, a folder — would otherwise be asked for as
+    // `Makefile.` and land with a trailing dot.
+    let landing = ext.isEmpty ? availableUnextendedURL(base: base, in: folder)
+                              : availableAttachmentURL(base: base, ext: ext, in: folder)
+    try FileManager.default.copyItem(at: file, to: landing)
+    return landing
+}
+
+/// `availableAttachmentURL` for something with no extension to put after the dot.
+public func availableUnextendedURL(base: String, in folder: URL,
+                                   exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> URL {
+    let first = folder.appendingPathComponent(base)
+    guard exists(first) else { return first }
+    for n in 1...999 {
+        let next = folder.appendingPathComponent("\(base)-\(n)")
+        if !exists(next) { return next }
+    }
+    return first
+}

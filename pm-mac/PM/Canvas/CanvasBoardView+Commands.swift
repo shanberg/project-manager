@@ -118,11 +118,81 @@ extension CanvasBoardView {
         }
     }
 
+    /// Which of `files` the vault has no path for — the ones a card can only point at absolutely.
+    ///
+    /// Pulled out as a static function of the resolver so the decision can be read and tested without
+    /// a board: it is `storablePath`'s answer, asked of each, and nothing else.
+    static func outside(_ files: [URL], of resolver: CanvasFileResolver) -> [URL] {
+        files.filter { resolver.storablePath(for: $0) == nil }
+    }
+
+    /// **Ask whether a file from outside the vault should be copied in, or pointed at where it is.**
+    ///
+    /// A canvas stores a file card's path from the vault root, and a file outside the vault has no such
+    /// path — so the card is written with an absolute one. PM reads that back correctly now (see
+    /// `CanvasFileResolver`, step 0) and Obsidian never will: it resolves the path against the vault
+    /// and finds nothing. Both answers are therefore defensible and they are not the same answer, which
+    /// is why this asks rather than deciding.
+    ///
+    /// **Copying is the default button** because it is the one that makes the card mean the same thing
+    /// in both apps, and because it is what the board already does with a pasted picture — into the
+    /// attachments folder beside the canvas, under the file's own name. Linking keeps one copy of the
+    /// file and is the right answer for something large, something that changes, or something that
+    /// lives where it lives on purpose.
+    ///
+    /// **Once per drop, not once per file**, and the whole drop takes the one answer: a folder of
+    /// markdown dragged in is one decision, and being asked six times is being asked to do the work of
+    /// the dialog.
+    ///
+    /// Asked on the next turn of the runloop, which is the part that is not merely tidiness. This is
+    /// called from inside `performDragOperation`, where AppKit's own drag loop is still unwinding; a
+    /// modal session started there is a nested event loop inside that one. The drop is reported
+    /// accepted straight away — it *was* — and the cards go up when there is an answer.
+    private func askWhereOutsidersGo(_ files: [URL], frames: [CanvasRect]) -> Bool {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let outsiders = Self.outside(files, of: store.resolver)
+            let alert = NSAlert()
+            alert.messageText = outsiders.count == 1
+                ? "\(outsiders[0].lastPathComponent) is outside your vault"
+                : "\(outsiders.count) of these files are outside your vault"
+            alert.informativeText = "A card can point at it where it is, which only PM will be able to "
+                + "follow — Obsidian resolves a card's path inside the vault. Copying it in puts it "
+                + "beside this board, where both apps can see it."
+            alert.addButton(withTitle: "Copy In")
+            alert.addButton(withTitle: "Point At It")
+            alert.addButton(withTitle: "Cancel")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                let moved = Set(outsiders)
+                commit(.files(files.map { moved.contains($0) ? self.copyIn($0) ?? $0 : $0 }),
+                       frames: frames, asking: false)
+            case .alertSecondButtonReturn:
+                commit(.files(files), frames: frames, asking: false)
+            default:
+                break
+            }
+        }
+        return true
+    }
+
+    /// Copy a dropped file into the vault, beside this board. Nil when the vault would not take it,
+    /// which leaves the card pointing at the original — a worse card than the one that was asked for,
+    /// and a better outcome than no card at all.
+    private func copyIn(_ file: URL) -> URL? {
+        do {
+            return try copyNoteAttachment(file, forNoteAt: store.url)
+        } catch {
+            Log.write("canvas file copy failed: \(error)")
+            return nil
+        }
+    }
+
     /// Make the cards `drop` describes, at `frames` — one per card, in the order `CanvasDrop` makes
     /// them. False when there turned out to be nothing to make, which for a picture with no file means
     /// the vault would not take it.
     @discardableResult
-    func commit(_ drop: CanvasDrop, frames: [CanvasRect]) -> Bool {
+    func commit(_ drop: CanvasDrop, frames: [CanvasRect], asking: Bool = true) -> Bool {
         // **In a tiled view the drop goes up as tiles**, which is what `addCard` does for every other
         // way of adding a card — a link carried out of one tile and let go in the window is a request
         // to read it beside the others. Until this, it went onto the board behind the tiles, where
@@ -146,6 +216,11 @@ extension CanvasBoardView {
             }
             insert(copied, at: nil, actionName: "Paste")
         case .files(let files):
+            // **A file from outside the vault is a question, and it is asked here.** See
+            // `askWhereOutsidersGo`; `asking` is false on the way back through it with the answer.
+            if asking, !Self.outside(files, of: store.resolver).isEmpty {
+                return askWhereOutsidersGo(files, frames: frames)
+            }
             insert(cards(files.map(file)), at: nil, actionName: files.count > 1 ? "Add Files" : "Add File")
         case .image(let data, let ext):
             guard let saved = save((data: data, ext: ext)) else { return false }

@@ -156,10 +156,14 @@ markdown file and find out what is actually missing. Suspected gaps:
   one that lands inside the vault is a vault-relative path spelled the long way and goes on through the
   drift steps as one. See `CanvasFileResolverTests`, which pins the decoy.
 
-  **What is left is the half the entry was actually about, and it is still a question**: the path PM
-  writes is one Obsidian cannot resolve. Copy the file into the vault — which is what a pasted image
-  already gets, and a much larger act on somebody's file — or keep the link and say on the card that it
-  points outside. Not a thing to decide from here,
+  **The other half is now asked rather than decided** (2026-09-12): a drop holding a file from outside
+  the vault raises one alert for the whole drop — *Copy In* (the default, since it is the answer that
+  makes the card mean the same thing in both apps, and where a pasted picture already goes: the
+  attachments folder beside the board, under the file's own name) or *Point At It*, which keeps one copy
+  of a file that is large, or changing, or living where it lives on purpose. Asked on the next turn of
+  the runloop, because the call comes from inside `performDragOperation` and a modal session started
+  there is a nested loop inside AppKit's own drag loop. See `askWhereOutsidersGo` and
+  `copyNoteAttachment`,
 - several files cascade by 30pt rather than laying out — still true
   ([CanvasDrop.swift:74](../pm-mac/PM/Canvas/CanvasDrop.swift:74)), and the same for several links.
 
