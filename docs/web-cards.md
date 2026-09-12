@@ -117,6 +117,23 @@ capture shows a stretched one. The reveal side of the same question is
 [canvas-backlog.md](canvas-backlog.md) #1 — the page is hidden until `didFinish`, which on an app-shell
 page is long after it was worth looking at.
 
-**`openInBrowser` opens the saved address, not the live one.** On a wandered card that is the wrong
-page. Probably just a bug; it is here because it is the third place in the file where "which of the two
-addresses" had to be answered and the only one that answered it differently.
+## Which of the two addresses each command means
+
+Every command on a web card has to answer this, and the answer is not the same one twice in a row. It
+is written down here because two of them used to get it wrong silently.
+
+| means the **saved** address | means the **live** one |
+|---|---|
+| Home — the whole point of it | Open in Browser |
+| Pin, which overwrites the saved one with the live one | Copy Address |
+| the placeholder's name and host: a card is *for* something | the header's field, and what VoiceOver reads |
+| Sign In / Sign Out / Block Ads — per site, and the site is the card's | Add Link/Page to Project |
+
+Open in Browser and Copy Address were on the left-hand column until they had no business being there:
+following three links out of a tracker and asking for a browser handed you the tracker — the one page
+you could already see, instead of the one you had gone to the trouble of finding.
+
+The sign-in and filtering row is the interesting one, and it stays on the left deliberately. Those are
+per *site* rather than per page, and the site a card belongs to is the site it is for; a card that has
+wandered onto an identity provider mid-redirect should not offer to sign you out of the identity
+provider.

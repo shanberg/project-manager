@@ -984,8 +984,17 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     /// Open the page in the browser — what the card's menu offers, and where a page you actually want
     /// to *use* belongs. A card is a clipping.
+    ///
+    /// **The page you are looking at, not the address on the board.** This used to open the saved one,
+    /// which meant that following three links out of a tracker and then asking for a browser handed you
+    /// the tracker — the one page you could already see, instead of the one you had gone to the trouble
+    /// of finding. Every other command in this file is explicit about which of a card's two addresses
+    /// it means, and this one had picked the wrong one silently.
+    ///
+    /// `liveURL` falls back to the saved address for a card with no page running, which is the same
+    /// answer as before for every card that never wandered.
     func openInBrowser() {
-        guard let url else { return }
+        guard let url = liveURL else { return }
         NSWorkspace.shared.open(url)
     }
 

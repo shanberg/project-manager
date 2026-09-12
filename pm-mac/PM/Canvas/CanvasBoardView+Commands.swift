@@ -1338,8 +1338,14 @@ extension CanvasBoardView {
         for id in selection { (nodeViews[id] as? CanvasLinkNodeView)?.reload() }
     }
 
+    /// Copy what the card is showing, which on a wandered card is not what the board saved for it —
+    /// the same rule Open in Browser follows, two items up the same menu.
+    ///
+    /// The document is still the answer for a card that isn't built: one scrolled out of view has no
+    /// page to ask, and its saved address is the only address anybody has.
     @objc private func copyAddress() {
         let addresses = selection.compactMap { id -> String? in
+            if let card = nodeViews[id] as? CanvasLinkNodeView { return card.liveURL?.absoluteString }
             guard case .link(let url)? = document.node(id: id)?.content else { return nil }
             return url
         }
