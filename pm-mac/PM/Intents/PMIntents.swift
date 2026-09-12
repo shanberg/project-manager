@@ -176,7 +176,7 @@ struct CompleteTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let t = try resolveTask(task)
-        try PMContract.perform("task.complete", PMContract.input(project: t.projectFolder) {
+        try PMContract.perform(.taskComplete, PMContract.input(project: t.projectFolder) {
             $0.task = t.reference
             $0.advanceFocus = true
         })
@@ -195,7 +195,7 @@ struct ReopenTaskIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Reopen \(\.$task)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        try PMContract.perform("task.reopen", PMContract.input(project: task.projectFolder) {
+        try PMContract.perform(.taskReopen, PMContract.input(project: task.projectFolder) {
             $0.task = task.reference
         })
         PMSpotlight.reindex()
@@ -216,7 +216,7 @@ struct AddTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (_, folder) = try resolveProject(project)
-        try PMContract.perform("task.add", PMContract.input(project: folder) {
+        try PMContract.perform(.taskAdd, PMContract.input(project: folder) {
             $0.text = text
             $0.due = due.map(dueString(from:))
         })
@@ -236,7 +236,7 @@ struct RenameTaskIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Rename \(\.$task) to \(\.$text)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        try PMContract.perform("task.setText", PMContract.input(project: task.projectFolder) {
+        try PMContract.perform(.taskSetText, PMContract.input(project: task.projectFolder) {
             $0.task = task.reference
             $0.text = text
         })
@@ -258,7 +258,7 @@ struct SetDueDateIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let t = try resolveTask(task)
         let value = dueString(from: due)
-        try PMContract.perform("task.setDue", PMContract.input(project: t.projectFolder) {
+        try PMContract.perform(.taskSetDue, PMContract.input(project: t.projectFolder) {
             $0.task = t.reference
             $0.due = value
         })
@@ -279,7 +279,7 @@ struct FocusTaskIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<TaskEntity> & ProvidesDialog {
         try PMFiles.setFocusedProjectKey(task.projectKey)
         PMFiles.recordRecent(projectKey: task.projectKey, name: task.projectFolder)
-        try PMContract.perform("task.focus", PMContract.input(project: task.projectFolder) {
+        try PMContract.perform(.taskFocus, PMContract.input(project: task.projectFolder) {
             $0.task = task.reference
         })
         return .result(value: task, dialog: IntentDialog(stringLiteral: "Focused “\(task.text)”."))
@@ -303,7 +303,7 @@ struct DiveInIntent: AppIntent {
         guard let target = nextDiveInLeaf(todos: list) else {
             return .result(value: nil, dialog: "No open leaf task to dive into.")
         }
-        try PMContract.perform("task.focus", PMContract.input(project: folder) {
+        try PMContract.perform(.taskFocus, PMContract.input(project: folder) {
             $0.task = target.reference
         })
         let entity = TaskEntity.make(projectKey: key, folder: folder, todo: target)

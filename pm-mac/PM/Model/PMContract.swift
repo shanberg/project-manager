@@ -27,6 +27,29 @@ extension Todo {
     }
 }
 
+extension ApiInput {
+    /// The names of the fields this input actually sets.
+    ///
+    /// By reflection rather than by encoding it: the synthesised `Codable` conformance omits nil
+    /// optionals, so the JSON keys would answer the same question — but that is a detail of how the
+    /// compiler happens to synthesise an encoder, and this is a check whose whole job is to be
+    /// trustworthy. `Mirror` asks the struct directly.
+    ///
+    /// Only used by the debug-build completeness check below, so the cost of reflection is paid in
+    /// builds that are already paying for assertions.
+    var givenFieldNames: Set<String> {
+        var names: Set<String> = []
+        for child in Mirror(reflecting: self).children {
+            guard let label = child.label else { continue }
+            // An optional that is set reflects as `.some`; one that is nil has no children at all.
+            if Mirror(reflecting: child.value).displayStyle == .optional,
+               Mirror(reflecting: child.value).children.isEmpty { continue }
+            names.insert(label)
+        }
+        return names
+    }
+}
+
 enum PMContract {
     /// How often this app's writes have had their reference healed against a document that moved.
     ///
@@ -61,14 +84,40 @@ enum PMContract {
 
     /// Run a mutation or a query. Safe off the main actor — it is file work, and the store's writes
     /// happen on its IO queue.
+    ///
+    /// Takes a `PMAction` rather than a string, so a misspelled action is a compile error here the way
+    /// it already was in Raycast's generated client. See `PMActions.generated.swift`.
     @discardableResult
-    static func perform(_ action: String, _ input: ApiInput, dryRun: Bool = false) throws -> ApiResult {
-        let result = try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "app"))
+    static func perform(_ action: PMAction, _ input: ApiInput, dryRun: Bool = false) throws -> ApiResult {
+        assertInputIsComplete(for: action, input)
+        let result = try performApi(action.rawValue, input,
+                                    options: ApiOptions(dryRun: dryRun, source: "app"))
         // A reference that had to move to find its task. The write happened and was right; this is the
         // app noticing that the list a click was based on had gone out of date underneath it, which is
         // worth saying once and quietly. See `relocations`, and docs/task-identity.md.
         if result.relocated { relocations.noteOne() }
         return result
+    }
+
+    /// **A missing required field, said at the call site rather than three frames down.**
+    ///
+    /// `ApiInput` is one struct of twenty-nine optional fields serving forty-three actions, so the
+    /// compiler cannot tell that `task.setDue` without a `due` is incomplete — the dispatcher refuses
+    /// it at runtime, and the app turns that into "that task changed on disk", which is the wrong
+    /// sentence for a bug in PM. Debug builds trap on it instead, naming the action and the field.
+    ///
+    /// Debug only, deliberately: in a release build the dispatcher's refusal is still the right
+    /// behaviour, and trapping in front of a person over a programming error is not.
+    private static func assertInputIsComplete(for action: PMAction, _ input: ApiInput) {
+        #if DEBUG
+        let given = input.givenFieldNames
+        for field in action.requiredFields where !given.contains(field) {
+            assertionFailure("\(action.rawValue) needs `\(field)`, which this input does not set")
+        }
+        for group in action.exclusiveGroups where group.filter(given.contains).count != 1 {
+            assertionFailure("\(action.rawValue) needs exactly one of \(group.joined(separator: ", "))")
+        }
+        #endif
     }
 
     /// What to put in front of a person when a write was refused.
@@ -91,32 +140,5 @@ enum PMContract {
         default:
             return api.message
         }
-    }
-
-    // MARK: Affordances
-    //
-    // The tier the headless adapters can't serve. Same names as the manifest publishes, so the
-    // vocabulary is one vocabulary even where only this adapter can act on it.
-
-    @MainActor
-    @discardableResult
-    static func performAffordance(_ action: String, store: PMStore? = nil) -> Bool {
-        switch action {
-        case "app.openWindow":
-            WindowManager.shared.openFocusedProject()
-        case "app.openInFinder":
-            guard let path = store?.projectPath else { return false }
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-        case "app.openInObsidian":
-            guard let store else { return false }
-            ObsidianLink.open(store: store)
-        case "app.showPanel":
-            FocusPanelController.shared.toggle()
-        case "app.settings":
-            SettingsWindowController.shared.show()
-        default:
-            return false
-        }
-        return true
     }
 }

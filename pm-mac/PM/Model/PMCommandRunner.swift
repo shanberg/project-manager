@@ -51,11 +51,11 @@ enum PMCommandRunner {
         // The project. Three of these are contract affordances, performed under the same names the
         // manifest publishes rather than through a second vocabulary — see `PMContract`.
         case .openWindow:
-            PMContract.performAffordance("app.openWindow", store: store)
+            PMContract.performAffordance(.appOpenWindow, store: store)
         case .openInFinder:
-            PMContract.performAffordance("app.openInFinder", store: store)
+            PMContract.performAffordance(.appOpenInFinder, store: store)
         case .openInObsidian:
-            PMContract.performAffordance("app.openInObsidian", store: store)
+            PMContract.performAffordance(.appOpenInObsidian, store: store)
         case .openInEditor:
             guard let path = store.projectPath else { return }
             CodeEditor.open(path: path)
@@ -81,7 +81,7 @@ enum PMCommandRunner {
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
         case .settings:
-            PMContract.performAffordance("app.settings", store: store)
+            PMContract.performAffordance(.appSettings, store: store)
         }
     }
 }
