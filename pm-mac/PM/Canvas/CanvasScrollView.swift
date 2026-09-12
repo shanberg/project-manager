@@ -190,9 +190,9 @@ final class CanvasScrollView: NSScrollView {
 
     /// `zoom(toFit:)` as a journey: ease to the zoom that fits `rect` in the window — never past 100% —
     /// centred on it. How a workspace zooms out to the board to pick its cards.
-    func fly(toFit rect: CanvasRect, animated: Bool, alone: Bool = false) {
+    func fly(toFit rect: CanvasRect, animated: Bool, byTransform: Bool = false) {
         guard let fit = fitting(rect) else { return }
-        fly(to: fit.zoom, centre: fit.centre, animated: animated, alone: alone)
+        fly(to: fit.zoom, centre: fit.centre, animated: animated, byTransform: byTransform)
     }
 
     /// Where `fly(toFit:)` would take the board, without going. Separate because a staged crossing asks
@@ -238,16 +238,22 @@ final class CanvasScrollView: NSScrollView {
     /// trying to answer the other's question. What must never be split across the two is a single
     /// number, which is what `HeaderChromeMotionTests` is about at the other end of the window.
     ///
-    /// **`alone` means no card is moving with it** — the zoom is the whole of the movement, as it is on
-    /// a peek. That is the one case where the flight can be handed to the compositor
-    /// (`flyByTransform`): what makes the transform unshippable elsewhere is that a board rasterised at
-    /// its destination and uniformly scaled reads as a scale rather than as cards gathering into tiles,
-    /// and where nothing is gathering there is nothing to read wrongly. See `CrossingTuning`.
-    func fly(to zoom: CGFloat, centre point: CanvasPoint, animated: Bool, alone: Bool = false) {
+    /// **`byTransform` hands the flight to the compositor** (`flyByTransform`) instead of travelling the
+    /// magnification. Cheap, and the caller has to have earned it: a board rasterised at its destination
+    /// and uniformly scaled reads as a *scale*, so it says nothing about which card went where. Two
+    /// callers can say that doesn't matter — a peek, where no card is moving at all, and a crossing that
+    /// offsets the two movements in phase so they are not describing the same trajectory
+    /// (`CanvasBoardView.cross`). See `CrossingTuning`.
+    ///
+    /// `curve` and `seconds` are for that second caller: the zoom is one half of a movement whose halves
+    /// must not spend themselves at the same rate. Left alone, this is the ease-out over 0.3s that every
+    /// other journey uses.
+    func fly(to zoom: CGFloat, centre point: CanvasPoint, animated: Bool, byTransform: Bool = false,
+             curve: Motion.Phase = .leads, seconds fly: Double = 0.3) {
         ticker.stop()
         flight = nil
         let wanted = min(max(zoom, Self.minimumZoom), Self.maximumZoom)
-        let seconds = animated ? Motion.duration(0.3) : 0
+        let seconds = animated ? Motion.duration(fly) : 0
         let from = magnification
         let at = board.canvasPoint(NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY))
         // **On the display's clock**, rather than a `Timer` at 1/60, and read from it rather than
@@ -261,8 +267,9 @@ final class CanvasScrollView: NSScrollView {
         // `CrossingTuning`, does a run measuring what the zoom flight costs.
         let flies = !CrossingTuning.current.contains(.skipZoomFlight)
         if flies, seconds > 0, from != wanted || at != point, board.layer != nil,
-           alone || CrossingTuning.current.contains(.zoomAsTransform) {
-            return flyByTransform(from: from, at: at, to: wanted, centre: point, seconds: seconds)
+           byTransform || CrossingTuning.current.contains(.zoomAsTransform) {
+            return flyByTransform(from: from, at: at, to: wanted, centre: point, seconds: seconds,
+                                  curve: curve)
         }
         guard flies, seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
             magnification = wanted
@@ -323,7 +330,8 @@ final class CanvasScrollView: NSScrollView {
     /// wrong: a transform is applied around the anchor point, so one composed in view coordinates lands
     /// offset by it unless it is conjugated as it is here.
     private func flyByTransform(from: CGFloat, at: CanvasPoint, to wanted: CGFloat,
-                                centre point: CanvasPoint, seconds: Double) {
+                                centre point: CanvasPoint, seconds: Double,
+                                curve: Motion.Phase = .leads) {
         ticker.stop()
         flight = nil
         // Measured before the jump: this is the region the compositor goes on showing while the
@@ -363,7 +371,7 @@ final class CanvasScrollView: NSScrollView {
         let travel = CAKeyframeAnimation(keyPath: "transform")
         travel.values = (0...steps).map { step -> CATransform3D in
             let fraction = Double(step) / Double(steps)
-            let eased = 1 - pow(1 - fraction, 3)
+            let eased = curve.eased(fraction)
             // Exactly `stepFlight`'s two lines: the zoom travels as a ratio, the centre as a distance.
             let zoom = from * pow(wanted / from, CGFloat(eased))
             let looking = board.viewPoint(CanvasPoint(x: at.x + (point.x - at.x) * eased,

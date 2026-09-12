@@ -35,4 +35,39 @@ enum Motion {
     /// A SwiftUI animation, or none — `nil` is what `withAnimation` and `.animation(_:value:)` take to
     /// mean "change immediately".
     static func animation(_ wanted: Animation) -> Animation? { isReduced ? nil : wanted }
+
+    /// One movement made of two things that must not happen at the same rate.
+    ///
+    /// **A crossing is two changes — the cards' places and the board's zoom — and running both on one
+    /// curve is why they cancel**: the eye is given two movements describing the same trajectory and
+    /// reads one. Sequencing them instead reads as two beats, which is worse in a different way. A phase
+    /// offset is the way out: both start together, both end together, and what differs is *when* each
+    /// spends its movement. The part that leads is most of the way there before the part that trails has
+    /// properly begun, and between them they trace a curved path rather than a straight one or a corner.
+    ///
+    /// Both are given twice — as a timing function, which is all AppKit will take for a view's frame,
+    /// and as arithmetic, because a transform flight samples its own curve into keyframes
+    /// (`CanvasScrollView.flyByTransform`). The two spellings are the standard cubics and match to
+    /// within a frame; they must be changed together.
+    enum Phase {
+        /// Spends itself early: two thirds done at a third of the way through.
+        case leads
+        /// Holds, then goes: a tenth done where `leads` is two thirds.
+        case trails
+
+        var timing: CAMediaTimingFunction {
+            switch self {
+            // easeOutCubic and easeInOutCubic, as the CSS curves of the same names.
+            case .leads: CAMediaTimingFunction(controlPoints: 0.33, 1, 0.68, 1)
+            case .trails: CAMediaTimingFunction(controlPoints: 0.65, 0, 0.35, 1)
+            }
+        }
+
+        func eased(_ fraction: Double) -> Double {
+            switch self {
+            case .leads: 1 - pow(1 - fraction, 3)
+            case .trails: fraction < 0.5 ? 4 * pow(fraction, 3) : 1 - pow(-2 * fraction + 2, 3) / 2
+            }
+        }
+    }
 }

@@ -741,7 +741,12 @@ final class CanvasBoardView: NSView {
     /// Both halves matter. The animation is what makes a tiled view legible — six cards appearing in a
     /// grid says nothing about which card went where, and six cards flying there says all of it — and
     /// it is the same argument in reverse on the way out.
-    func setLayout(_ next: CanvasLayout, animated: Bool) {
+    ///
+    /// `seconds` and `timing` are the crossing's, for the one caller that gives the cards and the zoom
+    /// different curves so that one leads and the other trails — see `CanvasBoardView.cross`. Everything
+    /// else takes the spring over 0.3s that a card landing in a slot has always used.
+    func setLayout(_ next: CanvasLayout, animated: Bool,
+                   seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.spring) {
         // **While picking, the board is what is shown**, whatever the tiling would lay out. Every change
         // to the workspace a click makes there comes through here with the tiles' layout, and taking it
         // would fly the cards back into tiles in the middle of choosing them.
@@ -764,7 +769,7 @@ final class CanvasBoardView: NSView {
             settlePageBudget()
             return
         }
-        settleIntoLayout()
+        settleIntoLayout(seconds: seconds, timing: timing)
         overlay.needsDisplay = true
         needsDisplay = true
     }
@@ -774,12 +779,12 @@ final class CanvasBoardView: NSView {
     /// Its own method because a reorder ends without the layout changing at all: the order was applied
     /// as you crossed, and what is left on mouse-up is one card that has been held away from a slot it
     /// already owns. `setLayout` would decline that as a no-op.
-    func settleIntoLayout() {
+    func settleIntoLayout(seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.spring) {
         settling += 1
         let generation = settling
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Motion.duration(0.3)
-            context.timingFunction = Motion.spring
+            context.duration = Motion.duration(seconds)
+            context.timingFunction = timing
             context.allowsImplicitAnimation = true
             animatesLayout = true
             layoutNodeViews()

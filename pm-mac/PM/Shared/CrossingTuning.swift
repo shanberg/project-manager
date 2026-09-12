@@ -69,7 +69,7 @@ struct CrossingTuning: OptionSet {
     ///
     /// **Shipping where nothing gathers, without this flag.** The objection is about cards being read
     /// against a scale, so it does not reach a journey where the zoom is the whole movement: a peek asks
-    /// for the transform outright (`CanvasScrollView.fly(to:centre:animated:alone:)`), and this flag is
+    /// for the transform outright (`CanvasScrollView.fly(to:centre:animated:byTransform:curve:seconds:)`), and this flag is
     /// only what turns it on for the journeys that also move cards. Measured on peek the same way, six
     /// round trips apiece: peeking in dropped 2, 3, 2, 1, 3 and 3 frames of 22 on the ticked flight and
     /// 1, 1, 0, 0, 0 and 1 on the transform.
@@ -91,7 +91,7 @@ struct CrossingTuning: OptionSet {
     /// and the window then zooms onto what they made. Coming out, the board zooms out first and the
     /// cards fly home across a board you can see all of. Either way the movement that says *which card
     /// went where* happens at the zoom that shows it, and the zoom is alone when it travels — which is
-    /// what lets it take the compositor path (`CanvasScrollView.fly(to:centre:animated:alone:)`) and be
+    /// what lets it take the compositor path (`CanvasScrollView.fly`) and be
     /// cheap as well as legible.
     ///
     /// It costs the crossing its length: two beats of 0.3s overlapping slightly, against one of 0.3s.
@@ -108,6 +108,22 @@ struct CrossingTuning: OptionSet {
     /// nothing is composed with anything.
     static let stagedZoom = CrossingTuning(rawValue: 1 << 2)
 
+    /// The same offset, in phase instead of in sequence: both halves start together and end together,
+    /// over 0.42s, and the curves decide which spends its movement first.
+    ///
+    /// **Because two beats read as two beats.** Staging worked — the cards became legible and the frame
+    /// count was the best of the four — and watching it, the seam was the whole of what you saw: a
+    /// movement that stops and a second that starts. What the separation is actually for is only that
+    /// the two halves not describe the same trajectory, and time-sharing them is a blunt way to get
+    /// that. Offsetting their easing gets the same thing with nothing to see: at a third of the way
+    /// through, the leader is two thirds done and the trailer a tenth, and the path the pair trace
+    /// between them is a curve rather than a diagonal or a corner. See `Motion.Phase`.
+    ///
+    /// Which half leads is the staged rule unchanged — the cards move at whichever zoom shows the whole
+    /// journey — and the zoom still travels on the compositor, which is what keeps a card's frame
+    /// meaning one thing for the length of the crossing while the two curves disagree.
+    static let curvedCrossing = CrossingTuning(rawValue: 1 << 3)
+
     /// What the app does when nobody is benching.
     static let shipping: CrossingTuning = []
 
@@ -121,6 +137,7 @@ struct CrossingTuning: OptionSet {
         ("shipping+nozoom", [.skipZoomFlight]),
         ("shipping+transform", [.zoomAsTransform]),
         ("shipping+staged", [.stagedZoom]),
+        ("shipping+curved", [.curvedCrossing]),
     ]
 
     /// Kept as a separate name because `CrossingBench` takes one, and because a longer list will be

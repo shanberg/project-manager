@@ -242,21 +242,43 @@ extension CanvasBoardView {
     /// closes on what they made; zooming out, the window widens first and they fly home across a board
     /// you can see all of. The zoom is then travelling alone, so it goes by the compositor.
     ///
+    /// **Or one movement on a curved path**, which is `CrossingTuning.curvedCrossing` and is what two
+    /// beats turned out to want to be. Both halves start together and end together, over a little longer
+    /// than a crossing used to take, and what differs is *when* each spends its movement: the leader is
+    /// two thirds done a third of the way through, where the trailer has barely begun. So there is no
+    /// handover to see — nothing stops and nothing starts — and the two are still not describing the
+    /// same trajectory, which is the whole of what made them cancel. The rule about which leads is the
+    /// staged rule unchanged: the cards move at whichever zoom shows the whole journey. See
+    /// `Motion.Phase`.
+    ///
     /// Generation-counted like `settleIntoLayout`, because the second beat is a message to a board that
     /// may have been asked for something else in the meantime — ⌥B twice in half a second — and the
     /// stalest thing you can do to a crossing is finish the one before it.
     func cross(to zoom: CGFloat, centre: CanvasPoint, layout next: CanvasLayout, animated: Bool) {
         let scroll = scrollView?.canvasScroll
-        guard animated, CrossingTuning.current.contains(.stagedZoom), let scroll else {
+        let tuning = CrossingTuning.current
+        guard animated, let scroll,
+              tuning.contains(.stagedZoom) || tuning.contains(.curvedCrossing) else {
             scroll?.fly(to: zoom, centre: centre, animated: animated)
             setLayout(next, animated: animated)
+            return
+        }
+        if tuning.contains(.curvedCrossing) {
+            // The board is going to arrive at its magnification in this frame and be drawn as if it
+            // hadn't, so a card's frame means the same thing for the whole crossing. That is what makes
+            // giving the two halves different curves safe — see `leaveTiling` on the hazard it replaces.
+            let widening = zoom < scroll.magnification
+            scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true,
+                       curve: widening ? .leads : .trails, seconds: Self.curvedCrossing)
+            setLayout(next, animated: true, seconds: Self.curvedCrossing,
+                      timing: widening ? Motion.Phase.trails.timing : Motion.spring)
             return
         }
         crossingStage += 1
         let generation = crossingStage
         let widening = zoom < scroll.magnification
         if widening {
-            scroll.fly(to: zoom, centre: centre, animated: true, alone: true)
+            scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true)
         } else {
             setLayout(next, animated: true)
         }
@@ -267,7 +289,7 @@ extension CanvasBoardView {
                     self.setLayout(next, animated: true)
                 } else {
                     self.scrollView?.canvasScroll?.fly(to: zoom, centre: centre, animated: true,
-                                                       alone: true)
+                                                       byTransform: true)
                 }
             }
         }
@@ -277,6 +299,12 @@ extension CanvasBoardView {
     /// lands, so the crossing reads as one gesture in two parts rather than as a stop and a start. The
     /// cards are on a spring and have all but arrived by here.
     private static var stageHandover: Double { Motion.duration(0.3) * 0.8 }
+
+    /// How long a curved crossing takes. Longer than the 0.3s both halves used to share, because the
+    /// halves no longer overlap perfectly and the trailing one needs room to finish without hurrying —
+    /// and not much longer, because what was wrong with two beats of 0.3s was as much the 0.6 as the
+    /// two.
+    private static let curvedCrossing = 0.42
 
     // MARK: Arriving from the pane before this one
 
@@ -831,7 +859,7 @@ extension CanvasBoardView {
     ///
     /// Not a frame: a frame is its cards, and there is nothing in one to read.
     ///
-    /// **The zoom travels on the compositor** — `alone: true`, which hands the flight to
+    /// **The zoom travels on the compositor** — `byTransform: true`, which hands the flight to
     /// `CanvasScrollView.flyByTransform` instead of rescaling every layer on every frame. A peek is the
     /// one crossing where that is safe to ship: what makes the transform unshippable on the others is
     /// that a board scaled as one image says nothing about which card went where, and here no card is
@@ -850,7 +878,7 @@ extension CanvasBoardView {
         // A zoom flight with a page at the end of it — the card wakes as it arrives, on the budget's
         // settling pass, which is inside the meter's window.
         FrameMeter.measure("peek in (\(nodeViews.count) views, \(pagesLive.count) live)", on: self)
-        scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true, alone: true)
+        scroll.fly(to: CGFloat(view.zoom), centre: view.centre, animated: true, byTransform: true)
         overlay.needsDisplay = true
     }
 
@@ -859,7 +887,8 @@ extension CanvasBoardView {
         guard let peek = peeking else { return }
         peeking = nil
         FrameMeter.measure("peek out (\(nodeViews.count) views)", on: self)
-        scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true, alone: true)
+        scrollView?.canvasScroll?.fly(to: peek.zoom, centre: peek.centre, animated: true,
+                                      byTransform: true)
         overlay.needsDisplay = true
     }
 
