@@ -33,9 +33,10 @@ final class MentionPopover {
 
     /// What the list is showing and where the highlight is. Published so the hosted SwiftUI redraws;
     /// owned here so the panel and the key handler read one source.
-    final class Model: ObservableObject {
-        @Published var items: [Item] = []
-        @Published var selection = 0
+    @Observable
+final class Model {
+        var items: [Item] = []
+        var selection = 0
     }
 
     private let model = Model()
@@ -126,7 +127,7 @@ final class MentionPopover {
 /// The rows. Deliberately plain: a mention list is read in the half-second between typing and pressing
 /// Return, so it shows the name, the code that names it, and nothing else that has to be read past.
 private struct MentionList: View {
-    @ObservedObject var model: MentionPopover.Model
+    var model: MentionPopover.Model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

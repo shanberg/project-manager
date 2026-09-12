@@ -14,7 +14,7 @@ struct TaskMenu: View {
     /// this row. Commands that need a single subject (edit, wrap, the positional adds) are hidden on
     /// a multi-selection rather than silently acting on one arbitrary member of it.
     var targets: [Todo] = []
-    @ObservedObject var store: PMStore
+    var store: PMStore
     /// Open (never toggle) the given editor kind on this task.
     let openEditor: (EditorTarget.Kind) -> Void
     /// Seed the add position, then open the add editor.

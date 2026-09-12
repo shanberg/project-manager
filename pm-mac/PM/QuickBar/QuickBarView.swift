@@ -8,7 +8,7 @@ import SwiftUI
 /// a row while you keep typing, and it's why the selection is drawn here rather than left to a `List`,
 /// which would want focus of its own to show one.
 struct QuickBarView: View {
-    @ObservedObject var model: QuickBarModel
+    @Bindable var model: QuickBarModel
     @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
     @FocusState private var fieldFocused: Bool
     /// The note editor's laid-out height, as it reports it. Clamped by `clampedNoteHeight`, which is

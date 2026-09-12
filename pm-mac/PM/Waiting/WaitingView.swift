@@ -12,7 +12,7 @@ import PmLib
 /// see `waitingGroups` for why that band goes first. Everything else is the same list in the order it
 /// will still be in tomorrow.
 struct WaitingView: View {
-    @StateObject private var model = WaitingModel()
+    @State private var model = WaitingModel()
     /// Whether a project name keeps its code — app-wide, see `ProjectCodes`. Bound so the list
     /// re-labels itself the moment it's toggled.
     @AppStorage(ProjectCodes.defaultsKey) private var showsCode = true

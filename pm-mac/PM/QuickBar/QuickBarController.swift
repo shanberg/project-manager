@@ -1133,11 +1133,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // The contract's third tier. Only an adapter running inside the app can perform these, so
         // they go through the same names the manifest publishes rather than a second vocabulary.
         case .openWindow:
-            PMContract.performAffordance("app.openWindow", store: store)
+            PMContract.performAffordance(.appOpenWindow, store: store)
         case .openInFinder:
-            PMContract.performAffordance("app.openInFinder", store: store)
+            PMContract.performAffordance(.appOpenInFinder, store: store)
         case .openInObsidian:
-            PMContract.performAffordance("app.openInObsidian", store: store)
+            PMContract.performAffordance(.appOpenInObsidian, store: store)
         case .editDetails:
             WindowManager.shared.openFocusedProject().editDetails()
         case .projectSettings:
@@ -1152,7 +1152,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
         case .settings:
-            PMContract.performAffordance("app.settings", store: store)
+            PMContract.performAffordance(.appSettings, store: store)
         }
         // Everything that fell through here either had no receipt to give or found nothing to act on.
         hide(restoringFocus: !(stays || target != nil))
@@ -1212,7 +1212,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             return
         }
         store.openCurrentSession { index in
-            guard !label.isEmpty else {
+            // No session opened, or none to label: either way the bar's receipt is owed now. The failure,
+            // if there was one, is already on the store for `settle` to read.
+            guard let index, !label.isEmpty else {
                 then()
                 return
             }

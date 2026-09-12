@@ -8,12 +8,13 @@ import PmLib
 /// put its stale idea of every other key back on disk. That also means a save touches exactly the key
 /// that changed, which is what `pm config set` does.
 @MainActor
-final class ConfigStore: ObservableObject {
+@Observable
+final class ConfigStore {
     static let shared = ConfigStore()
 
-    @Published private(set) var config: PmConfig?
+    private(set) var config: PmConfig?
     /// Why the config couldn't be read, for the pane to show instead of an empty form.
-    @Published private(set) var loadError: String?
+    private(set) var loadError: String?
 
     private init() { reload() }
 

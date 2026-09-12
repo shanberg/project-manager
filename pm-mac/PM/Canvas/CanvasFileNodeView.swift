@@ -49,7 +49,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     var shows: CanvasCardShows { CanvasCardShows.of(node) }
     /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
     /// here, from the project's own window, or from anywhere else holding the same store.
-    private var projectEdits: AnyCancellable?
+    private var projectEdits: ObservationRelay?
     private var lastUndoDepth = 0
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
@@ -69,7 +69,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// and the SwiftUI content redraws around whatever it was holding.
     ///
     /// Guarded on a difference because `update` runs on every document change and every layout pass,
-    /// and an unguarded `@Published` write does not care whether the value moved.
+    /// and an unguarded write to an observed property does not care whether the value moved.
     override func update(node: CanvasNode, scale: Double) {
         super.update(node: node, scale: scale)
         let wanted = CanvasCardShows.of(node)
@@ -217,13 +217,14 @@ final class CanvasFileNodeView: CanvasNodeView {
         // whichever surface they made it on. Watching that rather than wrapping each call site is what
         // catches the ones made through `TaskMenu`, which talks to the store directly.
         lastUndoDepth = store.undoStack.count
-        projectEdits = store.$undoStack
-            .sink { [weak self, weak store] stack in
-                guard let self, let store else { return }
-                defer { lastUndoDepth = stack.count }
-                guard stack.count > lastUndoDepth else { return }
-                board.lastEditedProject = store
-            }
+        projectEdits = ObservationRelay(tracking: { [weak store] in _ = store?.undoStack }) {
+            [weak self, weak store] in
+            guard let self, let store else { return }
+            let depth = store.undoStack.count
+            defer { lastUndoDepth = depth }
+            guard depth > lastUndoDepth else { return }
+            board.lastEditedProject = store
+        }
         return store
     }
 

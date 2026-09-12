@@ -51,7 +51,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// folder is re-scanned. A window in canvas mode has to follow it: the path is nil for the moment
     /// after a retarget, so acting only at the moment of the switch would leave the window showing the
     /// previous project's board, or an empty state for a project that has one.
-    private var canvasPathWatch: AnyCancellable?
+    private var canvasPathWatch: ObservationRelay?
+    /// The last answer acted on — `removeDuplicates` in the shape the relay replaces.
+    private struct CanvasAnswer: Equatable { let path: String?; let resolved: Bool }
+    private var lastCanvasAnswer: CanvasAnswer?
 
     let state = ProjectWindowState()
     private let split: ProjectSplitViewController
@@ -433,24 +436,31 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // Both halves of the answer: where the board is, and whether that has been looked for at all.
         // A project with no board publishes nil over nil, which is no change to see — so a window
         // watching only the path would wait on it for ever. See `PMStore.hasResolvedCanvasPath`.
-        canvasPathWatch = Publishers.CombineLatest(store.$canvasPath.removeDuplicates(),
-                                                   store.$hasResolvedCanvasPath.removeDuplicates())
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard self != nil else { return }
-                // On the next turn: this fires from inside the store's own publish, and re-entering the
-                // split view's child swap from there is a layout change during an update.
-                afterCurrentUpdate { [weak self] in
-                    guard let self else { return }
-                    if renderer == .canvas || awaitsRememberedCanvas {
-                        awaitsRememberedCanvas = false
-                        applyRememberedRenderer()
-                    }
-                    // Unconditionally, unlike before: a *notes* tab wants the board too now (§7d), and
-                    // its renderer is `.tasks`. The split answers for whether it has anything to do.
-                    split.canvasPathChanged()
+        lastCanvasAnswer = CanvasAnswer(path: store.canvasPath, resolved: store.hasResolvedCanvasPath)
+        canvasPathWatch = ObservationRelay(tracking: { [weak self] in
+            guard let self else { return }
+            _ = store.canvasPath
+            _ = store.hasResolvedCanvasPath
+        }) { [weak self] in
+            guard let self else { return }
+            // `removeDuplicates` in the shape this replaces: observation announces an assignment, not
+            // a change of value, and a reload that re-writes the same path is not news here.
+            let answer = CanvasAnswer(path: store.canvasPath, resolved: store.hasResolvedCanvasPath)
+            guard answer != lastCanvasAnswer else { return }
+            lastCanvasAnswer = answer
+            // On the next turn: this can still land inside a SwiftUI update, and re-entering the split
+            // view's child swap from there is a layout change during an update.
+            afterCurrentUpdate { [weak self] in
+                guard let self else { return }
+                if renderer == .canvas || awaitsRememberedCanvas {
+                    awaitsRememberedCanvas = false
+                    applyRememberedRenderer()
                 }
+                // Unconditionally, unlike before: a *notes* tab wants the board too now (§7d), and
+                // its renderer is `.tasks`. The split answers for whether it has anything to do.
+                split.canvasPathChanged()
             }
+        }
     }
 
     /// The renderer switch, as the two places that still call it mean it: go to the canvas, or go to

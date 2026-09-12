@@ -68,17 +68,16 @@ final class WaitingWatcher {
     var announce: ((_ title: String, _ count: Int) -> Void)?
 
     private var cancellables: Set<AnyCancellable> = []
+    private var waitRootsRelay: ObservationRelay?
     private let queue = DispatchQueue(label: "com.stuarthanberg.pm.unblock")
     private var scanning = false
 
     private init() {}
 
     func start() {
-        ProjectIndex.shared.$waitRoots
-            .sink { [weak self] roots in
-                Task { @MainActor in self?.archiveChanged(roots) }
-            }
-            .store(in: &cancellables)
+        waitRootsRelay = ObservationRelay(tracking: { _ = ProjectIndex.shared.waitRoots }) { [weak self] in
+            self?.archiveChanged(ProjectIndex.shared.waitRoots)
+        }
     }
 
     private func archiveChanged(_ roots: [ProjectIndex.WaitRoot]) {

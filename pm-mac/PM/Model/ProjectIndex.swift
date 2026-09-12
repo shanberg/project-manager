@@ -10,7 +10,8 @@ import PmLib
 /// on its own timer. Hoisting them here means the scan happens once no matter how many windows are
 /// open, and every store mirrors the result (see `PMStore.init`).
 @MainActor
-final class ProjectIndex: ObservableObject {
+@Observable
+final class ProjectIndex {
     static let shared = ProjectIndex()
 
     /// Projects ordered by notes-file mtime, newest first, each carrying cached progress/due/summary so
@@ -19,12 +20,12 @@ final class ProjectIndex: ObservableObject {
     /// Unlike the old per-store version this excludes nothing: a consumer drops whichever project it's
     /// showing (`PMStore.recents` does exactly that), which is why the cap is one higher than the eight
     /// rows a switcher wants.
-    @Published private(set) var recents: [Recent] = []
+    private(set) var recents: [Recent] = []
 
     /// Every project in the active and archive folders, newest-edited first within each group, each
     /// carrying cached progress + hero task for the project sidebar. Its (much larger) scan is gated on
     /// `retain()` — nothing pays for it while every sidebar is hidden.
-    @Published private(set) var allProjects: [ProjectEntry] = []
+    private(set) var allProjects: [ProjectEntry] = []
 
     /// Every open task across every project, for the quick bar's task search.
     ///
@@ -32,7 +33,7 @@ final class ProjectIndex: ObservableObject {
     /// notes to find its progress and hero task, so keeping the rest of the open tasks costs the read
     /// nothing — only the memory to hold them. Gated on the same `retain()`, so nothing pays for it
     /// while no sidebar and no quick bar wants it.
-    @Published private(set) var openTasks: [TaskEntry] = []
+    private(set) var openTasks: [TaskEntry] = []
 
     // MARK: Types
 
@@ -150,16 +151,20 @@ final class ProjectIndex: ObservableObject {
     /// Background queue for the recents warm (its own protected-folder scan + per-project notes reads),
     /// kept off every store's `io` queue so it can't delay a mutation/reload.
     private let recentsQueue = DispatchQueue(label: "com.stuarthanberg.pm.recents")
+    @ObservationIgnored
     private var recentsWarmedAt: Date = .distantPast
 
     /// Background queue for the sidebar's full-project scan, kept off both the stores' `io` queues and
     /// `recentsQueue` so a long list of per-project notes reads can't delay a mutation or the recents warm.
     private let projectsQueue = DispatchQueue(label: "com.stuarthanberg.pm.all-projects")
+    @ObservationIgnored
     private var allProjectsWarmedAt: Date = .distantPast
+    @ObservationIgnored
     private var waitRootsWarmedAt: Date = .distantPast
 
     /// How many sidebars are currently showing the full project list. The scan runs only while this is
     /// above zero, so a window with its sidebar hidden costs nothing.
+    @ObservationIgnored
     private var wantsAllProjectsCount = 0
     private var wantsAllProjects: Bool { wantsAllProjectsCount > 0 }
 
@@ -219,7 +224,7 @@ final class ProjectIndex: ObservableObject {
     /// Folder names only — no notes are read. That's what lets this be ungated where `allProjects`
     /// isn't: a task row has to draw its wait whether or not a sidebar is open, and three directory
     /// listings is a cost every reload can carry where a `notesShow` per project is not.
-    @Published private(set) var waitRoots: [WaitRoot] = []
+    private(set) var waitRoots: [WaitRoot] = []
 
     struct WaitRoot: Equatable {
         let scope: ProjectScope

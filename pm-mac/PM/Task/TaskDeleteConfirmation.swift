@@ -17,7 +17,7 @@ import PmLib
 struct TaskDeleteConfirmation: View {
     /// The tasks about to go. Empty draws nothing, so a caller can hand its state straight in.
     let todos: [Todo]
-    @ObservedObject var store: PMStore
+    var store: PMStore
     var confirm: () -> Void
     var cancel: () -> Void
 

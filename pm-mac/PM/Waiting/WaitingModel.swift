@@ -11,27 +11,33 @@ import PmLib
 /// that can be written to. `waitingBuckets` is the same walk the CLI and a model make for the same
 /// question, which is the point: one answer, three surfaces.
 @MainActor
-final class WaitingModel: ObservableObject {
-    @Published private(set) var buckets: [WaitingBucket] = []
-    @Published private(set) var isLoading = false
+@Observable
+final class WaitingModel {
+    private(set) var buckets: [WaitingBucket] = []
+    private(set) var isLoading = false
     /// Set when a scan or a write failed, so the window says so rather than showing an empty list.
-    @Published private(set) var failure: String?
+    private(set) var failure: String?
     /// Whether archived projects' own tasks are listed too. Off by default: an archived project's
     /// unfinished tasks were put down, not blocked.
-    @Published var includesArchived = false { didSet { reload() } }
+    var includesArchived = false { didSet { reload() } }
 
+    @ObservationIgnored
     private var cancellables: Set<AnyCancellable> = []
     private let queue = DispatchQueue(label: "com.stuarthanberg.pm.waiting")
     /// Rising counter so a slow scan can't overwrite a newer one that already landed.
+    @ObservationIgnored
     private var generation = 0
+
+    @ObservationIgnored
+    private var waitRootsRelay: ObservationRelay?
 
     init() {
         // The folder scan is what turns a wait from pending to released, and it is ungated — so the
         // list follows an archive made in another window without this window doing any polling.
-        ProjectIndex.shared.$waitRoots
-            .dropFirst()
-            .sink { [weak self] _ in Task { @MainActor in self?.reload() } }
-            .store(in: &cancellables)
+        // `dropFirst()` in the shape this replaces: a relay fires on change rather than replaying the
+        // current value, so the initial empty list is not an event to skip — there isn't one.
+        waitRootsRelay = ObservationRelay(tracking: { _ = ProjectIndex.shared.waitRoots },
+                                          then: { [weak self] in self?.reload() })
     }
 
     var isEmpty: Bool { buckets.isEmpty && !isLoading && failure == nil }
@@ -102,7 +108,7 @@ final class WaitingModel: ObservableObject {
                     TaskRefInput(session: $0.session ?? "", line: $0.line, digest: $0.digest)
                 }
                 input.clearWaiting = true
-                do { _ = try PMContract.perform("task.setWaiting", input) }
+                do { _ = try PMContract.perform(.taskSetWaiting, input) }
                 catch { failures.append(PMContract.message(for: error)) }
             }
             let reported = failures.first

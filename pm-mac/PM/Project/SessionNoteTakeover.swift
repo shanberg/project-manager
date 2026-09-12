@@ -98,7 +98,7 @@ struct SessionNoteTakeover: View {
     let index: Int
     let session: Session
     let projectName: String
-    @ObservedObject var store: PMStore
+    var store: PMStore
     let placement: Placement
     /// Follows a `[[Project]]` out of the note — the window's sidebar in one host, the board's
     /// open-project in the other.
@@ -416,7 +416,7 @@ struct SessionNoteTakeover: View {
 /// the takeover's title ended up under the buttons on macOS 26, where the unified titlebar sits them
 /// lower than the compact one this app started against.
 private struct TitlebarClearance: ViewModifier {
-    @ObservedObject var state: ProjectWindowState
+    var state: ProjectWindowState
     /// The gap below the header. The task list's is fenced off by a rule, the takeover's by a divider
     /// tight to the editor, so they don't want the same one.
     var bottom: CGFloat = 14

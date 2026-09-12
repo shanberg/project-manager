@@ -6,7 +6,7 @@ import PmLib
 /// Split from Projects because it's a different question — that pane is about where projects live and
 /// what they're called, this one about the file inside each of them.
 struct NotesSettingsView: View {
-    @ObservedObject private var store = ConfigStore.shared
+    private let store = ConfigStore.shared
 
     var body: some View {
         Form {

@@ -14,8 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var store: PMStore = StoreRegistry.shared.emptyStore
     private var storeKey: String?
     private var hasSyncedStore = false
-    /// The `store.objectWillChange` subscription, torn down and remade when the store is re-pointed.
-    private var storeSubscription: AnyCancellable?
+    /// The store observation, torn down and remade when the store is re-pointed.
+    private var storeRelay: ObservationRelay?
+    /// The PARA-roots watch, and the last set of bases it was pointed at.
+    private var rootsRelay: ObservationRelay?
+    private var watchedRootPaths: [String] = []
 
     private var settings = PanelSettings.load()
 
@@ -106,13 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // And the PARA roots themselves, so a project archived outside PM is noticed rather than
         // waiting for some unrelated reload to stumble on it. The folder scan already publishes where
         // they are, so this follows it rather than resolving the config a second time.
-        ProjectIndex.shared.$waitRoots
-            .map { $0.map(\.base) }
-            .removeDuplicates()
-            .sink { [weak self] bases in
-                Task { @MainActor in self?.watcher?.watchRoots(paths: bases) }
-            }
-            .store(in: &cancellables)
+        rootsRelay = ObservationRelay(tracking: { _ = ProjectIndex.shared.waitRoots }) { [weak self] in
+            guard let self else { return }
+            // `removeDuplicates` in the shape this replaces: a scan that finds the same roots should
+            // not re-point the watches. Held here rather than in an operator, which is the same trade
+            // `watchedNotesPaths` below already makes.
+            let bases = ProjectIndex.shared.waitRoots.map(\.base)
+            guard bases != self.watchedRootPaths else { return }
+            self.watchedRootPaths = bases
+            self.watcher?.watchRoots(paths: bases)
+        }
 
         // Be active for the first protected-folder access so a TCC prompt (if any) can present.
         NSApp.activate(ignoringOtherApps: true)
@@ -240,12 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // what's current or diverge on undo history.
         FocusPanelController.shared.syncToFocusedProject()
 
-        // Re-subscribe: the menubar glyph and the notes watch follow whichever store is current.
-        storeSubscription = store.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in
-                DispatchQueue.main.async { self?.storeDidChange() }
-            }
+        // Re-point the observation: the menubar glyph and the notes watch follow whichever store is
+        // current. A relay rather than a bare `withObservationTracking`, which arms one notification
+        // and then stops watching — see `ObservationRelay`.
+        storeRelay = ObservationRelay(tracking: { [weak self] in self?.store.trackForAppDelegate() },
+                                      then: { [weak self] in self?.storeDidChange() })
         storeDidChange()
     }
 

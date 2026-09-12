@@ -82,7 +82,8 @@ enum ProjectSettings {
 // MARK: - Model
 
 @MainActor
-final class ProjectSettingsModel: ObservableObject {
+@Observable
+final class ProjectSettingsModel {
     enum Mode: Hashable { case progress, symbol, emoji }
 
     let kind: ProjectKind
@@ -94,17 +95,17 @@ final class ProjectSettingsModel: ObservableObject {
     let done: Int
     let total: Int
 
-    @Published var title: String
-    @Published var mode: Mode
-    @Published var symbol: String
-    @Published var emoji: String
-    @Published var symbolQuery = ""
+    var title: String
+    var mode: Mode
+    var symbol: String
+    var emoji: String
+    var symbolQuery = ""
     /// The category menu's choice. Nil is All.
-    @Published var symbolCategory: String?
+    var symbolCategory: String?
     /// Loaded off the main thread when the sheet opens — see `init`. Nil until then, which the grid
     /// shows as a spinner rather than an empty grid.
-    @Published private(set) var symbolCatalog: SymbolCatalog?
-    @Published var emojiQuery = ""
+    private(set) var symbolCatalog: SymbolCatalog?
+    var emojiQuery = ""
     let emojiCatalog = EmojiCatalog.shared
     /// Taken when the sheet opens, so choosing an emoji doesn't reshuffle the row under the pointer.
     let recentEmoji = EmojiCatalog.recents
@@ -213,7 +214,7 @@ struct ProjectIconMark: View {
 // MARK: - The sheet
 
 struct ProjectSettingsView: View {
-    @ObservedObject var model: ProjectSettingsModel
+    @Bindable var model: ProjectSettingsModel
     let onCancel: () -> Void
     let onSave: () -> Void
     private let symbolColumns = [GridItem(.adaptive(minimum: 36), spacing: 4)]

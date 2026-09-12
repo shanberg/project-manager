@@ -84,18 +84,22 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
 /// single owner does it. The app delegate supplies what each action *does* once, at launch; everything
 /// after that is this object rebuilding registrations as the bindings change.
 @MainActor
-final class HotKeyManager: ObservableObject {
+@Observable
+final class HotKeyManager {
     static let shared = HotKeyManager()
 
     /// The current binding for each action. Absent means unbound.
-    @Published private(set) var bindings: [HotKeyAction: KeyCombo] = [:]
+    private(set) var bindings: [HotKeyAction: KeyCombo] = [:]
 
     /// Why a binding isn't live, for the actions where registration failed — almost always because
     /// another app already holds the keys. Without this the shortcut would just quietly not work.
-    @Published private(set) var failures: [HotKeyAction: String] = [:]
+    private(set) var failures: [HotKeyAction: String] = [:]
 
+    @ObservationIgnored
     private var registered: [HotKeyAction: HotKey] = [:]
+    @ObservationIgnored
     private var handlers: [HotKeyAction: () -> Void] = [:]
+    @ObservationIgnored
     private var suspended = false
 
     private let defaults = UserDefaults.standard

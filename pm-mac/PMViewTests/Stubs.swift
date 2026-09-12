@@ -41,9 +41,62 @@ func afterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
 
 /// A fixed vault: one project per shape a mention has to handle — two that share a first letter so
 /// arrowing has somewhere to go, an archived one, and an area, which carries no code at all.
+///
+/// The folder-scan half of it is structural and empty, per the rule at the top of this file. `PMStore`
+/// mirrors the index's three published streams and warms them on every load, so it cannot be compiled
+/// without them — but nothing a store test asserts depends on what a scan of somebody's Documents
+/// folder happens to return, and a stub that went looking would be a stub the tests were quietly
+/// about. Warming is a no-op; the streams stay empty.
 @MainActor
+@Observable
 final class ProjectIndex {
     static let shared = ProjectIndex()
+
+    // MARK: The folder scan, structurally
+
+    struct Recent: Identifiable, Equatable {
+        let projectKey: String
+        let name: String
+        let done: Int
+        let total: Int
+        let nextDue: String?
+        let summary: String?
+        let focusedText: String?
+        var id: String { projectKey }
+        var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    }
+
+    struct ProjectEntry: Identifiable, Equatable {
+        let name: String
+        let projectKey: String
+        let code: String
+        let number: Int
+        let shortName: String
+        let domain: String
+        let kind: ProjectKind
+        let isArchived: Bool
+        var id: String { projectKey }
+    }
+
+    struct WaitRoot: Equatable {
+        let scope: ProjectScope
+        let base: String
+        let folders: [String]
+    }
+
+    private(set) var recents: [Recent] = []
+    private(set) var allProjects: [ProjectEntry] = []
+    private(set) var waitRoots: [WaitRoot] = []
+
+    func warmRecents(force: Bool = false) {}
+    func warmWaitRoots(force: Bool = false) {}
+    func warmAllProjects(force: Bool = false) {}
+    func retain() {}
+    func release() {}
+
+    // MARK: The mention fixture, which tests do depend on
+
+    @ObservationIgnored
     var mentionCandidates: [MentionCandidate] = [
         MentionCandidate(name: "W-1 Website Refresh", shortName: "Website Refresh",
                          code: "W-1", kind: .project, isArchived: false),

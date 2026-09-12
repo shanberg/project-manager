@@ -179,10 +179,10 @@ struct SidebarSelectionMove {
 }
 
 struct ProjectSidebar: View {
-    @ObservedObject var store: PMStore
+    var store: PMStore
     /// The state shared with the task column across the split: the project selection (so the window's
     /// ⌘C / ⌘A can act on this pane), which pane has focus, and the task header's measured height.
-    @ObservedObject var state: ProjectWindowState
+    var state: ProjectWindowState
 
     /// Whether the list holds keyboard focus. Local — a `@FocusState` can't span the two hosting
     /// controllers the split view puts the panes in.

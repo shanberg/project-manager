@@ -29,11 +29,16 @@ extension View {
 ///
 /// Scoped to one window: the app can have several project windows open plus the focus panel, each with
 /// its own editor, and a click in one of them must not dismiss another's.
-final class OutsideClickMonitor: ObservableObject {
+@Observable
+final class OutsideClickMonitor {
+    @ObservationIgnored
     var editorFrame: CGRect?
+    @ObservationIgnored
     var onOutsideClick: (() -> Void)?
     /// The window this monitor belongs to; clicks anywhere else are left alone.
+    @ObservationIgnored
     weak var window: NSWindow?
+    @ObservationIgnored
     private var monitor: Any?
 
     func start() {

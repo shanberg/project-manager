@@ -7,7 +7,8 @@ import Combine
 /// is a contract with the Raycast extension, whose writer rewrites it with exactly those two keys — so
 /// anything else stored there would be silently dropped the next time Raycast toggled a setting.
 @MainActor
-final class WindowSettings: ObservableObject {
+@Observable
+final class WindowSettings {
     static let shared = WindowSettings()
 
     /// Show the focus panel on every Space, so it follows you between desktops and full-screen apps.
@@ -15,12 +16,12 @@ final class WindowSettings: ObservableObject {
     /// (macOS has no "show on every display": a window lives on one screen. Joining all Spaces — plus
     /// `.fullScreenAuxiliary`, which is what gets it over a full-screen app — is what makes it available
     /// wherever you are, which is what the setting is for.)
-    @Published var showOnAllSpaces: Bool {
+    var showOnAllSpaces: Bool {
         didSet { defaults.set(showOnAllSpaces, forKey: Keys.allSpaces) }
     }
 
     /// Reopen the projects that were open when the app last quit.
-    @Published var restoreWindows: Bool {
+    var restoreWindows: Bool {
         didSet { defaults.set(restoreWindows, forKey: Keys.restoreWindows) }
     }
 

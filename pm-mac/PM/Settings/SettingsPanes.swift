@@ -5,7 +5,7 @@ import PmLib
 /// General: appearance, launch behavior, and what PM does when it isn't showing a window.
 struct GeneralSettingsView: View {
     @AppStorage("PMPanelColorMode") private var colorMode: AppColorMode = .system
-    @ObservedObject private var settings = WindowSettings.shared
+    @Bindable private var settings = WindowSettings.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
@@ -49,7 +49,7 @@ struct GeneralSettingsView: View {
 /// another app — the focus panel and the quick bar — and a full editor window doing the same thing
 /// was a nuisance rather than a feature.
 struct WindowsSettingsView: View {
-    @ObservedObject private var settings = WindowSettings.shared
+    @Bindable private var settings = WindowSettings.shared
     /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, because
     /// Raycast toggles them too.
     @State private var panelSettings = PanelSettings.load()

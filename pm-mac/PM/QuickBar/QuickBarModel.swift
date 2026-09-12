@@ -555,11 +555,12 @@ struct CaptureReading: Equatable {
 /// building is the part worth testing: what a typed line resolves to shouldn't need a window on screen
 /// to find out.
 @MainActor
-final class QuickBarModel: ObservableObject {
+@Observable
+final class QuickBarModel {
     /// What the hotkey asked for, and what ⇥ cycles through. A sigil at the head of the line overrides
     /// it for as long as it's there.
-    @Published private(set) var baseMode: QuickBarMode = .capture { didSet { rebuild() } }
-    @Published var query: String = "" {
+    private(set) var baseMode: QuickBarMode = .capture { didSet { rebuild() } }
+    var query: String = "" {
         didSet {
             guard query != oldValue else { return }
             // A receipt is about the line before this one. The moment there's a new line being typed
@@ -585,7 +586,7 @@ final class QuickBarModel: ObservableObject {
     /// project; "due: end of week" would be eaten out of the middle of a sentence. So the note body
     /// goes somewhere nothing parses it, and the one thing a note does need from that vocabulary — a
     /// project other than the focused one — is decided before the writing starts, in `noteTarget`.
-    @Published var noteText: String = "" {
+    var noteText: String = "" {
         didSet {
             guard noteText != oldValue else { return }
             receipt = nil
@@ -598,6 +599,7 @@ final class QuickBarModel: ObservableObject {
     /// True while `applyNoteProse` is filling the editor from disk. What comes *out* of the editor is
     /// a keystroke to be written through; what goes *in* from the file is not, and echoing it back
     /// would schedule a write of the text we just read.
+    @ObservationIgnored
     private var isApplyingProse = false
 
     /// Put today's prose in the editor — the live note handing over what it read. Not a keystroke.
@@ -615,11 +617,11 @@ final class QuickBarModel: ObservableObject {
     ///
     /// Set on the way in — carried over from the `@…` of the capture line that was promoted — and then
     /// fixed for as long as the note is being written. See `noteText` for why it can't be re-read.
-    @Published var noteTarget: CaptureTarget? { didSet { if noteTarget != oldValue { rebuild() } } }
+    var noteTarget: CaptureTarget? { didSet { if noteTarget != oldValue { rebuild() } } }
 
     /// Bumped every time the writing surface opens, so the editor knows to take the caret even when
     /// SwiftUI has kept the one from last time. See `MarkdownTextEditor.focusRequest`.
-    @Published private(set) var noteFocusToken = 0
+    private(set) var noteFocusToken = 0
 
     /// What the mode acts on: the line with its sigil taken off.
     ///
@@ -629,13 +631,13 @@ final class QuickBarModel: ObservableObject {
     var argument: String {
         QuickBarMode.sigilMode(of: query) == nil ? query : String(query.dropFirst())
     }
-    @Published private(set) var rows: [QuickBarRow] = []
+    private(set) var rows: [QuickBarRow] = []
     /// Index into `rows`. Kept pointing at the row it was on across a rebuild; see `rebuild`.
-    @Published var selection: Int = 0
+    var selection: Int = 0
 
     /// What the typed line reads as, in capture. Empty in the other two modes, which read their line
     /// as a query rather than as something to keep.
-    @Published private(set) var reading = CaptureReading()
+    private(set) var reading = CaptureReading()
 
     /// What the bar says once a row has run and the change has landed or didn't — one line in the
     /// footer, where the hint usually is, for as long as it takes to read. Nil while the bar is being
@@ -646,7 +648,7 @@ final class QuickBarModel: ObservableObject {
     /// screen with a field that still has the keyboard: it takes nothing away, it's cleared by the
     /// first keystroke of the next line, and until then it's the only evidence that the last one
     /// landed somewhere you can't see.
-    @Published var receipt: QuickBarReceipt?
+    var receipt: QuickBarReceipt?
 
     /// The focused project's display name, or nil when there isn't one — capture has nowhere to go
     /// unless the line named somewhere with `@`.
@@ -655,14 +657,14 @@ final class QuickBarModel: ObservableObject {
     /// rebuilds on being set. The controller seeds them together and could just as well rebuild once at
     /// the end, but then the order it happened to write them in would be load-bearing — and a row list
     /// that silently reflects four of five inputs is the kind of wrong that looks right.
-    @Published var focusedProjectName: String? { didSet { if focusedProjectName != oldValue { rebuild() } } }
+    var focusedProjectName: String? { didSet { if focusedProjectName != oldValue { rebuild() } } }
 
     /// The task a captured line would be placed relative to. Nil when the project has no open tasks,
     /// which is what takes the two anchored placements off the list.
     ///
     /// The whole task rather than its text: the preview needs to know which line it is and how deep,
     /// and a second source for the same fact is a second thing that can disagree with the write.
-    @Published var anchor: PreviewTodo? { didSet { if anchor != oldValue { rebuild() } } }
+    var anchor: PreviewTodo? { didSet { if anchor != oldValue { rebuild() } } }
 
     /// What the rows call the anchor.
     var focusedTaskText: String? { anchor?.text }
@@ -672,7 +674,7 @@ final class QuickBarModel: ObservableObject {
     /// Already loaded — this is the same `todos` the menubar and any open window are showing — so the
     /// preview costs no read. It is a snapshot like everything else the bar holds, and it's refreshed
     /// by `QuickBarController.refreshContext` on the same signal the anchor is.
-    @Published var projectTodos: [PreviewTodo] = [] {
+    var projectTodos: [PreviewTodo] = [] {
         didSet {
             guard projectTodos != oldValue else { return }
             outcomeCache = nil
@@ -681,53 +683,53 @@ final class QuickBarModel: ObservableObject {
     }
 
     /// The project's session headings, indexed the way `PreviewTodo.sessionIndex` indexes them.
-    @Published var sessions: [PreviewSession] = []
+    var sessions: [PreviewSession] = []
 
     /// Which session is today's, or nil when the project hasn't got one yet — which is worth drawing,
     /// because a placement silently creating a session is the bar's quietest side effect.
-    @Published var todaySession: Int?
+    var todaySession: Int?
 
     /// Whether the next thing written into the focused project opens a session of its own — because
     /// the project has none for today, or has been left alone past `PmLib.sessionIdleWindow`. The
     /// preview draws the new heading either way, so the side effect is on screen before you commit to
     /// it rather than discovered in the file afterwards.
-    @Published var startsNewSession = false
+    var startsNewSession = false
 
     /// The current session's note as it stands, for the note placement to append its ghost to.
-    @Published var todayNote: String?
+    var todayNote: String?
 
     /// Whether there's a completion to take back — what puts Undo Last Complete on the `>` list.
-    @Published var canUndoCompletion = false { didSet { if canUndoCompletion != oldValue { rebuild() } } }
+    var canUndoCompletion = false { didSet { if canUndoCompletion != oldValue { rebuild() } } }
 
     /// Whether diving in would land anywhere. A command that would quietly do nothing is worse than a
     /// command that isn't offered.
-    @Published var hasNextTask = false { didSet { if hasNextTask != oldValue { rebuild() } } }
+    var hasNextTask = false { didSet { if hasNextTask != oldValue { rebuild() } } }
 
     /// Which of Archive and Unarchive the focused project can be on the receiving end of. Only ever
     /// one of the two, since it's already in one folder or the other.
-    @Published var focusedProjectIsArchived = false { didSet { if focusedProjectIsArchived != oldValue { rebuild() } } }
+    var focusedProjectIsArchived = false { didSet { if focusedProjectIsArchived != oldValue { rebuild() } } }
 
     /// The focused project's folder on disk. What the commands that hand off to another app need to
     /// know they have somewhere to send it — see `PMCommand.Context`.
-    @Published var focusedProjectPath: String? { didSet { if focusedProjectPath != oldValue { rebuild() } } }
+    var focusedProjectPath: String? { didSet { if focusedProjectPath != oldValue { rebuild() } } }
 
     /// The focused project's key, for ranking: a task in the project you're already in wins a tie
     /// against the same words somewhere else.
-    @Published var focusedProjectKey: String? { didSet { if focusedProjectKey != oldValue { rebuild() } } }
+    var focusedProjectKey: String? { didSet { if focusedProjectKey != oldValue { rebuild() } } }
 
     /// Whether ⌥ is held right now, published by the controller's flags monitor. Only the labels want
     /// it — running a row reads the modifiers off the keystroke that ran it.
-    @Published var optionDown = false
+    var optionDown = false
 
     /// How many matches the row list is not showing. Zero when it's showing them all.
     ///
     /// A list capped at `rowLimit` and silent about it looks exactly like a list of everything that
     /// matched, and the difference is whether your query needs narrowing or your task doesn't exist.
-    @Published private(set) var overflow = 0
+    private(set) var overflow = 0
 
     /// The rest of the project name the top row would give you, for the field to ghost after what
     /// you've typed. Nil unless what you've typed is a genuine prefix of it — see `completion(for:)`.
-    @Published private(set) var completion: String?
+    private(set) var completion: String?
 
     /// Whether a change to the bar's height should be animated.
     ///
@@ -736,7 +738,7 @@ final class QuickBarModel: ObservableObject {
     /// and the corner masks becoming separate interpolations of the same edge. Held off for the
     /// length of a summon: this object and its view both outlive the panel being ordered out, so the
     /// first layout of a new summon would otherwise animate away from the last one's rows.
-    @Published var animatesLayout = false
+    var animatesLayout = false
 
     /// The tallest the panel may grow on the screen it was summoned to, set by the controller each
     /// time the bar comes up.
@@ -746,21 +748,25 @@ final class QuickBarModel: ObservableObject {
     /// constant — the answer is a fraction of a particular screen's visible height, and the bar is
     /// summoned to whichever screen the pointer is on. Zero until the first summon, which the view
     /// reads as "no answer yet" and falls back from.
-    @Published var panelHeightLimit: CGFloat = 0
+    var panelHeightLimit: CGFloat = 0
 
     /// Recent projects (empty query) and everything (a query), supplied by the controller so the model
     /// stays free of the scan.
+    @ObservationIgnored
     var recents: [ProjectIndex.Recent] = []
+    @ObservationIgnored
     var allProjects: [ProjectIndex.ProjectEntry] = []
 
     /// Every open task the bar can search, supplied by the controller from the project index with the
     /// focused project's own tasks read live over the top. See `QuickBarController.seed`.
+    @ObservationIgnored
     var allTasks: [ProjectIndex.TaskEntry] = []
 
     /// The line the last summon was closed on, if it was closed on one recently enough to still be
     /// wanted. Offered as a row rather than typed back into the field: a bar that opens with the last
     /// thing you typed already in it is a bar you have to clear before you can use it, and the whole
     /// point of catching this is that it costs nothing when you didn't want it.
+    @ObservationIgnored
     var restorable: String?
 
     /// Ask the app what the project looks like once a command has run.
@@ -769,31 +775,40 @@ final class QuickBarModel: ObservableObject {
     /// out here is that the answer comes from the same function the write calls: a preview that
     /// reimplements a command is a second implementation, and the two drift apart on the day one of
     /// them is fixed.
+    @ObservationIgnored
     var dryRun: (QuickBarCommand, _ argument: String) -> PreviewOutcome? = { _, _ in nil }
 
     /// The last answer `dryRun` gave, and to what. See `outcome(for:argument:)`.
+    @ObservationIgnored
     private var outcomeCache: (key: String, outcome: PreviewOutcome?)?
 
     /// Runs a chosen row. Set by the controller, which owns what "go to a project" means.
+    @ObservationIgnored
     var onRun: (QuickBarRow, _ modifiers: EventModifiers) -> Void = { _, _ in }
+    @ObservationIgnored
     var onDismiss: () -> Void = {}
     /// Every edit to the note body, for the controller to keep a draft of. Prose is worth more than a
     /// task line and there is more of it, so it is written down as it's typed rather than caught on the
     /// way out — see `QuickBarController.saveNoteDraft`.
+    @ObservationIgnored
     var onNoteChanged: (String) -> Void = { _ in }
     /// The writing surface opening, however it was asked for. The controller answers with the draft
     /// belonging to wherever the note is going.
+    @ObservationIgnored
     var onEnterNote: (CaptureTarget?) -> Void = { _ in }
     /// ⌃⌘F in the writing surface: take this note full screen. The controller owns the presentation —
     /// the model's part is only to know that the key was pressed and that the mode allows it.
+    @ObservationIgnored
     var onEnterImmersive: () -> Void = {}
 
     /// The writing surface is closing. Raised before the text is cleared, so the controller can write
     /// what was on screen — see `QuickBarController.endNote`.
+    @ObservationIgnored
     var onLeaveNote: () -> Void = {}
 
     /// A click on a `[[…]]` in the note body. The controller owns what going somewhere means, as it
     /// does for a `@` row — one route out of this bar, not two.
+    @ObservationIgnored
     var onOpenProject: (String) -> Void = { _ in }
 
     // MARK: Rows
@@ -1193,7 +1208,7 @@ final class QuickBarModel: ObservableObject {
     /// Computed rather than published, because it depends on the *selection* as much as on the query —
     /// and the selection moves without a rebuild. A stored copy would need every mover to remember to
     /// refresh it; a computed one is re-read whenever the view re-renders, which is every time any of
-    /// its inputs is `@Published`.
+    /// its inputs changes — observation tracks through a computed property to the stored ones it reads.
     var preview: SessionPreview? {
         switch mode {
         case .capture: return capturePreview()

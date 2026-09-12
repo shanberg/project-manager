@@ -20,28 +20,32 @@ private struct FooterHeightKey: PreferenceKey {
 /// going out through `onTextChanged` *is* the write — so the only thing the surface can do on the way
 /// out is stop being on screen.
 @MainActor
-final class SessionNoteSurfaceModel: ObservableObject {
+@Observable
+final class SessionNoteSurfaceModel {
     /// The prose being edited. Bound straight into the editor, so this changes on every keystroke.
-    @Published var text: String = "" {
+    var text: String = "" {
         didSet {
             guard text != oldValue, !isApplyingExternalChange else { return }
             onTextChanged(text)
         }
     }
-    @Published var projectName: String?
+    var projectName: String?
     /// Which session this is, in its own words — "Today" almost always, but the surface should say what
     /// it's actually pointed at rather than assume.
-    @Published var sessionLabel: String = "Today"
+    var sessionLabel: String = "Today"
     /// Where the note lives on disk. The editor needs it to write a pasted picture beside the note and
     /// to resolve relative links; without it a pasted image silently becomes nothing.
-    @Published var noteURL: URL?
+    var noteURL: URL?
 
     /// Every edit, for the host to write through. Live and direct: there is no other save path.
+    @ObservationIgnored
     var onTextChanged: (String) -> Void = { _ in }
     /// Escape, or a click on the ground.
+    @ObservationIgnored
     var onClose: () -> Void = {}
     /// A click on a `[[…]]`. Supplied by the host, which owns both halves: going to the project, and
     /// stepping out of the way first.
+    @ObservationIgnored
     var onOpenProject: (String) -> Void = { _ in }
 
     /// Put text in from *outside* — a reload, or the host seeding the surface — without it coming
@@ -49,6 +53,7 @@ final class SessionNoteSurfaceModel: ObservableObject {
     ///
     /// Without this the write-through is a loop: the host writes the file, the store re-reads it and
     /// publishes, the new text lands here, `didSet` reports it as an edit, and the host writes again.
+    @ObservationIgnored
     private var isApplyingExternalChange = false
     func applyExternalChange(_ incoming: String) {
         guard incoming != text else { return }
@@ -101,7 +106,7 @@ private extension View {
 /// Fading on a timer rather than on the pointer, because in a mode you entered in order to write, the
 /// pointer is not where your attention is.
 struct SessionNoteSurface: View {
-    @ObservedObject var model: SessionNoteSurfaceModel
+    @Bindable var model: SessionNoteSurfaceModel
     @Environment(\.immersiveTuning) private var tuning
 
     /// How far down the note we're scrolled, so the chrome can ride with the prose and then stop.

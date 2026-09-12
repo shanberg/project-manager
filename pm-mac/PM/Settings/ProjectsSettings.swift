@@ -9,7 +9,7 @@ import PmLib
 /// of `config.json` rather than a form with a Save button — the CLI, the settings pane and the app all
 /// see one state, and there's no window in which a pane left open holds a stale copy.
 struct ProjectsSettingsView: View {
-    @ObservedObject private var store = ConfigStore.shared
+    private let store = ConfigStore.shared
     /// The raw code-editor preference. Empty means unset, which `CodeEditor` resolves rather than
     /// treating as off — see `CodeEditor.resolvedBundleID`.
     @AppStorage(CodeEditor.defaultsKey) private var storedEditor = ""

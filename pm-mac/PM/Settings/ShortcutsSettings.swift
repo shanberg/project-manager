@@ -5,7 +5,7 @@ import SwiftUI
 /// Only the focus panel ships bound. The rest start empty because a global shortcut is taken from
 /// every app on the machine at once, and which combinations are free is not something PM can guess.
 struct ShortcutsSettingsView: View {
-    @ObservedObject private var hotKeys = HotKeyManager.shared
+    private let hotKeys = HotKeyManager.shared
     /// The last thing worth saying about an attempted binding — a refusal, or what a new one displaced.
     @State private var message: String?
 

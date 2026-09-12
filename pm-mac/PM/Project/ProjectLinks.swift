@@ -69,8 +69,7 @@ enum ProjectLinks {
     }
 
     private static func loaded(_ store: PMStore) async {
-        guard !store.hasLoaded else { return }
-        for await done in store.$hasLoaded.values where done { return }
+        await ObservationRelay.wait { store.hasLoaded }
     }
 
     // MARK: Writing it

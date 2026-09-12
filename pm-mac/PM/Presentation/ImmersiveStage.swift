@@ -200,18 +200,20 @@ private struct BackdropBlur: NSViewRepresentable {
 /// belongs to is still open, and a presenter that named its tenant would have to be rewritten to
 /// answer it.
 @MainActor
-final class ImmersiveStageModel: ObservableObject {
+@Observable
+final class ImmersiveStageModel {
     /// The transition's one variable. Everything the stage animates reads off this.
-    @Published var presented = false
-    @Published var content: AnyView = AnyView(EmptyView())
+    var presented = false
+    var content: AnyView = AnyView(EmptyView())
     /// `.standard` everywhere but the tuning harness.
-    @Published var tuning: ImmersiveTuning = .standard
+    var tuning: ImmersiveTuning = .standard
     /// Called when a click lands on the ground rather than on the content.
+    @ObservationIgnored
     var onBackdropClick: () -> Void = {}
 }
 
 struct ImmersiveStage: View {
-    @ObservedObject var model: ImmersiveStageModel
+    var model: ImmersiveStageModel
 
     /// Read once per body rather than per modifier: a setting that changed halfway through the
     /// transition would leave the scale and the blur disagreeing about which transition they're part of.

@@ -9,7 +9,7 @@ import SwiftUI
 /// brief is part of the notes rather than part of the window.
 struct ProjectDetailsView: View {
     let notes: ProjectNotes?
-    @ObservedObject var store: PMStore
+    var store: PMStore
     @Binding var isEditing: Bool
     /// Whether an empty brief draws its six "Add summary…" prompts, or nothing at all.
     ///

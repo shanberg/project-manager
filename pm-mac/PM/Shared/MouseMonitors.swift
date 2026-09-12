@@ -26,8 +26,11 @@ import SwiftUI
 /// thing that still runs. Whichever signal arrives first wins and disarms the rest, so in the ordinary
 /// case this ticks a few times during the drag and stops without ever being the one to act.
 @MainActor
-final class DragEndWatcher: ObservableObject {
+@Observable
+final class DragEndWatcher {
+    @ObservationIgnored
     private var timer: Timer?
+    @ObservationIgnored
     private var onEnd: (() -> Void)?
 
     func arm(onEnd: @escaping () -> Void) {
@@ -52,8 +55,11 @@ final class DragEndWatcher: ObservableObject {
     }
 }
 
-final class LeftMouseUpMonitor: ObservableObject {
+@Observable
+final class LeftMouseUpMonitor {
+    @ObservationIgnored
     var onMouseUp: (() -> Void)?
+    @ObservationIgnored
     private var monitor: Any?
 
     func start() {
@@ -91,8 +97,11 @@ final class RowHoverTracker {
 /// that mutates state from there runs once per row per render (see `CanvasProjectNote.contextTargets`). A
 /// local monitor sees the event before it reaches the view, so the selection is committed by the time
 /// the menu appears.
-final class RightMouseDownMonitor: ObservableObject {
+@Observable
+final class RightMouseDownMonitor {
+    @ObservationIgnored
     var onRightMouseDown: (() -> Void)?
+    @ObservationIgnored
     private var monitor: Any?
 
     func start() {
@@ -111,8 +120,10 @@ final class RightMouseDownMonitor: ObservableObject {
 
 /// Publishes whether ⌥ is currently held, so a button can swap its icon/action live (as macOS menus
 /// do for alternate items). Backed by a local `flagsChanged` monitor active while the window is key.
-final class ModifierMonitor: ObservableObject {
-    @Published var optionDown = false
+@Observable
+final class ModifierMonitor {
+    var optionDown = false
+    @ObservationIgnored
     private var monitor: Any?
 
     func start() {
@@ -120,7 +131,7 @@ final class ModifierMonitor: ObservableObject {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             // Only publish on a real change. `flagsChanged` fires for *every* modifier, press and
             // release — ⌘ and ⇧ included, which are exactly the keys held while multi-selecting — and
-            // an unconditional write to an `@Published` republishes whether or not the value moved.
+            // an unconditional write to an observed property announces whether or not the value moved.
             // That rebuilt the whole view body, sidebar list and all, several times per click.
             let down = event.modifierFlags.contains(.option)
             if let self, self.optionDown != down { self.optionDown = down }

@@ -501,46 +501,62 @@ struct TabReorder: DropDelegate {
 /// separate view hierarchies — one SwiftUI, one a hosting view
 /// over an AppKit board — so what they share is this, one per window, owned by the split controller.
 @MainActor
-final class ProjectTabModel: ObservableObject {
-    @Published var items: [ProjectTabItem] = []
-    @Published var selectedID: String = ""
+@Observable
+final class ProjectTabModel {
+    var items: [ProjectTabItem] = []
+    var selectedID: String = ""
 
     /// One tab is no tabs — see `ProjectTabSet.showsBar`.
     var showsBar: Bool { items.count > 1 }
 
+    @ObservationIgnored
     var select: (String) -> Void = { _ in }
+    @ObservationIgnored
     var close: (String) -> Void = { _ in }
     /// Put a tab at an index — the drag along the bar.
+    @ObservationIgnored
     var move: (String, Int) -> Void = { _, _ in }
+    @ObservationIgnored
     var openNotes: () -> Void = {}
+    @ObservationIgnored
     var openBoard: () -> Void = {}
+    @ObservationIgnored
     var openFrame: (String) -> Void = { _ in }
+    @ObservationIgnored
     var openWorkspace: (String) -> Void = { _ in }
     /// The workspace verbs — see `WorkspaceCommands`. By **name**, because a workspace is the same
     /// workspace whichever chip you reached it from and the window has to find every chip on it either
     /// way. Naming is the exception and goes by tab id: an unnamed workspace has no name to route by,
     /// and it is the pane holding it that knows the tiling being named.
+    @ObservationIgnored
     var nameWorkspace: (String) -> Void = { _ in }
+    @ObservationIgnored
     var renameWorkspace: (String) -> Void = { _ in }
+    @ObservationIgnored
     var duplicateWorkspace: (String) -> Void = { _ in }
+    @ObservationIgnored
     var deleteWorkspace: (String) -> Void = { _ in }
     /// A chip's label, typed rather than picked. By tab id, because it covers both naming and renaming
     /// and only the tab knows which it was.
+    @ObservationIgnored
     var renameTab: (String, String) -> Void = { _, _ in }
     /// Go to the tab already showing this workspace, and say whether there was one.
+    @ObservationIgnored
     var selectWorkspace: (String) -> Bool = { _ in false }
     /// Go to the canvas — what leaving a tiled view means now that the canvas is a tab of its own. The
     /// workspace is untouched and its chip is still where it was; you are simply looking at the board.
+    @ObservationIgnored
     var goToCanvas: () -> Void = {}
     /// ⌘↩ on a board that is not tiled: keep this tiling as a workspace and open its tab. False when
     /// the window could not — see `ProjectSplitViewController.tileAsWorkspace`.
+    @ObservationIgnored
     var tileAsWorkspace: (CanvasViewState.Tiling) -> Bool = { _ in false }
 }
 
 /// The bar as the board's header puts it on screen: the window's tabs, or nothing while there is only
 /// one.
 struct ProjectTabBarHost: View {
-    @ObservedObject var model: ProjectTabModel
+    var model: ProjectTabModel
     @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {

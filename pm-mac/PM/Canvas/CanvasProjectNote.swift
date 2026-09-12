@@ -39,21 +39,21 @@ import PmLib
 /// by the act of clicking in it — see `CanvasBoardView.tileClicked`. The card cannot tell the two
 /// apart and does not need to: either way, by the time a row opens an editor the keyboard is here.
 struct CanvasProjectNote: View {
-    @ObservedObject var store: PMStore
+    var store: PMStore
     /// Whether the card has been stepped into. Only the open editor depends on it — everything else is
     /// gated by the card refusing to hit-test at all until then (`CanvasNodeView.takesItsOwnClicks`,
     /// which a tiled view grants outright), and the wheel reaches this scroll view either way
     /// (`CanvasBoardView.scrollWheel`).
-    @ObservedObject var engagement: CanvasCardEngagement
+    var engagement: CanvasCardEngagement
     /// The notes file itself, so a relative image embed resolves against the folder it lives in.
     let noteURL: URL
     /// Opens a project a `[[…]]` names, exactly as the window's rows do.
     var onOpenProject: (String) -> Void
     /// What the board is asking of this card — New Session and New Task, when it is the one you are
     /// standing in. See `CanvasProjectCardCommands`.
-    @ObservedObject var commands: CanvasProjectCardCommands
+    var commands: CanvasProjectCardCommands
     /// How much of the project this card draws. See `CanvasCardShows`.
-    @ObservedObject var display: CanvasProjectCardDisplay
+    var display: CanvasProjectCardDisplay
 
     /// The open inline editor, if any. One at a time, exactly as in the task list and the focus panel.
     @State private var activeEditor: EditorTarget?
@@ -74,7 +74,7 @@ struct CanvasProjectNote: View {
     /// the live value rather than the copy it captured. See `RowHoverTracker`.
     @State private var rowHover = RowHoverTracker()
     /// Moves the highlight onto a right-clicked row that isn't already picked (Finder's rule).
-    @StateObject private var rightClick = RightMouseDownMonitor()
+    @State private var rightClick = RightMouseDownMonitor()
     /// Tasks awaiting the delete confirmation. Empty when none is pending.
     @State private var pendingDelete: [Todo] = []
     /// The key of the task subtree being dragged, or nil when none is. See `TaskDropResolver`.
@@ -91,7 +91,7 @@ struct CanvasProjectNote: View {
     @State private var dropTarget: DropTarget?
     /// Clears drag state on a press that never moved, which releases no provider and so fires no
     /// `DragEndSentinel`.
-    @StateObject private var mouseUp = LeftMouseUpMonitor()
+    @State private var mouseUp = LeftMouseUpMonitor()
     /// A row Find Next has just moved onto, for the scroll view to reveal. Bumped rather than set, so
     /// two steps onto the same row are two distinct requests.
     @State private var scrollTarget: String?
@@ -824,7 +824,8 @@ struct CanvasProjectNote: View {
     private func beginCurrentSession() {
         guard store.projectName != nil else { return }
         activeEditor = nil
-        store.openCurrentSession { index in openNote = index }
+        // Only on success: a session that couldn't be opened leaves whatever note was showing alone.
+        store.openCurrentSession { index in if let index { openNote = index } }
     }
 
     /// New Task: appended to the current session rather than placed against a row, which is what the
@@ -898,10 +899,11 @@ struct CanvasProjectNote: View {
 /// The board cannot call into this card's SwiftUI directly — the card is an `NSHostingView` inside an
 /// `NSView` — and this is the seam the window already has for the same problem, in the same shape.
 @MainActor
-final class CanvasProjectCardCommands: ObservableObject {
-    @Published private(set) var newSessionRequest = 0
-    @Published private(set) var newTaskRequest = 0
-    @Published private(set) var editDetailsRequest = 0
+@Observable
+final class CanvasProjectCardCommands {
+    private(set) var newSessionRequest = 0
+    private(set) var newTaskRequest = 0
+    private(set) var editDetailsRequest = 0
 
     func requestNewSession() { newSessionRequest &+= 1 }
     func requestNewTask() { newTaskRequest &+= 1 }
@@ -917,16 +919,18 @@ final class CanvasProjectCardCommands: ObservableObject {
     /// window, whether or not you were standing in it. So the board asks first, exactly as it does for
     /// find and for the zoom commands: inside a card, they mean the card. See
     /// `CanvasBoardView.projectCardTakes(_:)`.
-    @Published private(set) var rowStepRequest = 0
+    private(set) var rowStepRequest = 0
+    @ObservationIgnored
     private(set) var rowStep = 1
+    @ObservationIgnored
     private(set) var rowStepExtends = false
-    @Published private(set) var selectAllRowsRequest = 0
-    @Published private(set) var deleteRowsRequest = 0
+    private(set) var selectAllRowsRequest = 0
+    private(set) var deleteRowsRequest = 0
 
     /// How many rows are selected, written back by the card. The board reads it to decide whether ⌫
     /// is about the rows at all — with nothing picked out, a delete in a project card is not a delete
     /// of nothing, it is a delete of the *card*, which is what the board would have done anyway.
-    @Published var selectedRows = 0
+    var selectedRows = 0
 
     func stepRows(_ step: Int, extending: Bool) {
         rowStep = step
@@ -937,9 +941,9 @@ final class CanvasProjectCardCommands: ObservableObject {
     func requestSelectAllRows() { selectAllRowsRequest &+= 1 }
     func requestDeleteRows() { deleteRowsRequest &+= 1 }
 
-    @Published private(set) var copyRowsRequest = 0
-    @Published private(set) var pasteRowsRequest = 0
-    @Published private(set) var openRowRequest = 0
+    private(set) var copyRowsRequest = 0
+    private(set) var pasteRowsRequest = 0
+    private(set) var openRowRequest = 0
 
     func requestCopyRows() { copyRowsRequest &+= 1 }
     func requestPasteRows() { pasteRowsRequest &+= 1 }
@@ -954,8 +958,9 @@ final class CanvasProjectCardCommands: ObservableObject {
 /// scroll position and any open editor — for a change whose whole purpose is to adjust what you are
 /// looking at while you look at it.
 @MainActor
-final class CanvasProjectCardDisplay: ObservableObject {
-    @Published var shows = CanvasCardShows.default
+@Observable
+final class CanvasProjectCardDisplay {
+    var shows = CanvasCardShows.default
 
     /// What the board's find is looking for, while this is the card you are standing in.
     ///
@@ -967,16 +972,17 @@ final class CanvasProjectCardDisplay: ObservableObject {
     /// see `visibleKeys`. The board's own find selects matching *cards*, and the page
     /// card's goes into the page; this is the third of the same rule, which is that find looks inside
     /// whatever you have stepped into.
-    @Published var find = ""
+    var find = ""
 
     /// How many task rows the query left standing, written back by the card so the find field can say
     /// so. Nil while nothing is being searched for — which is not the same as zero, and the field says
     /// nothing rather than "0" for it.
-    @Published var matches: Int?
+    var matches: Int?
 
     /// Find Next / Find Previous, as a counter for the reason `CanvasProjectCardCommands` gives: the
     /// same command twice in a row has to fire twice, and a flag set and unset is a change nobody sees.
-    @Published private(set) var findStepRequest = 0
+    private(set) var findStepRequest = 0
+    @ObservationIgnored
     private(set) var findStepDirection = 1
 
     func stepFind(_ direction: Int) {
@@ -991,8 +997,9 @@ final class CanvasProjectCardDisplay: ObservableObject {
 /// content needs to know — to start taking scroll wheels, to drop an open editor on the way out — gets
 /// one of these and the node view writes through it.
 @MainActor
-final class CanvasCardEngagement: ObservableObject {
-    @Published var isEngaged = false
+@Observable
+final class CanvasCardEngagement {
+    var isEngaged = false
 }
 
 /// The project a notes file belongs to, and the store that holds it.

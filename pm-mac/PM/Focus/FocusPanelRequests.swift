@@ -18,11 +18,13 @@ struct FocusEditorRequest: Equatable {
 /// there's nothing outside to call. An observable request the view watches is the way in — the same
 /// shape as `ProjectWindowState`'s counters, and for the same reason.
 @MainActor
-final class FocusPanelRequests: ObservableObject {
+@Observable
+final class FocusPanelRequests {
     static let shared = FocusPanelRequests()
 
-    @Published private(set) var pending: FocusEditorRequest?
+    private(set) var pending: FocusEditorRequest?
 
+    @ObservationIgnored
     private var nextID = 1
 
     private init() {}

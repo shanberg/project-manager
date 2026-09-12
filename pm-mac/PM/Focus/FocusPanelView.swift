@@ -13,7 +13,7 @@ import PmLib
 /// What it *does* carry is every action the task itself needs — complete, navigate, edit, add around
 /// it, set a due date, delete — so working through a short run of tasks never needs the big window.
 struct FocusPanelView: View {
-    @ObservedObject var store: PMStore
+    var store: PMStore
     /// Escape with nothing left to unwind hides the panel.
     var onDismiss: () -> Void = {}
     /// Measured content height, for the window's auto-fit.
@@ -37,9 +37,9 @@ struct FocusPanelView: View {
     /// which keys on a task — there isn't one here, which is the whole point of the state.
     @State private var addingTask = false
     /// Cancels an open editor when the user clicks outside it.
-    @StateObject private var outsideClick = OutsideClickMonitor()
+    @State private var outsideClick = OutsideClickMonitor()
     /// Editors asked for from outside the panel — the menu bar item's Add ▸ commands.
-    @ObservedObject private var requests = FocusPanelRequests.shared
+    private let requests = FocusPanelRequests.shared
 
     /// Shared with the project window: the appearance override is an app-wide preference, not a
     /// per-surface one.

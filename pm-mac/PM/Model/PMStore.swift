@@ -39,11 +39,12 @@ private final class RevisionBox: @unchecked Sendable {
 /// the main actor. `reload()` re-reads `focused.json` and `pm notes show` for the focused project;
 /// mutations perform their `NotesService` call and then reload.
 @MainActor
-final class PMStore: ObservableObject {
-    @Published private(set) var projectKey: String?
-    @Published private(set) var projectName: String?
+@Observable
+final class PMStore {
+    private(set) var projectKey: String?
+    private(set) var projectName: String?
     /// Resolved project folder path, captured during reload (for Open in Finder etc.).
-    @Published private(set) var projectPath: String?
+    private(set) var projectPath: String?
 
     /// Whether the thing this store is bound to is a project or an area.
     ///
@@ -53,12 +54,12 @@ final class PMStore: ObservableObject {
     var kind: ProjectKind { projectName.map(ProjectKind.of(folderName:)) ?? .project }
     /// Resolved path to the focused project's notes file, captured during reload so the app can watch
     /// it without re-scanning the (protected) project directory on every UI update.
-    @Published private(set) var notesPath: String?
+    private(set) var notesPath: String?
     /// The project's canvas, when it has one on disk. Nil is "not made yet", never "this project
     /// doesn't do canvases" — every project is assumed to want a board, so the header offers to make
     /// one rather than hiding itself. Re-resolved on every load so a canvas created in Obsidian while
     /// PM is open turns up without a restart.
-    @Published private(set) var canvasPath: String?
+    private(set) var canvasPath: String?
     /// Whether that answer has been *looked for* yet on this project.
     ///
     /// Nil `canvasPath` means two different things — "nobody has looked" and "looked, there isn't one"
@@ -67,12 +68,12 @@ final class PMStore: ObservableObject {
     /// the first is worth holding still for a moment, the second is the empty state that offers to make
     /// one. See `ProjectWindowController.applyRememberedRenderer`, which flashed the task list for
     /// exactly as long as it could not ask this question.
-    @Published private(set) var hasResolvedCanvasPath = false
-    @Published private(set) var notes: ProjectNotes?
+    private(set) var hasResolvedCanvasPath = false
+    private(set) var notes: ProjectNotes?
     /// The icon chosen in Project Settings, read from the notes' frontmatter at each load. Nil draws
     /// the progress ring.
-    @Published private(set) var icon: ProjectIcon?
-    @Published private(set) var todos: [Todo] = []
+    private(set) var icon: ProjectIcon?
+    private(set) var todos: [Todo] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
     ///
@@ -80,15 +81,15 @@ final class PMStore: ObservableObject {
     /// name: per-row that's the folder list times the task list on every redraw, and a task list is
     /// redrawn on every keystroke in the note beside it. Keyed by the target string exactly as the
     /// task line spells it, which is what `Todo.effectiveWaiting` carries.
-    @Published private(set) var waitTargets: [String: WaitTarget] = [:]
-    @Published private(set) var focusedKey: String?
+    private(set) var waitTargets: [String: WaitTarget] = [:]
+    private(set) var focusedKey: String?
     /// When this project's notes file was last written, read at each reload. It's what tells a
     /// command whether it's continuing the current session or starting a new one — see
     /// `willStartNewSession` and `PmLib.sessionIdleWindow`.
-    @Published private(set) var lastEditedAt: Date?
+    private(set) var lastEditedAt: Date?
     /// Why this project can't be read, if it can't. A read failure only — writes report themselves
     /// through `writeFailure` below.
-    @Published private(set) var errorMessage: String?
+    private(set) var errorMessage: String?
 
     /// A write that didn't happen, and why.
     ///
@@ -99,30 +100,39 @@ final class PMStore: ObservableObject {
     /// the sentence up, and the quick bar compares to tell "the write I just made failed" from "a
     /// reload happened to fail while I was writing".
     struct WriteFailure: Equatable { let message: String; let token: Int }
-    @Published private(set) var writeFailure: WriteFailure?
+    private(set) var writeFailure: WriteFailure?
+    @ObservationIgnored
     private var writeFailures = 0
     /// True once the first successful load has painted; used to keep the last-good render across
     /// transient (cloud-sync) read failures instead of flashing to empty.
-    @Published private(set) var hasLoaded = false
+    private(set) var hasLoaded = false
 
     /// The most recent classified change of the focused task, paired with a monotonic token. Observers
     /// (the focused card, the menubar button) animate whenever the token advances, reading `focusMove`
     /// for the direction; a token that doesn't advance means nothing worth animating changed. The token
     /// — not `focusMove` alone — is the trigger, so two successive moves in the same direction still
     /// fire.
-    @Published private(set) var focusMove: FocusMove = .none
-    @Published private(set) var focusMoveToken: Int = 0
+    private(set) var focusMove: FocusMove = .none
+    private(set) var focusMoveToken: Int = 0
 
     /// Snapshot of the hero task from the last load, compared against the next load to classify the
     /// movement. Identity (`key`), `text`, `depth`, and document position (`session`/`line`) are all it
     /// takes to tell an edit from a dive-in / bubble-up / next / previous.
     private struct HeroSnapshot { let key: String; let text: String; let depth: Int; let session: Int; let line: Int }
+    @ObservationIgnored
     private var heroSnapshot: HeroSnapshot?
 
-    /// The shared scans, mirrored in so views observing this store still repaint when they land.
-    /// See `ProjectIndex` for why they live outside the store.
-    @Published private var indexRecents: [Recent] = []
-    @Published private(set) var allProjects: [ProjectEntry] = []
+    /// The shared scans, read straight through rather than copied in.
+    ///
+    /// These used to be stored properties kept in step with `ProjectIndex` by two Combine
+    /// `assign(to:)` mirrors, because a view observing this store had no way to also be observing the
+    /// index — `ObservableObject` invalidates on the object you subscribed to, so the value had to be
+    /// physically present here to be noticed. Observation tracks through computed properties, so a
+    /// view reading `store.allProjects` now registers a dependency on `ProjectIndex.allProjects`
+    /// itself. The copies, the two subscriptions, and the window in which a store held a scan result
+    /// one turn out of date all go away with them.
+    var indexRecents: [Recent] { ProjectIndex.shared.recents }
+    var allProjects: [ProjectEntry] { ProjectIndex.shared.allProjects }
 
     /// Recent projects for the menubar's and this store's quick-switchers: the shared recency list with
     /// *this* store's project dropped (a switcher never offers the project you're already in) and capped
@@ -141,8 +151,8 @@ final class PMStore: ObservableObject {
     /// Undo/redo history of pre-mutation document snapshots, for in-app edits (move, complete,
     /// due, text, add, wrap, unwrap…). Coarse but reliable: each step restores the full prior document.
     /// Published so the menu/keyboard affordances can reflect availability; cleared on a project switch.
-    @Published private(set) var undoStack: [DocSnapshot] = []
-    @Published private(set) var redoStack: [DocSnapshot] = []
+    private(set) var undoStack: [DocSnapshot] = []
+    private(set) var redoStack: [DocSnapshot] = []
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
     /// Cap the history so a long session can't grow it without bound.
@@ -163,6 +173,7 @@ final class PMStore: ObservableObject {
 
     /// Whether this store is currently holding the shared full-project scan open (see
     /// `setWantsAllProjects`). Tracked per store so each one contributes at most one retain.
+    @ObservationIgnored
     private var wantsAllProjects = false
 
     /// The project this store shows. Every store is bound to exactly one project (nil = none, which
@@ -170,25 +181,85 @@ final class PMStore: ObservableObject {
     /// projects at once. Following the focus is the menubar's job: when `focused.json` changes it
     /// acquires the store for the new key, which means it shares one store — one undo stack, one
     /// `lastCompletedKey` — with any window already showing that project.
+    /// Not observable: it was never `@Published`, and `bind(to:)` sets it and then reloads, so a
+    /// view that cared would be repainted by the reload anyway.
+    @ObservationIgnored
     private(set) var boundKey: String?
 
     /// Mirror the shared scans into this store's published state, so existing views that observe the
     /// store keep repainting when a scan lands.
     init(boundKey: String? = nil) {
         self.boundKey = boundKey
-        ProjectIndex.shared.$recents.assign(to: &$indexRecents)
-        ProjectIndex.shared.$allProjects.assign(to: &$allProjects)
-        // A sink rather than an assign, because what a landing folder scan changes here isn't a
-        // mirrored value but a derived one: archiving the project a task waits on turns that wait from
-        // pending to released, and it happens in a different window from the one showing the task.
-        ProjectIndex.shared.$waitRoots
-            .sink { [weak self] _ in
-                Task { @MainActor in self?.resolveWaits() }
-            }
-            .store(in: &cancellables)
+        // `recents` and `allProjects` are read through to the index rather than mirrored, so there is
+        // nothing to keep in step. What a landing folder scan changes here is a *derived* value:
+        // archiving the project a task waits on turns that wait from pending to released, and it
+        // happens in a different window from the one showing the task. That still needs watching.
+        waitRootsRelay = ObservationRelay(tracking: { _ = ProjectIndex.shared.waitRoots },
+                                          then: { [weak self] in self?.resolveWaits() })
     }
 
+    /// Bookkeeping, not state. `@Observable` instruments *every* stored `var`, so without this the
+    /// store's private counters and its Combine bag would each invalidate every view reading the store
+    /// — a regression `ObservableObject` could not have, because a property had to opt *in* with
+    /// `@Published`. `PMStoreObservationTests` is what makes the omission fail rather than just cost.
+    @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored
+    private var waitRootsRelay: ObservationRelay?
+
+    // MARK: What a non-SwiftUI observer follows
+
+    /// The properties `AppDelegate.storeDidChange` depends on: each one's name, paired with a read of
+    /// it. `trackForAppDelegate` runs the reads so an `ObservationRelay` watching this store is woken
+    /// by them; `PMStoreObservationTests` checks the names against what the type actually has.
+    ///
+    /// **One list rather than a list and a matching method**, because two of those drift: adding a
+    /// property to the names and forgetting the read would leave the app delegate deaf to it while
+    /// every check still passed. Pairing them makes that arrangement unspellable.
+    ///
+    /// **It is deliberately all of them.** A SwiftUI view gets the benefit of `@Observable` for free —
+    /// it depends on what it draws, and that is where the win of this migration is. The app delegate
+    /// genuinely does not: one pass syncs notifications, refreshes the menubar glyph, renames every
+    /// window, re-points the notes watches and reports a write failure, and between them those read
+    /// most of this class. Narrowing the list by tracing which of them reads `waitTargets` would buy a
+    /// few skipped passes and risk a menubar that stops updating for one kind of change — silent, and
+    /// the bad trade.
+    ///
+    /// What this buys over `objectWillChange` is that the dependency is now written down, and a
+    /// twenty-third property cannot be added without a decision being made about it.
+    static let appDelegateDependencies: [(name: String, read: @MainActor (PMStore) -> Any)] = [
+        ("projectKey", { $0.projectKey as Any }),
+        ("projectName", { $0.projectName as Any }),
+        ("projectPath", { $0.projectPath as Any }),
+        ("notesPath", { $0.notesPath as Any }),
+        ("canvasPath", { $0.canvasPath as Any }),
+        ("hasResolvedCanvasPath", { $0.hasResolvedCanvasPath }),
+        ("notes", { $0.notes as Any }),
+        ("icon", { $0.icon as Any }),
+        ("todos", { $0.todos }),
+        ("waitTargets", { $0.waitTargets }),
+        ("focusedKey", { $0.focusedKey as Any }),
+        ("lastEditedAt", { $0.lastEditedAt as Any }),
+        ("errorMessage", { $0.errorMessage as Any }),
+        ("writeFailure", { $0.writeFailure as Any }),
+        ("hasLoaded", { $0.hasLoaded }),
+        ("focusMove", { $0.focusMove }),
+        ("focusMoveToken", { $0.focusMoveToken }),
+        // Computed pass-throughs to `ProjectIndex` rather than stored properties, but reading one
+        // inside `withObservationTracking` registers the index's property just the same — so the app
+        // delegate is still woken by a folder scan, exactly as it was when these were mirrored in.
+        ("indexRecents", { $0.indexRecents }),
+        ("allProjects", { $0.allProjects }),
+        ("undoStack", { $0.undoStack }),
+        ("redoStack", { $0.redoStack }),
+        ("lastCompletedKey", { $0.lastCompletedKey as Any }),
+    ]
+
+    /// Reads every dependency above, so that `withObservationTracking` registers them.
+    func trackForAppDelegate() {
+        for dependency in Self.appDelegateDependencies { _ = dependency.read(self) }
+    }
+
 
     /// Point this store at a different project (or back at `focused.json`) and reload.
     func bind(to key: String?) {
@@ -504,9 +575,25 @@ final class PMStore: ObservableObject {
     private func mutate(recordsUndo: Bool = true,
                         then: (@MainActor () -> Void)? = nil,
                         _ work: @escaping (String) throws -> Void) {
-        guard let name = projectName else { return }
+        // **A completion is always called**, the rule `reload` states for its own: a caller waiting on
+        // `then` — the quick bar's receipt, a surface giving a store back to the registry — is stranded
+        // if it only runs when the write happened. With no project there is nothing to write to, and that
+        // is a refused write like any other: reported, so a bar comparing failure tokens says so rather
+        // than confirming, and then completed.
+        guard let name = projectName else {
+            noteWriteFailure("No project is open, so nothing was written.")
+            then?()
+            return
+        }
         io.async { [weak self] in
-            let before = recordsUndo ? try? Self.snapshot(project: name) : nil
+            // Resolved once, for both snapshots. Resolving lists every PARA root, so it costs in proportion
+            // to how many projects there are — measured at 0.8ms with 20 and 16ms with 1,000, against
+            // 0.03ms to read the file itself — and it was most of what a tick spent outside the write.
+            // Safe to share across `work` because nothing passed here moves a project folder: every
+            // mutation is an edit inside the notes document. The reload that follows resolves again, which
+            // keeps a folder moved from outside mid-write a thing the store recovers from.
+            let handle = try? resolveNotesHandle(project: name)
+            let before = recordsUndo ? handle.flatMap { try? Self.snapshot($0) } : nil
             do {
                 try work(name)
             } catch {
@@ -519,7 +606,7 @@ final class PMStore: ObservableObject {
             // would otherwise be refused for a change this write made, which is the app arguing with
             // itself. Every write passes through here — including `moveSubtree`, which doesn't go
             // through the contract and so has no result to report a revision back in.
-            let after = try? Self.snapshot(project: name)
+            let after = handle.flatMap { try? Self.snapshot($0) }
             if let after { self?.seenRevision.value = revision(of: after.raw) }
             if let before, let after, before.raw != after.raw {
                 Task { @MainActor in self?.recordUndo(before) }
@@ -528,10 +615,11 @@ final class PMStore: ObservableObject {
         }
     }
 
-    /// Read the current raw document for `project` as a snapshot. Protected-folder IO — off-main only.
-    private nonisolated static func snapshot(project: String) throws -> DocSnapshot {
-        let handle = try resolveNotesHandle(project: project)
-        return DocSnapshot(notesPath: handle.notesPath, raw: try handle.io.readContent(path: handle.notesPath))
+    /// Read the current raw document behind an already-resolved handle, as a snapshot. Protected-folder
+    /// IO — off-main only. Takes a handle rather than a project name so a caller that needs two reads,
+    /// or a read and a write, pays for resolving the project once.
+    private nonisolated static func snapshot(_ handle: NotesHandle) throws -> DocSnapshot {
+        DocSnapshot(notesPath: handle.notesPath, raw: try handle.io.readContent(path: handle.notesPath))
     }
 
     /// Record a write that didn't happen. The token advances every time, so two identical refusals in
@@ -560,9 +648,18 @@ final class PMStore: ObservableObject {
                          to dest: ReferenceWritableKeyPath<PMStore, [DocSnapshot]>) {
         guard let name = projectName, let target = self[keyPath: source].last else { return }
         io.async { [weak self] in
-            let current = try? Self.snapshot(project: name)
+            // One resolution for both the banked snapshot and the write, as in `mutate`. If it fails, that
+            // is reported and nothing is written — which is what the second resolution used to do anyway.
+            let handle: NotesHandle
             do {
-                let handle = try resolveNotesHandle(project: name)
+                handle = try resolveNotesHandle(project: name)
+            } catch {
+                let message = String(describing: error)
+                Task { @MainActor in self?.noteWriteFailure(message) }
+                return
+            }
+            let current = try? Self.snapshot(handle)
+            do {
                 try handle.io.writeContent(path: handle.notesPath, content: target.raw)
                 self?.seenRevision.value = revision(of: target.raw)
             } catch {
@@ -580,11 +677,12 @@ final class PMStore: ObservableObject {
     }
 
     /// Key of the most recently completed task this session, for the menubar's ⌥ Undo alternate.
-    @Published private(set) var lastCompletedKey: String?
+    private(set) var lastCompletedKey: String?
 
     /// The same task as the contract names it. Completing doesn't change a task's text, so the digest
     /// taken before the write still identifies it afterwards — which is what lets the undo find it
     /// even if the document has moved on since.
+    @ObservationIgnored
     private var lastCompletedRef: TaskRefInput?
 
     /// `then` runs once the document has been re-read, like `addTodo`'s — it's what lets a caller that
@@ -594,7 +692,7 @@ final class PMStore: ObservableObject {
         lastCompletedRef = todo.reference
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         mutate(then: then) { project in
-            try PMContract.perform("task.complete", PMContract.input(project: project, task: todo) {
+            try PMContract.perform(.taskComplete, PMContract.input(project: project, task: todo) {
                 $0.advanceFocus = advanceFocus
             })
         }
@@ -602,14 +700,16 @@ final class PMStore: ObservableObject {
 
     /// Undo the most recent completion (re-open it and move focus back onto it).
     func undoLast(then: (@MainActor () -> Void)? = nil) {
-        guard let reference = lastCompletedRef else { return }
+        // Completed rather than reported: nothing to undo is not a refused write, and reporting it as
+        // one would post a notification whenever the bar asked from the background.
+        guard let reference = lastCompletedRef else { then?(); return }
         lastCompletedKey = nil
         lastCompletedRef = nil
         mutate(then: then) { project in
             var input = ApiInput()
             input.project = project
             input.task = reference
-            try PMContract.perform("task.reopen", input)
+            try PMContract.perform(.taskReopen, input)
         }
     }
 
@@ -624,17 +724,17 @@ final class PMStore: ObservableObject {
     func focus(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
         // Focus is navigation, not a content edit, so keep it out of the undo history.
         mutate(recordsUndo: false, then: then) {
-            try PMContract.perform("task.focus", PMContract.input(project: $0, task: todo))
+            try PMContract.perform(.taskFocus, PMContract.input(project: $0, task: todo))
         }
     }
 
     func undo(_ todo: Todo) {
-        mutate { try PMContract.perform("task.reopen", PMContract.input(project: $0, task: todo)) }
+        mutate { try PMContract.perform(.taskReopen, PMContract.input(project: $0, task: todo)) }
     }
 
     func setDue(_ todo: Todo, due: String?, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
-            try PMContract.perform("task.setDue", PMContract.input(project: project, task: todo) {
+            try PMContract.perform(.taskSetDue, PMContract.input(project: project, task: todo) {
                 if let due { $0.due = due } else { $0.clearDue = true }
             })
         }
@@ -643,7 +743,7 @@ final class PMStore: ObservableObject {
     /// Set or clear what a task is waiting on.
     func setWaiting(_ todo: Todo, waiting: String?, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
-            try PMContract.perform("task.setWaiting", PMContract.input(project: project, task: todo) {
+            try PMContract.perform(.taskSetWaiting, PMContract.input(project: project, task: todo) {
                 if let waiting { $0.waiting = waiting } else { $0.clearWaiting = true }
             })
         }
@@ -652,7 +752,7 @@ final class PMStore: ObservableObject {
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
     func editText(_ todo: Todo, text: String) {
         mutate { project in
-            try PMContract.perform("task.setText", PMContract.input(project: project, task: todo) {
+            try PMContract.perform(.taskSetText, PMContract.input(project: project, task: todo) {
                 $0.text = text
             })
         }
@@ -661,7 +761,7 @@ final class PMStore: ObservableObject {
     /// Wrap a task in a new parent task, nesting the task (and its subtree) under it; focus stays put.
     func wrap(_ todo: Todo, parentText: String) {
         mutate { project in
-            try PMContract.perform("task.wrap", PMContract.input(project: project, task: todo) {
+            try PMContract.perform(.taskWrap, PMContract.input(project: project, task: todo) {
                 $0.text = parentText
             })
         }
@@ -671,7 +771,7 @@ final class PMStore: ObservableObject {
     /// place. If the dissolved parent held focus, focus moves to its first child. Only meaningful for
     /// tasks with children — `hasChildren(_:)` gates the UI affordance. Inverse of `wrap`.
     func unwrap(_ todo: Todo) {
-        mutate { try PMContract.perform("task.unwrap", PMContract.input(project: $0, task: todo)) }
+        mutate { try PMContract.perform(.taskUnwrap, PMContract.input(project: $0, task: todo)) }
     }
 
     /// Drag-reorder, still a `NotesService` call: the contract has no action for it.
@@ -701,7 +801,7 @@ final class PMStore: ObservableObject {
     /// the first of those the store's in-memory tasks no longer describe the document the second would
     /// have to anchor against, and each would bank its own undo step.
     func pasteTasks(_ block: [PastedTask], after anchor: Todo?, then: (@MainActor () -> Void)? = nil) {
-        guard !block.isEmpty else { return }
+        guard !block.isEmpty else { then?(); return }
         let session = anchor == nil ? (todaySessionIndex ?? notes?.sessions.indices.last) : nil
         mutate(then: then) { project in
             try PmLib.insertTaskBlock(project: project,
@@ -791,7 +891,7 @@ final class PMStore: ObservableObject {
         // and a single step to undo — a batch a person made in one gesture should come back in one.
         let seen = seenRevision
         mutate { project in
-            try PMContract.perform("task.delete", PMContract.input(project: project) {
+            try PMContract.perform(.taskDelete, PMContract.input(project: project) {
                 $0.tasks = bottomUp.map(\.reference)
                 $0.revision = seen.value
             })
@@ -813,7 +913,7 @@ final class PMStore: ObservableObject {
         }
         let seen = seenRevision
         mutate { project in
-            try PMContract.perform(completing ? "task.complete" : "task.reopen",
+            try PMContract.perform(completing ? .taskComplete : .taskReopen,
                                    PMContract.input(project: project) {
                 $0.tasks = targets.map(\.reference)
                 $0.revision = seen.value
@@ -829,7 +929,7 @@ final class PMStore: ObservableObject {
         guard !todos.isEmpty else { return }
         let seen = seenRevision
         mutate { project in
-            try PMContract.perform("task.setDue", PMContract.input(project: project) {
+            try PMContract.perform(.taskSetDue, PMContract.input(project: project) {
                 $0.tasks = todos.map(\.reference)
                 $0.revision = seen.value
                 if let due { $0.due = due } else { $0.clearDue = true }
@@ -935,7 +1035,7 @@ final class PMStore: ObservableObject {
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
                  position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
-            try PMContract.perform("task.add", PMContract.input(project: project) { input in
+            try PMContract.perform(.taskAdd, PMContract.input(project: project) { input in
                 input.text = text
                 input.due = due
                 if let anchor, let position {
@@ -1001,15 +1101,17 @@ final class PMStore: ObservableObject {
     /// `PmLib.sessionIdleWindow`, in which case coming back to it is a new sitting and gets a heading
     /// of its own, labelled with the time so two dated the same day can be told apart. Within the
     /// window this stays idempotent: ask twice in a row and you land in the same session both times.
-    func openCurrentSession(then: @escaping @MainActor (Int) -> Void) {
+    ///
+    /// `then` is given nil when no session could be opened — no project, or a start that didn't land —
+    /// rather than not being called, which left the quick bar waiting on a receipt that never came.
+    func openCurrentSession(then: @escaping @MainActor (Int?) -> Void) {
         if let index = todaySessionIndex, !willStartNewSession {
             then(index)
             return
         }
         mutate(then: { [weak self] in
-            guard let self, let index = self.todaySessionIndex else { return }
-            then(index)
-        }) { try PMContract.perform("session.start", PMContract.input(project: $0)) }
+            then(self?.todaySessionIndex)
+        }) { try PMContract.perform(.sessionStart, PMContract.input(project: $0)) }
     }
 
     /// Fill in the session-addressing fields of an action's input from a reference.
@@ -1022,7 +1124,7 @@ final class PMStore: ObservableObject {
     /// Rename the session `ref` names (its trailing label; the date is preserved).
     func renameSession(_ ref: SessionRef, label: String, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
-            try PMContract.perform("session.rename", PMContract.input(project: project) {
+            try PMContract.perform(.sessionRename, PMContract.input(project: project) {
                 Self.address(&$0, ref)
                 $0.label = label
             })
@@ -1032,7 +1134,7 @@ final class PMStore: ObservableObject {
     /// Delete the session `ref` names. Refused by the write itself if it still holds tasks.
     func deleteSession(_ ref: SessionRef) {
         mutate { project in
-            try PMContract.perform("session.delete", PMContract.input(project: project) {
+            try PMContract.perform(.sessionDelete, PMContract.input(project: project) {
                 Self.address(&$0, ref)
             })
         }
@@ -1068,7 +1170,7 @@ final class PMStore: ObservableObject {
     /// heading.
     func appendSessionNote(_ prose: String, then: (@MainActor () -> Void)? = nil) {
         mutate(then: then) { project in
-            try PMContract.perform("session.note", PMContract.input(project: project) { $0.prose = prose })
+            try PMContract.perform(.sessionNote, PMContract.input(project: project) { $0.prose = prose })
         }
     }
 }

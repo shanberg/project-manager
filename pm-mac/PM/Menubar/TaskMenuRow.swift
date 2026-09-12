@@ -6,8 +6,9 @@ import PmLib
 
 /// Bridges NSMenu selection state (mouse hover + keyboard navigation) into the SwiftUI row so a
 /// custom `item.view` can draw the same highlight a standard menu item would.
-final class MenuRowHighlight: ObservableObject {
-    @Published var highlighted = false
+@Observable
+final class MenuRowHighlight {
+    var highlighted = false
 }
 
 // MARK: - AppKit host for a custom menu row
@@ -26,7 +27,7 @@ final class MenuRowView: NSView {
                         @ViewBuilder content: () -> Content) {
         self.onSelect = onSelect
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: fallbackHeight))
-        let hosting = NSHostingView(rootView: AnyView(content().environmentObject(highlight)))
+        let hosting = NSHostingView(rootView: AnyView(content().environment(highlight)))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hosting)
         NSLayoutConstraint.activate([
@@ -206,7 +207,7 @@ enum DueState {
 /// and a trailing relative-due pill. Highlights via `MenuRowHighlight` for both mouse and keyboard.
 struct TaskMenuRowContent: View {
     let todo: Todo
-    @EnvironmentObject private var highlight: MenuRowHighlight
+    @Environment(MenuRowHighlight.self) private var highlight
 
     private var dueValue: String? { todo.dueDate ?? todo.effectiveDueDate }
     private var symbol: String { todo.isFocused ? "arrow.right.circle.fill" : "circle" }
