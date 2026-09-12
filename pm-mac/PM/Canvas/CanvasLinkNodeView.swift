@@ -37,7 +37,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private var web: WKWebView?
     private var placeholder: NSView?
     /// The picture of the page that stands in for it while it is paused. See `freeze`.
-    private var frozen: NSImageView?
+    private var frozen: CanvasFrozenPageView?
     /// The placeholder's two lines of identity: what the page calls itself, and whose page it is. The
     /// second is hidden until there is a name above it to tell it apart from.
     private var nameLabel: NSTextField?
@@ -100,6 +100,14 @@ final class CanvasLinkNodeView: CanvasNodeView {
         super.init(node: node, board: board, scale: scale)
         setContent(face)
         showPlaceholder()
+        // What this card was last showing, from this session or the last one. A board opened cold used
+        // to come up as a screen of globes and fill in over the next several seconds as the budget
+        // woke the cards one at a time — which is the moment a board most needs to say what it is, and
+        // was the moment it said least.
+        if let picture = CanvasPageSnapshots.of(pageKey) {
+            showPicture(picture)
+            placeholder?.isHidden = true
+        }
         Self.cards.add(self)
         reconsiderLoading(scale: scale)
         // A card built into a board you have just switched to — a tile the workspace had not needed
@@ -186,6 +194,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // being adopted from the page on screen means the card is no longer off its address at all.
         // Both are true before the branch below, so this is above it.
         CanvasPageVisits.forget(pageKey)
+        // The picture, on the other hand, is only wrong when the address really did change: a card
+        // adopting the address of the page it is already showing is showing the right picture.
+        if !alreadyShowing { CanvasPageSnapshots.forget(pageKey) }
         // The address changed to the page this card is already displaying — see `adoptCurrentAddress`.
         // Nothing to rebuild; the card is already right, and rebuilding it would be the only thing the
         // user could see going wrong.
@@ -418,11 +429,21 @@ final class CanvasLinkNodeView: CanvasNodeView {
         }
     }
 
+    /// Put a picture of the page up, and keep it for the card as well as for this view.
+    ///
+    /// **Kept for the card**, which is the same move `CanvasPageHandover` made for the page and
+    /// `CanvasPageVisits` made for the address, and for the same reason: a view is the shortest-lived
+    /// thing here. See `CanvasPageSnapshots`.
     private func showFrozen(_ image: NSImage) {
+        CanvasPageSnapshots.keep(image, for: pageKey)
+        showPicture(image)
+    }
+
+    /// Put a picture up without filing it — for one that came out of the store in the first place.
+    private func showPicture(_ image: NSImage) {
         frozen?.removeFromSuperview()
-        let view = NSImageView()
+        let view = CanvasFrozenPageView()
         view.image = image
-        view.imageScaling = .scaleAxesIndependently
         view.setAccessibilityLabel(host)
         frozen = view
         fill(face, with: view, below: placeholder)
@@ -859,7 +880,36 @@ final class CanvasLinkNodeView: CanvasNodeView {
         board.pageStateChanged()
     }
 
+    /// The view is going; the card is not.
+    ///
+    /// Cards are built as they scroll into view and thrown away as they leave, so this runs constantly
+    /// on an ordinary board — and it used to tear a page down without asking it anything. A card
+    /// scrolled off and back came up as a globe and a hostname, its picture gone with the view and its
+    /// session as stale as the last time something had *paused* it. Freezing captured all of this
+    /// properly; being recycled captured none of it, and being recycled is the common one.
+    ///
+    /// Not `freeze()` itself, which installs its picture into a view that is about to be discarded and
+    /// stops on a `freezing` flag this has no way to clear. The three things worth keeping are kept
+    /// straight into the stores that outlive the view, and the web view is held by the snapshot's own
+    /// closure so the answer still arrives after `tearDownPage` has let go of it.
     override func prepareForRemoval() {
+        if let web, revealed {
+            resumeState = web.interactionState
+            resumeURL = web.url ?? resumeURL ?? url
+            noteVisit()
+            let key = pageKey
+            let configuration = WKSnapshotConfiguration()
+            configuration.afterScreenUpdates = false
+            web.takeSnapshot(with: configuration) { image, _ in
+                MainActor.assumeIsolated {
+                    // Held deliberately: without it the view is released by `tearDownPage` below,
+                    // before the web process has answered, and the picture never arrives.
+                    _ = web
+                    guard let image else { return }
+                    CanvasPageSnapshots.keep(image, for: key)
+                }
+            }
+        }
         tearDownPage()
         wanted = false
     }

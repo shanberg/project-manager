@@ -177,6 +177,8 @@ targets:
       - path: PM/Canvas/CanvasCardZoom.swift
       - path: PM/Canvas/CanvasPageTitles.swift
       - path: PM/Canvas/CanvasPageVisits.swift
+      - path: PM/Canvas/CanvasPageSnapshots.swift
+      - path: PM/Canvas/CanvasFrozenPageView.swift
       - path: PM/Canvas/CanvasCardSession.swift
       - path: PM/Canvas/CanvasCardEditing.swift
       - path: PM/Canvas/CanvasDocumentStore.swift

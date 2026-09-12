@@ -26,9 +26,12 @@ Open: what the earlier signal is. `didCommit` is too early — that is a blank f
 visually-non-empty layout is the honest one and WebKit only exposes it privately. A `estimatedProgress`
 threshold is the ugly, public, probably-good-enough version. Whichever it is, the 0.2s cross-fade stays.
 
-The other half of the same complaint — what a card shows *instead* of the page while it is stale — is
-in [web-cards.md](web-cards.md) under Open: three holes in the snapshot, none of them about timing.
-Worth taking together, since both are "what is on a card that isn't showing its page".
+The other half of the same complaint — what a card shows *instead* of the page — is **built**: the
+snapshot now belongs to the card rather than to the view, survives recycling and relaunching, and is
+drawn to the card's width instead of stretched. See [web-cards.md](web-cards.md). Which sharpens this
+entry rather than settling it: the placeholder a card falls back to is now usually a picture of the
+page, so what is left here is the narrower case of a card that has genuinely never loaded — and the
+*cross-fade* from a stale picture to a live page, which is the thing an earlier signal would improve.
 
 ### 2. The alignment indicators, again — **rebuilt as a target, wants using**
 

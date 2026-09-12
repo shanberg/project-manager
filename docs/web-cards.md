@@ -109,13 +109,47 @@ One of them is a real argument and is settled the other way: **the field does no
 `CanvasAddress` rejects what isn't an address rather than reinterpreting it, because handing what you
 typed to a search engine is a network claim nobody agreed to in an app that makes exactly one.
 
-**Preserving a stale page's picture.** `freeze` snapshots before tearing a renderer down, so a paused
-card still shows what it was showing. Three holes: `prepareForRemoval` tears down without taking one,
-so a card recycled out of the pool comes back as a globe; nothing survives a relaunch, so a cold board
-opens as placeholders; and the snapshot is scaled `scaleAxesIndependently`, so a tile resized since the
-capture shows a stretched one. The reveal side of the same question is
-[canvas-backlog.md](canvas-backlog.md) #1 — the page is hidden until `didFinish`, which on an app-shell
-page is long after it was worth looking at.
+**Revealing a page on an earlier signal than "finished."** The other half of the stale-page question,
+and the half still open: the page is hidden until `didFinish`, which on an app-shell page is long after
+it was worth looking at. [canvas-backlog.md](canvas-backlog.md) #1 has the argument.
+
+## A card that isn't running a page still shows one
+
+Freezing a card has always left a snapshot behind, because a board where the cards you aren't looking at
+turn back into globes tells you less the more of it you can see. The picture belonged to the **view**,
+though, which is the shortest-lived thing in this story — so it was missing from the two moments it was
+most wanted, and stretched in a third.
+
+- **A card recycled out of the pool.** Cards are built as they scroll into view and thrown away as they
+  leave, and `prepareForRemoval` tore the page down without asking it anything: no picture, no fresh
+  session, nothing. Scroll a card off the board and back and it came up as a globe and a hostname,
+  having been a page a second ago — and this is the *common* path, far commoner than a pause.
+- **A relaunch.** Every board opened cold and filled itself in over the next several seconds as the
+  budget woke the cards one at a time. That is the moment a board most needs to say what it is, and it
+  was the moment it said least.
+- **A card that changed shape.** The picture was an `NSImageView` set to `scaleAxesIndependently`, so a
+  tile whose workspace had been rearranged showed a page squashed into a column or pulled across the
+  screen. That is the one way a placeholder can be *worse* than a globe: a globe admits it isn't the
+  page.
+
+The first two are one answer — [`CanvasPageSnapshots`](../pm-mac/PM/Canvas/CanvasPageSnapshots.swift)
+keeps the picture for the **card**, keyed exactly as the page and the resume address are, in memory for
+this session and in the caches directory for the next. It is a cache in every sense that matters: it is
+derived entirely from pages PM happened to load, throwing it away costs one board opening as
+placeholders, and it is bounded at both ends — 80 cards in memory, 400 files on disk, the longest edge
+capped at 1400px and stored as JPEG, because it is a stand-in a loaded page crosses out in a fifth of a
+second and is sized to read *as* the page rather than to be read.
+
+The third is [`CanvasFrozenPageView`](../pm-mac/PM/Canvas/CanvasFrozenPageView.swift), which draws the
+picture **scaled to the card's width and anchored at the top** — how a picture of a page degrades
+honestly: the column keeps its proportions, the headline stays a headline, and a card that got taller
+shows the top of the page and then stops, which is what a page scrolled to the top actually looks like.
+Fitting the whole picture inside and letterboxing it was the alternative, and it reads as a photograph
+of a screen rather than as a screen.
+
+**Forgetting is a remembered miss, not a deleted row.** Deleting the file is IO and happens when it
+happens; dropping the row would send the very next lookup back to a disk that still has the old picture
+— and the next lookup is usually immediate, because changing a card's address rebuilds the card.
 
 ## Which of the two addresses each command means
 
