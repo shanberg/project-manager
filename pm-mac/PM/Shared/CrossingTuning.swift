@@ -75,6 +75,39 @@ struct CrossingTuning: OptionSet {
     /// 1, 1, 0, 0, 0 and 1 on the transform.
     static let zoomAsTransform = CrossingTuning(rawValue: 1 << 1)
 
+    /// Cross in two beats instead of one: the cards move at whichever zoom shows the whole journey, and
+    /// the magnification travels on its own afterwards.
+    ///
+    /// **What the parked transform is actually waiting for.** Everything measured says the two movements
+    /// are both there and that composing them is what makes the card half unreadable — a board scaled as
+    /// one image is all the eye is given. Separating them in time is the other way out, and it is only
+    /// available *because* of the transform: what forced the zoom and the cards onto one clock was that
+    /// a magnification changing under a running animation landed every card at its 100% size on a board
+    /// at 35% (`CanvasBoardView.leaveTiling`), and under a transform the magnification is final from the
+    /// first frame. So the hazard that made them inseparable is the very thing that has gone.
+    ///
+    /// **Cards at the wider zoom, in both directions.** Going in, the cards gather into the tile
+    /// arrangement while the board is still at the canvas's zoom, where the whole journey is on screen,
+    /// and the window then zooms onto what they made. Coming out, the board zooms out first and the
+    /// cards fly home across a board you can see all of. Either way the movement that says *which card
+    /// went where* happens at the zoom that shows it, and the zoom is alone when it travels — which is
+    /// what lets it take the compositor path (`CanvasScrollView.fly(to:centre:animated:alone:)`) and be
+    /// cheap as well as legible.
+    ///
+    /// It costs the crossing its length: two beats of 0.3s overlapping slightly, against one of 0.3s.
+    /// `stageHandover` is where that is tuned, and whether it reads as one gesture or as a stop and a
+    /// start is the question this flag exists to answer.
+    ///
+    /// **Measured on the picker, four round trips per configuration interleaved**, and it is the best of
+    /// the four on both halves: into the picker, shipping dropped 9, 9, 7 and 10 frames of 22, the
+    /// transform 4, 5, 4 and 4, removing the animation outright 5, 4, 5 and 5 — and this 1, 1, 2 and 2.
+    /// Back out, shipping 9, 9, 9 and 10; this 2, 3, 2 and 1. Both of its beats are clean, which the
+    /// numbers show as a quiet settle as well as a quiet crossing: the second beat starts at 0.24s and
+    /// therefore lands inside the settle window the meter measures. It beats the transform alone because
+    /// each beat has only one thing to do — no card is being flown while the magnification travels, so
+    /// nothing is composed with anything.
+    static let stagedZoom = CrossingTuning(rawValue: 1 << 2)
+
     /// What the app does when nobody is benching.
     static let shipping: CrossingTuning = []
 
@@ -87,6 +120,7 @@ struct CrossingTuning: OptionSet {
         ("shipping", .shipping),
         ("shipping+nozoom", [.skipZoomFlight]),
         ("shipping+transform", [.zoomAsTransform]),
+        ("shipping+staged", [.stagedZoom]),
     ]
 
     /// Kept as a separate name because `CrossingBench` takes one, and because a longer list will be

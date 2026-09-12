@@ -190,12 +190,20 @@ final class CanvasScrollView: NSScrollView {
 
     /// `zoom(toFit:)` as a journey: ease to the zoom that fits `rect` in the window — never past 100% —
     /// centred on it. How a workspace zooms out to the board to pick its cards.
-    func fly(toFit rect: CanvasRect, animated: Bool) {
+    func fly(toFit rect: CanvasRect, animated: Bool, alone: Bool = false) {
+        guard let fit = fitting(rect) else { return }
+        fly(to: fit.zoom, centre: fit.centre, animated: animated, alone: alone)
+    }
+
+    /// Where `fly(toFit:)` would take the board, without going. Separate because a staged crossing asks
+    /// the question a beat before it acts on it — see `CanvasBoardView.cross(to:centre:layout:animated:)`.
+    func fitting(_ rect: CanvasRect) -> (zoom: CGFloat, centre: CanvasPoint)? {
         let available = contentView.frame.size
-        guard rect.width > 0, rect.height > 0, available.width > 0, available.height > 0 else { return }
-        let zoom = min(1, available.width / rect.width, available.height / rect.height)
-        fly(to: max(zoom, Self.minimumZoom), centre: CanvasPoint(x: rect.midX, y: rect.midY),
-            animated: animated)
+        guard rect.width > 0, rect.height > 0, available.width > 0, available.height > 0 else { return nil }
+        let across = CGFloat(Double(available.width) / rect.width)
+        let down = CGFloat(Double(available.height) / rect.height)
+        let zoom = min(1, across, down)
+        return (max(zoom, Self.minimumZoom), CanvasPoint(x: rect.midX, y: rect.midY))
     }
 
     func zoomToActualSize() { setZoom(1) }

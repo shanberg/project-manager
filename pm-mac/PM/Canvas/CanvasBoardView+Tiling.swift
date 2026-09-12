@@ -207,8 +207,7 @@ extension CanvasBoardView {
         // ones, where every card is invalidated at once — are inside the measurement. See `FrameMeter`.
         FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(session.ids.count) tiles, "
                               + "\(pagesLive.count) live)", on: self)
-        flyToTiles(of: session, animated: true)
-        setLayout(session.layout, animated: true)
+        cross(to: 1, centre: tilesCentre(of: session), layout: session.layout, animated: true)
         onTilingChanged?()
         announceTiling()
     }
@@ -225,9 +224,59 @@ extension CanvasBoardView {
     /// (`poseAsTiling`) it is the centre that frames those tiles the way that pane had them, which is
     /// the whole point of the pose.
     func flyToTiles(of session: CanvasTileSession, animated: Bool) {
-        let centre = CanvasTiling.centre(framing: session.area, margins: tileMargins(atZoom: 1))
-        scrollView?.canvasScroll?.fly(to: 1, centre: centre, animated: animated)
+        scrollView?.canvasScroll?.fly(to: 1, centre: tilesCentre(of: session), animated: animated)
     }
+
+    /// The point the window looks at to frame a session's tiles.
+    func tilesCentre(of session: CanvasTileSession) -> CanvasPoint {
+        CanvasTiling.centre(framing: session.area, margins: tileMargins(atZoom: 1))
+    }
+
+    /// The whole of a crossing: the zoom, and the cards taking their new places.
+    ///
+    /// **One clock, or two beats.** As it ships the two run together, which is safe for the reason
+    /// `leaveTiling` sets out at length — neither is answering the other's question — and is what every
+    /// journey that changes the magnification costs about half its frames doing. Under
+    /// `CrossingTuning.stagedZoom` they are separated instead, and the rule is that **the cards move at
+    /// whichever zoom shows the whole journey**: zooming in, they gather first and the window then
+    /// closes on what they made; zooming out, the window widens first and they fly home across a board
+    /// you can see all of. The zoom is then travelling alone, so it goes by the compositor.
+    ///
+    /// Generation-counted like `settleIntoLayout`, because the second beat is a message to a board that
+    /// may have been asked for something else in the meantime — ⌥B twice in half a second — and the
+    /// stalest thing you can do to a crossing is finish the one before it.
+    func cross(to zoom: CGFloat, centre: CanvasPoint, layout next: CanvasLayout, animated: Bool) {
+        let scroll = scrollView?.canvasScroll
+        guard animated, CrossingTuning.current.contains(.stagedZoom), let scroll else {
+            scroll?.fly(to: zoom, centre: centre, animated: animated)
+            setLayout(next, animated: animated)
+            return
+        }
+        crossingStage += 1
+        let generation = crossingStage
+        let widening = zoom < scroll.magnification
+        if widening {
+            scroll.fly(to: zoom, centre: centre, animated: true, alone: true)
+        } else {
+            setLayout(next, animated: true)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stageHandover) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.crossingStage == generation, self.window != nil else { return }
+                if widening {
+                    self.setLayout(next, animated: true)
+                } else {
+                    self.scrollView?.canvasScroll?.fly(to: zoom, centre: centre, animated: true,
+                                                       alone: true)
+                }
+            }
+        }
+    }
+
+    /// When the second beat of a staged crossing starts, as a fraction of the first — slightly before it
+    /// lands, so the crossing reads as one gesture in two parts rather than as a stop and a start. The
+    /// cards are on a spring and have all but arrived by here.
+    private static var stageHandover: Double { Motion.duration(0.3) * 0.8 }
 
     // MARK: Arriving from the pane before this one
 
@@ -444,11 +493,9 @@ extension CanvasBoardView {
             FrameMeter.measure("tiles → canvas (\(nodeViews.count) views, \(current.ids.count) tiles, "
                                    + "\(pagesLive.count) live)", on: self)
         }
-        scrollView?.canvasScroll?.fly(to: CGFloat(session.restoreZoom),
-                                      centre: CanvasPoint(x: session.restoreVisible.midX,
-                                                          y: session.restoreVisible.midY),
-                                      animated: animated)
-        setLayout(.document, animated: animated)
+        cross(to: CGFloat(session.restoreZoom),
+              centre: CanvasPoint(x: session.restoreVisible.midX, y: session.restoreVisible.midY),
+              layout: .document, animated: animated)
         announceTiling()
         onTilingChanged?()
     }
@@ -709,10 +756,12 @@ extension CanvasBoardView {
         showTiledness(false)
         scrollView?.canvasScroll?.showsScrollers(true)
         FrameMeter.measure("tiles → picking (\(nodeViews.count) views, \(pagesLive.count) live)", on: self)
-        if let cards = document.bounds {
-            scrollView?.canvasScroll?.fly(toFit: cards.inset(by: 60), animated: true)
+        if let cards = document.bounds,
+           let fit = scrollView?.canvasScroll?.fitting(cards.inset(by: 60)) {
+            cross(to: fit.zoom, centre: fit.centre, layout: .document, animated: true)
+        } else {
+            setLayout(.document, animated: true)
         }
-        setLayout(.document, animated: true)
         refreshTileHandles()
         overlay.needsDisplay = true
     }
@@ -735,8 +784,7 @@ extension CanvasBoardView {
             FrameMeter.measure("picking → tiles (\(nodeViews.count) views, \(session.ids.count) tiles)",
                                on: self)
         }
-        flyToTiles(of: session, animated: animated)
-        setLayout(session.layout, animated: animated)
+        cross(to: 1, centre: tilesCentre(of: session), layout: session.layout, animated: animated)
         refreshTileHandles()
         overlay.needsDisplay = true
     }

@@ -441,18 +441,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         // **Dev only, and silent unless the frame meter is on**, like `bench` — and for a reason the
         // bench cannot cover: a spread says what a configuration *costs*, and nothing says what it
-        // looks like. `?zoom=transform|travel` holds one until it is changed back, so a crossing can be
-        // watched rather than counted. See `CrossingTuning`.
+        // looks like. `?zoom=transform|staged|none|travel` holds one until it is changed back, so a
+        // crossing can be watched rather than counted. See `CrossingTuning`.
         case "tuning":
             guard FrameMeter.isEnabled else { break }
             switch stringParam(url, "zoom") {
             case "transform": CrossingTuning.current = [.zoomAsTransform]
+            case "staged": CrossingTuning.current = [.stagedZoom]
             case "none", "skip": CrossingTuning.current = [.skipZoomFlight]
             case "travel", "off", "shipping": CrossingTuning.current = .shipping
             default: break
             }
             let held = CrossingTuning.current
-            let zoom = held.contains(.zoomAsTransform) ? "transform"
+            let zoom = held.contains(.stagedZoom) ? "staged"
+                : held.contains(.zoomAsTransform) ? "transform"
                 : held.contains(.skipZoomFlight) ? "none" : "travel (shipping)"
             Log.write("TUNING zoom: \(zoom)")
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
