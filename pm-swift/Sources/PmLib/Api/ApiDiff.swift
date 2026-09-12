@@ -122,6 +122,26 @@ struct Phrase: Equatable {
     func appending(past clause: String, future participle: String) -> Phrase {
         Phrase(past: past + ". " + clause, future: future + ", " + participle)
     }
+
+    /// The same sentence, plus the aside that the reference had to move to find its task.
+    ///
+    /// **Said in `summary`, rather than left to the `relocated` field.** The field has been on every
+    /// envelope since references learnt to heal, and no surface has ever read it — which is the whole
+    /// of what was wrong: a reference that healed healed silently everywhere a person was looking, and
+    /// a client holding stale positions had no way to find out it was. Putting it in the one sentence
+    /// every surface already shows says it once, everywhere, without each of them having to opt in.
+    /// The field stays for anything that wants to act on it rather than read it.
+    ///
+    /// **And quietly**: a second short sentence after the receipt, never a refusal. The write already
+    /// happened and was correct — this is a note about the document having moved underneath, not a
+    /// problem with what was asked for. See docs/task-identity.md.
+    ///
+    /// `batch` because the caller named several: `relocated` is one flag for the whole list, so with a
+    /// list the honest thing is not to claim which of them it was.
+    func tellingItHadMoved(batch: Bool) -> Phrase {
+        appending(past: batch ? "One of those tasks had moved" : "That task had moved",
+                  future: batch ? "one of which has moved" : "which has moved")
+    }
 }
 
 /// `batch` when the caller named several tasks: "and 2 subtasks" is true of one task that took its

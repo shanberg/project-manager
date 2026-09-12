@@ -96,6 +96,7 @@ This means `pm api describe` will list fewer things than the quick bar's `>` men
   changed: [ { ref, was, now } ],  // structured diff
   focus,                           // where focus ended up, if it moved
   relocated                        // a TaskRef healed against drift; see task-identity.md
+                                   // (`summary` says so too, in a second sentence)
 }
 ```
 

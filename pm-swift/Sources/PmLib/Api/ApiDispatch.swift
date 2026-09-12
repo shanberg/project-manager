@@ -668,8 +668,12 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
-    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes,
-                                           batch: (input.tasks?.count ?? 1) > 1)
+    let batch = (input.tasks?.count ?? 1) > 1
+    let phrase = outcome.note ?? summarize(action: spec.name, changes: changes, batch: batch)
+    // The receipt, and after it the aside that a reference had to move — see `tellingItHadMoved`,
+    // which is where the argument for saying it here lives. Not on the phrase the journal records:
+    // that is a label for an undo step, and where the task was found is not part of what changed.
+    let told = outcome.relocated ? phrase.tellingItHadMoved(batch: batch) : phrase
     if !options.dryRun, outcome.rawText != rawText {
         try handle.io.writeContent(path: handle.notesPath, content: outcome.rawText)
         // After the write, never before: a journal entry for a write that then failed would be a
@@ -679,7 +683,7 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
                           changed: changes, source: options.source)
     }
     return ApiResult(action: spec.name,
-                     summary: phrase.sentence(dryRun: options.dryRun),
+                     summary: told.sentence(dryRun: options.dryRun),
                      revision: revision(of: outcome.rawText),
                      changed: changes,
                      focus: after.first(where: \.isFocused).map(reference(to:)),

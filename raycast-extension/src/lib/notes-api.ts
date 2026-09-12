@@ -277,25 +277,35 @@ async function addedTodo(
   return { notes: data.notes, todo: found ?? fallback };
 }
 
-/** Toggle one todo (flip [ ] <-> [x]). */
+/**
+ * The aside a surface adds when the reference it acted on had to be healed.
+ *
+ * A list on screen is a set of positions read a moment ago, and the notes file is markdown the user
+ * also edits in Obsidian — so acting on a row can mean acting on a task that has since moved. The
+ * write was correct either way; this is so a person finds out the document shifted under them, and
+ * quietly, which is why it is a suffix on a success toast rather than anything louder. See
+ * docs/task-identity.md.
+ */
+export const hadMovedNote = "that task had moved";
+
+/** Toggle one todo (flip [ ] <-> [x]). True when the reference had to move to find it. */
 export async function toggleTodoInNotes(
   prefs: PreferenceValues,
   projectName: string,
   _notes: ProjectNotes,
   todo: Todo,
-): Promise<void> {
-  if (todo.checked) {
-    await callApi(prefs, "task.reopen", {
-      project: projectName,
-      task: taskRef(todo),
-    });
-  } else {
-    await callApi(prefs, "task.complete", {
-      project: projectName,
-      task: taskRef(todo),
-      advanceFocus: false,
-    });
-  }
+): Promise<boolean> {
+  const result = todo.checked
+    ? await callApi(prefs, "task.reopen", {
+        project: projectName,
+        task: taskRef(todo),
+      })
+    : await callApi(prefs, "task.complete", {
+        project: projectName,
+        task: taskRef(todo),
+        advanceFocus: false,
+      });
+  return result.relocated;
 }
 
 /** Complete every open todo in the list, leaving focus where it is. */
@@ -304,20 +314,21 @@ export async function toggleAllTodosInNotes(
   projectName: string,
   revision: string | undefined,
   todos: Todo[],
-): Promise<void> {
+): Promise<boolean> {
   // One call for the whole selection: one write, one journal entry, one step to undo. Completing a
   // task completes its descendants, so a task an earlier parent already closed is skipped rather
   // than failing the batch — and `revision` is what keeps that tolerance from also swallowing a task
   // someone edited in Obsidian while this list sat on screen. This used to take the `ProjectNotes` it
   // never looked at; it takes the revision of that same read instead.
   const open = todos.filter((t) => !t.checked);
-  if (open.length === 0) return;
-  await callApi(prefs, "task.complete", {
+  if (open.length === 0) return false;
+  const result = await callApi(prefs, "task.complete", {
     project: projectName,
     tasks: open.map(taskRef),
     revision,
     advanceFocus: false,
   });
+  return result.relocated;
 }
 
 /** Set or remove the inline due date on a task. */
@@ -327,12 +338,13 @@ export async function updateDueDateInNotes(
   _notes: ProjectNotes,
   todo: Todo,
   dueDate: string | null,
-): Promise<void> {
-  await callApi(prefs, "task.setDue", {
+): Promise<boolean> {
+  const result = await callApi(prefs, "task.setDue", {
     project: projectName,
     task: taskRef(todo),
     ...(dueDate ? { due: dueDate } : { clearDue: true }),
   });
+  return result.relocated;
 }
 
 /** Add a task to the current session, starting one if there isn't one to continue. */

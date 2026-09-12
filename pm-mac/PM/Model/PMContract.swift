@@ -28,6 +28,27 @@ extension Todo {
 }
 
 enum PMContract {
+    /// How often this app's writes have had their reference healed against a document that moved.
+    ///
+    /// **A counter to be sampled either side of a write, rather than a callback**, which is the shape
+    /// the app already uses for the other thing a write can report out of band: see
+    /// `PMStore.WriteFailure` and `QuickBarController.settle`, which compares the refusal count before
+    /// and after to tell "this write failed" from "an unrelated reload failed". The same reasoning
+    /// applies here and for the same reason — writes run on a background queue and more than one store
+    /// can be writing.
+    ///
+    /// A count and nothing else: the words belong to whichever surface is speaking. The contract's own
+    /// sentence already carries the clause for anything that shows `summary` — see
+    /// `Phrase.tellingItHadMoved` — and the quick bar composes its own receipt, so it appends its own.
+    static let relocations = Relocations()
+
+    final class Relocations: @unchecked Sendable {
+        private let lock = NSLock()
+        private var tally = 0
+        var count: Int { lock.lock(); defer { lock.unlock() }; return tally }
+        fileprivate func noteOne() { lock.lock(); tally += 1; lock.unlock() }
+    }
+
     /// Build an input for `project`, optionally about `task`.
     static func input(project: String?, task: Todo? = nil,
                       _ fill: (inout ApiInput) -> Void = { _ in }) -> ApiInput {
@@ -42,7 +63,12 @@ enum PMContract {
     /// happen on its IO queue.
     @discardableResult
     static func perform(_ action: String, _ input: ApiInput, dryRun: Bool = false) throws -> ApiResult {
-        try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "app"))
+        let result = try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "app"))
+        // A reference that had to move to find its task. The write happened and was right; this is the
+        // app noticing that the list a click was based on had gone out of date underneath it, which is
+        // worth saying once and quietly. See `relocations`, and docs/task-identity.md.
+        if result.relocated { relocations.noteOne() }
+        return result
     }
 
     /// What to put in front of a person when a write was refused.

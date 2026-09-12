@@ -346,12 +346,19 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// this is the write that failed; a receipt on top of that would be the bar claiming the opposite
     /// of the truth. This used to compare `errorMessage`, which also moves when an unrelated reload
     /// fails — so a cloud-sync hiccup during a write that worked fine reported the write as failed.
-    private func settle(_ message: String, failure: String, store: PMStore, failureBefore: Int?) {
+    private func settle(_ message: String, failure: String, store: PMStore, failureBefore: Int?,
+                        movedBefore: Int) {
         guard store.writeFailure?.token == failureBefore else {
             confirm(.failed(failure, store.writeFailure?.message))
             return
         }
-        confirm(.done(message))
+        // **And the one thing a receipt for a *successful* write still owes you.** The bar acts on a
+        // task found in an index read before you started typing; the notes file is markdown you also
+        // edit in Obsidian. When the reference had to be healed to find it, the write was right and the
+        // list it came from was out of date, which is worth knowing and worth saying no louder than
+        // this. Sampled either side, for the reason `failureBefore` is. See `PMContract.relocations`.
+        let moved = PMContract.relocations.count > movedBefore
+        confirm(.done(moved ? message + " — that task had moved" : message))
     }
 
     /// How long a receipt stays up.
@@ -675,6 +682,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             return
         }
         let failureBefore = store.writeFailure?.token
+        let movedBefore = PMContract.relocations.count
         let named = QuickBarModel.truncate(todo.text, 44)
         store.focus(todo) { [weak self] in
             defer { release?() }
@@ -692,7 +700,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             let where_ = there.map { " in \($0)" } ?? ""
             self.settle("Focused “\(named)”\(where_)",
                         failure: "Couldn't focus “\(named)”\(where_)",
-                        store: store, failureBefore: failureBefore)
+                        store: store, failureBefore: failureBefore,
+                        movedBefore: movedBefore)
         }
     }
 
@@ -725,6 +734,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         Log.write("quick bar \(placement.rawValue)\(reveal ? " (reveal)" : ""): \(text)\(due.map { " due:\($0)" } ?? "")")
         let optionDown = modifiers.contains(.option)
         let failureBefore = store.writeFailure?.token
+        let movedBefore = PMContract.relocations.count
         switch placement {
         case .narrow, .after:
             // Resolved now rather than held from the summon. The anchor is a value snapshot carrying
@@ -744,7 +754,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                     // was written before that anchor was re-resolved.
                     self?.settle(placement.confirmation(anchor: anchor.text, optionDown: optionDown),
                                  failure: placement.failure(anchor: anchor.text, optionDown: optionDown),
-                                 store: store, failureBefore: failureBefore)
+                                 store: store, failureBefore: failureBefore,
+                                movedBefore: movedBefore)
                     return
                 }
                 // A child insert moves the project's focus onto the new task by itself — that is what
@@ -759,7 +770,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 guard reveal else {
                     self?.settle(placement.confirmation(anchor: nil, optionDown: optionDown),
                                  failure: placement.failure(anchor: nil, optionDown: optionDown),
-                                 store: store, failureBefore: failureBefore)
+                                 store: store, failureBefore: failureBefore,
+                                movedBefore: movedBefore)
                     return
                 }
                 FocusPanelController.shared.show()
@@ -769,7 +781,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 guard reveal else {
                     self?.settle(placement.confirmation(anchor: nil, optionDown: optionDown),
                                  failure: placement.failure(anchor: nil, optionDown: optionDown),
-                                 store: store, failureBefore: failureBefore)
+                                 store: store, failureBefore: failureBefore,
+                                movedBefore: movedBefore)
                     return
                 }
                 WindowManager.shared.openFocusedProject().newSession(nil)
@@ -804,6 +817,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 return
             }
             let failureBefore = store.writeFailure?.token
+            let movedBefore = PMContract.relocations.count
             let landed: @MainActor () -> Void = {
                 defer { StoreRegistry.shared.release(key) }
                 guard reveal else {
@@ -811,7 +825,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                     let failed = placement.failure(anchor: nil, optionDown: false)
                     self.settle("\(what) in \(target.displayName)",
                                 failure: "\(failed) in \(target.displayName)",
-                                store: store, failureBefore: failureBefore)
+                                store: store, failureBefore: failureBefore,
+                                movedBefore: movedBefore)
                     return
                 }
                 // "And show me" across a redirect means going there: what you just wrote is in a
@@ -1051,6 +1066,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             : nil
         if receipt == nil { hide(restoringFocus: !(stays || target != nil)) } else { isRunning = true }
         let failureBefore = store?.writeFailure?.token
+        let movedBefore = PMContract.relocations.count
 
         // What every path here ends with: the receipt for the ones that earned one, and otherwise the
         // reveal that ⌘ asked for.
@@ -1068,7 +1084,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                 return
             }
             self.settle(receipt, failure: self.failure(for: command, task: task),
-                        store: store, failureBefore: failureBefore)
+                        store: store, failureBefore: failureBefore,
+                        movedBefore: movedBefore)
         }
 
         switch command {

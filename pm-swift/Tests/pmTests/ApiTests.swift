@@ -6,6 +6,38 @@ import XCTest
 /// that a dry run is the same path as a write minus the write. See docs/api-contract.md.
 final class ApiTests: XCTestCase {
 
+    // MARK: The sentence a surface shows
+
+    /// **A reference that healed has to say so**, and the envelope's own sentence is where it is said:
+    /// `relocated` has been on every result since references learnt to heal and no surface ever read
+    /// it. See `Phrase.tellingItHadMoved`.
+    func testARelocatedReferenceIsSaidInTheReceipt() {
+        let completed = summarize(action: "task.complete",
+                                  changes: [ApiChange(kind: .completed, ref: nil, was: nil, now: "Alpha")])
+        XCTAssertEqual(completed.sentence(dryRun: false), "Completed “Alpha”.")
+        XCTAssertEqual(completed.tellingItHadMoved(batch: false).sentence(dryRun: false),
+                       "Completed “Alpha”. That task had moved.")
+    }
+
+    /// With a list there is one flag for the whole of it, so the sentence must not claim which.
+    func testABatchDoesNotClaimWhichTaskMoved() {
+        let many = summarize(action: "task.complete",
+                             changes: [ApiChange(kind: .completed, ref: nil, was: nil, now: "Alpha"),
+                                       ApiChange(kind: .completed, ref: nil, was: nil, now: "Beta")],
+                             batch: true)
+        XCTAssertEqual(many.tellingItHadMoved(batch: true).sentence(dryRun: false),
+                       "Completed 2 tasks. One of those tasks had moved.")
+    }
+
+    /// And a preview says it in the tense a preview speaks in, since a dry run resolves the same
+    /// reference against the same document and can heal it in exactly the same way.
+    func testAPreviewSaysItWouldBeActingOnAMovedTask() {
+        let due = summarize(action: "task.setDue",
+                            changes: [ApiChange(kind: .retimed, ref: nil, was: nil, now: "2026-09-20")])
+        XCTAssertEqual(due.tellingItHadMoved(batch: false).sentence(dryRun: true),
+                       "Would " + due.future + ", which has moved.")
+    }
+
     // MARK: Manifest
 
     func testManifestCoversEveryAction() throws {

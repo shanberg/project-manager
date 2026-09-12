@@ -147,7 +147,17 @@ On the wire, `session` already accepted an ISO date or an index; `sessionDigest`
 
 ## Open question
 
-**Silent healing, or visible relocation?** *Half settled.* It is a field: every result the contract returns carries `relocated`, alongside the CLI's `note:` line on stderr. What no surface does yet is *show* it — neither the app nor Raycast reads the field, so a reference that healed still heals quietly everywhere a person is looking. That's the open half, and it's a question about phrasing rather than about the contract: "that task had moved" is worth saying once, and worth saying nowhere near as loudly as a refusal.
+**Silent healing, or visible relocation?** *Settled — visible, once, quietly.* It was a field nobody read: every result carried `relocated` and no surface showed it, so a reference that healed healed silently everywhere a person was looking.
+
+Three surfaces now say it, and the first of them says it for everything downstream of the contract:
+
+- **The envelope's own sentence.** `summary` gains a second short sentence — "Completed “Alpha”. That task had moved." — so every surface that shows the contract's receipt says it without opting in, including a model reading the result back. A batch says "One of those tasks had moved", because `relocated` is one flag for the whole list and claiming which would be a guess. A dry run says it in the tense a preview speaks in. See `Phrase.tellingItHadMoved`, which is also where the argument for putting it in `summary` rather than leaving it to the field lives; the field stays for anything that wants to act on it rather than read it.
+- **Raycast**, where a row is a position read when the list was drawn: the success toast gains "— that task had moved". The helpers that write now hand the flag back (`toggleTodoInNotes`, `toggleAllTodosInNotes`, `updateDueDateInNotes`) and `hadMovedNote` is the wording.
+- **The quick bar**, which acts on a task found in an index read before you started typing — the app's most drift-prone surface, and the one place it has a receipt line. `PMContract.relocations` is a counter sampled either side of the write, the same shape the bar already uses to tell its own failure from an unrelated one.
+
+The CLI's `note:` line on stderr predates all of this and is unchanged: `pm notes todo …` calls PmLib directly rather than through the envelope, so it has its own sentence to print.
+
+What is *not* done, and is a question rather than a task: the Mac app has no receipt line for a task mutation made anywhere but the quick bar — the store's `mutate` discards every result and the UI answers by reloading. Saying it there means choosing a surface for a sentence that has nowhere to go yet.
 
 ## Verification
 

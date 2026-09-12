@@ -19,6 +19,7 @@ import {
   resolveNotesPath,
   toggleAllTodosInNotes,
   toggleTodoInNotes,
+  hadMovedNote,
   type LinkEntry,
   type Todo,
 } from "./lib/notes-api";
@@ -186,14 +187,17 @@ export default function ProjectView({ projectName, basePath }: Props) {
   async function handleToggle(todo: Todo) {
     if (!notesPath || !notes) return;
     try {
-      await toggleTodoInNotes(prefs, projectName, notes, todo);
+      const hadMoved = await toggleTodoInNotes(prefs, projectName, notes, todo);
       await mutate();
       // `text` arrives with the inline due and focus marker already off it.
       const toastText = todo.text;
+      const shown = toastText.slice(0, 50) + (toastText.length > 50 ? "…" : "");
       await showToast({
         style: Toast.Style.Success,
         title: todo.checked ? "Incomplete" : "Complete",
-        message: toastText.slice(0, 50) + (toastText.length > 50 ? "…" : ""),
+        // The row was a position read when this list was drawn, and the file moves under it; when the
+        // reference had to be healed to find the task, say so here. See `hadMovedNote`.
+        message: hadMoved ? `${shown} — ${hadMovedNote}` : shown,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -211,12 +215,18 @@ export default function ProjectView({ projectName, basePath }: Props) {
     const unchecked = sessionTodos.filter((t) => !t.checked);
     if (unchecked.length === 0) return;
     try {
-      await toggleAllTodosInNotes(prefs, projectName, revision, unchecked);
+      const hadMoved = await toggleAllTodosInNotes(
+        prefs,
+        projectName,
+        revision,
+        unchecked,
+      );
       await mutate();
+      const many = `${unchecked.length} task${unchecked.length === 1 ? "" : "s"} in session`;
       await showToast({
         style: Toast.Style.Success,
         title: "Completed",
-        message: `${unchecked.length} task${unchecked.length === 1 ? "" : "s"} in session`,
+        message: hadMoved ? `${many} — one of them had moved` : many,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
