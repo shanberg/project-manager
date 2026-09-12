@@ -369,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // pmpanel://waiting                → the cross-project Waiting list
     // pmpanel://settings               → the Settings window
     // pmpanel://bench?spread=1&runs=&tiles=&journey= → dev only; inert unless the frame meter is on
+    // pmpanel://tuning?zoom=transform|travel|none   → dev only; holds a crossing configuration to watch
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
@@ -438,6 +439,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 CrossingBench.run(iterations: intParam(url, "runs") ?? 20,
                                   tiles: intParam(url, "tiles") ?? 8)
             }
+        // **Dev only, and silent unless the frame meter is on**, like `bench` — and for a reason the
+        // bench cannot cover: a spread says what a configuration *costs*, and nothing says what it
+        // looks like. `?zoom=transform|travel` holds one until it is changed back, so a crossing can be
+        // watched rather than counted. See `CrossingTuning`.
+        case "tuning":
+            guard FrameMeter.isEnabled else { break }
+            switch stringParam(url, "zoom") {
+            case "transform": CrossingTuning.current = [.zoomAsTransform]
+            case "none", "skip": CrossingTuning.current = [.skipZoomFlight]
+            case "travel", "off", "shipping": CrossingTuning.current = .shipping
+            default: break
+            }
+            let held = CrossingTuning.current
+            let zoom = held.contains(.zoomAsTransform) ? "transform"
+                : held.contains(.skipZoomFlight) ? "none" : "travel (shipping)"
+            Log.write("TUNING zoom: \(zoom)")
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
         case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break

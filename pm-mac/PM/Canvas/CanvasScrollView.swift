@@ -246,6 +246,10 @@ final class CanvasScrollView: NSScrollView {
         // outright down the same path Reduce Motion and a zero distance take — and so, under
         // `CrossingTuning`, does a run measuring what the zoom flight costs.
         let flies = !CrossingTuning.current.contains(.skipZoomFlight)
+        if flies, seconds > 0, from != wanted || at != point, board.layer != nil,
+           CrossingTuning.current.contains(.zoomAsTransform) {
+            return flyByTransform(from: from, at: at, to: wanted, centre: point, seconds: seconds)
+        }
         guard flies, seconds > 0, from != wanted || at != point, ticker.start(on: self) else {
             magnification = wanted
             centre(on: point)
@@ -292,9 +296,69 @@ final class CanvasScrollView: NSScrollView {
         board.settlePageBudget()
     }
 
+    /// The flight as a layer transform — `CrossingTuning.zoomAsTransform`.
+    ///
+    /// **Arrive first, then pretend you haven't.** The magnification is set once, which is one rescale
+    /// of everything under the clip rather than one per frame, and the board is then drawn with a
+    /// counter-transform that makes it look exactly as it did before — the old region at the old zoom —
+    /// which Core Animation eases back to identity on the render server. Nothing re-renders to travel;
+    /// the pages are rescaled once, at the destination, and the page budget and the card building are
+    /// asked their question once rather than twenty-two times.
+    ///
+    /// **The transform is written about the layer's anchor**, which is where a first version went
+    /// wrong: a transform is applied around the anchor point, so one composed in view coordinates lands
+    /// offset by it unless it is conjugated as it is here.
+    private func flyByTransform(from: CGFloat, at: CanvasPoint, to wanted: CGFloat,
+                                centre point: CanvasPoint, seconds: Double) {
+        ticker.stop()
+        flight = nil
+        magnification = wanted
+        centre(on: point)
+        board.magnificationChanged()
+        board.settlePageBudget()
+        guard let layer = board.layer else { return }
+
+        // Where the board is looking now, and where it was looking, in the board's own points — which
+        // do not change with the zoom (`CanvasBoardView.viewRect`), so both are measurable after the
+        // jump.
+        let source = board.viewPoint(at)
+        let destination = board.viewPoint(point)
+        let scale = from / wanted
+        let asItWas = CGAffineTransform(translationX: -source.x, y: -source.y)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: destination.x, y: destination.y))
+        let anchor = CGPoint(x: layer.anchorPoint.x * layer.bounds.width,
+                             y: layer.anchorPoint.y * layer.bounds.height)
+        let start = CGAffineTransform(translationX: anchor.x, y: anchor.y)
+            .concatenating(asItWas)
+            .concatenating(CGAffineTransform(translationX: -anchor.x, y: -anchor.y))
+
+        transformingUntil = CACurrentMediaTime() + seconds
+        let travel = CABasicAnimation(keyPath: "transform")
+        travel.fromValue = CATransform3DMakeAffineTransform(start)
+        travel.toValue = CATransform3DIdentity
+        travel.duration = seconds
+        // The same ease-out the ticked flight uses, so the two configurations are the same movement
+        // measured two ways rather than two movements.
+        travel.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setAffineTransform(.identity)
+        layer.add(travel, forKey: "canvasFlight")
+        CATransaction.commit()
+    }
+
+    /// When a transform flight is due to land, so `isFlying` can answer for it as well. Left set
+    /// afterwards rather than cleared on a timer: it is a time in the past, which answers false.
+    private var transformingUntil: CFTimeInterval?
+
     /// Whether the board is mid-crossing. Nothing may re-lay a tiling out while it is — see
     /// `CanvasBoardView.retileForWindowSize`.
-    var isFlying: Bool { flight != nil }
+    var isFlying: Bool {
+        if flight != nil { return true }
+        guard let transformingUntil else { return false }
+        return CACurrentMediaTime() < transformingUntil
+    }
 
     /// Fit the whole board in the window — ⌘0, and what a window does when it opens.
     ///

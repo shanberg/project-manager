@@ -39,6 +39,24 @@ struct CrossingTuning: OptionSet {
     /// not at all (`CanvasBoardView.refreshVisibleCards`) — so what is left is the rescale itself.
     static let skipZoomFlight = CrossingTuning(rawValue: 1 << 0)
 
+    /// Do the zoom as a layer transform: arrive at the destination magnification in one step, and ease
+    /// a counter-transform on the board's layer back to identity so the travel is the render server's
+    /// work rather than a rescale of every layer under the clip, once per frame.
+    ///
+    /// **What `skipZoomFlight` stands for, built** — the animation is kept rather than removed. See
+    /// `CanvasScrollView.flyByTransform` for what it costs: content is rasterised at the destination
+    /// scale and transformed to the intermediate ones, and the cards are where they will be rather than
+    /// where they are drawn, so a click mid-flight reads the destination's geometry.
+    ///
+    /// **Measured on the picker, 2026-09-11**, six crossings per configuration interleaved: shipping
+    /// dropped 11, 9, 9, 9, 6 and 10 frames of 22; skipping the flight dropped 2, 4, 4, 3, 2 and 4;
+    /// this dropped 4, 1, 5, 2, 3 and 2, with the worst frame 33-36ms against shipping's 39-50ms. So it
+    /// buys what removing the animation bought, and keeps the animation. **What is still unmeasured is
+    /// how it looks** — softness on the way through a long zoom-out, and a click landing on the
+    /// destination's geometry — which no frame count can answer. `pmpanel://tuning?zoom=transform`
+    /// holds it on so it can be watched.
+    static let zoomAsTransform = CrossingTuning(rawValue: 1 << 1)
+
     /// What the app does when nobody is benching.
     static let shipping: CrossingTuning = []
 
@@ -50,6 +68,7 @@ struct CrossingTuning: OptionSet {
     @MainActor static let spread: [(name: String, tuning: CrossingTuning)] = [
         ("shipping", .shipping),
         ("shipping+nozoom", [.skipZoomFlight]),
+        ("shipping+transform", [.zoomAsTransform]),
     ]
 
     /// Kept as a separate name because `CrossingBench` takes one, and because a longer list will be

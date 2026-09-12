@@ -1318,6 +1318,14 @@ pages included. The answer that keeps the animation is to do the zoom as a layer
 real magnification once at the end; `CrossingTuning.skipZoomFlight` is the probe that stands for it,
 and it is now measured on two journeys rather than one.
 
+**And it is built, behind `CrossingTuning.zoomAsTransform`.** Three configurations on the picker, six
+crossings apiece: shipping dropped 9 frames of 22 on average, skipping the flight 3.2, and the
+transform 2.8 — the animation kept, at the cost of not having one. It is not on, because a frame count
+cannot answer the two questions that decide it: whether a long zoom-out looks soft on the way through,
+since the content is rasterised at the destination scale, and whether a click mid-flight landing on the
+destination's geometry is ever noticed in a 0.3s movement. `pmpanel://tuning?zoom=transform` holds it
+on to be looked at.
+
 ### The order it is built in
 
 Each step ships on its own once the first is in.
