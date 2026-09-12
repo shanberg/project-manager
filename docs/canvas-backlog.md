@@ -12,19 +12,31 @@ Priorities are at the bottom.
 
 ## Fixes
 
-### 1. The placeholder sits over a page you could already read
+### 1. The placeholder sits over a page you could already read — **built**
 
-A card shows its globe-and-host placeholder until the page finishes loading, which on an app-shell
+A card showed its globe-and-host placeholder until the page *finished loading*, which on an app-shell
 page — the kind a dashboard is made of — is long after the page is worth looking at.
 
-Not an accident: `revealPage` is called from `didFinish`, with an eight-second fallback for pages that
-never settle ([CanvasLinkNodeView.swift:505](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:505)), and
-`suppressesIncrementalRendering` is on so the reveal is never half-painted. The design answers "don't
-flash"; the complaint is that it answers it by waiting for the wrong signal.
+The signal was the whole of it. The reveal is now the first of three things rather than one: the page
+having **painted**, then `didFinish`, then the eight seconds. `didCommit` was rightly ruled out here as
+a blank frame, and the honest milestone — WebKit's first visually-non-empty layout — is private, so the
+card reads its *effect* instead: from `didCommit` it takes a 48pt-wide snapshot every 200ms and asks
+[CanvasPagePaint](../pm-mac/PM/Canvas/CanvasPagePaint.swift) whether there is a page on it, which is a
+poll standing in for the notification. Two or three snapshots is the usual cost of a load. The 0.2s
+cross-fade stays, and both old signals stay under it: a page whose first paint is genuinely uniform
+never trips the probe and behaves exactly as it did before.
 
-Open: what the earlier signal is. `didCommit` is too early — that is a blank frame. First
-visually-non-empty layout is the honest one and WebKit only exposes it privately. A `estimatedProgress`
-threshold is the ugly, public, probably-good-enough version. Whichever it is, the 0.2s cross-fade stays.
+`estimatedProgress` was the expected answer and is not the one: it counts bytes, and the reveal is a
+question about pixels — a page can sit at 0.9 with nothing drawn and paint its shell at 0.3.
+
+**The measurement that decided the shape, because it contradicts the obvious reading of the API.**
+`suppressesIncrementalRendering` sounds like the private milestone made public. It is not: against a
+page that paints its shell and then holds a request open for three seconds, a suppressed view answered
+*blank* to all ten probes and arrived only at `didFinish` — the property means what its documentation
+says, fully loaded. With incremental rendering allowed, the first probe after the shell painted saw it,
+**2.7 seconds earlier**. So the card no longer suppresses, and the half-painted frame suppression used
+to guard against is covered by the probe (which only fires on a view with something drawn) and the
+cross-fade over it.
 
 The other half of the same complaint — what a card shows *instead* of the page — is **built**: the
 snapshot now belongs to the card rather than to the view, survives recycling and relaunching, and is

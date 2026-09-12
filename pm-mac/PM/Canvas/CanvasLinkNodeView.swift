@@ -88,6 +88,12 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// is not a reason to take the page away.
     private var revealed = false
     private var giveUp: DispatchWorkItem?
+    /// Asking, every so often, whether the page has painted — see `probeForPaint`. Alive only between
+    /// the page committing and the card being revealed, which is a second or two at most.
+    private var paintProbe: Timer?
+    /// One snapshot in flight at a time, since a probe that takes longer than the interval would
+    /// otherwise queue more of itself behind it.
+    private var probing = false
 
     /// Whether link cards embed the live page at all. On, because that is what a link card is for —
     /// but it is a network call made on your behalf by opening a document, so it is a switch.
@@ -652,9 +658,20 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // it is a property of the configuration rather than of the page — which is also why turning it
         // on doesn't start anything: it is the policy the *next* page will load under.
         configuration.mediaTypesRequiringUserActionForPlayback = autoplays ? [] : .all
-        // Nothing is shown until the page has laid out anyway, because the placeholder is over it —
-        // this just spares the card a half-painted frame at the moment of the reveal.
-        configuration.suppressesIncrementalRendering = true
+        // **Incremental rendering is left on, and it is load-bearing.** It used to be suppressed, to
+        // spare the card a half-painted frame at the moment of the reveal — cheap then, because the
+        // reveal was at `didFinish` and the page was finished by definition. The card now reveals as
+        // soon as the page has *painted* (see `startProbingForPaint`), and suppression makes that
+        // impossible rather than merely unnecessary: the property means what it says, fully loaded, so
+        // a suppressed view paints nothing at all until the load ends and there is nothing to notice.
+        // Measured against an app shell holding a request open for three seconds — suppressed, every
+        // probe was blank and the page arrived at `didFinish`; allowed, the first probe after the shell
+        // painted saw it, 2.7s earlier.
+        //
+        // The frame that suppression was protecting is now covered by the two things that replaced it:
+        // the probe only fires on a view with something actually drawn on it, and the placeholder
+        // cross-fades out over that rather than cutting.
+        configuration.suppressesIncrementalRendering = false
 
         let view = CanvasPageView(frame: .zero, configuration: configuration)
         // A link dropped on the page makes a card, unless there is a field under it to type into.
@@ -716,12 +733,77 @@ final class CanvasLinkNodeView: CanvasNodeView {
         }
     }
 
+    /// **Show the page when it has something on it, rather than when it has stopped loading.**
+    ///
+    /// `didFinish` is the honest signal that a page is *ready*, and on the pages a board is mostly
+    /// made of it is far too late: an app shell paints its bar, its nav and its first screenful and
+    /// then goes on fetching for several seconds, all of which the card spent behind a globe or a
+    /// stale picture of itself. The complaint was never that the reveal was wrong — it was that it
+    /// was waiting for the wrong event.
+    ///
+    /// The right event is WebKit's first visually-non-empty layout, which is private. Its effect is
+    /// not: a snapshot of a view that has not painted comes back as one flat colour, and one of a view
+    /// that has comes back as a page. So the card takes a very small snapshot every so often and asks
+    /// `CanvasPagePaint` whether there is a page on it — a poll standing in for the notification,
+    /// reading the same fact off the other side of it. This is also why the view no longer suppresses
+    /// incremental rendering; that argument is where the property is set.
+    ///
+    /// **Both of the old signals stay**, because this one can be wrong in one direction: a page whose
+    /// first paint is genuinely uniform — a dark canvas with a spinner, an error page — never trips
+    /// it, and falls through to `didFinish` and then to the eight seconds, which is exactly the
+    /// behaviour it had before. Nothing is lost by the probe failing; something is gained every time
+    /// it doesn't.
+    ///
+    /// Every 200ms, from `didCommit` — before which there is nothing to photograph — and stopped by the
+    /// reveal, the teardown, or a failure. Two or three snapshots is the usual cost of a load: against
+    /// a real app shell the paint landed about 300ms after the commit. 48 points wide, which is a
+    /// render WebKit does in a fraction of a millisecond and enough pixels to tell a bar and a spinner
+    /// from a blank ground.
+    private func startProbingForPaint() {
+        paintProbe?.invalidate()
+        guard !revealed, web != nil else { return paintProbe = nil }
+        let probe = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.probeForPaint() }
+        }
+        // The common modes, so a card goes on deciding it is ready while the board is being scrolled
+        // or a menu is down. A page that painted during a gesture and was revealed after it would be
+        // the same late reveal in a smaller window.
+        RunLoop.main.add(probe, forMode: .common)
+        paintProbe = probe
+    }
+
+    private func stopProbingForPaint() {
+        paintProbe?.invalidate()
+        paintProbe = nil
+    }
+
+    private func probeForPaint() {
+        guard !revealed, !probing, let web, web.bounds.width > 1, web.bounds.height > 1 else { return }
+        probing = true
+        let wanted = WKSnapshotConfiguration()
+        wanted.snapshotWidth = 48
+        // The card, not the page: a tall page snapshotted whole would be mostly the part you cannot
+        // see, and what is being asked is whether there is anything to look at *now*.
+        wanted.rect = web.bounds
+        web.takeSnapshot(with: wanted) { [weak self] image, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.probing = false
+                guard !self.revealed, let image, CanvasPagePaint.hasSomethingOnIt(image) else { return }
+                self.revealPage()
+            }
+        }
+    }
+
     /// A page that never finishes is shown anyway after a while.
     ///
     /// `didFinish` is the honest signal that a page is ready, but plenty of real pages hold a request
     /// open forever — a socket, a poll, an ad that never settles — and would sit behind the
     /// placeholder for good while being perfectly readable underneath it. After eight seconds, take
     /// whatever has painted.
+    ///
+    /// Still the backstop rather than the answer: `startProbingForPaint` usually gets there first now,
+    /// and this is what is left for a page whose first paint is one flat colour.
     private func waitForIt() {
         giveUp?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.revealPage() }
@@ -740,6 +822,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private func revealPage() {
         giveUp?.cancel()
         giveUp = nil
+        stopProbingForPaint()
         guard web != nil else { return }
         let first = !revealed
         revealed = true
@@ -774,6 +857,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private func tearDownPage() {
         giveUp?.cancel()
         giveUp = nil
+        stopProbingForPaint()
         // Before the view goes: an observation outliving what it observes is the one way this can
         // crash, and a page being torn down is about to report a title of nothing.
         titleWatch?.invalidate()
@@ -1289,6 +1373,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         noteVisit()
         describeYourself()
+        // There is a document now, so there is something to photograph: start asking whether it has
+        // painted. See `startProbingForPaint`, which is what gets a card out from behind its
+        // placeholder before the page has finished loading.
+        startProbingForPaint()
         board.pageStateChanged()
     }
 
@@ -1326,6 +1414,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         guard !(ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled) else { return }
         giveUp?.cancel()
         giveUp = nil
+        stopProbingForPaint()
         guard !revealed else { return }
         tearDownPage()
         placeholder?.isHidden = false

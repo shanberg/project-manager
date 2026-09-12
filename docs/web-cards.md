@@ -109,9 +109,18 @@ One of them is a real argument and is settled the other way: **the field does no
 `CanvasAddress` rejects what isn't an address rather than reinterpreting it, because handing what you
 typed to a search engine is a network claim nobody agreed to in an app that makes exactly one.
 
-**Revealing a page on an earlier signal than "finished."** The other half of the stale-page question,
-and the half still open: the page is hidden until `didFinish`, which on an app-shell page is long after
-it was worth looking at. [canvas-backlog.md](canvas-backlog.md) #1 has the argument.
+**Revealing a page on an earlier signal than "finished" — settled, and the argument is worth keeping.**
+The page used to be hidden until `didFinish`, which on an app-shell page is long after it was worth
+looking at. It is now revealed when it has *painted*: the honest milestone is private, so the card
+photographs itself every 200ms from `didCommit` and asks
+[CanvasPagePaint](../pm-mac/PM/Canvas/CanvasPagePaint.swift) whether there is a page on the picture.
+`didFinish` and the eight-second give-up stay behind it for pages whose first paint is one flat colour.
+
+The API reading that had to be measured rather than assumed:
+`suppressesIncrementalRendering` is not the milestone made public — it withholds painting until the
+load *ends*, so with it on there is nothing to photograph until the very event this stopped waiting
+for. Measured at 2.7 seconds of difference on an app shell. See [canvas-backlog.md](canvas-backlog.md)
+#1.
 
 ## A card that isn't running a page still shows one
 
