@@ -526,3 +526,95 @@ enum CanvasTiling {
     }
 
 }
+
+// MARK: - What a workspace is made of
+
+/// The tiling decisions that used to be computed properties on `CanvasBoardView`, and read only the
+/// document, the selection and the last tiling. Moved beside the rest of the tiling rules for the same
+/// reason those are here: nothing in the test bundle can build a board, so a rule that lives on one
+/// cannot be checked. See `CanvasTilingPlanTests`.
+extension CanvasTiling {
+
+    /// What a fresh tiling of `count` cards is dealt as, when nothing remembered or saved says otherwise.
+    static func preferredArrangement(for count: Int) -> Arrangement {
+        count >= 4 ? .masterStack : .grid
+    }
+
+    /// What a tiling is dealt as: the arrangement asked for, else the one these cards had last time, else
+    /// the one last chosen anywhere, else what suits this many cards.
+    ///
+    /// **One place for the order**, because it was written twice — here for a plan, and again in the
+    /// board's `tile` for a tiling dealt out afresh — and two copies of a precedence are two chances for
+    /// them to disagree about which card count gets which layout.
+    static func arrangement(asked: Arrangement?, remembered: Arrangement?, saved: Arrangement?,
+                            cardCount: Int) -> Arrangement {
+        asked ?? remembered ?? saved ?? preferredArrangement(for: cardCount)
+    }
+
+    /// The cards a tiling of the current selection would hold.
+    ///
+    /// A frame is a container of cards, so tiling one means tiling what is in it — "make a workspace out
+    /// of this region", and the one point where frames and workspaces should meet.
+    ///
+    /// **Nothing selected is nothing to make**, and it used to be everything on screen. A tiled view was a
+    /// way of looking, so "fill the window with what I can see" was a fair reading of an empty selection;
+    /// a workspace is saved, named and given a tab, and one made out of wherever the board happened to be
+    /// scrolled is a thing you then have to go and delete.
+    static func targets(of selection: Set<String>, in document: CanvasDocument) -> Set<String> {
+        var ids = selection.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
+        for id in selection {
+            guard let node = document.node(id: id), node.isGroup else { continue }
+            ids.formUnion(canvasCardsInside(node.frame, of: document))
+        }
+        return ids
+    }
+
+    /// The tiling `ids` would be laid out as, or nil when none of them is a card.
+    ///
+    /// **The same cards as last time means the same arrangement as last time**: the order they were
+    /// dragged into, the widths, the pin. Matched on the set rather than the order, because the order is
+    /// one of the things being remembered.
+    ///
+    /// **Asking for an arrangement is asking for the tiles to be dealt out again**, so what was kept of
+    /// their columns and sizes is set aside. The order is kept: it is where the cards were.
+    ///
+    /// - Parameters:
+    ///   - savedArrangement: The arrangement last chosen anywhere, from the user's defaults. A parameter
+    ///     so the rule can be checked without them; callers pass nothing.
+    ///   - savedMasterFraction: Likewise for the master column's share.
+    static func plan(for ids: Set<String>, in document: CanvasDocument,
+                     remembered last: CanvasViewState.Tiling?, arrangement: Arrangement?,
+                     savedArrangement: Arrangement? = CanvasTiling.savedArrangement,
+                     savedMasterFraction: Double = CanvasTiling.savedMasterFraction) -> CanvasViewState.Tiling? {
+        let cards = document.nodes.filter { ids.contains($0.id) && !$0.isGroup }
+            .map { (id: $0.id, frame: $0.frame) }
+        guard !cards.isEmpty else { return nil }
+        let remembered = last.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
+        if arrangement == nil, let remembered { return remembered }
+        return CanvasViewState.Tiling(
+            ids: remembered?.ids ?? order(cards),
+            arrangement: Self.arrangement(asked: arrangement, remembered: remembered?.arrangement,
+                                     saved: savedArrangement, cardCount: cards.count),
+            masterFraction: remembered?.masterFraction ?? savedMasterFraction,
+            sizes: nil)
+    }
+
+    /// How a tiling describes itself in the header: "3 of 12 cards" and "3/12". Frames are not cards and
+    /// are not counted, so a board of nine cards in three frames reads "of 9".
+    static func summary(cardsInTiling count: Int, of document: CanvasDocument) -> (long: String, short: String) {
+        let total = document.nodes.filter { !$0.isGroup }.count
+        let long = count == 1 ? "1 card of \(total)" : "\(count) of \(total) cards"
+        return (long, "\(count)/\(total)")
+    }
+}
+
+/// The cards a frame contains — the ones whose centres fall inside it.
+///
+/// By centre rather than by containment, which is how a frame on a real board actually holds things: a
+/// card nudged so its corner pokes out of the frame it belongs to is still in the group, and every
+/// other part of this app agrees (see `canvasDragSet`).
+func canvasCardsInside(_ frame: CanvasRect, of document: CanvasDocument) -> Set<String> {
+    Set(document.nodes.filter { node in
+        !node.isGroup && frame.contains(x: node.frame.midX, y: node.frame.midY)
+    }.map(\.id))
+}

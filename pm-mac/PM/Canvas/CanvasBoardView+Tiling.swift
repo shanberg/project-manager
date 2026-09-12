@@ -68,22 +68,7 @@ extension CanvasBoardView {
     /// the part that depends on the window, which is where the tiles physically land.
     func plannedTiling(for ids: Set<String>,
                        arrangement: CanvasTiling.Arrangement? = nil) -> CanvasViewState.Tiling? {
-        let cards = document.nodes.filter { ids.contains($0.id) && !$0.isGroup }
-            .map { (id: $0.id, frame: $0.frame) }
-        guard !cards.isEmpty else { return nil }
-        // The same cards as last time means the same arrangement as last time: the order they were
-        // dragged into, the widths, the pin. Matched on the set rather than the order, because the
-        // order is one of the things being remembered.
-        let remembered = lastTiling.flatMap { Set($0.ids) == Set(cards.map(\.id)) ? $0 : nil }
-        if arrangement == nil, let remembered { return remembered }
-        // Asking for an arrangement is asking for the tiles to be dealt out again, so what was kept of
-        // their columns and sizes is set aside. The order is kept: it is where the cards were.
-        return CanvasViewState.Tiling(
-            ids: remembered?.ids ?? CanvasTiling.order(cards),
-            arrangement: arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
-                ?? preferredArrangement(for: cards.count),
-            masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction,
-            sizes: nil)
+        CanvasTiling.plan(for: ids, in: document, remembered: lastTiling, arrangement: arrangement)
     }
 
     /// Hand this tiling to the window as a workspace, and say whether it took it. Only from a board
@@ -102,23 +87,7 @@ extension CanvasBoardView {
     /// counting them, and counting them means running exactly this — a menu that guessed at the number
     /// by looking at `selection.count` would be wrong in both of the cases below, which are the two
     /// cases where being told the number matters.
-    var tileTargets: Set<String> {
-        var ids = selection.filter { document.node(id: $0).map { !$0.isGroup } ?? false }
-        // A frame is a container of cards, so tiling one means tiling what is in it — "make a workspace
-        // out of this region", and the one point where frames and workspaces should meet. See `frames`
-        // for why that is the whole of the relationship rather than the two being the same thing.
-        for id in selection {
-            guard let node = document.node(id: id), node.isGroup else { continue }
-            ids.formUnion(canvasCardsInside(node.frame, of: document))
-        }
-        // **Nothing selected is nothing to make**, and it used to be everything on screen. A tiled
-        // view was a way of looking, so "fill the window with what I can see" was a fair reading of an
-        // empty selection; a workspace is saved, named and given a tab, and one made out of wherever
-        // the board happened to be scrolled is a thing you then have to go and delete. It also cost
-        // this property a scan of the visible region on every call — see `tileCommandTitle`, which had
-        // to route around it.
-        return ids
-    }
+    var tileTargets: Set<String> { CanvasTiling.targets(of: selection, in: document) }
 
     /// What ⌘Return is called right now. See `CanvasTiling.commandTitle`, which owns the wording.
     var tileCommandTitle: String {
@@ -191,8 +160,8 @@ extension CanvasBoardView {
             let order = remembered?.ids.filter { ids.contains($0) } ?? CanvasTiling.order(cards)
             session = CanvasTileSession(
                 columns: CanvasTiling.columns(
-                    arrangement ?? remembered?.arrangement ?? CanvasTiling.savedArrangement
-                        ?? preferredArrangement(for: cards.count),
+                    CanvasTiling.arrangement(asked: arrangement, remembered: remembered?.arrangement,
+                                             saved: CanvasTiling.savedArrangement, cardCount: cards.count),
                     of: order.map { CanvasTiling.Tile($0) }, in: area,
                     masterFraction: remembered?.masterFraction ?? CanvasTiling.savedMasterFraction),
                 area: area, restoreVisible: restoreVisible, restoreZoom: restoreZoom)
@@ -391,9 +360,6 @@ extension CanvasBoardView {
     /// Two or three tiles are peers and a grid says so. Past four, a grid makes every card equally small
     /// — which is the wrong answer to "I am reading this one and watching those", the shape a board of
     /// this size is nearly always in.
-    private func preferredArrangement(for count: Int) -> CanvasTiling.Arrangement {
-        count >= 4 ? .masterStack : .grid
-    }
 
     // MARK: Maximizing one tile
 
@@ -1311,24 +1277,10 @@ extension CanvasBoardView {
     /// thirty-seven hidden and the lines between them gone, looks exactly like a board most of which has
     /// been deleted — and the moment you think that is the moment you stop trusting the feature.
     var tilingSummary: (long: String, short: String)? {
-        guard let tiling else { return nil }
-        let total = document.nodes.filter { !$0.isGroup }.count
-        let count = tiling.cards.count
-        let long = count == 1 ? "1 card of \(total)" : "\(count) of \(total) cards"
-        return (long, "\(count)/\(total)")
+        tiling.map { CanvasTiling.summary(cardsInTiling: $0.cards.count, of: document) }
     }
 }
 
-/// The cards a frame contains — the ones whose centres fall inside it.
-///
-/// By centre rather than by containment, which is how a frame on a real board actually holds things: a
-/// card nudged so its corner pokes out of the frame it belongs to is still in the group, and every
-/// other part of this app agrees (see `canvasDragSet`).
-func canvasCardsInside(_ frame: CanvasRect, of document: CanvasDocument) -> Set<String> {
-    Set(document.nodes.filter { node in
-        !node.isGroup && frame.contains(x: node.frame.midX, y: node.frame.midY)
-    }.map(\.id))
-}
 
 // MARK: - Add Card from Canvas, in the menu bar
 

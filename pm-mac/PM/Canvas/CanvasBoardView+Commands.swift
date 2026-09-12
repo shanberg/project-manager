@@ -12,7 +12,9 @@ import PmLib
 extension CanvasBoardView {
 
     /// The private type a copied selection travels on.
-    static let pasteboardType = NSPasteboard.PasteboardType("com.stuarthanberg.pm.canvas-nodes")
+    /// The board's own pasteboard flavour. Kept as a name here because `CanvasBoardView+Dropping`
+    /// and the drop reader both spell it `Self.pasteboardType`; it belongs to `CanvasClipping`.
+    static var pasteboardType: NSPasteboard.PasteboardType { CanvasClipping.pasteboardType }
 
     // MARK: Selecting
 
@@ -36,41 +38,12 @@ extension CanvasBoardView {
             return card.projectCommands.requestCopyRows()
         }
         guard !selection.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setData(Data(extracted(selection).serialized().utf8), forType: Self.pasteboardType)
-        pasteboard.setString(plainText(for: selection), forType: .string)
+        CanvasClipping.write(selection, from: document, to: .general)
     }
 
     @objc func cut(_ sender: Any?) {
         copy(sender)
         deleteSelection()
-    }
-
-    /// The cards, as a canvas of their own.
-    ///
-    /// Lines are carried only when **both** ends were copied. A line to a card you didn't copy has
-    /// nowhere to land on paste, and the format has no way to express one — so it is dropped here
-    /// rather than pasted as a dangling edge that nothing will ever draw.
-    private func extracted(_ ids: Set<String>) -> CanvasDocument {
-        CanvasDocument(nodes: document.nodes.filter { ids.contains($0.id) },
-                       edges: document.edges.filter {
-                           ids.contains($0.fromNode) && ids.contains($0.toNode)
-                       })
-    }
-
-    /// What a card is worth outside a canvas: its prose, its address, its path.
-    private func plainText(for ids: Set<String>) -> String {
-        document.nodes.filter { ids.contains($0.id) }.map { node in
-            switch node.content {
-            case .text(let text): return text
-            case .link(let url): return url
-            case .file(let path, let subpath): return path + (subpath ?? "")
-            case .group(let label, _, _): return label ?? ""
-            }
-        }
-        .filter { !$0.isEmpty }
-        .joined(separator: "\n\n")
     }
 
     // MARK: Pasting
@@ -249,7 +222,8 @@ extension CanvasBoardView {
 
     @objc func duplicate(_ sender: Any?) {
         guard !selection.isEmpty else { return }
-        insert(extracted(selection), at: nil, actionName: "Duplicate", offsetBy: 24)
+        insert(CanvasClipping.clipping(of: selection, from: document),
+               at: nil, actionName: "Duplicate", offsetBy: 24)
     }
 
     /// Put a small canvas into this one: new identities, moved to where it's going, and selected.
@@ -1850,35 +1824,10 @@ extension NSScrollView {
 
 extension CanvasBoardView {
 
-    /// Every card whose content mentions `query`, in the order they sit in the file.
-    ///
-    /// Searches what a card *says* rather than what it stores where the two differ: a file card
-    /// matches on its path, so "Flexcompute" finds it, and on its basename, so "Notes.md" does too. A
-    /// board of 117 cards is several screens, and the alternative to this is panning until you spot it.
-    ///
-    /// A web card matches on its address **and on the name of the page at it**, which is the half a
-    /// person actually remembers. Eleven cards reading `jira.example.com/browse/PM-4127` are eleven
-    /// cards nobody can search; the same eleven are findable the moment "billing" matches the one
-    /// called "Billing rollover fails on renewal". The name comes from `CanvasPageTitles`, so it is
-    /// there for cards that have never been loaded in this window — which are most of them, on a board
-    /// you have just opened.
+    /// Every card whose content mentions `query`, in the order they sit in the file. The rule — what a
+    /// card says, a web card's remembered page name included — is `CanvasSearch.matches`.
     func matches(_ query: String) -> [String] {
-        let needle = query.trimmingCharacters(in: .whitespaces)
-        guard !needle.isEmpty else { return [] }
-        return document.nodes.filter { node in
-            switch node.content {
-            case .text(let text): return text.localizedCaseInsensitiveContains(needle)
-            case .link(let url):
-                return url.localizedCaseInsensitiveContains(needle)
-                    || CanvasPageTitles.of(url)?.localizedCaseInsensitiveContains(needle) == true
-            case .file(let path, let subpath):
-                return path.localizedCaseInsensitiveContains(needle)
-                    || (subpath?.localizedCaseInsensitiveContains(needle) ?? false)
-            case .group(let label, _, _):
-                return label?.localizedCaseInsensitiveContains(needle) ?? false
-            }
-        }
-        .map(\.id)
+        CanvasSearch.matches(query, in: document)
     }
 
     /// Select what `query` finds and frame the first of them.

@@ -832,156 +832,49 @@ final class CanvasBoardView: NSView {
 
     // MARK: The page budget
 
-    /// Set while a budget review is already queued, so a pass of `refreshNodeViews` in which eight
-    /// cards each decide they would like to run a page is one decision rather than eight.
-    private var budgetReviewQueued = false
-    /// Cancelled and replaced on every scroll and zoom — see `settlePageBudget`.
-    private var settleWork: DispatchWorkItem?
+    /// Which of this board's web cards run a renderer, and when that is decided again.
+    ///
+    /// Lifted out of this class into `CanvasPageDirector`, which sees the board through
+    /// `CanvasPageStage` — seven members rather than all hundred and thirty-six. The methods below
+    /// stay because they are the board's published surface (the scroll view, the link cards and the
+    /// pane controller all call them) and because forwarding is what let the move happen without
+    /// touching any of those callers.
+    lazy var pages = CanvasPageDirector(stage: self)
 
     /// Whether the board is in the middle of a crossing — the fade still travelling, or the view still
     /// flying to the zoom a tiling is laid out at.
     var isCrossing: Bool { tiledFade.isMoving || scrollView?.canvasScroll?.isFlying == true }
 
-    /// The page settings changed under the board — the number of pages kept live, or whether link
-    /// cards run pages at all.
-    ///
-    /// Both are read where they are used rather than cached, so the number takes effect the moment the
-    /// budget is next applied; the switch needs the cards asked again, because a card only reconsiders
-    /// whether it *wants* a page when its own zoom or address moves, and neither of those has.
-    /// Immediate rather than settled: this is a deliberate act in a settings window, not a gesture that
-    /// might still be going.
-    func pageSettingsChanged() {
-        for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reconsiderLoading() }
-        applyPageBudget()
-    }
+    /// The cards running a page. Read by the frame meter's labels.
+    var pagesLive: Set<String> { pages.live }
 
-    /// Bring over the pages the tab you just left was running for this board's cards — see
-    /// `CanvasLinkNodeView.reclaimPage`. Before the budget, which then decides about them like any other.
-    func reclaimPages() {
-        for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reclaimPage() }
-    }
-
-    /// Decide again which pages are live, at the end of the current run loop pass.
-    func reviewPageBudget() {
-        // **Not during a crossing**, which is exactly the case `settlePageBudget` was written for and
-        // the one place it was being routed around. Entering a workspace takes the board to 100%, that
-        // carries every web card across `pagesLoadAbove`, and each one asks for a review — which lands
-        // next runloop turn, in the middle of the animation, and builds a renderer per card while the
-        // tiles are trying to fly. Measured at 165–206ms in a single synchronous pass, inside a 350ms
-        // movement. A crossing is a gesture that has not finished saying what it wants, and the answer
-        // is the same one scrolling gets: decide when it stops.
-        if isCrossing { return settlePageBudget() }
-        guard !budgetReviewQueued else { return }
-        budgetReviewQueued = true
-        DispatchQueue.main.async { [weak self] in
-            self?.budgetReviewQueued = false
-            self?.applyPageBudget()
-        }
-    }
-
-    /// Decide again once the view has stopped moving.
-    ///
-    /// Scrolling across a board sweeps cards through the window at speed, and a budget applied on
-    /// every frame of that would start and kill renderers the whole way — the most expensive possible
-    /// response to a gesture that has not finished saying what it wants. So a scroll or a zoom only
-    /// schedules the decision, and each new one pushes it back; the board acts on where you *stopped*.
-    func settlePageBudget() {
-        settleWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.applyPageBudget() }
-        settleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
-    }
-
-    func applyPageBudget() {
-        FrameMeter.span("pageBudget") { applyPageBudgetBody() }
-    }
-
-    private func applyPageBudgetBody() {
-        settleWork?.cancel()
-        settleWork = nil
-        guard window != nil else { return }
-        let candidates = pageCandidates()
-        // A tiled view is not a budget problem — every tile runs. See `CanvasPageBudget.liveWhileTiled`.
-        let live = showsTiles ? CanvasPageBudget.liveWhileTiled(among: candidates)
-                           : CanvasPageBudget.live(among: candidates)
-        if live != pagesLive {
-            Log.write("canvas pages live: \(live.count) of \(candidates.count)")
-            pagesLive = live
-        }
-        for (id, view) in nodeViews where view.isPageCard {
-            view.setPageLive(live.contains(id))
-            view.timePassed()
-        }
-        refreshStalePages()
-        keepWatchingPages(live.isEmpty)
-    }
-
-    /// Every page card on the board, as the budget sees it.
-    ///
-    /// This is the one place `lastVisibleAt` is written, and writing it here rather than at the top of
-    /// a particular caller is deliberate: the grace period measures how long ago a card was last
-    /// *drawn*, and every question about the budget is asked at a moment when the answer to that is
-    /// whatever is on screen right now.
-    private func pageCandidates() -> [CanvasPageBudget.Candidate] {
-        let visible = canvasRect(visibleRect)
-        let centre = CanvasPoint(x: visible.midX, y: visible.midY)
-
-        let now = Date()
-        var candidates: [CanvasPageBudget.Candidate] = []
-        for (id, view) in nodeViews where view.isPageCard {
-            guard let node = document.node(id: id) else { continue }
-            // What is *drawn*, and only if it is drawn at all: the cards a tiled view has hidden are
-            // not on screen however central the file thinks they are.
-            let onScreen = view.isHidden ? false : layout.frame(of: node).intersects(visible)
-            if onScreen { view.lastVisibleAt = now }
-            candidates.append(.init(id: id,
-                                    wantsPage: view.wantsPage,
-                                    isVisible: onScreen,
-                                    isEngaged: view.isEngaged,
-                                    distanceFromCentre: hypot(layout.frame(of: node).midX - centre.x,
-                                                              layout.frame(of: node).midY - centre.y),
-                                    secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt)))
-        }
-        return candidates
-    }
-
-    /// How often this board's pages reload themselves, or nil for never.
-    ///
-    /// **A dashboard is a thing you leave up.** The board already knows how old each page is — it says
-    /// so in the header for the card you are in — and until now did nothing whatever about it: a wall
-    /// of tickets left
-    /// open since the morning is a wall of tickets as they were in the morning, indistinguishable from
-    /// how they are now. Off by default, because a page reloading itself is a network call you didn't
-    /// ask for and some pages cost real money to fetch.
-    ///
-    /// Per board rather than per card, and per board rather than app-wide: the cadence belongs to the
-    /// thing being watched. Kept in `CanvasViewMemory` with the rest of how you were looking at this
-    /// board, which is also why it is not in the `.canvas`.
+    /// How often this board's pages reload themselves, or nil for never. See `CanvasPageDirector`.
     var refreshInterval: TimeInterval? {
-        didSet {
-            guard refreshInterval != oldValue else { return }
-            onRefreshIntervalChanged?()
-            // A cadence set on a board whose pages have all settled has nothing to start it: the
-            // heartbeat stops when nothing is live, and the cards are already loaded and quiet.
-            applyPageBudget()
-        }
+        get { pages.refreshInterval }
+        set { pages.refreshInterval = newValue }
     }
-    var onRefreshIntervalChanged: (() -> Void)?
+    var onRefreshIntervalChanged: (() -> Void)? {
+        get { pages.onRefreshIntervalChanged }
+        set { pages.onRefreshIntervalChanged = newValue }
+    }
+    static var refreshChoices: [TimeInterval] { CanvasPageDirector.refreshChoices }
 
-    /// The cadences the menu offers, in seconds. Coarse on purpose — this is "how stale am I willing to
-    /// let this get", which nobody answers in units of one minute.
-    static let refreshChoices: [TimeInterval] = [60, 5 * 60, 15 * 60, 60 * 60]
+    func pageSettingsChanged() { pages.settingsChanged() }
+    func reclaimPages() { pages.reclaim() }
+    func reviewPageBudget() { pages.review() }
+    func settlePageBudget() { pages.settle() }
+    func applyPageBudget() { pages.apply() }
+    func pauseAllPages() { pages.pauseEverything() }
+    func pauseIdlePages() { pages.pauseWhileAway() }
 
-    /// Reload whatever has gone stale, on the heartbeat that is already running.
+    /// Let every card go, because the board is going with it.
     ///
-    /// No timer of its own: the heartbeat ticks every 20 seconds whenever anything is live, which is
-    /// exactly when a refresh could be due, and a second timer would be a second thing to keep in step
-    /// with the budget. The cards decide whether they are actually stale — see `reloadIfStale`.
-    private func refreshStalePages() {
-        guard let refreshInterval else { return }
-        for view in nodeViews.values {
-            (view as? CanvasLinkNodeView)?.reloadIfStale(after: refreshInterval)
-        }
+    /// `refreshNodeViews` already calls `prepareForRemoval` on a card that scrolls out of view, which is
+    /// where a card gives back whatever it is holding — a project's store, most of all. A window closing
+    /// takes the whole board without scrolling anything anywhere, so nothing would be given back at the
+    /// one moment everything should be.
+    func releaseCards() {
+        for view in nodeViews.values { view.prepareForRemoval() }
     }
 
     // MARK: Saying what just happened
@@ -999,78 +892,6 @@ final class CanvasBoardView: NSView {
     func report(_ message: String, reveal file: URL? = nil) {
         onReport?(message, file)
         Log.write("canvas: \(message)")
-    }
-
-    /// A slow tick, running only while the board has something live.
-    ///
-    /// Two things need it, and neither is caused by anything the board could be told about: a page's
-    /// grace period runs out while you sit perfectly still looking at something else on the board, and
-    /// the "as of" on a card gets older whether or not anyone touches it.
-    private var heartbeat: Timer?
-    private static let heartbeatInterval: TimeInterval = 20
-
-    private func keepWatchingPages(_ stop: Bool) {
-        if stop {
-            heartbeat?.invalidate()
-            heartbeat = nil
-        } else if heartbeat == nil {
-            heartbeat = Timer.scheduledTimer(withTimeInterval: Self.heartbeatInterval,
-                                             repeats: true) { _ in
-                Task { @MainActor [weak self] in self?.applyPageBudget() }
-            }
-        }
-    }
-
-    /// Only so a change can be logged once rather than on every settle.
-    private(set) var pagesLive: Set<String> = []
-
-    /// Let every card go, because the board is going with it.
-    ///
-    /// `refreshNodeViews` already calls `prepareForRemoval` on a card that scrolls out of view, which is
-    /// where a card gives back whatever it is holding — a project's store, most of all. A window closing
-    /// takes the whole board without scrolling anything anywhere, so nothing would be given back at the
-    /// one moment everything should be.
-    func releaseCards() {
-        for view in nodeViews.values { view.prepareForRemoval() }
-    }
-
-    /// Freeze every page on this board, without exception — the board itself is going away.
-    ///
-    /// For giving the board up. Looking away is `pauseIdlePages`, which is not the same question and
-    /// must not have the same answer.
-    func pauseAllPages() {
-        settleWork?.cancel()
-        settleWork = nil
-        if !pagesLive.isEmpty { Log.write("canvas pages paused: \(pagesLive.count)") }
-        pagesLive = []
-        keepWatchingPages(true)
-        for view in nodeViews.values where view.isPageCard { view.setPageLive(false) }
-    }
-
-    /// Whether the board is actually in front of somebody: not hidden, not minimised, not entirely
-    /// behind something else. `.visible` is any part of the window, which is the right threshold —
-    /// a board you have left a corner of showing is a board you meant to keep.
-    private var isOnScreen: Bool { window?.occlusionState.contains(.visible) ?? false }
-
-    /// Freeze this board's pages because the window has been left alone for a while — sparing the card
-    /// you are standing in, as long as PM is still on screen.
-    ///
-    /// The rule and the reasons are in `CanvasPageBudget.liveWhileAway`. Off screen, or with no window
-    /// at all, this is `pauseAllPages` and says so by calling it.
-    func pauseIdlePages() {
-        guard window != nil, isOnScreen else { return pauseAllPages() }
-        settleWork?.cancel()
-        settleWork = nil
-        let spared = CanvasPageBudget.liveWhileAway(among: pageCandidates(), onScreen: true)
-        if pagesLive != spared {
-            Log.write("canvas pages paused: \(pagesLive.subtracting(spared).count), "
-                + "kept \(spared.count) in use")
-        }
-        pagesLive = spared
-        // Stopped even with a card still live, because all the heartbeat does is apply the budget
-        // again — which would wake every card this just froze. The window becoming key starts it.
-        keepWatchingPages(true)
-        for (id, view) in nodeViews where view.isPageCard { view.setPageLive(spared.contains(id)) }
     }
 
     // MARK: The grid
@@ -1299,4 +1120,25 @@ private extension NSView {
         }
         return nil
     }
+}
+
+// MARK: - The board as a stage for the page director
+
+/// The seven things `CanvasPageDirector` is allowed to see. Everything here already existed; naming
+/// them in a protocol is what stops the director reaching past them.
+extension CanvasBoardView: CanvasPageStage {
+    var pageCards: [String: CanvasPageCard] { nodeViews }
+
+    var onScreenCanvasRect: CanvasRect { canvasRect(visibleRect) }
+
+    func frame(ofNode id: String) -> CanvasRect? {
+        document.node(id: id).map { layout.frame(of: $0) }
+    }
+
+    var hasWindow: Bool { window != nil }
+
+    /// Whether the board is actually in front of somebody: not hidden, not minimised, not entirely
+    /// behind something else. `.visible` is any part of the window, which is the right threshold —
+    /// a board you have left a corner of showing is a board you meant to keep.
+    var isOnScreen: Bool { window?.occlusionState.contains(.visible) ?? false }
 }

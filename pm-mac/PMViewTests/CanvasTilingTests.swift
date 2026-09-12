@@ -1123,3 +1123,127 @@ final class CanvasTilingTests: XCTestCase {
         return out
     }
 }
+
+// MARK: - What a workspace is made of
+
+/// The tiling rules that lived as computed properties on `CanvasBoardView` and could not be tested there,
+/// because nothing in this bundle can build a board. Each case below is a rule the code's own comments
+/// describe having got wrong once.
+final class CanvasTilingPlanTests: XCTestCase {
+
+    private func card(_ id: String, x: Double = 0, y: Double = 0, width: Double = 100) -> CanvasNode {
+        CanvasNode(id: id, content: .text(id), frame: CanvasRect(x: x, y: y, width: width, height: 100))
+    }
+
+    private func frame(_ id: String, x: Double, y: Double, width: Double, height: Double) -> CanvasNode {
+        CanvasNode(id: id, content: .group(label: id, background: nil, backgroundStyle: nil),
+                   frame: CanvasRect(x: x, y: y, width: width, height: height))
+    }
+
+    // MARK: Targets
+
+    /// **Nothing selected is nothing to make.** It used to be everything on screen, and a workspace made
+    /// out of wherever the board was scrolled is one you then have to delete.
+    func testNothingSelectedIsNothingToTile() {
+        let doc = CanvasDocument(nodes: [card("a"), card("b")])
+        XCTAssertTrue(CanvasTiling.targets(of: [], in: doc).isEmpty)
+    }
+
+    /// A selected frame means the cards in it — by centre, so one poking out by a corner still counts —
+    /// and never the frame itself.
+    func testASelectedFrameMeansTheCardsWhoseCentresAreInsideIt() {
+        let doc = CanvasDocument(nodes: [
+            frame("f", x: 0, y: 0, width: 300, height: 300),
+            card("inside", x: 50, y: 50),
+            card("pokingOut", x: 220, y: 220),       // centre 270,270: still inside
+            card("outside", x: 400, y: 400),
+        ])
+        XCTAssertEqual(CanvasTiling.targets(of: ["f"], in: doc), ["inside", "pokingOut"])
+    }
+
+    func testSelectedCardsAndFramesCombine() {
+        let doc = CanvasDocument(nodes: [frame("f", x: 0, y: 0, width: 200, height: 200),
+                                         card("inFrame", x: 10, y: 10), card("loose", x: 900, y: 900)])
+        XCTAssertEqual(CanvasTiling.targets(of: ["f", "loose"], in: doc), ["inFrame", "loose"])
+    }
+
+    // MARK: Plans
+
+    func testOnlyFramesIsNoPlan() {
+        let doc = CanvasDocument(nodes: [frame("f", x: 0, y: 0, width: 10, height: 10)])
+        XCTAssertNil(CanvasTiling.plan(for: ["f"], in: doc, remembered: nil, arrangement: nil,
+                                       savedArrangement: nil, savedMasterFraction: 0.5))
+    }
+
+    /// **The same cards as last time get last time's arrangement** — matched on the set, since the order
+    /// is one of the things being remembered.
+    func testTheSameCardsInAnyOrderGetTheRememberedTiling() throws {
+        let doc = CanvasDocument(nodes: [card("a"), card("b"), card("c")])
+        let last = CanvasViewState.Tiling(ids: ["c", "a", "b"], arrangement: .masterStack,
+                                          masterFraction: 0.7, sizes: nil)
+        let plan = try XCTUnwrap(CanvasTiling.plan(for: ["a", "b", "c"], in: doc, remembered: last,
+                                                   arrangement: nil, savedArrangement: .grid,
+                                                   savedMasterFraction: 0.5))
+        XCTAssertEqual(plan.ids, ["c", "a", "b"])
+        XCTAssertEqual(plan.arrangement, .masterStack)
+        XCTAssertEqual(plan.masterFraction, 0.7)
+    }
+
+    /// **Asking for an arrangement deals the tiles out again**: the order is kept, the sizes are not.
+    func testAskingForAnArrangementKeepsTheOrderButNotTheSizes() throws {
+        let doc = CanvasDocument(nodes: [card("a"), card("b")])
+        var last = CanvasViewState.Tiling(ids: ["b", "a"], arrangement: .grid, masterFraction: 0.6, sizes: nil)
+        last.sizes = nil
+        let plan = try XCTUnwrap(CanvasTiling.plan(for: ["a", "b"], in: doc, remembered: last,
+                                                   arrangement: .masterStack, savedArrangement: nil,
+                                                   savedMasterFraction: 0.5))
+        XCTAssertEqual(plan.ids, ["b", "a"], "the order is where the cards were")
+        XCTAssertEqual(plan.arrangement, .masterStack)
+        XCTAssertNil(plan.sizes)
+    }
+
+    func testADifferentSetOfCardsIsNotMistakenForTheRememberedOne() throws {
+        let doc = CanvasDocument(nodes: [card("a"), card("b"), card("c")])
+        let last = CanvasViewState.Tiling(ids: ["a", "b"], arrangement: .masterStack, masterFraction: 0.7, sizes: nil)
+        let plan = try XCTUnwrap(CanvasTiling.plan(for: ["a", "b", "c"], in: doc, remembered: last,
+                                                   arrangement: nil, savedArrangement: nil,
+                                                   savedMasterFraction: 0.5))
+        XCTAssertEqual(plan.arrangement, .grid, "three cards, nothing saved: the preferred arrangement")
+        XCTAssertEqual(plan.masterFraction, 0.5)
+    }
+
+    func testWithNothingRememberedTheSavedArrangementBeatsThePreferredOne() throws {
+        let doc = CanvasDocument(nodes: (1...5).map { card("\($0)", x: Double($0) * 200) })
+        let ids = Set(doc.nodes.map(\.id))
+        let saved = try XCTUnwrap(CanvasTiling.plan(for: ids, in: doc, remembered: nil, arrangement: nil,
+                                                    savedArrangement: .grid, savedMasterFraction: 0.5))
+        XCTAssertEqual(saved.arrangement, .grid)
+        let preferred = try XCTUnwrap(CanvasTiling.plan(for: ids, in: doc, remembered: nil, arrangement: nil,
+                                                        savedArrangement: nil, savedMasterFraction: 0.5))
+        XCTAssertEqual(preferred.arrangement, .masterStack, "four or more cards prefer a master column")
+    }
+
+    func testPreferredArrangementTurnsOverAtFourCards() {
+        XCTAssertEqual(CanvasTiling.preferredArrangement(for: 3), .grid)
+        XCTAssertEqual(CanvasTiling.preferredArrangement(for: 4), .masterStack)
+    }
+
+    // MARK: Summary
+
+    func testTheSummaryCountsCardsAndNotFrames() {
+        let doc = CanvasDocument(nodes: [card("a"), card("b"), card("c"),
+                                         frame("f", x: 0, y: 0, width: 10, height: 10)])
+        XCTAssertEqual(CanvasTiling.summary(cardsInTiling: 2, of: doc).long, "2 of 3 cards")
+        XCTAssertEqual(CanvasTiling.summary(cardsInTiling: 2, of: doc).short, "2/3")
+        XCTAssertEqual(CanvasTiling.summary(cardsInTiling: 1, of: doc).long, "1 card of 3")
+    }
+
+    /// The precedence both a plan and a fresh tiling deal from, in its one place.
+    func testTheArrangementIsAskedThenRememberedThenSavedThenPreferred() {
+        typealias T = CanvasTiling
+        XCTAssertEqual(T.arrangement(asked: .grid, remembered: .masterStack, saved: .masterStack, cardCount: 9), .grid)
+        XCTAssertEqual(T.arrangement(asked: nil, remembered: .grid, saved: .masterStack, cardCount: 9), .grid)
+        XCTAssertEqual(T.arrangement(asked: nil, remembered: nil, saved: .grid, cardCount: 9), .grid)
+        XCTAssertEqual(T.arrangement(asked: nil, remembered: nil, saved: nil, cardCount: 9), .masterStack)
+    }
+}

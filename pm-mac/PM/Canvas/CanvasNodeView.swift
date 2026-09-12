@@ -733,6 +733,17 @@ class CanvasNodeView: NSView {
     /// is has to be told that time has passed; nothing else about it changed.
     func timePassed() {}
 
+    /// Whether this card would run a page *now* — asked when a setting changed underneath it, since a
+    /// card only reconsiders on its own when its zoom or its address moves. Web cards override.
+    func reconsiderLoading() {}
+
+    /// Take back the renderer another tab was running for this card. Web cards override.
+    func reclaimPage() {}
+
+    /// Reload if what is showing is older than `interval`. The card decides whether it is stale; the
+    /// director only says how old is too old. Web cards override.
+    func reloadIfStale(after interval: TimeInterval) {}
+
     func engage(_ engaged: Bool) {
         guard engaged != isEngaged else { return }
         isEngaged = engaged
@@ -964,4 +975,12 @@ private struct CanvasTextEditing: View {
         editor.undoManager = undoManager
         return editor.onChange(of: text) { _, edited in onChange(edited) }
     }
+}
+
+// MARK: - As the page director sees a card
+
+/// Everything here already existed on the class; the protocol is what lets the director be written
+/// against ten members rather than against an `NSView`.
+extension CanvasNodeView: CanvasPageCard {
+    var isCardHidden: Bool { isHidden }
 }

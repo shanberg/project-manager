@@ -841,16 +841,14 @@ extension CanvasBoardView {
         // back and Return adds it. Nothing else means anything: ⌫ there would delete a card off the
         // board you are only choosing from.
         if isPicking {
-            let key = event.charactersIgnoringModifiers?.lowercased()
-            if key == " ", event.isARepeat { return }
-            if event.modifierFlags.contains(.option), key == "b" {
-                endPicking()
-            } else if peeking != nil {
-                if key == " " || key == "\u{1b}" { endPeek() } else if key == "\r" { finishPeek() }
-            } else if key == " " {
-                if let id = hovered { beginPeek(id) } else { NSSound.beep() }
-            } else if key == "\u{1b}" || key == "\r" {
-                endPicking()
+            // Which key is which command is `CanvasBoardKeys.picking`; this only does it.
+            switch CanvasBoardKeys.picking(.init(event), peeking: peeking != nil, hovering: hovered != nil) {
+            case .swallow: break
+            case .endPicking: endPicking()
+            case .endPeek: endPeek()
+            case .finishPeek: finishPeek()
+            case .beginPeek: if let id = hovered { beginPeek(id) }
+            case .beep: NSSound.beep()
             }
             return
         }
@@ -929,69 +927,29 @@ extension CanvasBoardView {
     /// tilde. A key only reaches the board when nothing that types wanted it, which is exactly when it
     /// can safely mean the workspace. ⌥ arrows have always worked this way.
     private func tilingTakes(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard !flags.contains(.command), !flags.contains(.control) else { return false }
-        let option = flags.contains(.option), shift = flags.contains(.shift)
-        let direction: CanvasNavigation.Direction?
-        switch event.specialKey {
-        case .leftArrow: direction = .left
-        case .rightArrow: direction = .right
-        case .upArrow: direction = .up
-        case .downArrow: direction = .down
-        default: direction = nil
-        }
-
-        if isChoosingPlacement, !option {
-            if let direction {
-                switch direction {
-                case .left: choosePlacement(.left)
-                case .right: choosePlacement(.right)
-                case .up: choosePlacement(.above)
-                case .down: choosePlacement(.below)
-                }
-                return true
-            }
-            if event.charactersIgnoringModifiers == "\r" {
-                confirmPlacement()
-                return true
-            }
-            // T: into the tile's tabs, rather than beside it.
-            if event.charactersIgnoringModifiers?.lowercased() == "t" {
-                choosePlacement(.tab)
-                return true
-            }
-        }
-        guard option else { return false }
-
-        if let direction {
-            if shift {
-                moveTile(direction)
-            } else {
-                moveFocus(direction, extending: false)
-                // Choosing where the next card goes, the place follows the focus onto the next tile.
-                if isChoosingPlacement { retargetPlacement() }
-            }
-            return true
-        }
-        if event.specialKey == .delete {
-            removeTile(nil)
-            return true
-        }
-        // Shift changes the character these report, not only the flags: ⌥⇧= arrives as "+".
-        switch event.charactersIgnoringModifiers {
-        case "=", "+": growTile(vertically: shift, by: Self.tileStep)
-        case "-", "_": growTile(vertically: shift, by: -Self.tileStep)
-        case "0": balanceTiles()
-        case ")": sizeTilesToContent()
-        case "b", "B": beginPicking()
-        case "`": focusPreviousTile()
-        case "[": stepTab(by: -1)
-        case "]": stepTab(by: 1)
-        case "t", "T":
-            if let id = focusedTile { pullTabOut(id) } else { NSSound.beep() }
-        case "n", "N":
-            if isChoosingPlacement { cancelPlacement() } else { beginPlacing() }
-        default: return false
+        // Which key is which command is `CanvasBoardKeys.workspace`; this only does it.
+        guard let command = CanvasBoardKeys.workspace(.init(event), choosingPlacement: isChoosingPlacement,
+                                                      hasFocusedTile: focusedTile != nil,
+                                                      step: Self.tileStep) else { return false }
+        switch command {
+        case .choosePlacement(let side): choosePlacement(side)
+        case .confirmPlacement: confirmPlacement()
+        case .moveTile(let direction): moveTile(direction)
+        case .moveFocus(let direction):
+            moveFocus(direction, extending: false)
+            // Choosing where the next card goes, the place follows the focus onto the next tile.
+            if isChoosingPlacement { retargetPlacement() }
+        case .removeTile: removeTile(nil)
+        case .grow(let vertically, let delta): growTile(vertically: vertically, by: delta)
+        case .balance: balanceTiles()
+        case .sizeToContent: sizeTilesToContent()
+        case .beginPicking: beginPicking()
+        case .focusPrevious: focusPreviousTile()
+        case .stepTab(let step): stepTab(by: step)
+        case .pullTabOut: if let id = focusedTile { pullTabOut(id) }
+        case .beginPlacing: beginPlacing()
+        case .cancelPlacement: _ = cancelPlacement()
+        case .beep: NSSound.beep()
         }
         return true
     }
