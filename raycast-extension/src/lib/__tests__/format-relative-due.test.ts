@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatRelativeDue,
-  isDueOverdue,
-  parseDueDate,
-} from "../format-relative-due";
+import { isDueOverdue, parseDueDate } from "../format-relative-due";
 
 describe("parseDueDate", () => {
   it("parses YYYY-MM-DD", () => {
@@ -37,18 +33,6 @@ describe("parseDueDate", () => {
     expect(d?.getFullYear()).toBe(2025);
     expect(d?.getMonth()).toBe(2);
     expect(d?.getDate()).toBe(15);
-  });
-});
-
-describe("formatRelativeDue", () => {
-  it("returns raw string when parse fails", () => {
-    expect(formatRelativeDue("invalid")).toBe("invalid");
-  });
-
-  it("formats future date relatively", () => {
-    const in48Hours = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    const str = `${in48Hours.getFullYear()}-${String(in48Hours.getMonth() + 1).padStart(2, "0")}-${String(in48Hours.getDate()).padStart(2, "0")}`;
-    expect(formatRelativeDue(str)).toBe("in 2 days");
   });
 });
 

@@ -107,7 +107,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             // bar is the one place it was still spelling out brackets and a code.
             text: truncate(ProjectIndex.shared.displayText(next.text), 30),
             due: due.map { RelativeDue.short($0) },
-            overdue: due.map(RelativeDue.isOverdue) ?? false
+            overdue: due.map { RelativeDue.isOverdue($0) } ?? false
         )
     }
 
@@ -241,7 +241,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let slice = todos.prefix(max(0, Self.menuTaskCap - shown))
             if slice.isEmpty { continue }
             menu.addItem(.separator())
-            let overdue = todos.filter { ($0.dueDate ?? $0.effectiveDueDate).map(RelativeDue.isOverdue) ?? false }.count
+            let overdue = todos.filter { ($0.dueDate ?? $0.effectiveDueDate).map { RelativeDue.isOverdue($0) } ?? false }.count
             menu.addItem(contextHeaderItem(context, overdue: overdue))
             for todo in slice { menu.addItem(taskRowItem(todo)); shown += 1 }
             if shown >= Self.menuTaskCap { break }

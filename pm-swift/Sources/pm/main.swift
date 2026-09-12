@@ -29,6 +29,11 @@ private func dispatch(cmd: String, args: [String]) {
         runApi(args: args)
     case "mcp":
         runMcp(args: args)
+    case "due-table":
+        // Undocumented and deliberately not a contract action: this exists so the Raycast extension's
+        // copy of the due-label rules can be checked against PmLib's, and nothing in the product calls
+        // it. See `RelativeDue.conformanceTable`.
+        runDueTable()
     default:
         stderr("Unknown command: \(cmd)")
         exit(1)
