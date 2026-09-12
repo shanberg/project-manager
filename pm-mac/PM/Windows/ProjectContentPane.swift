@@ -26,7 +26,7 @@ final class ProjectContentPaneController: NSViewController {
         // sliding in from the trailing edge while the list slides out the leading one — are contained
         // to the pane. The column used to do this with a SwiftUI `.clipped()`, which kept a scrolling
         // list inside a clip layer permanently for the sake of a quarter-second animation.
-        let view = NSView()
+        let view = ProjectContentGround()
         view.wantsLayer = true
         view.layer?.masksToBounds = true
         self.view = view
@@ -77,6 +77,35 @@ final class ProjectContentPaneController: NSViewController {
         (child as? ProjectTabContent)?.paneWillClose()
         child.view.removeFromSuperview()
         child.removeFromParent()
+    }
+}
+
+/// The column's own ground — what the window shows where no pane is showing anything.
+///
+/// **There is such a moment, and it used to be a hole.** Pointing the window at another project drops
+/// every pane the old one had and asks for the new project's board, whose path arrives with that
+/// store's first read of the folder — a fresh store every time, since one only lives as long as a
+/// window holds it (`StoreRegistry.acquire`). Until it lands the column holds an empty pane on
+/// purpose; see `ProjectSplitViewController.retarget` and `makeBoardless`, which argue for waiting
+/// rather than putting something on screen to take away again a moment later.
+///
+/// What it did not argue for is what waiting looked like. Nothing in the column was painting, and an
+/// unpainted region of a layer-backed hierarchy in an opaque window is not the window's grey — it is
+/// the backing behind it. So switching between two projects that were both showing a board flashed
+/// black between them, for however long the folder took to read.
+///
+/// `CanvasPalette.board` rather than a grey of this view's own: a board *is* painted with the window's
+/// background (see that comment, which is the whole argument for it), so the gap is now the same
+/// colour as the boards either side of it and there is nothing left to see. Drawn rather than set on
+/// the layer, so it follows the appearance, Increase Contrast and a tinted desktop the way every other
+/// use of that colour does — a `CGColor` on a layer is resolved once, against whichever appearance
+/// happened to be current when it was set.
+private final class ProjectContentGround: NSView {
+    override var isOpaque: Bool { true }
+
+    override func draw(_ dirty: NSRect) {
+        CanvasPalette.board.setFill()
+        dirty.fill()
     }
 }
 
