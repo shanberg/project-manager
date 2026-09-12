@@ -548,7 +548,9 @@ final class CanvasBoardView: NSView {
             // `pruneTilingOfDeletedCards`. Before the views are rebuilt, since it decides which of
             // them there are.
             pruneTilingOfDeletedCards()
-            refreshNodeViews()
+            // Build only: the layout pass below is the one this needs, and running both laid every
+            // card out twice for every change the document reported.
+            refreshVisibleCards()
         }
         layoutNodeViews()
         needsDisplay = true
@@ -565,6 +567,19 @@ final class CanvasBoardView: NSView {
         buildNodeViews()
         layoutNodeViews()
     }
+
+    /// Build the views the visible region now needs, and place nothing that is already on screen.
+    ///
+    /// **A scroll moves no card, and nor does a zoom.** `viewRect` has no scale in it: a card's frame is
+    /// in canvas coordinates, and the board itself is the thing being scrolled and magnified. So the
+    /// layout pass that panning and zooming used to run was a walk over every card on the board to write
+    /// each one the frame it already had — and `buildNodeViews` places a card as it makes it, which is
+    /// the only placement either gesture can owe.
+    ///
+    /// Measured: a crossing into the picker ran 55 of those passes in 0.35s, 51ms of the ~350 available,
+    /// because a flight posts a bounds change per frame (`CanvasScrollView.visibleRegionChanged`) and
+    /// `centre(on:)` asked for a second one on top of it.
+    func refreshVisibleCards() { buildNodeViews() }
 
     /// Build and drop card views as the visible region moves — without moving the ones that stay.
     ///
@@ -652,8 +667,9 @@ final class CanvasBoardView: NSView {
         // The tiles' grips move with the tiles, and they are drawn a layer down from them.
         refreshTileHandles()
         if isTiled { tileHandleView.needsDisplay = true }
+        let nodes = nodesByID
         for (id, view) in nodeViews {
-            guard let node = document.node(id: id) else { continue }
+            guard let node = nodes[id] else { continue }
             // Hidden rather than thrown away. A tiled view of six cards would otherwise tear down the
             // other thirty-seven and rebuild them on the way out — which for a board of web cards means
             // reloading every page you were watching, as the price of having glanced at six of them.
@@ -746,13 +762,25 @@ final class CanvasBoardView: NSView {
     }
 
     private func magnificationChangedBody() {
+        // One pass over the document rather than a linear search per view: `CanvasDocument.node(id:)`
+        // scans `nodes`, so asking it once per card made this O(cards × nodes) — 43 × 43 on a real
+        // board, on every frame of a zoom.
+        let nodes = nodesByID
         for (id, view) in nodeViews {
-            guard let node = document.node(id: id) else { continue }
+            guard let node = nodes[id] else { continue }
             view.update(node: node, scale: liveScale)
         }
         overlay.needsDisplay = true
         needsDisplay = true
-        refreshNodeViews()
+        // Zooming changes which cards are near enough to want a view, and moves none of them.
+        refreshVisibleCards()
+    }
+
+    /// The document's cards by id, for a pass that would otherwise ask for each one by name. Built per
+    /// pass rather than cached: the document is a value that can change under any of them, and a stale
+    /// index would place cards where they used to be.
+    private var nodesByID: [String: CanvasNode] {
+        Dictionary(document.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     // MARK: The page budget

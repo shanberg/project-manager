@@ -152,7 +152,9 @@ final class CanvasScrollView: NSScrollView {
     }
 
     @objc private func visibleRegionChanged() {
-        board.refreshNodeViews()
+        // Build what has come into reach; place nothing. Scrolling moves the board, not the cards on
+        // it — see `CanvasBoardView.refreshVisibleCards`.
+        board.refreshVisibleCards()
         // Which pages are worth running is a question about where you stopped, not about every frame
         // of the scroll that got you there.
         board.settlePageBudget()
@@ -333,7 +335,8 @@ final class CanvasScrollView: NSScrollView {
         let visible = documentVisibleRect.size
         board.scroll(NSPoint(x: at.x - visible.width / 2, y: at.y - visible.height / 2))
         reflectScrolledClipView(contentView)
-        board.refreshNodeViews()
+        // No refresh here: moving the clip posts a bounds change, and `visibleRegionChanged` answers
+        // it. Asking as well meant every frame of a flight rebuilt and re-laid the board twice.
     }
 
     /// Frame a card: centred, and zoomed in if it was too small to read.
