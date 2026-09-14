@@ -31,12 +31,20 @@ final class WindowSettings {
         set { defaults.set(newValue, forKey: Keys.openProjects) }
     }
 
+    /// Where each of those windows was, as `NSWindow.frameDescriptor`, index for index with
+    /// `openProjectKeys`. Empty where a window had no frame to give.
+    var openWindowFrames: [String] {
+        get { defaults.stringArray(forKey: Keys.openFrames) ?? [] }
+        set { defaults.set(newValue, forKey: Keys.openFrames) }
+    }
+
     private let defaults = UserDefaults.standard
 
     private enum Keys {
         static let allSpaces = "PMWindowAllSpaces"
         static let restoreWindows = "PMWindowRestore"
         static let openProjects = "PMWindowOpenProjects"
+        static let openFrames = "PMWindowOpenFrames"
     }
 
     private init() {

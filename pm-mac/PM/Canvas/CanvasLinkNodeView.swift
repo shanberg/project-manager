@@ -201,6 +201,13 @@ final class CanvasLinkNodeView: CanvasNodeView {
     override func simplificationChanged() {}
 
     override func contentChanged() {
+        // Undoing a Pin puts back the address it replaced, and redoing it puts the Pin's back — both
+        // while the pinned page is still on screen. Neither is a different page, so neither rebuilds
+        // one: the card is simply off its address again, or on it again. See `pinned`.
+        if let pinned, [pinned.home, pinned.page].contains(address),
+           web?.url?.absoluteString == pinned.page {
+            alreadyShowing = true
+        }
         // A different address makes where the old one had wandered to meaningless — and the address
         // being adopted from the page on screen means the card is no longer off its address at all.
         // Both are true before the branch below, so this is above it.
@@ -213,6 +220,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // user could see going wrong.
         if alreadyShowing {
             alreadyShowing = false
+            // On its address now or off it again (an undone Pin): written down either way, since
+            // quitting freezes nothing and the next launch should find the card where it is.
+            noteVisit()
             refreshName()
             describeYourself()
             board.pageStateChanged()
@@ -939,6 +949,29 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// whatever is showing it honest.
     override func timePassed() {
         describeYourself()
+        askWhetherPlaying()
+    }
+
+    /// Only a page that is running can be playing, whatever WebKit said last.
+    override var isPlayingMedia: Bool { web != nil && playing }
+
+    /// What WebKit last said about the page playing anything. See `askWhetherPlaying`.
+    private var playing = false
+
+    /// Ask whether the page is playing something, on the heartbeat.
+    ///
+    /// Asked rather than told. WebKit answers the question and posts nothing when the answer changes,
+    /// and a script listening for `play` in every frame would be one more thing PM says to every iframe
+    /// on the web — which `CanvasCardMedia.script` has already learnt the cost of. The heartbeat runs
+    /// every twenty seconds while anything is live and the idle pause is two minutes out, so the answer
+    /// is fresh by the time anything acts on it. See `CanvasPageBudget.Candidate.isInUse`.
+    private func askWhetherPlaying() {
+        guard let web else { return }
+        Task { [weak self] in
+            let state = await web.requestMediaPlaybackState()
+            guard let self, self.web === web else { return }
+            self.playing = state == .playing
+        }
     }
 
     // MARK: Stepping in and out
@@ -1114,12 +1147,59 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// returns the card to the thing it is *for*, and it works where Back cannot — after a sign-on
     /// redirect chain with nothing sensible behind it, or on a card whose page was rebuilt. "I am
     /// somewhere I did not mean to be" is a different question from "what was I looking at before".
+    ///
+    /// **Undoable**, because it is also a way of losing your place: Home from three links into a site
+    /// is a page you may not find your way back to. Undo walks back to where you were; redo goes home.
     func goHome() {
         guard let url else { return }
+        let from = web?.url
         // Back on its own address, so the page about to arrive is the card's own page again and its
         // name is the card's name. The one way out of the state stepping in put the card into.
         capturingTitle = true
         web?.load(URLRequest(url: url))
+        if let from, from != url {
+            registerUndo("Go Home", returningTo: from) { $0.goHome() }
+        }
+    }
+
+    /// Put a navigation on the board's undo stack: undo takes the page back to `page`, redo does `redo`.
+    ///
+    /// On the canvas's stack, because ⌘Z on a board already means the board's last act and a card has
+    /// no stack of its own. Found again by id when it runs rather than held, because the view that
+    /// registered the step may have been recycled by then; a card that is no longer built leaves the
+    /// step spent and its page where it was.
+    private func registerUndo(_ name: String, returningTo page: URL,
+                              redo: @escaping @MainActor (CanvasLinkNodeView) -> Void) {
+        let id = node.id
+        let store = board.store
+        weak var owner = board
+        store.undoManager.registerUndo(withTarget: store) { store in
+            MainActor.assumeIsolated {
+                guard let card = owner?.nodeViews[id] as? CanvasLinkNodeView else { return }
+                card.walkBack(to: page)
+                store.undoManager.registerUndo(withTarget: store) { _ in
+                    MainActor.assumeIsolated {
+                        (owner?.nodeViews[id] as? CanvasLinkNodeView).map(redo)
+                    }
+                }
+                store.undoManager.setActionName(name)
+            }
+        }
+        store.undoManager.setActionName(name)
+    }
+
+    /// Take the page to `page` — by Back, when Back goes there, so undoing your way to a page leaves a
+    /// history rather than a second copy of it.
+    private func walkBack(to page: URL) {
+        guard let web else { return }
+        // Wherever this lands is somewhere the card went, not what it is for, so not its name either.
+        capturingTitle = false
+        if web.backForwardList.backItem?.url == page {
+            web.goBack()
+        } else {
+            web.load(URLRequest(url: page))
+        }
+        board.pageStateChanged()
     }
 
     /// Make where the page has got to the address this card is *for*.
@@ -1133,25 +1213,30 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// being loaded would be the page already on screen, so the only visible effect of doing the honest
     /// thing would be a flash and a lost scroll position. `contentChanged` is suppressed for exactly
     /// the case where the new address is what the view is already showing.
+    ///
+    /// **Undone without rebuilding either.** Undo puts the old address back while this page stays where
+    /// it is, which leaves the card exactly as it was a moment before — off its address, with Home and
+    /// Pin beside it — and redo is the Pin again. See `pinned`.
     func adoptCurrentAddress() {
         guard let live = liveURL, live.absoluteString != address else { return }
         // The page on screen is what the card is for now, so its name is the card's name — and it is
         // in hand already. Remembered before the address changes, or the card would sit nameless until
         // the next time something loaded it, having been looking at the answer the whole time.
         if let title = web?.title { CanvasPageTitles.remember(title, for: live.absoluteString) }
-        setAddress(live.absoluteString)
+        pinned = (home: address, page: live.absoluteString)
+        setAddress(live.absoluteString, as: "Pin Address")
         capturingTitle = true
     }
 
     /// Point this card somewhere else. Undoable, and named for what the Edit menu should say.
-    func setAddress(_ next: String) {
+    func setAddress(_ next: String, as actionName: String = "Change Address") {
         let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != address else { return }
         // Set before the store's change lands, because the change comes back through `update(node:)`
         // and then `contentChanged`, which is the teardown this exists to skip.
         alreadyShowing = web?.url?.absoluteString == trimmed
         let id = node.id
-        board.store.change("Change Address") { doc in
+        board.store.change(actionName) { doc in
             guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
             doc.nodes[index].content = .link(url: trimmed)
         }
@@ -1160,6 +1245,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// Set for the one turn in which a new address is being adopted from the page already on screen.
     /// See `adoptCurrentAddress`.
     private var alreadyShowing = false
+
+    /// The last Pin: the address it replaced, and the page it made the address. Its undo and its redo
+    /// arrive as ordinary changes of address through the document, and this is how `contentChanged`
+    /// tells them from an edit that means a different page — the page on screen is the one pinned.
+    private var pinned: (home: String, page: String)?
 
     /// Load it again from the top — and if the card had given up, start over from the placeholder.
     func reload() {
@@ -1296,6 +1386,9 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
         board.addLinkCard(link.url.absoluteString, beside: node.id)
     }
 
+    /// A tile, or a card you have stepped into: somewhere you are working in the page, not arranging it.
+    var pageTakesFiles: Bool { isEngaged || board.isTiled }
+
     private func item(_ title: String, _ action: Selector, _ link: PageLink) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
@@ -1352,6 +1445,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
             return decisionHandler(.allow)
         }
         decisionHandler(.cancel)
+        // A file the page had nowhere to put arrives as the page navigating to it — WebKit's answer to
+        // a drop nobody took, now that a tile's page is offered files (`pageTakesFiles`). Nothing to
+        // open and nothing to report: the drop simply didn't land.
+        if target.isFileURL { return }
         handOff(target, clicked: clicked)
     }
 

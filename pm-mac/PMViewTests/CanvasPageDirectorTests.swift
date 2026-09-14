@@ -46,6 +46,7 @@ final class CanvasPageDirectorTests: XCTestCase {
         let isPageCard: Bool
         let wantsPage: Bool
         var isEngaged = false
+        var isPlayingMedia = false
         var isCardHidden: Bool
         var lastVisibleAt = Date.distantPast
 
@@ -215,8 +216,8 @@ final class CanvasPageDirectorTests: XCTestCase {
         XCTAssertTrue(director.live.isEmpty)
     }
 
-    /// Off screen, or with no window at all, looking away is the same as giving the board up — and
-    /// says so by being the same call.
+    /// Off screen with nothing playing, looking away costs the whole board — the card you are standing
+    /// in as well.
     func testPausingWhileAwayFromAnOffScreenBoardFreezesEverything() {
         let card = stage.add("a")
         director.apply()
@@ -239,6 +240,22 @@ final class CanvasPageDirectorTests: XCTestCase {
 
         XCTAssertEqual(engaged.live, true, "the card you are standing in is the one to spare")
         XCTAssertEqual(other.live, false)
+    }
+
+    /// Hidden, minimised or covered, what is playing keeps playing — and nothing else is spared.
+    func testPausingWhileAwayFromAnOffScreenBoardSparesWhatIsPlaying() {
+        let music = stage.add("music")
+        music.isPlayingMedia = true
+        let engaged = stage.add("engaged")
+        engaged.isEngaged = true
+        director.apply()
+        stage.isOnScreen = false
+
+        director.pauseWhileAway()
+
+        XCTAssertEqual(music.live, true)
+        XCTAssertEqual(engaged.live, false, "off screen, standing in a card is not using it")
+        XCTAssertEqual(director.live, ["music"])
     }
 
     // MARK: Refreshing

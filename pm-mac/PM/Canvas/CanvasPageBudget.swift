@@ -97,6 +97,13 @@ enum CanvasPageBudget {
         var distanceFromCentre: Double
         /// How long since the card was last in the window. Zero while it is.
         var secondsSinceVisible: Double = 0
+        /// The page is playing something — a video, a stream, music.
+        var isPlaying = false
+
+        /// Whether somebody is using this card, looking at it or not: stepped into it, or listening to
+        /// it. A page that is playing is a page you would notice stopping, which is all "in use" means
+        /// to the budget — and playing is the one kind of use that carries on with the window hidden.
+        var isInUse: Bool { isEngaged || isPlaying }
     }
 
     /// Which cards get to be live. Everything else pauses.
@@ -109,8 +116,9 @@ enum CanvasPageBudget {
     ///
     /// In order:
     ///
-    /// 1. **A card you are using is always live**, budget or no budget, on screen or off. Freezing the
-    ///    page under someone's pointer to save a renderer is a trade nobody would take.
+    /// 1. **A card you are using is always live**, budget or no budget, on screen or off — stepped into,
+    ///    or playing. Freezing the page under someone's pointer to save a renderer is a trade nobody
+    ///    would take, and neither is stopping the music.
     /// 2. **What's on screen, nearest the middle first.** When more of the board is visible than the
     ///    budget covers — which is what zooming out means — the cards at the centre are the ones being
     ///    looked at and the ones at the edges are about to be scrolled away.
@@ -119,8 +127,8 @@ enum CanvasPageBudget {
     static func live(among cards: [Candidate], budget: Int = livePages,
                      grace: TimeInterval = offScreenGrace) -> Set<String> {
         let wanting = cards.filter(\.wantsPage)
-        var chosen = Set(wanting.filter(\.isEngaged).map(\.id))
-        let waiting = wanting.filter { !$0.isEngaged }
+        var chosen = Set(wanting.filter(\.isInUse).map(\.id))
+        let waiting = wanting.filter { !$0.isInUse }
         for card in nearestFirst(waiting) + mostRecentlySeen(waiting, within: grace)
             where chosen.count < budget {
             chosen.insert(card.id)
@@ -149,8 +157,8 @@ enum CanvasPageBudget {
     static func liveWhileTiled(among cards: [Candidate], budget: Int = livePages,
                                grace: TimeInterval = offScreenGrace) -> Set<String> {
         let wanting = cards.filter(\.wantsPage)
-        var chosen = Set(wanting.filter { $0.isVisible || $0.isEngaged }.map(\.id))
-        let hidden = wanting.filter { !$0.isVisible && !$0.isEngaged }
+        var chosen = Set(wanting.filter { $0.isVisible || $0.isInUse }.map(\.id))
+        let hidden = wanting.filter { !$0.isVisible && !$0.isInUse }
         for card in mostRecentlySeen(hidden, within: grace) where chosen.count < budget {
             chosen.insert(card.id)
         }
@@ -160,7 +168,7 @@ enum CanvasPageBudget {
     /// Which cards keep running once you have looked away — the window is no longer the key one, but
     /// PM is still on screen.
     ///
-    /// **The card you are standing in, and nothing else.** The idle pause exists because a board left
+    /// **The card you are standing in, what is playing, and nothing else.** The idle pause exists because a board left
     /// behind your work is renderers that are all cost and no benefit, and that is true of every card
     /// on it *except* the one you had stepped into. Freezing that one is the trade rule one of
     /// `live(among:)` already refuses to make, and it costs more here than under the budget: waking a
@@ -170,13 +178,18 @@ enum CanvasPageBudget {
     /// what makes that unforgivable rather than merely annoying: the card goes on looking exactly as
     /// you left it while being none of it.
     ///
-    /// **On screen is the whole condition.** Hidden, minimised or completely covered, PM is not
-    /// something you are in the middle of using and the pause should take everything — that is what
-    /// the timer is for. Visible but not key is the case this exists for, and it is the ordinary one:
-    /// a board sitting beside the window you are typing in is still a board you are working with.
+    /// **On screen is the whole condition, for the card you are standing in.** Hidden, minimised or
+    /// completely covered, PM is not something you are in the middle of looking at, and the pause takes
+    /// that card with the rest — that is what the timer is for. Visible but not key is the case this
+    /// exists for, and it is the ordinary one: a board sitting beside the window you are typing in is
+    /// still a board you are working with.
+    ///
+    /// **What is playing is spared either way.** Music is the case that asked: a window put behind
+    /// another so you can get on with something is exactly the window whose sound you still want, and a
+    /// video frozen mid-sentence is a page anybody would notice stopping. Hiding PM is not asking it to
+    /// go quiet; pausing the player is, and the page says so the next time it is asked.
     static func liveWhileAway(among cards: [Candidate], onScreen: Bool) -> Set<String> {
-        guard onScreen else { return [] }
-        return Set(cards.filter { $0.wantsPage && $0.isEngaged }.map(\.id))
+        Set(cards.filter { $0.wantsPage && ($0.isPlaying || (onScreen && $0.isEngaged)) }.map(\.id))
     }
 
     // MARK: Who gives up a slot first

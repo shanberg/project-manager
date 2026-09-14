@@ -67,6 +67,15 @@ enum CanvasBoardKeys {
         return .swallow
     }
 
+    // MARK: The board
+
+    /// Whether this press holds the board for panning: Space, and nothing that would make it a
+    /// shortcut. A held Space repeats, and every repeat is the same hold. See
+    /// `CanvasBoardView.holdForPanning`.
+    static func holdsToPan(_ press: Press) -> Bool {
+        press.characters == " " && press.flags.subtracting([.capsLock, .function, .numericPad]).isEmpty
+    }
+
     // MARK: The workspace
 
     enum WorkspaceCommand: Equatable {

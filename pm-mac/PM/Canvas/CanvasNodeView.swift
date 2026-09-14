@@ -722,6 +722,9 @@ class CanvasNodeView: NSView {
     /// only ever *asks*; the board decides, because the answer is a comparison between cards.
     var wantsPage: Bool { false }
 
+    /// Whether the card's page is playing something. Web cards override.
+    var isPlayingMedia: Bool { false }
+
     /// The board's answer. Live means run; not live means freeze, keeping a picture of the page.
     func setPageLive(_ live: Bool) {}
 

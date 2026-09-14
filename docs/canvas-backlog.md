@@ -318,6 +318,135 @@ Design first. The nearest existing grammar is Figma's — ⇧1 fit all, ⇧2 fit
 adopting it wholesale would put ⇧1 next to a ⌘0 that already means the same thing, which is two keys
 for one act. Decide whether the Figma set replaces the ⌘ set or joins it before adding a single key.
 
+## Raised 2026-09-14
+
+A batch of notes from a day of using workspaces in earnest. The quick ones are built (see Priority);
+these are the rest. Several are bugs that want a reproduction before anyone reads code for them.
+
+### 18. Adding a tile disorders the workspace
+
+Adding a tile — "or similar": swapping, pulling a tab out — often leaves the other tiles in a different
+order from the one they were in. Not yet reproduced on purpose.
+
+Where to look: where the new card goes is decided in `CanvasTileSession` and argued in
+[canvas-workspaces.md](canvas-workspaces.md) §7k *Where the next card goes*; the saved arrangement is
+`CanvasViewState.Tiling`. The first question is whether the order is wrong in the saved workspace or
+only on screen — if a reopened workspace comes back in the right order, this is layout, not the model.
+
+### 19. A deleted card tile leaves part of itself on screen
+
+Delete a card that is a tile, and a piece of the old tile stays drawn over the workspace that reflowed
+around it, occluding it until something else redraws.
+
+Suspects, in the order worth checking: the node view removed while the tiled fade still holds its
+layer (`tiledFade`, `CanvasFade`); the frozen snapshot (`CanvasFrozenPageView`) outliving its card; the
+handlebar layer (`CanvasTileHandleView`) not being told the tile went. A web tile versus a text tile
+would split the first two from the third.
+
+### 20. Tile handles need a better placement system
+
+The handlebar sits in the gap on the off-axis edge facing outwards, taking the other side where one is a
+draggable boundary (`CanvasBoardView.tileHandle`, in `CanvasTileChrome.swift`). That rule is stated and
+consistent, and in use it still puts handles where you don't look for them.
+
+Open: what the rule should optimise — always the same edge of every tile (findable), always the edge
+nearest the window's (out of the way), or the tab strip itself as the handle, which would retire the
+bar where a tile has tabs. Decide with 21, since the tab strip is the other thing you grab a tile by.
+
+### 21. Tabs in a tile: how they look, and dragging to reorder them
+
+Two asks about the same strip ([canvas-workspaces.md](canvas-workspaces.md) §7k *Tabs in a tile*): its
+appearance wants revisiting, and tabs should reorder by dragging along the strip. Today a tab dragged
+is `Gesture.placeTile(… pulling: true)` — it comes *out* of the tile — so reordering needs a way to
+tell "along the strip" from "out of it". The window's own tab bar already answers that
+(`ProjectTabBar`, `TabDragTests`), and should be the model rather than a second grammar. Tile drags show
+a proxy and a drop mark rather than reflowing live, because live reflow was tried and disorienting; a
+strip of tabs may be short enough to be the exception, where reflow reads as sorting.
+
+### 22. Presses near the top of the window move the window
+
+Dragging a tab at the top of a tile, and pressing the top-right menu, start a window move instead.
+
+Unverified cause, and the first thing to check: the board runs under the transparent titlebar, and
+AppKit decides a titlebar-band press by asking the hit view's `mouseDownCanMoveWindow`. The header's
+capsules sit on a `WindowDragExcluder`, but a SwiftUI `Menu` brings its own AppKit view that answers for
+itself; and `CanvasBoardView` never overrides the property, so a tab drawn by the board inside that band
+may be answering yes. Log the hit view and its answer on a press there before changing anything.
+
+### 23. Header areas that drag, the way Arc finds them
+
+Arc treats a page's own header or toolbar as somewhere to grab the window, found automatically. Wanted
+most when a web tile is maximized and fills the window, where there is no other chrome to grab.
+
+Sketch: the same question `CanvasPageView.acceptsTyping` already asks a page, in the app's own script
+world — here, whether the point is in a top band with nothing interactive under it — and on yes,
+`window.performDrag(with:)`. Open: whether the drag moves the window or the tile (maximized, they are
+nearly the same thing; tiled, they are not), and how a page that draws its own drag regions is left
+alone. Depends on 22 being understood, since it is the same band.
+
+### 24. Switching tiles ends the session you were editing
+
+Editing a session in a project tile, then clicking another tile, steps out of the first — and the editor
+with it. A tile click selects and engages together (`tileClicked`), and one card is engaged at a time,
+so `selectionChanged` disengages the other.
+
+Open: whether a project tile should keep its editor across losing focus (the way two text views in two
+windows both keep their state), or whether engagement stays single and what comes back is the editing
+position when you return. The second is smaller and doesn't touch the one-engaged-card rule that the
+header, undo routing and New Session all lean on.
+
+### 25. Review: tile session entry, project data, sessions
+
+A full review, and possibly a redesign, of how a session is entered from a tile and how project data and
+sessions are presented there. Too large for an entry; it wants a page of its own, and it should absorb 16
+(deliberately starting a new session) and 24 rather than run beside them.
+
+### 26. Keeping web apps alive, and their notifications
+
+Slack's unread count stops updating once its card is frozen — past the ten-minute off-screen grace, or
+two minutes after the window stops being key. A frozen card runs no script, and waking one restores its
+history (`interactionState`), not its connections. Research notes, none of it built:
+
+- **Keep this card running.** A per-card flag, stored like `pmAutoplay` (`CanvasCardMedia`), that counts
+  as in use in `CanvasPageBudget` exactly the way playing media now does. The cheapest real answer, and
+  the model it would slot into exists as of today.
+- **Badges without a renderer.** Slack, Gmail and most chat apps put the count in `document.title` and
+  the favicon. The card already watches titles (`titleWatch`), so a live card could show a count in the
+  tab bar; a frozen one cannot, which makes this depend on the flag above.
+- **Web notifications.** WKWebView doesn't give an embedding app a public way to receive a page's
+  `Notification` calls — to be confirmed against current WebKit before relying on it. The usual
+  workaround is a user script that replaces `window.Notification` and posts to a script message handler,
+  which re-posts through `UNUserNotificationCenter`. It is also one more thing PM says to every frame,
+  which `CanvasCardMedia.script` has a documented reason to be careful about.
+- **Web Push / service workers**, which would keep delivering with the page closed: not assumed
+  available to a WKWebView embedder. Check before designing around it.
+- **Tabs behind.** Switching tabs still freezes a board's pages outright (`pauseAllPages`), including one
+  that is playing — the playing exception only covers the idle pause and the budget.
+
+### 27. Card size tools: an aspect ratio, an exact size
+
+Optional tools to set a card to a specific aspect ratio (16:9 and the usual set) or size, behind a
+switch in Settings that is off by default. Belongs with 5's open question (offering a picture's own
+ratio as a resize snap) and with 2, which would have to show a ratio snap the way it shows the others.
+Open: whether these are a menu of presets on the card, a field in an inspector the board doesn't have,
+or snaps during a resize that only the setting turns on.
+
+### 28. Save a page: PNG, web archive, restorable
+
+Save a web card's page as a PNG or a web capture, and have the capture come back on the next open.
+WebKit has the pieces — `takeSnapshot` (the visible part; a full page means `createPDF` or stitching),
+`createWebArchiveData` — and a pasted picture already has a home, the attachments folder beside the
+board (`copyNoteAttachment`). Open: whether a capture is a new card beside the page (an image or file
+card, which needs nothing new) or a state of the web card itself that opens offline, which is what
+"restorable" suggests and is a much bigger thing.
+
+### 29. A colour for a project, or a workspace, on the window
+
+Let a project (or a workspace) have a colour, and colour the window with it. Open: where it lives —
+the notes file, which travels with the project and shows in Obsidian; the `.canvas`, which is per board;
+or defaults, which syncs nowhere — and what it tints: the board's ground, the tab chip, the sidebar row,
+the window's accent. The HIG's line on accent colours versus content colours is the place to start.
+
 ## Priority
 
 **Nothing here reads as broken any more.** 1 was that entry — a card kept its placeholder until the
@@ -346,6 +475,19 @@ different kind of thing entirely.
 outside the vault now asks whether to copy the file in, and what remains is whether anything more is
 wanted for a *folder* dropped on a board.
 
-**Built since this list was last read:** 1 (the reveal), 5 (pictures fill a card that is nearly their
+**Raised 2026-09-14 (18–29).** Bugs first, each wanting a reproduction before code: 19 (a deleted tile
+left on screen), 18 (tiles disordered on add), 22 (presses at the top moving the window). Then design:
+20 and 21 together (handles and tabs are both how you grab a tile), 24 (a session kept across tiles),
+23 (Arc-style drag areas, after 22), 27 (size tools), 28 (saving a page), 29 (colour). A page of its
+own: 25. Research with a cheap first step: 26, a keep-running flag.
+
+**Built from the same notes, 2026-09-14:** the mouse's Back and Forward buttons on web cards and tiles;
+Space-drag to pan with nothing stepped into; undo and redo for Home and Pin, where undoing a Pin keeps
+the page on screen; a page that is playing keeps running through the idle pause and the budget, window
+hidden or not; files dropped on a tile's page go into the page. And outside the board, windows open at
+quit come back, each where it was and at its size — quitting used to close them one at a time and empty
+the saved list before the next launch could read it.
+
+**Built since this list was last read before that:** 1 (the reveal), 5 (pictures fill a card that is nearly their
 shape, bar the aspect-ratio snap, which belongs with 2), and most of 6 — the drop feedback, the
 absolute-path resolution, the copy-in question, and the block layout for several files at once.

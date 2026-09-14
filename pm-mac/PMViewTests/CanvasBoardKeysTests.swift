@@ -113,4 +113,23 @@ final class CanvasBoardKeysTests: XCTestCase {
         XCTAssertEqual(Keys.picking(chars("b", .option), peeking: true, hovering: true), .endPicking,
                        "⌥B leaves picking even from inside a peek")
     }
+
+    // MARK: The board
+
+    /// Space alone holds the board, and so does every repeat of a held Space.
+    func testSpaceHoldsTheBoardToPan() {
+        XCTAssertTrue(Keys.holdsToPan(chars(" ")))
+        XCTAssertTrue(Keys.holdsToPan(Keys.Press(characters: " ", isRepeat: true)))
+        XCTAssertTrue(Keys.holdsToPan(chars(" ", .capsLock)), "Caps Lock is a state, not a modifier")
+    }
+
+    /// A modified Space is somebody's shortcut — ⌃Space is the input source, ⌘Space is Spotlight — and
+    /// any other key is not a hold at all.
+    func testAModifiedSpaceOrAnotherKeyIsNotAHold() {
+        XCTAssertFalse(Keys.holdsToPan(chars(" ", .command)))
+        XCTAssertFalse(Keys.holdsToPan(chars(" ", .control)))
+        XCTAssertFalse(Keys.holdsToPan(chars(" ", .shift)))
+        XCTAssertFalse(Keys.holdsToPan(chars("h")))
+        XCTAssertFalse(Keys.holdsToPan(Keys.Press(specialKey: .leftArrow)))
+    }
 }

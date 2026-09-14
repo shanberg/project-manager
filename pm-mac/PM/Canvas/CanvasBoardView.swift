@@ -385,6 +385,10 @@ final class CanvasBoardView: NSView {
     /// from the left one, so a pan can begin in the middle of a marquee or a card drag, and storing it
     /// in `gesture` would throw that half-finished gesture away.
     var panGrab: NSPoint?
+    /// Space is down with nothing stepped into, so a left press takes hold of the board rather than a
+    /// card — and `spaceGrab` is where it took hold, while that press lasts. See `holdForPanning`.
+    var spaceHeld = false
+    var spaceGrab: NSPoint?
     /// The line under the pointer, so it can say it is clickable before it is clicked.
     var hoveredEdge: String?
 

@@ -11,9 +11,9 @@ final class CanvasPageBudgetTests: XCTestCase {
     /// A card that wants to run, `distance` points from the middle of the window.
     private func card(_ id: String, distance: Double, visible: Bool = true,
                       engaged: Bool = false, wants: Bool = true,
-                      goneFor: Double = 0) -> CanvasPageBudget.Candidate {
+                      goneFor: Double = 0, playing: Bool = false) -> CanvasPageBudget.Candidate {
         .init(id: id, wantsPage: wants, isVisible: visible, isEngaged: engaged,
-              distanceFromCentre: distance, secondsSinceVisible: goneFor)
+              distanceFromCentre: distance, secondsSinceVisible: goneFor, isPlaying: playing)
     }
 
     func testAQuietBoardRunsEverythingOnScreen() {
@@ -268,6 +268,44 @@ final class CanvasPageBudgetTests: XCTestCase {
         let live = CanvasPageBudget.liveWhileAway(among: [card("empty", distance: 0, engaged: true,
                                                                wants: false)],
                                                   onScreen: true)
+        XCTAssertTrue(live.isEmpty)
+    }
+
+    // MARK: Playing
+
+    /// The complaint: music stopped once the window went behind something. Playing is using, so a
+    /// playing card is spared wherever a card you are standing in is — and off screen as well.
+    func testLookingAwayKeepsWhatIsPlayingEvenOffScreen() {
+        let cards = [card("music", distance: 4000, visible: false, playing: true),
+                     card("typing", distance: 0, engaged: true),
+                     card("idle", distance: 100)]
+        XCTAssertEqual(CanvasPageBudget.liveWhileAway(among: cards, onScreen: false), ["music"])
+        XCTAssertEqual(CanvasPageBudget.liveWhileAway(among: cards, onScreen: true), ["music", "typing"])
+    }
+
+    /// The timeout is for pages nobody is getting anything from, and a playing page is not one.
+    func testSomethingPlayingKeepsItsSlotPastTheTimeout() {
+        let live = CanvasPageBudget.live(among: [card("here", distance: 10),
+                                                 card("music", distance: 4000, visible: false,
+                                                      goneFor: 11 * 60, playing: true)],
+                                         grace: CanvasPageBudget.defaultOffScreenGrace)
+        XCTAssertEqual(live, ["here", "music"])
+    }
+
+    /// And behind a tiling, which queues the cards it hid on the same clock.
+    func testATilingKeepsWhatIsPlayingBehindIt() {
+        let live = CanvasPageBudget.liveWhileTiled(among: [card("tile", distance: 0),
+                                                           card("music", distance: 4000, visible: false,
+                                                                goneFor: 11 * 60, playing: true)],
+                                                   grace: CanvasPageBudget.defaultOffScreenGrace)
+        XCTAssertEqual(live, ["tile", "music"])
+    }
+
+    /// Playing does not make a page out of nothing: a card that no longer wants one has none to keep.
+    func testPlayingDoesNotKeepACardThatWantsNoPage() {
+        let live = CanvasPageBudget.liveWhileAway(among: [card("gone", distance: 0, wants: false,
+                                                               playing: true)],
+                                                  onScreen: false)
         XCTAssertTrue(live.isEmpty)
     }
 }

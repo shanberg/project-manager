@@ -29,9 +29,11 @@ final class WindowManager {
     /// forward — which is what every "take me to this project" surface means. Passed `false`, it makes
     /// a second window regardless, which is what the two Open in New Window items and ⌥-click mean, and
     /// what restoring a saved session means when the same project was open in two windows last time.
+    ///
+    /// `frame` is where a restored window was, as `NSWindow.frameDescriptor`; nil places it the usual way.
     @discardableResult
     func open(projectKey: String?, reusingExistingWindow: Bool = true,
-              canvas: URL? = nil) -> ProjectWindowController {
+              canvas: URL? = nil, frame: String? = nil) -> ProjectWindowController {
         if reusingExistingWindow,
            let existing = controllers.first(where: { $0.projectKey == projectKey }) {
             existing.show()
@@ -41,11 +43,14 @@ final class WindowManager {
         controllers.append(controller)
         Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
         rememberOpenProjects()
-        // Every project window is the same window type at the same remembered frame, so a second one
-        // would open exactly on top of the first. Step it off the frontmost window the way AppKit
-        // cascades any other new window.
-        if let front = frontmost?.window, let new = controller.window,
-           front !== new, front.isVisible {
+        if let frame, !frame.isEmpty, let window = controller.window {
+            // Where it was last time — set before it is shown, so it doesn't open in one place and jump.
+            window.setFrame(from: frame)
+        } else if let front = frontmost?.window, let new = controller.window,
+                  front !== new, front.isVisible {
+            // Every project window is the same window type at the same remembered frame, so a second
+            // one would open exactly on top of the first. Step it off the frontmost window the way
+            // AppKit cascades any other new window.
             new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
         }
         controller.show()
@@ -179,7 +184,27 @@ final class WindowManager {
         controllers.removeAll { $0 === controller }
         Log.write("window closed: \(controller.projectKey ?? "no project") (\(controllers.count) open)")
         StoreRegistry.shared.release(controller.projectKey)
-        rememberOpenProjects()
+        // **Not while quitting.** AppKit closes every window on the way out, after `willTerminate`, so
+        // a list rewritten here was a list emptied one window at a time — and the next launch, finding
+        // nothing, opened the focused project instead of what you had. Closing a window by hand is
+        // still a change to what is open; quitting is not.
+        if !quitting { rememberOpenProjects() }
+    }
+
+    /// Set once the app has said it is terminating. See `windowClosed`.
+    private var quitting = false
+
+    private init() {
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // Written again rather than trusted: frames move without anything closing, and this is
+                // the last moment every window is still here to say where it is.
+                self.rememberOpenProjects()
+                self.quitting = true
+            }
+        }
     }
 
     /// Reopen what was open last time. A regular app that launches with no window at all reads as
@@ -192,8 +217,13 @@ final class WindowManager {
             // them here also cleans them out of the saved list on the next write.
             // One window per remembered entry, not one per distinct project: the list is a list of
             // windows, and a project you had open in two of them comes back in two.
-            for key in WindowSettings.shared.openProjectKeys where PMFiles.projectName(fromKey: key) != nil {
-                open(projectKey: key, reusingExistingWindow: false)
+            // Each comes back where it was and the size it was, rather than cascaded off the first —
+            // read up front, because every window opened below rewrites both lists.
+            let keys = WindowSettings.shared.openProjectKeys
+            let frames = WindowSettings.shared.openWindowFrames
+            for (index, key) in keys.enumerated() where PMFiles.projectName(fromKey: key) != nil {
+                open(projectKey: key, reusingExistingWindow: false,
+                     frame: frames.indices.contains(index) ? frames[index] : nil)
             }
         }
         guard !controllers.isEmpty else {

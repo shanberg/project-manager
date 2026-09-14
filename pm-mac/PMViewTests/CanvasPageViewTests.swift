@@ -160,6 +160,8 @@ final class CanvasPageViewTests: XCTestCase {
         }
 
         func openInNewCard(_ link: PageLink) {}
+
+        var pageTakesFiles = false
     }
 
     // MARK: Who gets the drag
@@ -192,6 +194,82 @@ final class CanvasPageViewTests: XCTestCase {
         XCTAssertEqual(board.calls.last, "performed")
     }
 
+    // MARK: Files, on a page you are working in
+
+    /// A file dropped on a tile goes into the page — Figma's canvas, a mail composer — and not onto the
+    /// board beside it, wherever on the page it lands.
+    func testFilesAreThePagesWhereThePageTakesThem() {
+        let host = MenuHost()
+        host.pageTakesFiles = true
+        page.linkHost = host
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window, carrying: Self.file)
+        _ = page.draggingEntered(drag)
+        _ = page.draggingUpdated(drag)
+        XCTAssertEqual(board.calls, [], "the board is never offered it")
+    }
+
+    /// Anywhere else, a file away from a field is still the board's.
+    func testFilesAreTheBoardsWhereThePageDoesNotTakeThem() {
+        let host = MenuHost()
+        page.linkHost = host
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window, carrying: Self.file)
+        _ = page.draggingEntered(drag)
+        XCTAssertEqual(board.calls, ["entered"])
+    }
+
+    /// Only files: a link dragged over a tile still makes a card, since links are what a board is made of.
+    func testALinkIsStillTheBoardsOnAPageThatTakesFiles() {
+        let host = MenuHost()
+        host.pageTakesFiles = true
+        page.linkHost = host
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window)
+        _ = page.draggingEntered(drag)
+        XCTAssertEqual(board.calls, ["entered"])
+    }
+
+    private static let file = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("drop.txt") as NSURL
+
+    // MARK: The side buttons
+
+    /// Back and Forward on a mouse's fourth and fifth buttons walk the page's own history.
+    func testTheSideButtonsGoBackAndForward() async throws {
+        // Two real navigations, so there is a history to walk: `loadHTMLString` leaves no entry behind,
+        // and WebKit skips entries a script pushes without a user gesture.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("side-buttons-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = folder.appendingPathComponent("first.html")
+        let second = folder.appendingPathComponent("second.html")
+        try "<p>first</p>".write(to: first, atomically: true, encoding: .utf8)
+        try "<p>second</p>".write(to: second, atomically: true, encoding: .utf8)
+
+        page.loadFileURL(first, allowingReadAccessTo: folder)
+        try await until("the first page loads") { self.page.url?.lastPathComponent == "first.html" }
+        try await until("the first page finishes") { !self.page.isLoading }
+        page.loadFileURL(second, allowingReadAccessTo: folder)
+        try await until("the second page finishes") {
+            self.page.url?.lastPathComponent == "second.html" && !self.page.isLoading
+        }
+        XCTAssertTrue(page.canGoBack, "back list: \(page.backForwardList.backList.map(\.url)), "
+                      + "current: \(String(describing: page.backForwardList.currentItem?.url))")
+
+        page.otherMouseDown(with: try sideButton(3))
+        try await until("Back returns to the first page") {
+            self.page.url?.lastPathComponent == "first.html" && !self.page.isLoading && self.page.canGoForward
+        }
+        page.otherMouseDown(with: try sideButton(4))
+        try await until("Forward returns to the second") { self.page.url?.lastPathComponent == "second.html" }
+    }
+
+    private func sideButton(_ number: UInt32) throws -> NSEvent {
+        let button = try XCTUnwrap(CGMouseButton(rawValue: number))
+        let event = try XCTUnwrap(CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown,
+                                          mouseCursorPosition: .zero, mouseButton: button))
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
     // MARK: Helpers
 
     private func until(_ what: String, timeout: TimeInterval = 5, _ done: () async -> Bool) async throws {
@@ -216,18 +294,19 @@ private final class Recorder: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { calls.append("performed"); return true }
 }
 
-/// A drag of one link, at a point in window coordinates.
+/// A drag of one thing — a link, unless it is given something else — at a point in window coordinates.
 private final class FakeDrag: NSObject, NSDraggingInfo {
     var draggingLocation: NSPoint
     let window: NSWindow
     let draggingPasteboard: NSPasteboard
 
-    init(at point: NSPoint, in window: NSWindow) {
+    init(at point: NSPoint, in window: NSWindow,
+         carrying item: NSPasteboardWriting = URL(string: "https://x.dev/a")! as NSURL) {
         draggingLocation = point
         self.window = window
         draggingPasteboard = NSPasteboard.withUniqueName()
         draggingPasteboard.clearContents()
-        draggingPasteboard.writeObjects([URL(string: "https://x.dev/a")! as NSURL])
+        draggingPasteboard.writeObjects([item])
     }
 
     deinit { draggingPasteboard.releaseGlobally() }

@@ -31,6 +31,9 @@ extension CanvasBoardView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // Space held is the hand: the press takes hold of the board, and nothing else. See
+        // `holdForPanning`.
+        if takesHoldWithSpace(event) { return }
         let where_ = point(event)
         let extending = event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.command)
 
@@ -181,6 +184,7 @@ extension CanvasBoardView {
     // MARK: Dragging
 
     override func mouseDragged(with event: NSEvent) {
+        if let grab = spaceGrab { return pan(keeping: grab, under: event) }
         let now = point(event)
         switch gesture {
         case .swap(let from, _):
@@ -346,6 +350,10 @@ extension CanvasBoardView {
     // MARK: Releasing
 
     override func mouseUp(with event: NSEvent) {
+        if spaceGrab != nil {
+            spaceGrab = nil
+            return refreshCursor()
+        }
         defer {
             gesture = nil
             overlay.marquee = nil
@@ -568,13 +576,72 @@ extension CanvasBoardView {
     /// Nothing to pan in a tiled view: the tiles were laid out to fill the window, which is the same
     /// reason scrolling is swallowed there. See `CanvasScrollView.scrollWheel`.
     override func otherMouseDown(with event: NSEvent) {
+        // The side buttons are Back and Forward, which is all they mean anywhere. A card you have not
+        // stepped into doesn't take clicks, so the board is what hears them and hands them to the web
+        // card under the pointer; a page taking its own clicks hears them itself — see
+        // `CanvasPageView.historyStep`.
+        if let step = CanvasPageView.historyStep(event) {
+            guard !isTiled, let card = card(under: point(event)) as? CanvasLinkNodeView else {
+                return super.otherMouseDown(with: event)
+            }
+            return step < 0 ? card.goBack() : card.goForward()
+        }
         guard event.buttonNumber == 2, !isTiled else { return super.otherMouseDown(with: event) }
         window?.makeFirstResponder(self)
         panGrab = convert(event.locationInWindow, from: nil)
         NSCursor.closedHand.push()
     }
 
-    /// Keep the point you grabbed under the pointer.
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let grab = panGrab else { return super.otherMouseDragged(with: event) }
+        pan(keeping: grab, under: event)
+    }
+
+    /// Space held down turns the pointer into a hand, and a drag with it pans.
+    ///
+    /// The middle button's gesture for everyone whose pointer hasn't got one — a trackpad most of all,
+    /// where two fingers pan but a click-drag draws a marquee — and the one every canvas agrees on:
+    /// Figma, Sketch, Photoshop, Illustrator. Only with nothing stepped into, because Space inside a
+    /// card is a space, or a page's own play button; and not in a tiled view, which has nothing to pan.
+    /// Returns whether the key was spent. See `CanvasBoardKeys.holdsToPan`.
+    func holdForPanning(_ event: NSEvent) -> Bool {
+        guard !isTiled, !nodeViews.values.contains(where: \.isEngaged),
+              CanvasBoardKeys.holdsToPan(.init(event)) else { return false }
+        if !spaceHeld {
+            spaceHeld = true
+            refreshCursor()
+        }
+        return true
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard spaceHeld, event.charactersIgnoringModifiers == " " else { return super.keyUp(with: event) }
+        spaceHeld = false
+        // A pan still under way finishes as the pan it began as; the hand goes when the button does.
+        if spaceGrab == nil { refreshCursor() }
+    }
+
+    /// Whether a left press takes hold of the board, because Space is down.
+    ///
+    /// Asked of the keyboard as well as of the flag: a Space let go while another window had the keys
+    /// never reaches `keyUp` here, and a board that went on believing it was held would turn the next
+    /// ordinary click into a pan.
+    func takesHoldWithSpace(_ event: NSEvent) -> Bool {
+        guard spaceHeld else { return false }
+        guard !isTiled, CGEventSource.keyState(.combinedSessionState, key: Self.spaceKeyCode) else {
+            spaceHeld = false
+            return false
+        }
+        spaceGrab = convert(event.locationInWindow, from: nil)
+        NSCursor.closedHand.set()
+        return true
+    }
+
+    /// The Space bar's virtual key code — `kVK_Space`, in Carbon's table.
+    private static let spaceKeyCode: CGKeyCode = 0x31
+
+    /// Keep the point you grabbed under the pointer. Both ways of holding the board come here: the
+    /// middle button, and the left one with Space down.
     ///
     /// Stated as "put the grabbed point back" rather than "scroll by however far the mouse moved". The
     /// two agree — `convert` has already divided by the magnification, so a pan moves the board at the
@@ -582,8 +649,7 @@ extension CanvasBoardView {
     /// where the board actually is, so a scroll the clip view clamped at the edge of the content, or a
     /// content origin that moved underneath the gesture, leaves no accumulated drift: the board is
     /// stuck to the pointer rather than following it.
-    override func otherMouseDragged(with event: NSEvent) {
-        guard let grab = panGrab else { return super.otherMouseDragged(with: event) }
+    func pan(keeping grab: NSPoint, under event: NSEvent) {
         let now = convert(event.locationInWindow, from: nil)
         let origin = visibleRect.origin
         scroll(NSPoint(x: origin.x + grab.x - now.x, y: origin.y + grab.y - now.y))
@@ -751,6 +817,11 @@ extension CanvasBoardView {
     /// leaves the new card to it, which is what the page's next mouse-moved does with a page that has
     /// anything to say about the matter.
     func refreshCursor() {
+        // Holding Space, the pointer is a hand over everything — cards included, since the press is
+        // the board's wherever it lands. See `holdForPanning`.
+        if spaceHeld || spaceGrab != nil {
+            return (spaceGrab == nil ? NSCursor.openHand : NSCursor.closedHand).set()
+        }
         let owner = cardUnderPointer
         defer { cursorOwner = owner }
         if owner != nil {
@@ -857,6 +928,7 @@ extension CanvasBoardView {
         // A project card you are standing in is a list, and a list answers three of these keys. See
         // `projectCardTakes`.
         if projectCardTakes(event) { return }
+        if holdForPanning(event) { return }
         switch event.specialKey {
         case .delete, .deleteForward:
             deleteSelection()

@@ -39,6 +39,12 @@ protocol CanvasPageLinkHost: AnyObject {
     func pageMenuItems(for link: PageLink?) -> [NSMenuItem]
     /// A link middle-clicked, which every browser answers with a tab and a board answers with a card.
     func openInNewCard(_ link: PageLink)
+    /// Whether files dragged over the page are the page's to take, wherever they land on it.
+    ///
+    /// True where the page is what you are working in — a tile, or a card you have stepped into — so a
+    /// file dropped on Figma goes into Figma rather than becoming a card beside it. Everywhere else a
+    /// dropped file is the board's, as it always was, unless there is a field under it.
+    var pageTakesFiles: Bool { get }
 }
 
 @MainActor
@@ -116,7 +122,8 @@ final class CanvasPageView: WKWebView {
 
     /// Hand the drag to whichever side the page's latest answer says, telling each about the crossing.
     private func route(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let wanted: Holder = editableUnderPointer || dropFallback == nil ? .page : .fallback
+        let wanted: Holder = editableUnderPointer || dropFallback == nil || carriesFilesForPage(sender)
+            ? .page : .fallback
         if holder == wanted {
             return wanted == .page ? super.draggingUpdated(sender)
                                    : dropFallback?.draggingUpdated(sender) ?? []
@@ -129,6 +136,13 @@ final class CanvasPageView: WKWebView {
         holder = wanted
         return wanted == .page ? super.draggingEntered(sender)
                                : dropFallback?.draggingEntered(sender) ?? []
+    }
+
+    /// Files, over a page that is where you are working. See `CanvasPageLinkHost.pageTakesFiles`.
+    private func carriesFilesForPage(_ sender: NSDraggingInfo) -> Bool {
+        linkHost?.pageTakesFiles == true
+            && sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self],
+                                                       options: [.urlReadingFileURLsOnly: true])
     }
 
     private func ask(about sender: NSDraggingInfo) {
@@ -209,7 +223,24 @@ final class CanvasPageView: WKWebView {
         linkUnderPointer = nil
     }
 
+    /// Which way a mouse's side buttons walk the history: −1 for Back, +1 for Forward, nil for any other
+    /// button. AppKit counts from zero, so these are buttons 3 and 4 — the fourth and fifth, to people.
+    static func historyStep(_ event: NSEvent) -> Int? {
+        switch event.buttonNumber {
+        case 3: return -1
+        case 4: return 1
+        default: return nil
+        }
+    }
+
+    /// Back and Forward on the side buttons, which WebKit leaves to the browser around it — here, the
+    /// card. A card that isn't taking clicks never sees these; the board hands them on instead.
     override func otherMouseDown(with event: NSEvent) {
+        if let step = Self.historyStep(event) {
+            middleDown = nil
+            if step < 0 { goBack() } else { goForward() }
+            return
+        }
         middleDown = event.buttonNumber == 2 ? convert(event.locationInWindow, from: nil) : nil
         super.otherMouseDown(with: event)
     }

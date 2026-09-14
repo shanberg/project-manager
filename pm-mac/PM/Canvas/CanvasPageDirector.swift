@@ -17,6 +17,8 @@ protocol CanvasPageCard: AnyObject {
     var wantsPage: Bool { get }
     /// Whether somebody is working in it — an engaged card keeps its page whatever the budget says.
     var isEngaged: Bool { get }
+    /// Whether its page is playing something. A playing card keeps its page, even with the window hidden.
+    var isPlayingMedia: Bool { get }
     /// Hidden by a tiled view, which is not the same as being off screen and has to beat it.
     var isCardHidden: Bool { get }
     /// When the card was last drawn. Written by the director, read by the budget.
@@ -189,15 +191,16 @@ final class CanvasPageDirector {
     }
 
     /// Freeze this board's pages because the window has been left alone for a while — sparing the card
-    /// you are standing in, as long as PM is still on screen.
+    /// you are standing in, as long as PM is still on screen, and whatever is playing, whether it is or
+    /// not.
     ///
-    /// The rule and the reasons are in `CanvasPageBudget.liveWhileAway`. Off screen, or with no window
-    /// at all, this is `pauseEverything` and says so by calling it.
+    /// The rule and the reasons are in `CanvasPageBudget.liveWhileAway`. With no window at all, this is
+    /// `pauseEverything` and says so by calling it.
     func pauseWhileAway() {
-        guard let stage, stage.hasWindow, stage.isOnScreen else { return pauseEverything() }
+        guard let stage, stage.hasWindow else { return pauseEverything() }
         settleWork?.cancel()
         settleWork = nil
-        let spared = CanvasPageBudget.liveWhileAway(among: candidates(), onScreen: true)
+        let spared = CanvasPageBudget.liveWhileAway(among: candidates(), onScreen: stage.isOnScreen)
         if live != spared {
             Log.write("canvas pages paused: \(live.subtracting(spared).count), "
                 + "kept \(spared.count) in use")
@@ -257,7 +260,8 @@ final class CanvasPageDirector {
                              isVisible: onScreen,
                              isEngaged: view.isEngaged,
                              distanceFromCentre: hypot(frame.midX - centre.x, frame.midY - centre.y),
-                             secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt)))
+                             secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt),
+                             isPlaying: view.isPlayingMedia))
         }
         return out
     }
