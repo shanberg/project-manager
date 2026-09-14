@@ -481,7 +481,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard !triedReplacingCanvas, canvasSource().url != nil else { return false }
         triedReplacingCanvas = true
         guard let kept = replaceCanvas() else { return false }
-        replacementNotice = ("This project's canvas couldn't be read, so PM made a new one. "
+        replacementNotice = ("This project's canvas couldn't be read, so Folio made a new one. "
                                  + "Your old board is still in the folder.", kept)
         return true
     }

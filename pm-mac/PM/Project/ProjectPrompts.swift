@@ -107,7 +107,7 @@ enum ProjectPrompts {
             let alert = NSAlert()
             alert.messageText = "Nothing to Take On"
             alert.informativeText = "Every folder in \(areasPath) is already an area. "
-                + "A folder there with no notes in it is one PM could adopt."
+                + "A folder there with no notes in it is one Folio could adopt."
             alert.addButton(withTitle: "OK")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
@@ -122,7 +122,7 @@ enum ProjectPrompts {
 
         let alert = NSAlert()
         alert.messageText = "Take On a Folder as an Area"
-        alert.informativeText = "PM writes a notes file into the folder and changes nothing else — "
+        alert.informativeText = "Folio writes a notes file into the folder and changes nothing else — "
             + "what's already in it stays where it is."
         alert.addButton(withTitle: "Take On")
         alert.addButton(withTitle: "Cancel")

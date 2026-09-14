@@ -129,7 +129,7 @@ extension CanvasBoardView {
             alert.messageText = outsiders.count == 1
                 ? "\(outsiders[0].lastPathComponent) is outside your vault"
                 : "\(outsiders.count) of these files are outside your vault"
-            alert.informativeText = "A card can point at it where it is, which only PM will be able to "
+            alert.informativeText = "A card can point at it where it is, which only Folio will be able to "
                 + "follow — Obsidian resolves a card's path inside the vault. Copying it in puts it "
                 + "beside this board, where both apps can see it."
             alert.addButton(withTitle: "Copy In")

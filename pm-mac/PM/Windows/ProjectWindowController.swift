@@ -338,7 +338,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // The folder name is the fallback and the one that carries a code, so it's written the way the
         // rest of the app has been told to write names — see `ProjectCodes`.
         let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
-        window.title = name ?? "PM"
+        window.title = name ?? "Folio"
         // A window retargeted away from the file it was opened on must lose the proxy icon with it: a
         // titlebar still offering the old canvas's path menu is a window claiming to be a document it
         // is not showing.

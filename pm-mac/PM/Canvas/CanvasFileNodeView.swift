@@ -287,7 +287,7 @@ final class CanvasFileNodeView: CanvasNodeView {
         label.textColor = .tertiaryLabelColor
         label.alignment = .center
         label.lineBreakMode = .byTruncatingMiddle
-        label.toolTip = "PM looked for this everywhere it knows to look and didn't find it."
+        label.toolTip = "Folio looked for this everywhere it knows to look and didn't find it."
 
         stack.addArrangedSubview(glyph)
         stack.addArrangedSubview(label)

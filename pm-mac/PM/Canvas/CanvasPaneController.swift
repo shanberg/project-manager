@@ -1178,7 +1178,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     private func noteOutsideChange() {
-        notice.show(message: "This canvas changed in another app. PM reloaded it.",
+        notice.show(message: "This canvas changed in another app. Folio reloaded it.",
                     kind: .informational, actionTitle: nil)
     }
 
@@ -1242,8 +1242,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         let moved = movedCards.count
         if moved > 0 {
             return notice.show(message: moved == 1
-                                   ? "1 card points at a file that has moved. PM is showing it from where it is now."
-                                   : "\(moved) cards point at files that have moved. PM is showing them from where they are now.",
+                                   ? "1 card points at a file that has moved. Folio is showing it from where it is now."
+                                   : "\(moved) cards point at files that have moved. Folio is showing them from where they are now.",
                                kind: .warning,
                                actionTitle: "Repair Paths",
                                revealTitle: "Show Them")

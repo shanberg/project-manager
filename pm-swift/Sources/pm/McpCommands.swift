@@ -157,8 +157,8 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
         case nil:
             reason = "No such tool: \(name)."
         case .affordance:
-            reason = "\(name) is a request to the running PM app, which this server can't make. "
-                + "No flag enables it — the person you're helping can do it in PM."
+            reason = "\(name) is a request to the running Folio app, which this server can't make. "
+                + "No flag enables it — the person you're helping can do it in Folio."
         default:
             reason = "\(name) isn't available in this session. It was started without the flag that permits it."
         }

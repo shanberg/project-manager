@@ -31,7 +31,7 @@ final class ProjectTroubleTests: XCTestCase {
     func testAProjectThatWouldNotLoadShowsItsError() {
         let message = ProjectTrouble.message(hasProject: true, errorMessage: "Invalid project.",
                                              goToProjectKeys: "⌃Space")
-        XCTAssertEqual(message.title, "PM couldn't open this project.")
+        XCTAssertEqual(message.title, "Folio couldn't open this project.")
         XCTAssertEqual(message.detail, "Invalid project.")
     }
 
@@ -40,7 +40,7 @@ final class ProjectTroubleTests: XCTestCase {
     func testALoadedProjectWithNoBoardBlamesTheVault() {
         let message = ProjectTrouble.message(hasProject: true, errorMessage: nil,
                                              goToProjectKeys: nil)
-        XCTAssertEqual(message.title, "PM couldn't make a canvas for this project.")
+        XCTAssertEqual(message.title, "Folio couldn't make a canvas for this project.")
         XCTAssertEqual(message.detail, "Check that the vault is writable, then open the project again.")
     }
 }

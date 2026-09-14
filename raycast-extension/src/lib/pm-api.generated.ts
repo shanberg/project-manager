@@ -20,16 +20,16 @@ export interface AppOpenInObsidianInput {
   project?: string;
 }
 
-/** Open the project's window in PM. */
+/** Open the project's window in Folio. */
 export interface AppOpenWindowInput {
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
 }
 
-/** Open PM's settings. */
+/** Open Folio's settings. */
 export type AppSettingsInput = Record<string, never>;
 
-/** Show PM's focus panel. */
+/** Show Folio's focus panel. */
 export type AppShowPanelInput = Record<string, never>;
 
 /** Read a typed capture line: its text, its due date, and the project it names. */

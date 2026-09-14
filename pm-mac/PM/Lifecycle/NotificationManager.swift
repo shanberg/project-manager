@@ -77,7 +77,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// which is the same deal every other background failure gets.
     func reportFailure(_ message: String) {
         let content = UNMutableNotificationContent()
-        content.title = "PM couldn't save that change"
+        content.title = "Folio couldn't save that change"
         content.body = message
         content.categoryIdentifier = Self.failureCategory
         center.add(UNNotificationRequest(identifier: "pm.failure.\(UUID().uuidString)",
@@ -123,7 +123,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         center.removeAllPendingNotificationRequests()   // this app owns all pending requests
         let now = Date().timeIntervalSince1970
-        let title = store.notes?.title ?? store.projectName.map { ProjectCodes.display($0) } ?? "PM"
+        let title = store.notes?.title ?? store.projectName.map { ProjectCodes.display($0) } ?? "Folio"
 
         // Stale nudges for the focused task.
         if wantsStale, let focused = store.focusedTodo, seenAt > 0 {

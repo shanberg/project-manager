@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 // PM's domain modeled as App Intents *entities* rather than opaque strings. This is what lets the
 // new (Apple Intelligence) Siri and Spotlight semantic search resolve, disambiguate, and reference
-// projects and tasks by name in natural language ("focus Redesign", "complete buy milk in PM"),
+// projects and tasks by name in natural language ("focus Redesign", "complete buy milk in Folio"),
 // chain intents together (a query returns entities that a later action consumes), and index content
 // for semantic search. Everything resolves through PmLib/PMFiles, so queries run headless.
 
@@ -231,7 +231,7 @@ extension ProjectEntity: IndexedEntity {
         let attrs = CSSearchableItemAttributeSet(contentType: .content)
         attrs.title = name
         attrs.displayName = name
-        attrs.contentDescription = domainDisplayName.map { "\($0) project" } ?? "PM project"
+        attrs.contentDescription = domainDisplayName.map { "\($0) project" } ?? "Folio project"
         if let domainDisplayName { attrs.kind = domainDisplayName }
         attrs.keywords = [name, folder]
         return attrs

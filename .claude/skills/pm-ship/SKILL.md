@@ -1,6 +1,6 @@
 ---
 name: pm-ship
-description: Ship a project-manager release, or replace the PM.app installed on this Mac with a fresh build from the working tree. Use when asked to release, ship, cut a version, bump the version, publish to Homebrew, or to "install", "make it live", or update the running/installed app so a change can be seen.
+description: Ship a project-manager release, or replace the Folio.app installed on this Mac with a fresh build from the working tree. Use when asked to release, ship, cut a version, bump the version, publish to Homebrew, or to "install", "make it live", or update the running/installed app so a change can be seen.
 ---
 
 # Shipping and installing project-manager
@@ -11,14 +11,14 @@ Two jobs, independent of each other. `install` is the local one you'll reach for
 ## Install the app on this machine
 
 A successful `xcodebuild` changes nothing the user can see — the app they run is
-`/Applications/PM.app`, and PM is a menubar-only agent that keeps running the old build until
+`/Applications/Folio.app`, and Folio is a menubar-only agent that keeps running the old build until
 it's swapped out. To make a change live:
 
 ```bash
 ./scripts/install-app-local.sh
 ```
 
-Builds Debug into `pm-mac/.build-dev`, quits the running PM, replaces `/Applications/PM.app`,
+Builds Debug into `pm-mac/.build-dev`, quits the running Folio, replaces `/Applications/Folio.app`,
 re-registers it with LaunchServices, and relaunches. `--release` builds Release instead;
 `--no-launch` skips the relaunch. It regenerates the Xcode project itself when `project.yml`
 is newer than the pbxproj.
@@ -27,9 +27,9 @@ Notes:
 - Debug keeps the app's Full Disk Access grant across rebuilds (stable signing identity in
   `pm-mac/project.yml`), so prefer it.
 - Confirm the new code is really in there before claiming it works — Debug builds put the code
-  in `PM.debug.dylib`, not the small `PM` stub, and Swift inlines short literals, so probe with
+  in `Folio.debug.dylib`, not the small `Folio` stub, and Swift inlines short literals, so probe with
   a long one:
-  `strings -a /Applications/PM.app/Contents/MacOS/PM.debug.dylib | grep -F "<a long literal you just added>"`
+  `strings -a /Applications/Folio.app/Contents/MacOS/Folio.debug.dylib | grep -F "<a long literal you just added>"`
 - `open "pmpanel://show"` summons the focus panel, `open "pmpanel://window"` opens a project
   window, `~/.config/pm/pm-mac.log` shows it launched. Screenshots and window queries are
   blocked for the shell, so the *visual* result has to be confirmed by the user.
@@ -43,7 +43,7 @@ npm run release -- patch    # or minor | major | an exact version like 0.34.0
 ```
 
 One command: bumps `package.json` (and the Swift `pmVersion`, and `project.yml`), commits,
-pushes, tags, builds the arm64 CLI tarball, builds + notarizes `PM.app`, uploads both to the
+pushes, tags, builds the arm64 CLI tarball, builds + notarizes `Folio.app`, uploads both to the
 GitHub release, and updates the Homebrew formula and cask in the tap.
 
 **It pushes and tags before it builds the app.** Everything after the tag — notarization, the
@@ -98,7 +98,7 @@ Exit 0 is not evidence. Look at the artifacts:
 
 ```bash
 V=$(node -p "require('./package.json').version")
-gh release view "v$V" --json assets --jq '.assets[].name'   # tarball AND PM-v<V>.zip
+gh release view "v$V" --json assets --jq '.assets[].name'   # tarball AND Folio-v<V>.zip
 grep -h 'version "' ../homebrew-s/Formula/project-manager.rb ../homebrew-s/Casks/pm.rb
 ```
 
@@ -112,14 +112,14 @@ version, commit and tag are done; finish the rest by hand (0.35.0 shown):
 
 ```bash
 ./scripts/build-app-dist.sh 0.35.0 notary
-gh release upload v0.35.0 dist/PM-v0.35.0.zip --clobber
-./scripts/update-cask.sh 0.35.0 "$(shasum -a 256 dist/PM-v0.35.0.zip | awk '{print $1}')"
+gh release upload v0.35.0 dist/Folio-v0.35.0.zip --clobber
+./scripts/update-cask.sh 0.35.0 "$(shasum -a 256 dist/Folio-v0.35.0.zip | awk '{print $1}')"
 ./scripts/update-homebrew-formula.sh v0.35.0
 git -C ../homebrew-s add Formula/project-manager.rb Casks/pm.rb \
   && git -C ../homebrew-s commit -m "project-manager 0.35.0" && git -C ../homebrew-s push
 ```
 
-A `dist/PM-v<version>.zip` left behind by a failed run is the **pre-notarization** zip. It is not
+A `dist/Folio-v<version>.zip` left behind by a failed run is the **pre-notarization** zip. It is not
 distributable; `build-app-dist.sh` overwrites it. Never upload one that stapling didn't touch —
 `xcrun stapler validate <app>` and `spctl -a -vv -t exec <app>` are how you know.
 

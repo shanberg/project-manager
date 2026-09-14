@@ -20,7 +20,7 @@ struct ShortcutsSettingsView: View {
                     if let message {
                         Text(message).foregroundStyle(.secondary)
                     }
-                    Text("These work in any app. PM's own menu shortcuts — ⇧⌘⏎, ⇧⌘D — keep working while PM is in front, whether or not the same command has a global shortcut here.")
+                    Text("These work in any app. Folio's own menu shortcuts — ⇧⌘⏎, ⇧⌘D — keep working while Folio is in front, whether or not the same command has a global shortcut here.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

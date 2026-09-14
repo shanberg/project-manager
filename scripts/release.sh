@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bump version, push, tag, build+upload CLI tarball and notarized PM.app, update Homebrew
+# Bump version, push, tag, build+upload CLI tarball and notarized Folio.app, update Homebrew
 # formula + cask, push tap.
 # Requires: GitHub token for release upload and formula tarball — use one of:
 #   gh auth login   (then this script uses `gh auth token`)
@@ -11,7 +11,7 @@
 #   bump      patch (bug fixes), minor (new features), major (breaking changes)
 #
 # Env:   TAP_DIR         path to homebrew-s repo (default: ../homebrew-s)
-#        SKIP_APP=1      release only the CLI (skip building/notarizing/publishing PM.app)
+#        SKIP_APP=1      release only the CLI (skip building/notarizing/publishing Folio.app)
 #        NOTARY_PROFILE  notarytool keychain profile name (default: notary)
 set -e
 
@@ -180,13 +180,13 @@ else
   rm -f "$TARBALL"
 fi
 
-# Build, notarize, and publish the native macOS app (PM.app) alongside the CLI.
+# Build, notarize, and publish the native macOS app (Folio.app) alongside the CLI.
 # Set SKIP_APP=1 to release only the CLI (e.g. on a machine without the Developer ID cert / notary
 # profile). NOTARY_PROFILE overrides the keychain profile name (default: notary).
 if [[ "${SKIP_APP:-0}" != "1" ]]; then
-  echo "==> Build + notarize PM.app"
+  echo "==> Build + notarize Folio.app"
   APP_ZIP="$("$ROOT/scripts/build-app-dist.sh" "$VERSION" "${NOTARY_PROFILE:-notary}" | tail -1)"
-  APP_NAME="PM-v${VERSION}.zip"
+  APP_NAME="Folio-v${VERSION}.zip"
   echo "==> Upload $APP_NAME to release $TAG"
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     gh release upload "$TAG" "$APP_ZIP" --repo "$REPO" --clobber

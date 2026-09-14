@@ -52,13 +52,13 @@ enum MainMenu {
         NSApp.helpMenu = helpMenu
     }
 
-    // MARK: PM
+    // MARK: Folio
 
     private static func appMenuItem(target: AppDelegate) -> NSMenuItem {
         let item = NSMenuItem()
-        let menu = NSMenu(title: "PM")
+        let menu = NSMenu(title: "Folio")
 
-        menu.addItem(withTitle: "About PM", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+        menu.addItem(withTitle: "About Folio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                      keyEquivalent: "")
         menu.addItem(.separator())
         add(menu, "Settings…", #selector(AppDelegate.openSettings), target: target, key: ",")
@@ -70,7 +70,7 @@ enum MainMenu {
         NSApp.servicesMenu = services
         menu.addItem(.separator())
 
-        menu.addItem(withTitle: "Hide PM", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        menu.addItem(withTitle: "Hide Folio", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = menu.addItem(withTitle: "Hide Others",
                                       action: #selector(NSApplication.hideOtherApplications(_:)),
                                       keyEquivalent: "h")
@@ -78,7 +78,7 @@ enum MainMenu {
         menu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)),
                      keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit PM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "Quit Folio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         item.submenu = menu
         return item
@@ -244,7 +244,7 @@ enum MainMenu {
     /// here because every global shortcut in this app is rebindable, so "what are the keys" is a
     /// question only the Shortcuts pane can answer.
     private static func fillHelpMenu(_ menu: NSMenu, target: AppDelegate) {
-        let help = menu.addItem(withTitle: "PM Help", action: #selector(AppDelegate.openHelp),
+        let help = menu.addItem(withTitle: "Folio Help", action: #selector(AppDelegate.openHelp),
                                 keyEquivalent: "?")
         help.keyEquivalentModifierMask = [.command]
         help.target = target

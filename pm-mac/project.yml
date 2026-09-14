@@ -68,14 +68,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.stuarthanberg.pm
-        PRODUCT_NAME: PM
+        PRODUCT_NAME: Folio
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: PM/Info.plist
       properties:
-        CFBundleName: PM
-        CFBundleDisplayName: PM
+        CFBundleName: Folio
+        CFBundleDisplayName: Folio
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Derived, not restated: the app is built for deploymentTarget above and won't launch below
@@ -109,16 +109,16 @@ targets:
         # app. See Panel/TaskPasteboard.swift.
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.stuarthanberg.pm.task-keys
-            UTTypeDescription: PM Task Selection
+            UTTypeDescription: Folio Task Selection
             UTTypeConformsTo: [public.data]
           # A tab chip being dragged along the row, and nothing a board or another app can take.
           # See Project/ProjectTabBar.swift, `ProjectTabDrag`.
           - UTTypeIdentifier: com.stuarthanberg.pm.tab
-            UTTypeDescription: PM Tab
+            UTTypeDescription: Folio Tab
             UTTypeConformsTo: [public.data]
-        # Speakable aliases so Siri can recognize App Shortcut phrases — the bundle name "PM" is a
-        # homophone of "p.m." and doesn't work as a spoken trigger. Say e.g. "Show Project Manager
-        # panel", "Complete my Project Manager task".
+        # Names Siri also accepts in App Shortcut phrases. "Folio" is speakable on its own; these are the
+        # names from when the app was PM — a homophone of "p.m." that never worked as a spoken trigger —
+        # kept so a phrase like "Complete my Project Manager task" goes on working after the rename.
         INAlternativeAppNames:
           - INAlternativeAppName: Project Manager
           - INAlternativeAppName: PM Projects
@@ -185,6 +185,21 @@ targets:
       - path: PM/Canvas/CanvasCardShows.swift
       - path: PM/Canvas/CanvasProjectNoteCard.swift
       - path: PM/Canvas/CanvasNavigation.swift
+      - path: PM/Canvas/CanvasBoardKeys.swift
+      - path: PM/Canvas/CanvasClipping.swift
+      - path: PM/Canvas/CanvasPageDirector.swift
+      - path: PM/Canvas/CanvasPageLoad.swift
+      - path: PM/Canvas/CanvasPagePaint.swift
+      - path: PM/Canvas/CanvasPictureView.swift
+      - path: PM/Canvas/CanvasSearch.swift
+      - path: PM/Shared/Coalescer.swift
+      - path: PM/Shared/FrameMeter.swift
+      - path: PM/Shared/ObservationRelay.swift
+      - path: PM/Model/PMActions.generated.swift
+      - path: PM/Model/PMContract.swift
+      - path: PM/Model/PMFiles.swift
+      - path: PM/Model/PMStore.swift
+      - path: PM/Windows/ProjectContentPane.swift
       - path: PM/Canvas/CanvasLayout.swift
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Canvas/CanvasExistingCards.swift

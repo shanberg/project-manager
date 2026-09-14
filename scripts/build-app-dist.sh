@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, sign (Developer ID), notarize, and staple PM.app, then zip it for distribution.
+# Build, sign (Developer ID), notarize, and staple Folio.app, then zip it for distribution.
 #
 # This produces a Gatekeeper-approved artifact any consumer can open: the Release config
 # signs with the Developer ID Application cert + hardened runtime (see pm-mac/project.yml),
@@ -9,7 +9,7 @@
 #   version         e.g. 0.8.0 (stamped as MARKETING_VERSION and into the zip name)
 #   notary-profile  keychain profile from `xcrun notarytool store-credentials` (default: notary)
 #
-# Produces: dist/PM-v<version>.zip  (prints its path on the last line)
+# Produces: dist/Folio-v<version>.zip  (prints its path on the last line)
 # Run on an Apple Silicon Mac with the Developer ID cert + notary profile in the keychain.
 set -euo pipefail
 
@@ -31,7 +31,7 @@ fi
 DERIVED="$(mktemp -d)"
 trap 'rm -rf "$DERIVED"' EXIT
 
-echo "==> Building PM.app (Release, Developer ID, hardened runtime)"
+echo "==> Building Folio.app (Release, Developer ID, hardened runtime)"
 xcodebuild \
   -project PM.xcodeproj \
   -scheme PM \
@@ -41,7 +41,7 @@ xcodebuild \
   MARKETING_VERSION="$VERSION" \
   clean build >/dev/null
 
-APP="$DERIVED/Build/Products/Release/PM.app"
+APP="$DERIVED/Build/Products/Release/Folio.app"
 [[ -d "$APP" ]] || { echo "Build did not produce $APP" >&2; exit 1; }
 
 # `xcodebuild build` signs without a secure timestamp (only `archive` contacts Apple's timestamp
@@ -62,7 +62,7 @@ if ! grep -q "flags=.*runtime" <<<"$SIGN_INFO"; then
 fi
 
 mkdir -p "$DIST"
-ZIP="$DIST/PM-v${VERSION}.zip"
+ZIP="$DIST/Folio-v${VERSION}.zip"
 
 # ditto --keepParent is the Apple-recommended way to zip a .app for notarization
 # (preserves the bundle structure and symlinks that plain `zip` mangles).

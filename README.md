@@ -8,14 +8,14 @@ PM tracks two kinds of thing. A **project** is numbered, lives in `active/`, and
 
 ## Install
 
-Requires Apple Silicon (arm64 only). The `pm` CLI runs on **macOS 13 or later**; the `PM.app` menubar app requires **macOS 26 or later**.
+Requires Apple Silicon (arm64 only). The `pm` CLI runs on **macOS 13 or later**; the `Folio.app` menubar app requires **macOS 26 or later**.
 
 **On another computer (Homebrew)**
 
 ```bash
 brew tap shanberg/s
 brew install shanberg/s/project-manager   # the `pm` CLI
-brew install --cask shanberg/s/pm         # the PM.app menubar app
+brew install --cask shanberg/s/pm         # the Folio.app menubar app
 ```
 
 The cask installs a **notarized, Developer ID–signed** build, so it opens on any Mac without Gatekeeper prompts, and `brew upgrade --cask pm` replaces it in place (existing Full Disk Access grants persist). If an older, self-built copy is already in `/Applications`, the cask install overwrites it cleanly.
@@ -92,7 +92,7 @@ pm archive W-1                     # By prefix (unambiguous)
 pm unarchive W-1                   # Move from archive back to active
 ```
 
-**Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released — and PM says so once, out loud, because the tasks that were freed are usually in a project you weren't looking at. Renaming the project it names changes nothing you can see: the token resolves by the code it carries, and the current title is what gets drawn. See [docs/links.md](docs/links.md).
+**Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released — and Folio says so once, out loud, because the tasks that were freed are usually in a project you weren't looking at. Renaming the project it names changes nothing you can see: the token resolves by the code it carries, and the current title is what gets drawn. See [docs/links.md](docs/links.md).
 
 **The Waiting list:** One window, across every project, of everything you're waiting on, grouped by what it's waiting on — ⌃⌘W, or Waiting… from the menubar. Anything that has landed sits at the top with a button that clears the wait on the whole group. `pm api call task.waiting` answers the same question on the command line.
 
@@ -129,7 +129,7 @@ poking at "new project" leaves permanent scaffolds behind. `scripts/dev-vault.sh
 and the MCP server all follow:
 
 ```
-./scripts/dev-vault.sh app        # build PM.app and launch it against the dev vault
+./scripts/dev-vault.sh app        # build Folio.app and launch it against the dev vault
 ./scripts/dev-vault.sh pm list    # run the CLI against the dev vault
 ./scripts/dev-vault.sh shell      # a shell with PM_CONFIG_HOME already exported
 ./scripts/dev-vault.sh reset      # wipe it back to empty
@@ -148,7 +148,7 @@ cd pm-mac && xcodebuild -scheme PM -destination 'platform=macOS,arch=arm64' test
 `PMViewTests` drives the note editor and the task field with real `NSEvent`s and asserts through the
 layout manager — which keys get swallowed, where the caret lands, whether a bracket became padding,
 where the completion list ended up on screen. It is **hostless**: the few files under test compile
-straight into the bundle beside `PMViewTests/Stubs.swift`, so nothing launches PM.app and nothing can
+straight into the bundle beside `PMViewTests/Stubs.swift`, so nothing launches Folio.app and nothing can
 reach your notes. A view that starts reaching for `PMStore` or `WindowManager` stops building here,
 which is a useful pressure to have on views.
 

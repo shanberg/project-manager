@@ -260,15 +260,15 @@ public enum ApiRegistry {
 
         // MARK: Affordances — listed so the boundary is documented, refused by the headless adapters.
         ApiActionSpec(name: "app.openWindow", tier: .affordance,
-                      summary: "Open the project's window in PM.", fields: [optionalProject]),
+                      summary: "Open the project's window in Folio.", fields: [optionalProject]),
         ApiActionSpec(name: "app.openInFinder", tier: .affordance,
                       summary: "Reveal the project's folder in Finder.", fields: [optionalProject]),
         ApiActionSpec(name: "app.openInObsidian", tier: .affordance,
                       summary: "Open the project's notes in Obsidian.", fields: [optionalProject]),
         ApiActionSpec(name: "app.showPanel", tier: .affordance,
-                      summary: "Show PM's focus panel.", fields: []),
+                      summary: "Show Folio's focus panel.", fields: []),
         ApiActionSpec(name: "app.settings", tier: .affordance,
-                      summary: "Open PM's settings.", fields: []),
+                      summary: "Open Folio's settings.", fields: []),
     ]
 
     public static func spec(_ name: String) -> ApiActionSpec? {

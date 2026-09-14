@@ -207,7 +207,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
             menu.addItem(.separator())
             menu.addItem(settingsMenuItem())
-            menu.addItem(actionItem("Quit PM", #selector(quit), key: "q"))
+            menu.addItem(actionItem("Quit Folio", #selector(quit), key: "q"))
             return
         }
 
@@ -270,7 +270,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(settingsMenuItem())
-        menu.addItem(actionItem("Quit PM", #selector(quit), key: "q"))
+        menu.addItem(actionItem("Quit Folio", #selector(quit), key: "q"))
     }
 
     // MARK: Submenus (Balanced collapse)

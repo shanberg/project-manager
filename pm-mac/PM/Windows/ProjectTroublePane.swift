@@ -34,9 +34,9 @@ enum ProjectTrouble {
                                ?? "Choose one from the list.")
         }
         if let errorMessage {
-            return Message(title: "PM couldn't open this project.", detail: errorMessage)
+            return Message(title: "Folio couldn't open this project.", detail: errorMessage)
         }
-        return Message(title: "PM couldn't make a canvas for this project.",
+        return Message(title: "Folio couldn't make a canvas for this project.",
                        detail: "Check that the vault is writable, then open the project again.")
     }
 }

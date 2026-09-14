@@ -273,7 +273,7 @@ final class McpTests: XCTestCase {
         let affordance = call("app_openWindow", [:], flags: ["--allow-write", "--allow-destructive"])
         XCTAssertTrue(affordance.isError)
         XCTAssertFalse(affordance.text.contains("flag that permits"), affordance.text)
-        XCTAssertTrue(affordance.text.contains("running PM app"), affordance.text)
+        XCTAssertTrue(affordance.text.contains("running Folio app"), affordance.text)
 
         // And the flag-gated case still says the thing that is true of it.
         let gated = call("task_delete", [:], flags: [])

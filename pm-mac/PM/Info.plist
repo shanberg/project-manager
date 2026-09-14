@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>PM</string>
+	<string>Folio</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -32,7 +32,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>PM</string>
+	<string>Folio</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -71,7 +71,7 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>PM Task Selection</string>
+			<string>Folio Task Selection</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.stuarthanberg.pm.task-keys</string>
 		</dict>
@@ -81,7 +81,7 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>PM Tab</string>
+			<string>Folio Tab</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.stuarthanberg.pm.tab</string>
 		</dict>

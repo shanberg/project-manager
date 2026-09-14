@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PMSpotlight.reindex()
 
         // Ask the system to (re)ingest our App Shortcuts. Without this, an in-place app update can
-        // leave Siri/Spotlight serving stale or missing shortcuts ("PM doesn't support that").
+        // leave Siri/Spotlight serving stale or missing shortcuts ("Folio doesn't support that").
         PMShortcuts.updateAppShortcutParameters()
     }
 
@@ -184,13 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("access help shown for: \(msg)")
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "PM needs Full Disk Access"
+        alert.messageText = "Folio needs Full Disk Access"
         alert.informativeText = """
-            PM couldn't read your projects folder:
+            Folio couldn't read your projects folder:
 
             \(msg)
 
-            Grant Full Disk Access to /Applications/PM.app in System Settings, then quit and reopen PM.
+            Grant Full Disk Access to /Applications/Folio.app in System Settings, then quit and reopen Folio.
             """
         alert.addButton(withTitle: "Open Full Disk Access…")
         alert.addButton(withTitle: "Later")
@@ -385,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Double-clicked in Finder, or dropped on the app. PM registers for `.canvas` as an
                 // alternate handler, never the default — the vault's canvases belong to Obsidian, and
                 // an app that quietly took them over on install would be taking a decision that isn't
-                // its to take. "Open With ▸ PM" is the whole claim.
+                // its to take. "Open With ▸ Folio" is the whole claim.
                 WindowManager.shared.open(canvas: url)
             }
         }

@@ -353,14 +353,14 @@ struct NewProjectIntent: AppIntent {
     }
 }
 
-// MARK: - Opening PM
+// MARK: - Opening Folio
 
-/// Opens a project in PM: focuses it and opens its window (launching the app if needed).
+/// Opens a project in Folio: focuses it and opens its window (launching the app if needed).
 ///
 /// A window, not the focus panel: "open this project" is a request for the whole project, and the
 /// panel only ever shows one task of it.
 struct OpenProjectIntent: OpenIntent {
-    static var title: LocalizedStringResource = "Open Project in PM"
+    static var title: LocalizedStringResource = "Open Project in Folio"
     static var description = IntentDescription("Focuses a project and opens its window.")
     static var openAppWhenRun = true
 
@@ -384,7 +384,7 @@ struct OpenProjectIntent: OpenIntent {
 
 /// Summons the focus panel (via the app's URL scheme, launching it if needed).
 struct ShowPanelIntent: AppIntent {
-    static var title: LocalizedStringResource = "Show PM Panel"
+    static var title: LocalizedStringResource = "Show Folio Panel"
     static var description = IntentDescription("Shows the floating focus panel.")
     static var openAppWhenRun = true
 

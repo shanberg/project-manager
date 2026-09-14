@@ -4,7 +4,7 @@
 # safe to delete; `reset` deletes and recreates it.
 #
 # Usage:
-#   ./scripts/dev-vault.sh app        Build PM.app and launch it against the dev vault
+#   ./scripts/dev-vault.sh app        Build Folio.app and launch it against the dev vault
 #   ./scripts/dev-vault.sh pm <args>  Run the pm CLI against the dev vault
 #   ./scripts/dev-vault.sh shell      Open a shell with PM_CONFIG_HOME already exported
 #   ./scripts/dev-vault.sh reset      Wipe the vault back to empty
@@ -81,14 +81,14 @@ case "$cmd" in
     ;;
   app)
     DERIVED="$ROOT/pm-mac/.build-dev"
-    echo "==> Building PM.app (Debug)"
+    echo "==> Building Folio.app (Debug)"
     xcodebuild -project "$ROOT/pm-mac/PM.xcodeproj" -scheme PM \
       -configuration Debug -destination 'platform=macOS,arch=arm64' \
       -derivedDataPath "$DERIVED" build >/dev/null
-    APP="$DERIVED/Build/Products/Debug/PM.app"
+    APP="$DERIVED/Build/Products/Debug/Folio.app"
     # Launch the executable directly rather than via `open`, so PM_CONFIG_HOME is inherited.
     echo "==> Launching against dev vault: $PARA"
-    exec "$APP/Contents/MacOS/PM"
+    exec "$APP/Contents/MacOS/Folio"
     ;;
   *)
     echo "Usage: $0 {app|pm <args>|shell|reset|path}" >&2

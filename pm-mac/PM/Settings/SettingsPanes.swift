@@ -20,7 +20,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle("Launch PM at login", isOn: $launchAtLogin)
+                Toggle("Launch Folio at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { on in
                         do {
                             if on { try SMAppService.mainApp.register() }
@@ -32,7 +32,7 @@ struct GeneralSettingsView: View {
                     }
                 Toggle("Reopen windows from last session", isOn: $settings.restoreWindows)
             } footer: {
-                Text("PM keeps running in the menu bar after you close its last window, so notifications and \(ShortcutHint.focusPanelPhrase) keep working.")
+                Text("Folio keeps running in the menu bar after you close its last window, so notifications and \(ShortcutHint.focusPanelPhrase) keep working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

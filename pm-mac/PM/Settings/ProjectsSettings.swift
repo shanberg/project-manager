@@ -56,7 +56,7 @@ struct ProjectsSettingsView: View {
                     // Offered only when there's an explicit value to clear. Clearing goes back to the
                     // derived location, and the row is already showing what that would be.
                     onClear: config.areasPath == nil ? nil : { setAreas(nil) },
-                    clearHelp: "Go back to the location PM works out for itself")
+                    clearHelp: "Go back to the location Folio works out for itself")
         } header: {
             Text("Folders")
         } footer: {
@@ -73,8 +73,8 @@ struct ProjectsSettingsView: View {
     /// broken one.
     private func areasNote(_ config: PmConfig) -> String {
         let origin = config.areasPath == nil
-            ? "Areas isn't set, so PM is using this — inside your PARA folder, or beside Active. Choose one to pin it."
-            : "Clear Areas to go back to the location PM works out for itself."
+            ? "Areas isn't set, so Folio is using this — inside your PARA folder, or beside Active. Choose one to pin it."
+            : "Clear Areas to go back to the location Folio works out for itself."
         return "\(origin) A folder that's already there becomes an Area once you take it on: File ▸ Take On a Folder…"
     }
 
@@ -145,7 +145,7 @@ struct ProjectsSettingsView: View {
             Toggle("Show project codes", isOn: Binding(get: { showsProjectCodes },
                                                        set: { ProjectCodes.areShown = $0 }))
         } footer: {
-            Text("Off, PM writes a project as “Website Refresh” everywhere it names one — the sidebar, the menu bar, the quick bar and its windows. The folders keep their codes, and so does anything written into a note.")
+            Text("Off, Folio writes a project as “Website Refresh” everywhere it names one — the sidebar, the menu bar, the quick bar and its windows. The folders keep their codes, and so does anything written into a note.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -346,7 +346,7 @@ struct ProjectsSettingsView: View {
         } header: {
             Text("Links")
         } footer: {
-            Text("Asks each linked site for its own icon, and — for a link you add without typing a label — for what that page calls itself. Both go to the linked site and nowhere else: no third-party icon service, nothing sent, and each site asked once. It is the only time PM goes to the network on a project's behalf, so it's here to turn off.")
+            Text("Asks each linked site for its own icon, and — for a link you add without typing a label — for what that page calls itself. Both go to the linked site and nowhere else: no third-party icon service, nothing sent, and each site asked once. It is the only time Folio goes to the network on a project's behalf, so it's here to turn off.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

@@ -1370,7 +1370,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     private func handOff(_ url: URL, clicked: Bool) {
         let scheme = (url.scheme ?? "link") + ":"
         guard clicked else {
-            return board.report("This page tried to open a \(scheme) link on its own. PM didn't.")
+            return board.report("This page tried to open a \(scheme) link on its own. Folio didn't.")
         }
         guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
             return board.report("Nothing on this Mac opens \(scheme) links.")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Replace /Applications/PM.app with a fresh build from this working tree and relaunch it.
+# Replace /Applications/Folio.app with a fresh build from this working tree and relaunch it.
 #
 # xcodebuild only writes the product into a build directory; the app the user actually sees is
 # the one in /Applications. This does the swap.
@@ -29,39 +29,50 @@ if [[ "$ROOT/pm-mac/project.yml" -nt "$ROOT/pm-mac/PM.xcodeproj/project.pbxproj"
   (cd "$ROOT/pm-mac" && xcodegen generate)
 fi
 
-echo "==> Building PM.app ($CONFIG)"
+echo "==> Building Folio.app ($CONFIG)"
 # Fixed -derivedDataPath on purpose: picking the product out of ~/Library/.../DerivedData means
 # guessing between several PM-* folders, and the freshest-looking one is not always this build.
 xcodebuild -project "$ROOT/pm-mac/PM.xcodeproj" -scheme PM \
   -configuration "$CONFIG" -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$DERIVED" build >/dev/null
 
-APP="$DERIVED/Build/Products/$CONFIG/PM.app"
+APP="$DERIVED/Build/Products/$CONFIG/Folio.app"
 [[ -d "$APP" ]] || { echo "Build succeeded but $APP is missing." >&2; exit 1; }
 
-if pgrep -x PM >/dev/null; then
-  echo "==> Quitting the running PM"
-  osascript -e 'quit app "PM"' 2>/dev/null || killall PM 2>/dev/null || true
+# The app was PM until it became Folio, and the running copy may still be the old one. Both
+# executables are asked by name, and the old name goes on being asked until nobody has a PM.app.
+for NAME in Folio PM; do
+  pgrep -x "$NAME" >/dev/null || continue
+  echo "==> Quitting the running $NAME"
+  osascript -e "quit app \"$NAME\"" 2>/dev/null || killall "$NAME" 2>/dev/null || true
   for _ in $(seq 20); do
-    pgrep -x PM >/dev/null || break
+    pgrep -x "$NAME" >/dev/null || break
     sleep 0.25
   done
-  pgrep -x PM >/dev/null && killall -9 PM 2>/dev/null || true
+  pgrep -x "$NAME" >/dev/null && killall -9 "$NAME" 2>/dev/null || true
+done
+
+# A PM.app left beside Folio.app is a second bundle claiming com.stuarthanberg.pm, which is what
+# sends Siri and appintentsd to the stale copy — so it goes, rather than being left to be found.
+if [[ -d /Applications/PM.app ]]; then
+  echo "==> Removing /Applications/PM.app (the app before it was renamed Folio)"
+  "$LSREG" -u /Applications/PM.app >/dev/null 2>&1 || true
+  rm -rf /Applications/PM.app
 fi
 
-echo "==> Replacing /Applications/PM.app"
-rm -rf /Applications/PM.app
-cp -R "$APP" /Applications/PM.app
+echo "==> Replacing /Applications/Folio.app"
+rm -rf /Applications/Folio.app
+cp -R "$APP" /Applications/Folio.app
 
 # Keep exactly one registered copy of com.stuarthanberg.pm: a second bundle with the same id lets
 # Siri and appintentsd bind to the stale one.
 "$LSREG" -u "$APP" >/dev/null 2>&1 || true
-"$LSREG" -f /Applications/PM.app >/dev/null 2>&1 || true
+"$LSREG" -f /Applications/Folio.app >/dev/null 2>&1 || true
 
-VERSION=$(defaults read /Applications/PM.app/Contents/Info CFBundleShortVersionString 2>/dev/null || echo "?")
-echo "==> Installed PM.app $VERSION ($CONFIG)"
+VERSION=$(defaults read /Applications/Folio.app/Contents/Info CFBundleShortVersionString 2>/dev/null || echo "?")
+echo "==> Installed Folio.app $VERSION ($CONFIG)"
 
 if [[ "$LAUNCH" == 1 ]]; then
-  open /Applications/PM.app
+  open /Applications/Folio.app
   echo "==> Relaunched. Log: ~/.config/pm/pm-mac.log"
 fi

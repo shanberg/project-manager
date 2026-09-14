@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Update homebrew-s Casks/pm.rb with a new version + sha256 for the notarized PM.app zip.
+# Update homebrew-s Casks/pm.rb with a new version + sha256 for the notarized Folio.app zip.
 # Companion to update-homebrew-formula.sh (which updates the CLI formula).
 #
 # Usage: ./scripts/update-cask.sh <version> [sha256]
 #   version  e.g. 0.8.0
-#   sha256   optional; if omitted, uses dist/PM-v<version>.zip when present, otherwise downloads
-#            the release asset PM-v<version>.zip and computes it.
+#   sha256   optional; if omitted, uses dist/Folio-v<version>.zip when present, otherwise downloads
+#            the release asset Folio-v<version>.zip and computes it.
 #
 # Env:   TAP_DIR  path to homebrew-s repo (default: ../homebrew-s)
 #        GITHUB_TOKEN / HOMEBREW_GITHUB_API_TOKEN  (only needed for the download fallback)
@@ -22,7 +22,7 @@ CASK="${TAP_DIR}/Casks/pm.rb"
 [[ -f "$CASK" ]] || { echo "Cask not found at $CASK (set TAP_DIR)." >&2; exit 1; }
 
 if [[ -z "$SHA256" ]]; then
-  LOCAL="$ROOT/dist/PM-v${VERSION}.zip"
+  LOCAL="$ROOT/dist/Folio-v${VERSION}.zip"
   if [[ -f "$LOCAL" ]]; then
     SHA256="$(shasum -a 256 "$LOCAL" | awk '{print $1}')"
   else
@@ -31,7 +31,7 @@ if [[ -z "$SHA256" ]]; then
       TOKEN="$(gh auth token)"
     fi
     [[ -n "$TOKEN" ]] || { echo "Pass sha256 as arg 2, or provide a token to download the asset." >&2; exit 1; }
-    TAG="v${VERSION}"; ASSET="PM-v${VERSION}.zip"
+    TAG="v${VERSION}"; ASSET="Folio-v${VERSION}.zip"
     REL=$(curl -sL -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" \
       "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")
     AID=$(echo "$REL" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const a=d.assets&&d.assets.find(x=>x.name===process.argv[1]);console.log(a?a.id:'')" "$ASSET")
@@ -47,6 +47,11 @@ echo "version=$VERSION sha256=$SHA256"
 # Anchored replacements so we only touch the version/sha256 stanzas.
 perl -i -pe 's/^(  version ")[^"]+(")/${1}'"$VERSION"'${2}/' "$CASK"
 perl -i -pe 's/^(  sha256 ")[a-f0-9]{64}(")/${1}'"$SHA256"'${2}/' "$CASK"
+# The app was PM.app, zipped as PM-v<version>.zip, until it became Folio. Rewriting those stanzas
+# here moves the cask in the same release that first publishes a Folio zip — edited in the tap by
+# hand beforehand, it would point the release already out at an asset that doesn't exist. No-ops
+# from then on.
+perl -i -pe 's|/PM-v\#\{version\}\.zip"|/Folio-v#{version}.zip"|; s/^(  name )"PM"$/${1}"Folio"/; s/^(  app )"PM\.app"$/${1}"Folio.app"/' "$CASK"
 
 ruby -c "$CASK" >/dev/null
 echo "Updated $CASK → version $VERSION, sha256 $SHA256"

@@ -47,7 +47,7 @@ struct NotesSettingsView: View {
             // Two rows rather than one, because a project template has a Problem and an Approach in
             // it, and handing that to an Area would give every Area the two sections the kind exists
             // to leave out.
-            Text("The Markdown a new project or area's notes start from. Write {{title}} where the title should go. Cleared, PM uses its built-in template — which for an Area is a Summary and Goals, and nothing else.")
+            Text("The Markdown a new project or area's notes start from. Write {{title}} where the title should go. Cleared, Folio uses its built-in template — which for an Area is a Summary and Goals, and nothing else.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -107,7 +107,7 @@ struct NotesSettingsView: View {
                 if vault.isEmpty || vaultPath == nil {
                     Text("Set both to enable the CLI option.")
                 } else if config.useObsidianCLI == true {
-                    Text("Needs Obsidian 1.12 or later with its CLI enabled. If it isn't available, PM reads and writes the files directly.")
+                    Text("Needs Obsidian 1.12 or later with its CLI enabled. If it isn't available, Folio reads and writes the files directly.")
                 }
             }
             .font(.caption)
