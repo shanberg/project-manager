@@ -636,17 +636,12 @@ final class CanvasBoardView: NSView {
             keep = keep.union(peekOrigin)
         }
 
-        var wanted: Set<String> = []
-        // While a layout is standing in for the document, every card it shows is wanted whatever the
-        // file says about where it is, and every card already built is kept — see `layoutNodeViews` on
-        // why the ones being hidden are not thrown away.
-        if !layout.isDocument {
-            wanted.formUnion(layout.visible ?? [])
-            wanted.formUnion(nodeViews.keys)
-        }
-        for node in document.nodes
-        where !node.isGroup && (wanted.contains(node.id) || layout.frame(of: node).intersects(keep)) {
-            wanted.insert(node.id)
+        // Which cards should have a view at all — see `CanvasVisibleCards`, which is where the reason a
+        // workspace keeps the cards it is hiding is written out, and the reason it stops keeping one
+        // that has been deleted.
+        let wanted = CanvasVisibleCards.wanted(in: document, layout: layout,
+                                               keep: keep, built: Set(nodeViews.keys))
+        for node in document.nodes where wanted.contains(node.id) {
             if let existing = nodeViews[node.id] {
                 existing.update(node: node, scale: liveScale)
             } else {

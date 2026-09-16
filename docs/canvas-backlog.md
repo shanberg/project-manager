@@ -42,16 +42,6 @@ Where to look: where the new card goes is decided in `CanvasTileSession` and arg
 `CanvasViewState.Tiling`. The first question is whether the order is wrong in the saved workspace or
 only on screen — if a reopened workspace comes back in the right order, this is layout, not the model.
 
-### 19. A deleted card tile leaves part of itself on screen
-
-Delete a card that is a tile, and a piece of the old tile stays drawn over the workspace that reflowed
-around it, occluding it until something else redraws.
-
-Suspects, in the order worth checking: the node view removed while the tiled fade still holds its
-layer (`tiledFade`, `CanvasFade`); the frozen snapshot (`CanvasFrozenPageView`) outliving its card; the
-handlebar layer (`CanvasTileHandleView`) not being told the tile went. A web tile versus a text tile
-would split the first two from the third.
-
 ## Features
 
 ### 3. The modifiers a board is missing, and the one collision under all of them
@@ -309,9 +299,9 @@ the window's accent. The HIG's line on accent colours versus content colours is 
 
 ## Priority
 
-**The two things that read as broken** are 19 (a deleted tile left on screen) and 18 (tiles
-disordered on add), and each wants a reproduction before anyone reads code for it. The third raised
-that day, 22, is fixed.
+**One thing still reads as broken**: 18 (tiles disordered on add), and it wants a reproduction
+before anyone reads code for it — the first question is whether the order is wrong in the saved
+workspace or only on screen. The other two raised that day, 19 and 22, are fixed.
 
 **Waiting on one decision, which unblocks three gestures:** 3. The argument is written out and comes
 with a recommendation; what it needs is a yes or a no, not more thinking.
@@ -365,5 +355,6 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |
 | 13 | offer the project's own links when adding a web card | **Built, 2026-09-15.** `CanvasLinkSuggestions` turns the combo box on when the current project has links — the engaged card if one is stepped into, else the board's own (canvas-workspaces §5). The mirror half, putting the page you are on into `## Links`, is in [web-cards.md](web-cards.md) |
+| 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |
