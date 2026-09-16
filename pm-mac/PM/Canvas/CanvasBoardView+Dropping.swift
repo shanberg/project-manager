@@ -9,7 +9,16 @@ struct CanvasDropSession {
     /// somewhere else must not be taken for the one arriving.
     let sequence: Int
     /// Nil for a pasteboard with nothing on it a board can hold — a drag the board declines.
-    let drop: CanvasDrop?
+    var drop: CanvasDrop?
+    /// The drag pasteboard's change count when `drop` was read from it.
+    ///
+    /// **A drag's pasteboard is not settled when the drag arrives.** WebKit begins a link's dragging
+    /// session and writes the link a few hundredths of a second later, twice, from the web process — and
+    /// until it has, the shared drag pasteboard still holds the *previous* drag's link. A drag started on
+    /// a page is over the board from its first moment, so reading once on the way in and trusting it
+    /// for the rest of the drag made a card of the link dragged last time (backlog 42).
+    /// `CanvasPageLinkDragTests` measures the premise. So every ask checks this and reads again.
+    var pasteboardChange: Int
     /// Where the cards are drawn while they ride with the pointer: centred under it.
     var carried: [CanvasRect] = []
     /// Where they would land if you let go now — `carried`, snapped.
@@ -51,7 +60,8 @@ extension CanvasBoardView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let drop = CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType)
-        dropSession = CanvasDropSession(sequence: sender.draggingSequenceNumber, drop: drop)
+        dropSession = CanvasDropSession(sequence: sender.draggingSequenceNumber, drop: drop,
+                                        pasteboardChange: sender.draggingPasteboard.changeCount)
         guard let drop else { return [] }
         if !isTiled {
             place(sender)
@@ -64,8 +74,34 @@ extension CanvasBoardView {
         guard let session = dropSession, session.sequence == sender.draggingSequenceNumber else {
             return draggingEntered(sender)
         }
+        if session.pasteboardChange != sender.draggingPasteboard.changeCount {
+            return rereadDrop(sender)
+        }
         guard session.drop != nil else { return [] }
         if !isTiled { place(sender) }
+        return .copy
+    }
+
+    /// The pasteboard changed under a drag already here: read it again, and redraw what is carried.
+    ///
+    /// The picture goes with the drop it was drawn from. The source's own images, if they have been
+    /// swapped out, are given back first when there is nothing left to show instead.
+    private func rereadDrop(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let drop = CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType)
+        dropSession?.pasteboardChange = sender.draggingPasteboard.changeCount
+        dropSession?.picture = nil
+        guard let drop else {
+            giveBack(sender)
+            dropSession?.drop = nil
+            overlay.ghost = nil
+            showGrid(false)
+            return []
+        }
+        dropSession?.drop = drop
+        if !isTiled {
+            place(sender)
+            carry(sender, as: drop)
+        }
         return .copy
     }
 
@@ -73,8 +109,12 @@ extension CanvasBoardView {
     /// likely, per `NSDragging.h`. The picture was handed over on the way in already; this answers the
     /// question the way the header asks for it to be answered.
     override func updateDraggingItemsForDrag(_ sender: NSDraggingInfo?) {
-        guard let sender, !isTiled, dropSession?.sequence == sender.draggingSequenceNumber,
-              let drop = dropSession?.drop else { return }
+        guard let sender, !isTiled, dropSession?.sequence == sender.draggingSequenceNumber else { return }
+        if dropSession?.pasteboardChange != sender.draggingPasteboard.changeCount {
+            _ = rereadDrop(sender)
+            return
+        }
+        guard let drop = dropSession?.drop else { return }
         carry(sender, as: drop)
     }
 
@@ -93,6 +133,12 @@ extension CanvasBoardView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { endDropPreview() }
+        // Read again if the pasteboard moved since the last ask: letting go is the one moment it has to be
+        // right, and the drop is made from what it holds now rather than from what it held on the way in.
+        if dropSession?.sequence == sender.draggingSequenceNumber,
+           dropSession?.pasteboardChange != sender.draggingPasteboard.changeCount {
+            _ = rereadDrop(sender)
+        }
         let session = dropSession?.sequence == sender.draggingSequenceNumber ? dropSession : nil
         guard let drop = session?.drop
                 ?? CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType) else {

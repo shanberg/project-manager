@@ -114,19 +114,6 @@ What is left is using it. Reorder a layer list in a tile, then check the two the
 the other side: a link dropped on a tile should still become a tile, and a file dropped anywhere on one
 should still go into the page. `acceptsTyping` has no caller now; it is kept for 23.
 
-### 42. The second drag of a link carries the first one
-
-Dragging a link off a card a second time often shows the previous link. Two places it can come from,
-and one question tells them apart: **does the card that lands hold the old address, or only the old
-picture?**
-
-The old address means the gesture or the hit test — the `.link` gesture carries a URL taken at
-mouse-down ([`dragLink`](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:416)), and a note card answers
-from `CanvasLinkZones`, a table its SwiftUI fills in and clears. Only the old picture means the
-destination: `carry` draws the proto-cards once and hands the same image back on every later ask —
-`dropSession.picture`, in
-[CanvasBoardView+Dropping.swift:162](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:162).
-
 ### 44. The dragged picture and the card that lands are not in the same place
 
 `place` lays the drop out centred on the pointer and snaps it, keeping both — `carried` and `landing`
@@ -560,8 +547,7 @@ layer rather than in a preference of its own.
 ## Priority
 
 **What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
-project moves the wrong window — instrumented, waiting to be caught in the log), 42 (a dragged link
-carrying the previous one), 44 (the dragged picture landing off the snapped frame), 35 (a tile-shaped
+project moves the wrong window — instrumented, waiting to be caught in the log), 44 (the dragged picture landing off the snapped frame), 35 (a tile-shaped
 picture shown in a card). 18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
 wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
 and a file dropped on one to check the two rules the rewrite moved.
@@ -629,4 +615,5 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
+| 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |
