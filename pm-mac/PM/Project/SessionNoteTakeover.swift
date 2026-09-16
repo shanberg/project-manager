@@ -104,6 +104,11 @@ struct SessionNoteTakeover: View {
     /// open-project in the other.
     let onOpenProject: (String) -> Void
     let onBack: () -> Void
+    /// Where the caret starts, when the host is putting you back where you were. See
+    /// `MarkdownTextEditor.startsAt`.
+    var startsAt: NSRange? = nil
+    /// Every caret move, for a host that wants to put you back there later.
+    var onSelectionChange: ((NSRange) -> Void)? = nil
 
     @State private var text: String
     /// The prose this takeover opened with, and the identity of the session it opened *on*.
@@ -136,7 +141,10 @@ struct SessionNoteTakeover: View {
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
          placement: Placement, onOpenProject: @escaping (String) -> Void,
-         onBack: @escaping () -> Void) {
+         onBack: @escaping () -> Void, startsAt: NSRange? = nil,
+         onSelectionChange: ((NSRange) -> Void)? = nil) {
+        self.startsAt = startsAt
+        self.onSelectionChange = onSelectionChange
         self.index = index
         self.session = session
         self.projectName = projectName
@@ -171,6 +179,8 @@ struct SessionNoteTakeover: View {
                                placeholder: "Write a note…",
                                noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
                                opensAtStart: true,
+                               startsAt: startsAt,
+                               onSelectionChange: onSelectionChange,
                                topInset: barHeight)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)

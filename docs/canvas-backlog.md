@@ -258,22 +258,12 @@ that was always this entry's own: `performDrag(with:)` is the opposite direction
 where the region rule would refuse one, and a maximized web tile is mostly *below* the 66pt band
 anyway — so Arc's trick is a second mechanism beside the region, not a use of it.
 
-### 24. Switching tiles ends the session you were editing
-
-Editing a session in a project tile, then clicking another tile, steps out of the first — and the editor
-with it. A tile click selects and engages together (`tileClicked`), and one card is engaged at a time,
-so `selectionChanged` disengages the other.
-
-Open: whether a project tile should keep its editor across losing focus (the way two text views in two
-windows both keep their state), or whether engagement stays single and what comes back is the editing
-position when you return. The second is smaller and doesn't touch the one-engaged-card rule that the
-header, undo routing and New Session all lean on. Absorbed by 25.
-
 ### 25. Review: tile session entry, project data, sessions
 
 A full review, and possibly a redesign, of how a session is entered from a tile and how project data and
 sessions are presented there. Too large for an entry; it wants a page of its own, and it should absorb 16
-(deliberately starting a new session) and 24 rather than run beside them.
+(deliberately starting a new session) rather than run beside it. 24, the editor lost on switching
+tiles, was fixed on its own first.
 
 ### 26. Keeping web apps alive, and their notifications
 
@@ -472,7 +462,7 @@ and a file dropped on one to check the two rules the rewrite moved.
 up too often — and 32, which now writes the frames it always
 read.
 
-**A page of its own, and it should come before the entries it absorbs:** 25, which takes 16 and 24
+**A page of its own, and it should come before the entries it absorbs:** 25, which takes 16
 with it — and 37 (combining projects), which is not a board question at all: every one of its answers
 is about what happens to two notes files.
 
@@ -530,6 +520,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
+| 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |

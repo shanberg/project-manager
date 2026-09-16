@@ -135,6 +135,14 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// the note is already showing its first line, and no scrolling correction is needed anywhere.
     var opensAtStart: Bool = false
 
+    /// Where the caret goes when the editor is made, overriding `opensAtStart` — for a host putting you
+    /// back where you were, the way a project tile returns to the note you were writing when you step
+    /// back into it (backlog 24). Ignored if the text has since become too short to hold it.
+    var startsAt: NSRange? = nil
+
+    /// Every move of the caret or selection, for a host that wants to put you back there later.
+    var onSelectionChange: ((NSRange) -> Void)? = nil
+
     /// Space above the first line that is **not** mirrored below it.
     ///
     /// `textContainerInset` is an `NSSize`, so AppKit applies its height at both ends — which is what
@@ -317,7 +325,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.noteURL = noteURL
         textView.growthCeiling = growthCeiling
         textView.string = text
-        if opensAtStart {
+        if let startsAt, NSMaxRange(startsAt) <= (text as NSString).length {
+            // Taking first responder scrolls the caret into view, so the place is shown as well as held.
+            textView.setSelectedRange(startsAt)
+        } else if opensAtStart {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
         }
         context.coordinator.highlight(textView)
@@ -433,6 +444,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// turned off by a host that simply had no opinion.
         func undoManager(for view: NSTextView) -> UndoManager? {
             parent.undoManager ?? view.window?.undoManager
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.onSelectionChange?(textView.selectedRange())
         }
 
         func textDidChange(_ notification: Notification) {
