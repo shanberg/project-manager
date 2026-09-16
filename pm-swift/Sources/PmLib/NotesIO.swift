@@ -16,6 +16,9 @@ public struct DirectNotesIO: NotesIO {
 
     public func writeContent(path: String, content: String) throws {
         try content.write(toFile: path, atomically: true, encoding: .utf8)
+        // Here rather than in the contract, because the contract isn't the only thing that completes
+        // tasks. See `DoneLog`.
+        DoneLog.observeWrite(notesPath: path, content: content)
     }
 }
 
@@ -165,5 +168,6 @@ public struct ObsidianNotesIO: NotesIO {
             let msg = String(data: result.stderr, encoding: .utf8) ?? String(data: result.stdout, encoding: .utf8) ?? "exit \(result.terminationStatus)"
             throw PmError.obsidianCLIWriteFailed(path: absolutePath, message: msg.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+        DoneLog.observeWrite(notesPath: absolutePath, content: content)
     }
 }

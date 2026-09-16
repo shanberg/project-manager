@@ -64,6 +64,7 @@ pm new --area <title>
 pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
+pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD]   # What got done, across every project
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes session note <project> <text>   # Appends to today's session, creating it if needed
 pm notes create <project>   # Requires valid config (active/archive paths) for template path
@@ -95,6 +96,8 @@ pm unarchive W-1                   # Move from archive back to active
 **Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released — and Folio says so once, out loud, because the tasks that were freed are usually in a project you weren't looking at. Renaming the project it names changes nothing you can see: the token resolves by the code it carries, and the current title is what gets drawn. See [docs/links.md](docs/links.md).
 
 **The Waiting list:** One window, across every project, of everything you're waiting on, grouped by what it's waiting on — ⌃⌘W, or Waiting… from the menubar. Anything that has landed sits at the top with a button that clears the wait on the whole group. `pm api call task.waiting` answers the same question on the command line.
+
+**What got done:** `pm done` lists the tasks you finished today — or `pm done week` — across every project, including ones ticked in Obsidian. Completion times live in a small log in each project folder (`.pm-done.ndjson`), never on the task line, so the notes stay prose. See [docs/done-report.md](docs/done-report.md).
 
 **In the note editor:** `@` names a project or area — a filtered list, arrow keys, Return — and writes the `[[…]]` the vault reads. `/` opens what a line can carry: make it a task, give it a due date, or start a wait (which hands straight to the `@` picker). A `[[…]]` behaves as one thing: the caret steps over it and backspace takes all of it.
 

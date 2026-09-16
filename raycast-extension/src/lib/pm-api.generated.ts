@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.6.0";
+export const API_CONTRACT_VERSION = "1.7.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -243,6 +243,18 @@ export interface TaskDiveInInput {
   project: string;
 }
 
+/** What got done: tasks completed in a period, across every project, newest first. */
+export interface TaskDoneInput {
+  /** Which span. Default today. */
+  period?: "today" | "week";
+  /** Which projects to look in. Default all. */
+  scope?: "active" | "archive" | "all";
+  /** First day to include, YYYY-MM-DD. Overrides the period's start. */
+  since?: string;
+  /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
+  until?: string;
+}
+
 /** Make this the project's focused task. */
 export interface TaskFocusInput {
   /** Project name or unambiguous prefix. */
@@ -398,6 +410,7 @@ export interface ApiInputs {
   "task.complete": TaskCompleteInput;
   "task.delete": TaskDeleteInput;
   "task.diveIn": TaskDiveInInput;
+  "task.done": TaskDoneInput;
   "task.focus": TaskFocusInput;
   "task.list": TaskListInput;
   "task.progress": TaskProgressInput;
@@ -450,6 +463,7 @@ export const API_TIERS: Record<
   "task.complete": "mutation",
   "task.delete": "mutation",
   "task.diveIn": "mutation",
+  "task.done": "query",
   "task.focus": "mutation",
   "task.list": "query",
   "task.progress": "query",

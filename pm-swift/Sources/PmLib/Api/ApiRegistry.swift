@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.6.0"
+public let apiContractVersion = "1.7.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -241,6 +241,14 @@ public enum ApiRegistry {
         ApiActionSpec(name: "task.waiting", tier: .query,
                       summary: "Everything you're waiting on, grouped by what it's waiting on.",
                       fields: [ApiField("scope", .string, "Which projects to look in. Default active.",
+                                        allowed: ["active", "archive", "all"])]),
+        ApiActionSpec(name: "task.done", tier: .query,
+                      summary: "What got done: tasks completed in a period, across every project, newest first.",
+                      fields: [ApiField("period", .string, "Which span. Default today.",
+                                        allowed: ["today", "week"]),
+                               ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
+                               ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
+                               ApiField("scope", .string, "Which projects to look in. Default all.",
                                         allowed: ["active", "archive", "all"])]),
         ApiActionSpec(name: "capture.parse", tier: .query,
                       summary: "Read a typed capture line: its text, its due date, and the project it names.",

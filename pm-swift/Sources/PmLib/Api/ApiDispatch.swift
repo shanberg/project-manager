@@ -110,6 +110,9 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
         "now": input.now.map(JSONValue.string),
+        "period": input.period.map(JSONValue.string),
+        "since": input.since.map(JSONValue.string),
+        "until": input.until.map(JSONValue.string),
     ]
 }
 
@@ -428,6 +431,20 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             if released > 0 { summary += " \(released) released." }
         }
         return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(buckets))
+
+    case "task.done":
+        // All by default, where `task.waiting` defaults to active: a project finished and archived this
+        // week is exactly the work a week's report is for.
+        let scope = input.scope ?? "all"
+        let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
+        let items = try doneTasks(in: range, includeArchived: scope != "active",
+                                  includeActive: scope != "archive")
+        let projects = Set(items.map(\.projectFolder)).count
+        let summary = items.isEmpty
+            ? "Nothing done."
+            : "\(items.count) task\(items.count == 1 ? "" : "s") done"
+                + (projects > 1 ? " across \(projects) projects." : ".")
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(items))
 
     case "capture.parse":
         let line = input.text ?? ""
