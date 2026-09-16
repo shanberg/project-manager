@@ -134,22 +134,26 @@ extension CanvasBoardView {
     /// to swap the two, or drag a boundary to change how the room is divided. A press on the background
     /// leaves the tiling, which is the tiled equivalent of clicking the desktop.
     ///
-    /// The handlebar is asked first because it is drawn *inside* a tile, so a hit test on the card
-    /// would answer for it; the boundary is asked next because it lies in the gap, where the card's own
-    /// band would otherwise catch it.
+    /// The grip is asked first because it is drawn *on* a tile, so a hit test on the card would answer
+    /// for it; the boundary is asked next because it lies in the gap, where the card's own band would
+    /// otherwise catch it.
     private func tiledMouseDown(at where_: CanvasPoint, extending: Bool, clicks: Int) {
-        // A tile's tab strip is its title bar. A click on a tab shows it; a drag on one pulls that card
-        // out, or carries the tile when it is the only tab; and the rest of the strip carries the tile,
-        // like the handlebar. Asked first, because the strip is not a card and nothing else answers
-        // for it.
+        // A tile's tab strip is its title bar. A click on a tab shows it, and on its close button takes
+        // that card out of the workspace; a drag on a tab slides it along the strip, or — pulled off
+        // the strip — pulls that card out; and the rest of the strip carries the tile, the way a grip
+        // does. Asked first, because the strip is not a card and nothing else answers for it.
         if let owner = tabStrip(at: where_) {
+            if let closing = tabClose(at: where_) {
+                hoveredTab = nil
+                return restoringMaximized { removeFromTiling(closing) }
+            }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner
             if chip != nil { showTab(id) } else { selection = [id] }
             if clicks == 2 { return toggleMaximizeTile(id) }
             guard tiling?.tileFrames[id] != nil else { return }
-            gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil,
-                                 pulling: (chip?.count ?? 0) > 1)
+            gesture = chip != nil ? .slideTab(id, from: where_)
+                                  : .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
         }
         if let id = tileHandle(at: where_), tiling?.tileFrames[id] != nil {
@@ -208,6 +212,28 @@ extension CanvasBoardView {
             dragTileDivider(divider, from: from, to: now, lengths: lengths)
             // A page squeezed too narrow to read says so while the boundary is moving.
             overlay.needsDisplay = true
+
+        case .slideTab(let card, let from):
+            guard let strip = tiling?.tabStrips.first(where: { $0.cards.contains(card) }),
+                  let index = strip.cards.firstIndex(of: card) else { break }
+            // Off the strip by more than a tab's height, and it is a card coming out: from here the drag
+            // is the tile drag it always was, proxy and drop marks and all.
+            let off = max(strip.band.minY - now.y, now.y - strip.band.maxY)
+            if off > Self.tabTearDistance / liveScale {
+                tabSlide = nil
+                gesture = .placeTile(card, base: tiling?.tileFrames ?? [:], drop: nil, pulling: true)
+                return mouseDragged(with: event)
+            }
+            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+            guard tabSlide != nil || abs(now.x - from.x) * liveScale >= 3 else { break }
+            // Along the strip and no further than its ends; it lands after every tab whose middle it
+            // has passed.
+            let dx = min(chips[chips.count - 1].minX - chips[index].minX,
+                         max(chips[0].minX - chips[index].minX, now.x - from.x))
+            let centre = chips[index].midX + dx
+            let to = chips.indices.filter { $0 != index && chips[$0].midX < centre }.count
+            let next = CanvasTabSlide(card: card, from: index, dx: dx, to: to)
+            if next != tabSlide { tabSlide = next }
 
         case .placeTile(let id, let base, let drop, let pulling):
             // **A proxy comes with you, and nothing else moves.** The tile stays in its slot, dimmed,
@@ -393,6 +419,12 @@ extension CanvasBoardView {
         case .resizeTiles(let divider, _, _):
             rememberTileSizes(divider)
             overlay.needsDisplay = true
+
+        case .slideTab(let card, _):
+            // Let go along the strip: the order is the one the slide showed. A press that never moved
+            // was a click, and showed the tab when it went down.
+            if let slide = tabSlide { moveTab(card, to: slide.to) }
+            tabSlide = nil
 
         case .placeTile(let id, _, let drop, let pulling):
             // Let go: what the mark said happens, and the tiles move — once, now.
@@ -779,6 +811,17 @@ extension CanvasBoardView {
         // that vanished on the way to being grabbed would be a control you can see and cannot use.
         // The pointer being on the bar counts as being on the tile it belongs to.
         if isTiled, let id = tileHandle(at: where_) { under = id }
+        if isTiled {
+            let zone = gesture == nil ? tileGripZone(at: where_) : nil
+            if zone != gripTile {
+                gripTile = zone
+                refreshTileHandles()
+                tileGripView.needsDisplay = true
+            }
+            let tab = gesture == nil ? tabChip(at: where_)?.card : nil
+            let next = tab.map { (card: $0, onClose: tabClose(at: where_) == $0) }
+            if next?.card != hoveredTab?.card || next?.onClose != hoveredTab?.onClose { hoveredTab = next }
+        }
         if under != hovered {
             hovered = under
             // A tiled view repaints too: the handlebar appears on the tile under the pointer, and it
@@ -805,6 +848,12 @@ extension CanvasBoardView {
 
     override func mouseExited(with event: NSEvent) {
         hovered = nil
+        hoveredTab = nil
+        if gripTile != nil, gesture == nil {
+            gripTile = nil
+            refreshTileHandles()
+            tileGripView.needsDisplay = true
+        }
         overlay.needsDisplay = true
         // Off the board altogether, straight from a card — the sidebar, the header, another window.
         // The same handover as `refreshCursor` makes between two tiles, and needed here for the same
@@ -862,6 +911,13 @@ extension CanvasBoardView {
         // the board's wherever it lands. See `holdForPanning`.
         if spaceHeld || spaceGrab != nil {
             return (spaceGrab == nil ? NSCursor.openHand : NSCursor.closedHand).set()
+        }
+        // A tile's grip lies over its card, so it is asked before the card is: over the grip, the press
+        // is the tile's.
+        if isTiled, let position = window?.mouseLocationOutsideOfEventStream,
+           tileHandle(at: canvasPoint(convert(position, from: nil))) != nil {
+            cursorOwner = nil
+            return NSCursor.openHand.set()
         }
         let owner = cardUnderPointer
         defer { cursorOwner = owner }

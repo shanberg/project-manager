@@ -224,6 +224,7 @@ final class CanvasBoardView: NSView {
         // session is cleared as leaving starts, and a grip belongs to the state that is over.
         tileHandleView.alphaValue = tiledness
         tileHandleView.needsDisplay = true
+        tileGripView.alphaValue = tiledness
     }
 
     /// Pose the crossing without animating it — see `CanvasFade.hold` and `arrive(from:)`.
@@ -275,6 +276,11 @@ final class CanvasBoardView: NSView {
         /// comes out, rather than the tile.
         case placeTile(String, base: [String: CanvasRect],
                        drop: (target: String, drop: CanvasTileSession.Drop)?, pulling: Bool)
+        /// Inside a tiled view: a tab pressed and dragged along its strip, which reorders the strip the
+        /// way the window's own tab bar does — the tab follows the pointer and the others slide aside.
+        /// Dragged far enough off the strip it becomes `placeTile(… pulling: true)`, and the card comes
+        /// out. `from` is where the press was. See `tabSlide`.
+        case slideTab(String, from: CanvasPoint)
         /// A press on a link drawn on a card: let go where it started and it opens, move and it is
         /// carried off as a drag the board — or anywhere else — can drop. See `CanvasLinkZones`.
         case link(URL, from: CanvasPoint)
@@ -287,7 +293,7 @@ final class CanvasBoardView: NSView {
         var pansTheBoard: Bool {
             switch self {
             case .move, .marquee, .connect: return true
-            case .resize, .swap, .resizeTiles, .placeTile, .link: return false
+            case .resize, .swap, .resizeTiles, .placeTile, .slideTab, .link: return false
             }
         }
     }
@@ -299,6 +305,7 @@ final class CanvasBoardView: NSView {
     /// The tile handlebars, at the bottom of the stack — above the board's own drawing and below
     /// every card. See `CanvasTileHandleView`.
     let tileHandleView = CanvasTileHandleView()
+    let tileGripView = CanvasTileGripView()
 
     /// Whether this board is standing in for the project window's notes — tiled to the project's own
     /// card, and nothing else (docs/canvas-workspaces.md §7d).
@@ -377,6 +384,19 @@ final class CanvasBoardView: NSView {
     /// Where the pointer is while a tile is dragged, which is where its proxy is drawn. See
     /// `CanvasOverlayView.drawCarried`.
     var dragPoint: CanvasPoint?
+    /// A tab being dragged along its strip, while it is: drawn by `CanvasTileHandleView`.
+    var tabSlide: CanvasTabSlide? {
+        didSet { tileHandleView.tabSlideChanged(from: oldValue) }
+    }
+    /// The tab under the pointer, and whether the pointer is on its close button — drawn as a hover.
+    var hoveredTab: (card: String, onClose: Bool)? {
+        didSet {
+            guard hoveredTab?.card != oldValue?.card || hoveredTab?.onClose != oldValue?.onClose else { return }
+            tileHandleView.hoverChanged(from: oldValue?.card, to: hoveredTab?.card)
+        }
+    }
+    /// The tile whose top centre the pointer is near, which is the one tile showing its grip.
+    var gripTile: String?
     /// Which match ⌘G steps to next.
     var findCursor = 0
     /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
@@ -469,12 +489,15 @@ final class CanvasBoardView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         tileHandleView.board = self
+        tileGripView.board = self
         overlay.board = self
         // Order matters and is load-bearing. These two are the floor and the ceiling of the board's
         // subviews: cards are inserted `.below` the overlay, which keeps them above the handlebars and
         // below the grips for the life of the board without anything having to re-sort them.
         addSubview(tileHandleView)
         addSubview(overlay)
+        // Above even the overlay: a tile's grip sits on the card it moves (backlog 20).
+        addSubview(tileGripView)
         // Without this AppKit offers the board no drag at all, and the only drops that ever reached it
         // were the ones a web card's page handed on — so a link carried off a card onto open ground
         // went back to being a link, and nothing dropped on the ground made a card.
@@ -536,6 +559,7 @@ final class CanvasBoardView: NSView {
         setFrameSize(NSSize(width: next.width, height: next.height))
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
+        tileGripView.frame = overlay.frame
 
         if let clip = scrollView?.contentView, shift != .zero {
             var wanted = NSRect(origin: NSPoint(x: clip.bounds.origin.x + shift.x,
@@ -697,7 +721,10 @@ final class CanvasBoardView: NSView {
     private func layoutNodeViewsBody() {
         // The tiles' grips move with the tiles, and they are drawn a layer down from them.
         refreshTileHandles()
-        if isTiled { tileHandleView.needsDisplay = true }
+        if isTiled {
+            tileHandleView.needsDisplay = true
+            tileGripView.needsDisplay = true
+        }
         let nodes = nodesByID
         var flying = 0, placed = 0, hiddenNow = 0
         for (id, view) in nodeViews {
@@ -729,6 +756,7 @@ final class CanvasBoardView: NSView {
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
+        tileGripView.frame = overlay.frame
         // After the frame, because these are placed in it. See `refreshStripExcluders`.
         tileHandleView.refreshStripExcluders()
     }

@@ -564,6 +564,18 @@ final class CanvasTilingTests: XCTestCase {
     }
 
     /// Tabs share the strip, none wider than a tab needs to be, none overlapping.
+    /// A tab slid along its strip lands where it was let go, and the card showing stays the one shown.
+    func testATabMovesAlongItsStripKeepingTheOneShowing() {
+        var session = CanvasTileSession(columns: [.init([.init(["a", "b", "c"], showing: 1)])],
+                                        area: wide, restoreVisible: wide)
+        XCTAssertTrue(session.moveTab("a", to: 2))
+        XCTAssertEqual(session.tabStrips.first?.cards, ["b", "c", "a"])
+        XCTAssertEqual(session.tabStrips.first.map { $0.cards[$0.showing] }, "b")
+        XCTAssertFalse(session.moveTab("a", to: 2), "where it already is is no move")
+        XCTAssertTrue(session.moveTab("c", to: 0))
+        XCTAssertEqual(session.tabStrips.first?.cards, ["c", "b", "a"])
+    }
+
     func testTabsShareTheStripAndNoneIsTooWide() {
         let band = CanvasRect(x: 0, y: 0, width: 900, height: 28)
         let tabs = CanvasTiling.tabs(in: band, count: 3)

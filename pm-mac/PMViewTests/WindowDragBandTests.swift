@@ -70,7 +70,7 @@ final class WindowDragBandTests: XCTestCase {
     private let tilesBegin: CGFloat = 40 + 6
     /// `CanvasTiling.tabStrip`. Kept beside the test that reads it, since this target does not compile
     /// the files these come from and a change to either should fail here rather than drift quietly.
-    private let tabStripHeight: CGFloat = 28
+    private let tabStripHeight: CGFloat = 32
 
     // MARK: What SwiftUI puts in front of an excluder
 

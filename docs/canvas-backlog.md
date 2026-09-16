@@ -192,26 +192,6 @@ Design first. The nearest existing grammar is Figma's — ⇧1 fit all, ⇧2 fit
 adopting it wholesale would put ⇧1 next to a ⌘0 that already means the same thing, which is two keys
 for one act. Decide whether the Figma set replaces the ⌘ set or joins it before adding a single key.
 
-### 20. Tile handles need a better placement system
-
-The handlebar sits in the gap on the off-axis edge facing outwards, taking the other side where one is a
-draggable boundary (`CanvasBoardView.tileHandle`, in `CanvasTileChrome.swift`). That rule is stated and
-consistent, and in use it still puts handles where you don't look for them.
-
-Open: what the rule should optimise — always the same edge of every tile (findable), always the edge
-nearest the window's (out of the way), or the tab strip itself as the handle, which would retire the
-bar where a tile has tabs. Decide with 21, since the tab strip is the other thing you grab a tile by.
-
-### 21. Tabs in a tile: how they look, and dragging to reorder them
-
-Two asks about the same strip ([canvas-workspaces.md](canvas-workspaces.md) §7k *Tabs in a tile*): its
-appearance wants revisiting, and tabs should reorder by dragging along the strip. Today a tab dragged
-is `Gesture.placeTile(… pulling: true)` — it comes *out* of the tile — so reordering needs a way to
-tell "along the strip" from "out of it". The window's own tab bar already answers that
-(`ProjectTabBar`, `TabDragTests`), and should be the model rather than a second grammar. Tile drags show
-a proxy and a drop mark rather than reflowing live, because live reflow was tried and disorienting; a
-strip of tabs may be short enough to be the exception, where reflow reads as sorting.
-
 ### 23. Header areas that drag, the way Arc finds them
 
 Arc treats a page's own header or toolbar as somewhere to grab the window, found automatically. Wanted
@@ -339,9 +319,10 @@ test both read it ([CanvasTiling.tabStrip](../pm-mac/PM/Canvas/CanvasTiling.swif
 [tabs(in:count:)](../pm-mac/PM/Canvas/CanvasTiling.swift:444)), so a second direction is a parameter
 rather than a rewrite.
 
-Open: per tile, per workspace, or a setting; how wide a vertical strip is and what a tab shows in it (a
-favicon alone, or an icon and a truncated name); and what a tile too short for its tabs does. Decide
-with 20 and 21 — the strip is also how you grab a tile, and moving it moves the handle question too.
+**Decided 2026-09-16:** per tile, from the tile's menu (Tabs on the Side), saved with the workspace.
+The strip is about 180pt wide with the icon and name, and a column of icons alone on a narrow tile.
+It looks and drags as the top strip does since 21 — the chip, the hover, the close button, reordering
+along the strip and pulling off it. Open: what a tile too short for its tabs does.
 
 ### 38. What macOS's compositor does that our freeze doesn't
 
@@ -414,8 +395,9 @@ and a file dropped on one to check the two rules the rewrite moved.
 up too often — and 32, which now writes the frames it always
 read.
 
-**Then design first, then build:** 20, 21 and 36 together, since handles, tabs and which edge they sit
-on are all how you grab a tile; 14 (pin and reorder links); 17 with 41, which is the same want at two
+**Decided, building next:** 36 (tabs down the side of a tile).
+
+**Then design first, then build:** 14 (pin and reorder links); 17 with 41, which is the same want at two
 altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
 (saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
 40 (a second view of a card).
@@ -465,6 +447,8 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 16 | deliberately starting a new session | **Built, 2026-09-16,** as part of 25: ⌥ New Session starts a new sitting inside the idle window, unless the current one is still empty (`session.start` `new`, contract 1.8.0). See [tile-sessions.md](tile-sessions.md) D1 |
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
+| 20 | where a tile's move handle goes | **Built, 2026-09-16.** A grip over the tile's top centre, shown only while the pointer is near there, modelled on Claude's desktop panels; a tile with tabs has none, its strip moves it. A catcher view above the card takes the press over a page (`CanvasBoardView.tileHandle`, `CanvasTileGripView`). [canvas-workspaces.md](canvas-workspaces.md) §7k |
+| 21 | how a tile's tabs look, and reordering them | **Built, 2026-09-16.** Tuned in an artifact: a 32pt strip, tabs to 190pt, the showing tab a lit glass chip that slides between tabs, hover fill and close button fading in. Dragging a tab reorders the strip the way the window's tab bar does and pulls the card out past 24pt off it (`CanvasTileSession.moveTab`, `CanvasTabSlide`). §7k |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |

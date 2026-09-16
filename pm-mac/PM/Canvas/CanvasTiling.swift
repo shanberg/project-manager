@@ -433,10 +433,11 @@ enum CanvasTiling {
         }
     }
 
-    /// How tall a tile's tab strip is, when it holds more than one card.
-    static let tabStrip: Double = 28
+    /// How tall a tile's tab strip is, when it holds more than one card. Tuned by eye with the strip's
+    /// look (backlog 21, 2026-09-16): 32, which leaves each tab 26 once it is inset from the band.
+    static let tabStrip: Double = 32
     /// The widest a tab gets. Two tabs on a wide tile don't want to be two half-tile buttons.
-    static let longestTab: Double = 220
+    static let longestTab: Double = 190
 
     /// Where each tab sits in a strip: side by side from the leading edge, sharing the width, none
     /// wider than `longestTab`. What the strip is drawn by and what a click on it is read against, so

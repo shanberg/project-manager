@@ -1228,9 +1228,26 @@ about, two documents you flip between. ⌥[ and ⌥] step through them. A tab th
 of the layout's `visible` — the mechanism a maximized tile already uses — so switching tabs changes which
 card is drawn and does not reload anything.
 
-**Dragging a tab pulls that one card out**, to beside any tile, including the one it came from, or into
-another tile's tabs. ⌥T does it from the keyboard, beside the tile it came from. Backlog 8 — "swap the
-card in a tile" — is this: add the new card as a tab and take the old one out.
+**Dragging a tab along its strip reorders it; dragging it off pulls that one card out** — **decided**
+(backlog 21, 2026-09-16), in the grammar of the window's own tab bar. Along the strip the tab follows the
+pointer and the others slide aside, which is the one place a tiled view reflows live: a strip is short,
+and there reflow reads as sorting. More than 24pt off the strip it becomes the tile drag, and the card
+comes out — to beside any tile, including the one it came from, or into another tile's tabs. ⌥T does it
+from the keyboard, beside the tile it came from. Backlog 8 — "swap the card in a tile" — is this: add
+the new card as a tab and take the old one out.
+
+**How the strip looks** — tuned by eye in an artifact (backlog 21): 32pt, tabs up to 190pt, names in
+regular weight. The showing tab sits on a small piece of glass — the label colour at 8.5%, lit from the
+top, a half-point rim, a soft lift — which slides to a tab when you click it. Other tabs are bare until
+the pointer is over one; then a paler fill and a close button fade in, and the close button takes that
+card out of the workspace, as ⌥⌫ does. A tab let go of eases into its slot.
+
+**A tile is moved by a grip at its top centre** — **decided** (backlog 20, 2026-09-16), after Claude's
+desktop app. It lies over the card and is drawn only while the pointer is near the top centre, so nothing
+sits on a page you are reading; a small view above the card takes the press, which over a web page
+would otherwise be the page's. It replaced a bar in the gap on whichever side faced out, a consistent
+rule that put the handle somewhere different on every tile. A tile with tabs has no grip: its strip is
+already across its top, and the rest of the strip carries the tile.
 
 **⌥⌫ takes out the card that is showing, not the tile** — **decided**. Taking a tile out is taking out
 each of its cards, and the one you are looking at is the one the command can see.
@@ -1398,10 +1415,11 @@ Each step ships on its own once the first is in.
 3. **Tabs.** **Built**:
    - **The strip is the layout's.** A tile of several cards is laid out whole and its card is drawn
      below a band across its top (`CanvasTileSession.tabStrips`, `belowTabs`), so everything that reads
-     where cards are — hit testing, the handlebars, the page budget — is right without knowing about
-     tabs. The band is drawn under the cards, with the handlebars (`CanvasTileHandleView`).
-   - **The strip is the tile's title bar.** A click on a tab shows it, a drag on one pulls that card out,
-     and a drag on the rest of the strip carries the tile, as the handlebar does. Double-clicking it
+     where cards are — hit testing, the grips, the page budget — is right without knowing about
+     tabs. The band is drawn under the cards (`CanvasTileHandleView`).
+   - **The strip is the tile's title bar.** A click on a tab shows it, a drag on one slides it along the
+     strip or, off it, pulls that card out, and a drag on the rest of the strip carries the tile, as a
+     grip does. Double-clicking it
      maximizes, as a title bar's double-click does.
    - **The top of every tile is its tabs.** Dropping a tile or a tab on a tile's top band joins its tabs.
      A tab pulled out joins them from the middle too, since one card is not a tile to swap with.

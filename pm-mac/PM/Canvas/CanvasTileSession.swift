@@ -509,6 +509,23 @@ struct CanvasTileSession: Equatable {
         columns[place.column].tiles[place.tile] = tile
     }
 
+    /// Move a tab along its own strip to `index`, the card showing staying the one that shows. Answers
+    /// whether anything moved — a drag along the strip that let go where it started did nothing.
+    @discardableResult
+    mutating func moveTab(_ card: String, to index: Int) -> Bool {
+        guard let at = position(of: card) else { return false }
+        var tile = columns[at.column].tiles[at.tile]
+        guard let from = tile.cards.firstIndex(of: card) else { return false }
+        let to = min(max(0, index), tile.cards.count - 1)
+        guard to != from else { return false }
+        let shown = tile.shown
+        tile.cards.remove(at: from)
+        tile.cards.insert(card, at: to)
+        tile.showing = tile.cards.firstIndex(of: shown) ?? 0
+        columns[at.column].tiles[at.tile] = tile
+        return true
+    }
+
     /// Bring a tab to the front of its tile. Answers whether it wasn't there already.
     ///
     /// **A maximized tile stays maximized.** The tile filling the room is named by the card it is

@@ -913,6 +913,32 @@ extension CanvasBoardView {
         return nil
     }
 
+    /// The tab whose close button is under a point. Read against the rectangle the button is drawn in,
+    /// so the two cannot disagree — see `CanvasTileHandleView.closeRect`.
+    func tabClose(at point: CanvasPoint) -> String? {
+        guard let tiling else { return nil }
+        let at = viewPoint(point)
+        for strip in tiling.tabStrips {
+            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+            for (card, chip) in zip(strip.cards, chips)
+            where CanvasTileHandleView.closeRect(in: viewRect(chip), scale: liveScale).contains(at) {
+                return card
+            }
+        }
+        return nil
+    }
+
+    /// Let go of a tab slid along its strip: it takes the place it was dropped in.
+    func moveTab(_ card: String, to index: Int) {
+        guard var session = tiling, session.moveTab(card, to: index) else { return }
+        tiling = session
+        setLayout(session.layout, animated: false)
+        onTilingChanged?()
+    }
+
+    /// How far off its strip a dragged tab goes before it is a card being pulled out, in view points.
+    static let tabTearDistance: Double = 24
+
     /// The tile whose tab strip is under a point, by the card it is showing.
     func tabStrip(at point: CanvasPoint) -> String? {
         tiling?.tabStrips.first { $0.band.contains(x: point.x, y: point.y) }.map { $0.cards[$0.showing] }
