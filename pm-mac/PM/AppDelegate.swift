@@ -236,6 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard key != storeKey || !hasSyncedStore else { return }
         hasSyncedStore = true
         let previous = storeKey
+        Log.write("focused store: \(previous ?? "none") → \(key ?? "none"); windows \(windows.windowSummary)")
         storeKey = key
         store = StoreRegistry.shared.acquire(key)
         StoreRegistry.shared.release(previous)

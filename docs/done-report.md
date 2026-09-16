@@ -2,7 +2,7 @@
 
 **Status:** implemented 2026-09-16 in PmLib (`DoneLog.swift`), the contract (`task.done`), and the
 CLI (`pm done`). Raycast, the menubar and MCP reach it through the contract; no surface draws it yet.
-It started as an entry in [open-items.md](open-items.md); what that entry argued is kept below.
+It started as an entry in a page of open items, since deleted; what that entry argued is kept below.
 
 Ask PM what you finished today, or this week, and get a list back, across every project.
 

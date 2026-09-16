@@ -132,12 +132,31 @@ final class WindowManager {
     /// any list on the Mac has — and the premise is gone anyway: the two windows are told apart by
     /// their tabs, and they share one store and one undo stack (`StoreRegistry` is refcounted), so
     /// editing in both is coherent rather than a race.
-    func retarget(_ controller: ProjectWindowController, to projectKey: String) {
+    ///
+    /// Logged with its caller and every window's project after, for backlog 45: with two windows open,
+    /// a switch in one has been seen to change both, and nothing on the way here reaches a second
+    /// controller. The next time it happens the log says whether the other window was retargeted at
+    /// all, and if so from where.
+    func retarget(_ controller: ProjectWindowController, to projectKey: String,
+                  caller: StaticString = #fileID, line: UInt = #line) {
         let previous = controller.projectKey
         let store = StoreRegistry.shared.acquire(projectKey)
         controller.retarget(to: store, projectKey: projectKey)
         StoreRegistry.shared.release(previous)
         rememberOpenProjects()
+        Log.write("window \(Self.name(controller)) retargeted: \(previous ?? "no project") → \(projectKey)"
+            + " (\(caller):\(line)); windows now \(windowSummary)")
+    }
+
+    /// Every open window and what it shows, for a log line: `[#412 Self, #518 H-004 Maxwell Carmody]`.
+    var windowSummary: String {
+        "[" + controllers.map { "\(Self.name($0)) \($0.projectKey.flatMap(PMFiles.projectName(fromKey:)) ?? "no project")" }
+            .joined(separator: ", ") + "]"
+    }
+
+    /// A window's number, which is what tells two windows on one project apart in the log.
+    static func name(_ controller: ProjectWindowController) -> String {
+        "#\(controller.window?.windowNumber ?? 0)"
     }
 
     /// The window a command should act on: the main one, else the key one, else the first open.
@@ -184,7 +203,8 @@ final class WindowManager {
 
     private func windowClosed(_ controller: ProjectWindowController) {
         controllers.removeAll { $0 === controller }
-        Log.write("window closed: \(controller.projectKey ?? "no project") (\(controllers.count) open)")
+        Log.write("window \(Self.name(controller)) closed: \(controller.projectKey ?? "no project")"
+            + " (\(controllers.count) open); windows now \(windowSummary)")
         StoreRegistry.shared.release(controller.projectKey)
         // **Not while quitting.** AppKit closes every window on the way out, after `willTerminate`, so
         // a list rewritten here was a list emptied one window at a time — and the next launch, finding

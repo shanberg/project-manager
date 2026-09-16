@@ -565,6 +565,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: NSWindowDelegate
 
     func windowDidBecomeMain(_ notification: Notification) {
+        Log.write("window \(WindowManager.name(self)) became main: \(projectKey ?? "no project")")
         pushFocusToDisk()
         // Joining or leaving a tab group moves the content area without resizing the window, and there
         // is no delegate callback for it. Becoming main is the moment that always follows.

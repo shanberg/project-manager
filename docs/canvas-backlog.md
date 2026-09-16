@@ -2,7 +2,7 @@
 
 One entry per item: what it is, where it lives, and — where there is one — the question that has to be
 answered before it can be built. Deliberately short. An item that turns out to need a real design
-argument graduates to [open-items.md](open-items.md) or a page of its own.
+argument graduates to a page of its own.
 
 Finished items are deleted rather than kept, because the reasoning that was worth having outlives them
 in the code: this codebase argues in its comments, and a done entry here is a second copy going stale.
@@ -152,9 +152,20 @@ controller a command is resolved against: `frontmost` takes the main window, els
 `controllers.first` ([WindowManager.swift:142](../pm-mac/PM/Windows/WindowManager.swift:142)) — and
 `controllers.first` is a window nobody clicked.
 
-Open: a reproduction that says which surface was used — a sidebar row, the menubar, a keystroke — and
-whether the second window changes on the click or on the focus write that follows it — a retarget
-ends in `pushFocusToDisk`, and the write to `focused.json` is seen by a watcher a second later.
+Read through on 2026-09-16 and not found. Every path to a retarget names one controller — the
+sidebar and a board's card through their own window, Open Recent through `frontmost`, a rename through
+the windows already on the old key — and the focus write that follows only moves the menubar's store:
+stores are bound to one key and nothing rebinds one in place. One suspect was tested and cleared: the
+sidebar sorts by recency, so a switch in one window re-sorts the other's list, but SwiftUI's `List`
+keeps a selection on its tag through a reorder and writes nothing back (checked in a PMViewTests probe,
+not kept).
+
+So it needs catching rather than reading. The log now says every retarget with its caller and every
+window's project after it, every window becoming main, closing, and every move of the focused store —
+`window #412 retargeted: … → … (PM/Menu/AppDelegate+Commands.swift:224); windows now [#412 Self, #518
+H-004 Maxwell Carmody]`. Open: the next time it happens, the lines in `~/.config/pm/pm-mac.log` around
+it. If the second window changed and no retarget names it, what changed isn't its project — its tabs,
+its board or its title — and that is a different bug.
 
 ## Features
 
@@ -269,7 +280,7 @@ of the lines in `## Links`, with nothing to say one matters more than another.
 Reordering is therefore an edit to the notes file, which is fine and is what a drag should write.
 Pinning needs somewhere to put the fact. The `key:value` convention the task lines already use is the
 obvious spelling and would not be an invention (see the todo.txt findings in
-[open-items.md](open-items.md)), but a token on a link line is visible in Obsidian in a way a token on
+[done-report.md](done-report.md)), but a token on a link line is visible in Obsidian in a way a token on
 a task line has already earned. The alternative is a defaults-side pin, which is invisible in Obsidian
 and does not sync — the same trade `CanvasWorkspaces` made, and it came out the other way there.
 
@@ -549,7 +560,7 @@ layer rather than in a preference of its own.
 ## Priority
 
 **What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
-project moves the wrong window — reproduce it first, and say which surface), 42 (a dragged link
+project moves the wrong window — instrumented, waiting to be caught in the log), 42 (a dragged link
 carrying the previous one), 44 (the dragged picture landing off the snapped frame), 35 (a tile-shaped
 picture shown in a card). 18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
 wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
@@ -590,9 +601,6 @@ here.
 Open work that lives on other pages, listed so this one is the whole picture. Nothing here is a backlog
 item; each is a question its own page states properly.
 
-- [open-items.md](open-items.md) — a report of what got done. The shape is decided (an append-only log
-  beside the notes, not a stamp on the task line); where the log lives and what to do about tasks
-  checked outside PM are not.
 - [api-contract.md](api-contract.md) Q1 — display strings in the contract, or per-surface formatting.
   Has a recommendation and wants a yes or no. Q2–Q4 are settled.
 - [task-identity.md](task-identity.md) — the Mac app has no receipt line for a task mutation made
