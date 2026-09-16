@@ -174,7 +174,7 @@ struct CanvasSnapResult: Equatable {
 ///
 /// The grid is the fallback, not the rule. Snapping to another card is a stronger statement of intent
 /// than snapping to an invisible 10pt lattice, so the grid only gets a say on an axis where nothing
-/// aligned. ⌥ turns the lot off, which is what makes snapping safe to have on by default.
+/// aligned. ⌘ or ⌃ turns the lot off, which is what makes snapping safe to have on by default.
 ///
 /// **The lattice gets no ghost, because it is not one of the three.** It used to get a mark of its own
 /// — four corners — because a card clicking to a grid nobody had mentioned reads as a card refusing to
@@ -585,7 +585,7 @@ enum CanvasSnapping {
     private static func ghost(_ horizontal: Hit?, _ vertical: Hit?, at frame: CanvasRect,
                               against others: [CanvasRect], complete: Bool,
                               show: Double) -> CanvasGhost? {
-        // ⌥ collapses both radii to nothing. An exact landing under it is still an exact landing, and
+        // ⌘ or ⌃ collapses both radii to nothing. An exact landing under it is still an exact landing, and
         // still not something to draw a mark about: the modifier means "leave me alone".
         guard show > 0, horizontal != nil || vertical != nil else { return nil }
 

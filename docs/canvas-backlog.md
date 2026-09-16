@@ -126,48 +126,6 @@ its board or its title — and that is a different bug.
 
 ## Features
 
-### 3. The modifiers a board is missing, and the one collision under all of them
-
-Three gestures are wanted and none exists: **⇧ keeps the aspect ratio while resizing, ⌥ resizes about
-the centre** — the design-tool grammar, where a resize today is the dragged grip and nothing else
-([CanvasSnapping.resize](../pm-mac/PM/Canvas/CanvasSnapping.swift:94)) — and **⌥-drag duplicates a
-card**, which is the Mac's own gesture and simply absent; `duplicate` exists as a command only.
-
-These were two entries parked separately on what turns out to be one obstacle. **⌥ already means *no
-snapping*, on both a move and a resize**
-([CanvasBoardView+Input.swift:522](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:522)), and that is
-the override which lets snapping be on by default. ⌥ cannot mean three things, so this is one decision
-and it only has to be made once.
-
-**What is actually free, read rather than assumed.** During a drag the board reads **only ⌥** — the
-snapping reach and the guides, nothing else. ⇧ and ⌘ are read at *mouse-down*, by the selection path
-and by nothing else: `extending = shift || command`
-([CanvasBoardView+Input.swift:35](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:35)). So both are
-available mid-drag, and the only real cost of taking one is a press that both extends the selection and
-does the modifier's new job on the drag that follows.
-
-**Recommendation: move the escape hatch to ⌘, and let ⌥ and ⇧ mean what they mean everywhere else.**
-
-| | today | proposed | why |
-|---|---|---|---|
-| ⇧ resizing | — | keep the aspect ratio | every design tool, and ⇧ is "constrain" across the system |
-| ⌥ resizing | no snapping | resize about the centre | the grammar this entry asked for |
-| ⌥ dragging | no snapping | duplicate | **the Mac's own copy-drag**, learnt in the Finder |
-| ⌘ dragging or resizing | extends selection, on the press | no snapping | Keynote, Pages and Numbers all suspend their guides on ⌘ |
-
-The case for it: ⌥ is the one modifier in that table whose meaning is not PM's to choose. "⌥ copies
-what you are dragging" is learnt from the Finder long before anyone meets a canvas, while "⌥ turns
-snapping off" is learnt from drawing apps — and the drawing apps a person arriving here has actually
-used are split on it, since Keynote's is ⌘. Trading a convention we share with some apps for one we
-share with the file manager is the better side of the trade.
-
-The cost, plainly: ⌘ already extends the selection on mouse-down, so a ⌘-click that becomes a drag
-would extend the selection *and* suspend snapping. The same overlap exists in Keynote and nobody trips
-over it, but it is the thing to watch if this feels wrong in the hand.
-
-Nothing here is built, deliberately. All three gestures fall out of the decision in an afternoon, and
-none of them can be built before it.
-
 ### 6. A folder dropped on a board
 
 Dropping *files* is built and verified: over the board the drag turns into the card it will make, with
@@ -522,9 +480,6 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
 and a file dropped on one to check the two rules the rewrite moved.
 
-**Waiting on one decision, which unblocks three gestures:** 3. The argument is written out and comes
-with a recommendation; what it needs is a yes or a no, not more thinking.
-
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often — 6, what a dropped folder should make — and 32, which now writes the frames it always
 read.
@@ -576,6 +531,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | | what it was | where it went |
 |---|---|---|
 | 1 | the placeholder sitting over a page you could already read | **Built.** The reveal is the first of the page having painted, `didFinish`, or eight seconds — a 48pt snapshot probed every 200ms standing in for WebKit's private first-paint milestone. Argued in [web-cards.md](web-cards.md) and [CanvasPagePaint](../pm-mac/PM/Canvas/CanvasPagePaint.swift) |
+| 3 | the modifiers a board was missing, and ⌥ already meaning no snapping | **Built, 2026-09-16.** The design-tool grammar every tool agrees on: ⇧ keeps the aspect and ⌥ resizes about the centre (`CanvasHandle.resize(_:by:keepingAspect:fromCentre:)`, `CanvasSelectionTests`), and ⌥-drag leaves a copy behind (`duplicateInPlace`, one undo). Snapping's escape moved off ⌥ to **⌘ or ⌃** — tools split on it (⌘ in Keynote, tldraw, Excalidraw, Miro; ⌃ in Figma) and neither is otherwise read mid-drag (`suspendsSnapping`). A constrained resize does not snap; revisit if missed |
 | 4 | ⌥-drag to duplicate a card | Folded into **3**, which is the one decision under all three modifier gestures |
 | 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27** |
 | 9 | saved arrangements, already built and hard to find | [canvas-workspaces.md](canvas-workspaces.md) — they are workspaces |

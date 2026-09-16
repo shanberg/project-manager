@@ -253,7 +253,8 @@ final class CanvasBoardView: NSView {
     /// What the pointer is currently doing. Nil between gestures.
     var gesture: Gesture?
     enum Gesture {
-        case move(from: CanvasPoint, frames: [String: CanvasRect])
+        /// `copying` while an ⌥-drag has yet to make its copies — done on the first move, then cleared.
+        case move(from: CanvasPoint, frames: [String: CanvasRect], copying: Bool)
         /// Dragging a grip or a card's edge. Carries the whole selection, not the card that was
         /// grabbed: several cards resize as one, and one card is that with a set of size one. `box` is
         /// what they occupied when the drag began — see `CanvasGroupResize`.
@@ -959,8 +960,8 @@ final class CanvasBoardView: NSView {
     ///
     /// So it earns its way back on by being about something. A drag snaps to a 10pt lattice, and the
     /// grid *is* that lattice — it comes up when a card starts moving, says what the card is landing
-    /// on, and goes when the card stops. Which also makes it honest about the modifier: hold ⌥ to turn
-    /// snapping off and the grid goes with it, so the ground under a free drag is plainly free.
+    /// on, and goes when the card stops. Which also makes it honest about the modifier: hold ⌘ or ⌃ to
+    /// turn snapping off and the grid goes with it, so the ground under a free drag is plainly free.
     ///
     /// The spacing steps up as you zoom out so the dots stay roughly the same distance apart on screen
     /// — at 20% a 10pt grid is a 2pt grid, which is a texture rather than a grid. It doubles rather

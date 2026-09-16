@@ -160,13 +160,13 @@ extension CanvasBoardView {
 
     /// Lay the drop out under the pointer and snap it, putting up the guides a moving card gets.
     ///
-    /// ⌥ is read off the keyboard rather than off an event, because a drag delivers none: the modifier
-    /// means "leave me alone" here exactly as it does for a card you are moving.
+    /// ⌘ and ⌃ are read off the keyboard rather than off an event, because a drag delivers none: they
+    /// mean "leave me alone" here exactly as they do for a card you are moving.
     private func place(_ sender: NSDraggingInfo) {
         guard let drop = dropSession?.drop else { return }
         let carried = drop.frames(centredOn: canvasPoint(convert(sender.draggingLocation, from: nil)))
         guard let box = Self.bounds(of: carried) else { return }
-        let free = !NSEvent.modifierFlags.contains(.option)
+        let free = !Self.suspendsSnapping(NSEvent.modifierFlags)
         let snap = CanvasSnapping.move(box, by: (dx: 0, dy: 0),
                                        against: snapCandidates(excluding: []),
                                        reach: free ? CanvasSnapping.reach / liveScale : 0,

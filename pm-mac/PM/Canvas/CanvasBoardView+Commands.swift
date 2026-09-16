@@ -226,6 +226,13 @@ extension CanvasBoardView {
                at: nil, actionName: "Duplicate", offsetBy: 24)
     }
 
+    /// Copies of the selection exactly on top of it, selected — the start of an ⌥-drag, which then
+    /// carries the copies away and leaves the originals where they were.
+    func duplicateInPlace() {
+        guard !selection.isEmpty else { return }
+        insert(CanvasClipping.clipping(of: selection, from: document), at: nil, actionName: "Duplicate")
+    }
+
     /// Put a small canvas into this one: new identities, moved to where it's going, and selected.
     ///
     /// Every id is minted fresh and the copied lines are rewritten to the new ids. Reusing the

@@ -385,4 +385,65 @@ final class CanvasSelectionTests: XCTestCase {
         let small = NSRect(x: 0, y: 0, width: 120, height: 120)
         XCTAssertFalse(canvasBoardKeeps(NSPoint(x: 60, y: 60), in: small, scale: 0.08))
     }
+
+    // MARK: Constrained resizing (backlog 3)
+
+    /// ⇧ on a corner keeps the proportions, led by the axis the pointer asked more of.
+    func testShiftOnACornerKeepsTheAspect() {
+        let frame = rect(100, 100, 200, 100)
+        let wider = CanvasHandle.bottomRight.resize(frame, by: (dx: 100, dy: 10),
+                                                    keepingAspect: true, fromCentre: false)
+        XCTAssertEqual(wider, rect(100, 100, 300, 150), "anchored at the top-left, 2:1 kept")
+        let taller = CanvasHandle.topLeft.resize(frame, by: (dx: 0, dy: -100),
+                                                 keepingAspect: true, fromCentre: false)
+        XCTAssertEqual(taller, rect(-100, 0, 400, 200), "led by height, anchored at the bottom-right")
+    }
+
+    /// ⇧ on a side sets that axis and grows the other about its centre.
+    func testShiftOnASideGrowsTheOtherAxisAboutItsCentre() {
+        let frame = rect(100, 100, 200, 100)
+        XCTAssertEqual(CanvasHandle.right.resize(frame, by: (dx: 200, dy: 0),
+                                                 keepingAspect: true, fromCentre: false),
+                       rect(100, 50, 400, 200))
+    }
+
+    /// ⌥ grows the opposite side by as much, so the centre stays where it was.
+    func testOptionResizesAboutTheCentre() {
+        let frame = rect(100, 100, 200, 100)
+        let grown = CanvasHandle.bottomRight.resize(frame, by: (dx: 50, dy: 20),
+                                                    keepingAspect: false, fromCentre: true)
+        XCTAssertEqual(grown, rect(50, 80, 300, 140))
+        XCTAssertEqual(grown.midX, frame.midX)
+        XCTAssertEqual(grown.midY, frame.midY)
+        XCTAssertEqual(CanvasHandle.left.resize(frame, by: (dx: 30, dy: 0),
+                                                keepingAspect: false, fromCentre: true),
+                       rect(130, 100, 140, 100), "a side about the centre narrows from both ends")
+    }
+
+    /// Both at once: proportions and centre.
+    func testShiftAndOptionTogether() {
+        let frame = rect(100, 100, 200, 100)
+        let grown = CanvasHandle.bottomRight.resize(frame, by: (dx: 50, dy: 0),
+                                                    keepingAspect: true, fromCentre: true)
+        XCTAssertEqual(grown, rect(50, 75, 300, 150))
+    }
+
+    /// The minimum holds on both axes, and with the aspect kept it is met by growing the other.
+    func testTheMinimumHoldsWithoutLosingTheAspect() {
+        let frame = rect(0, 0, 200, 100)
+        let shrunk = CanvasHandle.bottomRight.resize(frame, by: (dx: -190, dy: -95), minimum: 40,
+                                                     keepingAspect: true, fromCentre: false)
+        XCTAssertEqual(shrunk.height, 40)
+        XCTAssertEqual(shrunk.width, 80)
+    }
+
+    /// Neither modifier is the plain resize, exactly.
+    func testNoModifierIsThePlainResize() {
+        let frame = rect(100, 100, 200, 100)
+        for handle in CanvasHandle.allCases {
+            XCTAssertEqual(handle.resize(frame, by: (dx: 37, dy: -12), keepingAspect: false, fromCentre: false),
+                           handle.resize(frame, by: (dx: 37, dy: -12)), "\(handle)")
+        }
+    }
+
 }

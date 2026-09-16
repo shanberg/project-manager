@@ -90,6 +90,44 @@ enum CanvasHandle: CaseIterable {
         return CanvasRect(x: left, y: top, width: right - left, height: bottom - top)
     }
 
+    /// The frame this grip produces when dragged by `delta` with a modifier constraining it.
+    ///
+    /// The design-tool grammar, which every tool a person arrives here from agrees on (backlog 3):
+    ///
+    /// - **`keepingAspect` (⇧)** holds the frame's proportions. A corner is led by whichever axis the
+    ///   pointer has asked more of, relative to the frame, so the grip follows the hand on the axis it is
+    ///   actually moving along; a side sets its own axis and the other follows, grown about its centre.
+    /// - **`fromCentre` (⌥)** grows the opposite side by as much as the dragged one, so the centre stays
+    ///   put.
+    ///
+    /// The minimum holds on both axes, and with the aspect kept it is met by growing rather than by
+    /// letting the proportions go.
+    func resize(_ frame: CanvasRect, by delta: (dx: Double, dy: Double), minimum: Double = 40,
+                keepingAspect: Bool, fromCentre: Bool) -> CanvasRect {
+        guard keepingAspect || fromCentre else { return resize(frame, by: delta, minimum: minimum) }
+        var growW = unit.x == 1 ? delta.dx : unit.x == 0 ? -delta.dx : 0
+        var growH = unit.y == 1 ? delta.dy : unit.y == 0 ? -delta.dy : 0
+        if fromCentre { growW *= 2; growH *= 2 }
+        var width = max(frame.width + growW, minimum)
+        var height = max(frame.height + growH, minimum)
+        if keepingAspect, frame.width > 0, frame.height > 0 {
+            let ratio = frame.width / frame.height
+            let leadsWithWidth = isCorner
+                ? abs(width / frame.width - 1) >= abs(height / frame.height - 1)
+                : unit.x != 0.5
+            if leadsWithWidth { height = width / ratio } else { width = height * ratio }
+            if width < minimum { width = minimum; height = width / ratio }
+            if height < minimum { height = minimum; width = height * ratio }
+        }
+        // Anchored on the side opposite the grip, or about the centre — which is also where the axis a
+        // side grip doesn't move grows from when the aspect drags it along.
+        let left = fromCentre || unit.x == 0.5 ? frame.midX - width / 2
+            : unit.x == 0 ? frame.maxX - width : frame.minX
+        let top = fromCentre || unit.y == 0.5 ? frame.midY - height / 2
+            : unit.y == 0 ? frame.maxY - height : frame.minY
+        return CanvasRect(x: left, y: top, width: width, height: height)
+    }
+
     /// The frame this grip produces when dragged to `point`.
     ///
     /// Each grip moves only the edges it touches, and a card dragged through itself comes back the

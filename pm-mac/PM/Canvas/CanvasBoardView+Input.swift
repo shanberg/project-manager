@@ -110,8 +110,12 @@ extension CanvasBoardView {
                 selection.remove(id)
                 return
             }
-            store.beginInteraction(selection.count > 1 ? "Move Cards" : "Move Card")
-            gesture = .move(from: where_, frames: framesOfDragSet())
+            // **⌥-drag copies**, the Finder's gesture and every canvas tool's. Decided on the press and
+            // done on the first move, so an ⌥-click that goes nowhere makes nothing.
+            let copying = event.modifierFlags.contains(.option)
+            let noun = selection.count > 1 ? "Cards" : "Card"
+            store.beginInteraction(copying ? "Duplicate \(noun)" : "Move \(noun)")
+            gesture = .move(from: where_, frames: framesOfDragSet(), copying: copying)
 
         case .edge(let id):
             selection = extending ? selection.union([id]) : [id]
@@ -229,7 +233,15 @@ extension CanvasBoardView {
             gesture = .placeTile(id, base: base, drop: next, pulling: pulling)
             previewDrop(of: id, next, pulling: pulling)
 
-        case .move(let from, let frames):
+        case .move(let from, var frames, let copying):
+            if copying {
+                // The copies go down where the originals are, inside the same interaction so the whole
+                // gesture is one undo, and it is the copies that move: the originals stay put, which is
+                // what makes the gesture read as leaving a copy behind.
+                duplicateInPlace()
+                frames = framesOfDragSet()
+                gesture = .move(from: from, frames: frames, copying: false)
+            }
             let wanted = (dx: now.x - from.x, dy: now.y - from.y)
             let box = frames.values.dropFirst().reduce(frames.values.first ?? .init(x: 0, y: 0, width: 0, height: 0)) {
                 $0.union($1)
@@ -269,12 +281,22 @@ extension CanvasBoardView {
             // it the other way round — snapping each card and taking the box of the results — would
             // give a selection of six six chances to catch on something, and a box that jumped between
             // them as you dragged.
-            let wanted = handle.resize(box, by: (dx: now.x - from.x, dy: now.y - from.y))
+            // ⇧ keeps the proportions and ⌥ keeps the centre — see `CanvasHandle.resize`. Read on every
+            // event, so either can be taken up or let go mid-drag.
+            let keepingAspect = event.modifierFlags.contains(.shift)
+            let fromCentre = event.modifierFlags.contains(.option)
+            let wanted = handle.resize(box, by: (dx: now.x - from.x, dy: now.y - from.y),
+                                       keepingAspect: keepingAspect, fromCentre: fromCentre)
+            // **A constrained resize doesn't snap.** Snapping moves each grip-side edge on its own, which
+            // is exactly what the constraint is there to stop: a snapped edge would undo the aspect, or
+            // pull the centre off. Something to revisit if it is missed — snap the leading edge, then
+            // constrain — but not a thing to guess at.
+            let constrained = keepingAspect || fromCentre
             let snap = CanvasSnapping.resize(wanted, handle: handle,
                                              against: snapCandidates(excluding: Set(originals.keys)),
-                                             reach: snapReach(event),
-                                             showReach: ghostReach(event),
-                                             snapsToGrid: snapsToGrid(event))
+                                             reach: constrained ? 0 : snapReach(event),
+                                             showReach: constrained ? 0 : ghostReach(event),
+                                             snapsToGrid: !constrained && snapsToGrid(event))
             // Fitted into the offered box by the same function that fits them into the settled one, so
             // the outline is exactly the frame each card would get and not an approximation of it.
             overlay.ghost = snap.ghost.map { ghost in
@@ -301,8 +323,8 @@ extension CanvasBoardView {
             // card and starting there would drag *it* instead. Read on every event, so pressing and
             // releasing ⌥ mid-sweep re-anchors the rectangle under your hand.
             //
-            // No collision with ⌥'s other meaning: a sweep does not snap, so there is nothing here for
-            // it to turn off. ⇧ is spoken for on the way down — it is what makes the sweep additive.
+            // The same thing ⌥ means on a resize, and a sweep has nothing to snap. ⇧ is spoken for on the
+            // way down — it is what makes the sweep additive.
             let reach = (dx: abs(now.x - from.x), dy: abs(now.y - from.y))
             let rect = event.modifierFlags.contains(.option)
                 ? CanvasRect(x: from.x - reach.dx, y: from.y - reach.dy,
@@ -376,7 +398,7 @@ extension CanvasBoardView {
             // Let go: what the mark said happens, and the tiles move — once, now.
             dragPoint = nil
             finishDrop(of: id, drop, pulling: pulling)
-        case .move(let from, _):
+        case .move(let from, _, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)
         case .resize:
@@ -523,23 +545,36 @@ extension CanvasBoardView {
             .map(\.frame)
     }
 
+    /// Whether the modifiers held say "leave me alone": **⌘ or ⌃**, read on every event.
+    ///
+    /// Both, because the tools a person arrives from split on it — ⌘ in Keynote, tldraw, Excalidraw and
+    /// Miro, ⌃ in Figma — and neither is otherwise read during a drag, so taking both costs nothing.
+    /// It used to be ⌥, which left no modifier for the three gestures every one of those tools puts on
+    /// ⌥ and ⇧: copy-drag, resize about the centre, keep the aspect (backlog 3).
+    ///
+    /// Pressed mid-drag either is clean. Held before the press, ⌘ also extends the selection and ⌃
+    /// makes it a right-click — the same overlaps those tools live with.
+    static func suspendsSnapping(_ flags: NSEvent.ModifierFlags) -> Bool {
+        !flags.isDisjoint(with: [.command, .control])
+    }
+
     /// How near counts as a snap, in canvas units — a fixed distance on screen, so it doesn't get
-    /// coarser as you zoom out. ⌥ collapses it to nothing, which is the standard Mac override and the
-    /// reason snapping can be on by default: the cases it gets wrong are one modifier away from right.
+    /// coarser as you zoom out. ⌘ or ⌃ collapses it to nothing, which is the reason snapping can be on
+    /// by default: the cases it gets wrong are one modifier away from right.
     private func snapReach(_ event: NSEvent) -> Double {
-        event.modifierFlags.contains(.option) ? 0 : CanvasSnapping.reach / liveScale
+        Self.suspendsSnapping(event.modifierFlags) ? 0 : CanvasSnapping.reach / liveScale
     }
 
     /// How near counts as worth *offering*, in canvas units — the radius the ghost appears within,
     /// which is much wider than the snap's. See `CanvasGhost` for why the two are different numbers.
-    /// ⌥ collapses it along with the snap it belongs to: the modifier means "leave me alone", and a
-    /// board still offering matches would only be a quieter way of not doing that.
+    /// ⌘ or ⌃ collapses it along with the snap it belongs to: the modifier means "leave me alone", and
+    /// a board still offering matches would only be a quieter way of not doing that.
     private func ghostReach(_ event: NSEvent) -> Double {
-        event.modifierFlags.contains(.option) ? 0 : CanvasSnapping.showReach / liveScale
+        Self.suspendsSnapping(event.modifierFlags) ? 0 : CanvasSnapping.showReach / liveScale
     }
 
     private func snapsToGrid(_ event: NSEvent) -> Bool {
-        !event.modifierFlags.contains(.option)
+        !Self.suspendsSnapping(event.modifierFlags)
     }
 
     private func framesOfDragSet() -> [String: CanvasRect] {
