@@ -159,23 +159,15 @@ struct ProjectTabBar: View {
                         Color.clear.preference(key: TabRowWidthKey.self, value: geometry.size.width)
                     }
                 }
-                // **The row carves itself out of the window drag a second time**, from in here.
+                // **The row used to carve itself out of the window drag a second time**, from in
+                // here, because a `ScrollView` is a real `NSView` — a clip and a document view, in
+                // front of the excluder `HeaderCapsule` carried as a *background*, both answering
+                // `mouseDownCanMoveWindow` with true. So the chips sat under a stack of views that had
+                // put the window drag back, and dragging a tab along the row moved the window.
                 //
-                // `HeaderCapsule` already puts a `WindowDragExcluder` behind every header item, which
-                // is what lets you click one in a band that is otherwise the titlebar. That excluder is
-                // a view *behind* the capsule's contents, and until this row scrolled that was the end
-                // of it: nothing else in a capsule is a real AppKit view. A `ScrollView` is — SwiftUI
-                // backs it with an `NSScrollView`, a clip view and a document view, all of them in
-                // front of the excluder and every one of them answering `mouseDownCanMoveWindow` with
-                // true. So the chips sat under a stack of views that had put the window drag back, and
-                // dragging a tab along the row moved the window instead of moving the tab.
-                //
-                // An overlay rather than a background, and inside the scroll view rather than around
-                // it: it has to be the last thing over the chips, in front of the focus rings the
-                // buttons bring with them, which are views of their own and say true as well. It takes
-                // no hit testing, so it is invisible to everything except the question of what a
-                // mouse-down in the titlebar band means.
-                .overlay { WindowDragExcluder().allowsHitTesting(false) }
+                // That is `HeaderCapsule`'s own overlay now, which sits in front of everything in any
+                // capsule and so covers this row and the menus that hit the same thing
+                // (canvas-backlog.md 22, `WindowDragBandTests`). The argument lives there.
             }
             .scrollIndicators(.hidden)
             // Its own height rather than the row's, which inside a scroll view has nothing to take one

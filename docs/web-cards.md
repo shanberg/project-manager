@@ -70,7 +70,7 @@ appear a round trip after the press.
 question is answered by `engagedProjectCard`, and it cannot answer this one: you are inside a web card,
 so no project card is engaged at the moment the answer is wanted. What is left is where the board lives
 — `CanvasProjectNoteCard` already asks it — and a canvas elsewhere in the vault has no project and is
-offered nothing. That is the same answer [canvas-backlog.md](canvas-backlog.md) #13 will want from the
+offered nothing. That is the same question retired [canvas-backlog.md](canvas-backlog.md) #13 answered from the
 other side, and it is a *different* answer, for a reason: #13 is asked from the board.
 
 ## Links get named, and mostly for free

@@ -733,6 +733,8 @@ final class CanvasBoardView: NSView {
         }
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
+        // After the frame, because these are placed in it. See `refreshStripExcluders`.
+        tileHandleView.refreshStripExcluders()
     }
 
     /// Set while cards should slide to their new places rather than appear there — entering and leaving

@@ -210,7 +210,23 @@ struct HeaderCapsule<Content: View>: View {
             .padding(.vertical, HeaderMetrics.capsuleInset.vertical)
             .headerBacking(in: Capsule(), id: glass)
             // A click on a control is a click on that control, not the start of a window drag.
+            //
+            // **Both sides, and the overlay is the one that does the work.** AppKit settles a press in
+            // the titlebar band by building a region out of the view tree in z-order: a view answering
+            // `mouseDownCanMoveWindow` with no carves its frame out, and any view *in front of it*
+            // answering yes puts that frame back. For a capsule of text and symbols the background was
+            // enough, because nothing else in one is a real AppKit view. Several things are: a `Menu`
+            // arrives with `_NSGraphicsView`s and a `_FocusRingView`, a `ScrollView` with a clip and a
+            // document view, and every one of them says yes — so the board's options menu, sitting in
+            // the top-right corner, started a window move instead of opening (canvas-backlog.md 22,
+            // reproduced in `WindowDragBandTests`).
+            //
+            // The overlay is last in the capsule and so in front of all of them. It takes no hit
+            // testing, which makes it invisible to everything except this one question — the controls
+            // underneath still get every click. The background stays because it is what marks where the
+            // capsule *is* for `HeaderChromeMotionTests`, which reads capsules by their excluders.
             .background(WindowDragExcluder())
+            .overlay { WindowDragExcluder().allowsHitTesting(false) }
             // A window going to the background is a change people expect to see happen smoothly (HIG,
             // Designing for macOS). Opacity only, so it may animate — see `HeaderPresence` for why
             // nothing else here does.

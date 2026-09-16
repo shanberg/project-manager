@@ -897,7 +897,8 @@ extension CanvasBoardView {
     func addLinkCard(at where_: CanvasPoint?) {
         promptForAddress(title: "Add a link card",
                          message: "The page is embedded on the board.",
-                         initial: "") { [weak self] text in
+                         initial: "",
+                         suggestions: projectLinkSuggestions()) { [weak self] text in
             guard let self else { return }
             let at = where_ ?? centreOfVisibleBoard
             addCard(CanvasNode(content: .link(url: text),
@@ -947,9 +948,17 @@ extension CanvasBoardView {
     /// — including the part nobody thinks about until it is missing, which is that typing
     /// `example.com` gets a scheme put on it rather than producing a card that will never load. That
     /// part is `CanvasAddress.normalized`, shared further still with the header's address field.
+    ///
+    /// `suggestions` turns the field into a combo box offering them — a pick rather than a paste, for
+    /// the nine times in ten the address is already one of the project's own links (backlog item 13).
+    /// Empty, the field is exactly what it was before this existed.
     func promptForAddress(title: String, message: String, initial: String,
+                          suggestions: [(label: String, url: String)] = [],
                           then use: @escaping (String) -> Void) {
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+        let field: NSTextField = suggestions.isEmpty
+            ? NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+            : NSComboBox(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+        for link in suggestions { (field as? NSComboBox)?.addItem(withObjectValue: link.label) }
         field.placeholderString = "https://"
         field.stringValue = initial
         let alert = NSAlert()
@@ -965,7 +974,8 @@ extension CanvasBoardView {
         field.selectText(nil)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        guard let text = CanvasAddress.normalized(field.stringValue) else { return }
+        let resolved = CanvasLinkSuggestions.resolvedAddress(field.stringValue, against: suggestions)
+        guard let text = CanvasAddress.normalized(resolved) else { return }
         use(text)
     }
 
@@ -1343,6 +1353,37 @@ extension CanvasBoardView {
               let key = CanvasProjectSource.projectKey(for: notes),
               let folder = projectFolder(ofNotesPath: notes.path) else { return nil }
         return (key, projectTitle(fromFolderName: (folder as NSString).lastPathComponent))
+    }
+
+    /// The project to suggest links from when adding an address (backlog item 13).
+    ///
+    /// **Unlike `boardProject`, this one *can* use `engagedProjectCard`** — the add-a-link field is
+    /// reached from the board itself, never from inside a web page, so a project card being engaged is
+    /// exactly the "which of the six" answer canvas-workspaces.md §5 settled. It only falls back to the
+    /// board's own project when nothing is engaged, rather than offering nothing the way §5's aimed
+    /// commands do: those *write* to a project and have to be sure, while this only ever offers, and a
+    /// board that is a project's board has an obvious project to suggest from even standing on nothing.
+    private var linkSuggestionProject: (key: String, title: String)? {
+        if let engaged = engagedProjectCard,
+           let folder = engaged.projectFolderName,
+           let key = ProjectIndex.shared.projectKey(forFolder: folder) {
+            return (key, projectTitle(fromFolderName: folder))
+        }
+        return boardProject
+    }
+
+    /// `linkSuggestionProject`'s own links, as `promptForAddress` wants them.
+    ///
+    /// **Read straight off the store, never waited for.** The project card that makes a project current
+    /// has almost always already loaded it to draw itself, so this is usually free; when it isn't, no
+    /// suggestions is a fine answer for an offer, and worth it to keep the dialog appearing on the same
+    /// turn as the click that asked for it rather than after a read.
+    private func projectLinkSuggestions() -> [(label: String, url: String)] {
+        guard let project = linkSuggestionProject else { return [] }
+        let store = StoreRegistry.shared.acquire(project.key)
+        defer { StoreRegistry.shared.release(project.key) }
+        guard store.hasLoaded else { return [] }
+        return CanvasLinkSuggestions.suggestions(from: store.notes?.links ?? [])
     }
 
     /// Write an address into this board's project's `## Links`, and say so.

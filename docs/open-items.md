@@ -6,7 +6,9 @@ questions that have to be answered first — not a plan. An item graduates into 
 
 ## A report of what got done — today, this week
 
-**Status:** open, raised 2026-08-31.
+**Status:** raised 2026-08-31. The *shape* is decided (2026-09-01): an append-only log beside the
+notes, never a stamp on the task line. What is open is where the log lives, and what to say about
+tasks checked outside PM — both under *What's still open*.
 
 Ask PM what you finished today, or this week, and get a list back. The weekly-review use, and the
 standup use: you did the work, the record of it is spread across a dozen notes files, and reading
@@ -61,26 +63,22 @@ makes sharper rather than solving.
 
 ### The convention question, kept for the record
 
-[todo.txt](https://github.com/todotxt/todo.txt) came up as the way to spell an in-file stamp. It's
-moot now, but two findings from it are worth not re-deriving:
+[todo.txt](https://github.com/todotxt/todo.txt) came up as the way to spell an in-file stamp. Moot now,
+but two findings are worth not re-deriving — the first of which [canvas-backlog.md](canvas-backlog.md)
+item 14 leans on:
 
-- **PM's `key:value` tokens are already the todo.txt extension convention** — the spec's own worked
-  example is `due:2010-01-02`, character-for-character the token PM writes, and
-  `dueInlinePattern` even accepts the spaceless form
+- **PM's `key:value` tokens are already the todo.txt extension convention.** The spec's own worked
+  example is `due:2010-01-02`, character-for-character the token PM writes
   ([NotesTodos.swift:7](../pm-swift/Sources/PmLib/NotesTodos.swift:7)). If a date ever does land on a
-  line, `done: 2026-09-01` beside `due:` is the spelling, and it's a citation rather than an
-  invention.
-- **The positional half was never going to port.** `x 2011-03-02 2011-03-01 Review Tim's pull
-  request` duplicates the markdown checkbox, puts two bare dates in front of the text, and
-  distinguishes them by order alone — where `TaskContent.split` peels *trailing* tokens in a loop
-  specifically so any arrangement parses identically
-  ([NotesTodos.swift:59](../pm-swift/Sources/PmLib/NotesTodos.swift:59)). Also `+Project` and
-  `@context` collide head-on with the ` @` focus marker and `[[Name]]`. Those are settled; the spec
-  doesn't get to relitigate them.
+  line, `done:2026-09-01` beside `due:` is the spelling, and it is a citation rather than an invention.
+- **The positional half was never going to port.** `x 2011-03-02 2011-03-01 …` puts two bare dates in
+  front of the text and tells them apart by order alone, where `TaskContent.split` peels *trailing*
+  tokens in a loop so that any arrangement parses identically
+  ([NotesTodos.swift:59](../pm-swift/Sources/PmLib/NotesTodos.swift:59)). And `+Project` / `@context`
+  collide head-on with the ` @` focus marker and `[[Name]]`.
 
-todo.txt's second date, creation, is the one thing worth keeping in mind — and PM's answer is
-unchanged by any of this: the `### Thu, Aug 21, 2026` session heading already records creation once
-per sitting instead of once per line.
+todo.txt's second date, creation, is answered already and unchanged by any of this: the
+`### Thu, Aug 21, 2026` session heading records it once per sitting instead of once per line.
 
 ### What's still open
 

@@ -212,7 +212,8 @@ storage files with deliberately different lifetimes:
   which is *volatile*: rewritten on every change, so a board you left tiled comes back tiled. Leaving a
   tiling does not discard it either — `lastTiling` keeps it, because "Escape means *show me the board*,
   not *forget what I did*".
-- A named one lives in [`CanvasArrangements`](../pm-mac/PM/Canvas/CanvasArrangements.swift), and the
+- A named one lives in [`CanvasWorkspaces`](../pm-mac/PM/Canvas/CanvasWorkspaces.swift) — named
+  `CanvasArrangements` when this was written — and the
   reason it is a separate file is exactly this distinction: "you built an arrangement, you named it, and
   you expect it to be there next month… one careless memberwise initialiser away from losing all of
   them."
@@ -1491,7 +1492,7 @@ Each step ships on its own once the first is in.
 - **11** — BSP layouts — is **answered by §7k**: not a tree, but columns of tiles, which have the
   splitting grammar a tree needs and cost nothing to store.
 
-## Open
+## The last two questions, both closed
 
 **The rename is done**, and what it turned on is recorded in the code rather than here:
 `CanvasFocus.CodingKeys` (why `workspace` still goes on the wire as `arrangement`),

@@ -1,6 +1,6 @@
 # Areas
 
-**Status:** built, 2026-08-26, and reviewed. Every step in the order of work below is committed across PmLib, the CLI, the contract, the Mac app and the Raycast extension, and the seven defects the pre-release review turned up are fixed. Two things are known-missing on purpose: cadence, and adopting a folder you already have — both below.
+**Status:** built, 2026-08-26, and reviewed — including adoption, which shipped as `pm adopt`, `getAdoptableFolders`, the app's picker and Raycast's *Take On as Area*. Every step of the work is committed across PmLib, the CLI, the contract, the Mac app and the Raycast extension, and the seven defects the pre-release review turned up are fixed. One thing is known-missing on purpose: cadence, below.
 
 This settles what an Area *is* before any of it is written, because most of the answer turns out to be "relax four assumptions", not "add a second document type" — and because the interesting question is where the difference between the two kinds is allowed to live.
 
@@ -231,13 +231,7 @@ An explicitly configured `areasPath` is used verbatim, like `activePath` and `ar
 
 ## Order of work
 
-1. ~~`projectTitle` strips only a real code prefix, with tests.~~ **Done.**
-2. ~~`ProjectKind` and `HeaderSection` in PmLib.~~ **Done.**
-3. ~~`areasPath` and `areaSubfolders` in config; the Area scan; `ProjectScope` third case; the kind derived from the folder name.~~ **Done.**
-4. ~~`serializeNotes` takes a kind and applies the emit rule.~~ **Done.**
-5. Creating one: an Area template, and a `createArea` beside `createProject` that draws no number. `project.create` / `project.list` / `notes.setDetails` take kind; manifest bump.
-6. App: index, sidebar section and kind filter, New Area, the section-list header form.
-7. Raycast: New Area, and the kind filter in List Projects.
-8. Settings: the areas folder, the area scaffold, and the area notes template.
-
-Steps 2–5 are headless and testable. Nothing in 6 or 7 needs a decision they don't already settle.
+**All done**, in this order and for this reason: `projectTitle`, `ProjectKind` and `HeaderSection`, then
+the config and the scan, then `serializeNotes` taking a kind, then creating one — each headless and
+testable before any surface saw it — and only then the app, Raycast and Settings, none of which needed a
+decision the headless four had not already settled.

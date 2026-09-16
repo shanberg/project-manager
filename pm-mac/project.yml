@@ -187,6 +187,7 @@ targets:
       - path: PM/Canvas/CanvasNavigation.swift
       - path: PM/Canvas/CanvasBoardKeys.swift
       - path: PM/Canvas/CanvasClipping.swift
+      - path: PM/Canvas/CanvasLinkSuggestions.swift
       - path: PM/Canvas/CanvasPageDirector.swift
       - path: PM/Canvas/CanvasPageLoad.swift
       - path: PM/Canvas/CanvasPagePaint.swift

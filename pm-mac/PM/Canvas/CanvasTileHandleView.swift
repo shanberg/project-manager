@@ -60,6 +60,66 @@ final class CanvasTileHandleView: NSView {
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    // MARK: The strips, carved out of the window drag (canvas-backlog.md 22)
+
+    /// One invisible view over each tab strip, and they exist for a single property.
+    ///
+    /// The project window runs the board under a transparent titlebar, and an empty unified toolbar
+    /// makes that band **66pt** deep (measured, `WindowDragBandTests`). Tiles begin at 46 —
+    /// `headerClearance` plus `CanvasTiling.edgeGap` — so 20 of a strip's 28 points lie inside the
+    /// band, and a press on almost all of a top-row tab is AppKit's to interpret before it is
+    /// anybody's to handle.
+    ///
+    /// It interprets one by building a region out of the view tree **in z-order**: a view answering
+    /// `mouseDownCanMoveWindow` with no carves its frame out of the window drag, and any view in front
+    /// of it answering yes puts that frame straight back. Not by hit-testing, which is the reading that
+    /// looks right and says the header's own excluders could never work either. The board answers yes
+    /// by saying nothing — `NSView`'s default is true — so without these, dragging a tab moved the
+    /// window.
+    ///
+    /// **Only the strips, and that is the decision rather than the cheap way out.** One line on
+    /// `CanvasBoardView` would have carved out the entire board, and taken the whole band with it: the
+    /// empty top of a board is somewhere to grab the window, which is worth keeping in a window whose
+    /// titlebar is otherwise invisible. These carve out the part of that band that is a control.
+    ///
+    /// **They only reach as far as the board does.** `CanvasEdgeView` is a sibling in front of the
+    /// whole scroll view and answers the drag with true, so nothing in here can carve out anything
+    /// above it. It ends at 46 and the tiles start at 46 — the same line, which is why this works; a
+    /// strip that ever sat higher would need the answer to move out to the pane.
+    ///
+    /// They take no clicks, like everything else in this view. A press on a tab still reaches the
+    /// board's own `mouseDown` and `tabChip(at:)`; all these change is what AppKit does with a press
+    /// *before* anyone's `mouseDown` is called.
+    private var stripExcluders: [Excluder] = []
+
+    final class Excluder: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    /// Put one over each strip. Driven from `layoutNodeViews`, because where a strip is is a fact about
+    /// the layout — not about the pointer, which is what the handlebars follow.
+    ///
+    /// The views are moved rather than rebuilt: this runs on every layout pass, including every frame
+    /// of a tile being dragged, and a strip that has not moved should cost a frame comparison.
+    func refreshStripExcluders() {
+        // The same two conditions `drawTabStrips` draws under: no tiling and no strips, and while the
+        // board is picking there are none on screen to carve out.
+        var bands: [NSRect] = []
+        if let board, !board.isPicking, let session = board.tiling {
+            bands = session.tabStrips.map { board.viewRect($0.band) }
+        }
+        while stripExcluders.count < bands.count {
+            let view = Excluder(frame: .zero)
+            addSubview(view)
+            stripExcluders.append(view)
+        }
+        while stripExcluders.count > bands.count {
+            stripExcluders.removeLast().removeFromSuperview()
+        }
+        for (view, band) in zip(stripExcluders, bands) where view.frame != band { view.frame = band }
+    }
+
     override func draw(_ dirty: NSRect) {
         guard let board else { return }
         drawTabStrips(board, board.liveScale)
