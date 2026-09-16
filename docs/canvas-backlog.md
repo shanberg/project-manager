@@ -114,22 +114,6 @@ What is left is using it. Reorder a layer list in a tile, then check the two the
 the other side: a link dropped on a tile should still become a tile, and a file dropped anywhere on one
 should still go into the page. `acceptsTyping` has no caller now; it is kept for 23.
 
-### 44. The dragged picture and the card that lands are not in the same place
-
-`place` lays the drop out centred on the pointer and snaps it, keeping both — `carried` and `landing`
-([CanvasBoardView+Dropping.swift:119](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:119)). The
-guides and the drop use `landing`. The picture riding with the pointer is set to the bounds of
-`carried` and never moved again ([:162](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:162)), so
-the two differ by exactly the snap offset until `settle` re-aims on the way down
-([:209](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:209)). Reported for an image dragged out of
-a web card, where the picture is WebKit's own until the board swaps it for the 400pt square the drop
-will actually make — so the mismatch there is a size as well as an offset.
-
-Open, and it is a real question rather than a given: a proxy that does not jump under the hand is a
-rule kept on purpose elsewhere (21, where a dragged tile shows a proxy and a static drop mark). Decide
-whether a drop is the exception — the outline already says where it lands, so the picture agreeing with
-it costs nothing but the jump.
-
 ### 45. Switching project changes both windows
 
 With two windows open, clicking a project in one sometimes retargets both; closing a window is reported
@@ -547,7 +531,7 @@ layer rather than in a preference of its own.
 ## Priority
 
 **What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
-project moves the wrong window — instrumented, waiting to be caught in the log), 44 (the dragged picture landing off the snapped frame), 35 (a tile-shaped
+project moves the wrong window — instrumented, waiting to be caught in the log), 35 (a tile-shaped
 picture shown in a card). 18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
 wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
 and a file dropped on one to check the two rules the rewrite moved.
@@ -616,4 +600,5 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
+| 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |

@@ -19,9 +19,9 @@ struct CanvasDropSession {
     /// for the rest of the drag made a card of the link dragged last time (backlog 42).
     /// `CanvasPageLinkDragTests` measures the premise. So every ask checks this and reads again.
     var pasteboardChange: Int
-    /// Where the cards are drawn while they ride with the pointer: centred under it.
+    /// The cards laid out centred under the pointer, before the snap.
     var carried: [CanvasRect] = []
-    /// Where they would land if you let go now — `carried`, snapped.
+    /// Where they would land if you let go now — `carried`, snapped — and where the picture is drawn.
     var landing: [CanvasRect] = []
     /// The source's own images, and where each sat relative to the pointer, so they can be given back
     /// when the drag leaves. Nil while the source's images are the ones on screen.
@@ -172,8 +172,19 @@ extension CanvasBoardView {
                                        reach: free ? CanvasSnapping.reach / liveScale : 0,
                                        showReach: free ? CanvasSnapping.showReach / liveScale : 0,
                                        snapsToGrid: free)
+        let landing = Self.shifted(carried, onto: snap.frame, from: box)
         dropSession?.carried = carried
-        dropSession?.landing = Self.shifted(carried, onto: snap.frame, from: box)
+        dropSession?.landing = landing
+        // **The picture is where the card will land**, not centred on the pointer beside an outline
+        // saying otherwise (backlog 44). It steps with the snap as the outline does, and letting go is
+        // no longer a jump by the snap's offset. Only once the picture is the board's: the source's own
+        // image rides under the pointer until `carry` has swapped it out.
+        if dropSession?.original != nil, let frame = Self.bounds(of: landing).map(viewRect) {
+            sender.enumerateDraggingItems(options: [], for: self, classes: [NSPasteboardItem.self],
+                                          searchOptions: [:]) { item, _, _ in
+                item.draggingFrame = frame
+            }
+        }
         overlay.ghost = snap.ghost.map {
             CanvasOverlayView.Ghost($0, frames: Self.shifted(carried, onto: $0.frame, from: box),
                                     beneath: standingCards(excluding: []))
@@ -208,7 +219,9 @@ extension CanvasBoardView {
     private func carry(_ sender: NSDraggingInfo, as drop: CanvasDrop) {
         guard let carried = dropSession?.carried, let box = Self.bounds(of: carried) else { return }
         let picture = dropSession?.picture ?? protoCards(drop, frames: carried, in: box)
-        let frame = viewRect(box)
+        // Drawn from `carried` and put at `landing`: the two are the same cards moved by the snap, so the
+        // picture is the same either way and only where it goes differs. See `place`.
+        let frame = viewRect(dropSession.flatMap { Self.bounds(of: $0.landing) } ?? box)
         let pointer = convert(sender.draggingLocation, from: nil)
         let kept = dropSession?.original
         var original: [Int: (components: [NSDraggingImageComponent], offset: NSPoint, size: NSSize)] = [:]
@@ -250,8 +263,8 @@ extension CanvasBoardView {
     }
 
     /// Slide the picture into the place the cards were given, rather than letting it vanish where the
-    /// pointer happened to be. The difference is the snap: it is at most a grid unit or a guide's
-    /// reach, and without this the last thing the drop did would be a small jump.
+    /// pointer happened to be. The picture already rides at the snapped place (`place`), so this is
+    /// what keeps it there for the last frame rather than a correction of any size.
     private func settle(_ sender: NSDraggingInfo, onto frames: [CanvasRect]) {
         guard let box = Self.bounds(of: frames) else { return }
         let frame = viewRect(box)
