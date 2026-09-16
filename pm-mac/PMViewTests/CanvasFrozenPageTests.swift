@@ -68,14 +68,14 @@ final class CanvasFrozenPageTests: XCTestCase {
     // MARK: How long it is kept
 
     func testACardWithNoPictureHasNone() {
-        XCTAssertNil(CanvasPageSnapshots.of(card))
+        XCTAssertNil(CanvasPageSnapshots.of(card, tiled: false))
     }
 
     func testAPictureComesBackForTheCardItWasKeptFor() throws {
-        CanvasPageSnapshots.keep(image(NSSize(width: 400, height: 300), ink), for: card)
-        let back = try XCTUnwrap(CanvasPageSnapshots.of(card))
+        CanvasPageSnapshots.keep(image(NSSize(width: 400, height: 300), ink), for: card, tiled: false)
+        let back = try XCTUnwrap(CanvasPageSnapshots.of(card, tiled: false))
         XCTAssertEqual(back.size.width, 400)
-        XCTAssertNil(CanvasPageSnapshots.of("/Users/x/Vault/Work/docs/Board.canvas#n43"))
+        XCTAssertNil(CanvasPageSnapshots.of("/Users/x/Vault/Work/docs/Board.canvas#n43", tiled: false))
     }
 
     /// A Retina tile at full size would be megabytes a card, for detail nothing looks at long enough
@@ -86,14 +86,14 @@ final class CanvasFrozenPageTests: XCTestCase {
     /// could do that costs more than it is worth. The full-size picture stands in until it lands.
     func testABigPictureIsShrunkAndKeepsItsShape() async throws {
         let edge = CanvasPageSnapshots.longestEdge
-        CanvasPageSnapshots.keep(image(NSSize(width: edge * 2, height: edge), ink), for: card)
-        XCTAssertEqual(CanvasPageSnapshots.of(card)?.size.width, CGFloat(edge * 2),
+        CanvasPageSnapshots.keep(image(NSSize(width: edge * 2, height: edge), ink), for: card, tiled: false)
+        XCTAssertEqual(CanvasPageSnapshots.of(card, tiled: false)?.size.width, CGFloat(edge * 2),
                        "the stand-in, at full size")
 
         try await until("the shrunk one lands") {
-            CanvasPageSnapshots.of(card)?.size.width == CGFloat(edge)
+            CanvasPageSnapshots.of(card, tiled: false)?.size.width == CGFloat(edge)
         }
-        let back = try XCTUnwrap(CanvasPageSnapshots.of(card))
+        let back = try XCTUnwrap(CanvasPageSnapshots.of(card, tiled: false))
         XCTAssertEqual(back.size.height, edge / 2, accuracy: 1, "and it keeps its shape")
     }
 
@@ -106,10 +106,26 @@ final class CanvasFrozenPageTests: XCTestCase {
         }
     }
 
-    /// A picture of the page a card used to point at is worse than no picture at all.
+    /// A picture of the page a card used to point at is worse than no picture at all — at either shape.
     func testForgettingLeavesNothingBehind() {
-        CanvasPageSnapshots.keep(image(NSSize(width: 400, height: 300), ink), for: card)
+        CanvasPageSnapshots.keep(image(NSSize(width: 400, height: 300), ink), for: card, tiled: false)
+        CanvasPageSnapshots.keep(image(NSSize(width: 1200, height: 800), ink), for: card, tiled: true)
         CanvasPageSnapshots.forget(card)
-        XCTAssertNil(CanvasPageSnapshots.of(card))
+        XCTAssertNil(CanvasPageSnapshots.of(card, tiled: false))
+        XCTAssertNil(CanvasPageSnapshots.of(card, tiled: true))
+    }
+
+    /// **A card and its tile keep separate pictures** (backlog 35). A tile closed puts a window-shaped
+    /// picture in the store, and handing that to the 400pt card showed a strip of its top-left corner;
+    /// a card with a picture only at the other shape has none at this one, and shows its placeholder.
+    func testATilesPictureIsNotTheCardsPicture() throws {
+        CanvasPageSnapshots.keep(image(NSSize(width: 1200, height: 800), ink), for: card, tiled: true)
+        XCTAssertNil(CanvasPageSnapshots.of(card, tiled: false), "the board was handed the tile's picture")
+        XCTAssertEqual(try XCTUnwrap(CanvasPageSnapshots.of(card, tiled: true)).size.width, 1200)
+
+        CanvasPageSnapshots.keep(image(NSSize(width: 400, height: 300), ink), for: card, tiled: false)
+        XCTAssertEqual(try XCTUnwrap(CanvasPageSnapshots.of(card, tiled: false)).size.width, 400)
+        XCTAssertEqual(try XCTUnwrap(CanvasPageSnapshots.of(card, tiled: true)).size.width, 1200,
+                       "keeping the card's picture replaced the tile's")
     }
 }

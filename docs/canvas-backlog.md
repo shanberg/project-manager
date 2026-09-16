@@ -64,20 +64,6 @@ back wrong. The remaining suspects if something still forgets are all in the *wh
 the list is written on opening, retargeting, closing by hand, and at `willTerminate`, so a window
 resized and then lost to a crash was never recorded, and a resize on its own still writes nothing.
 
-### 35. One picture per card, and a card is two very different shapes
-
-A frozen page is kept per card and taken at whatever size the view happened to be
-([CanvasPageSnapshots.keep](../pm-mac/PM/Canvas/CanvasPageSnapshots.swift:55), called from
-[CanvasLinkNodeView.swift:460](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:460) and again on removal
-at [:1030](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:1030)). Close a tile and the picture that
-lands in the store is window-shaped; the board then shows it in a 400pt card, where
-`CanvasFrozenPageView` scales to the width and anchors at the top — so what you get is a strip of the
-tile's top-left. The reverse is the same trade the other way round.
-
-Open: whether a card keeps two pictures (tile-shaped and card-shaped, chosen by which the view is now)
-or one per shape band; what a cold launch shows before it knows which it will be; and whether the
-sweep in `CanvasPageSnapshots` counts them separately.
-
 ### 39. Drags inside a page were the board's — **rewritten, wants using**
 
 Figma's layer list could not be reordered inside a card, and nothing else that reorders by dragging
@@ -531,8 +517,8 @@ layer rather than in a preference of its own.
 ## Priority
 
 **What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
-project moves the wrong window — instrumented, waiting to be caught in the log), 35 (a tile-shaped
-picture shown in a card). 18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
+project moves the wrong window — instrumented, waiting to be caught in the log).
+18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
 wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
 and a file dropped on one to check the two rules the rewrite moved.
 
@@ -599,6 +585,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
+| 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |

@@ -21,6 +21,14 @@ import os
 /// So a picture is kept for the card, keyed the way the page and the resume address are —
 /// `CanvasPageHandover.key(canvas:card:)` — in memory for this session and on disk for the next.
 ///
+/// **Two per card, one for each shape a card has.** The same card is a 400pt square on the board and
+/// most of a window as a tile, and a picture is the shape it was taken at. Kept as one, closing a tile
+/// put a window-shaped picture in the store, and the board then showed its top-left corner in the card
+/// (backlog 35). So the picture is filed by whether the card was tiled, and a card with a picture only
+/// in the other shape shows its placeholder: a globe says less than a cropped page, but it is never
+/// wrong about what the page looks like, and the right-shaped picture arrives the first time the page
+/// is seen at that shape.
+///
 /// **A cache, in the directory for caches.** Derived entirely from pages PM happened to load, throwing
 /// it away costs nothing worse than a board that opens as placeholders once, and it is measured in
 /// megabytes — all three of which are `CanvasContentBlocker`'s reasons for putting its compiled lists
@@ -29,8 +37,9 @@ import os
 @MainActor
 enum CanvasPageSnapshots {
 
-    /// The picture of this card's page, if there is one.
-    static func of(_ card: String) -> NSImage? {
+    /// The picture of this card's page at this shape, if there is one.
+    static func of(_ card: String, tiled: Bool) -> NSImage? {
+        let card = key(card, tiled: tiled)
         if let known = memory[card] { return known.image }
         // Lazy: `NSImage` reads the file's header here and decodes when something draws it, so a board
         // building forty cards pays for the handful it can see.
@@ -52,9 +61,10 @@ enum CanvasPageSnapshots {
     ///
     /// The full-size image stands in for the shrunk one until it lands, which is a moment later and is
     /// the picture the card in front of you would have shown anyway.
-    static func keep(_ image: NSImage, for card: String) {
+    static func keep(_ image: NSImage, for card: String, tiled: Bool) {
         guard !card.isEmpty,
               let full = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let card = key(card, tiled: tiled)
         stamp &+= 1
         let mine = stamp
         memory[card] = Held(image: image, stamp: mine)
@@ -88,9 +98,18 @@ enum CanvasPageSnapshots {
     /// picture on it — and the next `of` is usually immediate, because changing a card's address
     /// rebuilds the card. The miss is the answer from this moment on, whatever the disk says.
     static func forget(_ card: String) {
-        memory[card] = Held(image: nil)
-        let file = file(for: card)
-        Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: file) }
+        for tiled in [false, true] {
+            let card = key(card, tiled: tiled)
+            memory[card] = Held(image: nil)
+            let file = file(for: card)
+            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: file) }
+        }
+    }
+
+    /// Where a card's picture at one shape is filed. The board's shape keeps the card's own key, so the
+    /// pictures kept before there were two are found as the board pictures they mostly were.
+    private static func key(_ card: String, tiled: Bool) -> String {
+        tiled ? card + "#tile" : card
     }
 
     // MARK: What is kept, and how big
@@ -209,7 +228,8 @@ enum CanvasPageSnapshots {
 
     /// How many pictures survive a quit. Larger than `capacity`, because this one is measured against
     /// every board you have ever opened rather than against one session, and a picture is the whole
-    /// value of a board that opens cold.
-    static let onDisk = 400
+    /// value of a board that opens cold. Counted in files, and a card can have two, so it was doubled
+    /// when the tile's picture was split from the card's.
+    static let onDisk = 800
 }
 

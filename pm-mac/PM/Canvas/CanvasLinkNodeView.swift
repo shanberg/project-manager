@@ -115,10 +115,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // to come up as a screen of globes and fill in over the next several seconds as the budget
         // woke the cards one at a time — which is the moment a board most needs to say what it is, and
         // was the moment it said least.
-        if let picture = CanvasPageSnapshots.of(pageKey) {
-            showPicture(picture)
-            placeholder?.isHidden = true
-        }
+        showStoredPicture()
         Self.cards.add(self)
         reconsiderLoading(scale: scale)
         // A card built into a board you have just switched to — a tile the workspace had not needed
@@ -458,8 +455,36 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// `CanvasPageVisits` made for the address, and for the same reason: a view is the shortest-lived
     /// thing here. See `CanvasPageSnapshots`.
     private func showFrozen(_ image: NSImage) {
-        CanvasPageSnapshots.keep(image, for: pageKey)
+        CanvasPageSnapshots.keep(image, for: pageKey, tiled: board.isTiled)
         showPicture(image)
+        pictureIsTiled = board.isTiled
+    }
+
+    /// Whether the picture up was taken as a tile — nil when there isn't one — so crossing between the
+    /// board and a workspace can swap it for the picture of the shape the card is now. See
+    /// `CanvasPageSnapshots` on why a card has two.
+    private var pictureIsTiled: Bool?
+
+    /// The stored picture for the shape the card is now, or the placeholder when there is none.
+    private func showStoredPicture() {
+        pictureIsTiled = board.isTiled
+        if let picture = CanvasPageSnapshots.of(pageKey, tiled: board.isTiled) {
+            showPicture(picture)
+            placeholder?.isHidden = true
+        } else {
+            frozen?.removeFromSuperview()
+            frozen = nil
+            placeholder?.isHidden = false
+        }
+    }
+
+    /// The board crossed between its modes. A card not showing its page is showing a picture of one,
+    /// and a picture of the other shape is swapped for this one's — cheap to ask on every frame of the
+    /// crossing, since it only does anything on the frame the mode actually flips.
+    override func refreshTiledness(fading: Bool) {
+        super.refreshTiledness(fading: fading)
+        guard !revealed, pictureIsTiled != board.isTiled else { return }
+        showStoredPicture()
     }
 
     /// Put a picture up without filing it — for one that came out of the store in the first place.
@@ -1033,6 +1058,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
             resumeURL = web.url ?? resumeURL ?? url
             noteVisit()
             let key = pageKey
+            let tiled = board.isTiled
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = false
             web.takeSnapshot(with: configuration) { image, _ in
@@ -1041,7 +1067,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
                     // before the web process has answered, and the picture never arrives.
                     _ = web
                     guard let image else { return }
-                    CanvasPageSnapshots.keep(image, for: key)
+                    CanvasPageSnapshots.keep(image, for: key, tiled: tiled)
                 }
             }
         }
