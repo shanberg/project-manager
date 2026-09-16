@@ -32,6 +32,130 @@ derive, and it is a stronger setting than it was now that the mark is at one opa
 is up: everything inside 48 is drawn at full strength. Drag a few cards around a real board and say
 whether the offer is up too often.
 
+### 30. The header in full screen was never designed
+
+Full screen is a state the header has no drawing for. `titlebarButtonMetrics` answers zero inset and
+zero drop there ([WindowChrome.swift:125](../pm-mac/PM/Shared/WindowChrome.swift:125)) — right as far
+as it goes, since there are no traffic lights to clear — and the auto-hiding titlebar then comes down
+over whatever the header has put in the space they left.
+[header-chrome.md](header-chrome.md) states every state the header has, and full screen is not among
+them, so what happens there is the sum of decisions taken for a window.
+
+Open: whether the header slides out from under the titlebar as it reveals, hides with it, or full
+screen gets a layout of its own. Settle it on that page, beside the other states.
+
+### 32. Restored windows forget their size — **one cause fixed, wants using**
+
+The cause, and it was the whole of the restore half: `WindowSettings.openWindowFrames` was read on
+launch and handed to each restored window and **never written by anything**. `rememberOpenProjects`
+saved the keys alone, so the list was always empty and every restored window fell back to the one
+`PMProject` autosave frame — which only the window opening into an empty screen claims in the first
+place ([ProjectWindowController.swift:182](../pm-mac/PM/Windows/ProjectWindowController.swift:182)) —
+or to a cascade off it. `PMWindowOpenFrames` had never been written on this machine, which is as plain
+as the evidence gets.
+
+Both lists are now built in one pass, index for index, so the filter that drops a projectless window
+cannot drift between them ([WindowManager.swift:255](../pm-mac/PM/Windows/WindowManager.swift:255));
+and the write on opening a window moved to after the window has been placed, since one asked earlier
+answers with the frame it was made at rather than the one it was given.
+
+What is left is **using it**: quit with three windows at three sizes on two screens and say what comes
+back wrong. The remaining suspects if something still forgets are all in the *when*, not the what —
+the list is written on opening, retargeting, closing by hand, and at `willTerminate`, so a window
+resized and then lost to a crash was never recorded, and a resize on its own still writes nothing.
+
+### 35. One picture per card, and a card is two very different shapes
+
+A frozen page is kept per card and taken at whatever size the view happened to be
+([CanvasPageSnapshots.keep](../pm-mac/PM/Canvas/CanvasPageSnapshots.swift:55), called from
+[CanvasLinkNodeView.swift:460](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:460) and again on removal
+at [:1030](../pm-mac/PM/Canvas/CanvasLinkNodeView.swift:1030)). Close a tile and the picture that
+lands in the store is window-shaped; the board then shows it in a 400pt card, where
+`CanvasFrozenPageView` scales to the width and anchors at the top — so what you get is a strip of the
+tile's top-left. The reverse is the same trade the other way round.
+
+Open: whether a card keeps two pictures (tile-shaped and card-shaped, chosen by which the view is now)
+or one per shape band; what a cold launch shows before it knows which it will be; and whether the
+sweep in `CanvasPageSnapshots` counts them separately.
+
+### 39. Drags inside a page were the board's — **rewritten, wants using**
+
+Figma's layer list could not be reordered inside a card, and nothing else that reorders by dragging
+could either. Every step of it is now measured rather than supposed (`CanvasPageDragOriginTests`):
+
+- A page's reorder is **HTML5 drag-and-drop**, so WebKit turns it into a real AppKit dragging session
+  whose source is the `CanvasPageView` itself — confirmed from the page's side by a `dragstart` in
+  Figma, and from ours by a test that hung in `NSCoreDragManager` until it was given a mouse-up.
+- `route` then handed it to the board, because the only thing that made a drag the page's was somewhere
+  to *type* under the pointer. The page got a `dragstart` and then nothing: no `dragover`, no `drop`.
+- Where the board could make nothing of the payload it answered `[]` — and still held it. **Refused by
+  the board and never offered back**, which is why the symptom was silence rather than a stray card.
+  (The card would have been visible: since 6fd7a1c a drop in a tiled view goes up as a tile.)
+
+**The rule is now the other way round: the page decides, and the board takes what the page declines.**
+An element claims a drop by preventing the default on `dragover`, WebKit answers a drag with that
+decision, so asking WebKit is asking the page — and it is a better question than the one we were
+asking, because "is there a drop target here" is not something `elementFromPoint` can answer.
+
+Nothing is lost by asking first, which is the part that had to be measured: WebKit answers `.none` over
+ordinary page and `.move` over an element that claimed the drop, for a link, a string and a page's own
+custom data alike. So a link let go over a page still falls through to the board and still becomes a
+card, or a tile beside the others. The hazard the old rule was built around — a card navigating to a
+link dropped on it — **does not reproduce**: a real `NSURL` dropped on a page with nothing to fall back
+on left the page where it was.
+
+One thing to know before touching it: **WebKit's first reply is a lie.** It answers `.copy` to
+everything before the web process has been consulted, `.none` on the second ask, and the truth on the
+third. So the first answer is discarded and the board holds the drag until one has arrived — which is
+the old behaviour's safety property kept on purpose: an undecided drag belongs to the side that can
+make a card of it. The four rows of the rule are pinned in `CanvasPageViewTests`, along with that one.
+
+What is left is using it. Reorder a layer list in a tile, then check the two the rewrite touches from
+the other side: a link dropped on a tile should still become a tile, and a file dropped anywhere on one
+should still go into the page. `acceptsTyping` has no caller now; it is kept for 23.
+
+### 42. The second drag of a link carries the first one
+
+Dragging a link off a card a second time often shows the previous link. Two places it can come from,
+and one question tells them apart: **does the card that lands hold the old address, or only the old
+picture?**
+
+The old address means the gesture or the hit test — the `.link` gesture carries a URL taken at
+mouse-down ([`dragLink`](../pm-mac/PM/Canvas/CanvasBoardView+Input.swift:416)), and a note card answers
+from `CanvasLinkZones`, a table its SwiftUI fills in and clears. Only the old picture means the
+destination: `carry` draws the proto-cards once and hands the same image back on every later ask —
+`dropSession.picture`, in
+[CanvasBoardView+Dropping.swift:162](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:162).
+
+### 44. The dragged picture and the card that lands are not in the same place
+
+`place` lays the drop out centred on the pointer and snaps it, keeping both — `carried` and `landing`
+([CanvasBoardView+Dropping.swift:119](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:119)). The
+guides and the drop use `landing`. The picture riding with the pointer is set to the bounds of
+`carried` and never moved again ([:162](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:162)), so
+the two differ by exactly the snap offset until `settle` re-aims on the way down
+([:209](../pm-mac/PM/Canvas/CanvasBoardView+Dropping.swift:209)). Reported for an image dragged out of
+a web card, where the picture is WebKit's own until the board swaps it for the 400pt square the drop
+will actually make — so the mismatch there is a size as well as an offset.
+
+Open, and it is a real question rather than a given: a proxy that does not jump under the hand is a
+rule kept on purpose elsewhere (21, where a dragged tile shows a proxy and a static drop mark). Decide
+whether a drop is the exception — the outline already says where it lands, so the picture agreeing with
+it costs nothing but the jump.
+
+### 45. Switching project changes both windows
+
+With two windows open, clicking a project in one sometimes retargets both; closing a window is reported
+the same way. Not the retarget itself, which is per-controller and deliberately "this window, always"
+([WindowManager.swift:133](../pm-mac/PM/Windows/WindowManager.swift:133)). The suspect is which
+controller a command is resolved against: `frontmost` takes the main window, else the key window, else
+`controllers.first` ([WindowManager.swift:142](../pm-mac/PM/Windows/WindowManager.swift:142)) — and
+`controllers.first` is a window nobody clicked.
+
+Open: a reproduction that says which surface was used — a sidebar row, the menubar, a keystroke — and
+whether the second window changes on the click or on the focus write that follows it — a retarget
+ends in `pushFocusToDisk`, and the write to `focused.json` is seen by a watcher a second later.
+
 ## Features
 
 ### 3. The modifiers a board is missing, and the one collision under all of them
@@ -287,28 +411,179 @@ the notes file, which travels with the project and shows in Obsidian; the `.canv
 or defaults, which syncs nowhere — and what it tints: the board's ground, the tab chip, the sidebar row,
 the window's accent. The HIG's line on accent colours versus content colours is the place to start.
 
+### 31. Say we are a different browser, and the layer that belongs around it
+
+A card is a real browser and some sites still turn it away. What PM says about itself today is one
+line — `applicationNameForUserAgent`, with the installed Safari's version read off disk
+([CanvasWebSession.swift:165](../pm-mac/PM/Canvas/CanvasWebSession.swift:165)). `customUserAgent`
+replaces the string outright and is per web view, so the mechanism is a property; what is missing is
+somewhere to keep the decision.
+
+The larger want is that place: **per-site web compatibility**, with the filtering exceptions rolled
+into it rather than sitting alongside. Those already exist — a site you have excused is remembered by
+`CanvasBlockPolicy.siteKey` in `PMCanvasUnfilteredSites`
+([CanvasContentBlocker.swift:30](../pm-mac/PM/Canvas/CanvasContentBlocker.swift:30)) — so this is
+widening a store that is there, not inventing one.
+
+Open: whether a claim is per site or per card (the card is the thing you are looking at; the site is
+the thing that has the problem); what else is per-site rather than per-card once there is a home for it
+— blocking, `pmAutoplay`, page zoom, 26's keep-this-card-running, 43's script freeze; and where it is
+edited, a list of sites in Settings or the card's own menu writing the site's row.
+
+### 33. Read Craft for what a polished Mac app holds itself to
+
+Not a feature: a pass over Craft with a list at the end. It is the nearest thing to what PM is — a
+document app whose whole claim is that it feels made rather than assembled — and it is worth reading
+for its standards as much as its features: how it animates a state change, what it does with the
+sidebar and the window chrome, how much of the HIG it follows and where it knowingly doesn't.
+
+Open: nothing to decide. The findings come back as entries here, and the ones that turn out to be about
+the same thing as an entry we already have should go into it rather than beside it.
+
+### 34. A tile as a real window
+
+Pop a tile out and have it be an ordinary window — the thing every tiling window manager lets you do,
+and the obvious answer to "I want this dashboard on the other screen".
+
+The constraint is known and it is the one peek ran into: a web card moved to a different parent view is
+a page torn down and started again, which is why peek is a zoom rather than a second copy
+([canvas-workspaces.md](canvas-workspaces.md) §7k *Peek is a zoom, not a copy*). A second window is a
+different view tree by definition, so a popped tile reloads unless what moves is the card's whole view
+and its `interactionState` goes with it.
+
+Open: what the board shows where the tile was — the card back on the board, a gap, a placeholder that
+says where it went; whether the window is a project window holding one tile or a kind of its own; and
+what closing it means. A board is already allowed to be up in two windows at once, sharing one
+refcounted store (`CanvasStoreRegistry`), so the document half of this is answered and the view half is
+not.
+
+### 36. Tabs down the side of a tile
+
+An option for a tile's tabs to run down its leading edge instead of across its top. Wanted where the
+tile is tall and narrow, or where five tabs on a wide one become a row of 220pt buttons you read
+left to right and then lose your place in.
+
+Cheap in the geometry: one band and one function decide where a tab is, and the drawing and the hit
+test both read it ([CanvasTiling.tabStrip](../pm-mac/PM/Canvas/CanvasTiling.swift:437),
+[tabs(in:count:)](../pm-mac/PM/Canvas/CanvasTiling.swift:444)), so a second direction is a parameter
+rather than a rewrite.
+
+Open: per tile, per workspace, or a setting; how wide a vertical strip is and what a tab shows in it (a
+favicon alone, or an icon and a truncated name); and what a tile too short for its tabs does. Decide
+with 20 and 21 — the strip is also how you grab a tile, and moving it moves the handle question too.
+
+### 37. Combining projects, and a project made of projects
+
+Two asks with one shape: fold one project into another, and roll several up under a master.
+`ProjectLifecycle` moves a project between scopes, renames one, and adopts a folder
+([ProjectLifecycle.swift:22](../pm-mac/PM/Model/ProjectLifecycle.swift:22)) — every one of which
+moves a folder whole. Nothing merges two, and nothing expresses "part of".
+
+This wants a page rather than an entry, because the questions are all about the document. Two
+`## Sessions` logs interleaved by date is the only honest merge, and it makes a history that never
+happened in one sitting. Two `## Links` blocks, two sets of framing callouts and two sets of open tasks
+each need an answer. And the master is the real fork: a project with a notes file of its own whose
+members are named in it, or a view computed over the members with nothing on disk. [areas.md](areas.md)
+is the nearest prior art — it got a whole kind of thing for the price of relaxing four assumptions, and
+the same trick may be available here.
+
+### 38. What macOS's compositor does that our freeze doesn't
+
+Moving around the system, windows keep their content: switch a Space, unhide an app, come back from
+sleep, and what was there is there, unblinking. A board's frozen card is visibly a picture of a card.
+The observation is worth chasing rather than admiring.
+
+The likely difference is not subtle: the window server holds each window's backing store and composites
+it, so nothing is restored because nothing was thrown away — the app is alive behind the image the
+whole time. Our freeze deliberately throws the renderer away, because taking its memory back is the
+entire point ([CanvasPageBudget](../pm-mac/PM/Canvas/CanvasPageBudget.swift)), and what stands in for it
+is a bitmap that has to be scaled to a card that has since changed shape (35).
+
+Open: which parts of what it does are actually ours to have — a layer that survives a view being
+rebuilt, WebKit's own suspension of a view out of the window hierarchy versus our teardown, and whether
+the honest version of this is 43 (freeze the script, keep the page) rather than a better picture.
+
+### 40. A second view of a card, and a tile made of the page you are on
+
+Two asks with one wall behind them. A second tab of the same card in the same tile, and "make a card of
+what I am looking at and open it as a tile".
+
+The second is nearly built, for links: middle-click or the page's menu makes a card beside this one
+(`openInNewCard` →
+[addLinkCard(_:beside:)](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:1315)), and an add while
+tiled comes up as a tile, since every add command ends in the same place. What is missing is the card's
+*current* address rather than a link under the pointer — the page you navigated to, which
+`CanvasPageVisits` is already holding.
+
+The first runs into peek's wall (see 34): one card is one view, and a web card in a second view is a
+second page. So "the same card twice" can only honestly mean "a second card on the same address" —
+which is exactly what the second half makes. Open: whether that is a good enough answer to say so in
+the menu, and what the new card is called when it is a second view of the same page.
+
+### 41. Maximize a card from the board
+
+⌘Return and a double-click on the handlebar maximize a *tile*
+([toggleMaximizeTile](../pm-mac/PM/Canvas/CanvasBoardView+Tiling.swift:384)), and a tile only exists
+inside a workspace. On the board the nearest thing is Space, which zooms to the card. Asked for as
+"fullscreen this card the way I can a tile", and flagged in the asking as a product smell: two ways of
+looking should not have two grammars for the same want.
+
+Open, and the smell is the more interesting half: whether this is one command (maximizing a card is a
+workspace of one tile, and Escape brings the board back) or whether peek and maximize should have been
+one act all along. Decide with 17, which is the same want one level up — one navigation grammar rather
+than a scatter.
+
+### 43. Freeze the script, not the whole page
+
+A cheaper freeze: stop a card's JavaScript and leave the page standing, instead of tearing the renderer
+down and putting a picture in its place. Per site, so the dashboard that is only worth having live stays
+live and the page that spins a timer forever does not.
+
+Open, and the first question is whether WebKit offers it at all: there is no public "suspend scripts" on
+`WKWebView`. What exists is media (`setAllMediaPlaybackSuspended`) and whatever WebKit does on its own
+for a view out of the window hierarchy, which is worth measuring before it is designed around —
+38 is the same question asked from the other end. If it exists it is a third state between live and
+frozen for `CanvasPageBudget`, where today there are two, and a per-site switch that belongs in 31's
+layer rather than in a preference of its own.
+
 ## Priority
 
-**Nothing reads as broken.** All three raised that day — 18, 19 and 22 — are fixed.
+**What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
+project moves the wrong window — reproduce it first, and say which surface), 42 (a dragged link
+carrying the previous one), 44 (the dragged picture landing off the snapped frame), 35 (a tile-shaped
+picture shown in a card). 18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
+wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
+and a file dropped on one to check the two rules the rewrite moved.
 
 **Waiting on one decision, which unblocks three gestures:** 3. The argument is written out and comes
 with a recommendation; what it needs is a yes or a no, not more thinking.
 
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
-up too often — and 6, what a dropped folder should make.
+up too often — 6, what a dropped folder should make — and 32, which now writes the frames it always
+read.
 
 **A page of its own, and it should come before the entries it absorbs:** 25, which takes 16 and 24
-with it.
+with it — and 37 (combining projects), which is not a board question at all: every one of its answers
+is about what happens to two notes files.
 
-**Then design first, then build:** 20 and 21 together, since handles and tabs are both how you grab a
-tile; 14 (pin and reorder links); 17 (the navigation grammar); 7 (tidy, the largest); 8 (the tile
-picker); 23 (Arc-style drag areas); 27 (size tools); 28 (saving a page); 29 (colour).
+**Wants designing before it is worth touching:** 30 — the header has no full-screen state, and that
+belongs on [header-chrome.md](header-chrome.md) with the others.
+
+**Then design first, then build:** 20, 21 and 36 together, since handles, tabs and which edge they sit
+on are all how you grab a tile; 14 (pin and reorder links); 17 with 41, which is the same want at two
+altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
+(saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
+40 (a second view of a card).
 
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
 
 **Research with a cheap first step:** 26 — the keep-this-card-running flag, which slots into a model
-that already exists.
+that already exists. 43 and 38 are the same research from two ends and should be done at once: what
+WebKit will let us suspend, and what the window server is doing that we are not.
+
+**Reading rather than building:** 33 — a pass over Craft, with the findings coming back as entries
+here.
 
 ## Open elsewhere
 

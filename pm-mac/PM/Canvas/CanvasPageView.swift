@@ -1,21 +1,34 @@
 import AppKit
 import WebKit
 
-/// A web card's page, which takes a drop only where the page has somewhere to put it.
+/// A web card's page, which is offered every drag before the board is.
 ///
-/// **WebKit's answer to a dragged link is to go to it.** A browser treats a link dropped on a page as a
-/// place to visit, and left to itself a card did the same — drag a link out of a page onto the board,
-/// let go a little early, and the card you dragged it out of had navigated away. A card is not that
-/// kind of browser. So a drop over a text field, a textarea or anything contenteditable is the page's,
-/// exactly as it would be in Safari, and a drop anywhere else on the page is `dropFallback`'s — the
-/// board, which makes a card of it. That is the rule every other card already follows: a text card
-/// takes a drop while its editor is open, because then there is somewhere to put it, and not otherwise.
+/// **The page decides first, and the board takes what the page declines.** While the pointer is inside
+/// a page, a drop is the page's business — and the page has a way of saying so that predates all of
+/// this: an element claims a drop by preventing the default on `dragover`. WebKit answers a drag with
+/// that decision, so asking it is asking the page.
 ///
-/// **What is under the pointer is the page's to say, and it says so asynchronously** — the page is in
-/// another process. So the answer trails the pointer by one round trip, a few milliseconds, and AppKit
-/// asks again on a timer while a drag holds still over a view, which is what lets the answer catch up
-/// without the pointer moving. Until the page has said yes the drag is the fallback's: a drop made
-/// before the first answer arrives makes a card, which is the outcome that can't lose anything.
+/// **This was the other way round, and it cost a whole class of gesture.** The board held every drag
+/// except one over somewhere to type, which meant a page's own drag — reordering a list, which is HTML5
+/// drag-and-drop and therefore a real dragging session — was taken from the page that started it.
+/// Where the board could make nothing of the payload it declined, and the drag was then refused by both:
+/// the page never saw a `dragover` and nothing happened at all. Figma's layer list could not be
+/// reordered inside a card, silently, and so could nothing else that reorders by dragging.
+///
+/// **Nothing is lost by asking first**, which is the part that had to be measured rather than assumed
+/// (`CanvasPageDragOriginTests`). WebKit answers `.none` over ordinary page and `.move` over an element
+/// that claimed the drop — for a link, a string and a page's own custom data alike — so a link let go
+/// over a page still falls through to the board and still becomes a card, or a tile beside the others.
+/// The hazard this file was built around, a card navigating to a link dropped on it, does not
+/// reproduce: a real `NSURL` dropped on a page with nothing to fall back on left it where it was.
+///
+/// It is **not** a faster answer. WebKit's first reply to a drag is an optimistic `.copy`, given before
+/// the web process has been consulted; its second is `.none`; only the third says what the page decided
+/// — measured for every payload in `CanvasPageDragOriginTests`. So this trails the pointer by a round
+/// trip exactly as the JavaScript question it replaces did, and for the same reason: the page is in
+/// another process. AppKit re-asks on a timer while a drag holds still, which is what lets the answer
+/// catch up without the pointer moving, and until it has, the board holds the drag — the outcome that
+/// can lose nothing, since it makes a card. See `route`.
 ///
 /// The two sides are told about the drag as it crosses between them — the one it leaves hears
 /// `draggingExited`, the one it reaches hears `draggingEntered` — so each sees an ordinary drag that
@@ -60,37 +73,43 @@ final class CanvasPageView: WKWebView {
     private enum Holder { case page, fallback }
     private var holder: Holder?
 
-    /// The page's latest answer to "is there somewhere to type under the pointer", and whether a
-    /// question is still out. One at a time: a drag produces updates far faster than a page answers
-    /// them, and a queue of stale questions would only delay the answer to the current one.
-    private var editableUnderPointer = false
-    private var asking = false
+    /// Whether WebKit has been told this drag arrived.
+    ///
+    /// Every drag is offered to the page, including the ones the board ends up holding, because the
+    /// page's answer is what decides between them and a destination that was never entered has no
+    /// answer to give. Kept so that the enter/update/exit sequence WebKit is owed stays well formed.
+    private var pageEntered = false
+
+    /// How many times WebKit has been asked about this drag. **The first answer is not an answer**: it
+    /// is `.copy` for everything, given before the page has been consulted, and taken at face value it
+    /// hands the page every drag that has only just arrived. See `route`.
+    private var pageAsks = 0
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         holder = nil
-        editableUnderPointer = false
-        ask(about: sender)
+        pageEntered = false
+        pageAsks = 0
         return route(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        ask(about: sender)
-        return route(sender)
+        route(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        switch holder {
-        case .page: super.draggingExited(sender)
-        case .fallback: dropFallback?.draggingExited(sender)
-        case nil: break
-        }
+        if holder == .fallback { dropFallback?.draggingExited(sender) }
+        leavePage(sender)
         holder = nil
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
         switch holder {
         case .page: return super.prepareForDragOperation(sender)
-        case .fallback: return dropFallback?.prepareForDragOperation(sender) ?? false
+        case .fallback:
+            // The board is about to take this one, so the page is told the drag has gone rather than
+            // left mid-drag with an indicator up for a drop that will never arrive.
+            leavePage(sender)
+            return dropFallback?.prepareForDragOperation(sender) ?? false
         case nil: return false
         }
     }
@@ -110,6 +129,8 @@ final class CanvasPageView: WKWebView {
         case nil: break
         }
         holder = nil
+        pageEntered = false
+        pageAsks = 0
     }
 
     /// AppKit asks the destination for new images once a drop there looks likely. The page has none of
@@ -120,22 +141,59 @@ final class CanvasPageView: WKWebView {
         (dropFallback as NSDraggingDestination?)?.updateDraggingItemsForDrag?(sender)
     }
 
-    /// Hand the drag to whichever side the page's latest answer says, telling each about the crossing.
+    /// Who holds the drag: **the page, wherever the page claims it; the board everywhere else.**
+    ///
+    /// The page is asked by being told. There is no way to read "does anything here want this drop"
+    /// out of a page without handing the drag to it — the answer *is* what its `dragover` handlers do
+    /// — so WebKit is given every drag and its answer is the vote. An empty answer means nothing under
+    /// the pointer claimed the drop, and the board takes it from there.
+    ///
+    /// Two cases are the page's whatever WebKit says. **A page with no board behind it** holds
+    /// everything, since there is nowhere else for a drop to go. And **files on a page you are working
+    /// in** are the page's wherever they land — `pageTakesFiles` is a rule about the card, not about
+    /// what is under the pointer, so a file dropped on Figma goes into Figma rather than becoming a
+    /// card beside it.
+    ///
+    /// Only the board is crossed in and out of here. The page is entered once and kept entered for as
+    /// long as the drag is over this view, because it has to go on being asked: the pointer moves onto
+    /// a drop target and off it again, and a page that had been told the drag left would answer for a
+    /// drag it no longer believes in. Answering `.copy` and then `.none` on the way to the real answer
+    /// is also why the board can be given a drag, lose it and be given it back within a few frames —
+    /// each of those is a real crossing, and it is told about all of them.
     private func route(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let wanted: Holder = editableUnderPointer || dropFallback == nil || carriesFilesForPage(sender)
+        let answer = pageEntered ? super.draggingUpdated(sender) : enterPage(sender)
+        pageAsks += 1
+        // The first reply is `.copy` whatever is under the pointer and whatever the drag carries, since
+        // the page has not been asked at that point. Routing on it would give the page every drag for
+        // the first moment of its life, including every one it is about to decline.
+        let pageWants = pageAsks > 1 ? answer : []
+        let wanted: Holder = !pageWants.isEmpty || dropFallback == nil || carriesFilesForPage(sender)
             ? .page : .fallback
-        if holder == wanted {
-            return wanted == .page ? super.draggingUpdated(sender)
-                                   : dropFallback?.draggingUpdated(sender) ?? []
+        if wanted == .page {
+            if holder == .fallback { dropFallback?.draggingExited(sender) }
+            holder = .page
+            // WebKit's own answer, not the filtered one: what the first reply is held back from is the
+            // decision about who holds the drag, not what AppKit is told about it. A page holding a
+            // drag because there is nowhere else for it to go still answers for itself.
+            return answer
         }
-        switch holder {
-        case .page: super.draggingExited(sender)
-        case .fallback: dropFallback?.draggingExited(sender)
-        case nil: break
-        }
-        holder = wanted
-        return wanted == .page ? super.draggingEntered(sender)
-                               : dropFallback?.draggingEntered(sender) ?? []
+        let crossing = holder != .fallback
+        holder = .fallback
+        return (crossing ? dropFallback?.draggingEntered(sender)
+                         : dropFallback?.draggingUpdated(sender)) ?? []
+    }
+
+    /// Tell WebKit the drag has arrived, once per drag.
+    private func enterPage(_ sender: NSDraggingInfo) -> NSDragOperation {
+        pageEntered = true
+        return super.draggingEntered(sender)
+    }
+
+    /// Tell WebKit the drag has gone, if it was ever told it arrived.
+    private func leavePage(_ sender: NSDraggingInfo?) {
+        guard pageEntered else { return }
+        pageEntered = false
+        super.draggingExited(sender)
     }
 
     /// Files, over a page that is where you are working. See `CanvasPageLinkHost.pageTakesFiles`.
@@ -145,18 +203,12 @@ final class CanvasPageView: WKWebView {
                                                        options: [.urlReadingFileURLsOnly: true])
     }
 
-    private func ask(about sender: NSDraggingInfo) {
-        guard !asking, dropFallback != nil else { return }
-        asking = true
-        let point = convert(sender.draggingLocation, from: nil)
-        Task { [weak self] in
-            guard let self else { return }
-            editableUnderPointer = await acceptsTyping(at: point)
-            asking = false
-        }
-    }
-
     /// Whether the page has somewhere to type at `point`, in this view's coordinates.
+    ///
+    /// **Nothing routes on this any more.** It was how a drop decided between the page and the board,
+    /// and WebKit's own answer to a drag says the same thing better and synchronously — see `route`.
+    /// Kept because the question is a real one and is asked again by backlog 23, where a top band with
+    /// nothing interactive under it is what makes a page's header somewhere to grab the window.
     ///
     /// Asked in the app's own script world, so the page can neither see the question nor answer it in
     /// place of the browser. Into open shadow roots, because a component's text field is a text field;

@@ -32,12 +32,18 @@ final class CanvasPageViewTests: XCTestCase {
            style="position:absolute;left:300px;top:360px;width:200px;height:30px"
            ><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
                  style="width:100%;height:30px"></a>
-        <script>window.ready = true</script>
+        <div id="zone" style="position:absolute;left:210px;top:150px;width:80px;height:60px">zone</div>
+        <script>
+        document.getElementById('zone').addEventListener('dragover', (e) => e.preventDefault());
+        window.ready = true
+        </script>
         </body></html>
         """
 
     private let textarea = NSPoint(x: 100, y: 50)
     private let paragraph = NSPoint(x: 400, y: 50)
+    /// The page's own drop zone: the one place on this page that claims a drop.
+    private let zone = NSPoint(x: 250, y: 180)
     private let link = NSPoint(x: 100, y: 375)
     private let iconLink = NSPoint(x: 400, y: 375)
 
@@ -166,32 +172,90 @@ final class CanvasPageViewTests: XCTestCase {
 
     // MARK: Who gets the drag
 
-    func testADropAwayFromAFieldIsTheBoards() {
-        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window)
-        XCTAssertEqual(page.draggingEntered(drag), .copy)
-        XCTAssertTrue(page.performDragOperation(drag))
-        XCTAssertEqual(board.calls, ["entered", "performed"])
+    // The four rows of the rule, in one place. The page is offered every drag and the board takes what
+    // the page declines, so what decides each of these is whether anything on the page claimed the drop.
+
+    /// **A drag the page claims is the page's.** The zone prevents the default on `dragover`, which is
+    /// how an element says a drop is its own — this is the row the old rule got wrong, and the reason a
+    /// layer list could not be reordered inside a card: HTML5 drag-and-drop is a real dragging session,
+    /// and the board was taking it off the page that started it.
+    func testADragThePageClaimsIsThePages() async throws {
+        let drag = FakeDrag(at: page.convert(zone, to: nil), in: window, carrying: Self.webCustomData)
+        _ = page.draggingEntered(drag)
+        // "exited" is the board being told it has lost the drag, which is the page claiming it. Waiting
+        // for merely "not entered" would stop one ask early, on WebKit's `.none` second reply.
+        try await settle(drag, until: "the page claims it") { self.board.calls.last == "exited" }
+        _ = page.prepareForDragOperation(drag)
+        _ = page.performDragOperation(drag)
+        XCTAssertFalse(board.calls.contains("performed"), "the board was given a drop the page claimed")
     }
 
-    /// Until the page has answered, the drag is the board's; once it says there is a field under the
-    /// pointer, the board is told the drag has left it, and moving off the field brings it back.
-    func testTheDragCrossesToThePageOverAFieldAndBack() async throws {
-        let drag = FakeDrag(at: page.convert(textarea, to: nil), in: window)
+    /// **A link let go over ordinary page is the board's**, and becomes a card. Nothing on the page
+    /// claims it, so asking the page first costs the board nothing — which is the whole case for asking.
+    func testADropAwayFromAnythingThatClaimsItIsTheBoards() async throws {
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window)
         _ = page.draggingEntered(drag)
-        XCTAssertEqual(board.calls, ["entered"], "the board holds the drag before the page has answered")
-
-        try await until("the page takes the drag") {
-            _ = self.page.draggingUpdated(drag)
-            return self.board.calls.last == "exited"
-        }
-
-        drag.draggingLocation = page.convert(paragraph, to: nil)
-        try await until("the board takes it back") {
-            _ = self.page.draggingUpdated(drag)
-            return self.board.calls.last == "entered" || self.board.calls.last == "updated"
-        }
+        try await settle(drag, until: "the board holds it") { self.board.calls.last != nil }
+        XCTAssertTrue(page.prepareForDragOperation(drag))
         XCTAssertTrue(page.performDragOperation(drag))
         XCTAssertEqual(board.calls.last, "performed")
+    }
+
+    /// **A drop over a field is the page's.** The old rule reached the same answer by asking the page in
+    /// JavaScript; this one is WebKit answering for its own fields, which also covers the ones a script
+    /// built and the ones inside a shadow root.
+    func testADropOverAFieldIsThePages() async throws {
+        let drag = FakeDrag(at: page.convert(textarea, to: nil), in: window)
+        _ = page.draggingEntered(drag)
+        try await settle(drag, until: "the page claims the field") { self.board.calls.last == "exited" }
+        _ = page.prepareForDragOperation(drag)
+        _ = page.performDragOperation(drag)
+        XCTAssertFalse(board.calls.contains("performed"), "the board was given a drop over a field")
+    }
+
+    /// **A drop made before any of that has settled is the board's.** WebKit's first reply is an
+    /// optimistic `.copy` for everything, so the answer is not worth anything until the page has
+    /// actually been asked — and while it is unknown the drag belongs to the side that can make a card
+    /// of it rather than the side that may be about to refuse it.
+    func testADropInTheFirstFrameIsTheBoards() {
+        let drag = FakeDrag(at: page.convert(zone, to: nil), in: window, carrying: Self.webCustomData)
+        XCTAssertEqual(page.draggingEntered(drag), .copy)
+        XCTAssertEqual(board.calls, ["entered"], "the page was given a drag on WebKit's first reply")
+    }
+
+    /// Crossing works in both directions within the one page: onto something that claims the drop and
+    /// back off it, with the board told each time it gains or loses the drag.
+    func testTheDragCrossesBetweenThePageAndTheBoard() async throws {
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window)
+        _ = page.draggingEntered(drag)
+        try await settle(drag, until: "the board holds it") { self.board.calls.last != nil }
+
+        drag.draggingLocation = page.convert(zone, to: nil)
+        try await settle(drag, until: "the page takes it") { self.board.calls.last == "exited" }
+
+        drag.draggingLocation = page.convert(paragraph, to: nil)
+        try await settle(drag, until: "the board takes it back") { self.board.calls.last == "entered" }
+        XCTAssertTrue(page.performDragOperation(drag))
+        XCTAssertEqual(board.calls.last, "performed")
+    }
+
+    /// Keep the drag alive the way AppKit does — it re-asks on a timer while a drag holds still — until
+    /// `done`, since the page's answer arrives a round trip after the question.
+    private func settle(_ drag: NSDraggingInfo, until what: String, _ done: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !done() {
+            guard Date() < deadline else { return XCTFail("timed out waiting for \(what)") }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            _ = page.draggingUpdated(drag)
+        }
+    }
+
+    /// What a page's own script puts on a drag: WebKit's custom data, and nothing a board can read.
+    private static var webCustomData: NSPasteboardItem {
+        let item = NSPasteboardItem()
+        item.setString("grabbed",
+                       forType: NSPasteboard.PasteboardType("com.apple.WebKit.custom-pasteboard-data"))
+        return item
     }
 
     // MARK: Files, on a page you are working in
@@ -217,7 +281,8 @@ final class CanvasPageViewTests: XCTestCase {
         XCTAssertEqual(board.calls, ["entered"])
     }
 
-    /// Only files: a link dragged over a tile still makes a card, since links are what a board is made of.
+    /// **A link dropped on a tile is still the board's**, and goes up as a tile beside the others —
+    /// the fourth row of the rule above. Only files are the page's wherever they land.
     func testALinkIsStillTheBoardsOnAPageThatTakesFiles() {
         let host = MenuHost()
         host.pageTakesFiles = true

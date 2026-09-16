@@ -42,7 +42,6 @@ final class WindowManager {
         let controller = makeController(projectKey: projectKey, canvas: canvas)
         controllers.append(controller)
         Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
-        rememberOpenProjects()
         if let frame, !frame.isEmpty, let window = controller.window {
             // Where it was last time — set before it is shown, so it doesn't open in one place and jump.
             window.setFrame(from: frame)
@@ -54,6 +53,9 @@ final class WindowManager {
             new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
         }
         controller.show()
+        // After the window has been placed, not before: this records where every window is, and a
+        // window asked before it has been given its frame answers with the one it was made at.
+        rememberOpenProjects()
         // **A window with no project has one thing to offer, so it offers it.** This used to open onto
         // a sentence saying "No focused project" and telling you which key would take you somewhere;
         // the list of projects is right there in the same window, and revealing it with the keyboard in
@@ -239,8 +241,26 @@ final class WindowManager {
         }
     }
 
+    /// The windows that are open, and where each one is, for the next launch.
+    ///
+    /// **Both lists in one pass, index for index.** `restoreOnLaunch` pairs a key with the frame at the
+    /// same position, so the two have to be filtered by one rule: a window with no project leaves both
+    /// lists or neither. Built here rather than as two `compactMap`s for exactly that reason — two
+    /// passes over the same array is two chances for the filters to drift apart, and the failure would
+    /// be silent and off by one.
+    ///
+    /// The frames were read on launch and never written, which is why every restored window came back
+    /// at whatever the `PMProject` autosave last held — one frame for all of them — rather than where
+    /// it was. See `ProjectWindowController.init` for why that autosave belongs to one window only.
     private func rememberOpenProjects() {
-        WindowSettings.shared.openProjectKeys = controllers.compactMap(\.projectKey)
+        let open = controllers.compactMap { controller -> (key: String, frame: String)? in
+            guard let key = controller.projectKey else { return nil }
+            // Empty where there is no window to ask yet. `restoreOnLaunch` reads that as "no frame" and
+            // places the window the ordinary way.
+            return (key, controller.window?.frameDescriptor ?? "")
+        }
+        WindowSettings.shared.openProjectKeys = open.map(\.key)
+        WindowSettings.shared.openWindowFrames = open.map(\.frame)
     }
 
     // MARK: Broadcasts
