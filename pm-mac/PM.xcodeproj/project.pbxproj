@@ -256,6 +256,7 @@
 		BCDB9FA4597D3182C47B6BDF /* SymbolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CF06385083F7356F9004AC /* SymbolCatalog.swift */; };
 		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
 		BD9B0642122BF6D6218ED08C /* CanvasAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7F4236A54907ECC9B1FDC3 /* CanvasAddress.swift */; };
+		BE241853058C8E947E918C73 /* SidebarRevealTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FDEBEBB7BAD06A19EBECE9 /* SidebarRevealTests.swift */; };
 		BEB4CF7584726844196CBAE6 /* CanvasPageTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F80FCC39BBAEBAD37D8F60 /* CanvasPageTitles.swift */; };
 		BF52B7D3FF969F904F67C091 /* CompletionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 670B4F39D9D0E21DA47ABAD9 /* CompletionController.swift */; };
 		BF85FC31F04BE19EA84467C4 /* FocusPanelChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62961DC25E3A42B6B0C38D7A /* FocusPanelChrome.swift */; };
@@ -503,6 +504,7 @@
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelController.swift; sourceTree = "<group>"; };
 		90BB9DDD079FFA1FD9822C54 /* CoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoalescerTests.swift; sourceTree = "<group>"; };
+		95FDEBEBB7BAD06A19EBECE9 /* SidebarRevealTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRevealTests.swift; sourceTree = "<group>"; };
 		968289B8E6C1C7232AF29218 /* TaskViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewHelpers.swift; sourceTree = "<group>"; };
 		969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorClipboardTests.swift; sourceTree = "<group>"; };
 		96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutsideClick.swift; sourceTree = "<group>"; };
@@ -1045,6 +1047,7 @@
 				33D362AFFD95C30D91955273 /* ScrollEdgeEffectTests.swift */,
 				57FE97DA6867B5C37159607B /* SessionBlocksTests.swift */,
 				A683751482352094B3CF8AC6 /* SidebarClickTests.swift */,
+				95FDEBEBB7BAD06A19EBECE9 /* SidebarRevealTests.swift */,
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
 				CD9C0FB324B53991D5DEEEB1 /* TabBarGrowthTests.swift */,
 				CF7D1664371AF585E7945B80 /* TabDragTests.swift */,
@@ -1516,6 +1519,7 @@
 				8FF818DB758A9E27ECC9A3A6 /* SessionBlocks.swift in Sources */,
 				5DAA840B013EE45FDD2AE38E /* SessionBlocksTests.swift in Sources */,
 				2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */,
+				BE241853058C8E947E918C73 /* SidebarRevealTests.swift in Sources */,
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				31AD6AAB106EC029FD8151CE /* TabBarGrowthTests.swift in Sources */,
 				F762E435E788D3F0722C1D73 /* TabDragTests.swift in Sources */,

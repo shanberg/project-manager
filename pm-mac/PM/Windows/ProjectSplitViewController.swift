@@ -147,6 +147,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.state.sidebarVisible = !item.isCollapsed
+                if !item.isCollapsed { self.collapsedByToggle = false }
                 self.syncProjectScan()
                 // With the sidebar showing, the traffic lights sit over *it* and a board in the content
                 // column needs no inset of its own — the same rule the task column's header follows.
@@ -212,6 +213,19 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Whether the sidebar is hidden because the window ran out of room for it, rather than because
     /// somebody asked for it to be hidden. Only the former comes back on its own.
     private var sidebarHiddenForWidth = false
+
+    /// Whether the sidebar was last collapsed by the animated toggle. Only then can showing it animate.
+    ///
+    /// Every other way it collapses is direct — a window opening with it hidden, the auto-hide, a
+    /// divider dragged to the edge — and AppKit's animated reveal of a pane collapsed that way leaves the
+    /// item expanded and its pane zero points wide: the sidebar doesn't come, and all that moves is the
+    /// task column, by its safe-area inset. It was how every second window's sidebar looked broken,
+    /// because only a session's first window opens with it showing. Shown directly once, the pane
+    /// animates both ways as normal. `SidebarRevealTests` holds the defect and the way round it.
+    ///
+    /// Set on the toggle's way to hiding and cleared whenever the pane shows, so the default — any
+    /// collapse nobody here animated — is the safe one.
+    private var collapsedByToggle = false
 
     /// Watches the split view's own resizes — see `syncSidebarForAvailableWidth`.
     private var resizeObservation: NSObjectProtocol?
@@ -849,6 +863,16 @@ final class ProjectSplitViewController: NSSplitViewController {
         sidebarHiddenForWidth = false
         if sidebarItem.isCollapsed { makeRoomForSidebar() }
 
+        // Hidden some way other than this toggle, so it can't animate back — see `collapsedByToggle`.
+        // No `sidebarAnimating` either: there is no slide for the sidebar to pin its layout through.
+        if sidebarItem.isCollapsed, !collapsedByToggle {
+            sidebarItem.isCollapsed = false
+            splitView.layoutSubtreeIfNeeded()
+            recordSidebarWidth()
+            UserDefaults.standard.set(true, forKey: ProjectWindow.sidebarDefaultsKey)
+            return
+        }
+
         // Set before the animation starts, cleared once it's over: the sidebar only pins its layout and
         // clips while it's actually moving (see `ProjectSidebar`). The width it pins *to* is read here,
         // while the pane is still at rest — a collapsed item keeps its last width, so this is the width
@@ -866,6 +890,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         // actually ends. Re-entrancy is safe: a second toggle mid-flight starts its own group, and the
         // first group's completion sets the flag the second one has already re-raised, so the token
         // check keeps the stale completion from clearing it early.
+        collapsedByToggle = !sidebarItem.isCollapsed
         settleToken &+= 1
         let token = settleToken
         NSAnimationContext.runAnimationGroup { _ in
