@@ -343,13 +343,6 @@ Open: per tile, per workspace, or a setting; how wide a vertical strip is and wh
 favicon alone, or an icon and a truncated name); and what a tile too short for its tabs does. Decide
 with 20 and 21 — the strip is also how you grab a tile, and moving it moves the handle question too.
 
-### 37. Combining projects — **master built, merge waits**
-
-A project made of projects is built: a member names its master in frontmatter, the master lists them
-under Projects and rolls their numbers up, one level only. Folding one project into another is decided in
-outline and not built. Both live on [combining-projects.md](combining-projects.md); what the merge still
-needs is G1–G4 there.
-
 ### 38. What macOS's compositor does that our freeze doesn't
 
 Moving around the system, windows keep their content: switch a Space, unhide an app, come back from
@@ -421,9 +414,6 @@ and a file dropped on one to check the two rules the rewrite moved.
 up too often — and 32, which now writes the frames it always
 read.
 
-**A page of its own:** 37's merge, on [combining-projects.md](combining-projects.md) — the master half is
-built.
-
 **Then design first, then build:** 20, 21 and 36 together, since handles, tabs and which edge they sit
 on are all how you grab a tile; 14 (pin and reorder links); 17 with 41, which is the same want at two
 altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
@@ -480,6 +470,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
+| 37 | combining projects: a master, and a merge | **Master built, 2026-09-16** — a member names its master in `pm-part-of`, one level, rolled up on the card and in the sidebar ([combining-projects.md](combining-projects.md)). **The merge was dropped** the same day, undecided |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |

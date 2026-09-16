@@ -1,6 +1,7 @@
 # Combining projects
 
-**Status:** the master is built, 2026-09-16 — backlog 37; the merge is decided in outline and waits.
+**Status:** the master is built, 2026-09-16 — backlog 37. The merge was dropped the same day; what was
+decided about it is kept below in case it comes back.
 Two asks with one shape: a project made of projects (a *master*), and folding one project into another
 (a *merge*).
 
@@ -61,7 +62,9 @@ it is archived. The same numbers `ProjectIndex` already has for the sidebar.
 - **M5 — how it is set.** `project.setPartOf` (`partOf`, or `clearPartOf`), `project.get` answering
   `partOf` and `members`, `pm part-of`, and a Part Of… item on a project's menu. Areas can be either.
 
-## Folding one project into another
+## Folding one project into another — dropped
+
+Taken off the backlog on 2026-09-16 with G1–G4 unsettled. Not built.
 
 ### Taken
 
@@ -72,7 +75,7 @@ it is archived. The same numbers `ProjectIndex` already has for the sidebar.
 - **A is archived, not deleted.** Its folder stays in the archive with a note at the top saying where
   its work went, so a `[[A]]` written anywhere still resolves to something that says so.
 
-### Open, for when it is built
+### Open, when it was dropped
 
 - **G1 — the framing callouts.** A's summary, problem, goals and approach appended under B's with a
   `from A` line, or left in the archived A and linked.
