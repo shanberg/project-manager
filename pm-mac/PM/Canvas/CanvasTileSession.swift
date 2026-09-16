@@ -79,19 +79,39 @@ struct CanvasTileSession: Equatable {
     /// right — which across a grid is not the columns' order.
     ///
     /// What re-arranging deals out, so that switching a grid to a master and stack keeps the card you
-    /// read first as the master rather than handing it the first *column*; and what an older build is
-    /// given to lay out its own way (`memory`).
+    /// read first as the master rather than handing it the first *column*; what ⌃1…9 numbers the tiles
+    /// by, and what an older build is given to lay out its own way (`memory`).
+    ///
+    /// **Each tile's own top-left corner decides where it comes, and nothing about the other tiles
+    /// does.** This used to ask `CanvasTiling.order`, which is the board's rule and right for a board:
+    /// scattered cards have no rows, so it invents them — a band as tall as the median card, measured
+    /// from each card's middle. Tiles are not scattered. They are laid out in columns, so their rows
+    /// are a fact and reading them off the top edges is exact, and two things went wrong from treating
+    /// them as a scatter. A tall tile's *middle* is level with nothing in particular, so a full-height
+    /// tile banded with whichever short tiles happened to sit across its midpoint rather than with the
+    /// tiles beside it at the top: a plain grid of four already read top-left, bottom-left, top-middle,
+    /// top-right. And the band came from the median of the heights, so **adding one tile changed what
+    /// counted as a row for tiles that had not moved at all** — which is canvas-backlog.md 18. Ordering
+    /// on each tile's own corner cannot do that: a tile that has not moved cannot change places with
+    /// another tile that has not moved, whatever else arrives or leaves.
+    ///
+    /// The worst of it was not the numbering. `setArrangement` deals this out, so a master and stack
+    /// nobody had touched — whose master is full height, and so whose middle is level with the middle
+    /// of the stack rather than the top of it — read its first stack tile first, and running Master and
+    /// Stack on it again promoted the wrong card. Both are pinned in `CanvasTileOrderTests`.
     var readingOrder: [CanvasTiling.Tile] {
-        let frames = CanvasTiling.frames(of: columns, in: area)
-        var placed: [String: CanvasTiling.Tile] = [:]
-        var rects: [(id: String, frame: CanvasRect)] = []
-        for (column, rows) in zip(columns, frames) {
-            for (tile, frame) in zip(column.tiles, rows) {
-                placed[tile.shown] = tile
-                rects.append((tile.shown, frame))
-            }
+        var placed: [(tile: CanvasTiling.Tile, frame: CanvasRect)] = []
+        for (column, rows) in zip(columns, CanvasTiling.frames(of: columns, in: area)) {
+            for (tile, frame) in zip(column.tiles, rows) { placed.append((tile, frame)) }
         }
-        return CanvasTiling.order(rects).compactMap { placed[$0] }
+        // Lexicographic on (top, left, where it sits in the columns) — a total order, so the sort is
+        // given the strict weak ordering it requires and the answer is the same every time.
+        return placed.enumerated().sorted { one, two in
+            let (a, b) = (one.element.frame, two.element.frame)
+            if a.minY != b.minY { return a.minY < b.minY }
+            if a.minX != b.minX { return a.minX < b.minX }
+            return one.offset < two.offset
+        }.map(\.element.tile)
     }
 
     /// The tile filling the room, if the one named is still here to fill it.

@@ -32,16 +32,6 @@ derive, and it is a stronger setting than it was now that the mark is at one opa
 is up: everything inside 48 is drawn at full strength. Drag a few cards around a real board and say
 whether the offer is up too often.
 
-### 18. Adding a tile disorders the workspace
-
-Adding a tile — "or similar": swapping, pulling a tab out — often leaves the other tiles in a different
-order from the one they were in. Not yet reproduced on purpose.
-
-Where to look: where the new card goes is decided in `CanvasTileSession` and argued in
-[canvas-workspaces.md](canvas-workspaces.md) §7k *Where the next card goes*; the saved arrangement is
-`CanvasViewState.Tiling`. The first question is whether the order is wrong in the saved workspace or
-only on screen — if a reopened workspace comes back in the right order, this is layout, not the model.
-
 ## Features
 
 ### 3. The modifiers a board is missing, and the one collision under all of them
@@ -299,9 +289,7 @@ the window's accent. The HIG's line on accent colours versus content colours is 
 
 ## Priority
 
-**One thing still reads as broken**: 18 (tiles disordered on add), and it wants a reproduction
-before anyone reads code for it — the first question is whether the order is wrong in the saved
-workspace or only on screen. The other two raised that day, 19 and 22, are fixed.
+**Nothing reads as broken.** All three raised that day — 18, 19 and 22 — are fixed.
 
 **Waiting on one decision, which unblocks three gestures:** 3. The argument is written out and comes
 with a recommendation; what it needs is a yes or a no, not more thinking.
@@ -355,6 +343,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |
 | 13 | offer the project's own links when adding a web card | **Built, 2026-09-15.** `CanvasLinkSuggestions` turns the combo box on when the current project has links — the engaged card if one is stepped into, else the board's own (canvas-workspaces §5). The mirror half, putting the page you are on into `## Links`, is in [web-cards.md](web-cards.md) |
+| 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |
