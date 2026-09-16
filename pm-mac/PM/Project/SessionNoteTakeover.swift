@@ -61,45 +61,15 @@ private struct SoftHeaderScrim: View {
 /// The label is edited here, in the header, rather than behind a gesture out in the list. This is where
 /// you already are when you're working on a session, it's the one place the label is shown next to the
 /// date it decorates, and it means the list doesn't need a second double-click meaning of its own.
-/// The clearance a takeover's header needs where it is standing — see `SessionNoteTakeover.Placement`.
-///
-/// A modifier rather than a branch in the header itself, so the two hosts differ in one named place
-/// instead of putting an `if` through the middle of a view that is otherwise identical in both.
-private struct SessionNoteHeaderInset: ViewModifier {
-    let placement: SessionNoteTakeover.Placement
-
-    @ViewBuilder func body(content: Content) -> some View {
-        switch placement {
-        case .titlebar(let state):
-            content.modifier(TitlebarClearance(state: state, bottom: 8))
-        case .card:
-            // The card's own gutter, and the same 8pt below the header the window leaves — this stands
-            // over the editor rather than above it either way, so the gap is the editor's top inset.
-            content.padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 8)
-        }
-    }
-}
-
-/// **Not private, because a project card hosts it too.** A board is a place you work, so writing a note
-/// happens where you are rather than in the window you would have had to go to — and a card that grew
-/// its own editor would be a lookalike of this one, drifting from it a fix at a time. The two couplings
-/// to a window are parameters instead: where the header stands, and what opens a `[[project]]`.
+/// **A project card's note editor.** It was the window's until the window's list became a board tiled to
+/// the project's card (canvas-workspaces §7d), and it kept one host rather than growing a lookalike —
+/// the placement it took for standing in a titlebar went with the list (docs/tile-sessions.md D5).
+/// What opens a `[[project]]` is a parameter, since that is the host's to decide.
 struct SessionNoteTakeover: View {
-    /// Where this takeover is standing, which is the only thing that differs between the two hosts.
-    ///
-    /// In a window the header shares the titlebar strip with the task column's, under the same traffic
-    /// lights, and insets itself from the same measurements. A card has no titlebar and no buttons to
-    /// clear, so there the header is simply a header.
-    enum Placement {
-        case titlebar(ProjectWindowState)
-        case card
-    }
-
     let index: Int
     let session: Session
     let projectName: String
     var store: PMStore
-    let placement: Placement
     /// Follows a `[[Project]]` out of the note — the window's sidebar in one host, the board's
     /// open-project in the other.
     let onOpenProject: (String) -> Void
@@ -140,7 +110,7 @@ struct SessionNoteTakeover: View {
     @Environment(\.controlActiveState) private var controlActiveState
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
-         placement: Placement, onOpenProject: @escaping (String) -> Void,
+         onOpenProject: @escaping (String) -> Void,
          onBack: @escaping () -> Void, startsAt: NSRange? = nil,
          onSelectionChange: ((NSRange) -> Void)? = nil) {
         self.startsAt = startsAt
@@ -149,7 +119,6 @@ struct SessionNoteTakeover: View {
         self.session = session
         self.projectName = projectName
         self.store = store
-        self.placement = placement
         self.onOpenProject = onOpenProject
         self.onBack = onBack
         _text = State(initialValue: sessionNoteBody(body: session.body))
@@ -232,7 +201,9 @@ struct SessionNoteTakeover: View {
             Spacer(minLength: 12)
         }
         .opacity(chrome.contentOpacity)
-        .modifier(SessionNoteHeaderInset(placement: placement))
+        // The card's own gutter, and 8pt below: the header stands over the editor rather than above
+        // it, so the gap is the editor's top inset.
+        .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 8)
         .animation(.easeOut(duration: 0.18), value: controlActiveState)
     }
 
@@ -416,104 +387,4 @@ struct SessionNoteTakeover: View {
         // now is, or a second commit from this same editor would be refused as stale.
         ref.digest = sessionDigest(trimmed)
     }
-}
-
-/// Insets a header that runs up under the window's (hidden, transparent) titlebar so it clears the
-/// traffic lights and sits level with them.
-///
-/// Every header this column can show wears this — the task list's and the session-note takeover's —
-/// because they occupy the same strip and swap places. Hard-coding the padding in one of them is how
-/// the takeover's title ended up under the buttons on macOS 26, where the unified titlebar sits them
-/// lower than the compact one this app started against.
-private struct TitlebarClearance: ViewModifier {
-    var state: ProjectWindowState
-    /// The gap below the header. The task list's is fenced off by a rule, the takeover's by a divider
-    /// tight to the editor, so they don't want the same one.
-    var bottom: CGFloat = 14
-
-    /// The column's own offset within its pane — zero until the width cap starts centring it in a wide
-    /// window.
-    @State private var columnOffsetInPane: CGFloat = 0
-
-    /// The header's measured height. Seeded at one `.title3` line, which is the task list's header, so
-    /// the first frame lands where it will settle rather than jumping.
-    @State private var contentHeight: CGFloat = 22
-
-    /// How much of the window's traffic lights this column sits under.
-    private var overhang: CGFloat {
-        guard !state.sidebarVisible else { return 0 }
-        return max(0, state.leadingTitlebarInset - columnOffsetInPane)
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.trailing, 14)
-            // Start past the traffic lights, but only by however much they actually overhang this
-            // column.
-            //
-            // Two things decide that. The sidebar, when it's showing, holds the buttons over *itself*,
-            // so the column needs no inset at all. And once the window is wide enough that the width
-            // cap has centred the column, it may already begin clear of them — so a fixed inset would
-            // shove the title 60-odd points further right for no reason.
-            //
-            // The inset is animated because the sidebar's collapse is: the flag flips in one frame
-            // while the pane takes a quarter second to slide, and an unanimated jump in the middle of
-            // that is the reflow this used to show on every toggle.
-            .padding(.leading, 14 + overhang)
-            // Measured *outside* the padding above, so it reports the column's own leading edge within
-            // its pane and can't feed back into the value it produces. Pane-local is all that's
-            // available — each pane's SwiftUI content is its own coordinate root — but pane-local is
-            // also all that's needed, given the sidebar case is settled by the flag.
-            .background(GeometryReader { geo in
-                Color.clear
-                    .preference(key: HeaderOriginKey.self, value: geo.frame(in: .global).minX)
-                    // Height is measured here too, and this is the right place for it: horizontal
-                    // padding doesn't change it, and the vertical padding that consumes it is applied
-                    // below, so it can't feed back either.
-                    .preference(key: HeaderHeightKey.self, value: geo.size.height)
-            })
-            .onPreferenceChange(HeaderOriginKey.self) { if let x = $0 { columnOffsetInPane = x } }
-            .onPreferenceChange(HeaderHeightKey.self) { if let h = $0, h > 0 { contentHeight = h } }
-            .animation(.easeInOut(duration: 0.25), value: overhang)
-            // Centre the header on the traffic lights, wherever the system has put them — the unified
-            // titlebar this window uses sits them twice as far down as a compact one would, and
-            // hard-coding either number means the header is level in one and adrift in the other.
-            //
-            // Centred on the header's *measured* height, not on half a title line. Both headers that
-            // wear this are laid out by it, and they aren't the same height: the task list's is one
-            // `.title3` line, while the note takeover's is a two-line stack (project name over the
-            // session's date). A fixed half-line centres whichever one it was written for and hangs the
-            // other below the buttons — which is what the takeover's header was doing.
-            // Floored at zero, not at 8. The floor used to be 8pt of guaranteed top margin, which
-            // quietly stopped being a floor and started being the answer: the note takeover's header is
-            // a two-line pill, tall enough that centring it on the buttons wants about 4pt of top
-            // padding, so the clamp held it ~4pt below the traffic lights it was supposed to be level
-            // with. A header taller than twice the button drop is *meant* to reach further up — that's
-            // what centring on a line means — and zero is the only floor that says so.
-            .padding(.top, max(0, state.titlebarButtonCenterY - contentHeight / 2))
-            .padding(.bottom, bottom)
-    }
-}
-
-/// The content column's leading edge in window space, so the header can tell how much of the window's
-/// traffic lights it actually sits under.
-/// Optional, and reduced by "first one that actually reported", for the reason spelled out on
-/// `BarHeightKey`: these are read across a view and its `.background`, so one of the two subtrees sets
-/// a real measurement and the other sets nothing. With a plain value and `value = nextValue()`, the
-/// subtree that reduces last wins — and when that was the non-reporting one, the answer was the
-/// default. `nil` for "didn't measure" makes non-reporters skippable, so the single real measurement
-/// wins regardless of order.
-private struct HeaderOriginKey: PreferenceKey {
-    static var defaultValue: CGFloat?
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = value ?? nextValue() }
-}
-
-/// The header's own height, so its top padding can centre it on the traffic lights whatever it holds.
-///
-/// This one was silently broken by the reduction above: it defaulted to 22 — one `.title3` line — which
-/// is the task list header's height, so that header looked right and the note takeover's two-line header
-/// went on being centred as if it were one line, which is the bug measuring it was meant to fix.
-private struct HeaderHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat?
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = value ?? nextValue() }
 }

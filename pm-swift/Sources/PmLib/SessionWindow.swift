@@ -93,15 +93,20 @@ public struct CurrentSession: Equatable {
 ///
 /// `label`, when given, is used verbatim for a session this call starts and overrides the automatic
 /// time label — it's what `session.start` passes when the caller named the sitting.
+///
+/// `forcingNew` skips the window: a warm session is left alone and a new one is started beside it.
+/// Still not over an *empty* one, which is already new — only `session.start` asks for it, when
+/// someone said "new session" on purpose (⌥ New Session; docs/tile-sessions.md D1).
 public func currentSessionPreservingFormat(rawText: String, lastEdited: Date?, now: Date = Date(),
-                                           label: String? = nil) throws -> CurrentSession? {
+                                           label: String? = nil,
+                                           forcingNew: Bool = false) throws -> CurrentSession? {
     let today = formatSessionDate(now)
     let notes = try parseNotes(markdown: rawText)
     let existing = notes.sessions.firstIndex { $0.date == today }
 
     if let existing {
         let isEmpty = notes.sessions[existing].body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if isEmpty || !sessionHasGoneCold(lastEdited: lastEdited, now: now) {
+        if isEmpty || (!forcingNew && !sessionHasGoneCold(lastEdited: lastEdited, now: now)) {
             return CurrentSession(rawText: rawText, sessionIndex: existing, started: false)
         }
     }

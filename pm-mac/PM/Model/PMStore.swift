@@ -1104,14 +1104,17 @@ final class PMStore {
     ///
     /// `then` is given nil when no session could be opened — no project, or a start that didn't land —
     /// rather than not being called, which left the quick bar waiting on a receipt that never came.
-    func openCurrentSession(then: @escaping @MainActor (Int?) -> Void) {
-        if let index = todaySessionIndex, !willStartNewSession {
+    ///
+    /// `forcingNew` is ⌥ New Session: a new sitting even inside the window, unless today's newest is still
+    /// empty — see `PmLib.currentSessionPreservingFormat` and docs/tile-sessions.md D1.
+    func openCurrentSession(forcingNew: Bool = false, then: @escaping @MainActor (Int?) -> Void) {
+        if !forcingNew, let index = todaySessionIndex, !willStartNewSession {
             then(index)
             return
         }
         mutate(then: { [weak self] in
             then(self?.todaySessionIndex)
-        }) { try PMContract.perform(.sessionStart, PMContract.input(project: $0)) }
+        }) { try PMContract.perform(.sessionStart, PMContract.input(project: $0) { $0.new = forcingNew ? true : nil }) }
     }
 
     /// Fill in the session-addressing fields of an action's input from a reference.

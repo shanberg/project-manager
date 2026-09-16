@@ -106,6 +106,33 @@ final class SessionWindowTests: XCTestCase {
         XCTAssertEqual(try parseNotes(markdown: session.rawText).sessions[0].label, "Standup")
     }
 
+    /// Forcing skips the window: a warm session is left as it is and a new one leads.
+    func testForcingNewStartsASessionInsideTheWindow() throws {
+        let session = try XCTUnwrap(currentSessionPreservingFormat(
+            rawText: fixture(today: now), lastEdited: now.addingTimeInterval(-10 * 60), now: now,
+            forcingNew: true))
+        XCTAssertTrue(session.started)
+        let sessions = try parseNotes(markdown: session.rawText).sessions
+        XCTAssertEqual(sessions.count, 2)
+        XCTAssertEqual(sessions[0].label, sessionTimeLabel(now))
+        XCTAssertTrue(sessions[1].body.contains("Todo one"))
+    }
+
+    /// …but not over an empty one, which is already a new session.
+    func testForcingNewStillReusesAnEmptySession() throws {
+        let raw = """
+        # My Project
+
+        ## Sessions
+
+        ### \(formatSessionDate(now))
+        """
+        let session = try XCTUnwrap(currentSessionPreservingFormat(
+            rawText: raw, lastEdited: now, now: now, forcingNew: true))
+        XCTAssertFalse(session.started)
+        XCTAssertEqual(try parseNotes(markdown: session.rawText).sessions.count, 1)
+    }
+
     /// No `## Sessions` heading to splice into: nil, so the caller can fall back.
     func testNoSessionsSectionReturnsNil() throws {
         XCTAssertNil(try currentSessionPreservingFormat(rawText: "# Title\n\nNothing here.",

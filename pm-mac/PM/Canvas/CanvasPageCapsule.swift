@@ -494,8 +494,7 @@ private struct CanvasAddressTextField: NSViewRepresentable {
 /// A wrapper for one reason: the drop that puts a piece of this header level with the traffic lights is
 /// the canvas header's own (`TitlebarDrop`, which reads measured button metrics off `CanvasHeaderModel`),
 /// while the bar itself has to be the same view the task column renders and so cannot know about any of
-/// that. The task column's header gets its clearance from `TitlebarClearance` on the strip as a whole
-/// and needs no wrapper at all.
+/// that.
 struct CanvasTabBar: View {
     var model: CanvasHeaderModel
     var tabs: ProjectTabModel

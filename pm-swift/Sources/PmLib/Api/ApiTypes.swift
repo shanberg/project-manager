@@ -149,6 +149,8 @@ public struct ApiInput: Codable, Equatable {
     public var query: String?
     /// Which span a report covers — `today` or `week`.
     public var period: String?
+    /// `session.start`: start a new session even inside the idle window.
+    public var new: Bool?
     /// A report's first and last days, YYYY-MM-DD, both inclusive.
     public var since: String?
     public var until: String?

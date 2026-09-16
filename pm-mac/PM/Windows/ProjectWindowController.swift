@@ -611,6 +611,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         aimAtProjectCard { $0.requestNewSession() }
     }
 
+    /// File ▸ Start a New Session, New Session's ⌥ alternate: a new sitting even inside the idle window.
+    @objc func startNewSession(_ sender: Any?) {
+        aimAtProjectCard { $0.requestNewSession(forcingNew: true) }
+    }
+
     /// Open the project's details form — the summary, problem, goals, approach and learnings, which
     /// were five separate Raycast forms and are one brief here.
     ///
@@ -626,7 +631,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(newTask(_:)), #selector(newSession(_:)):
+        case #selector(newTask(_:)), #selector(newSession(_:)), #selector(startNewSession(_:)):
             return store.projectName != nil
         case #selector(toggleCanvasRenderer(_:)):
             item.state = renderer == .canvas ? .on : .off

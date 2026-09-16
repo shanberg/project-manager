@@ -99,11 +99,12 @@ half-states when it says the card is "a project, not a markdown file".
 
 The two acts, in the order they matter.
 
-**New Session** is `store.openCurrentSession` ([PMStore.swift:975](../pm-mac/PM/Model/PMStore.swift:975)),
+**New Session** is `store.openCurrentSession` ([PMStore.swift:1110](../pm-mac/PM/Model/PMStore.swift:1110)),
 which is what the window's `beginCurrentSession` calls: the *current* session — the one the project is
 already in, or a new one when the idle window has closed the last. The card wants the same call and the
 same landing, which is the caret in the note, because a session you just asked for is one you are about
-to write in.
+to write in. ⌥ New Session is its stronger sibling — a new sitting even inside the idle window — for
+the times you mean it ([tile-sessions.md](tile-sessions.md) D1).
 
 **Writing prose is a takeover, not an inline field.** The window replaces its whole column with
 [`SessionNoteTakeover`](../pm-mac/PM/Project/SessionNoteTakeover.swift) — a header, a `MarkdownTextEditor`,
@@ -121,7 +122,9 @@ one that decides it:
 
 The dependency to sever is `state: ProjectViewState`, which the takeover uses for titlebar clearance
 and for opening a `[[project]]`. A card has no titlebar; the clearance becomes a parameter and the
-project-opening is the callback `CanvasProjectNote` already takes.
+project-opening is the callback `CanvasProjectNote` already takes. (The clearance went on to be a
+`Placement` with a `.titlebar` case for the window; once the window's list became a board, the card was
+the only host left and the case was removed — tile-sessions.md D5.)
 
 **Affordances: menu and keyboard, plus inline rescue for the dead ends.** The window has no New Session
 button either — it is ⇧⌘N and the File menu — and a card that grew chrome the window does not have
@@ -528,8 +531,9 @@ Two things stood in the way, and only one of them was real.
   project card is the third case, and it narrows its task list exactly as the window's find bar narrows
   the same list. No new bar: the field in the header is the field, ⌘F is how it opens, and ⌘G walks the
   narrowed list because a shortened list is what the matches are.
-- **The Incomplete filter was already there** and is called something else. `CanvasCardShows.completed`
-  is the card's version, per card and kept in the file, which is the bargain every other card setting
+- **The Incomplete filter was already there** and is called something else. `CanvasCardShows` is
+  the card's version — now four presets, everything, the current session, open tasks, or the brief —
+  per card and kept in the file, which is the bargain every other card setting
   made. Adding a second app-wide one would have been the two-spellings fault again.
 
 ### The flip

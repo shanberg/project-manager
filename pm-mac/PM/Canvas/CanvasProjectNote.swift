@@ -206,7 +206,7 @@ struct CanvasProjectNote: View {
             if let index = openNote, let sessions = notes?.sessions, sessions.indices.contains(index) {
                 SessionNoteTakeover(index: index, session: sessions[index],
                                     projectName: displayName, store: store,
-                                    placement: .card, onOpenProject: onOpenProject,
+                                    onOpenProject: onOpenProject,
                                     onBack: { openNote = nil },
                                     startsAt: display.returnCaret,
                                     onSelectionChange: { display.noteCaret = $0 })
@@ -291,7 +291,9 @@ struct CanvasProjectNote: View {
         }
         .onChange(of: store.todos) { _, _ in reportMatches() }
         .onChange(of: display.findStepRequest) { _, _ in stepFind(display.findStepDirection) }
-        .onChange(of: commands.newSessionRequest) { _, _ in beginCurrentSession() }
+        .onChange(of: commands.newSessionRequest) { _, _ in
+            beginCurrentSession(forcingNew: commands.newSessionForcing)
+        }
         .onChange(of: commands.newTaskRequest) { _, _ in beginTask() }
         .onChange(of: commands.editDetailsRequest) { _, _ in
             openNote = nil
@@ -501,7 +503,7 @@ struct CanvasProjectNote: View {
             // — which is indistinguishable from a project that has neither, and would put "Start a
             // session" on a card that is about to show you six.
             if notes?.sessions.isEmpty != false {
-                startRow("Start a session", symbol: "calendar.badge.plus", action: beginCurrentSession)
+                startRow("Start a session", symbol: "calendar.badge.plus") { beginCurrentSession() }
             } else if store.todos.isEmpty, shows.tasks != .none {
                 startRow("Add a task", symbol: "plus") { activeEditor = Self.quickAdd }
             }
@@ -554,7 +556,11 @@ struct CanvasProjectNote: View {
                 // arrives a moment later.
                 if store.hasLoaded, store.projectName != nil {
                     titleButton("plus", "New Task", action: beginTask)
-                    titleButton("calendar.badge.plus", "New Session", action: beginCurrentSession)
+                    // ⌥ on the click is ⌥ New Session, as it is in the File menu.
+                    titleButton("calendar.badge.plus", "New Session",
+                                help: "New Session — hold ⌥ to start another, unless this one is still empty") {
+                        beginCurrentSession(forcingNew: NSEvent.modifierFlags.contains(.option))
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -574,17 +580,16 @@ struct CanvasProjectNote: View {
     /// On a board, the first click steps into the card and the second presses the button — the same
     /// rule that governs every other target on it (`CanvasNodeView.takesItsOwnClicks`). In a tiled view
     /// the tile takes its clicks outright, so the press lands first time.
-    private func titleButton(_ symbol: String, _ title: String,
+    private func titleButton(_ symbol: String, _ title: String, help: String? = nil,
                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
                 .frame(width: 18, height: 18)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help(title)
+        .buttonStyle(CardTitleButtonStyle())
+        .help(help ?? title)
         .accessibilityLabel(Text(title))
     }
 
@@ -598,10 +603,17 @@ struct CanvasProjectNote: View {
     @ViewBuilder private func session_(_ session: Session, at index: Int) -> some View {
         let blocks = blocks(for: session, at: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
-        // One rule, no exceptions: a sitting is captioned when it puts something on the card. Narrowed
-        // to tasks, a session whose whole content was prose contributes nothing and would otherwise
-        // leave a date standing over the next session's work.
-        if !blocks.isEmpty, !caption.isEmpty {
+        // A sitting is captioned when it puts something on the card. Narrowed to tasks, a session whose
+        // whole content was prose contributes nothing and would otherwise leave a date standing over
+        // the next session's work.
+        //
+        // **Except a session with nothing in it at all**, which is a heading in the file and has to be
+        // one on the card too — or New Session makes something you can't see, and can't delete
+        // (docs/tile-sessions.md D3). Only where the card shows this session's prose, since writing in
+        // it is the first thing an empty sitting is for, and not while a find is narrowing the card.
+        let isEmpty = session.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let showsEmpty = isEmpty && shows.showsProse(ofSessionAt: index) && display.find.isEmpty
+        if (!blocks.isEmpty || showsEmpty), !caption.isEmpty {
             Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -613,6 +625,7 @@ struct CanvasProjectNote: View {
                 .onTapGesture(count: 2) { openNote = index }
                 .contextMenu { sessionMenu(at: index) }
         }
+        if showsEmpty { emptySession(at: index) }
         ForEach(blocks) { block in
             switch block {
             case .prose(_, let text):
@@ -631,6 +644,37 @@ struct CanvasProjectNote: View {
                 row(identified.todo)
             }
         }
+    }
+
+    /// What an empty session offers in place of content: the two things a sitting with nothing in it
+    /// yet is for. Quiet, in the caption's own tone, because it is scaffolding for a moment rather than
+    /// part of the project.
+    ///
+    /// **Add a task only on today's newest session**, because that is where an unanchored add lands —
+    /// an empty heading is always the one a write joins. Offered on an older empty session it would
+    /// put the task somewhere else, which is the button lying about where it writes.
+    @ViewBuilder private func emptySession(at index: Int) -> some View {
+        HStack(spacing: 10) {
+            quietAction("Write a note", symbol: "square.and.pencil") { openNote = index }
+            if index == store.todaySessionIndex {
+                quietAction("Add a task", symbol: "plus") { beginTask() }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 2)
+        .contextMenu { sessionMenu(at: index) }
+    }
+
+    private func quietAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: A task, and the editors that open on it
@@ -825,16 +869,28 @@ struct CanvasProjectNote: View {
         return todo.text.lowercased().contains(query)
     }
 
-    /// What a session offers on a card: its note, and the next sitting.
+    /// What a session offers on a card: its note, the next sitting, and — for a session with no tasks —
+    /// deleting it.
     ///
-    /// Deliberately shorter than the window's `SessionMenu`. Renaming happens in the note takeover's
-    /// header, where the label is shown beside the date it decorates; deleting a session is the kind of
-    /// thing the window keeps, being an edit to the shape of the document rather than to its contents.
+    /// Renaming happens in the note takeover's header, where the label is shown beside the date it
+    /// decorates. Delete is offered only where the write would take it: `session.delete` refuses a
+    /// session with tasks, and a menu item that fails is worse than one that isn't there
+    /// (docs/tile-sessions.md D2). New Session has its ⌥ alternate here as in the File menu.
     @ViewBuilder private func sessionMenu(at index: Int) -> some View {
         Button(sessionHasNote(index) ? "Edit Note" : "Add Note") { openNote = index }
         Divider()
         Button("New Session") { beginCurrentSession() }
+            .modifierKeyAlternate(.option) {
+                Button("Start a New Session") { beginCurrentSession(forcingNew: true) }
+            }
         Button("New Task") { beginTask() }
+        if !store.hasTasks(sessionIndex: index), let ref = store.sessionRef(at: index) {
+            Divider()
+            Button("Delete Session") {
+                if openNote == index { openNote = nil }
+                store.deleteSession(ref)
+            }
+        }
     }
 
     private func sessionHasNote(_ index: Int) -> Bool {
@@ -851,11 +907,11 @@ struct CanvasProjectNote: View {
     /// It lands in the note with the caret ready, for the window's reason: a session you have just asked
     /// for is one you are about to write in, and dropping an empty heading into the card and leaving you
     /// to find your way into it would be the long way round to the same place.
-    private func beginCurrentSession() {
+    private func beginCurrentSession(forcingNew: Bool = false) {
         guard store.projectName != nil else { return }
         activeEditor = nil
         // Only on success: a session that couldn't be opened leaves whatever note was showing alone.
-        store.openCurrentSession { index in if let index { openNote = index } }
+        store.openCurrentSession(forcingNew: forcingNew) { index in if let index { openNote = index } }
     }
 
     /// New Task: appended to the current session rather than placed against a row, which is what the
@@ -932,10 +988,17 @@ struct CanvasProjectNote: View {
 @Observable
 final class CanvasProjectCardCommands {
     private(set) var newSessionRequest = 0
+    /// Whether the last New Session asked for a new sitting outright — ⌥ New Session. Read with the
+    /// request rather than observed on its own.
+    @ObservationIgnored
+    private(set) var newSessionForcing = false
     private(set) var newTaskRequest = 0
     private(set) var editDetailsRequest = 0
 
-    func requestNewSession() { newSessionRequest &+= 1 }
+    func requestNewSession(forcingNew: Bool = false) {
+        newSessionForcing = forcingNew
+        newSessionRequest &+= 1
+    }
     func requestNewTask() { newTaskRequest &+= 1 }
     func requestEditDetails() { editDetailsRequest &+= 1 }
 
@@ -1057,5 +1120,36 @@ enum CanvasProjectSource {
     static func projectKey(for url: URL) -> String? {
         guard let folder = projectFolder(ofNotesPath: url.path) else { return nil }
         return ProjectIndex.shared.projectKey(forFolder: (folder as NSString).lastPathComponent)
+    }
+}
+
+/// A project card's title buttons: a glyph that says it is a button when the pointer is on it.
+///
+/// Plain, they were two grey glyphs that did nothing under the pointer until pressed — the only
+/// controls on the card with no hover at all, and nothing about them said they were controls. The
+/// highlight is the toolbar's: a rounded fill that comes up under the glyph, a little stronger while
+/// pressed, and the glyph going from secondary to primary.
+private struct CardTitleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Hovered(configuration: configuration)
+    }
+
+    private struct Hovered: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(hovering || configuration.isPressed ? .primary : .secondary)
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(.quaternary)
+                        .opacity(configuration.isPressed ? 1 : hovering ? 0.7 : 0)
+                )
+                .padding(-3)
+                .onHover { hovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
     }
 }

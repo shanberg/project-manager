@@ -98,6 +98,10 @@ enum MainMenu {
         // what replaced the "New session" button that used to sit in the list.
         add(menu, "New Session", #selector(ProjectWindowController.newSession), target: nil, key: "n",
             modifiers: [.command, .shift])
+        // Under ⌥, a new sitting outright rather than the one the idle window would join
+        // (docs/tile-sessions.md D1).
+        add(menu, "Start a New Session", #selector(ProjectWindowController.startNewSession), target: nil,
+            key: "n", modifiers: [.command, .shift, .option]).isAlternate = true
         // ⌃⌘N: the third "new" in the File menu, after the task and the session it sits above in scale.
         track(.quickCapture,
               add(menu, "Quick Add Task…", #selector(AppDelegate.quickCapture), target: target, key: ""))

@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.7.0";
+export const API_CONTRACT_VERSION = "1.8.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -193,6 +193,8 @@ export interface SessionRenameInput {
 export interface SessionStartInput {
   /** Optional label for the session. */
   label?: string;
+  /** Start a new session even if the current one is still open. An empty one is still reused. */
+  new?: boolean;
   /** Project name or unambiguous prefix. */
   project: string;
 }

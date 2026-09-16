@@ -191,20 +191,6 @@ Wants a better answer to "what are this project's links" than order-of-the-file 
 built 13 (offering them at the add-a-link field), which settled *whose* links but not their relative
 importance.
 
-### 16. Deliberately start a new session
-
-A write joins the last session unless the project has been left alone for 90 minutes
-([SessionWindow.swift:25](../pm-swift/Sources/PmLib/SessionWindow.swift:25)). The window is a good
-default and there is no override: two distinct sittings inside an hour and a half land in one block.
-
-The panel already has a New Session command — the question is whether it is the same thing, and
-whether the override belongs on every surface that writes (the CLI, Raycast, quick capture) or only on
-the one place you would deliberately say "this is new work". Probably the latter, since the whole point
-of the window is that the other surfaces should not have to think about it. A project card is now a
-third surface that starts one and calls the same `openCurrentSession`, so it inherits the question.
-
-Absorbed by 25, which should settle it rather than run beside it.
-
 ### 17. Zoom to fit the selection, and the rest of the grammar
 
 ⇧2 for "fit what is selected", explicitly asked for — and asked for as part of a larger want: one
@@ -257,13 +243,6 @@ back — so an area that drags is a real `NSView` in the right place, not a hit 
 that was always this entry's own: `performDrag(with:)` is the opposite direction, asking for a drag
 where the region rule would refuse one, and a maximized web tile is mostly *below* the 66pt band
 anyway — so Arc's trick is a second mechanism beside the region, not a use of it.
-
-### 25. Review: tile session entry, project data, sessions
-
-A full review, and possibly a redesign, of how a session is entered from a tile and how project data and
-sessions are presented there. Too large for an entry; it wants a page of its own, and it should absorb 16
-(deliberately starting a new session) rather than run beside it. 24, the editor lost on switching
-tiles, was fixed on its own first.
 
 ### 26. Keeping web apps alive, and their notifications
 
@@ -462,9 +441,8 @@ and a file dropped on one to check the two rules the rewrite moved.
 up too often — and 32, which now writes the frames it always
 read.
 
-**A page of its own, and it should come before the entries it absorbs:** 25, which takes 16
-with it — and 37 (combining projects), which is not a board question at all: every one of its answers
-is about what happens to two notes files.
+**A page of its own:** 37 (combining projects), which is not a board question at all: every one of its
+answers is about what happens to two notes files.
 
 **Wants designing before it is worth touching:** 30 — the header has no full-screen state, and that
 belongs on [header-chrome.md](header-chrome.md) with the others.
@@ -517,10 +495,12 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |
 | 13 | offer the project's own links when adding a web card | **Built, 2026-09-15.** `CanvasLinkSuggestions` turns the combo box on when the current project has links — the engaged card if one is stepped into, else the board's own (canvas-workspaces §5). The mirror half, putting the page you are on into `## Links`, is in [web-cards.md](web-cards.md) |
+| 16 | deliberately starting a new session | **Built, 2026-09-16,** as part of 25: ⌥ New Session starts a new sitting inside the idle window, unless the current one is still empty (`session.start` `new`, contract 1.8.0). See [tile-sessions.md](tile-sessions.md) D1 |
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
+| 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |

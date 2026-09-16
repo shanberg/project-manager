@@ -111,6 +111,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "entry": input.entry.map(JSONValue.string),
         "now": input.now.map(JSONValue.string),
         "period": input.period.map(JSONValue.string),
+        "new": input.new.map(JSONValue.bool),
         "since": input.since.map(JSONValue.string),
         "until": input.until.map(JSONValue.string),
     ]
@@ -241,7 +242,8 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             // so does coming back to the project after `sessionIdleWindow` — see `SessionWindow.swift`.
             let hadToday = try parseNotes(markdown: rawText).sessions
                 .contains { $0.date == formatSessionDate() }
-            let session = try currentSession(in: rawText, lastEdited: lastEdited, label: input.label)
+            let session = try currentSession(in: rawText, lastEdited: lastEdited, label: input.label,
+                                             forcingNew: input.new == true)
             // Reported either way, so a caller can ask for the current session and use the answer
             // without knowing whether it had to be made — and without formatting a date to find it.
             let sessions = try parseNotes(markdown: session.rawText).sessions
@@ -832,9 +834,9 @@ private func folderName(of project: String) throws -> String {
 /// The session a write lands in, creating it in the markdown when the project hasn't got one for
 /// today or has been left alone long enough that this is a new sitting. See `SessionWindow.swift`.
 private func currentSession(in rawText: String, lastEdited: Date?,
-                            label: String? = nil) throws -> CurrentSession {
+                            label: String? = nil, forcingNew: Bool = false) throws -> CurrentSession {
     guard let session = try currentSessionPreservingFormat(rawText: rawText, lastEdited: lastEdited,
-                                                           label: label) else {
+                                                           label: label, forcingNew: forcingNew) else {
         throw PmError.notesNotFound("## Sessions")
     }
     return session

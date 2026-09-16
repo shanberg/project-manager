@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.7.0"
+public let apiContractVersion = "1.8.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -145,7 +145,9 @@ public enum ApiRegistry {
         // MARK: Sessions
         ApiActionSpec(name: "session.start", tier: .mutation,
                       summary: "Start a session, unless the current one is still open.",
-                      fields: [project, ApiField("label", .string, "Optional label for the session.")]),
+                      fields: [project, ApiField("label", .string, "Optional label for the session."),
+                               ApiField("new", .boolean,
+                                        "Start a new session even if the current one is still open. An empty one is still reused.")]),
         ApiActionSpec(name: "session.note", tier: .mutation,
                       summary: "Append a note to the current session, starting one if needed.",
                       fields: [project, ApiField("prose", .string, required: true, "The note.")]),

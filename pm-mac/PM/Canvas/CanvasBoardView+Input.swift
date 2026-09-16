@@ -851,6 +851,12 @@ extension CanvasBoardView {
     /// pointer *changing hands* instead, and takes the cursor back at that moment — once, and then
     /// leaves the new card to it, which is what the page's next mouse-moved does with a page that has
     /// anything to say about the matter.
+    ///
+    /// **Including coming off the board itself**, which the first version didn't count as changing
+    /// hands. The board had set the open hand over the card on the way in, the card's SwiftUI buttons
+    /// set no cursor of their own — a Mac button is an arrow by *not* setting one — and so the hand
+    /// stayed over New Task and New Session on a card you had stepped into, promising a drag the press
+    /// would never make.
     func refreshCursor() {
         // Holding Space, the pointer is a hand over everything — cards included, since the press is
         // the board's wherever it lands. See `holdForPanning`.
@@ -860,7 +866,7 @@ extension CanvasBoardView {
         let owner = cardUnderPointer
         defer { cursorOwner = owner }
         if owner != nil {
-            if cursorOwner != nil && cursorOwner != owner { NSCursor.arrow.set() }
+            if cursorOwner != owner { NSCursor.arrow.set() }
             return
         }
         guard let position = window?.mouseLocationOutsideOfEventStream else { return }

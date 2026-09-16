@@ -389,6 +389,9 @@ extension CanvasBoardView {
                 // the card has been stepped into — see `newSessionOnCard`, which steps in on your
                 // behalf, because that is what clicking the item would have done anyway.
                 key(add(menu, "New Session", #selector(newSession(_:))), "n", modifiers: [.command, .shift])
+                let fresh = add(menu, "Start a New Session", #selector(startNewSession(_:)))
+                key(fresh, "n", modifiers: [.command, .shift, .option])
+                fresh.isAlternate = true
                 key(add(menu, "New Task", #selector(newTask(_:))), "n")
                 // No key, because the window has none for it either — the brief is reached by
                 // double-clicking it. This item is for the case that gesture cannot serve: a project
@@ -1099,6 +1102,11 @@ extension CanvasBoardView {
         projectCommandTarget(for: sender)?.projectCommands.requestNewSession()
     }
 
+    /// New Session's ⌥ alternate, on the same routing: a new sitting even inside the idle window.
+    @objc func startNewSession(_ sender: Any?) {
+        projectCommandTarget(for: sender)?.projectCommands.requestNewSession(forcingNew: true)
+    }
+
     /// File ▸ New Task (⌘N) on a board, on the same routing as New Session.
     @objc func newTask(_ sender: Any?) {
         projectCommandTarget(for: sender)?.projectCommands.requestNewTask()
@@ -1799,7 +1807,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // do nothing from where you were standing and had to be dimmed to say so; naming the four
             // cards outright means there is no such state left to guard against.
             return !selectedProjectCards.isEmpty
-        case #selector(newSession(_:)), #selector(newTask(_:)), #selector(editProjectDetails(_:)):
+        case #selector(newSession(_:)), #selector(startNewSession(_:)), #selector(newTask(_:)),
+             #selector(editProjectDetails(_:)):
             return hasProjectCommandTarget
         case #selector(removeMenuTile(_:)):
             return menuTile != nil
