@@ -43,6 +43,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// in. Every board is in a project window now, so there is one answer.
     let tabModel: ProjectTabModel
     private var pillLeading: NSLayoutConstraint!
+    /// The header's tops, and the notice's: moved down together by what the full-screen bar covers.
+    private var chromeTops: [NSLayoutConstraint] = []
+    private var noticeTop: NSLayoutConstraint!
+    /// The full-screen bar's window whose moves this pane is following, while there is one.
+    private weak var followedTitlebar: NSWindow?
+    private var titlebarReach: CGFloat = 0
 
     /// How far the header's leading edge starts in from the pane's own edge.
     ///
@@ -704,7 +710,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         pillLeading = pill.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor,
                                                     constant: TitlebarButtonMetrics.unmeasured.leadingInset)
 
-        NSLayoutConstraint.activate([
+        chromeTops = [pill.topAnchor.constraint(equalTo: container.topAnchor),
+                      capsule.topAnchor.constraint(equalTo: container.topAnchor),
+                      tabBar.topAnchor.constraint(equalTo: container.topAnchor)]
+        noticeTop = notice.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.noticeDrop)
+
+        NSLayoutConstraint.activate(chromeTops + [
             scroll.topAnchor.constraint(equalTo: container.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -717,16 +728,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             edge.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             edge.heightAnchor.constraint(equalToConstant: CanvasEdgeView.height),
 
-            pill.topAnchor.constraint(equalTo: container.topAnchor),
             pillLeading,
-            capsule.topAnchor.constraint(equalTo: container.topAnchor),
             capsule.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor,
                                               constant: -14),
             // Between the two, which is the space this header deliberately leaves empty — and the bar
             // is the one thing that has earned it, because it answers the same question the pill does.
             // Its own island, sized to its contents: a strip across the band would hit-test the whole
             // width and swallow clicks on the cards up there. See `ProjectTabBar`.
-            tabBar.topAnchor.constraint(equalTo: container.topAnchor),
             tabBar.leadingAnchor.constraint(equalTo: pill.trailingAnchor,
                                             constant: HeaderMetrics.capsuleGap),
             tabBar.trailingAnchor.constraint(lessThanOrEqualTo: capsule.leadingAnchor,
@@ -737,7 +745,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
             // Under the chrome rather than level with it, so the banner reads as something the window
             // is telling you about the board rather than as part of the window's controls.
-            notice.topAnchor.constraint(equalTo: container.topAnchor, constant: 56),
+            noticeTop,
             notice.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor,
                                             constant: 14),
             notice.trailingAnchor.constraint(lessThanOrEqualTo: container.safeAreaLayoutGuide.trailingAnchor,
@@ -780,7 +788,46 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             : max(Self.margin, metrics?.leadingInset ?? pillLeading.constant)
         if abs(pillLeading.constant - inset) > 0.5 { pillLeading.constant = inset }
         if let metrics, header.titlebar != metrics { header.titlebar = metrics }
+        followFullScreenTitlebar()
     }
+
+    /// In full screen, keep the header clear of the bar the system slides down from the top of the
+    /// screen, moving with it frame by frame — the way a toolbar rides down under the menu bar — and
+    /// back up when it goes (header-chrome.md, "Full screen"). The board stays where it is.
+    ///
+    /// The bar is a window of its own, made on entering full screen, so it is looked for again whenever
+    /// the titlebar is re-measured, which includes entering and leaving.
+    private func followFullScreenTitlebar() {
+        let bar = view.window?.fullScreenTitlebar?.window
+        if bar !== followedTitlebar {
+            if let followedTitlebar {
+                NotificationCenter.default.removeObserver(self, name: NSWindow.didMoveNotification,
+                                                          object: followedTitlebar)
+            }
+            followedTitlebar = bar
+            if let bar {
+                NotificationCenter.default.addObserver(self, selector: #selector(titlebarMoved),
+                                                       name: NSWindow.didMoveNotification, object: bar)
+            }
+        }
+        titlebarMoved()
+    }
+
+    @objc private func titlebarMoved() {
+        view.window?.clearFullScreenTitlebarBackground()
+        let reach = (view.window?.fullScreenTitlebarReach() ?? 0).rounded()
+        guard reach != titlebarReach else { return }
+        if (reach == 0) != (titlebarReach == 0) {
+            Log.write("canvas header: full-screen bar \(reach == 0 ? "gone" : "down, reaching \(reach)pt")")
+        }
+        titlebarReach = reach
+        for top in chromeTops { top.constant = reach }
+        noticeTop.constant = Self.noticeDrop + reach
+    }
+
+    /// How far below the top of the pane the notice sits: under the chrome, so it reads as the window
+    /// telling you something about the board rather than as one of the window's controls.
+    private static let noticeDrop: CGFloat = 56
 
     /// The gap between the header's chrome and the edge of the pane. The task column's is 14 too.
     private static let margin: CGFloat = 14

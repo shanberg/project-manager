@@ -108,14 +108,20 @@ struct TitlebarButtonMetrics: Equatable {
     /// Sensible values for the moment before a window has been laid out — 92pt of traffic lights and a
     /// compact titlebar's 13pt drop. Replaced by real ones as soon as there is a window to ask.
     static let unmeasured = TitlebarButtonMetrics(leadingInset: 92, buttonCenterY: 13)
+
+    /// Full screen has no buttons at rest, so nothing to clear on the leading edge — but the header keeps
+    /// the drop a window gives it, which is where the unified titlebar centres its buttons. So going full
+    /// screen doesn't move the header up, and the board's top edge has the margin it had in a window.
+    /// When the system's bar comes down over it, `fullScreenTitlebarReach` says by how far to move.
+    static let fullScreen = TitlebarButtonMetrics(leadingInset: 0, buttonCenterY: 26)
 }
 
 extension NSWindow {
     /// The window's own button geometry, or nil when it can't be read yet.
     ///
     /// Full screen has no titlebar over the content and no traffic lights sitting in it, so a header
-    /// there wants neither the leading inset nor the vertical drop — asking the buttons where they are
-    /// would answer for the auto-hiding bar, which is not where the content is.
+    /// there wants no leading inset — asking the buttons where they are would answer for the auto-hiding
+    /// bar, which is not where the content is. See `TitlebarButtonMetrics.fullScreen`.
     ///
     /// Measured in the content view's own space, not the window's. A header is laid out from the top of
     /// the content view, and that is not reliably the top of the window frame — a tab bar moves one and
@@ -124,14 +130,62 @@ extension NSWindow {
     /// the content view's height.
     func titlebarButtonMetrics() -> TitlebarButtonMetrics? {
         guard let content = contentView else { return nil }
-        guard !styleMask.contains(.fullScreen) else {
-            return TitlebarButtonMetrics(leadingInset: 0, buttonCenterY: 0)
-        }
+        guard !styleMask.contains(.fullScreen) else { return .fullScreen }
         guard let close = standardWindowButton(.closeButton),
               let zoom = standardWindowButton(.zoomButton) else { return nil }
         let box = content.convert(close.bounds, from: close)
         return TitlebarButtonMetrics(leadingInset: content.convert(zoom.bounds, from: zoom).maxX + 12,
                                      buttonCenterY: content.bounds.height - box.midY)
+    }
+}
+
+extension NSWindow {
+    /// The bar the system slides down over a full-screen window when the pointer reaches the top of the
+    /// screen: the window it lives in, and the view that carries the traffic lights and the toolbar.
+    ///
+    /// **It is not this window.** In full screen AppKit moves the titlebar into a window of its own
+    /// (`NSToolbarFullScreenWindow`), reached through the close button. Measured 2026-09-16 on a real
+    /// reveal: that window is transparent at rest and its titlebar container sits out of its bounds; on
+    /// the reveal it turns opaque and the container slides in, while the window itself springs a few
+    /// points — every frame of it posting the window's move notification, both ways. Nil outside full
+    /// screen, or while the bar is still this window's own.
+    var fullScreenTitlebar: (window: NSWindow, strip: NSView)? {
+        guard styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
+              let bar = close.window, bar !== self else { return nil }
+        let ancestors = sequence(first: close as NSView, next: \.superview)
+        let strip = ancestors.first { String(describing: type(of: $0)).contains("TitlebarContainer") }
+            ?? close.superview ?? close
+        return (bar, strip)
+    }
+
+    /// Let the board show through the full-screen bar, as it does through a window's own titlebar.
+    ///
+    /// `titlebarAppearsTransparent` is not carried over to the bar's window: it paints itself in the
+    /// window background colour, which is the canvas's ground but not a workspace's darker one, so over a
+    /// tiling the bar read as a strip of a different grey. Its background is a private view found by
+    /// name, hidden again on every move because the system may show it again on the next reveal; if a
+    /// later macOS renames it, this finds nothing and the bar is merely painted.
+    func clearFullScreenTitlebarBackground() {
+        guard let (_, strip) = fullScreenTitlebar else { return }
+        for view in strip.subviews
+        where String(describing: type(of: view)).contains("TitlebarBackground") && !view.isHidden {
+            view.isHidden = true
+        }
+    }
+
+    /// How far down into this window's content the full-screen bar reaches right now: zero while it is
+    /// hidden, its height once it is down, and every value between while it slides.
+    ///
+    /// Read off where the bar's strip actually is on screen, clipped to the window it is drawn in,
+    /// against the top of the content — so a display with a notch (the menu bar above the content) and
+    /// one without (the menu bar over it, pushing the bar further down) both come out as what is covered.
+    func fullScreenTitlebarReach() -> CGFloat {
+        guard let (bar, strip) = fullScreenTitlebar, bar.isVisible, bar.alphaValue > 0.01,
+              let content = contentView else { return 0 }
+        let shown = bar.convertToScreen(strip.convert(strip.bounds, to: nil)).intersection(bar.frame)
+        guard !shown.isNull, shown.height > 0.5 else { return 0 }
+        let top = convertToScreen(content.convert(content.bounds, to: nil)).maxY
+        return max(0, top - shown.minY)
     }
 }
 

@@ -47,6 +47,7 @@ edge instead (L1).
 | Background windows, in practice | Keep what's there: content at 85%, the glass as the system draws it (P3) | 2026-09-10 |
 | Hover | Ours: a soft capsule behind the control under the pointer. The system has none for custom glass (P2) | 2026-09-10 |
 | A chip arriving in the tab bar | Snap + fade (B) — P4 found the bar's width snaps on the first frame, so there is no growth to show | 2026-09-10 |
+| Full screen | The header keeps a window's drop at rest and rides down under the system's bar as it reveals, frame by frame; the board stays still (§3, Full screen) | 2026-09-16 |
 
 ## 2. What the HIG says, and what it does to us
 
@@ -144,6 +145,7 @@ Everything the header responds to. Nothing else may change what it draws.
 | Find | closed · open |
 | Mode | view · connect |
 | Room | full (≥ 900) · tight · minimal (< 680) |
+| Screen | windowed · full screen, bar hidden · full screen, bar down (and every point between) |
 | Tabs | count, selection, one being renamed |
 | Pointer | over a control · not |
 
@@ -222,6 +224,32 @@ change is what stops a capsule re-rendering for a value identical to the one it 
 (`HeaderHoverHighlight`). No island-level hover state: `HeaderChrome.engaged` is gone. The system's
 own hover was tried and isn't available to custom glass (P2).
 
+### Full screen
+
+Decided 2026-09-16 (backlog 30). Until then full screen was a state the header had no drawing for: the
+drop was zeroed with the traffic lights, so the header sat hard against the top of the screen, and the
+bar the system slides down when the pointer reaches the top came down over it.
+
+- **At rest, the header is where a window puts it** — centred 26pt down, the unified titlebar's own
+  button line (`TitlebarButtonMetrics.fullScreen`) — with no leading inset, since there are no traffic
+  lights to clear. Entering full screen doesn't move it up.
+- **When the bar comes down, the header comes down under it**, by exactly what the bar covers, and goes
+  back up with it — the way a Mac toolbar rides under the menu bar. The notice moves with the header.
+  The board, the edge and the tiles stay where they are; for the moment the bar is down, the header
+  sits over the top of whatever is under it.
+- **Followed, not animated.** In full screen AppKit puts the titlebar in a window of its own
+  (`NSToolbarFullScreenWindow`, reached through the close button). Measured on a real reveal: that window
+  turns opaque, its titlebar container slides in, and the window springs a few points — posting its move
+  notification on every frame, both ways. The pane listens for that and sets its top constraints to
+  `NSWindow.fullScreenTitlebarReach()`, so the header's motion is the bar's own, spring included, and no
+  second clock exists to disagree with it (R1). Only the tops move, so R3 is untouched.
+- **The bar is 32pt and clear.** The project window's empty toolbar (there only to place a window's
+  traffic lights) is hidden in full screen, where it made the bar 66pt. And the bar's own background is
+  hidden, since `titlebarAppearsTransparent` doesn't reach its window: painted, it was the window's grey
+  over a workspace's darker ground. The board shows through behind the traffic lights, as in a window.
+- Not taken: hiding the header with the bar (the tabs and the tile capsule would be out of reach until
+  asked for), or a permanent strip left clear for the bar (a band of nothing whenever it is up).
+
 ## 4. Transitions
 
 What each act does, layer by layer. "—" means that layer does nothing.
@@ -242,6 +270,7 @@ What each act does, layer by layer. "—" means that layer does nothing.
 | Window becomes / resigns key | system | — | system inactive treatment |
 | Resize across a Room breakpoint | — | — | instant (resizing is continuous) |
 | Connect mode on / off | — | — | label in / out, instant |
+| Full-screen bar down / up | — | all islands move down / up with the bar, frame by frame | — |
 
 ## 5. Rules
 

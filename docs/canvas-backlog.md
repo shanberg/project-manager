@@ -32,18 +32,6 @@ derive, and it is a stronger setting than it was now that the mark is at one opa
 is up: everything inside 48 is drawn at full strength. Drag a few cards around a real board and say
 whether the offer is up too often.
 
-### 30. The header in full screen was never designed
-
-Full screen is a state the header has no drawing for. `titlebarButtonMetrics` answers zero inset and
-zero drop there ([WindowChrome.swift:125](../pm-mac/PM/Shared/WindowChrome.swift:125)) — right as far
-as it goes, since there are no traffic lights to clear — and the auto-hiding titlebar then comes down
-over whatever the header has put in the space they left.
-[header-chrome.md](header-chrome.md) states every state the header has, and full screen is not among
-them, so what happens there is the sum of decisions taken for a window.
-
-Open: whether the header slides out from under the titlebar as it reveals, hides with it, or full
-screen gets a layout of its own. Settle it on that page, beside the other states.
-
 ### 32. Restored windows forget their size — **one cause fixed, wants using**
 
 The cause, and it was the whole of the restore half: `WindowSettings.openWindowFrames` was read on
@@ -436,9 +424,6 @@ read.
 **A page of its own:** 37's merge, on [combining-projects.md](combining-projects.md) — the master half is
 built.
 
-**Wants designing before it is worth touching:** 30 — the header has no full-screen state, and that
-belongs on [header-chrome.md](header-chrome.md) with the others.
-
 **Then design first, then build:** 20, 21 and 36 together, since handles, tabs and which edge they sit
 on are all how you grab a tile; 14 (pin and reorder links); 17 with 41, which is the same want at two
 altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
@@ -493,6 +478,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
+| 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |

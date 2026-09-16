@@ -579,6 +579,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         measureTitlebarButtons()
     }
 
+    /// The empty toolbar is only there to put a window's traffic lights where the header expects them.
+    /// Full screen has no traffic lights at rest, and the toolbar would only make the bar the system slides
+    /// down 66pt tall rather than 32 — so it goes for the duration, and comes back before the window
+    /// does, so the windowed titlebar is measured with it in place.
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        window?.toolbar?.isVisible = false
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        window?.toolbar?.isVisible = true
+    }
+
     func windowDidEnterFullScreen(_ notification: Notification) {
         measureTitlebarButtons()
     }
