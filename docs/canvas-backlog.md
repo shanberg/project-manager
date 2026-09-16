@@ -126,18 +126,6 @@ its board or its title — and that is a different bug.
 
 ## Features
 
-### 6. A folder dropped on a board
-
-Dropping *files* is built and verified: over the board the drag turns into the card it will make, with
-the move guides around it; several of a kind lay out as a block rather than cascading; an absolute path
-is the file it names or nothing at all; and a drop holding a file from outside the vault raises one
-alert — *Copy In*, to the attachments folder beside the board, or *Point At It*
-([CanvasDrop](../pm-mac/PM/Canvas/CanvasDrop.swift), `askWhereOutsidersGo`, `CanvasFileResolverTests`).
-
-What was never asked is the directory case. Nothing in `CanvasDrop` tests whether a dropped URL is a
-folder, so one becomes the same file card a document does. Open: whether that is enough, or whether a
-folder should make something that says what is in it.
-
 ### 7. Tidy
 
 FigJam's tidy-up: take a rough cluster and make it a clean grid, keeping the reading order and the
@@ -481,7 +469,7 @@ wants a few days of quitting and relaunching, the second wants a layer dragged i
 and a file dropped on one to check the two rules the rewrite moved.
 
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
-up too often — 6, what a dropped folder should make — and 32, which now writes the frames it always
+up too often — and 32, which now writes the frames it always
 read.
 
 **A page of its own, and it should come before the entries it absorbs:** 25, which takes 16 and 24
@@ -534,6 +522,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 3 | the modifiers a board was missing, and ⌥ already meaning no snapping | **Built, 2026-09-16.** The design-tool grammar every tool agrees on: ⇧ keeps the aspect and ⌥ resizes about the centre (`CanvasHandle.resize(_:by:keepingAspect:fromCentre:)`, `CanvasSelectionTests`), and ⌥-drag leaves a copy behind (`duplicateInPlace`, one undo). Snapping's escape moved off ⌥ to **⌘ or ⌃** — tools split on it (⌘ in Keynote, tldraw, Excalidraw, Miro; ⌃ in Figma) and neither is otherwise read mid-drag (`suspendsSnapping`). A constrained resize does not snap; revisit if missed |
 | 4 | ⌥-drag to duplicate a card | Folded into **3**, which is the one decision under all three modifier gestures |
 | 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27** |
+| 6 | a folder dropped on a board | **Built, 2026-09-16.** A folder card: the Finder's list of its top level, folders first, watched while the card is up, every row a link zone so a click opens the item and a drag carries it off as a card (`CanvasFolderCard`, `CanvasFolderCardTests`). Stored as the ordinary file card it was |
 | 9 | saved arrangements, already built and hard to find | [canvas-workspaces.md](canvas-workspaces.md) — they are workspaces |
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |

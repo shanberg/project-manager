@@ -51,6 +51,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// here, from the project's own window, or from anywhere else holding the same store.
     private var projectEdits: ObservationRelay?
     private var lastUndoDepth = 0
+    /// The listing this card shows when its path is a folder, watched while the card is up. See
+    /// `CanvasFolderCard`.
+    private var folder: CanvasFolderModel?
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -90,8 +93,11 @@ final class CanvasFileNodeView: CanvasNodeView {
         // cost a full layout to produce. The filename is what you are actually reading at this size.
         // Pictures are the exception and keep rendering: an image is *more* legible small than any
         // text, and at this zoom it is usually the only thing on the board you can identify.
+        let isFolder = location.url.map(CanvasFolderListing.isFolder) ?? false
+        if folder != nil, !isFolder || folder?.url != location.url { releaseFolder() }
         if isSimplified, !isPicture(path) {
-            setContent(summaryView(canvasFileCardName(path), symbol: canvasFileSymbol(path)))
+            setContent(summaryView(isFolder ? (path as NSString).lastPathComponent : canvasFileCardName(path),
+                                   symbol: isFolder ? "folder" : canvasFileSymbol(path)))
             return
         }
 
@@ -129,7 +135,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     ///
     /// The PDF is deliberate rather than an omission — a PDF card is one page scaled to fit, with no
     /// scrolling by design (see `preview`), so there is nothing under the pointer to travel through.
-    override var scrollsItsContent: Bool { isProse(stored.path) }
+    override var scrollsItsContent: Bool {
+        isProse(stored.path) || location.url.map(CanvasFolderListing.isFolder) == true
+    }
 
     private func isProse(_ path: String) -> Bool {
         ["md", "markdown", "txt"].contains((path as NSString).pathExtension.lowercased())
@@ -143,6 +151,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// The card's body: the file, drawn as the kind of thing it is.
     private func preview(for location: CanvasFileLocation, path: String, subpath: String?) -> NSView {
         guard let url = location.url else { return missingView(path) }
+
+        if CanvasFolderListing.isFolder(url) {
+            let model = folder ?? CanvasFolderModel(url: url)
+            folder = model
+            return NSHostingView(rootView: CanvasFolderCard(folder: model).canvasLinkZones(linkZones))
+        }
 
         switch url.pathExtension.lowercased() {
         case "png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp":
@@ -260,6 +274,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// long as the window lived.
     override func prepareForRemoval() {
         releaseProject()
+        releaseFolder()
+    }
+
+    private func releaseFolder() {
+        folder?.stop()
+        folder = nil
     }
 
     private func releaseProject() {

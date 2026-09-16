@@ -144,9 +144,10 @@ enum CanvasDrop {
     }
 
     /// A picture or a PDF is given a square card, since both are more likely tall than wide and a
-    /// short card would show a strip of one.
+    /// short card would show a strip of one. So is a folder, which is a list and wants the rows.
     static func isTall(_ file: URL) -> Bool {
         isMarkdownImagePath(file.path) || file.pathExtension.lowercased() == "pdf"
+            || CanvasFolderListing.isFolder(file)
     }
 }
 

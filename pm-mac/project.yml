@@ -206,6 +206,7 @@ targets:
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Canvas/CanvasExistingCards.swift
       - path: PM/Canvas/CanvasDrop.swift
+      - path: PM/Canvas/CanvasFolderCard.swift
       - path: PM/Canvas/CanvasLinkZones.swift
       - path: PM/Project/RenderedNote.swift
       - path: PM/Canvas/CanvasPageView.swift
