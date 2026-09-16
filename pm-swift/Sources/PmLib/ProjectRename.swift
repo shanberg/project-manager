@@ -54,6 +54,8 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
         throw PmError.renameTargetExists(dest)
     }
     if dryRun { return newBasename }
+    // Read before the move, while the members' links still resolve to this folder.
+    let members = ((try? projectMemberships()) ?? []).filter { $0.master == oldName }.map(\.member)
     try FileManager.default.moveItem(atPath: projectPath, toPath: dest)
     if let resolved = try resolveNotesPath(projectPath: dest),
        FileManager.default.fileExists(atPath: resolved) {
@@ -75,7 +77,23 @@ public func renameProjectTitle(nameOrPrefix: String, newTitle: String,
         }
     }
     renameProjectCanvas(projectPath: dest, oldFolderName: oldName)
+    repointMembers(members, to: newBasename)
     return newBasename
+}
+
+/// Point every member of a renamed master at its new name.
+///
+/// A numbered project would still resolve by its code, but an area has no code, and a member left
+/// naming a folder that no longer exists is a member nothing draws under its master. Best-effort for the
+/// same reason as the canvas: the rename has happened, and one member's file refusing a write is not a
+/// reason to report it failed.
+private func repointMembers(_ members: [String], to master: String) {
+    for member in members {
+        guard let handle = try? resolveNotesHandle(project: member),
+              let raw = try? handle.io.readContent(path: handle.notesPath) else { continue }
+        let updated = settingProjectPartOf(master, in: raw)
+        if updated != raw { try? handle.io.writeContent(path: handle.notesPath, content: updated) }
+    }
 }
 
 /// Move the project's canvas onto its new canonical name, so a renamed project's board is still the

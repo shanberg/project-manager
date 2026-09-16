@@ -106,6 +106,8 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "clearDue": input.clearDue.map(JSONValue.bool),
         "waiting": input.waiting.map(JSONValue.string),
         "clearWaiting": input.clearWaiting.map(JSONValue.bool),
+        "partOf": input.partOf.map(JSONValue.string),
+        "clearPartOf": input.clearPartOf.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
@@ -388,6 +390,38 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return metadata(spec, options, path: path,
                         archiving ? Phrase(past: "Archived \(folder)", future: "archive \(folder)")
                                   : Phrase(past: "Restored \(folder)", future: "restore \(folder)"))
+    case "project.setPartOf":
+        // Checked against the whole vault before the one file is written: one level, no archived master,
+        // not itself. See `ProjectPartOf` and docs/combining-projects.md.
+        let member = try folderName(of: try resolvedProject(input))
+        let clearing = input.clearPartOf == true
+        guard clearing || !(input.partOf ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
+            throw ApiError(.missingField, "Say which project this is part of, or clear it.",
+                           detail: .string("partOf"))
+        }
+        var master: String?
+        if !clearing, let name = input.partOf {
+            let (config, paths) = try loadConfigAndPaths()
+            let roots = try ProjectScope.allCases.map {
+                (scope: $0, folders: try getFolders(basePath: $0.path(in: paths), scope: $0,
+                                                    domainCodes: Array(config.domains.keys)))
+            }
+            do {
+                master = try checkedMaster(memberFolder: member, masterName: name,
+                                           memberships: try projectMemberships(), roots: roots)
+            } catch let refusal as PartOfRefusal {
+                throw ApiError(.invalidField, refusal.errorDescription ?? "That can't be done.",
+                               detail: .string("partOf"))
+            }
+        }
+        return try document(spec, input, options) { rawText in
+            let phrase = master.map { Phrase(past: "Made \(member) part of \($0)",
+                                             future: "make \(member) part of \($0)") }
+                ?? Phrase(past: "Took \(member) out of its master project",
+                          future: "take \(member) out of its master project")
+            return Outcome(rawText: settingProjectPartOf(master, in: rawText), note: phrase,
+                           data: master.map(JSONValue.string) ?? .null)
+        }
     case "project.focus":
         // The key is built from where the thing actually is, not from `activePath`. That was the same
         // string for every project and stops being so the moment an area — or anything archived — can
@@ -555,6 +589,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          }))
     case "project.get":
         let folder = try folderName(of: input.project ?? "")
+        let memberships = (try? projectMemberships()) ?? []
         let path = try resolveProjectPath(nameOrPrefix: input.project ?? "")
         return ApiResult(action: spec.name, summary: folder, data: .object([
             "folder": .string(folder),
@@ -562,6 +597,10 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             "kind": .string(ProjectKind.of(folderName: folder).rawValue),
             "path": .string(path),
             "notesPath": (try resolveNotesPath(projectPath: path)).map(JSONValue.string) ?? .null,
+            // The master it names, resolved, and the projects that name it — so a caller can draw either
+            // side of the relationship from the one it has. See `ProjectPartOf`.
+            "partOf": memberships.first { $0.member == folder }?.master.map(JSONValue.string) ?? .null,
+            "members": .array(memberships.filter { $0.master == folder }.map { .string($0.member) }),
         ]))
     case "notes.get":
         let read = try readProject(input)

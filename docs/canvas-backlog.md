@@ -355,20 +355,12 @@ Open: per tile, per workspace, or a setting; how wide a vertical strip is and wh
 favicon alone, or an icon and a truncated name); and what a tile too short for its tabs does. Decide
 with 20 and 21 — the strip is also how you grab a tile, and moving it moves the handle question too.
 
-### 37. Combining projects, and a project made of projects
+### 37. Combining projects — **master built, merge waits**
 
-Two asks with one shape: fold one project into another, and roll several up under a master.
-`ProjectLifecycle` moves a project between scopes, renames one, and adopts a folder
-([ProjectLifecycle.swift:22](../pm-mac/PM/Model/ProjectLifecycle.swift:22)) — every one of which
-moves a folder whole. Nothing merges two, and nothing expresses "part of".
-
-This wants a page rather than an entry, because the questions are all about the document. Two
-`## Sessions` logs interleaved by date is the only honest merge, and it makes a history that never
-happened in one sitting. Two `## Links` blocks, two sets of framing callouts and two sets of open tasks
-each need an answer. And the master is the real fork: a project with a notes file of its own whose
-members are named in it, or a view computed over the members with nothing on disk. [areas.md](areas.md)
-is the nearest prior art — it got a whole kind of thing for the price of relaxing four assumptions, and
-the same trick may be available here.
+A project made of projects is built: a member names its master in frontmatter, the master lists them
+under Projects and rolls their numbers up, one level only. Folding one project into another is decided in
+outline and not built. Both live on [combining-projects.md](combining-projects.md); what the merge still
+needs is G1–G4 there.
 
 ### 38. What macOS's compositor does that our freeze doesn't
 
@@ -441,8 +433,8 @@ and a file dropped on one to check the two rules the rewrite moved.
 up too often — and 32, which now writes the frames it always
 read.
 
-**A page of its own:** 37 (combining projects), which is not a board question at all: every one of its
-answers is about what happens to two notes files.
+**A page of its own:** 37's merge, on [combining-projects.md](combining-projects.md) — the master half is
+built.
 
 **Wants designing before it is worth touching:** 30 — the header has no full-screen state, and that
 belongs on [header-chrome.md](header-chrome.md) with the others.

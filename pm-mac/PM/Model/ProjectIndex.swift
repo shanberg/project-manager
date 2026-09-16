@@ -64,16 +64,25 @@ final class ProjectIndex {
         /// away. Kept so a sidebar row can be dragged onto a canvas without a second protected-folder
         /// lookup on the main thread at the moment the drag starts.
         let notesPath: String?
-        let done: Int
-        let total: Int
+        /// Checked and all tasks — a master's rolled up across its members (`rollingUp`).
+        var done: Int
+        var total: Int
         /// The project's focused task, else its first open one — the row's second line.
         let nextTask: String?
-        /// Earliest due among its open tasks, for due grouping.
-        let nextDue: String?
+        /// Earliest due among its open tasks — a master's, across its members too — for due grouping.
+        var nextDue: String?
         let detailsLoaded: Bool
         /// What the row shows in place of its ring, from the notes' frontmatter — see `ProjectIcon`.
         /// Nil draws the ring (or an area's dotted circle).
         var icon: ProjectIcon? = nil
+        /// The master this project is part of, resolved to a folder name — see `ProjectPartOf`.
+        var partOf: String? = nil
+        /// The members of this project, by folder name, when it is a master. Filled by `rollingUp`.
+        var members: [String] = []
+        /// This project's own counts before its members were added — what a live count for the open
+        /// project replaces, leaving the members' part standing.
+        var ownDone = 0
+        var ownTotal = 0
         var id: String { projectKey }
         var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
         /// Whether a completion ring means anything here — the kind's answer, forwarded so a view can
@@ -138,11 +147,12 @@ final class ProjectIndex {
         /// Complete this listing with the values a notes read produces (or the zeroes that stand in
         /// until one lands).
         func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool,
-                   icon: ProjectIcon? = nil) -> ProjectEntry {
+                   icon: ProjectIcon? = nil, partOf: String? = nil) -> ProjectEntry {
             ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
                          shortName: shortName, domain: domain, kind: kind, isArchived: isArchived,
                          modified: modified, notesPath: notesPath, done: done, total: total,
-                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded, icon: icon)
+                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded, icon: icon,
+                         partOf: partOf, ownDone: done, ownTotal: total)
         }
     }
 
@@ -374,10 +384,12 @@ final class ProjectIndex {
                                                                      in: groups),
                                          nextDue: Self.earliestDue(out.todos),
                                          detailsLoaded: true,
-                                         icon: read.icon))
+                                         icon: read.icon,
+                                         partOf: read.partOf.flatMap { resolveWrittenName($0, in: groups) }))
                 tasks += Self.openTasks(of: out.todos, in: item, shorteningCodes: shortening,
                                         resolvingIn: groups)
             }
+            warmed = Self.rollingUp(warmed)
             let collected = tasks
             Task { @MainActor in
                 guard let self else { return }
@@ -403,11 +415,37 @@ final class ProjectIndex {
 
     /// One project's notes as the sidebar needs them, plus its icon. The icon lives in frontmatter,
     /// which `notesShow` doesn't report, so the raw text is read once here and handed to both.
-    private nonisolated static func readDetails(of name: String) -> (output: NotesShowOutput, icon: ProjectIcon?)? {
+    private nonisolated static func readDetails(of name: String)
+        -> (output: NotesShowOutput, icon: ProjectIcon?, partOf: String?)? {
         guard let handle = try? resolveNotesHandle(project: name),
               let raw = try? handle.io.readContent(path: handle.notesPath),
               let output = try? notesShow(rawText: raw) else { return nil }
-        return (output, projectIcon(rawText: raw))
+        return (output, projectIcon(rawText: raw), projectPartOf(rawText: raw))
+    }
+
+    /// Masters with their members' numbers added in: progress across the whole, and the earliest due
+    /// anywhere in it (docs/combining-projects.md M2). Each master also learns who its members are.
+    ///
+    /// One level, as the write enforces — a member naming a project that is itself a member is ignored
+    /// here rather than rolled up twice, since a file edited by hand can say anything. A member whose
+    /// notes were never read has nothing to add and is still listed.
+    nonisolated static func rollingUp(_ entries: [ProjectEntry]) -> [ProjectEntry] {
+        let byName = Dictionary(entries.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        var rolled = entries
+        let index = Dictionary(entries.enumerated().map { ($1.name, $0) }, uniquingKeysWith: { a, _ in a })
+        for member in entries {
+            guard let master = member.partOf, master != member.name,
+                  let at = index[master], byName[master]?.partOf == nil else { continue }
+            rolled[at].members.append(member.name)
+            rolled[at].done += member.ownDone
+            rolled[at].total += member.ownTotal
+            if let due = member.nextDue {
+                let theirs = RelativeDue.parse(due) ?? .distantFuture
+                let ours = rolled[at].nextDue.flatMap(RelativeDue.parse) ?? .distantFuture
+                if theirs < ours { rolled[at].nextDue = due }
+            }
+        }
+        return rolled
     }
 
     /// Every project in the active and archive folders, ordered by notes-file mtime (newest first,

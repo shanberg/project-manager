@@ -31,6 +31,7 @@ enum ProjectLifecycle {
     /// Archive or unarchive several projects, reporting the first failure rather than carrying on
     /// silently. Selecting a mixed set isn't offered, so every target moves the same way.
     static func move(projects entries: [PMStore.ProjectEntry]) {
+        guard let entries = withMembersIfWanted(entries) else { return }
         for entry in entries {
             do {
                 try move(projectNamed: entry.name, from: entry.isArchived ? .archive : .active)
@@ -40,6 +41,95 @@ enum ProjectLifecycle {
                 return
             }
         }
+    }
+
+    /// Archiving a master asks whether its members go too (docs/combining-projects.md M4). Nil when the
+    /// question was cancelled.
+    ///
+    /// Asked, not assumed, because a member is a project in its own right: finishing the whole doesn't
+    /// always finish every part, and a part left open under an archived master is a thing somebody may
+    /// mean. Only members still active are counted — one already put away has nothing to be asked about.
+    private static func withMembersIfWanted(_ entries: [PMStore.ProjectEntry]) -> [PMStore.ProjectEntry]? {
+        guard entries.allSatisfy({ !$0.isArchived }) else { return entries }
+        let names = Set(entries.map(\.name))
+        let members = ProjectIndex.shared.allProjects.filter { member in
+            guard let master = member.partOf, names.contains(master) else { return false }
+            return !member.isArchived && !names.contains(member.name)
+        }
+        guard !members.isEmpty else { return entries }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        let masters = entries.filter { entry in members.contains { $0.partOf == entry.name } }
+        alert.messageText = masters.count == 1
+            ? "Archive \(masters[0].shortName)’s projects too?"
+            : "Archive the projects under these too?"
+        let listed = members.prefix(5).map(\.shortName).joined(separator: ", ")
+            + (members.count > 5 ? ", and \(members.count - 5) more" : "")
+        alert.informativeText = "\(members.count == 1 ? "1 project is" : "\(members.count) projects are") still open: \(listed)."
+        alert.addButton(withTitle: members.count == 1 ? "Archive Project Too" : "Archive Projects Too")
+        alert.addButton(withTitle: "Just \(masters.count == 1 ? "This" : "These")")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return entries + members
+        case .alertSecondButtonReturn: return entries
+        default: return nil
+        }
+    }
+
+    // MARK: Part of
+
+    /// Part Of…: pick the master a project belongs to, or none (docs/combining-projects.md M5).
+    ///
+    /// A pop-up of the projects it could join, rather than a search field, because the list is already
+    /// narrowed to what the one-level rule allows — live, not itself, not already a member of something
+    /// — and a menu of those is shorter than most sidebars. The write goes through the contract, which
+    /// checks the same rule again against the files, in case the scan was behind.
+    static func choosePartOf(for entry: PMStore.ProjectEntry) {
+        NSApp.activate(ignoringOtherApps: true)
+        let noun = entry.kind.displayName.lowercased()
+        guard entry.members.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "\(entry.shortName) has projects under it"
+            alert.informativeText = "Projects only nest one level, so a \(noun) with projects under it can’t be part of another."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        let candidates = ProjectIndex.shared.allProjects
+            .filter { !$0.isArchived && $0.name != entry.name && $0.partOf == nil }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+        popup.addItem(withTitle: "None")
+        popup.menu?.addItem(.separator())
+        for candidate in candidates {
+            popup.addItem(withTitle: candidate.name)
+            popup.lastItem?.representedObject = candidate.name
+        }
+        if let current = entry.partOf, let item = popup.itemArray.first(where: { $0.representedObject as? String == current }) {
+            popup.select(item)
+        }
+        let alert = NSAlert()
+        alert.messageText = "Make \(entry.shortName) part of…"
+        alert.informativeText = "Its tasks count toward the project you choose, and it’s listed under it."
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let master = popup.selectedItem?.representedObject as? String
+        guard master != entry.partOf else { return }
+        do {
+            _ = try PMContract.perform(.projectSetPartOf, PMContract.input(project: entry.name) {
+                if let master { $0.partOf = master } else { $0.clearPartOf = true }
+            })
+            Log.write("project part of: \(entry.name) -> \(master ?? "none")")
+        } catch {
+            // The contract's own sentence — "…projects only nest one level" — rather than an error's
+            // type name, since the refusal is the answer.
+            present(NSError(domain: "PM", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: PMContract.message(for: error)]),
+                    doing: "Couldn’t change what “\(entry.name)” is part of")
+        }
+        refresh()
     }
 
     // MARK: Renaming

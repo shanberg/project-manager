@@ -167,6 +167,7 @@ final class DryRunTests: XCTestCase {
             "project.archive": ["project": "W-1"],
             "project.unarchive": ["project": "W-2"],
             "project.focus": ["project": "W-2"],
+            "project.setPartOf": ["project": "W-2", "partOf": "W-1"],
             "config.set": ["key": "activePath", "value": "/tmp/somewhere-else"],
             "journal.undo": ["project": "W-1"],
         ]

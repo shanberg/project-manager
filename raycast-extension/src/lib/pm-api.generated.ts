@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.8.0";
+export const API_CONTRACT_VERSION = "1.9.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -127,7 +127,7 @@ export interface ProjectFocusInput {
   project: string;
 }
 
-/** One project's paths and domain. */
+/** One project's paths and domain, its master and its members. */
 export interface ProjectGetInput {
   /** Project name or unambiguous prefix. */
   project: string;
@@ -147,6 +147,16 @@ export interface ProjectRenameInput {
   project: string;
   /** The new title. */
   title: string;
+}
+
+/** Make a project part of a master project, or take it out. One level only. */
+export interface ProjectSetPartOfInput {
+  /** Take the project out of its master instead. */
+  clearPartOf?: boolean;
+  /** The master project or area, by name, code or prefix. */
+  partOf?: string;
+  /** Project name or unambiguous prefix. */
+  project: string;
 }
 
 /** Move a project or area back out of the archive, to wherever its kind lives. */
@@ -403,6 +413,7 @@ export interface ApiInputs {
   "project.get": ProjectGetInput;
   "project.list": ProjectListInput;
   "project.rename": ProjectRenameInput;
+  "project.setPartOf": ProjectSetPartOfInput;
   "project.unarchive": ProjectUnarchiveInput;
   "session.delete": SessionDeleteInput;
   "session.note": SessionNoteInput;
@@ -456,6 +467,7 @@ export const API_TIERS: Record<
   "project.get": "query",
   "project.list": "query",
   "project.rename": "mutation",
+  "project.setPartOf": "mutation",
   "project.unarchive": "mutation",
   "session.delete": "mutation",
   "session.note": "mutation",

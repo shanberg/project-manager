@@ -11,7 +11,7 @@ import PmLib
 /// Named distinctly from PmLib's own `apiContractVersion`, which is in scope here — a file-scope
 /// `let` of the same name would shadow it silently, and a check comparing the two would then be
 /// comparing a thing with itself.
-let generatedFromContractVersion = "1.8.0"
+let generatedFromContractVersion = "1.9.0"
 
 /// Every action the contract publishes.
 ///
@@ -57,12 +57,14 @@ enum PMAction: String, CaseIterable, Sendable {
     case projectCreate = "project.create"
     /// Make this the focused project.
     case projectFocus = "project.focus"
-    /// One project's paths and domain.
+    /// One project's paths and domain, its master and its members.
     case projectGet = "project.get"
     /// Every project and area, each with its kind.
     case projectList = "project.list"
     /// Rename a project, keeping its domain and number.
     case projectRename = "project.rename"
+    /// Make a project part of a master project, or take it out. One level only.
+    case projectSetPartOf = "project.setPartOf"
     /// Move a project or area back out of the archive, to wherever its kind lives.
     case projectUnarchive = "project.unarchive"
     /// Delete a session that has no tasks in it.
@@ -112,7 +114,7 @@ enum PMAction: String, CaseIterable, Sendable {
     /// in-process adapter can refuse to send an affordance to the dispatcher.
     var tier: ApiTier {
         switch self {
-        case .configSet, .journalUndo, .notesAddLink, .notesSetDetail, .projectAdopt, .projectArchive, .projectCreate, .projectFocus, .projectRename, .projectUnarchive, .sessionDelete, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskComplete, .taskDelete, .taskDiveIn, .taskFocus, .taskReopen, .taskSetDue, .taskSetText, .taskSetWaiting, .taskUnwrap, .taskWrap:
+        case .configSet, .journalUndo, .notesAddLink, .notesSetDetail, .projectAdopt, .projectArchive, .projectCreate, .projectFocus, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionDelete, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskComplete, .taskDelete, .taskDiveIn, .taskFocus, .taskReopen, .taskSetDue, .taskSetText, .taskSetWaiting, .taskUnwrap, .taskWrap:
             return .mutation
         case .captureParse, .configGet, .focusGet, .journalList, .notesGet, .projectAdoptable, .projectGet, .projectList, .taskDone, .taskList, .taskProgress, .taskSearch, .taskWaiting, .taskWhatsDue:
             return .query
@@ -136,7 +138,7 @@ enum PMAction: String, CaseIterable, Sendable {
             return ["key", "value"]
         case .notesAddLink, .taskAdd:
             return ["project", "text"]
-        case .notesGet, .projectArchive, .projectFocus, .projectGet, .projectUnarchive, .sessionStart, .taskComplete, .taskDelete, .taskDiveIn, .taskReopen, .taskSetDue, .taskSetWaiting:
+        case .notesGet, .projectArchive, .projectFocus, .projectGet, .projectSetPartOf, .projectUnarchive, .sessionStart, .taskComplete, .taskDelete, .taskDiveIn, .taskReopen, .taskSetDue, .taskSetWaiting:
             return ["project"]
         case .notesSetDetail:
             return ["key", "project", "value"]
@@ -165,7 +167,7 @@ enum PMAction: String, CaseIterable, Sendable {
     /// that take either, `due` or `clearDue` for the one that both sets and clears.
     var exclusiveGroups: [[String]] {
         switch self {
-        case .appOpenInFinder, .appOpenInObsidian, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectUnarchive, .sessionDelete, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskFocus, .taskList, .taskProgress, .taskSearch, .taskSetText, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
+        case .appOpenInFinder, .appOpenInObsidian, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionDelete, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskFocus, .taskList, .taskProgress, .taskSearch, .taskSetText, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
             return []
         case .taskComplete, .taskDelete, .taskReopen:
             return [["task", "tasks"]]

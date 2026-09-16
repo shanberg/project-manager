@@ -21,6 +21,8 @@ private func dispatch(cmd: String, args: [String]) {
         runUnarchive(args: args)
     case "rename":
         runRename(args: args)
+    case "part-of":
+        runPartOf(args: args)
     case "config":
         runConfig(args: args)
     case "notes":

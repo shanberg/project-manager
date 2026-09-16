@@ -65,6 +65,7 @@ pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
 pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD]   # What got done, across every project
+pm part-of <project> [<master> | --clear]   # Put a project under a master project, or show both sides
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes session note <project> <text>   # Appends to today's session, creating it if needed
 pm notes create <project>   # Requires valid config (active/archive paths) for template path
@@ -98,6 +99,8 @@ pm unarchive W-1                   # Move from archive back to active
 **The Waiting list:** One window, across every project, of everything you're waiting on, grouped by what it's waiting on — ⌃⌘W, or Waiting… from the menubar. Anything that has landed sits at the top with a button that clears the wait on the whole group. `pm api call task.waiting` answers the same question on the command line.
 
 **What got done:** `pm done` lists the tasks you finished today — or `pm done week` — across every project, including ones ticked in Obsidian. Completion times live in a small log in each project folder (`.pm-done.ndjson`), never on the task line, so the notes stay prose. See [docs/done-report.md](docs/done-report.md).
+
+**Master projects:** a project can be part of another — `pm part-of W-3 W-1`, or **Part Of…** on a project's menu in the app. The member names its master in its notes' frontmatter (`pm-part-of: "[[W-1 …]]"`), the master lists them under **Projects** on its card and nests them in the sidebar, and its progress and next due date count theirs. One level only. See [docs/combining-projects.md](docs/combining-projects.md).
 
 **In the note editor:** `@` names a project or area — a filtered list, arrow keys, Return — and writes the `[[…]]` the vault reads. `/` opens what a line can carry: make it a task, give it a due date, or start a wait (which hands straight to the `@` picker). A `[[…]]` behaves as one thing: the caret steps over it and backspace takes all of it.
 

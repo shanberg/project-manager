@@ -127,6 +127,9 @@ public struct ApiInput: Codable, Equatable {
     /// The name of what a task is waiting on — a project, an area, or a person.
     public var waiting: String?
     public var clearWaiting: Bool?
+    /// `project.setPartOf`: the master this project is part of, as written.
+    public var partOf: String?
+    public var clearPartOf: Bool?
     public var advanceFocus: Bool?
     public var label: String?
     public var prose: String?

@@ -229,11 +229,13 @@ struct CanvasProjectNote: View {
             rightClick.start()
             mouseUp.onMouseUp = { if draggingKey != nil { draggingKey = nil; dropTarget = nil } }
             mouseUp.start()
+            ProjectIndex.shared.retain()
+            ProjectIndex.shared.warmAllProjects()
             // The commands object outlives this view — it belongs to the node — so a card rebuilt
             // around a fresh, empty selection has to say so rather than leave the old count standing.
             commands.selectedRows = selection.count
         }
-        .onDisappear { rightClick.stop(); mouseUp.stop() }
+        .onDisappear { rightClick.stop(); mouseUp.stop(); ProjectIndex.shared.release() }
         // One place to let the dim go, whichever way the drag ended — dropped, cancelled outside, or
         // released without ever moving.
         .onChange(of: draggingKey) { _, key in if key == nil { draggedSubtree = [] } }
@@ -388,6 +390,7 @@ struct CanvasProjectNote: View {
                         ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
                                            showsPlaceholders: false)
                     }
+                    if shows.brief { members }
                     ForEach(shownSessions, id: \.index) { index, session in
                         session_(session, at: index)
                     }
@@ -539,6 +542,74 @@ struct CanvasProjectNote: View {
     /// a local.
     private var displayName: String {
         notes?.title.isEmpty == false ? notes!.title : filenameTitle
+    }
+
+    /// This project's row in the folder scan — where its master and members are known.
+    private var indexEntry: PMStore.ProjectEntry? {
+        guard let key = store.projectKey else { return nil }
+        return store.allProjects.first { $0.projectKey == key }
+    }
+
+    /// A master's members, and a member's master (docs/combining-projects.md M1).
+    ///
+    /// With the brief, since both are facts about what the project *is* rather than about its work. The
+    /// members are the folder scan's rows, so each carries its own progress and next task, and a click
+    /// opens that project the way a `[[…]]` does. The card holds the scan open while it is up
+    /// (`ProjectIndex.retain`), since a board with no sidebar would otherwise never warm it.
+    @ViewBuilder private var members: some View {
+        let entry = indexEntry
+        let rows = (entry?.members ?? []).compactMap { name in store.allProjects.first { $0.name == name } }
+        if let master = entry?.partOf {
+            Button { onOpenProject(master) } label: {
+                Label("Part of \(projectTitle(fromFolderName: master))", systemImage: "square.stack.3d.up")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Projects")
+                    .font(.system(size: 10, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.9)
+                    .foregroundStyle(.tertiary)
+                    .padding(.bottom, 2)
+                ForEach(rows) { member in
+                    Button { onOpenProject(member.name) } label: { memberRow(member) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+        }
+    }
+
+    private func memberRow(_ member: PMStore.ProjectEntry) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(member.shortName)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+            if let task = member.nextTask {
+                Text(task)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if member.isArchived {
+                Text("Done").font(.system(size: 11)).foregroundStyle(.tertiary)
+            } else if member.showsProgress, member.ownTotal > 0 {
+                Text("\(member.ownDone)/\(member.ownTotal)")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .opacity(member.isArchived ? 0.6 : 1)
     }
 
     @ViewBuilder private var title: some View {

@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.8.0"
+public let apiContractVersion = "1.9.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -198,6 +198,11 @@ public enum ApiRegistry {
         ApiActionSpec(name: "project.unarchive", tier: .mutation,
                       summary: "Move a project or area back out of the archive, to wherever its kind lives.",
                       fields: [project]),
+        ApiActionSpec(name: "project.setPartOf", tier: .mutation,
+                      summary: "Make a project part of a master project, or take it out. One level only.",
+                      fields: [project,
+                               ApiField("partOf", .string, "The master project or area, by name, code or prefix."),
+                               ApiField("clearPartOf", .boolean, "Take the project out of its master instead.")]),
         ApiActionSpec(name: "project.focus", tier: .mutation,
                       summary: "Make this the focused project.", fields: [project]),
 
@@ -212,7 +217,7 @@ public enum ApiRegistry {
                       summary: "Folders in the areas root that could become areas but haven't yet.",
                       fields: []),
         ApiActionSpec(name: "project.get", tier: .query,
-                      summary: "One project's paths and domain.", fields: [project]),
+                      summary: "One project's paths and domain, its master and its members.", fields: [project]),
         ApiActionSpec(name: "notes.get", tier: .query,
                       summary: "A project's notes, tasks, and focused task.", fields: [project]),
         ApiActionSpec(name: "task.list", tier: .query,

@@ -118,7 +118,9 @@ enum DueBucket: String, CaseIterable {
 /// One rendered section: a heading and the rows under it.
 private struct ProjectGroup: Identifiable {
     let title: String
-    let entries: [PMStore.ProjectEntry]
+    var entries: [PMStore.ProjectEntry]
+    /// The rows drawn as members, indented under the master above them — see `nestingMembers`.
+    var nested: Set<String> = []
     var id: String { title }
 }
 
@@ -319,7 +321,8 @@ struct ProjectSidebar: View {
                             isFocusedProject: entry.projectKey == store.projectKey,
                             isSelected: state.projectSelection.contains(entry.projectKey),
                             showsCode: showsCode,
-                            liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
+                            liveProgress: entry.projectKey == store.projectKey ? store.progress : nil,
+                            isNested: group.nested.contains(entry.projectKey)
                         )
                         .tag(entry.projectKey)
                         .listRowSeparator(.hidden)
@@ -579,7 +582,38 @@ struct ProjectSidebar: View {
         if !areas.isEmpty {
             groups.append(ProjectGroup(title: ProjectKind.area.pluralDisplayName, entries: areas))
         }
-        return groups
+        return nestingMembers(groups)
+    }
+
+    /// Each member moved to just under its master, and marked to draw indented
+    /// (docs/combining-projects.md M1).
+    ///
+    /// **Under the master wherever the member would otherwise have gone** — another domain, another due
+    /// bucket, the areas section — because the relationship is the stronger fact about where it belongs,
+    /// and a member left in its own section with its master three headings away is the grouping saying
+    /// nothing. A member whose master isn't in the list (filtered out, or not read yet) stays where the
+    /// grouping put it, unindented. Members keep the order the list was sorted in.
+    private static func nestingMembers(_ groups: [ProjectGroup]) -> [ProjectGroup] {
+        let shown = Set(groups.flatMap { $0.entries.map(\.name) })
+        func isNestable(_ entry: PMStore.ProjectEntry) -> Bool {
+            guard let master = entry.partOf, master != entry.name else { return false }
+            return shown.contains(master)
+        }
+        let members = groups.flatMap(\.entries).filter(isNestable)
+        guard !members.isEmpty else { return groups }
+        let byMaster = Dictionary(grouping: members, by: { $0.partOf ?? "" })
+        return groups.compactMap { group in
+            var out = group
+            out.entries = []
+            for entry in group.entries where !isNestable(entry) {
+                out.entries.append(entry)
+                for member in byMaster[entry.name] ?? [] {
+                    out.entries.append(member)
+                    out.nested.insert(member.projectKey)
+                }
+            }
+            return out.entries.isEmpty ? nil : out
+        }
     }
 }
 
@@ -712,9 +746,12 @@ private struct ProjectSidebarRow: View {
     /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
     /// other row, which falls back to the warmed values.
     let liveProgress: (done: Int, total: Int)?
+    /// Drawn indented, as a member under the master above it.
+    var isNested = false
 
-    private var total: Int { liveProgress?.total ?? entry.total }
-    private var done: Int { liveProgress?.done ?? entry.done }
+    /// The live count replaces this project's own share only: a master's members are still added on.
+    private var total: Int { liveProgress.map { $0.total + entry.total - entry.ownTotal } ?? entry.total }
+    private var done: Int { liveProgress.map { $0.done + entry.done - entry.ownDone } ?? entry.done }
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     private var title: String { showsCode ? entry.name : entry.shortName }
 
@@ -778,6 +815,8 @@ private struct ProjectSidebarRow: View {
         // so a re-scan doesn't drop every task line and re-add it; only the very first scan of a
         // session resizes rows, once.
         .padding(.vertical, 4)
+        // A member sits a step in from its master, the way a source list shows a child.
+        .padding(.leading, isNested ? 16 : 0)
         // The whole row is the click target, not just its text.
         .contentShape(Rectangle())
         // Carve the row out of the focus panel window-drag region, or AppKit's drag-tracking loop eats the
@@ -798,6 +837,10 @@ private struct ProjectSidebarRow: View {
     /// Tooltip: the counts and due date the one-line-per-field row has no room for.
     private var helpText: String {
         var parts: [String] = [entry.name]
+        if let master = entry.partOf { parts.append("part of \(master)") }
+        if !entry.members.isEmpty {
+            parts.append(entry.members.count == 1 ? "1 project" : "\(entry.members.count) projects")
+        }
         if total > 0 { parts.append("\(done)/\(total)") }
         if let due = entry.nextDue { parts.append("due \(RelativeDue.short(due))") }
         if let task = entry.nextTask { parts.append(task) }
@@ -875,8 +918,9 @@ private struct UpNextCard: View {
     /// Live (done, total) when this is the window's own project, which the cached scan can lag behind.
     let liveProgress: (done: Int, total: Int)?
 
-    private var total: Int { liveProgress?.total ?? entry.total }
-    private var done: Int { liveProgress?.done ?? entry.done }
+    /// The live count replaces this project's own share only: a master's members are still added on.
+    private var total: Int { liveProgress.map { $0.total + entry.total - entry.ownTotal } ?? entry.total }
+    private var done: Int { liveProgress.map { $0.done + entry.done - entry.ownDone } ?? entry.done }
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     private var title: String { showsCode ? entry.name : entry.shortName }
 
@@ -1026,6 +1070,11 @@ private struct ProjectMenu: View {
             Divider()
             Button { onSettings(only) } label: {
                 Label("\(only.kind.displayName) Settings…", systemImage: "slider.horizontal.3")
+            }
+            if !only.isArchived {
+                Button { ProjectLifecycle.choosePartOf(for: only) } label: {
+                    Label("Part Of…", systemImage: "square.stack.3d.up")
+                }
             }
         }
         if let isArchived = archiveDirection {
