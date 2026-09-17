@@ -99,6 +99,29 @@ final class CanvasOverlayView: NSView {
         drawCarried(board, scale)
         drawPicker(board, scale)
         drawMarquee(board, scale)
+        drawLinkReorder(board, scale)
+    }
+
+    /// A link being dragged along its card's list: its row lit, and a line where it would go.
+    private func drawLinkReorder(_ board: CanvasBoardView, _ scale: Double) {
+        guard let reorder = board.linkReorder, let to = reorder.to else { return }
+        let rows = reorder.rows.map(board.viewRect)
+        let accent = NSColor.controlAccentColor
+        let source = rows[reorder.from].insetBy(dx: -4 / scale, dy: -1 / scale)
+        accent.withAlphaComponent(0.12).setFill()
+        NSBezierPath(roundedRect: source, xRadius: 4 / scale, yRadius: 4 / scale).fill()
+        guard to != reorder.from else { return }
+        let others = rows.enumerated().filter { $0.offset != reorder.from }.map(\.element)
+        let left = rows.map(\.minX).min() ?? 0
+        let right = rows.map(\.maxX).max() ?? 0
+        // Between the row it would follow and the one it would precede.
+        let y: CGFloat
+        if to == 0 { y = others[0].minY - 1.5 / scale }
+        else if to >= others.count { y = others[others.count - 1].maxY + 1.5 / scale }
+        else { y = (others[to - 1].maxY + others[to].minY) / 2 }
+        let line = NSRect(x: left - 4 / scale, y: y - 1 / scale, width: right - left + 8 / scale, height: 2 / scale)
+        accent.setFill()
+        NSBezierPath(roundedRect: line, xRadius: 1 / scale, yRadius: 1 / scale).fill()
     }
 
     /// Picking cards on the board (⌥B): the workspace's cards ringed and numbered in the order the

@@ -63,6 +63,7 @@ extension CanvasBoardView {
         // than a request to open the card under it. See `CanvasLinkZones`.
         if let pressed = link(at: convert(event.locationInWindow, from: nil)) {
             gesture = .link(pressed.url, from: where_)
+            linkReorder = linkReorder(pressed.card, at: convert(event.locationInWindow, from: nil))
             return
         }
 
@@ -376,7 +377,19 @@ extension CanvasBoardView {
             // so it can go anywhere a link can — and when it comes back down on this board the drop
             // reads it like any other and makes it a card, or in a tiled view a tile.
             let slop = 3 / liveScale
-            guard abs(now.x - from.x) > slop || abs(now.y - from.y) > slop else { break }
+            guard linkReorder?.to != nil || abs(now.x - from.x) > slop || abs(now.y - from.y) > slop else { break }
+            // A link in a list that reorders moves along it while the pointer is on its card — the grammar
+            // of a tab on its strip — and is carried off as a card once the pointer leaves the card.
+            // **The card, not the list**: a list is a few rows tall, and a hand that overshoots it by a
+            // row lost the reorder to a drag it never meant (checked by use, 2026-09-16). Past either end
+            // of the list it goes first or last.
+            if var reorder = linkReorder, !reorder.rows.isEmpty,
+               let node = document.node(id: reorder.card), layout.frame(of: node).contains(x: now.x, y: now.y) {
+                reorder.to = reorder.rows.indices.filter { $0 != reorder.from && reorder.rows[$0].midY < now.y }.count
+                linkReorder = reorder
+                break
+            }
+            linkReorder = nil
             gesture = nil
             dragLink(url, with: event)
 
@@ -443,6 +456,13 @@ extension CanvasBoardView {
         case .connect(let id, let side, _):
             finishConnection(from: id, side: side, at: point(event))
         case .link(let url, _):
+            // Let go along its list: it goes where it was let go, and is not followed.
+            if let reorder = linkReorder, let to = reorder.to {
+                linkReorder = nil
+                if to != reorder.from { nodeViews[reorder.card]?.moveLink(in: reorder.list, from: reorder.from, to: to) }
+                return
+            }
+            linkReorder = nil
             // Let go without going anywhere: follow it. The first click of a run only — a
             // double-click on a link is one link, opened once.
             if event.clickCount == 1 { NSWorkspace.shared.open(url) }
@@ -465,6 +485,18 @@ extension CanvasBoardView {
         guard case .node(let id) = hitTester.hit(where_),
               let url = nodeViews[id]?.link(at: point) else { return nil }
         return (id, url)
+    }
+
+    /// The reorder a press on a link could become, if the link is a row of a list that reorders.
+    private func linkReorder(_ card: String, at point: NSPoint) -> CanvasLinkReorder? {
+        guard let view = nodeViews[card], let row = view.linkRow(at: point) else { return nil }
+        let rows = view.linkRows(of: row.list).map { rect -> CanvasRect in
+            let a = canvasPoint(NSPoint(x: rect.minX, y: rect.minY))
+            let b = canvasPoint(NSPoint(x: rect.maxX, y: rect.maxY))
+            return CanvasRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+        }
+        guard rows.count > 1, rows.indices.contains(row.slot) else { return nil }
+        return CanvasLinkReorder(card: card, list: row.list, from: row.slot, rows: rows)
     }
 
     /// Carry a link off the card it is drawn on.

@@ -118,7 +118,15 @@ struct ProjectDetailsView: View {
             proseBlock("Problem", n.problem)
             numberedBlock("Goals", n.goals)
             proseBlock("Approach", n.approach)
-            LinksBlock(links: n.links)
+            LinksBlock(links: n.links) { from, to in
+                // Onto the notes as they are on disk, like every other field here — the order is the
+                // lines' order, so this is the one write a reorder is.
+                store.saveDetails { fresh in
+                    var out = fresh
+                    out.links = fresh.links.movingLink(from: from, to: to)
+                    return out
+                }
+            }
             bulletBlock("Learnings", n.learnings)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -462,27 +470,33 @@ private struct DetailsEditor: View {
 
 private struct LinksBlock: View {
     let links: [LinkEntry]
+    /// Move the `from`th link that can move to `to` — see `movableLinkSlots`. Drag-reordered on a board
+    /// (canvas backlog 14), where the board reads each row's place through `reportsLinkRow`.
+    var move: (Int, Int) -> Void = { _, _ in }
+    @State private var listID = UUID()
 
-    private var usable: [LinkEntry] {
-        links.filter {
-            ($0.label ?? "").isEmpty == false
-                || ($0.url ?? "").isEmpty == false
-                || !($0.children ?? []).isEmpty
-        }
+    private var usable: [LinkEntry] { links.filter(isUsable) }
+
+    private func isUsable(_ link: LinkEntry) -> Bool {
+        (link.label ?? "").isEmpty == false || (link.url ?? "").isEmpty == false || !(link.children ?? []).isEmpty
     }
 
     var body: some View {
         if !usable.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Eyebrow("Links")
-                ForEach(Array(usable.enumerated()), id: \.offset) { _, link in
+                let slots = links.movableLinkSlots
+                ForEach(Array(links.enumerated()).filter { isUsable($0.element) }, id: \.offset) { index, link in
                     if let children = link.children, !children.isEmpty {
                         linkGroup(link, children: children)
+                    } else if let slot = slots.firstIndex(of: index) {
+                        linkRow(link).reportsLinkRow(listID, slot: slot)
                     } else {
                         linkRow(link)
                     }
                 }
             }
+            .reordersLinks(listID, count: links.movableLinkSlots.count, move: move)
         }
     }
 

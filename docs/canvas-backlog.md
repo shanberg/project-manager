@@ -106,23 +106,6 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 14. Pin and reorder a project's links
-
-`LinkEntry` is `label`, `url`, `children`
-([NotesTypes.swift:3](../pm-swift/Sources/PmLib/NotesTypes.swift:3)) — a list whose order is the order
-of the lines in `## Links`, with nothing to say one matters more than another.
-
-Reordering is therefore an edit to the notes file, which is fine and is what a drag should write.
-Pinning needs somewhere to put the fact. The `key:value` convention the task lines already use is the
-obvious spelling and would not be an invention (see the todo.txt findings in
-[done-report.md](done-report.md)), but a token on a link line is visible in Obsidian in a way a token on
-a task line has already earned. The alternative is a defaults-side pin, which is invisible in Obsidian
-and does not sync — the same trade `CanvasWorkspaces` made, and it came out the other way there.
-
-Wants a better answer to "what are this project's links" than order-of-the-file — the same want that
-built 13 (offering them at the add-a-link field), which settled *whose* links but not their relative
-importance.
-
 ### 17. Zoom to fit the selection, and the rest of the grammar
 
 ⇧2 for "fit what is selected", explicitly asked for — and asked for as part of a larger want: one
@@ -319,7 +302,7 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 14 (pin and reorder links); 17 with 41, which is the same want at two
+**Then design first, then build:** 17 with 41, which is the same want at two
 altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
 (saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
 40 (a second view of a card).
@@ -366,6 +349,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |
 | 13 | offer the project's own links when adding a web card | **Built, 2026-09-15.** `CanvasLinkSuggestions` turns the combo box on when the current project has links — the engaged card if one is stepped into, else the board's own (canvas-workspaces §5). The mirror half, putting the page you are on into `## Links`, is in [web-cards.md](web-cards.md) |
+| 14 | pin and reorder a project's links | **Reorder built, 2026-09-16; pinning dropped.** Drag a link along its project card's list and it moves there — the order of the lines in `## Links` is the order, so the drag writes the notes file and nothing else (`movingLink(from:to:)`, `ProjectLinksOrderTests`). Only plain links move; a group and the blank line keep their places. The drag reorders while the pointer is on the card and carries the link off as a card once it leaves (`CanvasLinkReorder`, `CanvasLinkZones.List`) |
 | 16 | deliberately starting a new session | **Built, 2026-09-16,** as part of 25: ⌥ New Session starts a new sitting inside the idle window, unless the current one is still empty (`session.start` `new`, contract 1.8.0). See [tile-sessions.md](tile-sessions.md) D1 |
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |

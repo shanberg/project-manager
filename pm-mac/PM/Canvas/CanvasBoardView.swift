@@ -384,6 +384,12 @@ final class CanvasBoardView: NSView {
     /// Where the pointer is while a tile is dragged, which is where its proxy is drawn. See
     /// `CanvasOverlayView.drawCarried`.
     var dragPoint: CanvasPoint?
+    /// A link on a card being dragged along the list it is in (canvas backlog 14): which card and list,
+    /// its place, the rows in canvas coordinates as they stood when the drag began, and where it would
+    /// go if let go now — nil until the press has moved.
+    var linkReorder: CanvasLinkReorder? {
+        didSet { if linkReorder != oldValue { overlay.needsDisplay = true } }
+    }
     /// A tab being dragged along its strip, while it is: drawn by `CanvasTileHandleView`.
     var tabSlide: CanvasTabSlide? {
         didSet { tileHandleView.tabSlideChanged(from: oldValue) }
@@ -1187,4 +1193,13 @@ extension CanvasBoardView: CanvasPageStage {
     /// behind something else. `.visible` is any part of the window, which is the right threshold —
     /// a board you have left a corner of showing is a board you meant to keep.
     var isOnScreen: Bool { window?.occlusionState.contains(.visible) ?? false }
+}
+
+/// See `CanvasBoardView.linkReorder`.
+struct CanvasLinkReorder: Equatable {
+    var card: String
+    var list: UUID
+    var from: Int
+    var rows: [CanvasRect]
+    var to: Int?
 }

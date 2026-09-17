@@ -44,7 +44,51 @@ final class CanvasLinkZones {
 
     func removeAll() {
         zones = [:]
+        lists = [:]
     }
+
+    // MARK: Lists that reorder
+
+    /// A list of links on the card that can be dragged into a new order — a project's `## Links` (canvas
+    /// backlog 14). A press on one of its links is still the board's, as every link is; a drag that stays
+    /// on the list moves the link along it, and one that leaves carries it off as a card.
+    struct List {
+        /// Each row by its place among the links that move, in `space`.
+        var rows: [Int: CGRect] = [:]
+        /// How many there are now, so a row reported before the list shrank is not read.
+        var count = 0
+        var move: (Int, Int) -> Void = { _, _ in }
+
+        /// The rows there are, in order.
+        var ordered: [CGRect] { (0..<count).compactMap { rows[$0] } }
+    }
+
+    private var lists: [UUID: List] = [:]
+
+    func setList(_ id: UUID, count: Int, move: @escaping (Int, Int) -> Void) {
+        lists[id, default: List()].count = count
+        lists[id]?.move = move
+    }
+
+    func setRow(_ id: UUID, slot: Int, rect: CGRect) {
+        lists[id, default: List()].rows[slot] = rect
+    }
+
+    func clearList(_ id: UUID) {
+        lists[id] = nil
+    }
+
+    /// The reorderable row drawn at `point`, in `space`: which list, and its place in it.
+    func row(at point: CGPoint) -> (list: UUID, slot: Int)? {
+        for (id, list) in lists {
+            for (slot, rect) in list.rows where slot < list.count && rect.insetBy(dx: -1, dy: -1).contains(point) {
+                return (id, slot)
+            }
+        }
+        return nil
+    }
+
+    func list(_ id: UUID) -> List? { lists[id] }
 
     /// The link drawn at `point`, in `space`.
     ///
@@ -102,6 +146,16 @@ extension View {
     /// Report where this text's marked links were drawn — see `linkMarkedText` — to the card it is on.
     func reportsLinkZones() -> some View {
         modifier(TextLinkZones())
+    }
+
+    /// Make this the list the rows inside it belong to: `count` rows that move, and what moving one does.
+    func reordersLinks(_ list: UUID, count: Int, move: @escaping (Int, Int) -> Void) -> some View {
+        modifier(LinkListRegistration(list: list, count: count, move: move))
+    }
+
+    /// Report this view as the `slot`th row of a list that reorders — see `reordersLinks`.
+    func reportsLinkRow(_ list: UUID, slot: Int) -> some View {
+        modifier(LinkRowZone(list: list, slot: slot))
     }
 
     /// Report this whole view as a link to `url`, to the card it is on.
@@ -165,6 +219,43 @@ private struct ViewLinkZone: ViewModifier {
                     Color.clear
                         .onChange(of: zone, initial: true) { _, now in registry.set([now], for: id) }
                         .onDisappear { registry.clear(id) }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private struct LinkListRegistration: ViewModifier {
+    let list: UUID
+    let count: Int
+    let move: (Int, Int) -> Void
+    @Environment(\.canvasLinkZones) private var registry
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let registry {
+            content
+                .onChange(of: count, initial: true) { _, now in registry.setList(list, count: now, move: move) }
+                .onDisappear { registry.clearList(list) }
+        } else {
+            content
+        }
+    }
+}
+
+private struct LinkRowZone: ViewModifier {
+    let list: UUID
+    let slot: Int
+    @Environment(\.canvasLinkZones) private var registry
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let registry {
+            content.background {
+                GeometryReader { proxy in
+                    let rect = proxy.frame(in: .named(CanvasLinkZones.space))
+                    Color.clear
+                        .onChange(of: rect, initial: true) { _, now in registry.setRow(list, slot: slot, rect: now) }
                 }
             }
         } else {

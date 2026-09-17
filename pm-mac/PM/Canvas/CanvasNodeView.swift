@@ -231,6 +231,24 @@ class CanvasNodeView: NSView {
         return url
     }
 
+    /// The row of a reorderable list of links under `point`, in the superview's coordinates, under the
+    /// same conditions `link(at:)` answers under. See `CanvasLinkZones.List`.
+    func linkRow(at point: NSPoint) -> (list: UUID, slot: Int)? {
+        guard link(at: point) != nil, let space = linkSpace else { return nil }
+        return linkZones.row(at: space.convert(point, from: superview))
+    }
+
+    /// A reorderable list's rows, in order, in the superview's coordinates.
+    func linkRows(of list: UUID) -> [NSRect] {
+        guard let space = linkSpace, let rows = linkZones.list(list)?.ordered else { return [] }
+        return rows.map { space.convert($0, to: superview) }
+    }
+
+    /// Move the `from`th link of a list to `to` — the list's own answer, which writes the file.
+    func moveLink(in list: UUID, from: Int, to: Int) {
+        linkZones.list(list)?.move(from, to)
+    }
+
     /// Escape steps back out.
     ///
     /// The last resort rather than the mechanism: a text card's editor takes Escape itself, and this is
