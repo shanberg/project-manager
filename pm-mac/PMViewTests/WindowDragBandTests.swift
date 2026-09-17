@@ -62,7 +62,7 @@ final class WindowDragBandTests: XCTestCase {
     }
 
     /// Where a workspace's first row of tiles starts: `CanvasBoardView.headerClearance` plus
-    /// `CanvasTiling.edgeGap`, which is also exactly `CanvasEdgeView.height` — the board's soft edge
+    /// `CanvasTiling.edgeGap`, which is also exactly `CanvasSoftEdge.band` — the board's soft edge
     /// ends where the tiles begin, by construction. That flushness matters to the fix as well as to
     /// the drawing: the edge view is a sibling in front of the whole scroll view and answers the window
     /// drag with *true*, so a strip reaching even a point above this line would have the drag put back

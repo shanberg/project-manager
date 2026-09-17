@@ -542,6 +542,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.openingNotice = replacementNotice
         replacementNotice = nil
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
+        pane.projectColor = self.store.color
         pane.trafficLightsAreElsewhere = { [weak self] in self?.sidebarItem.isCollapsed == false }
         pane.focus = focus
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
@@ -800,6 +801,11 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// The project's board has appeared (or moved) since a tab was built. Rebuild the tab that is
     /// waiting on it, so a canvas that has just been made lands on screen rather than leaving the
     /// window on the pane that was holding still for it.
+    /// The project's colour changed, or arrived with its first read: every mounted board takes it.
+    func projectColorChanged() {
+        for case let pane as CanvasPaneController in contentPane.allContent { pane.projectColor = store.color }
+    }
+
     func canvasPathChanged() {
         canvasUnavailable = false
         triedReplacingCanvas = false

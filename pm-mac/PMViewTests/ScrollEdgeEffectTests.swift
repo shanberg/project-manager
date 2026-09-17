@@ -12,7 +12,7 @@ import AppKit
 /// strip *below* the titlebar and took clicks; drawing the titlebar sent clicks in the band to the
 /// titlebar rather than the board.
 ///
-/// So `CanvasEdgeView` draws it. This keeps the evidence: if AppKit ever starts drawing the pocket for
+/// So `CanvasSoftEdge` draws it. This keeps the evidence: if AppKit ever starts drawing the pocket for
 /// this window, the test fails and the board can go back to the system's edge.
 ///
 /// A window built the way `ProjectWindowController` builds one — full-size content, transparent
@@ -36,7 +36,7 @@ final class ScrollEdgeEffectTests: XCTestCase {
         let drawing = layers.filter { $0.name != "NSScrollPocket" && $0.drawing }
         XCTAssertTrue(drawing.isEmpty,
                       "AppKit is drawing its own edge under this window's titlebar now — "
-                          + "`CanvasEdgeView` may be able to give way to it (docs/header-chrome.md P5)")
+                          + "`CanvasSoftEdge` may be able to give way to it (docs/header-chrome.md P5)")
 
         // And the band is still the board's: a click between the islands lands on it.
         let frame = try XCTUnwrap(window.contentView?.superview)

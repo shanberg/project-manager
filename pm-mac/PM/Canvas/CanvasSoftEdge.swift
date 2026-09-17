@@ -1,83 +1,69 @@
 import AppKit
+import QuartzCore
 
-/// What separates the window's chrome from a board scrolling under it: a soft edge along the board's
-/// top, where cards blur and fade into the board's own ground before they reach the controls.
-/// docs/header-chrome.md L1.
+/// What separates the window's chrome from a board scrolling under it: the cards fade out along the
+/// top of the pane before they reach the controls. docs/header-chrome.md L1.
 ///
-/// **Ours, and the spec wanted the system's.** A scroll view under this window's titlebar already has
-/// AppKit's edge view — an `NSScrollPocket` exactly the height of the band — but it never switches on:
-/// its soft and hard layers stayed hidden at zero size with the titlebar drawn or transparent, with or
-/// without a soft-preferring accessory, and with or without items in the toolbar
-/// (`ScrollEdgeEffectTests`, which will say so if that ever changes). The one supported way to ask for
-/// the style, an accessory, adds a strip *below* the titlebar and takes clicks. So this draws the soft
-/// edge the way the system's is described — a blur, masked to fade out, over a tint toward the ground —
-/// and nothing else.
+/// **A mask on the cards, not a film over them.** This was a view laid over the board — a blur, masked
+/// to fade out, under a tint toward the board's grey — and the tint was grey whatever was beneath it,
+/// so once the ground under the board could carry a project's colour (`CanvasColorWash`) the edge sat
+/// on it as a muddy band exactly where the colour is strongest. Masking the scroll view instead fades
+/// the cards themselves to nothing, and what shows through is the real ground, washed or not. The blur
+/// went with it: there is nothing left over the header to blur.
 ///
-/// **The same in every view, and nothing to switch.** It ends exactly where a workspace's tiles begin
-/// (`CanvasBoardView.headerClearance` plus `CanvasTiling.edgeGap`), so over a workspace there is only
-/// ground under it — blurred ground tinted toward itself, which is to say nothing — while over the
-/// canvas it has cards to soften. docs/header-chrome.md Q6.
+/// **Why ours.** A scroll view under this window's titlebar already has AppKit's edge view — an
+/// `NSScrollPocket` exactly the height of the band — but it never switches on (`ScrollEdgeEffectTests`,
+/// which will say so if that ever changes).
 ///
-/// **It takes no clicks.** A drawing, not a strip: a click between the islands lands on the board
-/// exactly as before.
-final class CanvasEdgeView: NSView {
-    /// From the top of the pane to where the fade reaches nothing.
-    static var height: CGFloat { CGFloat(CanvasBoardView.headerClearance + CanvasTiling.edgeGap) }
+/// **The board's, not a workspace's.** The fade reaches well below where a workspace's tiles begin
+/// (`CanvasBoardView.headerClearance` plus `CanvasTiling.edgeGap`), so over a tiling it would eat into
+/// the top of every tile — its tabs included. It stands down as the board crosses into a tiling, at
+/// the pace the tiles fly (`tiled`), and comes back as they leave.
+enum CanvasSoftEdge {
+    /// From the top of the pane to where a workspace's tiles begin — the header's own band.
+    static var band: CGFloat { CGFloat(CanvasBoardView.headerClearance + CanvasTiling.edgeGap) }
 
-    private let blur = NSVisualEffectView()
-    private let tint = Tint()
+    /// How far the fade runs, from nothing showing to all of a card: twice the band's first fade, which
+    /// ran over three quarters of it.
+    static var breadth: Double { Double(band) * 0.75 * 2 }
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        // Blurs what the window has already drawn behind it — the board — rather than what is behind
-        // the window.
-        blur.blendingMode = .withinWindow
-        blur.material = .contentBackground
-        // A background window's chrome recedes, and this is part of it (HIG: inactive windows don't use
-        // materials) — the system's own answer, not a second one.
-        blur.state = .followsWindowActiveState
-        for layer in [blur, tint] as [NSView] {
-            layer.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(layer)
-            NSLayoutConstraint.activate([
-                layer.topAnchor.constraint(equalTo: topAnchor),
-                layer.leadingAnchor.constraint(equalTo: leadingAnchor),
-                layer.trailingAnchor.constraint(equalTo: trailingAnchor),
-                layer.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-        }
-        blur.maskImage = Self.fade(height: Self.height)
+    /// Where the fade starts. Clear above — the strip the pill and the capsules sit in — by a quarter of
+    /// the band, and a further tenth of the fade's breadth.
+    static var start: Double { Double(band) * 0.25 + breadth * 0.1 }
+
+    /// From the top of the pane to where the cards are fully there.
+    static var height: CGFloat { CGFloat(start + breadth) }
+
+    /// How much of a card shows `y` points down from the top of the pane, 0…1: nothing above `start`,
+    /// then a smootherstep to full, so neither end of the fade has an edge to see. `tiled` lifts it
+    /// toward fully shown, since a tiling has no edge.
+    static func opacity(at y: Double, tiled: Double = 0) -> Double {
+        let t = min(max((y - start) / breadth, 0), 1)
+        let faded = t * t * t * (t * (t * 6 - 15) + 10)
+        return faded + (1 - faded) * min(max(tiled, 0), 1)
     }
 
-    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override var mouseDownCanMoveWindow: Bool { true }
-
-    /// Opaque at the top, clear at the bottom — solid for the half the controls sit in, then gone by
-    /// where the tiles start. Stretched across the width; only its alpha is read.
-    private static func fade(height: CGFloat) -> NSImage {
-        let image = NSImage(size: NSSize(width: 1, height: height), flipped: true) { rect in
-            NSGradient(colorsAndLocations: (.black, 0), (.black, 0.45), (.clear, 1))?
-                .draw(in: rect, angle: 90)
-            return true
-        }
-        image.resizingMode = .stretch
-        return image
+    /// A mask for a layer `bounds` tall: clear at the top, opaque from `height` down.
+    ///
+    /// `flipped` is whether the layer's own y runs downward — a gradient's points are in the layer's
+    /// unit space, whichever way that faces.
+    static func mask(for bounds: CGRect, flipped: Bool, tiled: Double) -> CAGradientLayer {
+        let mask = CAGradientLayer()
+        update(mask, for: bounds, flipped: flipped, tiled: tiled)
+        return mask
     }
 
-    /// The fade toward the board's own ground, over the blur. Drawn rather than a layer so the colour
-    /// follows light and dark by itself.
-    private final class Tint: NSView {
-        override var isFlipped: Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func draw(_ dirtyRect: NSRect) {
-            let ground = CanvasPalette.board
-            NSGradient(colorsAndLocations: (ground.withAlphaComponent(0.72), 0),
-                       (ground.withAlphaComponent(0.5), 0.45),
-                       (ground.withAlphaComponent(0), 1))?
-                .draw(in: bounds, angle: 90)
-        }
+    static func update(_ mask: CAGradientLayer, for bounds: CGRect, flipped: Bool, tiled: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = bounds
+        let stops = (0...16).map { Double($0) / 16 }
+        mask.colors = stops.map { NSColor.black.withAlphaComponent(opacity(at: $0 * Double(height), tiled: tiled)).cgColor }
+            + [NSColor.black.cgColor]
+        let reach = bounds.height > 0 ? Double(height / bounds.height) : 1
+        mask.locations = (stops.map { $0 * reach } + [1]).map { NSNumber(value: $0) }
+        mask.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
+        mask.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
+        CATransaction.commit()
     }
 }

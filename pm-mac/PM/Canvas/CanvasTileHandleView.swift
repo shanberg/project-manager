@@ -158,7 +158,7 @@ final class CanvasTileHandleView: NSView {
     /// titlebar is otherwise invisible. These carve out the part of that band that is a control.
     ///
     /// **In front of or behind anything, it makes no difference.** The region is built from the
-    /// blockers alone, so `CanvasEdgeView` answering true over the top of the pane puts nothing back.
+    /// blockers alone, so a view answering true over the top of the pane (the soft edge was one) puts nothing back.
     /// (This comment once said it did, from a test that modelled the rule rather than reading the
     /// region; see `WindowDragBlocker`.)
     ///

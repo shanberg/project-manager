@@ -36,7 +36,7 @@ extension View {
     /// workspace, which made one set of controls two different materials depending on what happened to
     /// be under them — and read as two different sets of controls. What glass was being asked to do
     /// there, keep the header distinct from a board scrolling under it, is the board's own edge's job
-    /// now (`CanvasEdgeView`). Glass says one thing: *these belong together, and you can press
+    /// now (`CanvasSoftEdge`). Glass says one thing: *these belong together, and you can press
     /// them*. So it is on controls and never on a title.
     ///
     /// The one time it is not `.regular` is while a capsule is arriving or leaving — see

@@ -73,6 +73,8 @@ final class PMStore {
     /// The icon chosen in Project Settings, read from the notes' frontmatter at each load. Nil draws
     /// the progress ring.
     private(set) var icon: ProjectIcon?
+    /// The colour chosen in Project Settings, from the same frontmatter — see `ProjectColor`.
+    private(set) var color: ProjectColor?
     private(set) var todos: [Todo] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
@@ -236,6 +238,7 @@ final class PMStore {
         ("hasResolvedCanvasPath", { $0.hasResolvedCanvasPath }),
         ("notes", { $0.notes as Any }),
         ("icon", { $0.icon as Any }),
+        ("color", { $0.color as Any }),
         ("todos", { $0.todos }),
         ("waitTargets", { $0.waitTargets }),
         ("focusedKey", { $0.focusedKey as Any }),
@@ -357,6 +360,7 @@ final class PMStore {
             hasResolvedCanvasPath = true
             notes = nil
             icon = nil
+            color = nil
             todos = []
             lastEditedAt = nil
             focusedKey = nil
@@ -377,7 +381,7 @@ final class PMStore {
             // Resolve the project directory once (this is the protected-folder access), then reuse
             // the handle for both the notes read and the cached notes path.
             Log.write("reload start: name=\(name)")
-            let result = Result { () -> (NotesShowOutput, String, String, Date?, ProjectIcon?) in
+            let result = Result { () -> (NotesShowOutput, String, String, Date?, ProjectIcon?, ProjectColor?) in
                 let cfg = try? loadConfig()
                 Log.write("config: useObsidianCLI=\(cfg?.useObsidianCLI ?? false)")
                 let handle = try resolveNotesHandle(project: name)
@@ -399,7 +403,7 @@ final class PMStore {
                 // After the prune above, which is a write of our own — read before it, the file's
                 // date would be the moment *this* load touched it rather than the last real edit.
                 return (output, handle.notesPath, handle.projectPath, notesLastEdited(path: handle.notesPath),
-                        projectIcon(rawText: raw))
+                        projectIcon(rawText: raw), projectColor(rawText: raw))
             }
             if case .failure(let error) = result {
                 let ns = error as NSError
@@ -408,7 +412,7 @@ final class PMStore {
             Task { @MainActor in
                 guard let self else { return }
                 switch result {
-                case .success(let (output, path, projectPath, lastEdited, icon)):
+                case .success(let (output, path, projectPath, lastEdited, icon, color)):
                     // Classify how the hero task moved since the last load, but never animate across a
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
@@ -422,6 +426,7 @@ final class PMStore {
                     self.projectPath = projectPath
                     self.notes = output.notes
                     self.icon = icon
+                    self.color = color
                     self.todos = output.todos
                     self.resolveWaits()
                     self.lastEditedAt = lastEdited

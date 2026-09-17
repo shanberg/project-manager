@@ -66,6 +66,10 @@ enum ProjectSettings {
                 Log.write("project icon: \(name) -> \(icon?.value ?? "none")")
                 if case .emoji(let emoji) = icon { EmojiCatalog.noteUsed(emoji) }
             }
+            if model.color != model.originalColor {
+                try setProjectColor(project: name, to: model.color)
+                Log.write("project color: \(name) -> \(model.color?.value ?? "none")")
+            }
             if !title.isEmpty, title != model.originalTitle {
                 try ProjectLifecycle.rename(projectNamed: name, to: title, isArchived: isArchived)
             } else {
@@ -92,6 +96,7 @@ final class ProjectSettingsModel {
     let prefix: String?
     let originalTitle: String
     let originalIcon: ProjectIcon?
+    let originalColor: ProjectColor?
     let done: Int
     let total: Int
 
@@ -99,6 +104,7 @@ final class ProjectSettingsModel {
     var mode: Mode
     var symbol: String
     var emoji: String
+    var color: ProjectColor?
     var symbolQuery = ""
     /// The category menu's choice. Nil is All.
     var symbolCategory: String?
@@ -127,6 +133,8 @@ final class ProjectSettingsModel {
         done = todos.filter(\.checked).count
         total = todos.count
         originalIcon = raw.flatMap(projectIcon(rawText:))
+        originalColor = raw.flatMap(projectColor(rawText:))
+        color = originalColor
 
         switch originalIcon {
         case .symbol(let name): mode = .symbol; symbol = name; emoji = Self.defaultEmoji
@@ -152,7 +160,7 @@ final class ProjectSettingsModel {
     }
 
     var canSave: Bool {
-        !trimmedTitle.isEmpty && (trimmedTitle != originalTitle || chosenIcon != originalIcon)
+        !trimmedTitle.isEmpty && (trimmedTitle != originalTitle || chosenIcon != originalIcon || color != originalColor)
     }
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
@@ -255,6 +263,8 @@ struct ProjectSettingsView: View {
                     Divider()
                     emojiPicker.padding(12)
                 }
+                Divider()
+                row("Color") { ProjectColorPicker(color: $model.color) }
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))

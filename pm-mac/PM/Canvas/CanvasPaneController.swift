@@ -28,8 +28,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private var pill: NSHostingView<CanvasTitlePill>!
     private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
     private var tabBar: NSHostingView<CanvasTabBar>!
-    /// The soft edge between the header and the board. See `CanvasEdgeView`.
-    private let edge = CanvasEdgeView()
     /// Which part of the board this pane is pinned to. `.whole` is a plain board and behaves exactly as
     /// one; the other two are a tab that was opened *at* something.
     var focus: CanvasFocus = .whole
@@ -170,6 +168,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     var title_: String {
         get { header.title }
         set { header.title = newValue }
+    }
+
+    /// The colour of the project this board belongs to, for the wash. Nil for a board that isn't a
+    /// project's, or a project with no colour.
+    var projectColor: ProjectColor? {
+        get { scroll.washColor }
+        set { scroll.washColor = newValue }
     }
 
     override func loadView() {
@@ -693,10 +698,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         notice.translatesAutoresizingMaskIntoConstraints = false
 
+        // Behind the board, the same size: the ground and its wash, which the board's soft edge fades
+        // the cards out to. See `CanvasScrollView.groundView`.
+        scroll.groundView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(scroll.groundView)
         container.addSubview(scroll)
-        // Over the board and under everything else: the edge softens cards, never the chrome.
-        edge.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(edge)
         container.addSubview(notice)
         container.addSubview(pill)
         container.addSubview(tabBar)
@@ -727,13 +733,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-
-            // The board's full width, sidebar included — the board runs under the sidebar, so its
-            // edge does too.
-            edge.topAnchor.constraint(equalTo: container.topAnchor),
-            edge.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            edge.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            edge.heightAnchor.constraint(equalToConstant: CanvasEdgeView.height),
+            scroll.groundView.topAnchor.constraint(equalTo: scroll.topAnchor),
+            scroll.groundView.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            scroll.groundView.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            scroll.groundView.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
 
             pillLeading,
             capsule.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor,

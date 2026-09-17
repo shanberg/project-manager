@@ -52,6 +52,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// after a retarget, so acting only at the moment of the switch would leave the window showing the
     /// previous project's board, or an empty state for a project that has one.
     private var canvasPathWatch: ObservationRelay?
+    private var colorWatch: ObservationRelay?
     /// The last answer acted on — `removeDuplicates` in the shape the relay replaces.
     private struct CanvasAnswer: Equatable { let path: String?; let resolved: Bool }
     private var lastCanvasAnswer: CanvasAnswer?
@@ -157,6 +158,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
+        watchColor()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
             renderer = split.renderer
@@ -318,6 +320,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // wants is the *new* one, whose path arrives with the new store's first read. So this can go
         // either way here and `watchCanvasPath` finishes it when the path lands.
         watchCanvasPath()
+        watchColor()
         applyRememberedRenderer()
     }
 
@@ -430,6 +433,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// board are two views of it with one undo stack rather than two copies racing each other to save.
     @objc func toggleCanvasRenderer(_ sender: Any?) {
         setRenderer(renderer == .canvas ? .tasks : .canvas)
+    }
+
+    /// The project's colour into every board in the window — on the first read, which is when a new
+    /// store learns it, and whenever Project Settings changes it.
+    private func watchColor() {
+        colorWatch = ObservationRelay(tracking: { [weak self] in _ = self?.store.color }) { [weak self] in
+            afterCurrentUpdate { [weak self] in self?.split.projectColorChanged() }
+        }
     }
 
     private func watchCanvasPath() {

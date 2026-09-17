@@ -34,6 +34,8 @@ final class ProjectContentPaneController: NSViewController {
 
     /// What this tab has already built, if anything.
     func content(for tab: String) -> NSViewController? { mounted[tab] }
+    /// Every tab's content that has been mounted, shown or hidden.
+    var allContent: [NSViewController] { Array(mounted.values) }
 
     /// Put `child` on screen as `tab`'s content, adding it if this is the first time.
     ///

@@ -75,6 +75,8 @@ final class ProjectIndex {
         /// What the row shows in place of its ring, from the notes' frontmatter — see `ProjectIcon`.
         /// Nil draws the ring (or an area's dotted circle).
         var icon: ProjectIcon? = nil
+        /// The project's colour, from the same frontmatter — see `ProjectColor`. Nil is uncoloured.
+        var color: ProjectColor? = nil
         /// The master this project is part of, resolved to a folder name — see `ProjectPartOf`.
         var partOf: String? = nil
         /// The members of this project, by folder name, when it is a master. Filled by `rollingUp`.
@@ -147,11 +149,11 @@ final class ProjectIndex {
         /// Complete this listing with the values a notes read produces (or the zeroes that stand in
         /// until one lands).
         func entry(done: Int, total: Int, nextTask: String?, nextDue: String?, detailsLoaded: Bool,
-                   icon: ProjectIcon? = nil, partOf: String? = nil) -> ProjectEntry {
+                   icon: ProjectIcon? = nil, color: ProjectColor? = nil, partOf: String? = nil) -> ProjectEntry {
             ProjectEntry(name: name, projectKey: projectKey, code: code, number: number,
                          shortName: shortName, domain: domain, kind: kind, isArchived: isArchived,
                          modified: modified, notesPath: notesPath, done: done, total: total,
-                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded, icon: icon,
+                         nextTask: nextTask, nextDue: nextDue, detailsLoaded: detailsLoaded, icon: icon, color: color,
                          partOf: partOf, ownDone: done, ownTotal: total)
         }
     }
@@ -385,6 +387,7 @@ final class ProjectIndex {
                                          nextDue: Self.earliestDue(out.todos),
                                          detailsLoaded: true,
                                          icon: read.icon,
+                                         color: read.color,
                                          partOf: read.partOf.flatMap { resolveWrittenName($0, in: groups) }))
                 tasks += Self.openTasks(of: out.todos, in: item, shorteningCodes: shortening,
                                         resolvingIn: groups)
@@ -416,11 +419,11 @@ final class ProjectIndex {
     /// One project's notes as the sidebar needs them, plus its icon. The icon lives in frontmatter,
     /// which `notesShow` doesn't report, so the raw text is read once here and handed to both.
     private nonisolated static func readDetails(of name: String)
-        -> (output: NotesShowOutput, icon: ProjectIcon?, partOf: String?)? {
+        -> (output: NotesShowOutput, icon: ProjectIcon?, color: ProjectColor?, partOf: String?)? {
         guard let handle = try? resolveNotesHandle(project: name),
               let raw = try? handle.io.readContent(path: handle.notesPath),
               let output = try? notesShow(rawText: raw) else { return nil }
-        return (output, projectIcon(rawText: raw), projectPartOf(rawText: raw))
+        return (output, projectIcon(rawText: raw), projectColor(rawText: raw), projectPartOf(rawText: raw))
     }
 
     /// Masters with their members' numbers added in: progress across the whole, and the earliest due

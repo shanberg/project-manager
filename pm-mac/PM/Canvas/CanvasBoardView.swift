@@ -75,7 +75,7 @@ final class CanvasBoardView: NSView {
     /// margins asked the same question and answering it twice, for 32pt at the edges. The tiling owns
     /// the whole answer now; see `CanvasTiling.edgeGap`, which is where to go if it wants adjusting.
     ///
-    /// Read by `CanvasEdgeView` too, which fades to nothing exactly where the tiles start.
+    /// Read by `CanvasSoftEdge` too, as the band its fade is measured from.
     static let headerClearance: Double = 40
 
     /// The board's extent in canvas coordinates: everything on it, plus room to drag things outside it.
@@ -214,6 +214,7 @@ final class CanvasBoardView: NSView {
 
     private func tilednessChangedBody() {
         scrollView?.backgroundColor = ground
+        (scrollView as? CanvasScrollView)?.edgeTiledness = tiledness
         needsDisplay = true
         for (id, view) in nodeViews { applyPresence(to: view, id: id) }
         overlay.needsDisplay = true
@@ -993,8 +994,8 @@ final class CanvasBoardView: NSView {
     }
 
     private func drawBody(_ dirty: NSRect) {
-        ground.setFill()
-        dirty.fill()
+        // No ground here: it is painted under the scroll view's clip, so the project's colour can be
+        // washed between it and the cards — see `CanvasColorWash`. `ground` still says what it is.
         drawGrid(in: dirty)
         // Frames and lines are statements about where cards are, and a tiled view has moved them. A line
         // routed to a position a card no longer has would be fiction drawn at full contrast; a tiled

@@ -771,7 +771,7 @@ private struct ProjectSidebarRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
-            KindMark(entry: entry, fraction: fraction, total: total)
+            KindMark(entry: entry, fraction: fraction, total: total, isSelected: isSelected)
             VStack(alignment: .leading, spacing: 1) {
                 // The due date rides the name line rather than the task line: `nextDue` is the
                 // earliest due across the project's open tasks, which needn't be the next task's own.
@@ -927,7 +927,7 @@ private struct UpNextCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
             // An area reaches this card whenever a task inside it has a date, so it needs the mark too.
-            KindMark(entry: entry, fraction: fraction, total: total)
+            KindMark(entry: entry, fraction: fraction, total: total, isSelected: isSelected)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // Semibold is what marks the promotion. The rows below stay regular, so a carded
@@ -1137,23 +1137,38 @@ private struct KindMark: View {
     let entry: PMStore.ProjectEntry
     let fraction: Double
     let total: Int
+    let isSelected: Bool
+
+    /// The project's colour, which the mark takes — except on the highlight, where a blue ring on a
+    /// blue selection would vanish and the row's own foreground reads instead.
+    private var tint: Color? { isSelected ? nil : entry.color?.swiftUIColor }
 
     var body: some View {
         if let icon = entry.icon, ProjectIconMark.canDraw(icon) {
             // A chosen icon stands in for either mark. The count the ring gave up is still in the
             // row's tooltip, and in the menu bar's menu when this is the focused project.
-            ProjectIconMark(icon: icon, size: 13)
+            ProjectIconMark(icon: icon, size: 13, tint: tint)
                 .frame(width: 16, height: 16)
+                .overlay(alignment: .bottomTrailing) {
+                    // An emoji keeps its own colours, so the project's rides beside it as a dot.
+                    if case .emoji = icon, let color = entry.color {
+                        Circle().fill(color.swiftUIColor)
+                            .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1))
+                            .frame(width: 7, height: 7)
+                            .offset(x: 2, y: 2)
+                    }
+                }
         } else if entry.showsProgress {
             // The ring is a template image, so it takes the row's foreground color, the same way the
             // menubar recolors it.
             Image(nsImage: MenubarRing.image(fraction: fraction, hasProject: total > 0, tint: nil))
                 .renderingMode(.template)
+                .foregroundStyle(tint ?? Color.primary)
                 .opacity(entry.detailsLoaded ? 1 : 0.35)
         } else {
             Image(systemName: "circle.dotted")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tint ?? Color.secondary)
                 // Matched to the ring image's box so both kinds of row line their text up.
                 .frame(width: 16, height: 16)
         }

@@ -331,7 +331,7 @@ final class CanvasHeaderModel {
 /// **And no glass, in any state.** "Non-interactive items like custom titles… should avoid the glass
 /// material" (WWDC25, *Build an AppKit app with the new design*): glass in this header means *these are
 /// controls*, and a name is not one. What keeps it legible over cards panning under it is the board's
-/// soft edge (`CanvasEdgeView`). So the pill is identical on the board and in every workspace —
+/// soft edge (`CanvasSoftEdge`). So the pill is identical on the board and in every workspace —
 /// same inset, same place, same nothing behind it — which is what the first complaint about this header
 /// asked for. docs/header-chrome.md Q1.
 struct CanvasTitlePill: View {

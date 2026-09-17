@@ -15,6 +15,45 @@ import QuartzCore
 @MainActor
 final class CanvasScrollView: NSScrollView {
     private(set) var board: CanvasBoardView!
+    /// The ground under the board and the project's colour washed down it — behind every card and
+    /// tile. See `CanvasColorWash`. Not a subview: the host puts it behind this view, so the soft edge
+    /// that masks this view fades the cards to it rather than taking it with them.
+    let groundView = CanvasColorWash()
+
+    /// The board's ground colour — its grey, or a tiling's deeper one mid-crossing. The board no longer
+    /// paints it; this view's ground does, so the wash can sit between the two.
+    override var backgroundColor: NSColor {
+        didSet { groundView.ground = backgroundColor }
+    }
+
+    /// The cards fading out under the header — see `CanvasSoftEdge`. On this view's layer rather than
+    /// the clip's, whose bounds move as the board scrolls and would carry the mask with the cards.
+    private var edgeMask: CAGradientLayer?
+
+    /// How far into a tiling the board is, 0…1 — the soft edge stands down over a workspace. Set by
+    /// the board on every step of its crossing.
+    var edgeTiledness: Double = 0 {
+        didSet { if edgeTiledness != oldValue { tile() } }
+    }
+
+    override func tile() {
+        super.tile()
+        guard let layer else { return }
+        let flipped = layer.contentsAreFlipped()
+        if let edgeMask {
+            CanvasSoftEdge.update(edgeMask, for: layer.bounds, flipped: flipped, tiled: edgeTiledness)
+        } else {
+            let mask = CanvasSoftEdge.mask(for: layer.bounds, flipped: flipped, tiled: edgeTiledness)
+            layer.mask = mask
+            edgeMask = mask
+        }
+    }
+
+    /// The project's colour for the wash. Nil for none.
+    var washColor: ProjectColor? {
+        get { groundView.color }
+        set { groundView.color = newValue }
+    }
 
     /// How far in and out a board goes. The bottom is where a large board fits on a screen; the top is
     /// where you are reading one card and nothing else.
@@ -27,6 +66,7 @@ final class CanvasScrollView: NSScrollView {
 
         // Before anything reads `contentView` below, and before the board goes in: replacing the clip
         // resets the scroll position, so it has to be the first thing that happens.
+        wantsLayer = true
         contentView = CanvasClipView()
         documentView = board
         hasVerticalScroller = true
@@ -35,10 +75,9 @@ final class CanvasScrollView: NSScrollView {
         allowsMagnification = true
         minMagnification = Self.minimumZoom
         maxMagnification = Self.maximumZoom
-        // The board paints its own ground, including the region beyond the content, so the scroll
-        // view must not paint underneath it — an elastic overscroll would otherwise flash the window
-        // background at the edges of a board.
-        drawsBackground = true
+        // Neither the board nor the clip paints the ground: `groundView`, beneath both, does — edge to
+        // edge including an elastic overscroll, with the wash on top of it and the cards on top of that.
+        drawsBackground = false
         backgroundColor = CanvasPalette.board
         // The board runs under the titlebar, because the window has a full-size content view and its
         // chrome floats over the board rather than sitting above it. Left on, AppKit would inset the
