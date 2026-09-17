@@ -143,6 +143,10 @@ struct CanvasPageMenuItems: View {
         Button("Sign Out of \(page.site)", action: model.pageSignOut)
         Toggle("Block Ads on \(page.site)", isOn: Binding(
             get: { page.isFiltered }, set: model.pageSetFiltered))
+        Picker("Identify \(page.site) As", selection: Binding(
+            get: { page.identity }, set: model.pageSetIdentity)) {
+            ForEach(CanvasBrowserIdentity.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
     }
 }
 

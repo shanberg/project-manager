@@ -165,6 +165,7 @@ targets:
       - path: PM/Canvas/CanvasWebDialogs.swift
       - path: PM/Canvas/CanvasColors.swift
       - path: PM/Canvas/CanvasBlockPolicy.swift
+      - path: PM/Canvas/CanvasSiteSettings.swift
       - path: PM/Canvas/CanvasAddress.swift
       - path: PM/Canvas/CanvasAddressSuggestions.swift
       - path: PM/Canvas/CanvasSelection.swift

@@ -870,6 +870,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             self?.engagedCard?.setFiltered(on)
             self?.pageStateChanged()
         }
+        header.pageSetIdentity = { [weak self] identity in
+            self?.engagedCard?.setIdentity(identity)
+            self?.pageStateChanged()
+        }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
@@ -941,7 +945,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             icon: icon(for: card.liveHost),
             back: card.backSteps.map { .init(title: $0.title, address: $0.address) },
             site: card.siteName,
-            isFiltered: card.isFiltered)
+            isFiltered: card.isFiltered,
+            identity: card.identity)
         if header.page != page { header.page = page }
     }
 

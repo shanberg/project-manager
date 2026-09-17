@@ -463,11 +463,15 @@ private func selectNewCurrentAfterRemoval(
     if let firstAvailable = validCandidates.first(where: { sessionTodos[$0].isAvailableForFocus }) {
         return sessionTodos[firstAvailable]
     }
-    // Falling back to a *checked* candidate keeps focus somewhere structural when the subtree is
-    // finished; falling back to a waiting one would be handing over blocked work, so those drop out
-    // here and the caller's document-wide search gets a turn instead.
-    if let firstAny = validCandidates.first(where: { sessionTodos[$0].effectiveWaiting == nil }) {
-        return sessionTodos[firstAny]
+    // A checked next-sibling or parent's-first-leaf candidate means that branch is already done —
+    // landing focus there would hand back a task that's finished, not next. The one legitimate
+    // checked-or-not landing spot is the parent itself (rule 3): finishing an only child moves focus
+    // up to its parent regardless of the parent's own state. Anything else defers to the caller's
+    // document-wide fallback so we never land on an already-completed task.
+    if let parentIdx = parentOf(sessionTodos: sessionTodos, idx: completedLineIndex),
+       validCandidates.contains(parentIdx),
+       sessionTodos[parentIdx].effectiveWaiting == nil {
+        return sessionTodos[parentIdx]
     }
     return nil
 }

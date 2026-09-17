@@ -36,7 +36,7 @@ Within the **same session** as the completed task, candidates are considered in 
 3. **Parent**  
    If the completed task has a parent (shallower depth), focus moves to that parent.
 
-From these candidates, any task that is being completed in the same operation (the task itself or its descendants) is excluded. Among the remaining candidates, the **first unchecked** task is chosen; if all are checked, the first candidate is used.
+From these candidates, any task that is being completed in the same operation (the task itself or its descendants) is excluded. Among the remaining candidates, the **first unchecked** task is chosen. If none are unchecked, the **parent** candidate (rule 3) is used anyway as a structural fallback — but a checked *sibling* or *parent's-first-leaf* candidate is never used, since that would land focus on a task that's already done; in that case the rule below runs instead.
 
 ### Fallback
 

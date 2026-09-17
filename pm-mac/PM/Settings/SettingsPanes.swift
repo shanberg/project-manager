@@ -158,6 +158,7 @@ struct BoardsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            CanvasSitesSection()
         }
         .formStyle(.grouped)
         .scenePadding()
@@ -171,6 +172,69 @@ struct BoardsSettingsView: View {
         let minutes = Int(seconds / 60)
         if minutes >= 60 { return minutes == 60 ? "1 hour" : "\(minutes / 60) hours" }
         return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+    }
+}
+
+/// Sites: every site PM treats differently, and what it does for each (backlog 31).
+///
+/// **Only the exceptions.** A site appears here once something about it has been changed from a card's
+/// menu, and leaves when it is back to Safari with ads blocked — so the list is the answer to "what have
+/// I told PM to do differently", not a history of where you have been.
+private struct CanvasSitesSection: View {
+    @State private var sites = CanvasSiteSettings.all()
+
+    var body: some View {
+        Section {
+            if sites.isEmpty {
+                Text("None")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(sites.keys.sorted(), id: \.self) { key in
+                row(key)
+            }
+        } header: {
+            Text("Sites")
+        } footer: {
+            Text("A site is added here when you change how Folio treats it from a web card's menu. Identifying as another browser helps with a site that turns Safari away; the page is still drawn by Safari's engine, so a site that relies on another browser's features can still misbehave.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CanvasSiteSettings.changed)) { _ in
+            sites = CanvasSiteSettings.all()
+        }
+    }
+
+    private func row(_ key: String) -> some View {
+        let site = sites[key] ?? CanvasSite()
+        return HStack(spacing: 12) {
+            Text(key)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Picker("Identify As", selection: Binding(
+                get: { site.identity },
+                set: { identity in change(key) { $0.identity = identity } })) {
+                ForEach(CanvasBrowserIdentity.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            Toggle("Block Ads", isOn: Binding(
+                get: { site.blocksAds },
+                set: { on in change(key) { $0.blocksAds = on } }))
+            Button {
+                change(key) { $0 = CanvasSite() }
+            } label: {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Treat \(key) like any other site")
+            .accessibilityLabel(Text("Remove \(key)"))
+        }
+    }
+
+    private func change(_ key: String, _ edit: (inout CanvasSite) -> Void) {
+        CanvasSiteSettings.update(key, edit)
+        CanvasLinkNodeView.siteChanged(key)
     }
 }
 

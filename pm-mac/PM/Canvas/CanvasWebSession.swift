@@ -166,6 +166,14 @@ enum CanvasWebSession {
         configuration.applicationNameForUserAgent = applicationName
     }
 
+    /// And on the view, for a site that has been told to expect a different browser — see
+    /// `CanvasBrowserIdentity`. A whole user agent can only be set per view, so this is the second half
+    /// of the call above rather than a replacement for it: Safari is the configuration's tail and
+    /// nothing here, anybody else is the whole string here.
+    static func identify(_ web: WKWebView, host: String?) {
+        web.customUserAgent = CanvasSiteSettings.site(for: host).identity.userAgent()
+    }
+
     /// Let Safari's Web Inspector attach to a card, a sign-in window or a popup — on the same switch
     /// the log uses.
     ///

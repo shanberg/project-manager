@@ -26,7 +26,7 @@ final class CanvasWebPopupTests: XCTestCase {
                      for navigationAction: WKNavigationAction,
                      windowFeatures: WKWindowFeatures) -> WKWebView? {
             if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
-                popup = CanvasWebPopup.present(with: configuration, features: windowFeatures,
+                popup = CanvasWebPopup.present(with: configuration, features: windowFeatures, userAgent: nil,
                                                over: parent)
                 return popup
             }

@@ -487,6 +487,24 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(focused?.text, "B", "focus moves to next sibling B (leaf)")
     }
 
+    /// Three roots A (focused), B (already checked), C (open) — complete A → the immediate next
+    /// sibling B is already done, so focus must skip it and land on C, not on the completed B.
+    func testCompleteAdvanceFocusSkipsAlreadyCheckedNextSibling() throws {
+        let session = Session(
+            date: "Wed, Feb 25, 2025",
+            label: "",
+            body: "- [ ] A @\n- [x] B\n- [ ] C"
+        )
+        let notes = ProjectNotes(title: "T", sessions: [session])
+        let updated = try completeTodoWithDescendants(notes: notes, sessionIndex: 0, lineIndex: 0, advanceFocus: true)
+        let todos = try parseTodos(notes: updated)
+        XCTAssertTrue(todos[0].checked, "A completed")
+        let focused = todos.first(where: { $0.isFocused })
+        XCTAssertNotNil(focused)
+        XCTAssertEqual(focused?.text, "C", "focus skips already-checked sibling B and lands on open C")
+        XCTAssertFalse(focused?.checked ?? true, "focus never lands on a completed task")
+    }
+
     /// applyFocusToTodoAt: focus on second task → only second has @.
     func testApplyFocusToTodoAt() throws {
         let session = Session(

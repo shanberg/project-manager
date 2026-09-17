@@ -501,7 +501,7 @@ struct CanvasProjectNote: View {
             } onCancel: { activeEditor = nil }
                 .padding(.horizontal, 12)
                 .padding(.top, 4)
-        } else if engagement.isEngaged, activeEditor == nil, store.hasLoaded {
+        } else if engagement.actsImmediately, activeEditor == nil, store.hasLoaded {
             // `hasLoaded`, because a store that has not read the file yet has no sessions and no tasks
             // — which is indistinguishable from a project that has neither, and would put "Start a
             // session" on a card that is about to show you six.
@@ -867,7 +867,7 @@ struct CanvasProjectNote: View {
         // being stepped into, because until then the board owns this drag and it moves the card. That
         // is the same line `CanvasNodeView.takesItsOwnClicks` already draws; in a tiled view, where
         // there is nowhere to move a card to, the card has the drag from the first press.
-        .ifCondition(activeEditor == nil && engagement.isEngaged) { view in
+        .ifCondition(activeEditor == nil && engagement.actsImmediately) { view in
             view.onDrag {
                 let dragged = key
                 draggingKey = dragged
@@ -1186,6 +1186,15 @@ final class CanvasProjectCardDisplay {
 @Observable
 final class CanvasCardEngagement {
     var isEngaged = false
+    /// Whether the board is currently tiled — kept in step by `CanvasFileNodeView.refreshTiledness`,
+    /// which is `CanvasNodeView.takesItsOwnClicks` for this card's SwiftUI content: a tile takes its
+    /// clicks outright, so a control gated on "has this card been stepped into" should read as stepped
+    /// into from the first press in a tile, rather than waiting for the click `isEngaged` is earned by
+    /// on a freeform board.
+    var isTiled = false
+    /// Whether a control that only makes sense once the card is "yours" should act — stepped into on a
+    /// freeform board, or in any tile at all. See `isTiled`.
+    var actsImmediately: Bool { isEngaged || isTiled }
 }
 
 /// The project a notes file belongs to, and the store that holds it.

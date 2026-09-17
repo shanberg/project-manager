@@ -574,6 +574,16 @@ extension CanvasBoardView {
                 // be one click away from the card that is wrong.
                 let filtering = add(menu, "Block Ads on \(site)", #selector(toggleLinkFiltering))
                 filtering.state = card.isFiltered ? .on : .off
+                // Per site for the same reason: a site that turns Safari away turns away every card on it.
+                // A tick only where every selected site already agrees, as Size does.
+                let identify = NSMenu(title: "Identify As")
+                let identities = Set(selectedLinkCards.map(\.identity))
+                for (index, identity) in CanvasBrowserIdentity.allCases.enumerated() {
+                    let item = add(identify, identity.title, #selector(setLinkIdentity(_:)))
+                    item.tag = index
+                    item.state = identities == [identity] ? .on : .off
+                }
+                menu.addItem(withTitle: "Identify \(site) As", action: nil, keyEquivalent: "").submenu = identify
                 // Per card, unlike the three above: what a page is allowed to play is a fact about
                 // this card on this board — one embed you want running and the eleven beside it you
                 // don't — rather than about the site it happens to be on. See `CanvasCardMedia`.
@@ -1467,6 +1477,16 @@ extension CanvasBoardView {
         for id in selection {
             guard let card = nodeViews[id] as? CanvasLinkNodeView else { continue }
             card.setFiltered(!card.isFiltered)
+        }
+    }
+
+    /// Which browser the selected cards' sites are told they are talking to — one change per site.
+    @objc private func setLinkIdentity(_ sender: NSMenuItem) {
+        guard CanvasBrowserIdentity.allCases.indices.contains(sender.tag) else { return }
+        let identity = CanvasBrowserIdentity.allCases[sender.tag]
+        var done: Set<String> = []
+        for card in selectedLinkCards where done.insert(card.siteName).inserted {
+            card.setIdentity(identity)
         }
     }
 

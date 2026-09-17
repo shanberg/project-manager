@@ -72,11 +72,15 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     /// Put WebKit's page on a sheet over `parent`, and hand WebKit back the view it will load into.
     ///
     /// - Parameter configuration: the one `createWebViewWith` was given, unexchanged. See above.
+    /// - Parameter userAgent: the opener's `customUserAgent`. It belongs to the view, not the
+    ///   configuration, so a popup would otherwise sign in as Safari for a site told to expect Chrome.
     @discardableResult
     static func present(with configuration: WKWebViewConfiguration,
                         features: WKWindowFeatures,
+                        userAgent: String?,
                         over parent: NSWindow?) -> WKWebView {
         let popup = CanvasWebPopup(configuration: configuration, features: features, over: parent)
+        popup.web.customUserAgent = userAgent
         open.insert(popup)
         popup.show(over: parent)
         return popup.web
@@ -219,7 +223,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        Self.present(with: configuration, features: windowFeatures, over: sheet)
+        Self.present(with: configuration, features: windowFeatures, userAgent: webView.customUserAgent, over: sheet)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,

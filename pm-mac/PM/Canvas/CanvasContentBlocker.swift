@@ -26,8 +26,6 @@ import WebKit
 /// each list, by name, whether it is actually in force.
 @MainActor
 enum CanvasContentBlocker {
-    /// Sites the user has excused, by `CanvasBlockPolicy.siteKey`.
-    private static let unfilteredKey = "PMCanvasUnfilteredSites"
     /// Everything this app compiles is named with this prefix, so stale lists can be told from
     /// whatever else might ever share the store.
     private static let identifierPrefix = "pm.block."
@@ -90,12 +88,9 @@ enum CanvasContentBlocker {
 
     // MARK: The per-site exception
 
-    /// Normalised on the way out as well as in. Everything PM writes here is already in key form;
-    /// this is so a set edited by hand — `defaults write com.stuarthanberg.pm
-    /// PMCanvasUnfilteredSites -array www.example.com` — does what it plainly means.
-    static var unfilteredSites: Set<String> {
-        Set((UserDefaults.standard.stringArray(forKey: unfilteredKey) ?? []).map(CanvasBlockPolicy.siteKey))
-    }
+    /// The sites ad blocking is off for. They live with the rest of what PM remembers per site — see
+    /// `CanvasSiteSettings`, which also reads a set left under the old `PMCanvasUnfilteredSites` key.
+    static var unfilteredSites: Set<String> { CanvasSiteSettings.unblocked() }
 
     static func filters(host: String) -> Bool {
         CanvasBlockPolicy.filters(host, unfiltered: unfilteredSites)
@@ -103,11 +98,7 @@ enum CanvasContentBlocker {
 
     /// Turn filtering on or off for one site. The caller rebuilds the page; see `attach`.
     static func setFilters(_ on: Bool, host: String) {
-        let key = CanvasBlockPolicy.siteKey(for: host)
-        guard !key.isEmpty else { return }
-        var sites = unfilteredSites
-        if on { sites.remove(key) } else { sites.insert(key) }
-        UserDefaults.standard.set(Array(sites).sorted(), forKey: unfilteredKey)
+        guard let key = CanvasSiteSettings.update(host, { $0.blocksAds = on }) else { return }
         Log.write("canvas blocking: \(on ? "filtering" : "not filtering") \(key)")
     }
 

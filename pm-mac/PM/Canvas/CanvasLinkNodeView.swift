@@ -729,6 +729,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         view.dropFallback = board
         // And a link right-clicked or middle-clicked can make one too.
         view.linkHost = self
+        // Safari unless this site has been told otherwise; the configuration above already says Safari.
+        CanvasWebSession.identify(view, host: url.host())
         CanvasWebSession.allowInspecting(view)
         view.navigationDelegate = self
         view.uiDelegate = self
@@ -1336,13 +1338,37 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// Whether this card's site is being filtered, for the menu's checkmark.
     var isFiltered: Bool { CanvasContentBlocker.filters(host: url?.host() ?? host) }
 
-    /// Turn filtering on or off for this card's site, and show the result immediately.
+    /// Turn filtering on or off for this card's site, and show the result on every card showing it.
     func setFiltered(_ on: Bool) {
         CanvasContentBlocker.setFilters(on, host: url?.host() ?? host)
-        reapplyFiltering()
+        Self.siteChanged(url?.host() ?? host)
     }
 
-    /// Build the page again so it picks up a different set of rule lists.
+    /// Which browser this card's site is told it is talking to, for the menu's checkmark.
+    var identity: CanvasBrowserIdentity { CanvasSiteSettings.site(for: url?.host() ?? host).identity }
+
+    /// Tell this card's site it is talking to a different browser, and rebuild every card showing it.
+    func setIdentity(_ identity: CanvasBrowserIdentity) {
+        let site = url?.host() ?? host
+        guard let key = CanvasSiteSettings.update(site, { $0.identity = identity }) else { return }
+        Log.write("canvas site: \(key) identifies as \(identity.rawValue)")
+        Self.siteChanged(site)
+    }
+
+    /// Rebuild every running page on a site whose settings just changed — from a card's menu, the tile's
+    /// menu or the list in Settings.
+    ///
+    /// **Every card, not the one you asked from.** The setting is the site's, so a second card on the same
+    /// site left running under the old one would be two answers to one question on the same screen. A
+    /// card with no page running has nothing to rebuild and picks the setting up when it next starts.
+    static func siteChanged(_ host: String) {
+        let key = CanvasBlockPolicy.siteKey(for: host)
+        for card in cards.allObjects where CanvasBlockPolicy.siteKey(for: card.url?.host() ?? card.host) == key {
+            card.reapplyFiltering()
+        }
+    }
+
+    /// Build the page again so it picks up a different set of rule lists, or a different name.
     ///
     /// A reload would not do it: the lists belong to the configuration, which is fixed once the web
     /// view exists. The interaction state comes across, so the page returns to the scroll position and
@@ -1667,7 +1693,8 @@ extension CanvasLinkNodeView: WKUIDelegate {
         if navigationAction.modifierFlags.contains(.command) {
             board.addLinkCard(url.absoluteString, beside: node.id)
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
-            return CanvasWebPopup.present(with: configuration, features: windowFeatures, over: window)
+            return CanvasWebPopup.present(with: configuration, features: windowFeatures,
+                                          userAgent: webView.customUserAgent, over: window)
         } else {
             capturingTitle = false
             webView.load(URLRequest(url: url))

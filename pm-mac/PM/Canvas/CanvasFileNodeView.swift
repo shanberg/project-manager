@@ -257,6 +257,17 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// double-click.
     override var engagesOnClick: Bool { isProjectCard && !isSimplified }
 
+    /// Cheap to ask on every frame of a crossing, since it only does anything the frame the board's
+    /// tiled-ness actually flips — the same shape as `CanvasLinkNodeView`'s override. What it keeps in
+    /// step is `engagement.isTiled`, so a project card's buttons stop waiting for the click that steps
+    /// into it the moment there is nowhere left to step in *from*.
+    override func refreshTiledness(fading: Bool) {
+        super.refreshTiledness(fading: fading)
+        let tiled = board.showsTiles
+        guard engagement.isTiled != tiled else { return }
+        engagement.isTiled = tiled
+    }
+
     override func engagementChanged() {
         engagement.isEngaged = isEngaged
         if isEngaged {
