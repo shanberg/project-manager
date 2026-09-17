@@ -96,7 +96,7 @@ history (`interactionState`), not its connections. Research notes, none of it bu
 - **Tabs behind.** Switching tabs still freezes a board's pages outright (`pauseAllPages`), including one
   that is playing — the playing exception only covers the idle pause and the budget.
 
-### 28. Save a page: PNG, web archive, restorable
+### 28. Save a page: PNG, web archive, restorable — **iced**
 
 Save a web card's page as a PNG or a web capture, and have the capture come back on the next open.
 WebKit has the pieces — `takeSnapshot` (the visible part; a full page means `createPDF` or stitching),
@@ -212,8 +212,10 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 28 (saving a page); 29 (colour); 31 (a per-site compatibility layer,
-which 43 and 26 would both live in); 40 (a second view of a card).
+**Then design first, then build:** 29 (colour); 31 (a per-site compatibility layer, which 43 and 26
+would both live in); 40 (a second view of a card).
+
+**Iced:** 28 (saving a page) — set aside 2026-09-17, not wanted yet.
 
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
