@@ -156,7 +156,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             // instead of it: the two never both apply, because opening on a file is what a window with
             // no project does, and taking a project clears it.
             return (self.openedCanvas ?? self.store.canvasPath.map { URL(fileURLWithPath: $0) },
-                    self.window?.title)
+                    self.windowName)
         }
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
@@ -327,6 +327,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         applyRememberedRenderer()
     }
 
+    /// What this window is of: the file it was opened on, or the project. The header's pill says this.
+    private var windowName: String {
+        // A window opened on a file is named for the file.
+        if let openedCanvas { return openedCanvas.deletingPathExtension().lastPathComponent }
+        let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The folder name is the fallback and the one that carries a code, so it's written the way the
+        // rest of the app has been told to write names — see `ProjectCodes`.
+        let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
+        return name ?? "Folio"
+    }
+
     /// The window's title — invisible in the titlebar, but what the Window menu, ⌘`, and the tab bar
     /// all show. The subtitle carries progress, which is where the header's "3/8" goes in a window.
     ///
@@ -335,23 +346,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// workspace is what tells them apart. Workspaces only: the canvas is the project itself, and a
     /// frame or the notes tab is a place on it rather than a way of working. Kept current from
     /// `ProjectSplitViewController.refreshTabModel`, the funnel every switch and rename goes through.
+    ///
+    /// **The system's title only.** The header's pill names the board, and is `windowName` without the
+    /// workspace — the workspace already has its chip beside it.
     func applyTitle() {
         guard let window else { return }
         let workspace = split.tabs.selected.view.workspaceName.map { " \u{2014} \($0)" } ?? ""
-        // A window opened on a file is named for the file, and carries it: `representedURL` is what
-        // gives the titlebar its proxy icon and its ⌘-click path menu, which for a document window is
-        // most of what a title is for.
+        window.title = windowName + workspace
+        // A window opened on a file carries it: `representedURL` is what gives the titlebar its proxy
+        // icon and its ⌘-click path menu, which for a document window is most of what a title is for.
         if let openedCanvas {
-            window.title = openedCanvas.deletingPathExtension().lastPathComponent + workspace
             window.subtitle = ""
             window.representedURL = openedCanvas
             return
         }
-        let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The folder name is the fallback and the one that carries a code, so it's written the way the
-        // rest of the app has been told to write names — see `ProjectCodes`.
-        let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
-        window.title = (name ?? "Folio") + workspace
         // A window retargeted away from the file it was opened on must lose the proxy icon with it: a
         // titlebar still offering the old canvas's path menu is a window claiming to be a document it
         // is not showing.
