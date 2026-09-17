@@ -138,6 +138,7 @@ struct CanvasPageMenuItems: View {
     var body: some View {
         Button("Copy Address", action: model.pageCopyAddress)
         Button("Open in Browser", action: model.pageOpenInBrowser)
+        Button("Open Page as New Card", action: model.pageOpenAsNewCard)
         Divider()
         Button("Sign In to \(page.site)\u{2026}", action: model.pageSignIn)
         Button("Sign Out of \(page.site)", action: model.pageSignOut)

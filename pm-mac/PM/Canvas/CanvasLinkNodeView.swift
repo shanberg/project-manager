@@ -1332,6 +1332,12 @@ final class CanvasLinkNodeView: CanvasNodeView {
         NSWorkspace.shared.open(url)
     }
 
+    /// Where the running page is — scroll, history — for a second card to start from. Nil with no page.
+    var liveInteractionState: Any? { web?.interactionState }
+
+    /// A second card on the page this one is showing — see `CanvasBoardView.openPageAsNewCard`.
+    func openPageAsNewCard() { _ = board.openPageAsNewCard(from: self) }
+
     /// The site this card shows, for the sign-in item's title.
     var siteName: String { host }
 
@@ -1421,6 +1427,8 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
         var items: [NSMenuItem] = []
         if let link {
             items.append(item("Open Link as New Card", #selector(openLinkAsCard), link))
+        } else if let page = liveURL {
+            items.append(item("Open Page as New Card", #selector(openPageAsCard), PageLink(url: page, name: liveTitle)))
         }
         if let project = board.boardProject {
             // Whatever the click was on: the link under the pointer, or the page itself. The page's
@@ -1448,6 +1456,10 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
         // that built it and the pointer will have moved on by the time anything is chosen.
         item.representedObject = link
         return item
+    }
+
+    @objc private func openPageAsCard(_ sender: NSMenuItem) {
+        openPageAsNewCard()
     }
 
     @objc private func openLinkAsCard(_ sender: NSMenuItem) {

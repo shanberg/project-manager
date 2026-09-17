@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.9.0"
+public let apiContractVersion = "1.10.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -284,6 +284,9 @@ public enum ApiRegistry {
                       summary: "Show Folio's focus panel.", fields: []),
         ApiActionSpec(name: "app.settings", tier: .affordance,
                       summary: "Open Folio's settings.", fields: []),
+        ApiActionSpec(name: "app.openPageAsNewCard", tier: .affordance,
+                      summary: "Put the page open in the front window's web card on its board as a new card, where it is.",
+                      fields: []),
     ]
 
     public static func spec(_ name: String) -> ApiActionSpec? {

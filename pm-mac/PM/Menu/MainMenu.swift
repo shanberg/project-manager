@@ -452,6 +452,8 @@ enum MainMenu {
                      action: #selector(CanvasBoardView.pageOpenAddress(_:)), keyEquivalent: "l")
         page.addItem(withTitle: "Open in Browser",
                      action: #selector(CanvasBoardView.pageOpenInBrowser(_:)), keyEquivalent: "")
+        page.addItem(withTitle: "Open Page as New Card",
+                     action: #selector(CanvasBoardView.pageOpenAsNewCard(_:)), keyEquivalent: "")
         page.addItem(.separator())
 
         // How stale you are willing to let a board get. Here rather than on a card, because it is a

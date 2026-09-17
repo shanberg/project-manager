@@ -38,6 +38,12 @@ extension PMContract {
             FocusPanelController.shared.toggle()
         case .appSettings:
             SettingsWindowController.shared.show()
+        case .appOpenPageAsNewCard:
+            // The front project window's board: the one a person means when they ask from Raycast with a
+            // page up in front of them. Nothing to act on — no window, no page — is false, not a guess.
+            let front = NSApp.orderedWindows.lazy
+                .compactMap { $0.windowController as? ProjectWindowController }.first
+            return front?.canvasPane?.openPageAsNewCard() ?? false
         default:
             return false
         }

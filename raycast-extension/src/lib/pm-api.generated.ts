@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.9.0";
+export const API_CONTRACT_VERSION = "1.10.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -19,6 +19,9 @@ export interface AppOpenInObsidianInput {
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
 }
+
+/** Put the page open in the front window's web card on its board as a new card, where it is. */
+export type AppOpenPageAsNewCardInput = Record<string, never>;
 
 /** Open the project's window in Folio. */
 export interface AppOpenWindowInput {
@@ -393,6 +396,7 @@ export interface TaskWrapInput {
 export interface ApiInputs {
   "app.openInFinder": AppOpenInFinderInput;
   "app.openInObsidian": AppOpenInObsidianInput;
+  "app.openPageAsNewCard": AppOpenPageAsNewCardInput;
   "app.openWindow": AppOpenWindowInput;
   "app.settings": AppSettingsInput;
   "app.showPanel": AppShowPanelInput;
@@ -447,6 +451,7 @@ export const API_TIERS: Record<
 > = {
   "app.openInFinder": "affordance",
   "app.openInObsidian": "affordance",
+  "app.openPageAsNewCard": "affordance",
   "app.openWindow": "affordance",
   "app.settings": "affordance",
   "app.showPanel": "affordance",

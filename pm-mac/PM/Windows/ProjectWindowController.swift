@@ -60,6 +60,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     let state = ProjectWindowState()
     private let split: ProjectSplitViewController
 
+    /// The board showing in this window's content, if a board is what it is showing.
+    var canvasPane: CanvasPaneController? { split.canvasPane }
+
     /// Called when the window has closed, so `WindowManager` can drop it.
     var onClose: ((ProjectWindowController) -> Void)?
     /// Asks to open a project — in this window or a new one. Supplied by `WindowManager`.

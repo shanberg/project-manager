@@ -279,6 +279,8 @@ final class CanvasHeaderModel {
     @ObservationIgnored
     var pageOpenInBrowser: () -> Void = {}
     @ObservationIgnored
+    var pageOpenAsNewCard: () -> Void = {}
+    @ObservationIgnored
     var pageSignIn: () -> Void = {}
     @ObservationIgnored
     var pageSignOut: () -> Void = {}

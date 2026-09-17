@@ -864,6 +864,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageBackTo = { [weak self] steps in self?.engagedCard?.goBack(steps) }
         header.pageCopyAddress = { [weak self] in self?.engagedCard?.copyAddress() }
         header.pageOpenInBrowser = { [weak self] in self?.engagedCard?.openInBrowser() }
+        header.pageOpenAsNewCard = { [weak self] in self?.engagedCard?.openPageAsNewCard() }
         header.pageSignIn = { [weak self] in self?.engagedCard?.signIn() }
         header.pageSignOut = { [weak self] in self?.engagedCard?.signOut() }
         header.pageSetFiltered = { [weak self] on in
@@ -916,6 +917,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// browser buttons for a board with nothing running on it would say otherwise.
     private var engagedCard: CanvasLinkNodeView? {
         scroll.board.engagedPageCard as? CanvasLinkNodeView
+    }
+
+    /// `app.openPageAsNewCard`, from outside the window: the card you are inside, or the one web card
+    /// selected. False when there is no such page.
+    func openPageAsNewCard() -> Bool {
+        scroll.board.openPageAsNewCard()
     }
 
     func pageStateChanged() {

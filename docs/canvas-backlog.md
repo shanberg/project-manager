@@ -148,23 +148,6 @@ Open: which parts of what it does are actually ours to have — a layer that sur
 rebuilt, WebKit's own suspension of a view out of the window hierarchy versus our teardown, and whether
 the honest version of this is 43 (freeze the script, keep the page) rather than a better picture.
 
-### 40. A second view of a card, and a tile made of the page you are on
-
-Two asks with one wall behind them. A second tab of the same card in the same tile, and "make a card of
-what I am looking at and open it as a tile".
-
-The second is nearly built, for links: middle-click or the page's menu makes a card beside this one
-(`openInNewCard` →
-[addLinkCard(_:beside:)](../pm-mac/PM/Canvas/CanvasBoardView+Commands.swift:1315)), and an add while
-tiled comes up as a tile, since every add command ends in the same place. What is missing is the card's
-*current* address rather than a link under the pointer — the page you navigated to, which
-`CanvasPageVisits` is already holding.
-
-The first runs into peek's wall (see 34): one card is one view, and a web card in a second view is a
-second page. So "the same card twice" can only honestly mean "a second card on the same address" —
-which is exactly what the second half makes. Open: whether that is a good enough answer to say so in
-the menu, and what the new card is called when it is a second view of the same page.
-
 ### 43. Freeze the script, not the whole page
 
 A cheaper freeze: stop a card's JavaScript and leave the page standing, instead of tearing the renderer
@@ -185,8 +168,6 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
-
-**Then design first, then build:** 40 (a second view of a card).
 
 **Iced:** 28 (saving a page) — set aside 2026-09-17, not wanted yet.
 
@@ -254,6 +235,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 36 | tabs down the side of a tile | **Built, 2026-09-16.** Tabs on the Side, per tile from its menus and saved with the workspace (`CanvasTiling.Tile.tabsOnSide`, written only when on). A 180pt column of icon and name on a tile at least 540pt wide, 40pt of icons alone on a narrower one; the top strip's chip, drag and pull-out turned on their side (`CanvasTileSession.TabStrip`). A column longer than its tile scrolls, and showing a tab scrolls it into view. [canvas-workspaces.md](canvas-workspaces.md) §7k |
 | 37 | combining projects: a master, and a merge | **Master built, 2026-09-16** — a member names its master in `pm-part-of`, one level, rolled up on the card and in the sidebar ([combining-projects.md](combining-projects.md)). **The merge was dropped** the same day, undecided |
 | 39 | a page's own drags being taken by the board | **Fixed, 2026-09-16.** Reordering a list in a card is HTML5 drag-and-drop and therefore a real dragging session, and the board took every one of them — refusing the ones it could make nothing of without handing them back, which is why the symptom was silence. The precedence is reversed: the page is asked first, since an element claims a drop by preventing the default on `dragover` and WebKit answers a drag with that decision. Argued in [CanvasPageView](../pm-mac/PM/Canvas/CanvasPageView.swift); what WebKit does, including that its first reply is `.copy` to everything, is measured in `CanvasPageDragOriginTests` and the rule is pinned in `CanvasPageViewTests` |
+| 40 | a second view of a card, and a tile made of the page you are on | **Built, 2026-09-17,** as the honest version of both asks: Open Page as New Card puts a second card beside this one on the address it is showing now, not the one it was saved with, and the new card resumes the page where it was — scroll and Back history, handed over through `CanvasPageHandover` — with no arrow between them, named by the page title. From the page's right-click menu, the tile's `…`, Page ▸ Open Page as New Card, and `app.openPageAsNewCard` (an affordance, contract 1.10.0). While tiled it comes up as a tile, since every add ends in the same place. "The same card twice" stays impossible for peek's reason (34) |
 | 41 | maximize a card from the board | **Built, 2026-09-16,** as one command rather than a second grammar: ⌥⌘↩ (Maximize Card) with one card selected tiles it alone, and Escape, ⌥⌘↩, ⌘↩ or ⌘− fly back to the board as it was. It is a workspace of one that is never saved — no tab, no view state, no departure pose (`maximizeCard`, `restoreMaximizedCard`). Not stepped into, so one Escape is the way back. Peek (Space) stays its own act |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |

@@ -1601,17 +1601,27 @@ extension CanvasBoardView {
     ///
     /// Placed to the right and nudged down past anything already there, rather than dropped on top of
     /// a card that was in the way.
-    func addLinkCard(_ address: String, beside id: String) {
+    /// - Parameters:
+    ///   - joined: whether an arrow runs from the source to the new card — yes for a link followed out
+    ///     of a page, no for a second card on the same page.
+    ///   - resuming: a page's `interactionState` for the new card to open with, so it arrives where the
+    ///     source was — scrolled, with its Back — rather than at the top.
+    func addLinkCard(_ address: String, beside id: String, joined: Bool = true, resuming: Any? = nil) {
         guard let source = document.node(id: id), let normalized = CanvasAddress.normalized(address)
         else { return }
         let frame = freeFrame(rightOf: source.frame)
         let node = CanvasNode(content: .link(url: normalized), frame: frame)
+        // Before the card exists, since its view reads the handover as it is built.
+        if let resuming {
+            CanvasPageHandover.resumes[CanvasPageHandover.key(canvas: store.url, card: node.id)] =
+                .init(state: resuming, url: URL(string: normalized))
+        }
         // From the source's right to the new card's left: the direction you read the board in, and the
         // direction the page was actually followed in.
         let edge = CanvasEdge(fromNode: id, fromSide: .right, toNode: node.id, toSide: .left)
-        store.change("Add Link") { doc in
+        store.change(joined ? "Add Link" : "Open Page as New Card") { doc in
             doc.nodes.append(node)
-            doc.edges.append(edge)
+            if joined { doc.edges.append(edge) }
         }
         // Up on screen with the rest, beside the tile it was followed from. This used to report "added to the board,
         // behind this tiled view" — honest about where the card had gone and no use at all, since
@@ -1948,6 +1958,25 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func pageReload(_ sender: Any?) { pageTargets.forEach { $0.reload() } }
     @objc func pageHome(_ sender: Any?) { pageTargets.forEach { $0.goHome() } }
     @objc func pageOpenInBrowser(_ sender: Any?) { pageTargets.forEach { $0.openInBrowser() } }
+    @objc func pageOpenAsNewCard(_ sender: Any?) { _ = openPageAsNewCard() }
+
+    /// A second card on the page you are on (backlog 40) — the honest version of "this card twice".
+    ///
+    /// One card is one view, and a web view in two places is two pages (see peek, and 34), so a mirror
+    /// is not on offer. What is: a new card at the address the page has *got to*, arriving at the same
+    /// scroll position with the same Back, beside the one it came from. No arrow — unlike a link
+    /// followed out of a page, nothing was followed. One target only: several pages at once would be
+    /// several new cards from one click, which nobody means.
+    func openPageAsNewCard() -> Bool {
+        guard pageTargets.count == 1, let card = pageTargets.first else { return false }
+        return openPageAsNewCard(from: card)
+    }
+
+    func openPageAsNewCard(from card: CanvasLinkNodeView) -> Bool {
+        guard let address = card.liveURL?.absoluteString else { return false }
+        addLinkCard(address, beside: card.node.id, joined: false, resuming: card.liveInteractionState)
+        return true
+    }
 
     /// ⌘L. The address of the card you are inside, ready to be typed over.
     ///
@@ -2152,6 +2181,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return pageTargets.contains { $0.hasWandered }
         case #selector(pageOpenInBrowser(_:)):
             return !pageTargets.isEmpty
+        case #selector(pageOpenAsNewCard(_:)):
+            return pageTargets.count == 1 && pageTargets[0].liveURL != nil
         case #selector(pageOpenAddress(_:)):
             return engagedPageCard is CanvasLinkNodeView || selectedLinkCards.count == 1
         case #selector(setPageRefresh(_:)):
