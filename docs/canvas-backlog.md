@@ -74,26 +74,6 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 23. Header areas that drag, the way Arc finds them
-
-Arc treats a page's own header or toolbar as somewhere to grab the window, found automatically. Wanted
-most when a web tile is maximized and fills the window, where there is no other chrome to grab.
-
-Sketch: the same question `CanvasPageView.acceptsTyping` already asks a page, in the app's own script
-world — here, whether the point is in a top band with nothing interactive under it — and on yes,
-`window.performDrag(with:)`. Open: whether the drag moves the window or the tile (maximized, they are
-nearly the same thing; tiled, they are not), and how a page that draws its own drag regions is left
-alone.
-
-**22 answered the band half**, which this was waiting on. The band is 66pt deep and AppKit settles a
-press in it by building a region from the view tree *in z-order* — a view answering
-`mouseDownCanMoveWindow` with no carves its frame out, a view in front of it answering yes puts it
-back — so an area that drags is a real `NSView` in the right place, not a hit test
-(`CanvasTileHandleView.refreshStripExcluders`, `WindowDragBandTests`). What is still open is the part
-that was always this entry's own: `performDrag(with:)` is the opposite direction, asking for a drag
-where the region rule would refuse one, and a maximized web tile is mostly *below* the 66pt band
-anyway — so Arc's trick is a second mechanism beside the region, not a use of it.
-
 ### 26. Keeping web apps alive, and their notifications
 
 Slack's unread count stops updating once its card is frozen — past the ten-minute off-screen grace, or
@@ -244,9 +224,8 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 23 (Arc-style drag areas); 27 (size tools); 28 (saving a page); 29
-(colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in); 40 (a second view of a
-card).
+**Then design first, then build:** 27 (size tools); 28 (saving a page); 29 (colour); 31 (a per-site
+compatibility layer, which 43 and 26 would both live in); 40 (a second view of a card).
 
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
@@ -300,6 +279,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 20 | where a tile's move handle goes | **Built, 2026-09-16.** A grip over the tile's top centre, shown only while the pointer is near there, modelled on Claude's desktop panels; a tile with tabs has none, its strip moves it. A catcher view above the card takes the press over a page (`CanvasBoardView.tileHandle`, `CanvasTileGripView`). [canvas-workspaces.md](canvas-workspaces.md) §7k |
 | 21 | how a tile's tabs look, and reordering them | **Built, 2026-09-16.** Tuned in an artifact: a 32pt strip, tabs to 190pt, the showing tab a lit glass chip that slides between tabs, hover fill and close button fading in. Dragging a tab reorders the strip the way the window's tab bar does and pulls the card out past 24pt off it (`CanvasTileSession.moveTab`, `CanvasTabSlide`). §7k |
 | 22 | presses near the top of the window moving it | **Fixed, 2026-09-15.** Both halves were one already-known failure: AppKit builds the window-drag region from the view tree in z-order, so a *background* excluder stops working the moment a real `NSView` is drawn over it — a `Menu`'s `_FocusRingView` in the header, and the board itself under the tab strips. `HeaderCapsule` carries an overlay as well now, and `CanvasTileHandleView.refreshStripExcluders` carves out the strips alone, leaving the empty band as somewhere to grab the window. The band's depth and the region rule are measured in `WindowDragBandTests` |
+| 23 | page headers that drag the window, Arc's way | **Already works, 2026-09-16** — found solved in use; nothing built for it |
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
