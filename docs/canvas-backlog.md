@@ -58,20 +58,6 @@ its board or its title — and that is a different bug.
 
 ## Features
 
-### 7. Tidy
-
-FigJam's tidy-up: take a rough cluster and make it a clean grid, keeping the reading order and the
-rows people already meant. Different from the tiling — a tiling is a temporary *way of looking*, this
-edits the document.
-
-`CanvasTiling.order` already answers the hard half: what reading order a scatter of cards is in, rows
-banded by the median card height ([CanvasTiling.swift:120](../pm-mac/PM/Canvas/CanvasTiling.swift:120)).
-Tidy is that order, laid back out on the board at a regular pitch, as one undoable change.
-
-Open: whether it acts on the selection, on a frame, or on everything; whether card sizes are made
-uniform or only their positions regularised (Figma keeps sizes — probably right); what the spacing is
-and whether it is the 10pt grid.
-
 ### 8. Swap the card in a tile
 
 **Folded into [canvas-workspaces.md](canvas-workspaces.md) §7k**, as tabs in a tile — and the picker is
@@ -276,7 +262,7 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
+**Then design first, then build:** 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
 (saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
 40 (a second view of a card).
 
@@ -318,6 +304,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 4 | ⌥-drag to duplicate a card | Folded into **3**, which is the one decision under all three modifier gestures |
 | 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27** |
 | 6 | a folder dropped on a board | **Built, 2026-09-16.** A folder card: the Finder's list of its top level, folders first, watched while the card is up, every row a link zone so a click opens the item and a drag carries it off as a card (`CanvasFolderCard`, `CanvasFolderCardTests`). Stored as the ordinary file card it was |
+| 7 | tidy a rough cluster into a grid | **Built, 2026-09-16.** FigJam's Tidy Up, ⌃⌥T and Edit ▸ Tidy Up: two or more selected cards, or the cards a lone frame holds, laid out with their rows kept and their columns aligned — each column as wide as its widest card, each row as tall as its tallest, a 20pt gutter on the 10pt lattice, sizes untouched, one undo. A frame grows to hold its grid and never shrinks; in a larger selection it is one item and carries its contents. Rows are read off top edges rather than `CanvasTiling.order`'s middles, so a second tidy is a no-op (`CanvasTidy`, `CanvasTidyTests`) |
 | 9 | saved arrangements, already built and hard to find | [canvas-workspaces.md](canvas-workspaces.md) — they are workspaces |
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |

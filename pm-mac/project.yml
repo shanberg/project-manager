@@ -170,6 +170,7 @@ targets:
       - path: PM/Canvas/CanvasSelection.swift
       - path: PM/Canvas/CanvasSnapping.swift
       - path: PM/Canvas/CanvasGroupResize.swift
+      - path: PM/Canvas/CanvasTidy.swift
       - path: PM/Canvas/CanvasTiling.swift
       - path: PM/Canvas/CanvasTileSession.swift
       - path: PM/Canvas/CanvasViewState.swift

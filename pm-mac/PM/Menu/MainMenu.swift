@@ -193,6 +193,9 @@ enum MainMenu {
         // Here rather than in a canvas-only menu because ⌘D belongs in Edit wherever it appears — and
         // above Select All, which every Mac app puts last in this group.
         menu.addItem(withTitle: "Duplicate", action: Selector(("duplicate:")), keyEquivalent: "d")
+        // Figma's Tidy Up key, and the same answerer: a board with a selection to lay out, dim elsewhere.
+        let tidy = menu.addItem(withTitle: "Tidy Up", action: Selector(("tidyUp:")), keyEquivalent: "t")
+        tidy.keyEquivalentModifierMask = [.control, .option]
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())

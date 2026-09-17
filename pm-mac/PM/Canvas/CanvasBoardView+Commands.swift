@@ -226,6 +226,22 @@ extension CanvasBoardView {
                at: nil, actionName: "Duplicate", offsetBy: 24)
     }
 
+    // MARK: Tidying
+
+    /// Tidy Up (backlog 7): the selection, or the cards in a lone frame, laid out as a clean grid in
+    /// one undoable change — see `CanvasTidy`. Already tidy is not an error, so it does nothing quietly.
+    @objc func tidyUp(_ sender: Any?) {
+        guard !isTiled, let plan = CanvasTidy.plan(selection, in: document) else { return NSSound.beep() }
+        guard !plan.isEmpty else { return }
+        store.change("Tidy Up") { doc in
+            for index in doc.nodes.indices {
+                if let frame = plan[doc.nodes[index].id] { doc.nodes[index].frame = frame }
+            }
+        }
+    }
+
+    var canTidy: Bool { !isTiled && CanvasTidy.plan(selection, in: document) != nil }
+
     /// Copies of the selection exactly on top of it, selected — the start of an ⌥-drag, which then
     /// carries the copies away and leaves the originals where they were.
     func duplicateInPlace() {
@@ -513,6 +529,7 @@ extension CanvasBoardView {
         key(add(menu, "Cut", #selector(cut(_:))), "x")
         key(add(menu, "Copy", #selector(copy(_:))), "c")
         key(add(menu, "Duplicate", #selector(duplicate(_:))), "d")
+        if canTidy { key(add(menu, "Tidy Up", #selector(tidyUp(_:))), "t", modifiers: [.control, .option]) }
         menu.addItem(.separator())
         key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
             "\u{8}", modifiers: [])
@@ -1935,6 +1952,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Not while tiled: a tiled view is a way of looking, and cutting a card out of one would be
             // editing the board through a lens that has moved everything.
             return !selection.isEmpty && !isTiled
+        case #selector(tidyUp(_:)):
+            return canTidy
         case #selector(paste(_:)), #selector(pasteHere):
             // `pasteHere` is the board menu's own item and was answered by nothing, so it fell to the
             // `default` below and was live over an empty pasteboard. It is the same question as
