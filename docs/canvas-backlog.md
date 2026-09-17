@@ -105,25 +105,6 @@ board (`copyNoteAttachment`). Open: whether a capture is a new card beside the p
 card, which needs nothing new) or a state of the web card itself that opens offline, which is what
 "restorable" suggests and is a much bigger thing.
 
-### 31. Say we are a different browser, and the layer that belongs around it
-
-A card is a real browser and some sites still turn it away. What PM says about itself today is one
-line — `applicationNameForUserAgent`, with the installed Safari's version read off disk
-([CanvasWebSession.swift:165](../pm-mac/PM/Canvas/CanvasWebSession.swift:165)). `customUserAgent`
-replaces the string outright and is per web view, so the mechanism is a property; what is missing is
-somewhere to keep the decision.
-
-The larger want is that place: **per-site web compatibility**, with the filtering exceptions rolled
-into it rather than sitting alongside. Those already exist — a site you have excused is remembered by
-`CanvasBlockPolicy.siteKey` in `PMCanvasUnfilteredSites`
-([CanvasContentBlocker.swift:30](../pm-mac/PM/Canvas/CanvasContentBlocker.swift:30)) — so this is
-widening a store that is there, not inventing one.
-
-Open: whether a claim is per site or per card (the card is the thing you are looking at; the site is
-the thing that has the problem); what else is per-site rather than per-card once there is a home for it
-— blocking, `pmAutoplay`, page zoom, 26's keep-this-card-running, 43's script freeze; and where it is
-edited, a list of sites in Settings or the card's own menu writing the site's row.
-
 ### 33. Read Craft for what a polished Mac app holds itself to
 
 Not a feature: a pass over Craft with a list at the end. It is the nearest thing to what PM is — a
@@ -205,8 +186,7 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 31 (a per-site compatibility layer, which 43 and 26 would both live
-in); 40 (a second view of a card).
+**Then design first, then build:** 40 (a second view of a card).
 
 **Iced:** 28 (saving a page) — set aside 2026-09-17, not wanted yet.
 
@@ -268,6 +248,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 27 | card size tools: an aspect ratio, an exact size | **Built, 2026-09-17.** Size ▸ in a card's menu and under Edit: 16:9, 3:2, 4:3, 1:1, 3:4, 5:7, 2:3, 11:19, 9:16 — each keeping the width and top-left, widened rather than flattened under the 40pt floor, ticked when every selected card is already there — and Exact Size…, seeded where the selection agrees, a blank field leaving that side alone. One undo, every selected card from its own width, dim when tiled; no Settings switch, and no picture-ratio snap (`CanvasCardSize`, `CanvasCardSizeTests`) |
 | 29 | a colour for a project on its window | **Built, 2026-09-17.** Project only, in the notes' frontmatter as `pm-color` (a system colour's name, or quoted hex), set in Project Settings from twelve named colours or the colour well. A wash down from the top of the window, 3½ header bands deep on a smootherstep with dithered pixels, painted *behind* the board — the board paints no ground of its own now — and the sidebar's ring or symbol takes the colour (an emoji gets a dot). The header's grey blur-and-tint edge became a mask on the scroll view, so cards fade out to the real ground, washed or not, and stands down over a tiling (`ProjectColor`, `CanvasColorWash`, `CanvasSoftEdge`, `ProjectColorTests`) |
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
+| 31 | say we are a different browser, and the per-site layer around it | **Built, 2026-09-17.** Per site, in one store (`CanvasSiteSettings`, `PMCanvasSites`) that also took over the ad-blocking exceptions, migrated from `PMCanvasUnfilteredSites`. Safari, Chrome or Firefox — the other two as whole user agents with versions counted from the calendar — from "Identify <site> As ▸" in the card menu and the tile's `…`, carried into sign-in windows and popups; Settings ▸ Boards lists every changed site. A change rebuilds every running card on that site. 26 and 43 add fields here. |
 | 32 | restored windows forgetting their size | **Fixed, 2026-09-16.** `openWindowFrames` was read on launch and written by nothing: `rememberOpenProjects` saved the keys alone, so every restored window fell back to the one `PMProject` autosave frame or a cascade off it. Both lists are built in one pass now, index for index, so the filter that drops a projectless window cannot drift between them ([WindowManager](../pm-mac/PM/Windows/WindowManager.swift)) |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 36 | tabs down the side of a tile | **Built, 2026-09-16.** Tabs on the Side, per tile from its menus and saved with the workspace (`CanvasTiling.Tile.tabsOnSide`, written only when on). A 180pt column of icon and name on a tile at least 540pt wide, 40pt of icons alone on a narrower one; the top strip's chip, drag and pull-out turned on their side (`CanvasTileSession.TabStrip`). A column longer than its tile scrolls, and showing a tab scrolls it into view. [canvas-workspaces.md](canvas-workspaces.md) §7k |
