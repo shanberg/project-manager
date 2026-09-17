@@ -132,4 +132,27 @@ final class CanvasBoardKeysTests: XCTestCase {
         XCTAssertFalse(Keys.holdsToPan(chars("h")))
         XCTAssertFalse(Keys.holdsToPan(Keys.Press(specialKey: .leftArrow)))
     }
+
+    // MARK: Fitting the view
+
+    private func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags) -> Keys.Press {
+        Keys.Press(characters: characters, flags: flags, keyCode: code)
+    }
+
+    /// ⇧1 fits the board and ⇧2 the selection, by where the key sits: a Swiss layout's ⇧1 is "+".
+    func testShiftOneAndTwoFitByKeyPosition() {
+        XCTAssertEqual(Keys.fit(key(18, "!", .shift)), .all)
+        XCTAssertEqual(Keys.fit(key(18, "+", .shift)), .all)
+        XCTAssertEqual(Keys.fit(key(19, "@", .shift)), .selection)
+        XCTAssertEqual(Keys.fit(key(19, "@", [.shift, .capsLock])), .selection)
+    }
+
+    /// Only ⇧ exactly: ⌘1 is a tab, ⌃1 a frame, a plain 1 nothing, and ⇧0 stays unclaimed beside ⌘0.
+    func testOtherModifiersAndKeysAreNotFits() {
+        XCTAssertNil(Keys.fit(key(18, "1", [])))
+        XCTAssertNil(Keys.fit(key(18, "1", .command)))
+        XCTAssertNil(Keys.fit(key(18, "1", [.control])))
+        XCTAssertNil(Keys.fit(key(18, "!", [.shift, .command])))
+        XCTAssertNil(Keys.fit(key(29, ")", .shift)))
+    }
 }

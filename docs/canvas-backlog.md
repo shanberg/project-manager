@@ -106,19 +106,6 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 17. Zoom to fit the selection, and the rest of the grammar
-
-⇧2 for "fit what is selected", explicitly asked for — and asked for as part of a larger want: one
-coherent set of navigation keys rather than the current scatter.
-
-What exists: ⌘0 fits the whole board, ⌘+/− step, ⌃1…9 go to a frame, ⌘↩ tiles, the arrow keys move by
-direction ([CanvasNavigation](../pm-mac/PM/Canvas/CanvasNavigation.swift)). What is missing is fit-to-
-selection and, arguably, "back to where I was".
-
-Design first. The nearest existing grammar is Figma's — ⇧1 fit all, ⇧2 fit selection, ⇧0 100% — and
-adopting it wholesale would put ⇧1 next to a ⌘0 that already means the same thing, which is two keys
-for one act. Decide whether the Figma set replaces the ⌘ set or joins it before adding a single key.
-
 ### 23. Header areas that drag, the way Arc finds them
 
 Arc treats a page's own header or toolbar as somewhere to grab the window, found automatically. Wanted
@@ -268,19 +255,6 @@ second page. So "the same card twice" can only honestly mean "a second card on t
 which is exactly what the second half makes. Open: whether that is a good enough answer to say so in
 the menu, and what the new card is called when it is a second view of the same page.
 
-### 41. Maximize a card from the board
-
-⌘Return and a double-click on the handlebar maximize a *tile*
-([toggleMaximizeTile](../pm-mac/PM/Canvas/CanvasBoardView+Tiling.swift:384)), and a tile only exists
-inside a workspace. On the board the nearest thing is Space, which zooms to the card. Asked for as
-"fullscreen this card the way I can a tile", and flagged in the asking as a product smell: two ways of
-looking should not have two grammars for the same want.
-
-Open, and the smell is the more interesting half: whether this is one command (maximizing a card is a
-workspace of one tile, and Escape brings the board back) or whether peek and maximize should have been
-one act all along. Decide with 17, which is the same want one level up — one navigation grammar rather
-than a scatter.
-
 ### 43. Freeze the script, not the whole page
 
 A cheaper freeze: stop a card's JavaScript and leave the page standing, instead of tearing the renderer
@@ -302,8 +276,7 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 17 with 41, which is the same want at two
-altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
+**Then design first, then build:** 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
 (saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
 40 (a second view of a card).
 
@@ -351,6 +324,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 13 | offer the project's own links when adding a web card | **Built, 2026-09-15.** `CanvasLinkSuggestions` turns the combo box on when the current project has links — the engaged card if one is stepped into, else the board's own (canvas-workspaces §5). The mirror half, putting the page you are on into `## Links`, is in [web-cards.md](web-cards.md) |
 | 14 | pin and reorder a project's links | **Reorder built, 2026-09-16; pinning dropped.** Drag a link along its project card's list and it moves there — the order of the lines in `## Links` is the order, so the drag writes the notes file and nothing else (`movingLink(from:to:)`, `ProjectLinksOrderTests`). Only plain links move; a group and the blank line keep their places. The drag reorders while the pointer is on the card and carries the link off as a card once it leaves (`CanvasLinkReorder`, `CanvasLinkZones.List`) |
 | 16 | deliberately starting a new session | **Built, 2026-09-16,** as part of 25: ⌥ New Session starts a new sitting inside the idle window, unless the current one is still empty (`session.start` `new`, contract 1.8.0). See [tile-sessions.md](tile-sessions.md) D1 |
+| 17 | zoom to fit the selection, and the rest of the navigation keys | **Built, 2026-09-16.** Figma's fits join the ⌘ set rather than replace it: ⇧1 fits the board and ⇧2 the selection, read by key position on the board and never as menu equivalents, so a card still types ! and @ (`CanvasBoardKeys.fit`, `CanvasBoardKeysTests`). View ▸ Zoom to Selection is new; ⌘+/− and ⌘0 (Actual Size) stay, ⇧0 was not added. ⌘9 came off Zoom to Fit — it was Go to Tab ▸ Last Tab's too, which won. "Back to where I was" not taken |
 | 18 | adding a tile disordering the workspace | **Fixed, 2026-09-15.** Neither the model nor the layout: the columns were right the whole time and `readingOrder` was wrong. It asked `CanvasTiling.order`, which is the *board's* rule — scattered cards have no rows, so it invents them from the median card height, measured from each card's middle. Tiles are columns and their rows are a fact. A full-height tile's middle is level with nothing in particular, and the band moved when the median did, so adding one tile changed what counted as a row for tiles that had not moved. It reads off each tile's own top-left corner now, which cannot depend on the population. Worst symptom found on the way: an untouched master and stack read its first stack tile before its master, so re-running Master and Stack promoted the wrong card. `CanvasTileOrderTests` |
 | 19 | a deleted card tile leaving part of itself on screen | **Fixed, 2026-09-15.** None of the three suspects: the build pass kept the view. A layout that is not the document keeps every card already built — a workspace of six on a board of forty-three must not tear the other thirty-seven down — and that rule went on answering for a card the file no longer had, while `layoutNodeViews` skips a view whose node it cannot find. So the orphan sat at its old tile's frame until the workspace was left. The decision is `CanvasVisibleCards` now, asserted in `CanvasVisibleCardsTests` |
 | 20 | where a tile's move handle goes | **Built, 2026-09-16.** A grip over the tile's top centre, shown only while the pointer is near there, modelled on Claude's desktop panels; a tile with tabs has none, its strip moves it. A catcher view above the card takes the press over a page (`CanvasBoardView.tileHandle`, `CanvasTileGripView`). [canvas-workspaces.md](canvas-workspaces.md) §7k |
@@ -364,6 +338,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 36 | tabs down the side of a tile | **Built, 2026-09-16.** Tabs on the Side, per tile from its menus and saved with the workspace (`CanvasTiling.Tile.tabsOnSide`, written only when on). A 180pt column of icon and name on a tile at least 540pt wide, 40pt of icons alone on a narrower one; the top strip's chip, drag and pull-out turned on their side (`CanvasTileSession.TabStrip`). A column longer than its tile scrolls, and showing a tab scrolls it into view. [canvas-workspaces.md](canvas-workspaces.md) §7k |
 | 37 | combining projects: a master, and a merge | **Master built, 2026-09-16** — a member names its master in `pm-part-of`, one level, rolled up on the card and in the sidebar ([combining-projects.md](combining-projects.md)). **The merge was dropped** the same day, undecided |
 | 39 | a page's own drags being taken by the board | **Fixed, 2026-09-16.** Reordering a list in a card is HTML5 drag-and-drop and therefore a real dragging session, and the board took every one of them — refusing the ones it could make nothing of without handing them back, which is why the symptom was silence. The precedence is reversed: the page is asked first, since an element claims a drop by preventing the default on `dragover` and WebKit answers a drag with that decision. Argued in [CanvasPageView](../pm-mac/PM/Canvas/CanvasPageView.swift); what WebKit does, including that its first reply is `.copy` to everything, is measured in `CanvasPageDragOriginTests` and the rule is pinned in `CanvasPageViewTests` |
+| 41 | maximize a card from the board | **Built, 2026-09-16,** as one command rather than a second grammar: ⌥⌘↩ (Maximize Card) with one card selected tiles it alone, and Escape, ⌥⌘↩, ⌘↩ or ⌘− fly back to the board as it was. It is a workspace of one that is never saved — no tab, no view state, no departure pose (`maximizeCard`, `restoreMaximizedCard`). Not stepped into, so one Escape is the way back. Peek (Space) stays its own act |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |

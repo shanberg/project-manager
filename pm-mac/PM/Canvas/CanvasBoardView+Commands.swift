@@ -799,7 +799,11 @@ extension CanvasBoardView {
     }
 
     /// What Maximize is called right now: which way the toggle goes.
-    var maximizeTileTitle: String { maximizedTile == nil ? "Maximize Tile" : "Restore Tile" }
+    var maximizeTileTitle: String {
+        if maximizedCard != nil { return "Restore Card" }
+        if !isTiled { return "Maximize Card" }
+        return maximizedTile == nil ? "Maximize Tile" : "Restore Tile"
+    }
 
     /// ⌥⌘Return — fill the room with the focused tile, or put the workspace back.
     ///
@@ -807,7 +811,9 @@ extension CanvasBoardView {
     /// back, and asking for a focused tile first would make the key dead in exactly the state it is
     /// most obviously meant for.
     @objc func maximizeTile(_ sender: Any?) {
-        if restoreMaximizedTile() { return }
+        if restoreMaximizedTile() || restoreMaximizedCard() { return }
+        // On the board it is the card: the same want as the tile's, and so the same key (backlog 41).
+        if !isTiled { return maximizableCard.map(maximizeCard) ?? NSSound.beep() }
         guard let id = focusedTile else { return NSSound.beep() }
         toggleMaximizeTile(id)
     }
@@ -928,6 +934,13 @@ extension CanvasBoardView {
         let item = add(menu, tileCommandTitle, #selector(tileSelection(_:)))
         item.keyEquivalent = "\r"
         item.keyEquivalentModifierMask = [.command]
+        // The card's Maximize, beside the workspace it is the temporary version of. A tile's is in its
+        // own section, so this is only the board's card and the one filling the window alone.
+        if maximizableCard != nil || (maximizedCard != nil && tiling?.ids.count == 1) {
+            let maximize = add(menu, maximizeTileTitle, #selector(maximizeTile(_:)))
+            maximize.keyEquivalent = "\r"
+            maximize.keyEquivalentModifierMask = [.command, .option]
+        }
         addWorkspacesHoldingSelection(menu)
         // The deliberate half of pinning, and the only half: a drag can change a pin but never make
         // one, or a layout would stop responding to its window one adjustment at a time without
@@ -1727,6 +1740,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     /// this is a second door rather than the one that had to work. See `leaveTiling`.
     @objc func zoomOut(_ sender: Any?) {
         guard !zoomEngagedCard(by: -1) else { return }
+        if restoreMaximizedCard() { return }
         guard !isTiled else { return onGoToCanvas() }
         scrollView?.canvasScroll?.zoom(by: 1 / 1.25)
     }
@@ -1820,6 +1834,19 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     @objc func zoomToFit(_ sender: Any?) { scrollView?.canvasScroll?.zoomToFit() }
 
+    /// ⇧2. Fit what is selected in the window, flown to rather than cut — never past 100%, for the
+    /// reason `CanvasScrollView.zoomToFit` gives: fit is seeing all of it, not filling the window with it.
+    @objc func zoomToSelection(_ sender: Any?) {
+        guard !isTiled, let bounds = selectionBounds else { return NSSound.beep() }
+        scrollView?.canvasScroll?.fly(toFit: bounds.inset(by: 60), animated: true)
+    }
+
+    /// The smallest rectangle around every selected card, or nil with no card selected.
+    var selectionBounds: CanvasRect? {
+        selection.compactMap { document.node(id: $0) }.map { layout.frame(of: $0) }
+            .reduce(nil) { $0?.union($1) ?? $1 }
+    }
+
     @objc func toggleConnectMode(_ sender: Any?) { mode = mode == .connect ? .view : .connect }
 
     @objc func setTileArrangement(_ sender: Any?) {
@@ -1848,7 +1875,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.title = maximizeTileTitle
             // Live whenever there is something to put back, or a tile picked out of several to fill
             // the room with. A workspace of one tile already fills it.
-            return maximizedTile != nil || (focusedTile != nil && (tiling?.ids.count ?? 0) > 1)
+            return maximizedTile != nil || maximizedCard != nil || maximizableCard != nil
+                || (focusedTile != nil && (tiling?.ids.count ?? 0) > 1)
         case #selector(renameWorkspace(_:)), #selector(deleteWorkspace(_:)),
              #selector(duplicateWorkspace(_:)):
             // All three act on the workspace you are in, so all three want one with a name. Retitled
@@ -1963,6 +1991,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // A tiled view is a fixed view: the tiles were laid out to fill this window at this zoom,
             // and changing it would slide them out of it. Dim rather than ignored, so the menu says so.
             return !isTiled
+        case #selector(zoomToSelection(_:)):
+            return !isTiled && selectionBounds != nil
         case #selector(pageBack(_:)):
             return pageTargets.contains { $0.canGoBack }
         case #selector(pageForward(_:)):

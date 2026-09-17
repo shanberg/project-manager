@@ -43,6 +43,7 @@ extension CanvasBoardView {
     /// happen to be scrolled to is a surprise you then have to go and delete. See
     /// `CanvasTiling.commandTitle`, which dims rather than guessing.
     @objc func tileSelection(_ sender: Any?) {
+        if restoreMaximizedCard() { return }
         guard tiling == nil else {
             // **A change of tab, not a change to the board.** The tiles stay exactly as they are; the
             // window shows its canvas. See `onGoToCanvas`. Picking is over either way — coming back to
@@ -254,7 +255,7 @@ extension CanvasBoardView {
         // arrives at this zoom with nothing to pose as.
         CanvasArrival(zoom: Double(scrollView?.magnification ?? 1),
                       centre: canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)),
-                      tiling: isPicking ? nil : tiling)
+                      tiling: isPicking || maximizedCard != nil ? nil : tiling)
     }
 
     /// Stand exactly where the board before this one was standing, wearing the workspace it was wearing
@@ -342,7 +343,12 @@ extension CanvasBoardView {
 
     /// The workspace this board would carry into another session: the one that is up, or the last one
     /// there was.
-    var tilingMemory: CanvasViewState.Tiling? { tiling.map(memory(of:)) ?? lastTiling }
+    ///
+    /// A maximized card is not one: it is the board, looked at through one card for a moment.
+    var tilingMemory: CanvasViewState.Tiling? {
+        guard maximizedCard == nil else { return lastTiling }
+        return tiling.map(memory(of:)) ?? lastTiling
+    }
 
     /// Say out loud what just happened to the board.
     ///
@@ -400,6 +406,37 @@ extension CanvasBoardView {
         announceTiling()
     }
 
+    /// ⌥⌘Return on a card on the board: fill the window with it, and put the board back afterwards
+    /// (backlog 41).
+    ///
+    /// **A tiling of one card that is not a workspace**, which is the thing `tile(_:)` already makes for
+    /// the project-note view — so the crossing, the 100% zoom and the way back to exactly where the board
+    /// was are all the tiling's. What makes it temporary is `maximizedCard`: no tab is offered, nothing
+    /// is remembered, and the ways out are the ways out of a maximized tile.
+    func maximizeCard(_ id: String) {
+        guard tiling == nil, let node = document.node(id: id), !node.isGroup else { return NSSound.beep() }
+        // Set first: tiling announces itself, and the pane remembers what it hears.
+        maximizedCard = id
+        // Not stepped into, as a maximized tile is not: one Escape is the way back, not two.
+        tile([id])
+    }
+
+    /// The card ⌥⌘Return would fill the window with: one card selected on a board that is not tiled.
+    var maximizableCard: String? {
+        guard tiling == nil, selection.count == 1, let id = selection.first,
+              let node = document.node(id: id), !node.isGroup else { return nil }
+        return id
+    }
+
+    /// Back to the board from a maximized card. Answers whether it had anything to do.
+    @discardableResult
+    func restoreMaximizedCard(animated: Bool = true) -> Bool {
+        guard maximizedCard != nil else { return false }
+        guard isTiled else { maximizedCard = nil; return false }
+        leaveTiling(animated: animated)
+        return true
+    }
+
     /// Put the workspace back, if a tile is filling it. Answers whether it had anything to do, because
     /// Escape has somewhere else to go when it doesn't — see `cancelOperation`.
     @discardableResult
@@ -438,8 +475,10 @@ extension CanvasBoardView {
         // `tileClicked` — and leaving it holding would hand back a board with one card open in an
         // editor, which is a state you never asked the board for.
         for id in current.ids { nodeViews[id]?.engage(false) }
-        // Kept, not discarded — see `CanvasViewState.lastTiling`.
-        lastTiling = memory(of: session)
+        // Kept, not discarded — see `CanvasViewState.lastTiling`. Not for a maximized card, which was
+        // never a tiling anybody arranged and would push out the one that was.
+        if maximizedCard == nil { lastTiling = memory(of: session) }
+        maximizedCard = nil
         tiling = nil
         // **The view and the cards, started together and travelling together.** Both halves of leaving
         // change where a card is drawn: the zoom changes how canvas coordinates map to the window, and

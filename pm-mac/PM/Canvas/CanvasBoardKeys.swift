@@ -16,18 +16,22 @@ enum CanvasBoardKeys {
         var characters: String?
         var flags: NSEvent.ModifierFlags
         var isRepeat: Bool
+        /// The physical key, for the few keys that are named by where they sit rather than by what they
+        /// type — ⇧1 reports "!" on one layout and "+" on another.
+        var keyCode: UInt16?
 
         init(specialKey: NSEvent.SpecialKey? = nil, characters: String? = nil,
-             flags: NSEvent.ModifierFlags = [], isRepeat: Bool = false) {
+             flags: NSEvent.ModifierFlags = [], isRepeat: Bool = false, keyCode: UInt16? = nil) {
             self.specialKey = specialKey
             self.characters = characters
             self.flags = flags.intersection(.deviceIndependentFlagsMask)
             self.isRepeat = isRepeat
+            self.keyCode = keyCode
         }
 
         init(_ event: NSEvent) {
             self.init(specialKey: event.specialKey, characters: event.charactersIgnoringModifiers,
-                      flags: event.modifierFlags, isRepeat: event.isARepeat)
+                      flags: event.modifierFlags, isRepeat: event.isARepeat, keyCode: event.keyCode)
         }
 
         var direction: CanvasNavigation.Direction? {
@@ -74,6 +78,26 @@ enum CanvasBoardKeys {
     /// `CanvasBoardView.holdForPanning`.
     static func holdsToPan(_ press: Press) -> Bool {
         press.characters == " " && press.flags.subtracting([.capsLock, .function, .numericPad]).isEmpty
+    }
+
+    // MARK: Fitting the view
+
+    enum FitCommand: Equatable { case all, selection }
+
+    /// ⇧1 fits the whole board and ⇧2 fits what is selected — Figma's pair, and the grammar backlog 17
+    /// settled on. ⌘+, ⌘− and ⌘0 stay the Mac's, so ⇧0 is not taken: it would be a second key for ⌘0.
+    ///
+    /// **By key position, and never as menu key equivalents.** A shifted digit is a character on every
+    /// layout — ! and @ here, + and " on a Swiss one — so an equivalent would take it from every card you
+    /// type in. A key only reaches the board when nothing that types wanted it, which is the same bargain
+    /// the workspace's ⌥ keys make.
+    static func fit(_ press: Press) -> FitCommand? {
+        guard press.flags.subtracting([.capsLock, .function, .numericPad]) == .shift else { return nil }
+        switch press.keyCode {
+        case 18: return .all        // kVK_ANSI_1
+        case 19: return .selection  // kVK_ANSI_2
+        default: return nil
+        }
     }
 
     // MARK: The workspace

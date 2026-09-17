@@ -259,7 +259,7 @@ enum MainMenu {
         shortcuts.target = target
     }
 
-    /// The four zoom commands a board answers, routed through the responder chain so they are live when
+    /// The five zoom commands a board answers, routed through the responder chain so they are live when
     /// one is in front and dim when it isn't.
     private static func canvasZoomItems(_ menu: NSMenu) {
         menu.addItem(.separator())
@@ -274,8 +274,13 @@ enum MainMenu {
                      keyEquivalent: "-")
         menu.addItem(withTitle: "Actual Size", action: #selector(CanvasBoardView.zoomActualSize(_:)),
                      keyEquivalent: "0")
+        // ⇧1 and ⇧2 are the board's keys rather than these items' equivalents — a shifted digit is a
+        // character a card types. See `CanvasBoardKeys.fit`. ⌘9 was here, and was View ▸ Go to Tab's
+        // Last Tab too, which sits above and took it.
         menu.addItem(withTitle: "Zoom to Fit", action: #selector(CanvasBoardView.zoomToFit(_:)),
-                     keyEquivalent: "9")
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Zoom to Selection", action: #selector(CanvasBoardView.zoomToSelection(_:)),
+                     keyEquivalent: "")
         menu.addItem(.separator())
     }
 

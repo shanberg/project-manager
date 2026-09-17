@@ -1047,6 +1047,7 @@ extension CanvasBoardView {
         // Where the next card was going, first: the smallest thing there is to cancel.
         if cancelPlacement() { return }
         if restoreMaximizedTile() { return }
+        if restoreMaximizedCard() { return }
         if !isTiled { selection = [] }
     }
 
@@ -1086,6 +1087,13 @@ extension CanvasBoardView {
         // `projectCardTakes`.
         if projectCardTakes(event) { return }
         if holdForPanning(event) { return }
+        // ⇧1 and ⇧2 — see `CanvasBoardKeys.fit`.
+        if let fit = CanvasBoardKeys.fit(.init(event)) {
+            switch fit {
+            case .all: return isTiled ? NSSound.beep() : zoomToFit(nil)
+            case .selection: return zoomToSelection(nil)
+            }
+        }
         switch event.specialKey {
         case .delete, .deleteForward:
             deleteSelection()

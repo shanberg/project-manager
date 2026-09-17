@@ -321,6 +321,12 @@ final class CanvasBoardView: NSView {
     /// does not zoom its content, and zooming out of a workspace of one card is the board.
     var isProjectNoteView = false
 
+    /// The card ⌥⌘↩ is filling the window with, from the board rather than from a workspace — backlog
+    /// 41. The tiling that shows it is a way of looking for a moment, like a maximized tile: never
+    /// remembered, never a workspace, and Escape, ⌥⌘↩, ⌘↩ or ⌘− puts the board back as it was. See
+    /// `maximizeCard`.
+    var maximizedCard: String?
+
     /// This board's project note, and whether we have been to look for it.
     ///
     /// Looked for once and remembered, including the answer "there isn't one": the canvas does not
