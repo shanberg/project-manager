@@ -592,6 +592,8 @@ extension CanvasBoardView {
                 autoplay.state = selectedLinkCards.allSatisfy(\.autoplays) ? .on : .off
                 let muted = add(menu, CanvasCardMedia.muteTitle(count), #selector(toggleMuted))
                 muted.state = selectedLinkCards.allSatisfy(\.isMuted) ? .on : .off
+                let running = add(menu, CanvasCardMedia.keepRunningTitle(count), #selector(toggleKeepRunning))
+                running.state = selectedLinkCards.allSatisfy(\.keepsPageRunning) ? .on : .off
                 addSessionMenu(menu, card: card)
             }
         case .text:
@@ -1564,6 +1566,22 @@ extension CanvasBoardView {
         setMedia(cards, actionName: on ? "Mute Card" : "Unmute Card") { node in
             CanvasCardMedia.setMuted(on, on: &node)
         }
+    }
+
+    /// Keep these cards' pages running whatever the budget would rather — or let it decide again.
+    @objc func toggleKeepRunning(_ sender: Any?) {
+        let cards = selectedLinkCards
+        guard !cards.isEmpty else { return }
+        setKeepRunning(!cards.allSatisfy(\.keepsPageRunning), on: cards)
+    }
+
+    /// The budget is asked again straight away: turning it off is a card that may now be over the count,
+    /// and turning it on is a card that may be frozen right now and should not be.
+    func setKeepRunning(_ on: Bool, on cards: [CanvasLinkNodeView]) {
+        setMedia(cards, actionName: on ? "Keep Running" : "Stop Keeping Running") { node in
+            CanvasCardMedia.setKeepRunning(on, on: &node)
+        }
+        reviewPageBudget()
     }
 
     /// Write a media setting to every one of these cards, as one undoable change — the same shape as

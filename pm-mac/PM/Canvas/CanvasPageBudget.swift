@@ -99,11 +99,19 @@ enum CanvasPageBudget {
         var secondsSinceVisible: Double = 0
         /// The page is playing something — a video, a stream, music.
         var isPlaying = false
+        /// The card is set to keep running — `CanvasCardMedia.keepsRunning`.
+        var keepsRunning = false
 
         /// Whether somebody is using this card, looking at it or not: stepped into it, or listening to
         /// it. A page that is playing is a page you would notice stopping, which is all "in use" means
         /// to the budget — and playing is the one kind of use that carries on with the window hidden.
-        var isInUse: Bool { isEngaged || isPlaying }
+        ///
+        /// A card set to keep running is in use by declaration: it is the page you would notice
+        /// stopping *without* it making a sound — a dashboard that stops updating.
+        var isInUse: Bool { isEngaged || carriesOn }
+
+        /// The uses that go on with nobody looking: playing, or set to keep running.
+        var carriesOn: Bool { isPlaying || keepsRunning }
     }
 
     /// Which cards get to be live. Everything else pauses.
@@ -117,7 +125,7 @@ enum CanvasPageBudget {
     /// In order:
     ///
     /// 1. **A card you are using is always live**, budget or no budget, on screen or off — stepped into,
-    ///    or playing. Freezing the page under someone's pointer to save a renderer is a trade nobody
+    ///    playing, or set to keep running. Freezing the page under someone's pointer to save a renderer is a trade nobody
     ///    would take, and neither is stopping the music.
     /// 2. **What's on screen, nearest the middle first.** When more of the board is visible than the
     ///    budget covers — which is what zooming out means — the cards at the centre are the ones being
@@ -187,9 +195,10 @@ enum CanvasPageBudget {
     /// **What is playing is spared either way.** Music is the case that asked: a window put behind
     /// another so you can get on with something is exactly the window whose sound you still want, and a
     /// video frozen mid-sentence is a page anybody would notice stopping. Hiding PM is not asking it to
-    /// go quiet; pausing the player is, and the page says so the next time it is asked.
+    /// go quiet; pausing the player is, and the page says so the next time it is asked. A card set to
+    /// keep running is spared the same way, since being spared this is what the setting is for.
     static func liveWhileAway(among cards: [Candidate], onScreen: Bool) -> Set<String> {
-        Set(cards.filter { $0.wantsPage && ($0.isPlaying || (onScreen && $0.isEngaged)) }.map(\.id))
+        Set(cards.filter { $0.wantsPage && ($0.carriesOn || (onScreen && $0.isEngaged)) }.map(\.id))
     }
 
     // MARK: Who gives up a slot first

@@ -47,6 +47,7 @@ final class CanvasPageDirectorTests: XCTestCase {
         let wantsPage: Bool
         var isEngaged = false
         var isPlayingMedia = false
+        var keepsPageRunning = false
         var isCardHidden: Bool
         var lastVisibleAt = Date.distantPast
 
@@ -256,6 +257,21 @@ final class CanvasPageDirectorTests: XCTestCase {
         XCTAssertEqual(music.live, true)
         XCTAssertEqual(engaged.live, false, "off screen, standing in a card is not using it")
         XCTAssertEqual(director.live, ["music"])
+    }
+
+    /// Backlog 26: the idle pause spares a card set to keep running, with PM hidden or not.
+    func testPausingWhileAwaySparesACardKeptRunning() {
+        let dashboard = stage.add("dashboard")
+        dashboard.keepsPageRunning = true
+        let other = stage.add("other")
+        director.apply()
+        stage.isOnScreen = false
+
+        director.pauseWhileAway()
+
+        XCTAssertEqual(dashboard.live, true)
+        XCTAssertEqual(other.live, false)
+        XCTAssertEqual(director.live, ["dashboard"])
     }
 
     // MARK: Refreshing

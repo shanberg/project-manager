@@ -40,6 +40,32 @@ enum CanvasCardMedia {
     static func setAutoplay(_ on: Bool, on node: inout CanvasNode) { set(autoplayKey, on, on: &node) }
     static func setMuted(_ on: Bool, on node: inout CanvasNode) { set(mutedKey, on, on: &node) }
 
+    // MARK: Keep Running (backlog 26)
+
+    static let keepRunningKey = "pmKeepRunning"
+
+    /// Whether this card's page goes on running whatever the page budget would rather — the dashboard
+    /// only worth having live, the chat app whose unread count stops the moment it is frozen.
+    ///
+    /// **Here, with autoplay and mute, rather than in the per-site store**, for the reason those two
+    /// are: it is about what *this* card is for. The dashboard card on your board is worth a renderer;
+    /// a link to the same site pinned beside a note is not.
+    ///
+    /// What it buys is exactly what playing media already has — see `CanvasPageBudget.Candidate.isInUse`:
+    /// past the count, past the off-screen timer, and through the idle pause with the window behind or
+    /// hidden. Not past the zoom (a board zoomed out too far to draw pages runs none) and not past the
+    /// window closing.
+    ///
+    /// **Deliberately a switch you throw, not a guess.** Keeping cards alive so that a web app can tell
+    /// you something is the wrong shape for that job — it ties hearing from Slack to which board is
+    /// open, and costs a renderer per card rather than per account. That question is 26's research.
+    static func keepsRunning(_ node: CanvasNode) -> Bool { flag(keepRunningKey, on: node) }
+    static func setKeepRunning(_ on: Bool, on node: inout CanvasNode) { set(keepRunningKey, on, on: &node) }
+
+    static func keepRunningTitle(_ count: Int) -> String {
+        count > 1 ? "Keep \(count) Cards Running" : "Keep Running"
+    }
+
     /// Put the mute switch into every page this configuration will show, set to `muted`.
     ///
     /// The switch's opening position has to be baked in here rather than pushed afterwards, or a muted

@@ -982,6 +982,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// Only a page that is running can be playing, whatever WebKit said last.
     override var isPlayingMedia: Bool { web != nil && playing }
 
+    override var keepsPageRunning: Bool { CanvasCardMedia.keepsRunning(node) }
+
+    /// Keep Running from the tile's menu, which is about this card rather than the selection.
+    func setKeepRunning(_ on: Bool) { board.setKeepRunning(on, on: [self]) }
+
     /// What WebKit last said about the page playing anything. See `askWhetherPlaying`.
     private var playing = false
 

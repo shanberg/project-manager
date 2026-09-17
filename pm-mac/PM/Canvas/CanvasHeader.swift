@@ -172,6 +172,7 @@ final class CanvasHeaderModel {
         var site: String = ""
         var isFiltered: Bool = false
         var identity: CanvasBrowserIdentity = .safari
+        var keepsRunning: Bool = false
 
         /// One page in the back list.
         struct Step: Equatable {
@@ -288,6 +289,8 @@ final class CanvasHeaderModel {
     var pageSetFiltered: (Bool) -> Void = { _ in }
     @ObservationIgnored
     var pageSetIdentity: (CanvasBrowserIdentity) -> Void = { _ in }
+    @ObservationIgnored
+    var pageSetKeepRunning: (Bool) -> Void = { _ in }
     /// Send the page to an address typed into the header's field. Navigation only — it does not touch
     /// what the board has saved for the card, which is what Pin is for.
     @ObservationIgnored

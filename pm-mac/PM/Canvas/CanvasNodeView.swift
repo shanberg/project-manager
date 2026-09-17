@@ -743,6 +743,9 @@ class CanvasNodeView: NSView {
     /// Whether the card's page is playing something. Web cards override.
     var isPlayingMedia: Bool { false }
 
+    /// Whether the card is set to keep its page running. Web cards override.
+    var keepsPageRunning: Bool { false }
+
     /// The board's answer. Live means run; not live means freeze, keeping a picture of the page.
     func setPageLive(_ live: Bool) {}
 

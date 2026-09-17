@@ -11,9 +11,30 @@ final class CanvasPageBudgetTests: XCTestCase {
     /// A card that wants to run, `distance` points from the middle of the window.
     private func card(_ id: String, distance: Double, visible: Bool = true,
                       engaged: Bool = false, wants: Bool = true,
-                      goneFor: Double = 0, playing: Bool = false) -> CanvasPageBudget.Candidate {
+                      goneFor: Double = 0, playing: Bool = false,
+                      kept: Bool = false) -> CanvasPageBudget.Candidate {
         .init(id: id, wantsPage: wants, isVisible: visible, isEngaged: engaged,
-              distanceFromCentre: distance, secondsSinceVisible: goneFor, isPlaying: playing)
+              distanceFromCentre: distance, secondsSinceVisible: goneFor, isPlaying: playing,
+              keepsRunning: kept)
+    }
+
+    /// Backlog 26: a card set to keep running is past the clock and over the budget, like music — off
+    /// screen for an hour, it still beats a card in the middle of the window.
+    func testACardKeptRunningIsLivePastTheGraceAndOverTheBudget() {
+        let cards = [card("near", distance: 10), card("dashboard", distance: 0, visible: false,
+                                                       goneFor: 3600, kept: true)]
+        XCTAssertEqual(CanvasPageBudget.live(among: cards, budget: 1, grace: 60), ["dashboard"])
+        XCTAssertEqual(CanvasPageBudget.live(among: cards, budget: 0, grace: 60), ["dashboard"],
+                       "over the budget, too")
+        XCTAssertEqual(CanvasPageBudget.liveWhileTiled(among: cards, budget: 1, grace: 60),
+                       ["near", "dashboard"])
+    }
+
+    /// …but not past the zoom: a board zoomed out too far to draw pages runs none of them.
+    func testACardKeptRunningStillNeedsToWantItsPage() {
+        let cards = [card("dashboard", distance: 0, wants: false, kept: true)]
+        XCTAssertEqual(CanvasPageBudget.live(among: cards), [])
+        XCTAssertEqual(CanvasPageBudget.liveWhileAway(among: cards, onScreen: false), [])
     }
 
     func testAQuietBoardRunsEverythingOnScreen() {

@@ -74,27 +74,37 @@ Open: whether that is one arrangement more or a different kind of thing entirely
 master-stack are computed from a list, and a BSP layout is a tree that has to be stored. If it is a
 tree, `CanvasViewState.Tiling` grows a second shape and every saved arrangement has to decode either.
 
-### 26. Keeping web apps alive, and their notifications
+### 26. Hearing from web apps without keeping their cards alive — **researching**
 
-Slack's unread count stops updating once its card is frozen — past the ten-minute off-screen grace, or
-two minutes after the window stops being key. A frozen card runs no script, and waking one restores its
-history (`interactionState`), not its connections. Research notes, none of it built:
+**Keep Running is built** (2026-09-17): a per-card switch beside Autoplay and Mute, in the card menu and
+the tile's `…`, that makes a card in use to the page budget the way playing media is — past the
+limit, the off-screen timer and the idle pause, not past the zoom ([CanvasCardMedia](../pm-mac/PM/Canvas/CanvasCardMedia.swift)).
+It is for the dashboard that is only worth having live.
 
-- **Keep this card running.** A per-card flag, stored like `pmAutoplay` (`CanvasCardMedia`), that counts
-  as in use in `CanvasPageBudget` exactly the way playing media now does. The cheapest real answer, and
-  the model it would slot into exists.
-- **Badges without a renderer.** Slack, Gmail and most chat apps put the count in `document.title` and
-  the favicon. The card already watches titles (`titleWatch`), so a live card could show a count in the
-  tab bar; a frozen one cannot, which makes this depend on the flag above.
-- **Web notifications.** WKWebView doesn't give an embedding app a public way to receive a page's
-  `Notification` calls — to be confirmed against current WebKit before relying on it. The usual
-  workaround is a user script that replaces `window.Notification` and posts to a script message handler,
-  which re-posts through `UNUserNotificationCenter`. It is also one more thing PM says to every frame,
-  which `CanvasCardMedia.script` has a documented reason to be careful about.
-- **Web Push / service workers**, which would keep delivering with the page closed: not assumed
-  available to a WKWebView embedder. Check before designing around it.
-- **Tabs behind.** Switching tabs still freezes a board's pages outright (`pauseAllPages`), including one
-  that is playing — the playing exception only covers the idle pause and the budget.
+**It is the wrong shape for the real ask**, which is: several cards per chat workspace across several
+projects, and knowing when something relevant arrives — without a renderer per card and without a
+notification per message. A version that guessed which cards to keep (recognise a live app by its
+title changing or a WebSocket held open, keep one card per site and profile) was built, tested and
+set aside unmerged, because it still ties hearing from an app to which board happens to be open.
+
+The direction instead: **listening belongs to the app, not to cards.** One hidden page per account,
+owned by the app, costing one renderer per account however many cards point at it. The app's own
+notification rules — mentions, DMs, keywords — are the relevance filter, caught where the page calls
+the web `Notification` API. The board is the routing table: a card's address names the workspace and
+channel, so a notification lands on the projects whose cards match. Quiet by default — counts on cards,
+dots on projects and the menubar — with system notifications grouped per project.
+
+Open, and research before design, across chat, mail and work apps (Slack, Discord, Teams, Google Chat,
+Gmail, Outlook, Linear, GitHub, Notion, Figma, WhatsApp and the like), not Slack alone:
+
+1. Does a WKWebView page get a working `Notification` on macOS 26, and if not, does a page call one PM
+   supplies? The Badging API (`navigator.setAppBadge`), title counts and favicon badges as the quieter
+   signals.
+2. What each app passes — does a notification carry ids (workspace, channel, thread) or only text?
+3. Does one page hear every workspace or account signed in, or only the one on screen?
+4. Does a page in no window keep its connection for hours, or does WebKit suspend it — and what does
+   a service worker or Web Push give an embedder?
+5. Where there is an API instead (Slack, GitHub, Linear), whether it is the better listener.
 
 ### 28. Save a page: PNG, web archive, restorable — **iced**
 
@@ -174,8 +184,8 @@ up too often.
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
 
-**Research with a cheap first step:** 26 — the keep-this-card-running flag, which slots into a model
-that already exists. 43 and 38 are the same research from two ends and should be done at once: what
+**Research, now:** 26 — hearing from web apps (chat, mail, work tools) through one listener per
+account rather than live cards: what WebKit and each app will give an embedder. 43 and 38 are the same research from two ends and should be done at once: what
 WebKit will let us suspend, and what the window server is doing that we are not.
 
 **Reading rather than building:** 33 — a pass over Craft, with the findings coming back as entries

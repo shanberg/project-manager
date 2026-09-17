@@ -19,6 +19,8 @@ protocol CanvasPageCard: AnyObject {
     var isEngaged: Bool { get }
     /// Whether its page is playing something. A playing card keeps its page, even with the window hidden.
     var isPlayingMedia: Bool { get }
+    /// Whether the card is set to keep its page running. Spared like a playing card.
+    var keepsPageRunning: Bool { get }
     /// Hidden by a tiled view, which is not the same as being off screen and has to beat it.
     var isCardHidden: Bool { get }
     /// When the card was last drawn. Written by the director, read by the budget.
@@ -261,7 +263,8 @@ final class CanvasPageDirector {
                              isEngaged: view.isEngaged,
                              distanceFromCentre: hypot(frame.midX - centre.x, frame.midY - centre.y),
                              secondsSinceVisible: now.timeIntervalSince(view.lastVisibleAt),
-                             isPlaying: view.isPlayingMedia))
+                             isPlaying: view.isPlayingMedia,
+                             keepsRunning: view.keepsPageRunning))
         }
         return out
     }

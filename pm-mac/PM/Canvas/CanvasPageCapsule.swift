@@ -148,6 +148,9 @@ struct CanvasPageMenuItems: View {
             get: { page.identity }, set: model.pageSetIdentity)) {
             ForEach(CanvasBrowserIdentity.allCases, id: \.self) { Text($0.title).tag($0) }
         }
+        Divider()
+        Toggle(CanvasCardMedia.keepRunningTitle(1), isOn: Binding(
+            get: { page.keepsRunning }, set: model.pageSetKeepRunning))
     }
 }
 
