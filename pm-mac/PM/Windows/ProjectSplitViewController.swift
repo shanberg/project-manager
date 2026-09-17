@@ -621,6 +621,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             }
         }
         tabModel.selectedID = tabs.selectedID
+        (view.window?.windowController as? ProjectWindowController)?.applyTitle()
     }
 
     // MARK: The workspaces this window has open

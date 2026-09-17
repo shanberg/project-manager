@@ -329,13 +329,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     /// The window's title — invisible in the titlebar, but what the Window menu, ⌘`, and the tab bar
     /// all show. The subtitle carries progress, which is where the header's "3/8" goes in a window.
+    ///
+    /// **The workspace in front goes on the end** — "S-004 Project Manager Tool — Dashboard" — because
+    /// two windows on one project are otherwise two identical rows in the Window menu and ⌘`, and the
+    /// workspace is what tells them apart. Workspaces only: the canvas is the project itself, and a
+    /// frame or the notes tab is a place on it rather than a way of working. Kept current from
+    /// `ProjectSplitViewController.refreshTabModel`, the funnel every switch and rename goes through.
     func applyTitle() {
         guard let window else { return }
+        let workspace = split.tabs.selected.view.workspaceName.map { " \u{2014} \($0)" } ?? ""
         // A window opened on a file is named for the file, and carries it: `representedURL` is what
         // gives the titlebar its proxy icon and its ⌘-click path menu, which for a document window is
         // most of what a title is for.
         if let openedCanvas {
-            window.title = openedCanvas.deletingPathExtension().lastPathComponent
+            window.title = openedCanvas.deletingPathExtension().lastPathComponent + workspace
             window.subtitle = ""
             window.representedURL = openedCanvas
             return
@@ -344,7 +351,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // The folder name is the fallback and the one that carries a code, so it's written the way the
         // rest of the app has been told to write names — see `ProjectCodes`.
         let name = (title?.isEmpty ?? true) ? store.projectName.map { ProjectCodes.display($0) } : title
-        window.title = name ?? "Folio"
+        window.title = (name ?? "Folio") + workspace
         // A window retargeted away from the file it was opened on must lose the proxy icon with it: a
         // titlebar still offering the old canvas's path menu is a window claiming to be a document it
         // is not showing.
