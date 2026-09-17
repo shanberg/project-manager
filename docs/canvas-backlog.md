@@ -94,6 +94,9 @@ the web `Notification` API. The board is the routing table: a card's address nam
 channel, so a notification lands on the projects whose cards match. Quiet by default — counts on cards,
 dots on projects and the menubar — with system notifications grouped per project.
 
+**The research so far is [web-app-attention.md](web-app-attention.md)** — what WebKit gives an
+embedder, what each app gives, whether a hidden page keeps listening, and what is left to measure.
+
 Open, and research before design, across chat, mail and work apps (Slack, Discord, Teams, Google Chat,
 Gmail, Outlook, Linear, GitHub, Notion, Figma, WhatsApp and the like), not Slack alone:
 
