@@ -431,6 +431,23 @@ struct CanvasTileSession: Equatable {
         columns[b.column].tiles[b.tile].tabsOnSide = first.tabsOnSide
     }
 
+    /// Put `other` in `id`'s place — the same tile, the same tab, the same size — and take `id` out
+    /// (backlog 8). Answers whether anything changed: `other` already in the workspace is a swap or a
+    /// tab switch, which have their own commands, so it is refused rather than guessed at.
+    ///
+    /// The tile keeps what is the tile's — its length, its tab strip, which tab is showing — because
+    /// the ask is "this slot, a different card", and the slot is all of those.
+    @discardableResult
+    mutating func replace(_ id: String, with other: String) -> Bool {
+        guard id != other, !cards.contains(other), let at = position(of: id),
+              let index = columns[at.column].tiles[at.tile].cards.firstIndex(of: id) else { return false }
+        columns[at.column].tiles[at.tile].cards[index] = other
+        if maximized == id { maximized = other }
+        if preselection?.target == id { preselection?.target = other }
+        if let scroll = tabScroll.removeValue(forKey: id) { tabScroll[other] = scroll }
+        return true
+    }
+
     // MARK: Where things go
 
     /// A side of a tile, for something going beside it — or into it, as another of its tabs.

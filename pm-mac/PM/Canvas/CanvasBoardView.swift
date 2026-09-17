@@ -345,6 +345,12 @@ final class CanvasBoardView: NSView {
         guard let projectNote else { return false }
         return !CanvasProjectNoteCard.isOn(document, notes: projectNote, resolver: store.resolver)
     }
+    /// The project's note card, when it is on this board — what a list of cards to fill a tile with
+    /// offers first.
+    var projectNoteCardID: String? {
+        _ = offersProjectNoteCard
+        return projectNote.flatMap { CanvasProjectNoteCard.id(on: document, notes: $0, resolver: store.resolver) }
+    }
     var trackingArea: NSTrackingArea?
     /// Where the right-click that opened the context menu landed. Held because the menu is long
     /// dismissed by the time an item fires, and "Paste" from that menu means *there*.

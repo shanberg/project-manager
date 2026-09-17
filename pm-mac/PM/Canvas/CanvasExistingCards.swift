@@ -48,7 +48,10 @@ enum CanvasExistingCards {
     ///
     /// `isFolder` answers whether a file card's stored path is a folder, which only a resolver can —
     /// see `card`.
-    static func sections(of document: CanvasDocument, showing shown: [String],
+    ///
+    /// `first` is a card to lead the list whatever frame it sits in — the project's note, which is the
+    /// card most often meant when there is a tile to fill (backlog 8).
+    static func sections(of document: CanvasDocument, showing shown: [String], first: String? = nil,
                          isFolder: (String) -> Bool = { _ in false }) -> [Section] {
         let showing = Set(shown)
         let candidates = document.nodes.filter { !$0.isGroup && !showing.contains($0.id) }
@@ -66,12 +69,17 @@ enum CanvasExistingCards {
         }
 
         var sections: [Section] = []
+        let lead = candidates.first { $0.id == first }.flatMap { card($0, isFolder: isFolder) }
+        if let lead {
+            for key in Array(byFrame.keys) { byFrame[key]?.removeAll { $0.id == lead.id } }
+            if byFrame[nil] == nil { byFrame[nil] = [] }
+        }
         if let loose = byFrame[nil] {
-            sections.append(Section(frame: nil, cards: ordered(loose, isFolder)))
+            sections.append(Section(frame: nil, cards: (lead.map { [$0] } ?? []) + ordered(loose, isFolder)))
         }
         let framesByID = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, $0) })
         for id in CanvasTiling.order(frames.map { ($0.id, $0.frame) }) {
-            guard let nodes = byFrame[id], let frame = framesByID[id] else { continue }
+            guard let nodes = byFrame[id], !nodes.isEmpty, let frame = framesByID[id] else { continue }
             sections.append(Section(frame: label(of: frame), cards: ordered(nodes, isFolder)))
         }
         return sections

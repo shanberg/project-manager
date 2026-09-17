@@ -58,24 +58,6 @@ its board or its title — and that is a different bug.
 
 ## Features
 
-### 8. Swap the card in a tile
-
-**Folded into [canvas-workspaces.md](canvas-workspaces.md) §7k**, as tabs in a tile — and the picker is
-the board itself.
-
-In a tiled view, a way to say "this slot, different card" — a control on the tile that raises a
-picker of the cards on the board that are not currently up.
-
-- Rows are `[thumbnail] [title / preview text]`.
-- **The project note sorts first when it isn't already on screen**, since that is the card you most
-  often meant.
-- Existing pieces: `CanvasPageTitles` for names, and the summary/preview text in `CanvasSummary`.
-  Thumbnails are the unknown — a web card's snapshot exists, a file card's does not.
-
-Where it lives: the tile's contextual menu, beside promote and pin. Not on the handlebar — that drags
-and does nothing else, deliberately, and every other tile command has moved off it and into the two
-menus.
-
 ### 11. BSP layouts
 
 **Answered by [canvas-workspaces.md](canvas-workspaces.md) §7k**: columns of tiles rather than a tree.
@@ -262,9 +244,9 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
-(saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
-40 (a second view of a card).
+**Then design first, then build:** 23 (Arc-style drag areas); 27 (size tools); 28 (saving a page); 29
+(colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in); 40 (a second view of a
+card).
 
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
@@ -305,6 +287,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27** |
 | 6 | a folder dropped on a board | **Built, 2026-09-16.** A folder card: the Finder's list of its top level, folders first, watched while the card is up, every row a link zone so a click opens the item and a drag carries it off as a card (`CanvasFolderCard`, `CanvasFolderCardTests`). Stored as the ordinary file card it was |
 | 7 | tidy a rough cluster into a grid | **Built, 2026-09-16.** FigJam's Tidy Up, ⌃⌥T and Edit ▸ Tidy Up: two or more selected cards, or the cards a lone frame holds, laid out with their rows kept and their columns aligned — each column as wide as its widest card, each row as tall as its tallest, a 20pt gutter on the 10pt lattice, sizes untouched, one undo. A frame grows to hold its grid and never shrinks; in a larger selection it is one item and carries its contents. Rows are read off top edges rather than `CanvasTiling.order`'s middles, so a second tidy is a no-op (`CanvasTidy`, `CanvasTidyTests`) |
+| 8 | swap the card in a tile | **Built, 2026-09-16.** Replace With, in a tile's and a tab's contextual menu: the board's cards not already up, grouped by frame, the project note first (and first in Add Card from Canvas too). The chosen card takes the old one's slot — tab position, size, tabs on the side, maximized — and is focused; the old card leaves the workspace and stays on the board. The rest of the picker was already tabs, [canvas-workspaces.md](canvas-workspaces.md) §7k (`CanvasTileSession.replace`, `CanvasTileReplaceTests`) |
 | 9 | saved arrangements, already built and hard to find | [canvas-workspaces.md](canvas-workspaces.md) — they are workspaces |
 | 10 | duplicate the current arrangement | canvas-workspaces §7c — the ordinary way a second workspace comes to exist |
 | 12 | what a project card shows | canvas-workspaces §6 |

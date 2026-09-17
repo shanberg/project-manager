@@ -715,7 +715,7 @@ extension CanvasBoardView {
         }
         // Here as well as on the board's own menu, because the board's is reached by right-clicking a
         // gap between tiles, and the gaps are four points wide.
-        if !wholeTile { addExistingCards(menu) }
+        if !wholeTile { addExistingCards(menu); addReplaceWith(menu) }
         add(menu, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
 
         addArrange(menu)
@@ -738,6 +738,7 @@ extension CanvasBoardView {
         menu.addItem(.sectionHeader(title: "Tab"))
         add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
         add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:)))
+        addReplaceWith(menu)
         if tiling.tabs(of: id).count > 1 {
             add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
         }
@@ -998,6 +999,15 @@ extension CanvasBoardView {
         fillExistingCardsMenu(list)
         guard !list.items.isEmpty else { return }
         menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = list
+    }
+
+    /// Replace With: the same list, each card going into `menuTile`'s place rather than beside it.
+    private func addReplaceWith(_ menu: NSMenu) {
+        guard isTiled, menuTile != nil else { return }
+        let list = NSMenu()
+        fillExistingCardsMenu(list, action: #selector(replaceMenuTile(_:)))
+        guard !list.items.isEmpty else { return }
+        menu.addItem(withTitle: "Replace With", action: nil, keyEquivalent: "").submenu = list
     }
 
     @discardableResult

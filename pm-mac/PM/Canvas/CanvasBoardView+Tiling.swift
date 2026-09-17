@@ -620,7 +620,8 @@ extension CanvasBoardView {
     /// every card on the board is already a tile. See `CanvasExistingCards`.
     var existingCardSections: [CanvasExistingCards.Section] {
         guard let tiling else { return [] }
-        return CanvasExistingCards.sections(of: document, showing: tiling.cards, isFolder: isFolderPath)
+        return CanvasExistingCards.sections(of: document, showing: tiling.cards, first: projectNoteCardID,
+                                            isFolder: isFolderPath)
     }
 
     /// A card's one-line name and icon, as a menu, a tab and a dragged tile show it. See
@@ -672,6 +673,24 @@ extension CanvasBoardView {
         case .text:
             return NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
         }
+    }
+
+    /// Replace With: the card a menu item names, in the right-clicked tile's place (backlog 8).
+    @objc func replaceMenuTile(_ sender: Any?) {
+        guard let id = menuTile, let other = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        replaceInTiling(id, with: other)
+    }
+
+    /// Put a card from the board where `id` is showing, and take `id` out — back to its place on the
+    /// board, untouched. Focused, as a card you went looking for is (`addExistingCard`).
+    func replaceInTiling(_ id: String, with other: String) {
+        guard var session = tiling, document.node(id: other).map({ !$0.isGroup }) ?? false,
+              session.replace(id, with: other) else { return NSSound.beep() }
+        tiling = session
+        select([other])
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+        announceTiling()
     }
 
     /// The card a menu item names, up as a tile.
