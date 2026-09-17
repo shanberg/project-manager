@@ -96,18 +96,6 @@ history (`interactionState`), not its connections. Research notes, none of it bu
 - **Tabs behind.** Switching tabs still freezes a board's pages outright (`pauseAllPages`), including one
   that is playing — the playing exception only covers the idle pause and the budget.
 
-### 27. Card size tools: an aspect ratio, an exact size
-
-Optional tools to set a card to a specific aspect ratio (16:9 and the usual set) or size, behind a
-switch in Settings that is off by default.
-
-It carries what retired 5 left behind: whether a resize should *offer* a picture's own aspect ratio as
-a snap, which would make the 8% fill something you land on deliberately rather than something that
-happens to be true — and which 2 would then have to draw, the way it draws the other agreements.
-
-Open: whether these are a menu of presets on the card, a field in an inspector the board doesn't have,
-or snaps during a resize that only the setting turns on.
-
 ### 28. Save a page: PNG, web archive, restorable
 
 Save a web card's page as a PNG or a web capture, and have the capture come back on the next open.
@@ -224,8 +212,8 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Then design first, then build:** 27 (size tools); 28 (saving a page); 29 (colour); 31 (a per-site
-compatibility layer, which 43 and 26 would both live in); 40 (a second view of a card).
+**Then design first, then build:** 28 (saving a page); 29 (colour); 31 (a per-site compatibility layer,
+which 43 and 26 would both live in); 40 (a second view of a card).
 
 **Blocked on an argument of its own:** 11 (BSP) — whether a stored tree is one arrangement more or a
 different kind of thing entirely.
@@ -263,7 +251,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 1 | the placeholder sitting over a page you could already read | **Built.** The reveal is the first of the page having painted, `didFinish`, or eight seconds — a 48pt snapshot probed every 200ms standing in for WebKit's private first-paint milestone. Argued in [web-cards.md](web-cards.md) and [CanvasPagePaint](../pm-mac/PM/Canvas/CanvasPagePaint.swift) |
 | 3 | the modifiers a board was missing, and ⌥ already meaning no snapping | **Built, 2026-09-16.** The design-tool grammar every tool agrees on: ⇧ keeps the aspect and ⌥ resizes about the centre (`CanvasHandle.resize(_:by:keepingAspect:fromCentre:)`, `CanvasSelectionTests`), and ⌥-drag leaves a copy behind (`duplicateInPlace`, one undo). Snapping's escape moved off ⌥ to **⌘ or ⌃** — tools split on it (⌘ in Keynote, tldraw, Excalidraw, Miro; ⌃ in Figma) and neither is otherwise read mid-drag (`suspendsSnapping`). A constrained resize does not snap; revisit if missed |
 | 4 | ⌥-drag to duplicate a card | Folded into **3**, which is the one decision under all three modifier gestures |
-| 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27** |
+| 5 | cards that are just an image | **Built.** A card within 8% of the picture's shape fills instead of letterboxing ([CanvasPictureView](../pm-mac/PM/Canvas/CanvasPictureView.swift)); the ratio-as-a-resize-snap question it left behind is carried by **27**, which chose not to |
 | 6 | a folder dropped on a board | **Built, 2026-09-16.** A folder card: the Finder's list of its top level, folders first, watched while the card is up, every row a link zone so a click opens the item and a drag carries it off as a card (`CanvasFolderCard`, `CanvasFolderCardTests`). Stored as the ordinary file card it was |
 | 7 | tidy a rough cluster into a grid | **Built, 2026-09-16.** FigJam's Tidy Up, ⌃⌥T and Edit ▸ Tidy Up: two or more selected cards, or the cards a lone frame holds, laid out with their rows kept and their columns aligned — each column as wide as its widest card, each row as tall as its tallest, a 20pt gutter on the 10pt lattice, sizes untouched, one undo. A frame grows to hold its grid and never shrinks; in a larger selection it is one item and carries its contents. Rows are read off top edges rather than `CanvasTiling.order`'s middles, so a second tidy is a no-op (`CanvasTidy`, `CanvasTidyTests`) |
 | 8 | swap the card in a tile | **Built, 2026-09-16.** Replace With, in a tile's and a tab's contextual menu: the board's cards not already up, grouped by frame, the project note first (and first in Add Card from Canvas too). The chosen card takes the old one's slot — tab position, size, tabs on the side, maximized — and is focused; the old card leaves the workspace and stays on the board. The rest of the picker was already tabs, [canvas-workspaces.md](canvas-workspaces.md) §7k (`CanvasTileSession.replace`, `CanvasTileReplaceTests`) |
@@ -282,6 +270,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 23 | page headers that drag the window, Arc's way | **Already works, 2026-09-16** — found solved in use; nothing built for it |
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
+| 27 | card size tools: an aspect ratio, an exact size | **Built, 2026-09-17.** Size ▸ in a card's menu and under Edit: 16:9, 3:2, 4:3, 1:1, 3:4, 5:7, 2:3, 11:19, 9:16 — each keeping the width and top-left, widened rather than flattened under the 40pt floor, ticked when every selected card is already there — and Exact Size…, seeded where the selection agrees, a blank field leaving that side alone. One undo, every selected card from its own width, dim when tiled; no Settings switch, and no picture-ratio snap (`CanvasCardSize`, `CanvasCardSizeTests`) |
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
 | 32 | restored windows forgetting their size | **Fixed, 2026-09-16.** `openWindowFrames` was read on launch and written by nothing: `rememberOpenProjects` saved the keys alone, so every restored window fell back to the one `PMProject` autosave frame or a cascade off it. Both lists are built in one pass now, index for index, so the filter that drops a projectless window cannot drift between them ([WindowManager](../pm-mac/PM/Windows/WindowManager.swift)) |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |

@@ -196,6 +196,8 @@ enum MainMenu {
         // Figma's Tidy Up key, and the same answerer: a board with a selection to lay out, dim elsewhere.
         let tidy = menu.addItem(withTitle: "Tidy Up", action: Selector(("tidyUp:")), keyEquivalent: "t")
         tidy.keyEquivalentModifierMask = [.control, .option]
+        // Same answerer again; the menu is the board's own, so the two lists can't drift apart.
+        menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = CanvasBoardView.sizeMenu()
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())

@@ -242,6 +242,89 @@ extension CanvasBoardView {
 
     var canTidy: Bool { !isTiled && CanvasTidy.plan(selection, in: document) != nil }
 
+    // MARK: Sizing
+
+    /// Size ▸ a proportion (backlog 27): each selected card at `CanvasCardSize.ratios[tag]`, its width
+    /// and top-left kept — see `CanvasCardSize`.
+    @objc func setCardRatio(_ sender: NSMenuItem) {
+        guard canSize, CanvasCardSize.ratios.indices.contains(sender.tag) else { return NSSound.beep() }
+        let ratio = CanvasCardSize.ratios[sender.tag]
+        resizeSelection("Set Size to \(ratio.title)") { CanvasCardSize.frame($0, at: ratio) }
+    }
+
+    /// Size ▸ Exact Size…: a width and a height, seeded from the selection where its cards agree and
+    /// left blank where they don't, and a blank field leaves that axis of every card alone.
+    @objc func setCardSize(_ sender: Any?) {
+        guard canSize else { return NSSound.beep() }
+        let frames = selectedFrames
+        func seed(_ value: (CanvasRect) -> Double) -> String {
+            let values = Set(frames.map { Int(value($0).rounded()) })
+            return values.count == 1 ? String(values.first!) : ""
+        }
+        let width = NSTextField(frame: NSRect(x: 0, y: 0, width: 90, height: 22))
+        let height = NSTextField(frame: NSRect(x: 118, y: 0, width: 90, height: 22))
+        width.stringValue = seed(\.width)
+        height.stringValue = seed(\.height)
+        width.placeholderString = "Width"
+        height.placeholderString = "Height"
+        let by = NSTextField(labelWithString: "×")
+        by.frame = NSRect(x: 96, y: 2, width: 16, height: 18)
+        by.alignment = .center
+        let fields = NSView(frame: NSRect(x: 0, y: 0, width: 208, height: 22))
+        [width, by, height].forEach(fields.addSubview)
+
+        let alert = NSAlert()
+        alert.messageText = frames.count > 1 ? "Size of \(frames.count) Cards" : "Card Size"
+        alert.informativeText = "In points. A blank field leaves that side as it is."
+        alert.accessoryView = fields
+        alert.addButton(withTitle: "Set Size")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = width
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let w = Double(width.stringValue.trimmingCharacters(in: .whitespaces))
+            let h = Double(height.stringValue.trimmingCharacters(in: .whitespaces))
+            guard w != nil || h != nil else { return }
+            self?.resizeSelection("Set Size") { CanvasCardSize.frame($0, width: w, height: h) }
+        }
+    }
+
+    /// Sizing is the board's: in a tile a card is as big as its slot.
+    var canSize: Bool { !isTiled && !selection.isEmpty }
+
+    private var selectedFrames: [CanvasRect] {
+        document.nodes.filter { selection.contains($0.id) }.map(\.frame)
+    }
+
+    private func resizeSelection(_ name: String, _ resize: (CanvasRect) -> CanvasRect) {
+        let plan = CanvasCardSize.plan(selection, in: document, resize)
+        guard !plan.isEmpty else { return }
+        store.change(name) { doc in
+            for index in doc.nodes.indices {
+                if let frame = plan[doc.nodes[index].id] { doc.nodes[index].frame = frame }
+            }
+        }
+    }
+
+    /// The Size submenu, for the card menu and the menu bar alike: the proportions, then Exact Size.
+    /// Targetless, so whichever board is answering gets it and ticks the proportion its cards share.
+    static func sizeMenu() -> NSMenu {
+        let menu = NSMenu(title: "Size")
+        for (index, ratio) in CanvasCardSize.ratios.enumerated() {
+            let item = menu.addItem(withTitle: ratio.title, action: #selector(setCardRatio(_:)), keyEquivalent: "")
+            item.tag = index
+            // The square divides the landscape proportions from the portrait ones.
+            if ratio.width == ratio.height {
+                menu.insertItem(.separator(), at: menu.items.count - 1)
+                menu.addItem(.separator())
+            }
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Exact Size…", action: #selector(setCardSize(_:)), keyEquivalent: "")
+        return menu
+    }
+
     /// Copies of the selection exactly on top of it, selected — the start of an ⌥-drag, which then
     /// carries the copies away and leaves the originals where they were.
     func duplicateInPlace() {
@@ -530,6 +613,11 @@ extension CanvasBoardView {
         key(add(menu, "Copy", #selector(copy(_:))), "c")
         key(add(menu, "Duplicate", #selector(duplicate(_:))), "d")
         if canTidy { key(add(menu, "Tidy Up", #selector(tidyUp(_:))), "t", modifiers: [.control, .option]) }
+        if canSize {
+            let size = Self.sizeMenu()
+            size.items.forEach { $0.target = self }
+            menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
+        }
         menu.addItem(.separator())
         key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
             "\u{8}", modifiers: [])
@@ -1964,6 +2052,13 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return !selection.isEmpty && !isTiled
         case #selector(tidyUp(_:)):
             return canTidy
+        case #selector(setCardRatio(_:)):
+            guard canSize, CanvasCardSize.ratios.indices.contains(item.tag) else { return false }
+            (item as? NSMenuItem)?.state = CanvasCardSize.all(selectedFrames, at: CanvasCardSize.ratios[item.tag])
+                ? .on : .off
+            return true
+        case #selector(setCardSize(_:)):
+            return canSize
         case #selector(paste(_:)), #selector(pasteHere):
             // `pasteHere` is the board menu's own item and was answered by nothing, so it fell to the
             // `default` below and was live over an empty pasteboard. It is the same question as
