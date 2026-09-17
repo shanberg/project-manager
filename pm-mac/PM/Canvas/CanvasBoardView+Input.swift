@@ -220,22 +220,23 @@ extension CanvasBoardView {
             guard let strip = tiling?.tabStrips.first(where: { $0.cards.contains(card) }),
                   let index = strip.cards.firstIndex(of: card) else { break }
             // Off the strip by more than a tab's height, and it is a card coming out: from here the drag
-            // is the tile drag it always was, proxy and drop marks and all.
-            let off = max(strip.band.minY - now.y, now.y - strip.band.maxY)
-            if off > Self.tabTearDistance / liveScale {
+            // is the tile drag it always was, proxy and drop marks and all. Across the strip, whichever
+            // way it runs: up or down off a top strip, sideways off a side one.
+            if strip.distanceOff(now) > Self.tabTearDistance / liveScale {
                 tabSlide = nil
                 gesture = .placeTile(card, base: tiling?.tileFrames ?? [:], drop: nil, pulling: true)
                 return mouseDragged(with: event)
             }
-            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
-            guard tabSlide != nil || abs(now.x - from.x) * liveScale >= 3 else { break }
+            let chips = strip.tabs
+            let moved = strip.along(now) - strip.along(from)
+            guard tabSlide != nil || abs(moved) * liveScale >= 3 else { break }
             // Along the strip and no further than its ends; it lands after every tab whose middle it
             // has passed.
-            let dx = min(chips[chips.count - 1].minX - chips[index].minX,
-                         max(chips[0].minX - chips[index].minX, now.x - from.x))
-            let centre = chips[index].midX + dx
-            let to = chips.indices.filter { $0 != index && chips[$0].midX < centre }.count
-            let next = CanvasTabSlide(card: card, from: index, dx: dx, to: to)
+            let offset = min(strip.start(of: chips[chips.count - 1]) - strip.start(of: chips[index]),
+                             max(strip.start(of: chips[0]) - strip.start(of: chips[index]), moved))
+            let centre = strip.middle(of: chips[index]) + offset
+            let to = chips.indices.filter { $0 != index && strip.middle(of: chips[$0]) < centre }.count
+            let next = CanvasTabSlide(card: card, from: index, offset: offset, to: to)
             if next != tabSlide { tabSlide = next }
 
         case .placeTile(let id, let base, let drop, let pulling):
@@ -255,7 +256,8 @@ extension CanvasBoardView {
             let under = base.first { ($0.key != id || pulling) && $0.value.contains(x: now.x, y: now.y) }
             var next = under.map {
                 (target: $0.key, drop: CanvasTileSession.drop(at: now, on: $0.value,
-                                                              middle: pulling ? .beside(.tab) : .swap))
+                                                              middle: pulling ? .beside(.tab) : .swap,
+                                                              tabsOnSide: tiling?.tabsOnSide($0.key) == true))
             }
             if next?.target == id, next?.drop == .beside(.tab) { next = nil }
             guard next?.target != drop?.target || next?.drop != drop?.drop else { break }
@@ -752,6 +754,20 @@ extension CanvasBoardView {
     /// back up and the board moves, which is the same board it has always been.
     override func scrollWheel(with event: NSEvent) {
         guard !forwardingScroll else { return super.scrollWheel(with: event) }
+        // A side strip of tabs scrolls under the wheel (backlog 36), latched the way a card is: a gesture
+        // that began over the strip is the strip's to the end of its momentum.
+        if isTiled, !event.modifierFlags.contains(.command) {
+            let at = canvasPoint(convert(event.locationInWindow, from: nil))
+            if event.phase.contains(.began) || (event.phase.isEmpty && event.momentumPhase.isEmpty) {
+                tabScrollLatch = tiling?.tabStrips.contains { $0.onSide && $0.band.contains(x: at.x, y: at.y) } == true
+                if tabScrollLatch { scrollLatch = nil }
+            }
+            if tabScrollLatch {
+                let lines = event.hasPreciseScrollingDeltas ? 1 : CanvasTiling.tabStrip
+                _ = scrollSideTabs(at: at, by: -event.scrollingDeltaY * lines / liveScale)
+                return
+            }
+        }
         // A new gesture picks a card; the rest of that gesture — its `.changed` events and the
         // momentum after them — stays with the one it picked. A wheel on a mouse has no phases at all
         // and so is a fresh aim every tick, which is right: there is no gesture to stay inside of.

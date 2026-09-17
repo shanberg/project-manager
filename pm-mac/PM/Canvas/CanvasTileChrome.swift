@@ -46,13 +46,15 @@ extension CanvasBoardView {
     /// else, so reading a page never has a control on it. A press has to reach the board over a card
     /// that would otherwise take it, which is `CanvasTileGripView`'s catcher.
     ///
-    /// **A tile with tabs has none.** Its strip is already across its top, and the strip is what moves
-    /// it — a tab pulls its card, the rest of the strip carries the tile.
+    /// **A tile with tabs across its top has none.** Its strip is already there, and the strip is what
+    /// moves it — a tab pulls its card, the rest of the strip carries the tile. One with its tabs down
+    /// its side keeps its grip, over the card beside them: a column of tabs can be full to the bottom,
+    /// with no bare strip left to take hold of.
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect)? {
         // A maximized tile has no order to be dragged along. Restoring is Escape, a double-click on the
         // grip that got you here, or the menu.
         guard let tiling, !isPicking, tiling.maximized == nil, tiling.ids.count > 1,
-              !tiling.hasTabs(id), let frame = tiling.layout.frames[id] else { return nil }
+              !tiling.hasTabs(id) || tiling.tabsOnSide(id), let frame = tiling.layout.frames[id] else { return nil }
         let scale = liveScale
         let bar = CanvasRect(x: frame.midX - Self.gripLength / 2 / scale, y: frame.minY + Self.gripInset / scale,
                              width: Self.gripLength / scale, height: Self.gripThickness / scale)

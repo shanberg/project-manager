@@ -438,6 +438,8 @@ final class CanvasBoardView: NSView {
     /// drifted over. Weak, because a card can be thrown away mid-flick — a board that scrolls past it,
     /// a tiling that hides it — and a dangling target would go on being scrolled.
     weak var scrollLatch: NSView?
+    /// Whether the wheel gesture under way began over a side strip of tabs, and so scrolls it.
+    var tabScrollLatch = false
     /// Set while an event is being handed to a card, so the one it hands back doesn't come straight
     /// back down again. See `scrollWheel`.
     var forwardingScroll = false

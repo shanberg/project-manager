@@ -37,9 +37,9 @@ final class CanvasTileHandleView: NSView {
     private var chipTravels: [String: (from: NSRect, fade: CanvasFade)] = [:]
     /// Where each strip's chip was last drawn, and for which card — what a change of tab travels from.
     private var lastChips: [String: (card: String, rect: NSRect)] = [:]
-    /// Where each tab was last drawn, and where the tabs of a drag that has just ended were let go, so
-    /// they ease into their places rather than jumping there.
-    private var drawnX: [String: CGFloat] = [:]
+    /// Where each tab was last drawn along its strip, and where the tabs of a drag that has just ended
+    /// were let go, so they ease into their places rather than jumping there.
+    private var drawnAt: [String: CGFloat] = [:]
     private var settleFrom: [String: CGFloat] = [:]
     private lazy var settleFade = CanvasFade(rise: 0.18, fall: 0.18, on: self) { [weak self] in
         self?.needsDisplay = true
@@ -55,7 +55,7 @@ final class CanvasTileHandleView: NSView {
         guard let slide = board?.tabSlide, let strip = board?.tiling?.tabStrips
             .first(where: { $0.cards.contains(slide.card) }) else {
             if old != nil {
-                settleFrom = drawnX
+                settleFrom = drawnAt
                 settleFade.hold(1)
                 settleFade.set(false)
             }
@@ -117,10 +117,11 @@ final class CanvasTileHandleView: NSView {
         if let travel = chipTravels[key] {
             if travel.fade.isMoving || travel.fade.presence < 1 {
                 let t = Self.easeOut(travel.fade.presence)
+                // Every edge, so the one function serves a strip across a top and one down a side.
                 rect = NSRect(x: travel.from.minX + (target.minX - travel.from.minX) * t,
-                              y: target.minY,
+                              y: travel.from.minY + (target.minY - travel.from.minY) * t,
                               width: travel.from.width + (target.width - travel.from.width) * t,
-                              height: target.height)
+                              height: travel.from.height + (target.height - travel.from.height) * t)
             } else {
                 chipTravels[key] = nil
             }
@@ -208,38 +209,56 @@ final class CanvasTileHandleView: NSView {
         guard let session = board.tiling, !board.isPicking else { return }
         let space = CanvasTiling.space(of: session.area)
         for strip in session.tabStrips {
+            // The band's own ground, rounded on the tile's outer corners and run a radius in under the
+            // card, so the card's corners round off into the strip rather than onto the ground behind.
             let outer = CanvasTiling.corners(of: strip.band, in: space)
-            var radii = CanvasTiling.Corners(topLeft: outer.topLeft, topRight: outer.topRight,
-                                             bottomRight: false, bottomLeft: false)
-                .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
-            radii.bottomLeft = 0
-            radii.bottomRight = 0
             var band = board.viewRect(strip.band)
-            band.size.height += CanvasTiling.outerRadius
+            var radii: CanvasTiling.Radii
+            if strip.onSide {
+                radii = CanvasTiling.Corners(topLeft: outer.topLeft, topRight: false, bottomRight: false,
+                                             bottomLeft: outer.bottomLeft)
+                    .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+                radii.topRight = 0
+                radii.bottomRight = 0
+                band.size.width += CanvasTiling.outerRadius
+            } else {
+                radii = CanvasTiling.Corners(topLeft: outer.topLeft, topRight: outer.topRight,
+                                             bottomRight: false, bottomLeft: false)
+                    .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
+                radii.bottomLeft = 0
+                radii.bottomRight = 0
+                band.size.height += CanvasTiling.outerRadius
+            }
             CanvasPalette.card.setFill()
             CanvasNodeView.path(in: band, radii: radii).fill()
 
-            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+            // A side strip scrolls, so what it holds is kept inside it.
+            NSGraphicsContext.saveGraphicsState()
+            if strip.onSide { NSBezierPath(rect: board.viewRect(strip.band)).addClip() }
+            defer { NSGraphicsContext.restoreGraphicsState() }
+
             let slide = board.tabSlide.flatMap { strip.cards.contains($0.card) ? $0 : nil }
             let settling = settleFade.isVisible ? Self.easeOut(1 - settleFade.presence) : 1
             var rects: [NSRect] = []
-            for (index, (card, chip)) in zip(strip.cards, chips).enumerated() {
-                var rect = board.viewRect(chip)
+            for (index, (card, chip)) in zip(strip.cards, strip.tabs).enumerated() {
+                let rect = board.viewRect(chip)
+                let start = strip.onSide ? rect.minY : rect.minX
+                var shift: CGFloat = 0
                 if let slide {
                     if card == slide.card {
-                        rect.origin.x += slide.dx * scale
+                        shift = slide.offset * scale
                     } else {
                         // A step is one tab and the gap after it, and a tab only ever moves towards the
                         // place the dragged one left.
-                        let step = rect.width + CanvasTiling.gap * scale
+                        let step = (strip.onSide ? rect.height : rect.width) + CanvasTiling.gap * scale
                         let presence = Self.smooth(slideFades[card]?.presence ?? 0)
-                        rect.origin.x += (index > slide.from ? -step : step) * presence
+                        shift = (index > slide.from ? -step : step) * presence
                     }
                 } else if settling < 1, let from = settleFrom[card] {
-                    rect.origin.x += (from - rect.minX) * (1 - settling)
+                    shift = (from - start) * (1 - settling)
                 }
-                drawnX[card] = rect.minX
-                rects.append(rect)
+                drawnAt[card] = start + shift
+                rects.append(strip.onSide ? rect.offsetBy(dx: 0, dy: shift) : rect.offsetBy(dx: shift, dy: 0))
             }
 
             let key = strip.cards.sorted().joined(separator: "\u{1}")
@@ -249,11 +268,12 @@ final class CanvasTileHandleView: NSView {
             let draggedIndex = slide.flatMap { strip.cards.firstIndex(of: $0.card) }
             for (index, card) in strip.cards.enumerated() where index != draggedIndex {
                 drawTab(card, in: rects[index], showing: index == strip.showing, board, scale,
-                        hoverable: slide == nil)
+                        hoverable: slide == nil, named: strip.namesShown)
             }
             if let draggedIndex {
                 drawTab(strip.cards[draggedIndex], in: rects[draggedIndex],
-                        showing: draggedIndex == strip.showing, board, scale, hoverable: false)
+                        showing: draggedIndex == strip.showing, board, scale, hoverable: false,
+                        named: strip.namesShown)
             }
 
             // Only while the pointer is on this strip, or its menu is open. Its room is kept either way
@@ -261,7 +281,7 @@ final class CanvasTileHandleView: NSView {
             let menuOpen = board.openNewTabMenu == shown
             let presence = menuOpen ? 1 : plusStrip.map { strip.cards.contains($0) } == true ? plusFade.presence : 0
             if presence > 0 {
-                let plus = board.viewRect(CanvasTiling.newTabButton(in: strip.band, count: strip.cards.count))
+                let plus = board.viewRect(strip.newTabButton)
                 drawNewTabButton(in: plus, lit: menuOpen || (slide == nil && board.hoveredNewTab == shown),
                                  presence: presence, scale)
             }
@@ -331,8 +351,11 @@ final class CanvasTileHandleView: NSView {
     /// Bare until the pointer is over it, when it takes a paler fill — unless it is the one showing,
     /// which has the chip — and shows its close button, both fading. Regular weight throughout: which tab
     /// is showing is said by the chip and the colour, not by the name getting heavier.
+    ///
+    /// Not `named`, in a column of icons down a narrow tile's side: the icon alone, centred, and no close
+    /// button — the tab's menu closes it.
     private func drawTab(_ card: String, in rect: NSRect, showing: Bool,
-                         _ board: CanvasBoardView, _ scale: Double, hoverable: Bool) {
+                         _ board: CanvasBoardView, _ scale: Double, hoverable: Bool, named: Bool = true) {
         let hover = hoverable ? (hoverFades[card]?.presence ?? 0) : 0
         let radius = Self.tabRadius / scale
         if !showing, hover > 0 {
@@ -342,6 +365,13 @@ final class CanvasTileHandleView: NSView {
 
         guard let described = board.describeCard(card) else { return }
         let side = 14 / scale
+        guard named else {
+            let icon = tabIcon(for: described.kind, tint: showing ? .labelColor : .secondaryLabelColor)
+            icon?.image.draw(in: NSRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side),
+                             from: .zero, operation: .sourceOver,
+                             fraction: icon?.isSymbol == true || showing ? 1 : 0.6, respectFlipped: true, hints: nil)
+            return
+        }
         var textLeft = rect.minX + 8 / scale
         if let icon = tabIcon(for: described.kind, tint: showing ? .labelColor : .secondaryLabelColor) {
             icon.image.draw(in: NSRect(x: textLeft, y: rect.midY - side / 2, width: side, height: side),
@@ -432,11 +462,12 @@ final class CanvasTileHandleView: NSView {
 }
 
 /// A tab being dragged along its strip: which, where it started in the strip, how far it has been
-/// carried in canvas points, and the place in the strip it would land in now.
+/// carried along the strip in canvas points — across for a top strip, down for a side one — and the
+/// place in the strip it would land in now.
 struct CanvasTabSlide: Equatable {
     var card: String
     var from: Int
-    var dx: Double
+    var offset: Double
     var to: Int
 }
 

@@ -595,6 +595,96 @@ final class CanvasTilingTests: XCTestCase {
         XCTAssertLessThan(narrow[0].width, 100, "squeezed, they share what there is")
     }
 
+    // MARK: Tabs down the side (backlog 36)
+
+    /// A tile with its tabs on the side draws its card beside them: names wide on a tile that can spare
+    /// it, icons wide on one that can't, and the tabs stacked down the band without overlapping.
+    func testTabsOnTheSideStandBesideTheCard() {
+        var session = tabbed()
+        XCTAssertTrue(session.setTabsOnSide("a", true))
+        XCTAssertFalse(session.setTabsOnSide("b", true), "already on the side")
+        let tile = session.tileFrames["a"]!
+        let strip = session.tabStrips[0]
+        XCTAssertTrue(strip.onSide)
+        XCTAssertEqual(strip.band.width, CanvasTiling.sideStrip, accuracy: 0.001)
+        XCTAssertTrue(strip.namesShown)
+        let card = session.layout.frames[session.ids[0]]!
+        XCTAssertEqual(card.minX, tile.minX + CanvasTiling.sideStrip, accuracy: 0.001)
+        XCTAssertEqual(card.minY, tile.minY, accuracy: 0.001, "no strip across the top")
+        XCTAssertEqual(card.maxX, tile.maxX, accuracy: 0.001)
+        let tabs = strip.tabs
+        XCTAssertLessThan(tabs[0].maxY, tabs[1].minY)
+        XCTAssertGreaterThan(strip.newTabButton.minY, tabs[1].maxY, "the + follows the last tab down")
+        for tab in tabs { XCTAssertTrue(strip.band.contains(x: tab.midX, y: tab.midY)) }
+
+        let narrow = CanvasRect(x: 0, y: 0, width: 400, height: 600)
+        let icons = CanvasTileSession.tabBand(of: narrow, onSide: true)
+        XCTAssertEqual(icons.width, CanvasTiling.iconStrip, accuracy: 0.001)
+        XCTAssertFalse(CanvasTileSession.TabStrip(band: icons, cards: ["a", "b"], showing: 0, onSide: true).namesShown)
+    }
+
+    /// A column of tabs longer than its tile scrolls, never past either end, and showing a tab scrolled
+    /// out of sight brings it back.
+    func testASideStripTooShortScrollsAndShowsTheTabShowing() {
+        let cards = (0..<30).map { "t\($0)" }
+        var session = CanvasTileSession(columns: [.init([.init(cards, tabsOnSide: true)])],
+                                        area: wide, restoreVisible: wide)
+        var strip = session.tabStrips[0]
+        XCTAssertGreaterThan(strip.maxScroll, 0)
+        XCTAssertEqual(strip.scroll, 0)
+        XCTAssertFalse(session.scrollTabs(of: "t0", by: -50), "nothing above the top")
+        XCTAssertTrue(session.scrollTabs(of: "t0", by: 100_000))
+        strip = session.tabStrips[0]
+        XCTAssertEqual(strip.scroll, strip.maxScroll, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(strip.newTabButton.maxY, strip.band.maxY + 0.001, "the end is in view")
+
+        XCTAssertTrue(session.showTab("t29"))
+        XCTAssertEqual(session.tabStrips[0].scroll, strip.maxScroll, accuracy: 0.001, "in view already")
+        XCTAssertTrue(session.showTab("t0"))
+        strip = session.tabStrips[0]
+        XCTAssertGreaterThanOrEqual(strip.tabs[0].minY, strip.band.minY, "the tab shown is scrolled to")
+        XCTAssertTrue(session.showTab("t29"))
+        strip = session.tabStrips[0]
+        XCTAssertLessThanOrEqual(strip.tabs[29].maxY, strip.band.maxY, "and to the bottom as well")
+
+        let short = CanvasTileSession(columns: [.init([.init(["a", "b"], tabsOnSide: true)])],
+                                      area: wide, restoreVisible: wide)
+        XCTAssertEqual(short.tabStrips[0].maxScroll, 0, "a column that fits doesn't scroll")
+    }
+
+    /// A drop on the side strip joins the tabs, and the tile's sides are still reachable beside it.
+    func testDroppingOnASideStripJoinsItsTabs() {
+        let frame = CanvasRect(x: 0, y: 0, width: 800, height: 600)
+        XCTAssertEqual(CanvasTileSession.drop(at: CanvasPoint(x: 90, y: 300), on: frame, tabsOnSide: true),
+                       .beside(.tab))
+        XCTAssertEqual(CanvasTileSession.drop(at: CanvasPoint(x: 200, y: 300), on: frame, tabsOnSide: true),
+                       .beside(.left), "just past the strip is the card's left edge")
+        XCTAssertEqual(CanvasTileSession.drop(at: CanvasPoint(x: 400, y: 10), on: frame, tabsOnSide: true),
+                       .beside(.above), "the top is no longer the tabs'")
+        var session = tabbed()
+        session.setTabsOnSide("a", true)
+        XCTAssertEqual(session.dropMark(.beside(.tab), on: "a"),
+                       CanvasTileSession.tabBand(of: session.tileFrames["a"]!, onSide: true))
+    }
+
+    /// The setting is the tile's: it goes with the tile when tiles swap, and it is saved — written only
+    /// when on, and read as off from a workspace saved before it existed.
+    func testTabsOnTheSideGoWithTheTileAndAreSaved() throws {
+        var session = tabbed()
+        session.setTabsOnSide("a", true)
+        session.swap("a", with: "c")
+        XCTAssertTrue(session.tabsOnSide("a"))
+        XCTAssertFalse(session.tabsOnSide("c"))
+
+        let on = try JSONEncoder().encode(CanvasTiling.Tile(["a", "b"], tabsOnSide: true))
+        XCTAssertEqual(try JSONDecoder().decode(CanvasTiling.Tile.self, from: on).tabsOnSide, true)
+        let off = try JSONEncoder().encode(CanvasTiling.Tile(["a", "b"]))
+        XCTAssertFalse(String(decoding: off, as: UTF8.self).contains("tabsOnSide"))
+        let height = try JSONEncoder().encode(CanvasTiling.Size.even)
+        let saved = Data(#"{"cards":["a"],"showing":0,"height":"#.utf8) + height + Data("}".utf8)
+        XCTAssertEqual(try JSONDecoder().decode(CanvasTiling.Tile.self, from: saved).tabsOnSide, false)
+    }
+
     /// The strip's menus act on a whole tile: Close Other Tabs and Remove Tile read its cards from here.
     func testATilesTabsAreItsCards() {
         var session = tabbed()

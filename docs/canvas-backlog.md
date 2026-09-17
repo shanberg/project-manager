@@ -252,22 +252,6 @@ what closing it means. A board is already allowed to be up in two windows at onc
 refcounted store (`CanvasStoreRegistry`), so the document half of this is answered and the view half is
 not.
 
-### 36. Tabs down the side of a tile
-
-An option for a tile's tabs to run down its leading edge instead of across its top. Wanted where the
-tile is tall and narrow, or where five tabs on a wide one become a row of 220pt buttons you read
-left to right and then lose your place in.
-
-Cheap in the geometry: one band and one function decide where a tab is, and the drawing and the hit
-test both read it ([CanvasTiling.tabStrip](../pm-mac/PM/Canvas/CanvasTiling.swift:437),
-[tabs(in:count:)](../pm-mac/PM/Canvas/CanvasTiling.swift:444)), so a second direction is a parameter
-rather than a rewrite.
-
-**Decided 2026-09-16:** per tile, from the tile's menu (Tabs on the Side), saved with the workspace.
-The strip is about 180pt wide with the icon and name, and a column of icons alone on a narrow tile.
-It looks and drags as the top strip does since 21 — the chip, the hover, the close button, reordering
-along the strip and pulling off it. Open: what a tile too short for its tabs does.
-
 ### 38. What macOS's compositor does that our freeze doesn't
 
 Moving around the system, windows keep their content: switch a Space, unhide an app, come back from
@@ -335,8 +319,6 @@ project moves the wrong window — instrumented, waiting to be caught in the log
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
 up too often.
 
-**Decided, building next:** 36 (tabs down the side of a tile).
-
 **Then design first, then build:** 14 (pin and reorder links); 17 with 41, which is the same want at two
 altitudes; 7 (tidy, the largest); 8 (the tile picker); 23 (Arc-style drag areas); 27 (size tools); 28
 (saving a page); 29 (colour); 31 (a per-site compatibility layer, which 43 and 26 would both live in);
@@ -395,6 +377,7 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
 | 32 | restored windows forgetting their size | **Fixed, 2026-09-16.** `openWindowFrames` was read on launch and written by nothing: `rememberOpenProjects` saved the keys alone, so every restored window fell back to the one `PMProject` autosave frame or a cascade off it. Both lists are built in one pass now, index for index, so the filter that drops a projectless window cannot drift between them ([WindowManager](../pm-mac/PM/Windows/WindowManager.swift)) |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
+| 36 | tabs down the side of a tile | **Built, 2026-09-16.** Tabs on the Side, per tile from its menus and saved with the workspace (`CanvasTiling.Tile.tabsOnSide`, written only when on). A 180pt column of icon and name on a tile at least 540pt wide, 40pt of icons alone on a narrower one; the top strip's chip, drag and pull-out turned on their side (`CanvasTileSession.TabStrip`). A column longer than its tile scrolls, and showing a tab scrolls it into view. [canvas-workspaces.md](canvas-workspaces.md) §7k |
 | 37 | combining projects: a master, and a merge | **Master built, 2026-09-16** — a member names its master in `pm-part-of`, one level, rolled up on the card and in the sidebar ([combining-projects.md](combining-projects.md)). **The merge was dropped** the same day, undecided |
 | 39 | a page's own drags being taken by the board | **Fixed, 2026-09-16.** Reordering a list in a card is HTML5 drag-and-drop and therefore a real dragging session, and the board took every one of them — refusing the ones it could make nothing of without handing them back, which is why the symptom was silence. The precedence is reversed: the page is asked first, since an element claims a drop by preventing the default on `dragover` and WebKit answers a drag with that decision. Argued in [CanvasPageView](../pm-mac/PM/Canvas/CanvasPageView.swift); what WebKit does, including that its first reply is `.copy` to everything, is measured in `CanvasPageDragOriginTests` and the rule is pinned in `CanvasPageViewTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |

@@ -690,6 +690,7 @@ extension CanvasBoardView {
         if tiling.hasTabs(id), !wholeTile {
             add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
         }
+        if tiling.hasTabs(id) { add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
         if tiling.canPromote(id) {
             let promote = add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:)))
             promote.keyEquivalent = "\r"
@@ -719,6 +720,7 @@ extension CanvasBoardView {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tab"))
         add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
+        add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:)))
         if tiling.tabs(of: id).count > 1 {
             add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
         }
@@ -776,6 +778,15 @@ extension CanvasBoardView {
 
     /// What that command is called: which way it goes.
     var pickCardsTitle: String { isPicking ? "Back to Workspace" : "Pick Cards on Board" }
+
+    /// A tile's tabs down its side or across its top — one checked item rather than two, since it is a
+    /// setting of the tile's and a check says which it has.
+    var tabsOnSideTitle: String { "Tabs on the Side" }
+
+    @objc func toggleMenuTabsOnSide(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        toggleTabsOnSide(id)
+    }
 
     @objc func pullMenuTabOut(_ sender: Any?) {
         guard let id = menuTile else { return }
@@ -1924,6 +1935,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return hasProjectCommandTarget
         case #selector(removeMenuTile(_:)):
             return menuTile != nil
+        case #selector(toggleMenuTabsOnSide(_:)):
+            guard let id = menuTile, let tiling else { return false }
+            (item as? NSMenuItem)?.state = tiling.tabsOnSide(id) ? .on : .off
+            return true
         case #selector(removeTile(_:)):
             return focusedTile != nil
         case #selector(promoteTile(_:)):

@@ -406,11 +406,36 @@ enum CanvasTiling {
         var showing: Int
         /// How long it is down its column. The tile's, not the card's: see `CanvasTileSession.columns`.
         var height: Size
+        /// Whether its tabs run down its leading side rather than across its top (backlog 36). The
+        /// tile's, set from its menu and saved with the workspace, and kept while it has only one card
+        /// so the next tab goes where the last ones were.
+        var tabsOnSide: Bool
 
-        init(_ cards: [String], showing: Int = 0, height: Size = .even) {
+        init(_ cards: [String], showing: Int = 0, height: Size = .even, tabsOnSide: Bool = false) {
             self.cards = cards
             self.showing = showing
             self.height = height
+            self.tabsOnSide = tabsOnSide
+        }
+
+        private enum CodingKeys: String, CodingKey { case cards, showing, height, tabsOnSide }
+
+        /// Read with the flag optional, since every workspace saved before it has none; and written only
+        /// when it is on, so a workspace that never used it is saved exactly as it was.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            cards = try container.decode([String].self, forKey: .cards)
+            showing = try container.decode(Int.self, forKey: .showing)
+            height = try container.decode(Size.self, forKey: .height)
+            tabsOnSide = try container.decodeIfPresent(Bool.self, forKey: .tabsOnSide) ?? false
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(cards, forKey: .cards)
+            try container.encode(showing, forKey: .showing)
+            try container.encode(height, forKey: .height)
+            if tabsOnSide { try container.encode(tabsOnSide, forKey: .tabsOnSide) }
         }
 
         init(_ card: String, height: Size = .even) { self.init([card], height: height) }
@@ -465,6 +490,42 @@ enum CanvasTiling {
 
     private static let tabInset = 4.0
 
+    // MARK: Tabs down the side (backlog 36)
+
+    /// How wide a tile's tabs are down its side: an icon and a name, the width a sidebar gives one.
+    static let sideStrip: Double = 180
+    /// The side strip of a tile too narrow to spare `sideStrip`: a column of icons alone.
+    static let iconStrip: Double = 40
+    /// The narrowest tile that keeps its tabs' names down its side. Below it, 180 of it would be a third
+    /// of the card or more.
+    static let sideNamesFrom: Double = 540
+
+    /// Where each tab sits down a side strip: stacked from the top, a top tab's height each, the whole
+    /// width of the band — moved up by `scroll`, since a column of tabs longer than its tile scrolls.
+    static func sideTabs(in band: CanvasRect, count: Int, scroll: Double = 0) -> [CanvasRect] {
+        let height = tabStrip - 6
+        return (0..<count).map {
+            CanvasRect(x: band.minX + tabInset, y: band.minY + tabInset - scroll + Double($0) * (height + gap),
+                       width: max(0, band.width - tabInset * 2), height: height)
+        }
+    }
+
+    /// The side strip's +, in the row after the last tab: a square at the leading edge beside names, and
+    /// the width of the icons in a column of icons, so it lines up with what is above it.
+    static func sideNewTabButton(in band: CanvasRect, count: Int, scroll: Double = 0) -> CanvasRect {
+        let height = tabStrip - 6
+        let width = band.width < sideStrip ? max(0, band.width - tabInset * 2) : height
+        return CanvasRect(x: band.minX + tabInset,
+                          y: band.minY + tabInset - scroll + Double(count) * (height + gap),
+                          width: width, height: height)
+    }
+
+    /// How long a side strip's contents are — every tab and the + — which is what it scrolls through.
+    static func sideTabsLength(count: Int) -> Double {
+        let height = tabStrip - 6
+        return tabInset * 2 + Double(count + 1) * height + Double(count) * gap
+    }
+
     /// Where every tile goes inside `area`: a list of frames per column, in the columns' order.
     ///
     /// `run` twice — once across the width for the columns, once down each column for its tiles — so
@@ -497,9 +558,9 @@ enum CanvasTiling {
     /// where that arrangement honoured them — along a run — and ignored where it didn't.
     static func columns(_ arrangement: Arrangement, of tiles: [Tile], in area: CanvasRect,
                         masterFraction: Double, sizes: [String: Size] = [:]) -> [Column] {
-        func plain(_ tile: Tile) -> Tile { Tile(tile.cards, showing: tile.showing) }
+        func plain(_ tile: Tile) -> Tile { Tile(tile.cards, showing: tile.showing, tabsOnSide: tile.tabsOnSide) }
         func sized(_ tile: Tile) -> Tile {
-            Tile(tile.cards, showing: tile.showing, height: sizes[tile.shown] ?? .even)
+            Tile(tile.cards, showing: tile.showing, height: sizes[tile.shown] ?? .even, tabsOnSide: tile.tabsOnSide)
         }
         guard tiles.count > 1 else { return tiles.map { Column([plain($0)]) } }
 

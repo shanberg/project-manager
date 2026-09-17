@@ -1249,6 +1249,17 @@ would otherwise be the page's. It replaced a bar in the gap on whichever side fa
 rule that put the handle somewhere different on every tile. A tile with tabs has no grip: its strip is
 already across its top, and the rest of the strip carries the tile.
 
+**Tabs can run down a tile's side** — **decided and built** (backlog 36, 2026-09-16). Per tile, from its
+menu (Tabs on the Side, on the tile's, the strip's and a tab's right-click), and saved with the workspace
+— on the tile, written only when on, so a workspace that never used it is saved as it was. The strip is
+180pt wide with each tab's icon and name, on a tile at least 540pt wide; a narrower tile gets a 40pt
+column of icons alone, whose tabs close from their menu rather than a ×. Everything else is the top
+strip turned on its side: the same glass chip, a drag down the column reorders and a drag 24pt off
+either side pulls the card out, and a drop on the column joins the tabs, with the tile's own sides
+measured on the card beside it. **A column longer than its tile scrolls** under the wheel, never past
+either end, and showing a tab scrolled out of sight scrolls it back. A tile with side tabs keeps its
+top-centre grip, over the card: a full column leaves no bare strip to take hold of.
+
 **⌥⌫ takes out the card that is showing, not the tile** — **decided**. Taking a tile out is taking out
 each of its cards, and the one you are looking at is the one the command can see.
 

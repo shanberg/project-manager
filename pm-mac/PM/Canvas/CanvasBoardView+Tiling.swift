@@ -923,8 +923,10 @@ extension CanvasBoardView {
     /// The tab under a point, if it is on a tab strip — and how many the strip holds.
     func tabChip(at point: CanvasPoint) -> (card: String, count: Int)? {
         guard let tiling else { return nil }
-        for strip in tiling.tabStrips {
-            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
+        // Inside the band as well as the tab: a side strip scrolled part of a tab out of sight has
+        // scrolled that part out of reach too.
+        for strip in tiling.tabStrips where strip.band.contains(x: point.x, y: point.y) {
+            let chips = strip.tabs
             if let index = chips.firstIndex(where: { $0.contains(x: point.x, y: point.y) }) {
                 return (strip.cards[index], strip.cards.count)
             }
@@ -937,9 +939,10 @@ extension CanvasBoardView {
     func tabClose(at point: CanvasPoint) -> String? {
         guard let tiling else { return nil }
         let at = viewPoint(point)
-        for strip in tiling.tabStrips {
-            let chips = CanvasTiling.tabs(in: strip.band, count: strip.cards.count)
-            for (card, chip) in zip(strip.cards, chips)
+        // A column of icons has no close buttons — no room for one beside the icon, and one over it would
+        // be a tab that closes where you meant to show it. Its tabs close from their menu.
+        for strip in tiling.tabStrips where strip.namesShown && strip.band.contains(x: point.x, y: point.y) {
+            for (card, chip) in zip(strip.cards, strip.tabs)
             where CanvasTileHandleView.closeRect(in: viewRect(chip), scale: liveScale).contains(at) {
                 return card
             }
@@ -951,8 +954,8 @@ extension CanvasBoardView {
     /// the + is drawn in (`CanvasTiling.newTabButton`).
     func newTabButton(at point: CanvasPoint) -> String? {
         tiling?.tabStrips.first {
-            CanvasTiling.newTabButton(in: $0.band, count: $0.cards.count).contains(x: point.x, y: point.y)
-        }.map { $0.cards[$0.showing] }
+            $0.band.contains(x: point.x, y: point.y) && $0.newTabButton.contains(x: point.x, y: point.y)
+        }.map(\.shown)
     }
 
     /// Open the strip's + menu under its button — `fillNewTabMenu`, the list the strip's right-click leads
@@ -962,7 +965,7 @@ extension CanvasBoardView {
         menuTile = tile
         let menu = NSMenu()
         fillNewTabMenu(menu)
-        let button = viewRect(CanvasTiling.newTabButton(in: strip.band, count: strip.cards.count))
+        let button = viewRect(strip.newTabButton)
         openNewTabMenu = tile
         defer { openNewTabMenu = nil }
         menu.popUp(positioning: nil, at: NSPoint(x: button.minX, y: button.maxY + 4), in: self)
@@ -993,9 +996,35 @@ extension CanvasBoardView {
     /// How far off its strip a dragged tab goes before it is a card being pulled out, in view points.
     static let tabTearDistance: Double = 24
 
+    /// Tabs on the Side: a tile's tabs down its leading side, or back across its top (backlog 36). The
+    /// card beside them moves over as the layout does, so it animates like any other change of shape.
+    func toggleTabsOnSide(_ id: String) {
+        guard var session = tiling else { return }
+        session.setTabsOnSide(id, !session.tabsOnSide(id))
+        hoveredTab = nil
+        commitTiling(session)
+    }
+
+    /// A wheel over a side strip scrolls its tabs, when there are more than it can show. Answers whether
+    /// the wheel was the strip's — over one, it always is, since the card beside it is not what the
+    /// pointer is on.
+    func scrollSideTabs(at point: CanvasPoint, by delta: Double) -> Bool {
+        guard var session = tiling,
+              let strip = session.tabStrips.first(where: { $0.onSide && $0.band.contains(x: point.x, y: point.y) })
+        else { return false }
+        if session.scrollTabs(of: strip.shown, by: delta) {
+            tiling = session
+            // What is under the pointer has moved; the next mouse-moved says what it is now.
+            hoveredTab = nil
+            hoveredNewTab = nil
+            tileHandleView.needsDisplay = true
+        }
+        return true
+    }
+
     /// The tile whose tab strip is under a point, by the card it is showing.
     func tabStrip(at point: CanvasPoint) -> String? {
-        tiling?.tabStrips.first { $0.band.contains(x: point.x, y: point.y) }.map { $0.cards[$0.showing] }
+        tiling?.tabStrips.first { $0.band.contains(x: point.x, y: point.y) }.map(\.shown)
     }
 
     // MARK: The workspace's keys

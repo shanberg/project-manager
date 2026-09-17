@@ -47,6 +47,12 @@ struct CanvasTileSession: Equatable {
     /// reason `maximized` isn't: it is where you are about to put something, not what you built.
     var preselection: Placement?
 
+    /// How far each side strip of tabs has been scrolled, in canvas points, under every card of its tile
+    /// — so the number goes wherever the tile does. Read clamped (`tabStrips`), so a strip that has since
+    /// grown or lost tabs never shows past its end. **Not part of what a workspace is**, like the two
+    /// above: it is where you were looking.
+    var tabScroll: [String: Double] = [:]
+
     // MARK: Reading it
 
     /// The cards being drawn, a column at a time and each column top to bottom.
@@ -129,8 +135,8 @@ struct CanvasTileSession: Equatable {
     var layout: CanvasLayout {
         var frames: [String: CanvasRect] = [:]
         for placed in placedTiles {
-            frames[placed.tile.shown] = placed.tile.cards.count > 1 ? Self.belowTabs(placed.frame)
-                                                                     : placed.frame
+            frames[placed.tile.shown] = placed.tile.cards.count > 1
+                ? Self.belowTabs(placed.frame, onSide: placed.tile.tabsOnSide) : placed.frame
         }
         return CanvasLayout(frames: frames, visible: Set(frames.keys))
     }
@@ -143,32 +149,137 @@ struct CanvasTileSession: Equatable {
         Dictionary(placedTiles.map { ($0.tile.shown, $0.frame) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// A tile holding more than one card: the band across its top, and the cards the band holds.
+    /// A tile holding more than one card: the band its tabs are in — across its top, or down its side —
+    /// and the cards the band holds.
+    ///
+    /// **Where every tab and the + are is asked of this**, by the drawing and by every click read against
+    /// it, so the two directions cannot be told apart anywhere but here.
     struct TabStrip: Equatable {
         var band: CanvasRect
         var cards: [String]
         var showing: Int
+        /// Down the tile's leading side rather than across its top.
+        var onSide = false
+        /// How far a side strip is scrolled, clamped to what it holds.
+        var scroll: Double = 0
+
+        var shown: String { cards[showing] }
+
+        /// Whether the tabs have room for their names. A side strip too narrow for them is icons alone.
+        var namesShown: Bool { !onSide || band.width >= CanvasTiling.sideStrip }
+
+        var tabs: [CanvasRect] {
+            onSide ? CanvasTiling.sideTabs(in: band, count: cards.count, scroll: scroll)
+                   : CanvasTiling.tabs(in: band, count: cards.count)
+        }
+
+        var newTabButton: CanvasRect {
+            onSide ? CanvasTiling.sideNewTabButton(in: band, count: cards.count, scroll: scroll)
+                   : CanvasTiling.newTabButton(in: band, count: cards.count)
+        }
+
+        /// Where a point is along the strip: across for a top strip, down for a side one.
+        func along(_ point: CanvasPoint) -> Double { onSide ? point.y : point.x }
+        /// Where a rectangle starts, and its middle, along the strip.
+        func start(of rect: CanvasRect) -> Double { onSide ? rect.minY : rect.minX }
+        func middle(of rect: CanvasRect) -> Double { onSide ? rect.midY : rect.midX }
+
+        /// How far a point is off the strip, across it; zero or less while it is on it.
+        func distanceOff(_ point: CanvasPoint) -> Double {
+            onSide ? max(band.minX - point.x, point.x - band.maxX)
+                   : max(band.minY - point.y, point.y - band.maxY)
+        }
+
+        /// The furthest a side strip can scroll: how much longer its tabs are than it is.
+        var maxScroll: Double {
+            onSide ? max(0, CanvasTiling.sideTabsLength(count: cards.count) - band.height) : 0
+        }
     }
 
     /// The tab strips on screen — one for every tile holding more than one card.
     var tabStrips: [TabStrip] {
         placedTiles.filter { $0.tile.cards.count > 1 }.map { placed in
-            TabStrip(band: Self.tabBand(of: placed.frame), cards: placed.tile.cards,
-                     showing: min(max(0, placed.tile.showing), placed.tile.cards.count - 1))
+            var strip = TabStrip(band: Self.tabBand(of: placed.frame, onSide: placed.tile.tabsOnSide),
+                                 cards: placed.tile.cards,
+                                 showing: min(max(0, placed.tile.showing), placed.tile.cards.count - 1),
+                                 onSide: placed.tile.tabsOnSide)
+            strip.scroll = min(max(0, scroll(of: placed.tile)), strip.maxScroll)
+            return strip
         }
     }
 
-    /// The band across the top of a tile where its tabs go — never more than half the tile, so a
-    /// squeezed one still shows some of its card.
-    static func tabBand(of frame: CanvasRect) -> CanvasRect {
-        CanvasRect(x: frame.minX, y: frame.minY, width: frame.width,
-                   height: min(CanvasTiling.tabStrip, frame.height / 2))
+    /// The band a tile's tabs go in. Across the top it is never more than half the tile, so a squeezed
+    /// one still shows some of its card; down the side it is names wide on a tile that can spare it,
+    /// icons wide on one that can't, and never more than half of it either.
+    static func tabBand(of frame: CanvasRect, onSide: Bool = false) -> CanvasRect {
+        if onSide {
+            let wanted = frame.width >= CanvasTiling.sideNamesFrom ? CanvasTiling.sideStrip : CanvasTiling.iconStrip
+            return CanvasRect(x: frame.minX, y: frame.minY, width: min(wanted, frame.width / 2),
+                              height: frame.height)
+        }
+        return CanvasRect(x: frame.minX, y: frame.minY, width: frame.width,
+                          height: min(CanvasTiling.tabStrip, frame.height / 2))
     }
 
-    /// The part of a tile left for the card, below its tabs.
-    static func belowTabs(_ frame: CanvasRect) -> CanvasRect {
-        let band = tabBand(of: frame).height
-        return CanvasRect(x: frame.minX, y: frame.minY + band, width: frame.width, height: frame.height - band)
+    /// The part of a tile left for the card, below its tabs or beside them.
+    static func belowTabs(_ frame: CanvasRect, onSide: Bool = false) -> CanvasRect {
+        let band = tabBand(of: frame, onSide: onSide)
+        if onSide {
+            return CanvasRect(x: frame.minX + band.width, y: frame.minY, width: frame.width - band.width,
+                              height: frame.height)
+        }
+        return CanvasRect(x: frame.minX, y: frame.minY + band.height, width: frame.width,
+                          height: frame.height - band.height)
+    }
+
+    // MARK: Tabs down the side
+
+    /// Whether this card's tile has its tabs down its side.
+    func tabsOnSide(_ id: String) -> Bool {
+        position(of: id).map { columns[$0.column].tiles[$0.tile].tabsOnSide } ?? false
+    }
+
+    /// Put a tile's tabs down its side, or back across its top. Answers whether that changed anything.
+    @discardableResult
+    mutating func setTabsOnSide(_ id: String, _ onSide: Bool) -> Bool {
+        guard let at = position(of: id), columns[at.column].tiles[at.tile].tabsOnSide != onSide else { return false }
+        columns[at.column].tiles[at.tile].tabsOnSide = onSide
+        if onSide { revealShowingTab(of: id) }
+        return true
+    }
+
+    private func scroll(of tile: CanvasTiling.Tile) -> Double {
+        tile.cards.lazy.compactMap { tabScroll[$0] }.first ?? 0
+    }
+
+    private mutating func setScroll(_ value: Double, of tile: CanvasTiling.Tile) {
+        for card in tile.cards { tabScroll[card] = value }
+    }
+
+    /// Scroll the side strip holding `id` by `delta`. Answers whether it moved — a strip that fits, or
+    /// is already at the end being scrolled towards, doesn't.
+    @discardableResult
+    mutating func scrollTabs(of id: String, by delta: Double) -> Bool {
+        guard let at = position(of: id), let strip = tabStrips.first(where: { $0.cards.contains(id) }),
+              strip.onSide else { return false }
+        let next = min(max(0, strip.scroll + delta), strip.maxScroll)
+        guard next != strip.scroll else { return false }
+        setScroll(next, of: columns[at.column].tiles[at.tile])
+        return true
+    }
+
+    /// Scroll a side strip just far enough that the tab showing is in it — after it is chosen from the
+    /// keys, a menu or a drop, which can all show a tab that was scrolled out of sight.
+    mutating func revealShowingTab(of id: String) {
+        guard let at = position(of: id), let strip = tabStrips.first(where: { $0.cards.contains(id) }),
+              strip.onSide, strip.maxScroll > 0 else { return }
+        let tab = CanvasTiling.sideTabs(in: strip.band, count: strip.cards.count)[strip.showing]
+        let inset = 4.0
+        let top = tab.minY - strip.band.minY - inset
+        let bottom = tab.maxY - strip.band.minY + inset - strip.band.height
+        let next = min(max(0, min(max(strip.scroll, bottom), top)), strip.maxScroll)
+        guard next != strip.scroll else { return }
+        setScroll(next, of: columns[at.column].tiles[at.tile])
     }
 
     /// The tiles on screen and where each one is: every tile, or the one filling the room — with its
@@ -314,8 +425,10 @@ struct CanvasTileSession: Equatable {
         let first = columns[a.column].tiles[a.tile], second = columns[b.column].tiles[b.tile]
         columns[a.column].tiles[a.tile].cards = second.cards
         columns[a.column].tiles[a.tile].showing = second.showing
+        columns[a.column].tiles[a.tile].tabsOnSide = second.tabsOnSide
         columns[b.column].tiles[b.tile].cards = first.cards
         columns[b.column].tiles[b.tile].showing = first.showing
+        columns[b.column].tiles[b.tile].tabsOnSide = first.tabsOnSide
     }
 
     // MARK: Where things go
@@ -368,6 +481,7 @@ struct CanvasTileSession: Equatable {
             target.showing = target.cards.count + min(max(0, tile.showing), max(0, tile.cards.count - 1))
             target.cards += tile.cards
             columns[at.column].tiles[at.tile] = target
+            revealShowingTab(of: placement.target)
             return
         }
         if placement.side.opensColumn {
@@ -419,8 +533,20 @@ struct CanvasTileSession: Equatable {
     ///
     /// **A quarter and a bit of the way in.** Wide enough that the four sides are easy to hit on a small
     /// tile, and narrow enough that the middle is still the largest target.
-    static func drop(at point: CanvasPoint, on frame: CanvasRect, middle: Drop = .swap) -> Drop {
+    ///
+    /// A tile with its tabs down its side takes a tab there instead, and its sides are measured on the
+    /// card beside the strip — otherwise the strip, which is where a left drop would be, would swallow it.
+    static func drop(at point: CanvasPoint, on frame: CanvasRect, middle: Drop = .swap,
+                     tabsOnSide: Bool = false) -> Drop {
+        if tabsOnSide {
+            if tabBand(of: frame, onSide: true).contains(x: point.x, y: point.y) { return .beside(.tab) }
+            return drop(atEdgesOf: point, on: belowTabs(frame, onSide: true), middle: middle)
+        }
         if point.y - frame.minY < tabBand(of: frame).height { return .beside(.tab) }
+        return drop(atEdgesOf: point, on: frame, middle: middle)
+    }
+
+    private static func drop(atEdgesOf point: CanvasPoint, on frame: CanvasRect, middle: Drop) -> Drop {
         let across = (point.x - frame.minX) / max(1, frame.width)
         let down = (point.y - frame.minY) / max(1, frame.height)
         let distances: [(side: Side, distance: Double)] = [(.left, across), (.right, 1 - across),
@@ -455,7 +581,7 @@ struct CanvasTileSession: Equatable {
         case .swap:
             return tile
         case .beside(.tab):
-            return Self.tabBand(of: tile)
+            return Self.tabBand(of: tile, onSide: tabsOnSide(target))
         case .beside(.above):
             return CanvasRect(x: tile.minX, y: tile.minY, width: tile.width, height: tile.height / 2)
         case .beside(.below):
@@ -538,6 +664,7 @@ struct CanvasTileSession: Equatable {
         guard was != card else { return false }
         columns[at.column].tiles[at.tile].showing = index
         if maximized == was { maximized = card }
+        revealShowingTab(of: card)
         return true
     }
 
