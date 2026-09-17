@@ -115,6 +115,7 @@ struct BoardsSettingsView: View {
     @AppStorage(CanvasPageBudget.defaultsKey) private var livePages = CanvasPageBudget.defaultLivePages
     @AppStorage(CanvasPageBudget.graceDefaultsKey)
     private var offScreenGrace = CanvasPageBudget.defaultOffScreenGrace
+    @AppStorage(CanvasSearchEngine.defaultsKey) private var searchEngine: CanvasSearchEngine = .none
 
     var body: some View {
         Form {
@@ -137,6 +138,23 @@ struct BoardsSettingsView: View {
                 // The honest version of the trade, because the number is only meaningful next to what
                 // a page costs — and nothing else in PM has a per-item cost anywhere near this.
                 Text("A live page is a real browser tab, and a heavy site can hold a few hundred megabytes of memory on its own. Cards past the limit keep a picture of the page and wake up when you come back to them.\n\nScrolling a card out of the window doesn't pause it, and neither does hiding it behind a workspace — a board keeps more running than it is showing, and the ones you looked at most recently keep their place in the queue. The timeout is only for a card you have well and truly left: it stops a board you wandered away from holding pages all afternoon. Every tile in a workspace runs, whatever the limit says.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Search engine", selection: $searchEngine) {
+                    Text("None").tag(CanvasSearchEngine.none)
+                    Divider()
+                    ForEach(CanvasSearchEngine.allCases.filter { $0 != .none }) { engine in
+                        Text(engine.name).tag(engine)
+                    }
+                }
+            } header: {
+                Text("Address Bar")
+            } footer: {
+                // Said plainly, because it is the one setting in the app that decides whether what you
+                // type leaves this Mac.
+                Text("Words typed into a card's address bar that aren't an address are searched for here. With None, they go nowhere. Suggestions while you type come only from this Mac — your boards and the pages you've visited — and nothing is sent until you press Return.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

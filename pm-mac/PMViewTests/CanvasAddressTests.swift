@@ -23,8 +23,8 @@ final class CanvasAddressTests: XCTestCase {
         XCTAssertEqual(CanvasAddress.normalized("  https://example.com \n"), "https://example.com")
     }
 
-    /// The rule the address field depends on: text that isn't an address leaves the page where it is,
-    /// rather than being handed to a search engine PM never agreed to talk to.
+    /// The rule the address field depends on: text that isn't an address is not an address. What happens
+    /// to it next is the search engine's business — see `testSearchesOnlyWithAnEngine`.
     func testRejectsWhatIsNotAnAddress() {
         XCTAssertNil(CanvasAddress.normalized(""))
         XCTAssertNil(CanvasAddress.normalized("   "))
@@ -63,5 +63,36 @@ final class CanvasAddressTests: XCTestCase {
         for address in ["", "about:blank", "data:text/html,hi"] {
             XCTAssertTrue(CanvasAddress.isEncrypted(address), address)
         }
+    }
+
+    /// With no engine chosen, words go nowhere — the default, and the old behaviour.
+    func testSearchesOnlyWithAnEngine() {
+        XCTAssertNil(CanvasAddress.resolved("weather tomorrow", engine: .none))
+        XCTAssertEqual(CanvasAddress.resolved("weather tomorrow", engine: .duckDuckGo),
+                       "https://duckduckgo.com/?q=weather%20tomorrow")
+        XCTAssertEqual(CanvasAddress.resolved("notes", engine: .startpage),
+                       "https://www.startpage.com/sp/search?query=notes")
+    }
+
+    /// An address is still an address with an engine chosen — searching for "example.com" is the one
+    /// thing a browser's field must never do.
+    func testAnAddressIsNeverSearched() {
+        XCTAssertEqual(CanvasAddress.resolved("example.com", engine: .google), "https://example.com")
+        XCTAssertNil(CanvasAddress.resolved("   ", engine: .google))
+    }
+
+    func testSearchWordsAreEncoded() {
+        XCTAssertEqual(CanvasSearchEngine.google.searchAddress(for: "c++ & rust"),
+                       "https://www.google.com/search?q=c%2B%2B%20%26%20rust")
+    }
+
+    /// The site is everything up to the port, whichever of host and port the address ends its origin on.
+    func testAnAddressSplitsWhereTheSiteEnds() {
+        XCTAssertTrue(CanvasAddress.splitAtOrigin("https://example.com/issues?q=1")
+                      == ("https://example.com", "/issues?q=1"))
+        XCTAssertTrue(CanvasAddress.splitAtOrigin("http://localhost:3000/app")
+                      == ("http://localhost:3000", "/app"))
+        XCTAssertTrue(CanvasAddress.splitAtOrigin("https://www.example.com") == ("https://www.example.com", ""))
+        XCTAssertTrue(CanvasAddress.splitAtOrigin("about:blank") == ("about:blank", ""))
     }
 }

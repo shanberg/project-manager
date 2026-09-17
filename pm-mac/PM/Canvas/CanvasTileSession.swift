@@ -592,6 +592,12 @@ struct CanvasTileSession: Equatable {
         return columns[at.column].tiles[at.tile].cards.count > 1
     }
 
+    /// Every card in this card's tile, in the strip's order — itself alone for a tile without tabs.
+    func tabs(of id: String) -> [String] {
+        guard let at = position(of: id) else { return [] }
+        return columns[at.column].tiles[at.tile].cards
+    }
+
     // MARK: The keys
 
     /// ⌥⇧← and →: into the next column over, level with where it was — or, past the last column, out

@@ -55,9 +55,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Normally the window's traffic lights decide it. A project window's sidebar holds those buttons
     /// over *itself*, so a board in that window's content pane wants no inset at all — the same
     /// reasoning, and the same answer, as the task column's header.
-    var ignoresTrafficLights = false {
-        didSet { measureTitlebar() }
-    }
+    ///
+    /// **Asked at measure time, not told.** This used to be a flag the window set, and tabs stay
+    /// mounted, so only the tab showing heard the sidebar come or go: a board made while it was out
+    /// kept believing so, and came back with its header under the traffic lights. A question has no
+    /// copy to go stale. The window still calls `titlebarDidChange` when the answer changes, for the
+    /// pane on screen; a hidden one asks again when it is shown (`paneBecameVisible`).
+    var trafficLightsAreElsewhere: () -> Bool = { false }
+
+    /// Something that decides where the header starts has changed. See `trafficLightsAreElsewhere`.
+    func titlebarDidChange() { measureTitlebar() }
 
     init(store: CanvasDocumentStore, tabs: ProjectTabModel) {
         self.store = store
@@ -777,14 +784,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// traffic lights are relative to *it* — and there are three answers, not two. A window with its
     /// sidebar hidden puts them over the board, so the pill starts clear of them. Full screen has none, so
     /// it starts at the edge. And with the sidebar showing they sit over the sidebar, which is a
-    /// different pane entirely, so again the pill starts at the edge — see `ignoresTrafficLights`.
+    /// different pane entirely, so again the pill starts at the edge — see `trafficLightsAreElsewhere`.
     private func measureTitlebar() {
         guard pillLeading != nil else { return }
         let metrics = view.window?.titlebarButtonMetrics()
         // `Self.margin` is the floor in every case, so the pill never sits hard against the pane's edge
         // — full screen reports no buttons at all, and a sidebar holding them reports buttons that are
         // over somebody else's pane.
-        let inset = ignoresTrafficLights ? Self.margin
+        let inset = trafficLightsAreElsewhere() ? Self.margin
             : max(Self.margin, metrics?.leadingInset ?? pillLeading.constant)
         if abs(pillLeading.constant - inset) > 0.5 { pillLeading.constant = inset }
         if let metrics, header.titlebar != metrics { header.titlebar = metrics }
@@ -836,11 +843,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Point the header's controls at the board and the window.
     private func wireHeader() {
-        header.addCard = { [weak self] in self?.addTextCard() }
-        header.addFrame = { [weak self] in self?.addFrame() }
-        header.addLink = { [weak self] in self?.scroll.board.addLinkCard(at: nil) }
-        header.addFile = { [weak self] in self?.scroll.board.addFileCard(at: nil) }
-        header.addProjectNote = { [weak self] in self?.scroll.board.addProjectNoteCard(at: nil) }
+        header.add = { [weak self] command in self?.scroll.board.add(command, at: nil) }
         header.addExistingCard = { [weak self] id in self?.scroll.board.addExistingCard(withID: id) }
         header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
         header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
@@ -852,6 +855,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageReload = { [weak self] in self?.engagedCard?.reload() }
         header.pageStop = { [weak self] in self?.engagedCard?.stopLoading() }
         header.pageGo = { [weak self] address in self?.engagedCard?.go(to: address) }
+        header.addressCandidates = { [weak self] in self?.addressCandidates ?? [] }
         header.pageHome = { [weak self] in self?.engagedCard?.goHome() }
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.pageBackTo = { [weak self] steps in self?.engagedCard?.goBack(steps) }
@@ -936,6 +940,24 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             site: card.siteName,
             isFiltered: card.isFiltered)
         if header.page != page { header.page = page }
+    }
+
+    /// What the address field can suggest: this board's web cards, where this card has been, and every
+    /// page PM remembers a name for — in that order, which is the order ties are broken in.
+    private var addressCandidates: [CanvasAddressSuggestions.Candidate] {
+        var candidates: [CanvasAddressSuggestions.Candidate] = []
+        for node in scroll.board.document.nodes {
+            guard case .link(let url) = node.content else { continue }
+            let host = URL(string: url)?.host() ?? url
+            candidates.append(.init(title: CanvasPageTitles.of(url) ?? host, address: url, source: .board))
+        }
+        for step in engagedCard?.backSteps ?? [] {
+            candidates.append(.init(title: step.title, address: step.address, source: .history))
+        }
+        for page in CanvasPageTitles.remembered() {
+            candidates.append(.init(title: page.title, address: page.address, source: .history))
+        }
+        return candidates
     }
 
     private var findScope: CanvasHeaderModel.Find.Scope {
@@ -1333,31 +1355,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     @objc private func zoomOut() { scroll.zoom(by: 1 / 1.25) }
     @objc private func zoomToFit() { scroll.zoomToFit() }
 
-    /// A new card lands in the middle of what you're looking at, which is the only place you can be
-    /// sure you'll see it.
-    private var centreOfView: CanvasPoint {
-        let visible = scroll.documentVisibleRect
-        return scroll.board.canvasPoint(NSPoint(x: visible.midX, y: visible.midY))
-    }
-
-    /// The header's Add ▸ Card. The board owns it — it had a copy of its own for the right-click menu,
-    /// and a card added from here landed on top of the tiles while one was up because only the board's
-    /// copy knew about tiled views. See `CanvasBoardView.addTextCard`.
-    @objc private func addTextCard() { scroll.board.addTextCard(at: nil) }
-
-    @objc private func addFrame() {
-        let centre = centreOfView
-        let node = CanvasNode(content: .group(label: "Frame", background: nil, backgroundStyle: nil),
-                              frame: CanvasRect(x: centre.x - 300, y: centre.y - 200,
-                                                width: 600, height: 400))
-        store.change("Add Frame") { $0.nodes.append(node) }
-        scroll.board.select([node.id])
-    }
-
-    @objc private func addLink() { scroll.board.addLinkCard(at: nil) }
-
-    @objc private func addFile() { scroll.board.addFileCard(at: nil) }
-
     // MARK: A board nobody is looking at
 
     private var idleTimer: Timer?
@@ -1417,6 +1414,9 @@ extension CanvasPaneController: ProjectTabContent {
         // window resized, or a sidebar opened, while you were in another tab is a resize this pane
         // never got, and without this it would come back filling the window it was last visible in.
         if scroll.board.isTiled { scroll.board.retileForWindowSize() }
+        // And the header's clearance of the traffic lights, for the same reason: whatever moved them
+        // while this tab was in the background, the header is about to be seen against where they are.
+        measureTitlebar()
         focusBoard()
     }
 

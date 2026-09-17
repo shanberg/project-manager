@@ -299,6 +299,29 @@ extension CanvasBoardView {
         // and a menu about a card there would be a menu about whichever card the gap happened to be
         // beside.
         if isTiled {
+            // **A tab is its card.** Right-clicking one is asking what that card can do, so the menu is
+            // the card's, the way a tile's is — with the tab's own verbs where the tile's would be. The
+            // tab comes to the front first: every command below acts on the selection, and a card you
+            // cannot see is not one to edit an address or reload blind.
+            //
+            // Asked before the boundary, whose reach laps a few points onto the strip below it: a tab is
+            // a control you aimed at, and the boundary is still one point further up.
+            if let chip = tabChip(at: where_) {
+                showTab(chip.card)
+                menuTile = chip.card
+                buildCardMenu(menu, id: chip.card, includingTiling: false)
+                menu.insertItem(.sectionHeader(title: "Card"), at: 0)
+                addTabSection(menu, id: chip.card)
+                return menu
+            }
+            // The rest of the strip — the + included — is the tile's title bar, and its menu is the
+            // tile's: what goes into it, and everything a tile can be told.
+            if let tile = tabStrip(at: where_) {
+                if !selection.contains(tile) { selection = [tile] }
+                menuTile = tile
+                buildTabStripMenu(menu, tile: tile)
+                return menu
+            }
             // The boundary first, and that is not a new precedence — it has always been asked before
             // the card, because `dividerReach` is wider than the gap and so laps onto the tiles either
             // side of it. A right-click in that strip is about the pair, not about one.
@@ -639,7 +662,10 @@ extension CanvasBoardView {
     /// else: it is the one that takes something away. A tile is a view of a card, so "close" would be
     /// the ambiguous word — half of what a person means by closing something is destroying it, and
     /// this destroys nothing. See `removeFromTiling`.
-    private func addTileSection(_ menu: NSMenu, id: String) {
+    ///
+    /// `wholeTile` is the strip's menu, which is about the tile and all its tabs rather than the card
+    /// showing: what goes into it is already above, under Tabs, and Remove takes every tab.
+    private func addTileSection(_ menu: NSMenu, id: String, wholeTile: Bool = false) {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tile"))
         // **First, because it is the one you reach for**: fill the room with this tile for a moment and
@@ -661,7 +687,7 @@ extension CanvasBoardView {
         // Only where it means something: a workspace not shaped as a master and a stack has no master,
         // and the master is already the master.
         // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
-        if tiling.hasTabs(id) {
+        if tiling.hasTabs(id), !wholeTile {
             add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
         }
         if tiling.canPromote(id) {
@@ -671,7 +697,7 @@ extension CanvasBoardView {
         }
         // Here as well as on the board's own menu, because the board's is reached by right-clicking a
         // gap between tiles, and the gaps are four points wide.
-        addExistingCards(menu)
+        if !wholeTile { addExistingCards(menu) }
         add(menu, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
 
         addArrange(menu)
@@ -679,7 +705,67 @@ extension CanvasBoardView {
         add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
 
         menu.addItem(.separator())
-        add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
+        if wholeTile {
+            add(menu, "Remove Tile from Tiled View", #selector(removeMenuTileWithTabs(_:)))
+        } else {
+            add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
+        }
+    }
+
+    /// A tab's own verbs, under the card's: out into a tile of its own, and closed — alone, or leaving it
+    /// alone. **Close, here**, where the tile's section says Remove: on a tab the word is the browser's,
+    /// and the tab's own button is a ×. It deletes nothing either way (`removeFromTiling`).
+    private func addTabSection(_ menu: NSMenu, id: String) {
+        guard let tiling else { return }
+        menu.addItem(.sectionHeader(title: "Tab"))
+        add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
+        if tiling.tabs(of: id).count > 1 {
+            add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
+        }
+        menu.addItem(.separator())
+        add(menu, "Close Tab", #selector(removeMenuTile(_:)))
+    }
+
+    /// Right-clicking a strip anywhere but on a tab: the tile's menu. What can go into it first — a new
+    /// card, or one already on the board, as a tab — which is the same list the strip's + opens; then
+    /// the tile's commands, as a right-click on its card gives them.
+    private func buildTabStripMenu(_ menu: NSMenu, tile: String) {
+        menu.addItem(.sectionHeader(title: "Tabs"))
+        fillNewTabMenu(menu)
+        addTileSection(menu, id: tile, wholeTile: true)
+    }
+
+    /// Every `CanvasAddCommand` that makes a tile, as a tab of `menuTile`, and Add Card from Canvas into
+    /// it. Shared by the strip's right-click and its +, which are two ways into one list.
+    func fillNewTabMenu(_ menu: NSMenu) {
+        addCommandItems(menu, tabs: true)
+        let list = NSMenu()
+        fillExistingCardsMenu(list, action: #selector(addExistingCardAsTab(_:)))
+        guard !list.items.isEmpty else { return }
+        menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = list
+    }
+
+    @objc func newTab(_ sender: Any?) {
+        guard let tile = menuTile,
+              let command = (sender as? NSMenuItem)?.representedObject as? CanvasAddCommand else { return }
+        addingTab(to: tile) { add(command, at: nil) }
+    }
+
+    @objc func addExistingCardAsTab(_ sender: Any?) {
+        guard let tile = menuTile, let id = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        addingTab(to: tile) { addExistingCard(withID: id) }
+    }
+
+    /// Every tab in the right-clicked one's tile but it.
+    @objc func closeOtherMenuTabs(_ sender: Any?) {
+        guard let id = menuTile, let tiling else { return }
+        restoringMaximized { removeFromTiling(tiling.tabs(of: id).filter { $0 != id }) }
+    }
+
+    /// The right-clicked strip's whole tile, every tab of it, out of the view.
+    @objc func removeMenuTileWithTabs(_ sender: Any?) {
+        guard let id = menuTile, let tiling else { return }
+        restoringMaximized { removeFromTiling(tiling.tabs(of: id)) }
     }
 
     /// Make the right-clicked tile the master. `promoteTile` is the same command with no pointer
@@ -796,18 +882,10 @@ extension CanvasBoardView {
     }
 
     private func buildBoardMenu(_ menu: NSMenu) {
-        // The same four the toolbar's Add offers, under the same four names — see `CanvasAddCommand`.
+        // The same list the toolbar's Add offers, under the same names — see `CanvasAddCommand`.
         // Here so that Add is a convenience rather than the only door: the toolbar is customisable now,
         // and a command reachable from one removable button is a command that can be removed.
-        add(menu, CanvasAddCommand.card.title, #selector(newCardHere))
-        add(menu, CanvasAddCommand.frame.title, #selector(newFrameHere))
-        add(menu, CanvasAddCommand.link.title, #selector(newLinkHere))
-        add(menu, CanvasAddCommand.file.title, #selector(newFileHere))
-        // Fifth, and only sometimes: the one document this board is *about*, when it has been deleted
-        // off it. See `CanvasProjectNoteCard`.
-        if offersProjectNoteCard {
-            add(menu, CanvasAddCommand.projectNote.title, #selector(newProjectNoteHere))
-        }
+        addCommandItems(menu, tabs: false)
         addExistingCards(menu)
         menu.addItem(.separator())
         // Enabled or not is `validateUserInterfaceItem`'s answer, not one set here: this menu
@@ -897,6 +975,34 @@ extension CanvasBoardView {
     }
 
     // MARK: What the menu items do
+
+    /// Make what `command` names — at `where_`, or in the middle of what you can see. The one place a
+    /// `CanvasAddCommand` becomes a card, so every menu that lists them does the same thing for each.
+    func add(_ command: CanvasAddCommand, at where_: CanvasPoint?) {
+        switch command {
+        case .card: addTextCard(at: where_)
+        case .frame: addFrame(at: where_)
+        case .link: addLinkCard(at: where_)
+        case .file: addFileCard(at: where_)
+        case .folder: addFolderCard(at: where_)
+        case .projectNote: addProjectNoteCard(at: where_)
+        }
+    }
+
+    /// The items for `CanvasAddCommand.offered`, each carrying its command. `tabs` is a strip's list,
+    /// which leaves out what can't be a tab and adds into `menuTile`.
+    private func addCommandItems(_ menu: NSMenu, tabs: Bool) {
+        for command in CanvasAddCommand.offered(projectNote: offersProjectNoteCard)
+        where !tabs || command.makesTile {
+            let item = add(menu, command.title, tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
+            item.representedObject = command
+        }
+    }
+
+    @objc private func newHere(_ sender: Any?) {
+        guard let command = (sender as? NSMenuItem)?.representedObject as? CanvasAddCommand else { return }
+        add(command, at: menuPoint)
+    }
 
     /// Adding a link or a file card, wherever the request came from.
     ///
@@ -990,23 +1096,32 @@ extension CanvasBoardView {
     }
 
     func addFileCard(at where_: CanvasPoint?) {
+        addFileCard(at: where_, folder: false)
+    }
+
+    /// A folder's card: the same file card, pointed at a folder, which `CanvasFileNodeView` draws as a
+    /// list of what is in it. Tall, the way a dropped folder is (`CanvasDrop.isTall`), for the rows.
+    func addFolderCard(at where_: CanvasPoint?) {
+        addFileCard(at: where_, folder: true)
+    }
+
+    private func addFileCard(at where_: CanvasPoint?, folder: Bool) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a file from the vault."
+        panel.canChooseFiles = !folder
+        panel.canChooseDirectories = folder
+        panel.message = folder ? "Choose a folder." : "Choose a file from the vault."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         // Stored the way Obsidian stores it — from the vault root — so the card means the same thing
         // in both apps. A file outside the vault has no such path and is stored as it stands.
         let path = store.resolver.storablePath(for: url) ?? url.path
         let at = where_ ?? centreOfVisibleBoard
+        let height: Double = folder ? 400 : 350
         addCard(CanvasNode(content: .file(path: path, subpath: nil),
-                           frame: CanvasRect(x: at.x - 200, y: at.y - 175,
-                                             width: 400, height: 350)),
-                actionName: "Add File")
+                           frame: CanvasRect(x: at.x - 200, y: at.y - height / 2,
+                                             width: 400, height: height)),
+                actionName: folder ? "Add Folder" : "Add File")
     }
-
-    @objc private func newLinkHere() { addLinkCard(at: menuPoint) }
-    @objc private func newFileHere() { addFileCard(at: menuPoint) }
-    @objc private func newProjectNoteHere() { addProjectNoteCard(at: menuPoint) }
 
     /// Put the project's note back on its board.
     ///
@@ -1026,10 +1141,10 @@ extension CanvasBoardView {
         return addCard(node, actionName: "Add Project Note")
     }
 
-    @objc private func newCardHere() { addTextCard(at: menuPoint) }
-
-    @objc private func newFrameHere() {
-        let at = menuPoint ?? centreOfVisibleBoard
+    /// An empty frame, selected. Not through `addCard`: a frame can't be a tile (`makesTile`), which is
+    /// why it is only offered untiled.
+    func addFrame(at where_: CanvasPoint?) {
+        let at = where_ ?? centreOfVisibleBoard
         let node = CanvasNode(content: .group(label: "Frame", background: nil, backgroundStyle: nil),
                               frame: CanvasRect(x: at.x - 300, y: at.y - 200, width: 600, height: 400))
         store.change("Add Frame") { $0.nodes.append(node) }
@@ -1786,22 +1901,19 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // `default` below and was live over an empty pasteboard. It is the same question as
             // `paste(_:)` and gets the same answer.
             return !isTiled && NSPasteboard.general.types?.isEmpty == false
-        case #selector(newCardHere), #selector(newLinkHere), #selector(newFileHere):
-            // Live while tiled, which they were not. The old reason was that a card added through a
+        case #selector(newHere(_:)):
+            // Live while tiled, which they were not, except a frame — see `CanvasAddCommand.makesTile`. The old reason was that a card added through a
             // tiled view would land at a point on a board the lens has moved out from under you — true,
             // and answered by `addCard`, which steps the card clear and puts a tile up for it. The
             // right-click that reaches these while tiled is one on a gap that isn't a divider.
-            return true
+            guard let command = (item as? NSMenuItem)?.representedObject as? CanvasAddCommand else { return true }
+            return command.makesTile || !isTiled
         case #selector(addExistingCard(_:)):
             guard let id = (item as? NSMenuItem)?.representedObject as? String else { return false }
             return tiling.map { !$0.cards.contains(id) } ?? false
         case #selector(pickCardsOnBoard(_:)):
             (item as? NSMenuItem)?.title = pickCardsTitle
             return isTiled
-        case #selector(newFrameHere):
-            // Still not, and alone in that. A frame is a container of cards rather than a card, so
-            // there is no tile it could become — it would be an edit made entirely behind the view.
-            return !isTiled
         case #selector(setShowsPreset(_:)):
             // Every preset is available on every project card. The old menu had two items that could
             // do nothing from where you were standing and had to be dimmed to say so; naming the four

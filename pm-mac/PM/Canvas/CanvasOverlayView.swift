@@ -181,7 +181,7 @@ final class CanvasOverlayView: NSView {
             NSBezierPath(roundedRect: board.viewRect(source), xRadius: CanvasTiling.innerRadius,
                          yRadius: CanvasTiling.innerRadius).fill()
         }
-        guard let described = board.document.node(id: id).flatMap(CanvasExistingCards.card) else { return }
+        guard let described = board.describeCard(id) else { return }
         let title = NSAttributedString(string: described.name, attributes: [
             .font: NSFont.systemFont(ofSize: 13 / scale, weight: .semibold),
             .foregroundColor: NSColor.labelColor,

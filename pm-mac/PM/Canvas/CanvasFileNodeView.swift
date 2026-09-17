@@ -96,8 +96,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         let isFolder = location.url.map(CanvasFolderListing.isFolder) ?? false
         if folder != nil, !isFolder || folder?.url != location.url { releaseFolder() }
         if isSimplified, !isPicture(path) {
-            setContent(summaryView(isFolder ? (path as NSString).lastPathComponent : canvasFileCardName(path),
-                                   symbol: isFolder ? "folder" : canvasFileSymbol(path)))
+            setContent(summaryView(canvasFileCardName(path, isFolder: isFolder),
+                                   symbol: canvasFileSymbol(path, isFolder: isFolder)))
             return
         }
 

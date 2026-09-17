@@ -143,6 +143,9 @@ extension CanvasBoardView {
         // the strip — pulls that card out; and the rest of the strip carries the tile, the way a grip
         // does. Asked first, because the strip is not a card and nothing else answers for it.
         if let owner = tabStrip(at: where_) {
+            // The +: what can go into this tile, as a tab. A menu rather than a blank tab, because a tab
+            // here is a card and a card has to be some kind of card.
+            if let tile = newTabButton(at: where_) { return popUpNewTabMenu(for: tile) }
             if let closing = tabClose(at: where_) {
                 hoveredTab = nil
                 return restoringMaximized { removeFromTiling(closing) }
@@ -821,6 +824,13 @@ extension CanvasBoardView {
             let tab = gesture == nil ? tabChip(at: where_)?.card : nil
             let next = tab.map { (card: $0, onClose: tabClose(at: where_) == $0) }
             if next?.card != hoveredTab?.card || next?.onClose != hoveredTab?.onClose { hoveredTab = next }
+            let plus = gesture == nil ? newTabButton(at: where_) : nil
+            if plus != hoveredNewTab { hoveredNewTab = plus }
+            // Kept while it names a card in the same strip, so a click that changes the tab showing
+            // isn't a leave and a return.
+            let strip = tabStrip(at: where_)
+            let same = strip.flatMap { s in hoveredStrip.map { tiling?.tabs(of: $0).contains(s) == true } }
+            if same != true { hoveredStrip = strip }
         }
         if under != hovered {
             hovered = under
@@ -849,6 +859,8 @@ extension CanvasBoardView {
     override func mouseExited(with event: NSEvent) {
         hovered = nil
         hoveredTab = nil
+        hoveredNewTab = nil
+        hoveredStrip = nil
         if gripTile != nil, gesture == nil {
             gripTile = nil
             refreshTileHandles()
@@ -1217,9 +1229,10 @@ extension CanvasBoardView {
         scrollView?.canvasScroll?.centre(on: CanvasPoint(x: frame.midX, y: frame.midY))
     }
 
-    /// One point, or ten with shift — the same pair every Mac drawing surface uses.
+    /// One grid unit, or ten with shift — the same pair every Mac drawing surface uses, but in the
+    /// canvas's own unit so a nudge always lands on a grid line rather than one point off it.
     private func step(_ event: NSEvent) -> Double {
-        event.modifierFlags.contains(.shift) ? 10 : 1
+        CanvasSnapping.grid * (event.modifierFlags.contains(.shift) ? 10 : 1)
     }
 
     private func nudge(dx: Double, dy: Double) {

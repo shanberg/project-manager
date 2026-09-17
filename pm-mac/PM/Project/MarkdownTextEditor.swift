@@ -217,6 +217,23 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// `> `, the markers a captured note actually uses.
     var gutterAdvances: CGFloat = MarkdownTextEditor.gutterAdvances
 
+    /// The column widths, in advances of the host's face, between which the gutter opens out.
+    ///
+    /// The gutter is a luxury of a wide column. At a page's width four characters of margin cost
+    /// nothing; in a 480pt canvas card they are a tenth of every line, spent on nothing but the hang,
+    /// and a heading's hashes and a bullet pushed into the margin read as the note being indented away
+    /// from its own edge. So a column at or below `snugColumn` gets no gutter at all — markers sit
+    /// inline, content follows them, and wraps still align under the content — and one at or past
+    /// `roomyColumn` gets the whole of `gutterAdvances`.
+    ///
+    /// Between the two it ramps rather than steps, for the reason `ReadableWidth` does: dragging a
+    /// window or a tile wider should open the margin gradually, not jump every line sideways as it
+    /// crosses one particular pixel. Measured in advances rather than points so a canvas card zoomed
+    /// in gets the same answer as the same card at 100% — its face and its width scale together.
+    /// `roomyColumn` sits just under `measureWidth`, so a takeover at its readable cap has the lot.
+    static let snugColumn: CGFloat = 56
+    static let roomyColumn: CGFloat = 80
+
     /// How wide a column of note prose is allowed to get: 78 characters of it, plus the gutter the
     /// markers hang in.
     ///
@@ -303,7 +320,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // The grid an empty note starts on, and what the caret measures itself against before the
         // first highlight pass has anything to style. Without it the first character you type lands
         // flush at the margin and jumps onto the column a keystroke later.
-        var grid = MarkdownGrid(base: baseFont, advances: gutterAdvances)
+        // No width yet, so no gutter: the first `setFrameSize` gives the column its real width and
+        // `regutter` lays the note out on the gutter that width affords, before anything is drawn.
+        var grid = MarkdownGrid(base: baseFont, advances: gutterAdvances, columnWidth: 0)
         let empty = grid.style(indent: "", marker: "")
         textView.defaultParagraphStyle = empty
         // …and in the typing attributes, which is the pair that actually governs the caret.
@@ -322,6 +341,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onCancel = onCancel
         textView.onToggleImmersive = onToggleImmersive
+        textView.onResize = { [weak coordinator = context.coordinator, weak textView] in
+            guard let coordinator, let textView else { return }
+            coordinator.regutter(textView)
+        }
         textView.noteURL = noteURL
         textView.growthCeiling = growthCeiling
         textView.string = text
@@ -414,6 +437,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         private var scrollObserver: Any?
         /// The last `focusRequest` acted on. Nil until the first update, so a fresh editor focuses.
         var focusedRequest: Int?
+        /// The gutter the note was last laid out on, so a resize that doesn't change it restyles
+        /// nothing. See `regutter`.
+        private var appliedGutter: CGFloat?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
@@ -536,7 +562,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let text = textView.string
             let base = parent.baseFont
             let full = NSRange(location: 0, length: storage.length)
-            var grid = MarkdownGrid(base: base, advances: parent.gutterAdvances)
+            var grid = MarkdownGrid(base: base, advances: parent.gutterAdvances,
+                                    columnWidth: textView.textContainer?.size.width ?? 0)
+            appliedGutter = grid.gutter
             storage.beginEditing()
             storage.setAttributes([.font: base,
                                    .foregroundColor: NSColor.labelColor,
@@ -558,6 +586,26 @@ struct MarkdownTextEditor: NSViewRepresentable {
             if storage.length == 0 {
                 textView.typingAttributes = [.font: base, .foregroundColor: NSColor.labelColor,
                                              .paragraphStyle: grid.style(indent: "", marker: "")]
+                textView.defaultParagraphStyle = grid.style(indent: "", marker: "")
+            }
+        }
+
+        /// Re-lay the note when its column has changed enough to change the gutter.
+        ///
+        /// Called on every frame change, so it asks the cheap question first: a live resize passes
+        /// through hundreds of widths and nearly all of them round to the gutter already applied.
+        /// Only a different one pays for the restyle — and then the height too, because a different
+        /// gutter wraps the prose differently.
+        func regutter(_ textView: NSTextView) {
+            let grid = MarkdownGrid(base: parent.baseFont, advances: parent.gutterAdvances,
+                                    columnWidth: textView.textContainer?.size.width ?? 0)
+            guard grid.gutter != appliedGutter else { return }
+            highlight(textView)
+            if (textView.string as NSString).length == 0 { textView.needsDisplay = true }
+            // `DispatchQueue.main` for the reason `claimFocus` gives.
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                self.reportHeight(textView)
             }
         }
     }
@@ -693,7 +741,8 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
 /// indents that put it where it belongs are:
 ///
 ///   firstLineHeadIndent = G - width(marker)    → the marker starts left of the column, content on it
-///   headIndent          = G + width(indent)    → wrapped lines align under the content, not the marker
+///   headIndent          = max(G, width(marker)) + width(indent)
+///                                              → wrapped lines align under the content, not the marker
 ///
 /// The marker's own width is the only thing the hang depends on, which is why `MarkdownBlock` keeps
 /// the indent and the marker apart: `- ` is two advances at every nesting depth, so a nested item's
@@ -706,15 +755,22 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
 /// quick bar's proportional face, where a marker's width is not its character count.
 private struct MarkdownGrid {
     let base: NSFont
+    /// The margin markers hang into, in points — the host's `gutterAdvances`, scaled down for a column
+    /// too narrow to spare it. See `MarkdownTextEditor.snugColumn`.
     let gutter: CGFloat
     /// The gap under each line — see `MarkdownTextEditor.lineHeightMultiple` for why it goes below.
     let leading: CGFloat
     private var widths: [String: CGFloat] = [:]
     private var styles: [String: NSParagraphStyle] = [:]
 
-    init(base: NSFont, advances: CGFloat) {
+    init(base: NSFont, advances: CGFloat, columnWidth: CGFloat) {
         self.base = base
-        self.gutter = ("0" as NSString).size(withAttributes: [.font: base]).width * advances
+        let advance = ("0" as NSString).size(withAttributes: [.font: base]).width
+        let column = columnWidth / advance
+        let snug = MarkdownTextEditor.snugColumn, roomy = MarkdownTextEditor.roomyColumn
+        let room = min(1, max(0, (column - snug) / (roomy - snug)))
+        // Whole points, so a resize only restyles when the gutter visibly moves.
+        self.gutter = (advance * advances * room).rounded()
         self.leading = (NSLayoutManager().defaultLineHeight(for: base)
             * (MarkdownTextEditor.lineHeightMultiple - 1)).rounded()
     }
@@ -722,11 +778,13 @@ private struct MarkdownGrid {
     mutating func style(indent: String, marker: String) -> NSParagraphStyle {
         let key = "\(indent)\u{0}\(marker)"
         if let hit = styles[key] { return hit }
-        let column = gutter + width(indent)
         let style = NSMutableParagraphStyle()
-        // Clamped at the margin: a marker wider than the gutter (`#### ` and deeper) starts flush left
-        // and pushes its own content a little right, rather than widening the gutter for the whole
-        // note. See `gutterAdvances`.
+        // Clamped at the margin: a marker wider than the gutter (`#### ` and deeper, or any marker at
+        // all in a column too narrow for one) starts flush left and pushes its own content a little
+        // right, rather than widening the gutter for the whole note. See `gutterAdvances`. Wrapped
+        // lines follow the content wherever that put it, so a bullet's wraps still hang under its
+        // words when there's no margin for the bullet to hang in.
+        let column = max(gutter, width(marker)) + width(indent)
         style.firstLineHeadIndent = max(0, gutter - width(marker))
         style.headIndent = column
         style.lineSpacing = leading
@@ -826,6 +884,15 @@ final class ShortcutTextView: NSTextView {
     var onCancel: (() -> Void)?
     /// Invoked on ⌃⌘F. See `MarkdownTextEditor.onToggleImmersive`.
     var onToggleImmersive: (() -> Void)?
+    /// Invoked after the frame changes size, so the editor can give the new column the gutter it
+    /// affords. See `MarkdownTextEditor.snugColumn`.
+    var onResize: (() -> Void)?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widthChanged { onResize?() }
+    }
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
 

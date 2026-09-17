@@ -70,6 +70,19 @@ final class CanvasTileHandleView: NSView {
         }
     }
 
+    /// The pointer came onto a strip or left one: its + fades in or out. One fade for the board, since
+    /// the pointer is only ever over one strip; the card it last named is kept so the + fading out is
+    /// drawn on the strip it is leaving.
+    func stripHoverChanged(to card: String?) {
+        if let card { plusStrip = card }
+        plusFade.set(card != nil)
+    }
+
+    private var plusStrip: String?
+    private lazy var plusFade = CanvasFade(rise: 0.12, fall: 0.2, on: self) { [weak self] in
+        self?.needsDisplay = true
+    }
+
     /// The tab under the pointer changed: fade the old one's hover out and the new one's in.
     func hoverChanged(from old: String?, to new: String?) {
         guard old != new else { return needsDisplay = true }
@@ -132,30 +145,28 @@ final class CanvasTileHandleView: NSView {
     /// band, and a press on almost all of a top-row tab is AppKit's to interpret before it is
     /// anybody's to handle.
     ///
-    /// It interprets one by building a region out of the view tree **in z-order**: a view answering
-    /// `mouseDownCanMoveWindow` with no carves its frame out of the window drag, and any view in front
-    /// of it answering yes puts that frame straight back. Not by hit-testing, which is the reading that
-    /// looks right and says the header's own excluders could never work either. The board answers yes
-    /// by saying nothing — `NSView`'s default is true — so without these, dragging a tab moved the
-    /// window.
+    /// It interprets one against a **region the window hands the window server ahead of time**, and a
+    /// press inside it moves the window before any `mouseDown` in this process is called. So what
+    /// matters is what AppKit leaves out of that region, which is narrower than
+    /// `mouseDownCanMoveWindow` suggests; see `WindowDragBlocker`. Without these, dragging a tab moved
+    /// the window.
     ///
     /// **Only the strips, and that is the decision rather than the cheap way out.** One line on
     /// `CanvasBoardView` would have carved out the entire board, and taken the whole band with it: the
     /// empty top of a board is somewhere to grab the window, which is worth keeping in a window whose
     /// titlebar is otherwise invisible. These carve out the part of that band that is a control.
     ///
-    /// **They only reach as far as the board does.** `CanvasEdgeView` is a sibling in front of the
-    /// whole scroll view and answers the drag with true, so nothing in here can carve out anything
-    /// above it. It ends at 46 and the tiles start at 46 — the same line, which is why this works; a
-    /// strip that ever sat higher would need the answer to move out to the pane.
+    /// **In front of or behind anything, it makes no difference.** The region is built from the
+    /// blockers alone, so `CanvasEdgeView` answering true over the top of the pane puts nothing back.
+    /// (This comment once said it did, from a test that modelled the rule rather than reading the
+    /// region; see `WindowDragBlocker`.)
     ///
     /// They take no clicks, like everything else in this view. A press on a tab still reaches the
     /// board's own `mouseDown` and `tabChip(at:)`; all these change is what AppKit does with a press
     /// *before* anyone's `mouseDown` is called.
     private var stripExcluders: [Excluder] = []
 
-    final class Excluder: NSView {
-        override var mouseDownCanMoveWindow: Bool { false }
+    final class Excluder: WindowDragBlocker {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 
@@ -179,7 +190,7 @@ final class CanvasTileHandleView: NSView {
         while stripExcluders.count > bands.count {
             stripExcluders.removeLast().removeFromSuperview()
         }
-        for (view, band) in zip(stripExcluders, bands) where view.frame != band { view.frame = band }
+        for (view, band) in zip(stripExcluders, bands) where view.frame != band { view.move(to: band) }
     }
 
     override func draw(_ dirty: NSRect) {
@@ -244,7 +255,37 @@ final class CanvasTileHandleView: NSView {
                 drawTab(strip.cards[draggedIndex], in: rects[draggedIndex],
                         showing: draggedIndex == strip.showing, board, scale, hoverable: false)
             }
+
+            // Only while the pointer is on this strip, or its menu is open. Its room is kept either way
+            // (`CanvasTiling.tabs`), so tabs don't resize as it comes and goes.
+            let menuOpen = board.openNewTabMenu == shown
+            let presence = menuOpen ? 1 : plusStrip.map { strip.cards.contains($0) } == true ? plusFade.presence : 0
+            if presence > 0 {
+                let plus = board.viewRect(CanvasTiling.newTabButton(in: strip.band, count: strip.cards.count))
+                drawNewTabButton(in: plus, lit: menuOpen || (slide == nil && board.hoveredNewTab == shown),
+                                 presence: presence, scale)
+            }
         }
+    }
+
+    /// The strip's +: a bare glyph in the tabs' secondary colour, shown while the pointer is on the
+    /// strip, taking the close button's fill under the pointer and while its menu is open.
+    private func drawNewTabButton(in rect: NSRect, lit: Bool, presence: Double, _ scale: Double) {
+        if lit {
+            NSColor.labelColor.withAlphaComponent(0.1 * presence).setFill()
+            let radius = Self.tabRadius / scale
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+        }
+        let arm = 5 / scale
+        let cross = NSBezierPath()
+        cross.move(to: NSPoint(x: rect.midX - arm, y: rect.midY))
+        cross.line(to: NSPoint(x: rect.midX + arm, y: rect.midY))
+        cross.move(to: NSPoint(x: rect.midX, y: rect.midY - arm))
+        cross.line(to: NSPoint(x: rect.midX, y: rect.midY + arm))
+        cross.lineWidth = 1.4 / scale
+        cross.lineCapStyle = .round
+        (lit ? NSColor.labelColor : NSColor.secondaryLabelColor).withAlphaComponent(presence).setStroke()
+        cross.stroke()
     }
 
     /// The showing tab's chip: **a small piece of glass on the card** (backlog 21, tuned by eye
@@ -299,13 +340,13 @@ final class CanvasTileHandleView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
         }
 
-        guard let described = board.document.node(id: card).flatMap(CanvasExistingCards.card) else { return }
+        guard let described = board.describeCard(card) else { return }
         let side = 14 / scale
         var textLeft = rect.minX + 8 / scale
-        if let icon = CanvasBoardView.menuIcon(for: described.kind) {
-            icon.draw(in: NSRect(x: textLeft, y: rect.midY - side / 2, width: side, height: side),
-                      from: .zero, operation: .sourceOver, fraction: showing ? 1 : 0.6,
-                      respectFlipped: true, hints: nil)
+        if let icon = tabIcon(for: described.kind, tint: showing ? .labelColor : .secondaryLabelColor) {
+            icon.image.draw(in: NSRect(x: textLeft, y: rect.midY - side / 2, width: side, height: side),
+                            from: .zero, operation: .sourceOver,
+                            fraction: icon.isSymbol || showing ? 1 : 0.6, respectFlipped: true, hints: nil)
             textLeft += side + 6 / scale
         }
         // The close button's room is kept whether or not it is showing, so a name doesn't re-truncate
@@ -343,6 +384,38 @@ final class CanvasTileHandleView: NSView {
         (onClose ? NSColor.labelColor : NSColor.secondaryLabelColor).withAlphaComponent(hover).setStroke()
         cross.stroke()
     }
+
+    /// A tab's icon: the site's own for a page, else the card's symbol in the colour of the tab's name.
+    ///
+    /// **Not `CanvasBoardView.menuIcon`**, which is right for a menu and wrong here twice. A symbol from
+    /// it is a template, which a menu tints and a plain `draw(in:)` paints black whatever the appearance.
+    /// And it only reads the favicon cache: a menu is rebuilt each time it opens and gets a second
+    /// chance, where a strip drawn before the icon arrived was never drawn again. So a missing icon is
+    /// asked for once per host here, and the strip redraws when it lands.
+    private func tabIcon(for kind: CanvasExistingCards.Card.Kind,
+                         tint: NSColor) -> (image: NSImage, isSymbol: Bool)? {
+        let symbol: String
+        switch kind {
+        case .page(let host):
+            if let favicon = FaviconLoader.shared.cached(for: host) { return (favicon, false) }
+            if FaviconLoader.isEnabled, !host.isEmpty, askedFavicons.insert(host.lowercased()).inserted {
+                Task { [weak self] in
+                    guard await FaviconLoader.shared.favicon(for: host) != nil else { return }
+                    self?.needsDisplay = true
+                }
+            }
+            symbol = "globe"
+        case .file(let name): symbol = name
+        case .text: symbol = "text.alignleft"
+        }
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(paletteColors: [tint])) else { return nil }
+        return (image, true)
+    }
+
+    /// Hosts this view has asked the loader for, so a strip redrawn every frame of a slide starts one
+    /// fetch rather than sixty. The loader remembers its own misses; this only saves the asking.
+    private var askedFavicons: Set<String> = []
 
     /// A tab's close button, inside its trailing edge. In view coordinates, like the tab it is in; the
     /// board reads the same rectangle in canvas coordinates through `tabClose(at:)`.
@@ -461,7 +534,7 @@ final class CanvasTileGripView: NSView {
         }
         let rect = board.viewRect(handle.hit)
         if catcher.frame != rect || catcher.isHidden {
-            catcher.frame = rect
+            if catcher.isHidden { catcher.frame = rect } else { catcher.move(to: rect) }
             catcher.isHidden = false
             catcher.board = board
             window?.invalidateCursorRects(for: catcher)
@@ -470,14 +543,42 @@ final class CanvasTileGripView: NSView {
 
     /// Takes a press on a grip for the board. Out of the window drag, since the top of a top-row tile is
     /// inside the transparent titlebar's band (see `CanvasTileHandleView.stripExcluders`).
-    final class Catcher: NSView {
+    final class Catcher: WindowDragBlocker {
         weak var board: CanvasBoardView?
-        override var mouseDownCanMoveWindow: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
         override func mouseDown(with event: NSEvent) { board?.mouseDown(with: event) }
         override func mouseDragged(with event: NSEvent) { board?.mouseDragged(with: event) }
         override func mouseUp(with event: NSEvent) { board?.mouseUp(with: event) }
         override func rightMouseDown(with event: NSEvent) { board?.rightMouseDown(with: event) }
+    }
+}
+
+/// A view that keeps a press in the titlebar band from moving the window, for as long as it is where
+/// it was put.
+///
+/// **What AppKit actually carves out, read off the region rather than modelled.** A window with a
+/// transparent titlebar gives the window server its draggable band minus a region of blockers
+/// (`NSWindow._regionForOpaqueViewsBlockingDraggableFrame:`, sent as `_lastDragRegionData`), and a
+/// press inside what is left moves the window server-side. A view counts as a blocker by its
+/// `_opaqueRectForWindowMoveWhenInTitlebar`, which is empty for a plain `NSView` whatever it answers
+/// to `mouseDownCanMoveWindow` — and the bounds for `NSControl`, `NSButton`, `NSSegmentedControl` and
+/// `NSSplitView`. So the tab strips' excluders, plain views answering no, were never in the region at
+/// all, and a top-row tab moved the window. Decoded in a harness (2026-09-16): the same view carved
+/// nothing as an `NSView` and exactly its 20pt of band as an `NSControl`, whatever was in front of it.
+///
+/// **And the region is not rebuilt when a blocker moves.** Setting the frame of one already on screen
+/// left the region where it was, as did asking for display or layout; adding the view, resizing the
+/// window, or hiding and showing it again (`_updateDragRegionForHiddenStateChange`) all rebuilt it.
+/// `move(to:)` is the last of those, and is the only way these should be moved while shown.
+class WindowDragBlocker: NSControl {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Move, and have the window's drag region follow.
+    func move(to rect: NSRect) {
+        frame = rect
+        guard !isHidden else { return }
+        isHidden = true
+        isHidden = false
     }
 }

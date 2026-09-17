@@ -26,6 +26,14 @@ enum CanvasPageTitles {
         return entry.title
     }
 
+    /// Every page with a name, most recently seen first — the nearest thing PM has to a history, and
+    /// what the address field suggests from. See `CanvasAddressSuggestions`.
+    static func remembered() -> [(address: String, title: String)] {
+        stored().compactMap { key, data in decode(data).map { (address: key, title: $0.title, seen: $0.seen) } }
+            .sorted { $0.seen > $1.seen }
+            .map { (address: $0.address, title: $0.title) }
+    }
+
     /// Remember what the page at `address` calls itself.
     ///
     /// **Titles that name nothing are refused rather than stored.** A page with no `<title>` is

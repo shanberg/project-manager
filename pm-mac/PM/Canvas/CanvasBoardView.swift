@@ -395,6 +395,20 @@ final class CanvasBoardView: NSView {
             tileHandleView.hoverChanged(from: oldValue?.card, to: hoveredTab?.card)
         }
     }
+    /// The tile whose strip's + is under the pointer, or whose + has its menu open — drawn as a hover,
+    /// and held while the menu is up so the button reads as the thing that opened it.
+    var hoveredNewTab: String? {
+        didSet { if hoveredNewTab != oldValue { tileHandleView.needsDisplay = true } }
+    }
+    /// A card in the strip the pointer is over, if it is over one: that strip shows its +. Any card of
+    /// it rather than the one showing, so clicking a tab — which changes the one showing — doesn't read
+    /// as leaving the strip.
+    var hoveredStrip: String? {
+        didSet { if hoveredStrip != oldValue { tileHandleView.stripHoverChanged(to: hoveredStrip) } }
+    }
+    var openNewTabMenu: String? {
+        didSet { if openNewTabMenu != oldValue { tileHandleView.needsDisplay = true } }
+    }
     /// The tile whose top centre the pointer is near, which is the one tile showing its grip.
     var gripTile: String?
     /// Which match ⌘G steps to next.

@@ -526,16 +526,22 @@ extension CanvasBoardView {
     /// The last tile is the way out. A tiling of nothing is not a state — the window would be empty
     /// with no way to say what it was — so removing the only tile means leaving, which is also what
     /// anybody doing it was asking for.
-    func removeFromTiling(_ id: String) {
+    func removeFromTiling(_ id: String) { removeFromTiling([id]) }
+
+    /// Several at once — a whole tile of tabs, or every tab in one but the one you are keeping — as one
+    /// change to the layout rather than one per card.
+    func removeFromTiling(_ ids: [String]) {
         // Counted in cards, not tiles: a workspace of one tile holding two tabs has one to spare.
-        guard var session = tiling, session.cards.contains(id) else { return }
-        guard session.cards.count > 1 else { return leaveTiling(animated: true) }
-        let index = session.ids.firstIndex(of: id) ?? 0
-        session.remove(id)
+        guard var session = tiling else { return }
+        let ids = ids.filter(session.cards.contains)
+        guard let first = ids.first else { return }
+        guard session.cards.count > ids.count else { return leaveTiling(animated: true) }
+        let index = session.ids.firstIndex(of: first) ?? 0
+        for id in ids { session.remove(id) }
         tiling = session
         // Something has to stay focused, for the same reason entering a tiling focuses something: the
         // arrows and Return act on it. The tile that took this one's place, else the new last one.
-        selection.remove(id)
+        selection.subtract(ids)
         if selection.isDisjoint(with: session.ids) {
             selection = [session.ids[min(index, session.ids.count - 1)]]
         }
@@ -575,14 +581,28 @@ extension CanvasBoardView {
     /// every card on the board is already a tile. See `CanvasExistingCards`.
     var existingCardSections: [CanvasExistingCards.Section] {
         guard let tiling else { return [] }
-        return CanvasExistingCards.sections(of: document, showing: tiling.cards)
+        return CanvasExistingCards.sections(of: document, showing: tiling.cards, isFolder: isFolderPath)
+    }
+
+    /// A card's one-line name and icon, as a menu, a tab and a dragged tile show it. See
+    /// `CanvasExistingCards.card`.
+    func describeCard(_ id: String) -> CanvasExistingCards.Card? {
+        document.node(id: id).flatMap { CanvasExistingCards.card($0, isFolder: isFolderPath) }
+    }
+
+    /// Whether a file card's stored path resolves to a folder, which it draws as a list.
+    func isFolderPath(_ path: String) -> Bool {
+        store.resolver.resolve(path).url.map(CanvasFolderListing.isFolder) ?? false
     }
 
     /// Fill `menu` with Add Card from Canvas's list: a header per frame, an item per card.
     ///
     /// One builder for the contextual menus and for the View menu, which fills itself from here each
     /// time it opens — see `CanvasExistingCardsMenu`.
-    func fillExistingCardsMenu(_ menu: NSMenu) {
+    ///
+    /// `action` is what picking one does: up as a tile of its own, unless the menu is a strip's, where it
+    /// joins that tile's tabs (`addExistingCardAsTab`).
+    func fillExistingCardsMenu(_ menu: NSMenu, action: Selector = #selector(addExistingCard(_:))) {
         let sections = existingCardSections
         // Asked for now so the next opening has them: a menu is built synchronously and draws only the
         // icons that have already arrived. See `FaviconLoader.cached`.
@@ -593,8 +613,7 @@ extension CanvasBoardView {
         for section in sections {
             if let frame = section.frame { menu.addItem(.sectionHeader(title: frame)) }
             for card in section.cards {
-                let item = menu.addItem(withTitle: card.name, action: #selector(addExistingCard(_:)),
-                                        keyEquivalent: "")
+                let item = menu.addItem(withTitle: card.name, action: action, keyEquivalent: "")
                 item.target = self
                 item.representedObject = card.id
                 item.image = Self.menuIcon(for: card.kind)
@@ -926,6 +945,41 @@ extension CanvasBoardView {
             }
         }
         return nil
+    }
+
+    /// The tile whose strip's + is under a point, by the card it is showing. Read against the rectangle
+    /// the + is drawn in (`CanvasTiling.newTabButton`).
+    func newTabButton(at point: CanvasPoint) -> String? {
+        tiling?.tabStrips.first {
+            CanvasTiling.newTabButton(in: $0.band, count: $0.cards.count).contains(x: point.x, y: point.y)
+        }.map { $0.cards[$0.showing] }
+    }
+
+    /// Open the strip's + menu under its button — `fillNewTabMenu`, the list the strip's right-click leads
+    /// with.
+    func popUpNewTabMenu(for tile: String) {
+        guard let strip = tiling?.tabStrips.first(where: { $0.cards[$0.showing] == tile }) else { return }
+        menuTile = tile
+        let menu = NSMenu()
+        fillNewTabMenu(menu)
+        let button = viewRect(CanvasTiling.newTabButton(in: strip.band, count: strip.cards.count))
+        openNewTabMenu = tile
+        defer { openNewTabMenu = nil }
+        menu.popUp(positioning: nil, at: NSPoint(x: button.minX, y: button.maxY + 4), in: self)
+    }
+
+    /// Run an add command so that the card it makes joins `tile`'s tabs rather than going beside it.
+    ///
+    /// **A preselection, the one ⌥N makes**, so every add command already honours it (`addCard` →
+    /// `addToTiling` → `nextPlacement`). The link and file commands ask first, modally; a cancelled ask
+    /// leaves the place unused, and it is forgotten here rather than left for the next card to fall into.
+    func addingTab(to tile: String, _ add: () -> Void) {
+        guard var session = tiling, session.position(of: tile) != nil else { return }
+        let place = CanvasTileSession.Placement(target: tile, side: .tab)
+        session.preselection = place
+        tiling = session
+        add()
+        if tiling?.preselection == place { tiling?.preselection = nil }
     }
 
     /// Let go of a tab slid along its strip: it takes the place it was dropped in.

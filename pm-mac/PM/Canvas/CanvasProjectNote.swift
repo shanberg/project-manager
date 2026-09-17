@@ -898,14 +898,24 @@ struct CanvasProjectNote: View {
         // with the window's ⇧ and ⌘ — because a list you can only act on one row at a time is a list
         // missing the thing this app says out loud everywhere else: you say which ones, then you say
         // what to do. The gesture is the row's, not the checkbox's, so the whole band is one target.
-        .onTapGesture(count: 2) {
-            if NSEvent.modifierFlags.contains(.option) || todo.checked {
-                open(.edit, on: todo)
+        //
+        // **One tap gesture that reads the click count, not a `count: 2` gesture beside a single one.**
+        // A double-tap gesture on the row makes SwiftUI hold every single click inside it for the
+        // system's double-click interval, to see whether a second one follows — and that includes the
+        // checkbox's Button, so ticking a task painted a third of a second (or more) after the click.
+        // Reading `clickCount` fires on each click as it lands: the first selects, the second
+        // activates, which is also the order Finder does it in.
+        .onTapGesture {
+            if NSApp.currentEvent?.clickCount == 2 {
+                if NSEvent.modifierFlags.contains(.option) || todo.checked {
+                    open(.edit, on: todo)
+                } else {
+                    store.focus(todo)
+                }
             } else {
-                store.focus(todo)
+                selection.click(key, modifiers: NSEvent.modifierFlags, in: visibleKeys)
             }
         }
-        .onTapGesture { selection.click(key, modifiers: NSEvent.modifierFlags, in: visibleKeys) }
         .contextMenu {
             TaskMenu(todo: todo, targets: contextTargets(for: todo), store: store,
                      openEditor: { open($0, on: todo) },

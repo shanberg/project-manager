@@ -45,7 +45,11 @@ enum CanvasExistingCards {
     ///
     /// A frame is never offered: it is a container of cards rather than a card, so there is no tile
     /// it could be — see `CanvasBoardView.addToTiling`.
-    static func sections(of document: CanvasDocument, showing shown: [String]) -> [Section] {
+    ///
+    /// `isFolder` answers whether a file card's stored path is a folder, which only a resolver can —
+    /// see `card`.
+    static func sections(of document: CanvasDocument, showing shown: [String],
+                         isFolder: (String) -> Bool = { _ in false }) -> [Section] {
         let showing = Set(shown)
         let candidates = document.nodes.filter { !$0.isGroup && !showing.contains($0.id) }
         guard !candidates.isEmpty else { return [] }
@@ -63,19 +67,20 @@ enum CanvasExistingCards {
 
         var sections: [Section] = []
         if let loose = byFrame[nil] {
-            sections.append(Section(frame: nil, cards: ordered(loose)))
+            sections.append(Section(frame: nil, cards: ordered(loose, isFolder)))
         }
         let framesByID = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, $0) })
         for id in CanvasTiling.order(frames.map { ($0.id, $0.frame) }) {
             guard let nodes = byFrame[id], let frame = framesByID[id] else { continue }
-            sections.append(Section(frame: label(of: frame), cards: ordered(nodes)))
+            sections.append(Section(frame: label(of: frame), cards: ordered(nodes, isFolder)))
         }
         return sections
     }
 
-    private static func ordered(_ nodes: [CanvasNode]) -> [Card] {
+    private static func ordered(_ nodes: [CanvasNode], _ isFolder: (String) -> Bool) -> [Card] {
         let byID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
-        return CanvasTiling.order(nodes.map { ($0.id, $0.frame) }).compactMap { byID[$0].flatMap(card) }
+        return CanvasTiling.order(nodes.map { ($0.id, $0.frame) })
+            .compactMap { byID[$0].flatMap { card($0, isFolder: isFolder) } }
     }
 
     private static func label(of frame: CanvasNode) -> String {
@@ -85,8 +90,12 @@ enum CanvasExistingCards {
         return label
     }
 
-    /// What one card is called in the list, and what stands beside it.
-    static func card(_ node: CanvasNode) -> Card? {
+    /// What one card is called in the list, and what stands beside it — which is also how a tile's tab
+    /// and a dragged tile's proxy name it. Use `CanvasBoardView.describeCard`, which knows the folders.
+    ///
+    /// **A folder is a file card** in the document (`CanvasFolderCard`), so the stored path can't say
+    /// which it is; `isFolder` asks the disk, through the board's resolver.
+    static func card(_ node: CanvasNode, isFolder: (String) -> Bool = { _ in false }) -> Card? {
         switch node.content {
         case .text(let text):
             let summary = canvasCardSummary(text)
@@ -94,12 +103,14 @@ enum CanvasExistingCards {
         case .file(let path, let subpath):
             // The heading after the name, the way the card describes itself — two cards on one note
             // are told apart by nothing else.
-            var name = canvasFileCardName(path)
+            let folder = isFolder(path)
+            var name = canvasFileCardName(path, isFolder: folder)
             if let heading = subpath?.trimmingCharacters(in: CharacterSet(charactersIn: "#")),
                !heading.isEmpty {
                 name += " \u{00B7} " + heading
             }
-            return Card(id: node.id, name: clipped(name), kind: .file(symbol: canvasFileSymbol(path)))
+            return Card(id: node.id, name: clipped(name),
+                        kind: .file(symbol: canvasFileSymbol(path, isFolder: folder)))
         case .link(let url):
             // The page's own name when one has ever been seen, else whose page it is — the same two
             // lines the card shows, the first of them when it has it. See `CanvasPageTitles`.
@@ -128,15 +139,17 @@ enum CanvasExistingCards {
 /// starting with the same word.
 ///
 /// Shared by the card's zoomed-out face and Add Card from Canvas, so the list names a card the way the
-/// board does.
-func canvasFileCardName(_ path: String) -> String {
+/// board does. A folder keeps its whole name: a dot in one isn't an extension.
+func canvasFileCardName(_ path: String, isFolder: Bool = false) -> String {
+    if isFolder { return (path as NSString).lastPathComponent }
     let name = ((path as NSString).deletingPathExtension as NSString).lastPathComponent
     guard projectFolder(ofNotesPath: path) != nil, name.hasPrefix("Notes - ") else { return name }
     return String(name.dropFirst("Notes - ".count))
 }
 
 /// The SF Symbol a file card draws when it is one line, by the kind of file it is.
-func canvasFileSymbol(_ path: String) -> String {
+func canvasFileSymbol(_ path: String, isFolder: Bool = false) -> String {
+    if isFolder { return "folder" }
     switch (path as NSString).pathExtension.lowercased() {
     case "md", "markdown", "txt": return "doc.text"
     case "png", "jpg", "jpeg", "gif", "heic", "webp", "tiff": return "photo"

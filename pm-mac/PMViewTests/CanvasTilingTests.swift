@@ -585,8 +585,26 @@ final class CanvasTilingTests: XCTestCase {
             XCTAssertLessThanOrEqual(tab.maxX, band.maxX)
         }
         for (a, b) in pairs(tabs) { XCTAssertFalse(a.intersects(b)) }
+        let plus = CanvasTiling.newTabButton(in: band, count: 3)
+        XCTAssertGreaterThan(plus.minX, tabs[2].maxX, "the + follows the last tab")
+        XCTAssertLessThanOrEqual(plus.maxX, band.maxX)
+        let squeezed = CanvasRect(x: 0, y: 0, width: 300, height: 28)
+        XCTAssertLessThanOrEqual(CanvasTiling.newTabButton(in: squeezed, count: 3).maxX, squeezed.maxX,
+                                 "however many tabs there are, the + stays on the strip")
         let narrow = CanvasTiling.tabs(in: CanvasRect(x: 0, y: 0, width: 300, height: 28), count: 3)
         XCTAssertLessThan(narrow[0].width, 100, "squeezed, they share what there is")
+    }
+
+    /// The strip's menus act on a whole tile: Close Other Tabs and Remove Tile read its cards from here.
+    func testATilesTabsAreItsCards() {
+        var session = tabbed()
+        XCTAssertEqual(session.tabs(of: "b"), ["a", "b"])
+        XCTAssertEqual(session.tabs(of: "c"), ["c"])
+        XCTAssertEqual(session.tabs(of: "z"), [])
+        // Adding as a tab is the ⌥N preselection the + and the strip's menu set.
+        session.add("d", at: .init(target: "a", side: .tab))
+        XCTAssertEqual(session.tabs(of: "a"), ["a", "b", "d"])
+        XCTAssertEqual(session.ids, ["d", "c"], "the tab just added is the one showing")
     }
 
     /// ⌥[ and ⌥]: step through the tabs, round and round.

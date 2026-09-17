@@ -32,62 +32,6 @@ derive, and it is a stronger setting than it was now that the mark is at one opa
 is up: everything inside 48 is drawn at full strength. Drag a few cards around a real board and say
 whether the offer is up too often.
 
-### 32. Restored windows forget their size — **one cause fixed, wants using**
-
-The cause, and it was the whole of the restore half: `WindowSettings.openWindowFrames` was read on
-launch and handed to each restored window and **never written by anything**. `rememberOpenProjects`
-saved the keys alone, so the list was always empty and every restored window fell back to the one
-`PMProject` autosave frame — which only the window opening into an empty screen claims in the first
-place ([ProjectWindowController.swift:182](../pm-mac/PM/Windows/ProjectWindowController.swift:182)) —
-or to a cascade off it. `PMWindowOpenFrames` had never been written on this machine, which is as plain
-as the evidence gets.
-
-Both lists are now built in one pass, index for index, so the filter that drops a projectless window
-cannot drift between them ([WindowManager.swift:255](../pm-mac/PM/Windows/WindowManager.swift:255));
-and the write on opening a window moved to after the window has been placed, since one asked earlier
-answers with the frame it was made at rather than the one it was given.
-
-What is left is **using it**: quit with three windows at three sizes on two screens and say what comes
-back wrong. The remaining suspects if something still forgets are all in the *when*, not the what —
-the list is written on opening, retargeting, closing by hand, and at `willTerminate`, so a window
-resized and then lost to a crash was never recorded, and a resize on its own still writes nothing.
-
-### 39. Drags inside a page were the board's — **rewritten, wants using**
-
-Figma's layer list could not be reordered inside a card, and nothing else that reorders by dragging
-could either. Every step of it is now measured rather than supposed (`CanvasPageDragOriginTests`):
-
-- A page's reorder is **HTML5 drag-and-drop**, so WebKit turns it into a real AppKit dragging session
-  whose source is the `CanvasPageView` itself — confirmed from the page's side by a `dragstart` in
-  Figma, and from ours by a test that hung in `NSCoreDragManager` until it was given a mouse-up.
-- `route` then handed it to the board, because the only thing that made a drag the page's was somewhere
-  to *type* under the pointer. The page got a `dragstart` and then nothing: no `dragover`, no `drop`.
-- Where the board could make nothing of the payload it answered `[]` — and still held it. **Refused by
-  the board and never offered back**, which is why the symptom was silence rather than a stray card.
-  (The card would have been visible: since 6fd7a1c a drop in a tiled view goes up as a tile.)
-
-**The rule is now the other way round: the page decides, and the board takes what the page declines.**
-An element claims a drop by preventing the default on `dragover`, WebKit answers a drag with that
-decision, so asking WebKit is asking the page — and it is a better question than the one we were
-asking, because "is there a drop target here" is not something `elementFromPoint` can answer.
-
-Nothing is lost by asking first, which is the part that had to be measured: WebKit answers `.none` over
-ordinary page and `.move` over an element that claimed the drop, for a link, a string and a page's own
-custom data alike. So a link let go over a page still falls through to the board and still becomes a
-card, or a tile beside the others. The hazard the old rule was built around — a card navigating to a
-link dropped on it — **does not reproduce**: a real `NSURL` dropped on a page with nothing to fall back
-on left the page where it was.
-
-One thing to know before touching it: **WebKit's first reply is a lie.** It answers `.copy` to
-everything before the web process has been consulted, `.none` on the second ask, and the truth on the
-third. So the first answer is discarded and the board holds the drag until one has arrived — which is
-the old behaviour's safety property kept on purpose: an undecided drag belongs to the side that can
-make a card of it. The four rows of the rule are pinned in `CanvasPageViewTests`, along with that one.
-
-What is left is using it. Reorder a layer list in a tile, then check the two the rewrite touches from
-the other side: a link dropped on a tile should still become a tile, and a file dropped anywhere on one
-should still go into the page. `acceptsTyping` has no caller now; it is kept for 23.
-
 ### 45. Switching project changes both windows
 
 With two windows open, clicking a project in one sometimes retargets both; closing a window is reported
@@ -386,14 +330,10 @@ layer rather than in a preference of its own.
 ## Priority
 
 **What reads as broken**, roughly in the order a day of using the board meets it: 45 (switching
-project moves the wrong window — instrumented, waiting to be caught in the log).
-18, 19 and 22 are fixed. **32 and 39 are fixed and want using** — the first
-wants a few days of quitting and relaunching, the second wants a layer dragged in a tile, and a link
-and a file dropped on one to check the two rules the rewrite moved.
+project moves the wrong window — instrumented, waiting to be caught in the log). 18, 19, 22, 32 and 39 are fixed.
 
 **Wants using rather than building:** 2 — drag cards around a real board and say whether the offer is
-up too often — and 32, which now writes the frames it always
-read.
+up too often.
 
 **Decided, building next:** 36 (tabs down the side of a tile).
 
@@ -453,8 +393,10 @@ Numbers are never reused, and comments elsewhere cite them, so this is where a r
 | 24 | switching tiles ending the session you were editing | **Fixed, 2026-09-16.** The smaller answer: engagement stays single, and a card stepped out of with a session note open keeps the note (by `SessionRef`) and its caret, and reopens both on the way back in (`CanvasProjectCardDisplay.returnTo`, `MarkdownTextEditor.startsAt`, `NoteEditorReturnTests`). Once per return; a session that has gone shows the project. The rest of the tile-session review is still 25 |
 | 25 | review of tile session entry, project data and sessions | **Reviewed and built, 2026-09-16** — [tile-sessions.md](tile-sessions.md): ⌥ New Session, Delete Session on an empty session's caption, empty sessions drawn with a quiet call to action, and the takeover's dead titlebar placement removed. Captions as handles was not taken |
 | 30 | the header in full screen, never designed | **Built, 2026-09-16.** At rest the header keeps a window's 26pt drop; when the system's bar comes down it rides down under it frame by frame, following the bar window's move notifications (`NSWindow.fullScreenTitlebarReach`). The bar is 32pt with the empty toolbar hidden, and clear so the ground shows through. Settled in [header-chrome.md](header-chrome.md) §3, Full screen |
+| 32 | restored windows forgetting their size | **Fixed, 2026-09-16.** `openWindowFrames` was read on launch and written by nothing: `rememberOpenProjects` saved the keys alone, so every restored window fell back to the one `PMProject` autosave frame or a cascade off it. Both lists are built in one pass now, index for index, so the filter that drops a projectless window cannot drift between them ([WindowManager](../pm-mac/PM/Windows/WindowManager.swift)) |
 | 35 | one frozen picture per card, shown at either shape | **Fixed, 2026-09-16.** Two pictures per card, filed by whether it was tiled when the picture was taken (`CanvasPageSnapshots`, the tile's under `#tile`). A card with a picture only at the other shape shows its placeholder rather than a cropped one; crossing between the board and a workspace swaps the picture of a card not showing its page (`CanvasLinkNodeView.refreshTiledness`). The on-disk cap doubled to 800 files. `CanvasFrozenPageTests` |
 | 37 | combining projects: a master, and a merge | **Master built, 2026-09-16** — a member names its master in `pm-part-of`, one level, rolled up on the card and in the sidebar ([combining-projects.md](combining-projects.md)). **The merge was dropped** the same day, undecided |
+| 39 | a page's own drags being taken by the board | **Fixed, 2026-09-16.** Reordering a list in a card is HTML5 drag-and-drop and therefore a real dragging session, and the board took every one of them — refusing the ones it could make nothing of without handing them back, which is why the symptom was silence. The precedence is reversed: the page is asked first, since an element claims a drop by preventing the default on `dragover` and WebKit answers a drag with that decision. Argued in [CanvasPageView](../pm-mac/PM/Canvas/CanvasPageView.swift); what WebKit does, including that its first reply is `.copy` to everything, is measured in `CanvasPageDragOriginTests` and the rule is pinned in `CanvasPageViewTests` |
 | 42 | the second link dragged off a web card making a card of the first | **Fixed, 2026-09-16.** Neither suspect in the entry: the drag pasteboard. It is shared and keeps the last drag's contents, and WebKit writes a dragged link to it a few hundredths of a second *after* the drag begins — clearing it and writing twice. A drag started on a page is over the board from its first moment, and the board read the pasteboard once on the way in and kept that. It now reads again whenever the change count has moved (`CanvasDropSession.pasteboardChange`). The premise is measured with real WebKit drags in `CanvasPageLinkDragTests` |
 | 44 | the dragged picture and the card that lands not in the same place | **Fixed, 2026-09-16.** Decided that a drop is the exception to the proxy-holds-still rule of 21: the outline already says where it lands, so the picture agreeing with it costs only the jump. `place` puts the dragging items at the snapped `landing` frame on every update once `carry` has swapped in the board's picture, and `carry` draws from `carried` but places at `landing` |
 | 15 | live-saving the summary and goals | canvas-workspaces §4 — the block becomes live rows like the task list, and Cancel is retired |

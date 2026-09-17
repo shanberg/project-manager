@@ -151,7 +151,8 @@ final class ProjectSplitViewController: NSSplitViewController {
                 self.syncProjectScan()
                 // With the sidebar showing, the traffic lights sit over *it* and a board in the content
                 // column needs no inset of its own — the same rule the task column's header follows.
-                self.canvasPane?.ignoresTrafficLights = !item.isCollapsed
+                // Each board asks for that itself (`makeBoard`); the one on screen is told to ask now.
+                self.canvasPane?.titlebarDidChange()
             }
         }
 
@@ -541,7 +542,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.openingNotice = replacementNotice
         replacementNotice = nil
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
-        pane.ignoresTrafficLights = !sidebarItem.isCollapsed
+        pane.trafficLightsAreElsewhere = { [weak self] in self?.sidebarItem.isCollapsed == false }
         pane.focus = focus
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
         return pane

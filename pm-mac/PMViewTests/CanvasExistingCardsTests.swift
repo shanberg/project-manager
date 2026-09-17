@@ -132,4 +132,29 @@ final class CanvasExistingCardsTests: XCTestCase {
         XCTAssertEqual(CanvasExistingCards.card(node(.link(url: address)))?.name,
                        "Billing rollover fails on renewal")
     }
+
+    /// A folder is stored as a file card, so only the disk can say it is one — and when it is, it is
+    /// named whole (a dot is not an extension) and drawn with a folder, in a menu, a tab and a proxy.
+    func testAFolderIsNamedWholeAndDrawnAsAFolder() {
+        let path = "Reference/Q3.drafts"
+        let card = CanvasExistingCards.card(node(.file(path: path, subpath: nil)), isFolder: { $0 == path })
+        XCTAssertEqual(card?.name, "Q3.drafts")
+        XCTAssertEqual(card?.kind, .file(symbol: "folder"))
+        XCTAssertEqual(CanvasExistingCards.card(node(.file(path: path, subpath: nil)))?.kind, .file(symbol: "doc"))
+    }
+
+    // MARK: What can be added
+
+    /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers.
+    func testEveryKindOfCardIsOfferedAndTheProjectNoteOnlyWhenMissing() {
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .frame, .link, .file, .folder])
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).last, .projectNote)
+        XCTAssertEqual(CanvasAddCommand.folder.title, "New Folder\u{2026}")
+    }
+
+    /// A tile's strip offers what can be a tab: everything but a frame.
+    func testATabCanBeAnythingButAFrame() {
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).filter(\.makesTile),
+                       [.card, .link, .file, .folder, .projectNote])
+    }
 }

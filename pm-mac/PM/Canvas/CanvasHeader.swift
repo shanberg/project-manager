@@ -113,11 +113,14 @@ final class CanvasHeaderModel {
         var showsModeLabel: Bool { self == .full }
         /// How wide the address field is allowed to get. Enough for a real host at every width — a
         /// truncated middle still shows you the end of the domain, which is the half that matters.
+        ///
+        /// A `hitWidth` and a `gap` wider than it was, because Reload moved inside it: the row is the
+        /// width it always was, and the field is where the button's room went.
         var addressWidth: CGFloat {
             switch self {
-            case .full: return 240
-            case .tight: return 150
-            case .minimal: return 104
+            case .full: return 266
+            case .tight: return 176
+            case .minimal: return 130
             }
         }
         var findWidth: CGFloat { self == .full ? 170 : 120 }
@@ -238,16 +241,9 @@ final class CanvasHeaderModel {
 
     // MARK: What the controls do. Supplied by the window controller.
 
+    /// Every item of the `+` menu's `CanvasAddCommand` list — see `CanvasBoardView.add(_:at:)`.
     @ObservationIgnored
-    var addCard: () -> Void = {}
-    @ObservationIgnored
-    var addFrame: () -> Void = {}
-    @ObservationIgnored
-    var addLink: () -> Void = {}
-    @ObservationIgnored
-    var addFile: () -> Void = {}
-    @ObservationIgnored
-    var addProjectNote: () -> Void = {}
+    var add: (CanvasAddCommand) -> Void = { _ in }
     @ObservationIgnored
     var addExistingCard: (String) -> Void = { _ in }
     @ObservationIgnored
@@ -291,6 +287,10 @@ final class CanvasHeaderModel {
     /// what the board has saved for the card, which is what Pin is for.
     @ObservationIgnored
     var pageGo: (String) -> Void = { _ in }
+    /// Every page the address field may suggest, board cards first — see `CanvasAddressSuggestions`.
+    /// Asked for when the field opens rather than kept up to date, since it is read once per edit.
+    @ObservationIgnored
+    var addressCandidates: () -> [CanvasAddressSuggestions.Candidate] = { [] }
     @ObservationIgnored
     var findChanged: (String) -> Void = { _ in }
     @ObservationIgnored
@@ -453,21 +453,12 @@ struct CanvasControlCapsule: View {
 
     private var addMenu: some View {
         Menu {
-            // The board's right-click menu offers the same four; both read their names from
-            // `CanvasAddCommand` so the two can't drift into "Card" here and "New Card" there again.
-            Button(CanvasAddCommand.card.title, action: model.addCard)
-            // The one of the four a tiled view cannot take. A frame is a container of cards rather
-            // than a card, so there is no tile it could become — adding one from here would be an edit
-            // made entirely behind the view. The board's own menu dims it for the same reason; the
-            // other three now work while tiled and go on the end of the arrangement.
-            Button(CanvasAddCommand.frame.title, action: model.addFrame)
-                .disabled(model.tiling != nil)
-            Button(CanvasAddCommand.link.title, action: model.addLink)
-            Button(CanvasAddCommand.file.title, action: model.addFile)
-            // Conditional, and the board's right-click menu makes the same test — the item is the board
-            // saying something is missing, so it has nothing to say once it is back.
-            if model.offersProjectNote {
-                Button(CanvasAddCommand.projectNote.title, action: model.addProjectNote)
+            // The board's right-click menu and a tile's strip offer the same list; all of them read it
+            // from `CanvasAddCommand` so they can't drift apart in wording or in what they offer again.
+            // What can't be a tile is dimmed while tiled — see `CanvasAddCommand.makesTile`.
+            ForEach(CanvasAddCommand.offered(projectNote: model.offersProjectNote), id: \.self) { command in
+                Button(command.title) { model.add(command) }
+                    .disabled(model.tiling != nil && !command.makesTile)
             }
             // The cards already on the board that the tiled view isn't showing. Absent rather than dim
             // when there are none, like the board's own menus — see `CanvasExistingCards`.

@@ -442,15 +442,28 @@ enum CanvasTiling {
     /// Where each tab sits in a strip: side by side from the leading edge, sharing the width, none
     /// wider than `longestTab`. What the strip is drawn by and what a click on it is read against, so
     /// the two cannot disagree.
+    ///
+    /// Room is kept after the last one for the strip's + (`newTabButton`), so the tabs never run under it.
     static func tabs(in band: CanvasRect, count: Int) -> [CanvasRect] {
         guard count > 0 else { return [] }
-        let inset = 4.0
-        let width = min(longestTab, (band.width - inset * 2 - gap * Double(count - 1)) / Double(count))
+        let height = max(0, band.height - 6)
+        let room = band.width - tabInset * 2 - gap * Double(count) - height
+        let width = min(longestTab, room / Double(count))
         return (0..<count).map {
-            CanvasRect(x: band.minX + inset + Double($0) * (width + gap), y: band.minY + 3,
-                       width: max(0, width), height: max(0, band.height - 6))
+            CanvasRect(x: band.minX + tabInset + Double($0) * (width + gap), y: band.minY + 3,
+                       width: max(0, width), height: height)
         }
     }
+
+    /// The strip's +, a square as tall as a tab, just after the last tab — where a browser puts it, so
+    /// it moves along as tabs come and go rather than sitting at the far end of a wide tile.
+    static func newTabButton(in band: CanvasRect, count: Int) -> CanvasRect {
+        let height = max(0, band.height - 6)
+        let after = tabs(in: band, count: count).last.map { $0.maxX + gap } ?? band.minX + tabInset
+        return CanvasRect(x: after, y: band.minY + 3, width: height, height: height)
+    }
+
+    private static let tabInset = 4.0
 
     /// Where every tile goes inside `area`: a list of frames per column, in the columns' order.
     ///

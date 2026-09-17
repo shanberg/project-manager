@@ -7,11 +7,35 @@ import Foundation
 /// modal dialog, so the field would have shipped either without it (typing `example.com` gives you a
 /// card that never loads) or with a second copy of it that drifts.
 ///
-/// **Deliberately not a search box.** A browser's address bar sends anything that isn't an address to a
-/// search engine, and PM will not: this app makes one network claim — the pages you put on a board —
-/// and quietly handing what you typed to Google would be a second one nobody agreed to. So text that
-/// isn't an address is rejected rather than reinterpreted, and the field puts you back where you were.
+/// **A search box only once you have said which one.** A browser's address bar sends anything that isn't
+/// an address to a search engine, and PM used to refuse to: this app makes one network claim — the pages
+/// you put on a board — and quietly handing what you typed to Google would be a second one nobody agreed
+/// to. So the engine is a setting, and its default is none (`CanvasSearchEngine`). Picking one is the
+/// agreement. Until then, text that isn't an address is rejected rather than reinterpreted, and the
+/// field puts you back where you were.
+///
+/// The Add Link box stays address-only whatever the setting says: a card made from a search is a card
+/// pointed at a results page, which is never what somebody pasting into that box meant.
 enum CanvasAddress {
+    /// Where the header's address field goes with what was typed: the address, if it is one, else a
+    /// search on the engine you chose, else nowhere.
+    static func resolved(_ typed: String, engine: CanvasSearchEngine) -> String? {
+        normalized(typed) ?? engine.searchAddress(for: typed)
+    }
+
+    /// An address cut where the site ends: the scheme, host and port, then everything after them.
+    ///
+    /// The address field draws the two at different strengths, so the part that says *whose* page this
+    /// is reads first and a look-alike host can't hide in a long path. An address with no host —
+    /// `about:blank`, a `data:` page — is all origin, since there is no site to single out.
+    static func splitAtOrigin(_ address: String) -> (origin: String, rest: String) {
+        guard let components = URLComponents(string: address),
+              let end = components.rangeOfPort?.upperBound ?? components.rangeOfHost?.upperBound,
+              components.host?.isEmpty == false
+        else { return (address, "") }
+        return (String(address[..<end]), String(address[end...]))
+    }
+
     /// A loadable address, or nil when what was typed isn't one.
     static func normalized(_ typed: String) -> String? {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,5 +68,62 @@ enum CanvasAddress {
         guard scheme == "http" else { return true }
         let host = url.host()?.lowercased() ?? ""
         return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local")
+    }
+}
+
+/// The search engine the address field hands plain words to, when you have picked one.
+///
+/// **None by default**, for the reason `CanvasAddress` gives: sending what you type to a third party is
+/// a thing you choose, not a thing the app decides for you on first launch. The list is the engines
+/// Safari offers plus two that people pick precisely for not being those — every one of them a plain
+/// GET with the words in the query string, so there is nothing here but a URL to build.
+enum CanvasSearchEngine: String, CaseIterable, Identifiable {
+    case none, duckDuckGo, google, bing, ecosia, kagi, startpage
+
+    static let defaultsKey = "PMCanvasSearchEngine"
+
+    /// What Settings has, read at the moment it is needed rather than cached — the field is opened far
+    /// less often than the setting could change.
+    static var current: CanvasSearchEngine {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(CanvasSearchEngine.init) ?? .none
+    }
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .none: "None"
+        case .duckDuckGo: "DuckDuckGo"
+        case .google: "Google"
+        case .bing: "Bing"
+        case .ecosia: "Ecosia"
+        case .kagi: "Kagi"
+        case .startpage: "Startpage"
+        }
+    }
+
+    /// The results page for these words, or nil with no engine or nothing to search for.
+    func searchAddress(for typed: String) -> String? {
+        let words = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, let (base, parameter) = endpoint,
+              var components = URLComponents(string: base) else { return nil }
+        components.queryItems = [URLQueryItem(name: parameter, value: words)]
+        // `URLQueryItem` leaves `+` alone, and a query string reads a bare `+` as a space — so "c++"
+        // would search for "c". Encoded by hand, after the fact, because nothing else in a query needs it.
+        components.percentEncodedQuery = components.percentEncodedQuery?
+            .replacingOccurrences(of: "+", with: "%2B")
+        return components.url?.absoluteString
+    }
+
+    private var endpoint: (String, String)? {
+        switch self {
+        case .none: nil
+        case .duckDuckGo: ("https://duckduckgo.com/", "q")
+        case .google: ("https://www.google.com/search", "q")
+        case .bing: ("https://www.bing.com/search", "q")
+        case .ecosia: ("https://www.ecosia.org/search", "q")
+        case .kagi: ("https://kagi.com/search", "q")
+        case .startpage: ("https://www.startpage.com/sp/search", "query")
+        }
     }
 }
