@@ -862,32 +862,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageHome = { [weak self] in self?.engagedCard?.goHome() }
         header.pageAdoptAddress = { [weak self] in self?.engagedCard?.adoptCurrentAddress() }
         header.pageBackTo = { [weak self] steps in self?.engagedCard?.goBack(steps) }
-        header.pageCopyAddress = { [weak self] in self?.engagedCard?.copyAddress() }
-        header.pageOpenInBrowser = { [weak self] in self?.engagedCard?.openInBrowser() }
-        header.pageOpenAsNewCard = { [weak self] in self?.engagedCard?.openPageAsNewCard() }
-        header.pageSignIn = { [weak self] in self?.engagedCard?.signIn() }
-        header.pageSignOut = { [weak self] in self?.engagedCard?.signOut() }
-        header.pageSetFiltered = { [weak self] on in
-            self?.engagedCard?.setFiltered(on)
-            self?.pageStateChanged()
-        }
-        header.pageSetIdentity = { [weak self] identity in
-            self?.engagedCard?.setIdentity(identity)
-            self?.pageStateChanged()
-        }
-        header.pageSetKeepRunning = { [weak self] on in
-            self?.engagedCard?.setKeepRunning(on)
-            self?.pageStateChanged()
-        }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
         header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
         // The focused tile's verbs, routed to the same commands the menu bar and the contextual menu
         // send — so a tile cannot be told one thing from the header and another from a menu.
         header.maximizeTile = { [weak self] in self?.scroll.board.maximizeTile(nil) }
-        header.promoteTile = { [weak self] in self?.scroll.board.promoteTile(nil) }
-        header.pinTile = { [weak self] in self?.scroll.board.togglePinTileSize(nil) }
-        header.removeTile = { [weak self] in self?.scroll.board.removeTile(nil) }
+        header.showCardActions = { [weak self] anchor in
+            self?.scroll.board.cardActionsMenu()?.popUpBelow(anchor)
+        }
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —
@@ -954,11 +937,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             progress: card.loadProgress,
             isSecure: card.isSecure,
             icon: icon(for: card.liveHost),
-            back: card.backSteps.map { .init(title: $0.title, address: $0.address) },
-            site: card.siteName,
-            isFiltered: card.isFiltered,
-            identity: card.identity,
-            keepsRunning: card.keepsPageRunning)
+            back: card.backSteps.map { .init(title: $0.title, address: $0.address) })
         if header.page != page { header.page = page }
     }
 
@@ -1219,6 +1198,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // itself in and out on this value.
         let controls = scroll.board.tileControls
         if header.focusedTile != controls { header.focusedTile = controls }
+        let hasCard = scroll.board.actionsCard != nil
+        if header.hasCard != hasCard { header.hasCard = hasCard }
     }
 
     // MARK: Undo, on a board that can hold two kinds of document

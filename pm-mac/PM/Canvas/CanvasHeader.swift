@@ -52,6 +52,9 @@ final class CanvasHeaderModel {
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
     var focusedTile: TileControls?
+    /// Whether there is one card to open a `…` for — one selected, a tile focused, or a page stepped
+    /// into. See `CanvasBoardView.actionsCard`.
+    var hasCard = false
 
     /// The one capsule that is about what you are *in* — see `CanvasTileCapsule`.
     ///
@@ -62,9 +65,14 @@ final class CanvasHeaderModel {
     ///
     /// Either half can be absent and the capsule is still there for the other: a page with no focused
     /// tile is an engaged card on an untiled board, and a focused tile with no page is every tile that
-    /// isn't a web card. Nil only when both are, which is a board you are not standing in anything on.
+    /// isn't a web card.
+    ///
+    /// **And with neither, for one selected card**, as its `…` alone: the menu is the card's own
+    /// contextual menu (`CanvasBoardView.cardActionsMenu`), so a folder or a note selected on the board
+    /// has as much in it as a tile does. Nil only when there is no one card — nothing selected, or
+    /// several.
     var focus: Focus? {
-        guard page != nil || focusedTile != nil else { return nil }
+        guard page != nil || focusedTile != nil || hasCard else { return nil }
         return Focus(page: page, tile: focusedTile)
     }
 
@@ -167,12 +175,6 @@ final class CanvasHeaderModel {
         /// Where Back would take you, nearest first. Empty disables the menu behind the button and
         /// leaves an ordinary Back.
         var back: [Step] = []
-        /// The host the site-wide commands in the overflow menu are about — sign-in, ad blocking.
-        /// Those are per *site*, and the site is the card's rather than wherever it has wandered.
-        var site: String = ""
-        var isFiltered: Bool = false
-        var identity: CanvasBrowserIdentity = .safari
-        var keepsRunning: Bool = false
 
         /// One page in the back list.
         struct Step: Equatable {
@@ -189,11 +191,6 @@ final class CanvasHeaderModel {
     /// state rather than a second copy of the board's rules.
     struct TileControls: Equatable {
         var isMaximized = false
-        /// Whether Make This the Master Tile means anything: master-and-stack, and not already it.
-        var canPromote = false
-        /// What Pin is called, or nil where there is no run to pin along. See
-        /// `CanvasBoardView.pinTileTitle`.
-        var pinTitle: String?
     }
 
     struct Find: Equatable {
@@ -273,24 +270,6 @@ final class CanvasHeaderModel {
     /// Back by more than one, from the menu behind the Back button. The argument is how many pages.
     @ObservationIgnored
     var pageBackTo: (Int) -> Void = { _ in }
-    /// The overflow menu's items. Each is a command the card already had somewhere else — see
-    /// `CanvasPageOverflow`, which explains why "somewhere else" stopped being good enough.
-    @ObservationIgnored
-    var pageCopyAddress: () -> Void = {}
-    @ObservationIgnored
-    var pageOpenInBrowser: () -> Void = {}
-    @ObservationIgnored
-    var pageOpenAsNewCard: () -> Void = {}
-    @ObservationIgnored
-    var pageSignIn: () -> Void = {}
-    @ObservationIgnored
-    var pageSignOut: () -> Void = {}
-    @ObservationIgnored
-    var pageSetFiltered: (Bool) -> Void = { _ in }
-    @ObservationIgnored
-    var pageSetIdentity: (CanvasBrowserIdentity) -> Void = { _ in }
-    @ObservationIgnored
-    var pageSetKeepRunning: (Bool) -> Void = { _ in }
     /// Send the page to an address typed into the header's field. Navigation only — it does not touch
     /// what the board has saved for the card, which is what Pin is for.
     @ObservationIgnored
@@ -314,12 +293,10 @@ final class CanvasHeaderModel {
     /// The focused tile's verbs — see `CanvasTileCapsule`.
     @ObservationIgnored
     var maximizeTile: () -> Void = {}
+    /// The `…`: open what the tile or card you are in can be told, against the view given — the board's
+    /// own contextual menu for it (`CanvasBoardView.cardActionsMenu`).
     @ObservationIgnored
-    var promoteTile: () -> Void = {}
-    @ObservationIgnored
-    var pinTile: () -> Void = {}
-    @ObservationIgnored
-    var removeTile: () -> Void = {}
+    var showCardActions: (NSView) -> Void = { _ in }
 }
 
 // MARK: - The pill

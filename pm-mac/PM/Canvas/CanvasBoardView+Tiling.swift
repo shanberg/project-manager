@@ -100,21 +100,15 @@ extension CanvasBoardView {
 
     /// What the header's tile capsule draws, or nil when there is no one tile to draw it for.
     ///
-    /// **The conditions are decided here**, on the board, rather than in the capsule — a tile in a grid
-    /// has no master to become, and a tile in a grid of both rows and columns has no run to pin along,
-    /// and those are facts about the arrangement rather than about the chrome. The capsule is then a
-    /// drawing of a state instead of a second copy of these rules, which is what stops the header and
-    /// the contextual menu offering different verbs for the same tile.
+    /// Only the maximize state now: every other verb a tile has is in its menu, which the capsule's
+    /// `…` gets from `cardActionsMenu` — so the header and the contextual menu cannot offer different
+    /// verbs for the same tile.
     ///
-    /// **Nil in a workspace of one tile**, which is the project-note view: nothing to promote, nothing
-    /// to pin, and a tile that already fills the room. A capsule there would be two controls that
-    /// cannot do anything.
+    /// **Nil in a workspace of one tile**, which is the project-note view: a tile that already fills the
+    /// room has nothing to maximize.
     var tileControls: CanvasHeaderModel.TileControls? {
-        guard let tiling, tiling.ids.count > 1, let id = focusedTile else { return nil }
-        return CanvasHeaderModel.TileControls(
-            isMaximized: tiling.maximized != nil,
-            canPromote: tiling.canPromote(id),
-            pinTitle: pinnableTile == nil ? nil : pinTileTitle)
+        guard let tiling, tiling.ids.count > 1, focusedTile != nil else { return nil }
+        return CanvasHeaderModel.TileControls(isMaximized: tiling.maximized != nil)
     }
 
     /// Tile these cards, whatever asked for it.

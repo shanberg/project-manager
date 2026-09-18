@@ -441,13 +441,7 @@ extension CanvasBoardView {
                 // command — reload these six — is most likely to be what you wanted.
                 if !selection.contains(id) { selection = [id] }
                 menuTile = id
-                buildCardMenu(menu, id: id, includingTiling: false)
-                // The card's commands, then the tile's, each under its own header — see
-                // `addTileSection`. The first header goes in afterwards because `buildCardMenu` is
-                // shared with the untiled board, where there is only one kind of object and a header
-                // would be labelling the whole menu.
-                menu.insertItem(.sectionHeader(title: "Card"), at: 0)
-                addTileSection(menu, id: id)
+                buildTileMenu(menu, id: id)
                 return menu
             }
         }
@@ -463,6 +457,49 @@ extension CanvasBoardView {
             buildBoardMenu(menu)
         }
         return menu
+    }
+
+    /// A tile's whole menu: the card's commands, then the tile's, each under its own header — see
+    /// `addTileSection`. The first header goes in afterwards because `buildCardMenu` is shared with the
+    /// untiled board, where there is only one kind of object and a header would be labelling the whole
+    /// menu.
+    private func buildTileMenu(_ menu: NSMenu, id: String) {
+        buildCardMenu(menu, id: id, includingTiling: false)
+        menu.insertItem(.sectionHeader(title: "Card"), at: 0)
+        addTileSection(menu, id: id)
+    }
+
+    /// What the card you are standing in can be told — the focused tile, else the card you have
+    /// stepped into — as the header's `…` opens it.
+    ///
+    /// **The same menu a right-click on it gives, not a list of its own.** The header's menu used to be
+    /// written out separately, in SwiftUI, and so knew only what somebody had remembered to copy into
+    /// it: the page's commands and four of the tile's. Anything a kind of card added to its contextual
+    /// menu — a project card's Shows, a folder card's View — was missing from the one menu that is
+    /// always on screen. Built here, a card's commands appear in both places or in neither.
+    func cardActionsMenu() -> NSMenu? {
+        guard let id = actionsCard else { return nil }
+        if !selection.contains(id) { selection = [id] }
+        menuPoint = nil
+        menuDivider = nil
+        let menu = NSMenu()
+        if tiling?.ids.contains(id) == true {
+            menuTile = id
+            buildTileMenu(menu, id: id)
+        } else {
+            menuTile = nil
+            buildCardMenu(menu, id: id)
+        }
+        return menu
+    }
+
+    /// The one card the header's `…` is about: the focused tile, else the page you have stepped into,
+    /// else the one card selected. Nil for several, for none, and for a line — a line's menu is about
+    /// the line, and the header's is about a card.
+    var actionsCard: String? {
+        if let id = focusedTile ?? engagedPageCard?.node.id { return id }
+        guard selection.count == 1, let id = selection.first, document.node(id: id) != nil else { return nil }
+        return id
     }
 
     /// The tile a right-click in a tiled view is about: the one it landed on, else the one whose
@@ -521,6 +558,13 @@ extension CanvasBoardView {
                 add(menu, "Edit Details\u{2026}", #selector(editProjectDetails(_:)))
                 addShowsMenu(menu)
             }
+            // A folder card's own two: where it points, and how it lays that out. First, as a project
+            // card's are, because they are what this card is rather than what any file card can do.
+            if (nodeViews[id] as? CanvasFileNodeView)?.folderURL != nil {
+                add(menu, "Change Folder\u{2026}", #selector(changeFolder(_:)))
+                addFolderViewMenu(menu)
+                menu.addItem(.separator())
+            }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
                 add(menu, "Repair Stored Path", #selector(repairSelectedPaths))
@@ -539,6 +583,10 @@ extension CanvasBoardView {
             // that is worth knowing before you commit rather than after.
             add(menu, many("Open in Browser", "Open %d in Browser"), #selector(openLinkInBrowser))
             add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
+            if selectedLinkCards.count == 1, let card = nodeViews[id] as? CanvasLinkNodeView,
+               card.liveURL != nil {
+                add(menu, "Open Page as New Card", #selector(openMenuPageAsNewCard))
+            }
             menu.addItem(.separator())
             // The two ways a card's address changes, and they are genuinely different errands. One is
             // "I navigated somewhere better and the card should point here now", which needs no typing
@@ -668,6 +716,33 @@ extension CanvasBoardView {
 
         let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
         item.submenu = shows
+    }
+
+    /// The folder cards in the selection — what the View submenu acts on.
+    private var selectedFolderCards: [CanvasFileNodeView] {
+        selection.compactMap { nodeViews[$0] as? CanvasFileNodeView }.filter { $0.folderURL != nil }
+    }
+
+    /// How a folder card lays itself out: the Finder's View menu, cut to what fits a card — as List or
+    /// as Icons, then what it sorts by. Ticked only where every selected folder card agrees, as Shows is.
+    private func addFolderViewMenu(_ menu: NSMenu) {
+        let cards = selectedFolderCards
+        guard !cards.isEmpty else { return }
+        let options = cards.map { CanvasFolderOptions.of($0.node) }
+        let view = NSMenu(title: "View")
+        for layout in CanvasFolderView.allCases {
+            let entry = add(view, layout.title, #selector(setFolderView(_:)))
+            entry.representedObject = layout.rawValue
+            entry.state = options.allSatisfy { $0.view == layout } ? .on : .off
+        }
+        view.addItem(.separator())
+        view.addItem(.sectionHeader(title: "Sort By"))
+        for sort in CanvasFolderSort.allCases {
+            let entry = add(view, sort.title, #selector(setFolderSort(_:)))
+            entry.representedObject = sort.rawValue
+            entry.state = options.allSatisfy { $0.sort == sort } ? .on : .off
+        }
+        menu.addItem(withTitle: "View", action: nil, keyEquivalent: "").submenu = view
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -1252,17 +1327,38 @@ extension CanvasBoardView {
 
     /// A folder's card: the same file card, pointed at a folder, which `CanvasFileNodeView` draws as a
     /// list of what is in it. Tall, the way a dropped folder is (`CanvasDrop.isTall`), for the rows.
+    ///
+    /// **On a project's board it is the project's folder, without asking.** That is the folder you
+    /// want beside a project nine times in ten, and the tenth is Change Folder… on the card — cheaper
+    /// than an open panel every time for the nine. A board that isn't a project's has no such guess
+    /// and asks, as it always did.
     func addFolderCard(at where_: CanvasPoint?) {
-        addFileCard(at: where_, folder: true)
+        if let project = CanvasProjectNoteCard.projectFolder(forCanvasAt: store.url) {
+            addFileCard(project, at: where_, folder: true)
+        } else {
+            addFileCard(at: where_, folder: true)
+        }
     }
 
     private func addFileCard(at where_: CanvasPoint?, folder: Bool) {
+        guard let url = chooseFile(folder: folder, from: nil) else { return }
+        addFileCard(url, at: where_, folder: folder)
+    }
+
+    /// Ask for a file or a folder, starting in `from` when there is somewhere better to start than
+    /// wherever the panel was last.
+    private func chooseFile(folder: Bool, from: URL?) -> URL? {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = !folder
         panel.canChooseDirectories = folder
         panel.message = folder ? "Choose a folder." : "Choose a file from the vault."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        panel.directoryURL = from
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    private func addFileCard(_ url: URL, at where_: CanvasPoint?, folder: Bool) {
         // Stored the way Obsidian stores it — from the vault root — so the card means the same thing
         // in both apps. A file outside the vault has no such path and is stored as it stands.
         let path = store.resolver.storablePath(for: url) ?? url.path
@@ -1401,6 +1497,45 @@ extension CanvasBoardView {
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
                 CanvasCardShows.set(wanted, on: &doc.nodes[index])
             }
+        }
+    }
+
+    @objc func setFolderView(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let layout = CanvasFolderView(rawValue: raw) else { return }
+        setFolderOptions("View \(layout.title)") { $0.view = layout }
+    }
+
+    @objc func setFolderSort(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let sort = CanvasFolderSort(rawValue: raw) else { return }
+        setFolderOptions("Sort by \(sort.title)") { $0.sort = sort }
+    }
+
+    /// Change one of a folder card's view settings on every selected folder card, leaving the other as
+    /// each card had it — one undoable edit, like `setShows`.
+    private func setFolderOptions(_ actionName: String, _ change: @escaping (inout CanvasFolderOptions) -> Void) {
+        let ids = Set(selectedFolderCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.change(actionName) { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                var options = CanvasFolderOptions.of(doc.nodes[index])
+                change(&options)
+                options.set(on: &doc.nodes[index])
+            }
+        }
+    }
+
+    /// Point the folder card you right-clicked at another folder, starting the panel in the one it shows
+    /// now. The card keeps its place, size and view settings — it is the same card looking elsewhere.
+    @objc func changeFolder(_ sender: Any?) {
+        guard let card = selectedFolderCards.first, let current = card.folderURL,
+              let url = chooseFile(folder: true, from: current), url != current else { return }
+        let id = card.node.id
+        let path = store.resolver.storablePath(for: url) ?? url.path
+        store.change("Change Folder") { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            doc.nodes[index].content = .file(path: path, subpath: nil)
         }
     }
 
@@ -1977,6 +2112,13 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func pageHome(_ sender: Any?) { pageTargets.forEach { $0.goHome() } }
     @objc func pageOpenInBrowser(_ sender: Any?) { pageTargets.forEach { $0.openInBrowser() } }
     @objc func pageOpenAsNewCard(_ sender: Any?) { _ = openPageAsNewCard() }
+
+    /// Open Page as New Card from a card's own menu: the card the menu is about, which is the
+    /// selection rather than whichever page happens to be engaged.
+    @objc private func openMenuPageAsNewCard() {
+        guard selectedLinkCards.count == 1, let card = selectedLinkCards.first else { return }
+        _ = openPageAsNewCard(from: card)
+    }
 
     /// A second card on the page you are on (backlog 40) — the honest version of "this card twice".
     ///

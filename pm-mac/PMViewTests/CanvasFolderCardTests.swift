@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import SwiftUI
+import PmLib
 
 /// A folder dropped on a board lists what is in it (backlog 6) — `CanvasFolderCard`.
 @MainActor
@@ -57,6 +58,75 @@ final class CanvasFolderCardTests: XCTestCase {
         XCTAssertEqual(CanvasFolderListing.countLabel(12), "12 items")
     }
 
+    // MARK: How it is laid out
+
+    /// Each sort keeps folders on top and orders the rest by its own key — newest and largest first —
+    /// falling back to the name where the key can't tell two apart.
+    func testEachSortKeepsFoldersOnTop() throws {
+        make(["small.txt", "big.txt", "old.md"], folders: ["Sub"])
+        try Data(count: 10).write(to: root.appendingPathComponent("small.txt"))
+        try Data(count: 5000).write(to: root.appendingPathComponent("big.txt"))
+        let fm = FileManager.default
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -86_400 * 30)],
+                             ofItemAtPath: root.appendingPathComponent("old.md").path)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+                             ofItemAtPath: root.appendingPathComponent("small.txt").path)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)],
+                             ofItemAtPath: root.appendingPathComponent("big.txt").path)
+
+        XCTAssertEqual(CanvasFolderListing.read(root, sort: .name).entries.map(\.name),
+                       ["Sub", "big.txt", "old.md", "small.txt"])
+        XCTAssertEqual(CanvasFolderListing.read(root, sort: .modified).entries.map(\.name),
+                       ["Sub", "small.txt", "big.txt", "old.md"])
+        XCTAssertEqual(CanvasFolderListing.read(root, sort: .size).entries.map(\.name),
+                       ["Sub", "big.txt", "small.txt", "old.md"])
+        let byKind = CanvasFolderListing.read(root, sort: .kind).entries
+        XCTAssertEqual(byKind.first?.name, "Sub")
+        XCTAssertEqual(byKind.dropFirst().map(\.kind), byKind.dropFirst().map(\.kind).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending })
+    }
+
+    /// Sorted before the cap: a big folder sorted by date shows its newest, not the newest of the first
+    /// few by name.
+    func testTheCapComesAfterTheSort() throws {
+        make(["a.txt", "b.txt", "z.txt"])
+        try FileManager.default.setAttributes([.modificationDate: Date()],
+                                              ofItemAtPath: root.appendingPathComponent("z.txt").path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -600)],
+                                              ofItemAtPath: root.appendingPathComponent("a.txt").path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -900)],
+                                              ofItemAtPath: root.appendingPathComponent("b.txt").path)
+        XCTAssertEqual(CanvasFolderListing.read(root, sort: .modified, limit: 1).entries.map(\.name), ["z.txt"])
+    }
+
+    /// The view settings live on the node, and a card set back to the defaults leaves no keys behind.
+    func testOptionsRoundTripOnTheNodeAndDefaultsWriteNothing() {
+        var node = CanvasNode(content: .file(path: "Folder", subpath: nil),
+                              frame: CanvasRect(x: 0, y: 0, width: 400, height: 400))
+        XCTAssertEqual(CanvasFolderOptions.of(node), CanvasFolderOptions())
+
+        CanvasFolderOptions(view: .icons, sort: .modified).set(on: &node)
+        XCTAssertEqual(CanvasFolderOptions.of(node), CanvasFolderOptions(view: .icons, sort: .modified))
+
+        CanvasFolderOptions().set(on: &node)
+        XCTAssertTrue(node.extra.isEmpty)
+
+        node.extra[CanvasFolderOptions.viewKey] = .string("colums")
+        XCTAssertEqual(CanvasFolderOptions.of(node).view, .list)
+    }
+
+    /// A card already up re-sorts when its sort changes.
+    func testChangingTheSortReReadsTheFolder() throws {
+        make(["a.txt", "b.txt"])
+        try Data(count: 10).write(to: root.appendingPathComponent("a.txt"))
+        try Data(count: 900).write(to: root.appendingPathComponent("b.txt"))
+        let model = CanvasFolderModel(url: root)
+        defer { model.stop() }
+        XCTAssertEqual(model.listing.entries.map(\.name), ["a.txt", "b.txt"])
+        model.options.sort = .size
+        XCTAssertEqual(model.listing.entries.map(\.name), ["b.txt", "a.txt"])
+    }
+
     // MARK: Staying true
 
     /// A file added to the folder shows up on a card already up.
@@ -98,6 +168,34 @@ final class CanvasFolderCardTests: XCTestCase {
         for y in stride(from: 0.0, to: 300, by: 2) {
             if let url = zones.link(at: CGPoint(x: 150, y: y)), seen.last != url.lastPathComponent {
                 seen.append(url.lastPathComponent)
+            }
+        }
+        XCTAssertEqual(seen, ["Sub", "one.md", "two.md"])
+    }
+
+    /// In the icon view each cell is the link: across the grid's first row, every icon answers with its
+    /// own item, in order.
+    func testEachIconIsALinkToItsItem() {
+        make(["one.md", "two.md"], folders: ["Sub"])
+        TestApp.start()
+        let model = CanvasFolderModel(url: root, options: CanvasFolderOptions(view: .icons))
+        defer { model.stop() }
+        let zones = CanvasLinkZones()
+        let hosting = NSHostingView(rootView: CanvasFolderCard(folder: model).canvasLinkZones(zones))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+
+        var seen: [String] = []
+        for y in stride(from: 0.0, to: 300, by: 4) {
+            for x in stride(from: 0.0, to: 300, by: 2) {
+                if let url = zones.link(at: CGPoint(x: x, y: y)), !seen.contains(url.lastPathComponent) {
+                    seen.append(url.lastPathComponent)
+                }
             }
         }
         XCTAssertEqual(seen, ["Sub", "one.md", "two.md"])

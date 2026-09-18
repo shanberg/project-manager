@@ -40,13 +40,24 @@ enum CanvasProjectNoteCard {
     /// notes file a step above it and gets no offer, which is right: it is a canvas, not a project's
     /// board.
     static func notes(forCanvasAt canvas: URL) -> URL? {
-        // `docs/<Title>.canvas` is where `getProjectCanvasPath` puts it; a board adopted from Obsidian
-        // can sit at the top of the project folder instead. Both are one step from the project.
-        let folder = canvas.deletingLastPathComponent()
-        let project = folder.lastPathComponent == "docs" ? folder.deletingLastPathComponent() : folder
         // `try?` flattens the throw and the "no notes file" nil into the one answer this wants.
-        guard let found = try? resolveNotesPath(projectPath: project.path) else { return nil }
+        guard let found = try? resolveNotesPath(projectPath: candidateProject(forCanvasAt: canvas).path)
+        else { return nil }
         return URL(fileURLWithPath: found)
+    }
+
+    /// The folder of the project this board is, or nil if it isn't a project's — by the same test as
+    /// `notes(forCanvasAt:)`. What New Folder puts on the board without asking: the folder you most
+    /// often want beside a project's board is the project's own.
+    static func projectFolder(forCanvasAt canvas: URL) -> URL? {
+        notes(forCanvasAt: canvas) == nil ? nil : candidateProject(forCanvasAt: canvas)
+    }
+
+    /// `docs/<Title>.canvas` is where `getProjectCanvasPath` puts a board; one adopted from Obsidian can
+    /// sit at the top of the project folder instead. Both are one step from the project.
+    private static func candidateProject(forCanvasAt canvas: URL) -> URL {
+        let folder = canvas.deletingLastPathComponent()
+        return folder.lastPathComponent == "docs" ? folder.deletingLastPathComponent() : folder
     }
 
     /// Whether that note is already on the board.
