@@ -171,6 +171,8 @@ final class CanvasTaskListModel {
 struct CanvasTaskListCard: View {
     let model: CanvasTaskListModel
     var zoom: Double = 1
+    /// How large the card is on screen, which Coming up's month says less at when it's small.
+    var onScreen = CanvasOnScreen()
     var onOpenProject: (String) -> Void = { _ in }
     /// Do something to rows, all in the project in `folder`. Nil draws the card read-only.
     var onAct: ((CanvasDayAction, [CanvasDayRow], _ folder: String) -> Void)?
@@ -339,8 +341,16 @@ struct CanvasTaskListCard: View {
 
     /// The next seven days as columns (D9), what's due pinned to the top of its day and what's overdue
     /// on today, in red. Rows are the list's rows — they tick, drop and open as they do there — with
-    /// only the project's mark after them, since a column is narrow.
+    /// only the project's mark after them while a column is narrow, and full size with its project's
+    /// name, as the list has them, once the card is wide enough. See `CanvasCalendarDetail.column`.
     private func dueWeek(_ span: CanvasCalendarSpan, _ groups: [CanvasTaskGroup]) -> some View {
+        GeometryReader { geometry in
+            dueWeek(span, groups, column: CanvasCalendarDetail.column(width: (geometry.size.width / 7 - 6) / zoom))
+        }
+    }
+
+    private func dueWeek(_ span: CanvasCalendarSpan, _ groups: [CanvasTaskGroup],
+                         column: CanvasCalendarDetail.Column) -> some View {
         let (byDay, overdue) = dueDays(groups)
         let today = CanvasTaskLists.todayISO()
         return VStack(spacing: 0) {
@@ -367,10 +377,10 @@ struct CanvasTaskListCard: View {
                                 Text("Overdue")
                                     .font(.system(size: 10 * zoom, weight: .semibold))
                                     .foregroundStyle(Color.red)
-                                ForEach(overdue, id: \.key) { item in row(item, among: groups, compact: true) }
+                                ForEach(overdue, id: \.key) { item in row(item, among: groups, column: column) }
                                 if !(byDay[day] ?? []).isEmpty { Divider().padding(.vertical, 2) }
                             }
-                            ForEach(byDay[day] ?? [], id: \.key) { item in row(item, among: groups, compact: true) }
+                            ForEach(byDay[day] ?? [], id: \.key) { item in row(item, among: groups, column: column) }
                         }
                         .padding(.horizontal, 3)
                         .padding(.vertical, 6)
@@ -392,41 +402,51 @@ struct CanvasTaskListCard: View {
 
     /// Five weeks from the start of this one (D9): each day with what falls due on it, as many as fit,
     /// and today with what's overdue in red above them. Days already past are drawn faint. A task's
-    /// line goes to its project; its words are in the help when they don't fit.
+    /// line goes to its project; its words are in the help when they don't fit, and run to a second
+    /// line when the day is wide and has the room. Too small on screen to read, a day is a dot per
+    /// task in its project's colour.
     private func dueMonth(_ span: CanvasCalendarSpan, _ groups: [CanvasTaskGroup]) -> some View {
         let (byDay, overdue) = dueDays(groups)
         let today = CanvasTaskLists.todayISO()
-        return CanvasMonthGrid(span: span, zoom: zoom, today: today, isQuiet: { $0 < today }) { day, lines in
+        return CanvasMonthGrid(span: span, zoom: zoom, today: today, isQuiet: { $0 < today }) { day, room in
             let items = byDay[day] ?? []
             let late = day == today ? overdue : []
-            VStack(alignment: .leading, spacing: 1) {
-                if !late.isEmpty {
-                    Text("\(late.count) overdue")
-                        .font(.system(size: 9.5 * zoom, weight: .semibold))
-                        .foregroundStyle(Color.red)
-                        .help(late.map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
-                }
-                let room = max(0, lines - (late.isEmpty ? 0 : 1))
-                // The last line says how many more, rather than one more task.
-                let shown = items.count > room ? max(0, room - 1) : items.count
-                ForEach(items.prefix(shown), id: \.key) { item in
-                    Button { onOpenProject(item.hit.projectFolder) } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            CanvasProjectMark(color: item.hit.projectColor, icon: item.hit.projectIcon, zoom: zoom * 0.8)
-                            Text(item.hit.text)
-                                .font(.system(size: 9.5 * zoom))
-                                .lineLimit(1)
-                        }
-                        .contentShape(Rectangle())
+            let lines = room.lines
+            if !onScreen.finePrintReadable {
+                CanvasDotsCell(colors: (late + items).map(\.hit.projectColor), zoom: zoom, large: true)
+                    .help((late + items).map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    if !late.isEmpty {
+                        Text("\(late.count) overdue")
+                            .font(.system(size: 9.5 * zoom, weight: .semibold))
+                            .foregroundStyle(Color.red)
+                            .help(late.map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
                     }
-                    .buttonStyle(.plain)
-                    .help("\(item.hit.text) · \(item.hit.projectName)")
-                }
-                if items.count > shown {
-                    Text(shown == 0 ? "\(items.count) due" : "+\(items.count - shown) more")
-                        .font(.system(size: 9 * zoom))
-                        .foregroundStyle(.secondary)
-                        .help(items.dropFirst(shown).map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+                    let left = max(0, lines - (late.isEmpty ? 0 : 1))
+                    // The last line says how many more, rather than one more task.
+                    let shown = items.count > left ? max(0, left - 1) : items.count
+                    // Two lines each, when the day is wide and every one of them has them.
+                    let wrap = room.width >= 120 && shown == items.count && items.count * 2 <= left
+                    ForEach(items.prefix(shown), id: \.key) { item in
+                        Button { onOpenProject(item.hit.projectFolder) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                CanvasProjectMark(color: item.hit.projectColor, icon: item.hit.projectIcon, zoom: zoom * 0.8)
+                                Text(item.hit.text)
+                                    .font(.system(size: 9.5 * zoom))
+                                    .lineLimit(wrap ? 2 : 1)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("\(item.hit.text) · \(item.hit.projectName)")
+                    }
+                    if items.count > shown {
+                        Text(shown == 0 ? "\(items.count) due" : "+\(items.count - shown) more")
+                            .font(.system(size: 9 * zoom))
+                            .foregroundStyle(.secondary)
+                            .help(items.dropFirst(shown).map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+                    }
                 }
             }
         }
@@ -528,7 +548,10 @@ struct CanvasTaskListCard: View {
 
     // MARK: A row
 
-    private func row(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup], compact: Bool = false) -> some View {
+    /// A row of the list, or of a week's `column`.
+    private func row(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup],
+                     column: CanvasCalendarDetail.Column? = nil) -> some View {
+        let compact = column == .compact
         let hit = item.hit
         let row = item.row()
         let folder = hit.projectFolder
@@ -562,7 +585,7 @@ struct CanvasTaskListCard: View {
             drag: {
                 NSItemProvider(object: CanvasDayRows.markdown(targets(item, among: groups).map { $0.row() }) as NSString)
             },
-            trailing: { if compact { compactChip(item) } else { chip(item) } },
+            trailing: { if column == nil || column == .named { chip(item) } else { compactChip(item) } },
             menu: { menu(item, among: groups) })
     }
 

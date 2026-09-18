@@ -493,6 +493,19 @@ extension CanvasBoardView {
         return menu
     }
 
+    /// What the header's `+` opens: the add commands and Add Card from Canvas, as a right-click on the
+    /// board leads with them — the same builders, so the two lists cannot drift. No point, so a new
+    /// card goes where the header's add has always put one (`add(_:at:)` with nil).
+    func addMenu() -> NSMenu {
+        menuPoint = nil
+        menuDivider = nil
+        menuTile = nil
+        let menu = NSMenu()
+        addCommandItems(menu, tabs: false)
+        addExistingCards(menu)
+        return menu
+    }
+
     /// The cards the header's `…` is about — see `CanvasCardActions.target` for the rule.
     var actionsTarget: CanvasCardActions.Target? {
         CanvasCardActions.target(focused: focusedTile ?? engagedPageCard?.node.id,

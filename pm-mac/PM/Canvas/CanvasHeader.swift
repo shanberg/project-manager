@@ -249,25 +249,11 @@ final class CanvasHeaderModel {
     /// workspace is a chip, so the row already answers "which of this board's places am I in" at all
     /// times, and it answers it in one place. What the pill keeps is the project's name and the way
     /// back to the board, both of which are true at a constant width.
-    /// Whether the `+` offers the project's own note — true only on a project's board that hasn't got
-    /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
-    /// question (`CanvasBoardView.offersProjectNoteCard`).
-    var offersProjectNote = false
-    /// Whether New Folder already knows which folder — a project's board does. See
-    /// `CanvasAddCommand.title(knowsFolder:)`.
-    var knowsFolder = false
-    /// What the `+` menu's Add Card from Canvas lists — the cards a tiled view isn't showing, and
-    /// nothing while there is no tiled view. Kept in step by `CanvasPaneController.refreshExistingCards`
-    /// for the reason `offersProjectNote` is.
-    var existingCards: [CanvasExistingCards.Section] = []
-
     // MARK: What the controls do. Supplied by the window controller.
 
-    /// Every item of the `+` menu's `CanvasAddCommand` list — see `CanvasBoardView.add(_:at:)`.
+    /// The `+`: open what can be added to the board, against the view given — see `addMenu`.
     @ObservationIgnored
-    var add: (CanvasAddCommand) -> Void = { _ in }
-    @ObservationIgnored
-    var addExistingCard: (String) -> Void = { _ in }
+    var showAddMenu: (NSView) -> Void = { _ in }
     @ObservationIgnored
     var setMode: (CanvasMode) -> Void = { _ in }
     @ObservationIgnored
@@ -462,50 +448,16 @@ struct CanvasControlCapsule: View {
 
     // MARK: Menus
 
+    /// The `+`: what can go on this board, as the board's own menu builds it (`CanvasBoardView.addMenu`).
+    ///
+    /// **AppKit's menu, not a SwiftUI one**, for the reason `HeaderMenuButton` gives and two of its own.
+    /// A SwiftUI `Menu` is built from state published ahead of time, so the pane had to keep a copy of
+    /// the board's cards in step with every edit; built as it opens, the list is simply current. And a
+    /// SwiftUI menu cannot say which item the pointer is on, which is what the card preview beside
+    /// Add Card from Canvas needs (`CanvasCardPreview`). It also draws the cards' icons, which the
+    /// SwiftUI copy asked for and did not get.
     private var addMenu: some View {
-        Menu {
-            // The board's right-click menu and a tile's strip offer the same list; all of them read it
-            // from `CanvasAddCommand` so they can't drift apart in wording or in what they offer again.
-            // What can't be a tile is dimmed while tiled — see `CanvasAddCommand.makesTile`.
-            ForEach(CanvasAddCommand.offered(projectNote: model.offersProjectNote), id: \.self) { command in
-                Button(command.title(knowsFolder: model.knowsFolder)) { model.add(command) }
-                    .disabled(model.tiling != nil && !command.makesTile)
-            }
-            // The cards already on the board that the tiled view isn't showing. Absent rather than dim
-            // when there are none, like the board's own menus — see `CanvasExistingCards`.
-            if !model.existingCards.isEmpty {
-                Divider()
-                Menu(CanvasExistingCards.title) {
-                    ForEach(Array(model.existingCards.enumerated()), id: \.offset) { _, section in
-                        if let frame = section.frame {
-                            Section(frame) { existingCardButtons(section.cards) }
-                        } else {
-                            existingCardButtons(section.cards)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "plus")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
-        .headerHoverHighlight()
-        .help("Add to this canvas")
-    }
-
-    /// One item per card, with the icon the board's menus give it.
-    private func existingCardButtons(_ cards: [CanvasExistingCards.Card]) -> some View {
-        ForEach(cards, id: \.id) { card in
-            Button { model.addExistingCard(card.id) } label: {
-                Label {
-                    Text(card.name)
-                } icon: {
-                    if let icon = CanvasBoardView.menuIcon(for: card.kind) { Image(nsImage: icon) }
-                }
-            }
-        }
+        HeaderMenuButton(symbol: "plus", help: "Add to this canvas", open: model.showAddMenu)
     }
 
     private var optionsMenu: some View {

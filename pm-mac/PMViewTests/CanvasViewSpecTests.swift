@@ -600,4 +600,57 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(entries.map(\.minute), [nil, 550, 855, 16 * 60 + 2])
         XCTAssertEqual(CanvasTimeGrid.ordered(list.sittings).map(\.name), ["a", "b", "c"])
     }
+
+    // MARK: How much a calendar says
+
+    func testAMonthsDaySaysMoreAsItHasRoom() {
+        typealias D = CanvasCalendarDetail
+        // Too narrow for a name, or too small on screen to read: dots.
+        XCTAssertEqual(D.monthCell(sittings: 3, width: 50, lines: 6, readable: true), .dots)
+        XCTAssertEqual(D.monthCell(sittings: 3, width: 150, lines: 6, readable: false), .dots)
+        // Room for everyone twice over, and width for a lede: two lines each.
+        XCTAssertEqual(D.monthCell(sittings: 3, width: 150, lines: 6, readable: true), .ledes)
+        // Room for names but not ledes, or not the width for them.
+        XCTAssertEqual(D.monthCell(sittings: 3, width: 150, lines: 5, readable: true), .names(shown: 3))
+        XCTAssertEqual(D.monthCell(sittings: 3, width: 80, lines: 6, readable: true), .names(shown: 3))
+        // More than fit: the last line is how many more.
+        XCTAssertEqual(D.monthCell(sittings: 5, width: 150, lines: 3, readable: true), .names(shown: 2))
+        // One line is no room for a name and a count.
+        XCTAssertEqual(D.monthCell(sittings: 2, width: 150, lines: 1, readable: true), .dots)
+        XCTAssertEqual(D.monthCell(sittings: 1, width: 150, lines: 1, readable: true), .names(shown: 1))
+    }
+
+    func testAWeeksBlockSaysMoreAsItHasRoom() {
+        typealias D = CanvasCalendarDetail
+        // What it always said: the time, the project, a line of lede.
+        XCTAssertEqual(D.weekBlock(lines: 1, width: 100, finished: 4, readable: true), .init(lede: 1))
+        // Then what came of it, then the tasks it finished, then more lede.
+        XCTAssertEqual(D.weekBlock(lines: 2, width: 100, finished: 4, readable: true), .init(lede: 1, counts: true))
+        XCTAssertEqual(D.weekBlock(lines: 4, width: 100, finished: 4, readable: true),
+                       .init(lede: 1, counts: true, tasks: 2))
+        XCTAssertEqual(D.weekBlock(lines: 9, width: 100, finished: 4, readable: true),
+                       .init(lede: 3, counts: true, tasks: 4))
+        XCTAssertEqual(D.weekBlock(lines: 9, width: 100, finished: 0, readable: true), .init(lede: 3, counts: true))
+        // Narrow, or unreadable: colour and a name.
+        XCTAssertEqual(D.weekBlock(lines: 9, width: 50, finished: 4, readable: true), .init(time: false))
+        XCTAssertEqual(D.weekBlock(lines: 9, width: 100, finished: 4, readable: false), .init(time: false))
+    }
+
+    func testAWeeksHoursFillTheCard() {
+        typealias D = CanvasCalendarDetail
+        XCTAssertEqual(D.perHour(available: 200, hours: 8, minimum: 46), 46)
+        XCTAssertEqual(D.perHour(available: 800, hours: 8, minimum: 46), 100)
+        XCTAssertEqual(D.column(width: 100), .compact)
+        XCTAssertEqual(D.column(width: 180), .regular)
+        XCTAssertEqual(D.column(width: 260), .named)
+    }
+
+    func testSmallPrintGivesWayWhenTheBoardIsZoomedOut() {
+        XCTAssertTrue(CanvasCalendarDetail.finePrintReadable(zoom: 1, scale: 1))
+        XCTAssertFalse(CanvasCalendarDetail.finePrintReadable(zoom: 1, scale: 0.6))
+        // The card's own zoom makes its type larger, so it reads further out.
+        XCTAssertTrue(CanvasCalendarDetail.finePrintReadable(zoom: 1.5, scale: 0.6))
+        // Still readable above where the card becomes its label.
+        XCTAssertLessThan(CanvasDetail.simplifiedBelow, 0.75)
+    }
 }

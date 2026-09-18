@@ -171,6 +171,7 @@
 		717B2F38C2DB89B572DDBB63 /* SessionNoteTakeover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BD74807560D1658286E39F5 /* SessionNoteTakeover.swift */; };
 		71C9733C5EE3F93A2890A308 /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D875EB76F3DC60050396219 /* EmojiCatalog.swift */; };
 		739CBFDC4342E91E456EC8B2 /* SessionPicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DAF694D06EA74A49555934 /* SessionPicks.swift */; };
+		739FAA9C215674B5EA1F5BB6 /* CanvasCardPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B466E68351649C62FC289A04 /* CanvasCardPreview.swift */; };
 		749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */; };
 		760E56D3DEF256FDB04DCCF8 /* CanvasSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 571876A037F38CB125519DF2 /* CanvasSearch.swift */; };
 		779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */; };
@@ -620,6 +621,7 @@
 		B1E01C208CC17DE6B8A683C8 /* CanvasSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelection.swift; sourceTree = "<group>"; };
 		B22B8BE339F897EB29DCBD6D /* ConfigWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigWatcher.swift; sourceTree = "<group>"; };
 		B358A62B026F88C33AA9FF42 /* MenubarRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarRing.swift; sourceTree = "<group>"; };
+		B466E68351649C62FC289A04 /* CanvasCardPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardPreview.swift; sourceTree = "<group>"; };
 		B4AAA2F26E9B7EB32CC24113 /* CanvasAddressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAddressBar.swift; sourceTree = "<group>"; };
 		B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossingBench.swift; sourceTree = "<group>"; };
 		B693908982BE1960D0F08898 /* CanvasBlockPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBlockPolicy.swift; sourceTree = "<group>"; };
@@ -952,6 +954,7 @@
 				44A6DF0164FC83CE59AED01C /* CanvasCardActions.swift */,
 				255D306E8C06804C6D670431 /* CanvasCardEditing.swift */,
 				3202FE3BD4B24BE3435D4E9B /* CanvasCardMedia.swift */,
+				B466E68351649C62FC289A04 /* CanvasCardPreview.swift */,
 				67C9C91443C938A6F7527779 /* CanvasCardSession.swift */,
 				7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */,
 				848FA341B00F0C77B03E0B5E /* CanvasCardSize.swift */,
@@ -1343,6 +1346,7 @@
 				34A846861B7E0FD63D4AE1FA /* CanvasCardActions.swift in Sources */,
 				1E6E3DD230FC8168A84B959C /* CanvasCardEditing.swift in Sources */,
 				46C367160209DA62CE6B4791 /* CanvasCardMedia.swift in Sources */,
+				739FAA9C215674B5EA1F5BB6 /* CanvasCardPreview.swift in Sources */,
 				9454422E4EE26FE4CCDAC870 /* CanvasCardSession.swift in Sources */,
 				5373F6519FFB9872B7CCB3C5 /* CanvasCardShows.swift in Sources */,
 				A9CD46E26DCCEFBF4B7CEAF2 /* CanvasCardSize.swift in Sources */,

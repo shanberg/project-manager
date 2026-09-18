@@ -648,6 +648,9 @@ extension CanvasBoardView {
     /// joins that tile's tabs (`addExistingCardAsTab`).
     func fillExistingCardsMenu(_ menu: NSMenu, action: Selector = #selector(addExistingCard(_:))) {
         let sections = existingCardSections
+        // The picture beside the highlighted card. Not over a delegate the menu already has — the View
+        // menu's forwards to this itself (`CanvasExistingCardsMenu`).
+        if menu.delegate == nil { menu.delegate = cardPreview }
         // Asked for now so the next opening has them: a menu is built synchronously and draws only the
         // icons that have already arrived. See `FaviconLoader.cached`.
         FaviconLoader.shared.warm(hosts: sections.flatMap(\.cards).compactMap { card -> String? in
@@ -1461,16 +1464,27 @@ extension CanvasBoardView {
 final class CanvasExistingCardsMenu: NSObject, NSMenuDelegate {
     static let shared = CanvasExistingCardsMenu()
 
+    /// The board the list was last filled from, whose `CanvasCardPreview` the highlights go to.
+    private weak var board: CanvasBoardView?
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let board = NSApp.target(forAction: #selector(CanvasBoardView.addExistingCard(_:)),
-                                 to: nil, from: nil) as? CanvasBoardView
+        board = NSApp.target(forAction: #selector(CanvasBoardView.addExistingCard(_:)),
+                             to: nil, from: nil) as? CanvasBoardView
         board?.fillExistingCardsMenu(menu)
         // Never an empty submenu: the menu bar can't leave the item out the way a contextual menu does,
         // so it says why there is nothing in it instead.
         if menu.items.isEmpty {
             menu.addItem(withTitle: "No Cards to Add", action: nil, keyEquivalent: "")
         }
+    }
+
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        board?.cardPreview.menu(menu, willHighlight: item)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        board?.cardPreview.menuDidClose(menu)
     }
 
     /// Nothing in here has a key equivalent. Saying so stops AppKit filling the list to search it every
