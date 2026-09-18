@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18, nothing built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times) and 2 (`session.list`, `pm day`) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -292,6 +292,23 @@ an Obsidian edit an hour ago is in the answer.
 `pm day [today|yesterday|week|DATE]` is the CLI's `pm done` with the prose kept in, and Raycast gets
 a Today command for free. Contract **1.14.0**.
 
+**As built (step 2).** `SittingList.swift`. The rules D4 and D5 left open were settled this way:
+
+- **Roles overlap on purpose.** A task written in a sitting and finished in it is in both `written` and
+  `finished`. Every role then means one thing, and a renderer dedupes by `ref`, as `pm day` does. A
+  finished task carries the `ref` of its line *now*, or none when the line has been tidied away.
+- **An untimed sitting** owns what happened on its day before the first timed sitting began. It is the
+  "Earlier" mark, and it sorts first within its day.
+- **The midnight rule** measures from the sitting's last completion, and that completion may fall on
+  the day before the span. So Today reads events from the previous day on, and it lists only the
+  ones owned by today's sittings or by nobody. A 12:40 AM tick that belongs to last night's sitting is
+  last night's work and doesn't show in Today.
+- **The archive is included** when `projects` is absent. The staleness rule makes it nearly free, and
+  a project archived today had sittings today.
+- `period` gained `yesterday` (on `DoneRange`, so `task.done` could take it later).
+- **`projects`** is a list field, the contract's first (`stringList`). `[[links]]` are unwrapped and
+  masters bring their members.
+
 Coming up needs `task.whatsDue` to take a range, not just "soon". Projects needs `project.list` to carry
 `lastActivity`: the later of its newest sitting's start and the notes file's modification time.
 
@@ -366,12 +383,12 @@ What it leaves open, recorded so the views don't paper over it:
 
 Each step ships on its own.
 
-1. **Start times in headings (D4).** It's first because it's the only step that can't be backfilled:
+1. ✓ **Start times in headings (D4).** It's first because it's the only step that can't be backfilled:
    every sitting started without one reads as "Earlier" forever. The label splits into a time and a
    name, every new sitting is written with its time, and renaming keeps the time. PmLib tests cover
    each heading shape in D4 parsing as it says, a rename keeping the time, and the first sitting of a
    day getting one.
-2. **`session.list` and `pm day` (D8).** Tests cover attributing a completion to the sitting it fell
+2. ✓ **`session.list` and `pm day` (D8).** Tests cover attributing a completion to the sitting it fell
    in, a completion in no sitting, and a completion after midnight staying with the evening's sitting.
 3. **The view card and Day (D2, D3, D5).** A text node carrying `pmView`, the row vocabulary with the
    project chip, the rail and the Week lede. Reading only.

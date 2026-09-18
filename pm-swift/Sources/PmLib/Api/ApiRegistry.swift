@@ -20,7 +20,7 @@ public enum ApiTier: String, Codable, CaseIterable {
 
 public struct ApiField: Equatable {
     public enum Kind: String, Equatable {
-        case string, integer, boolean, taskRef, taskRefList, any
+        case string, integer, boolean, taskRef, taskRefList, stringList, any
     }
     public let name: String
     public let kind: Kind
@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.13.0"
+public let apiContractVersion = "1.14.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -275,6 +275,14 @@ public enum ApiRegistry {
                                ApiField("scope", .string, "Which projects to look in. Default all.",
                                         allowed: ["active", "archive", "all"]),
                                ApiField("includeDropped", .boolean, "Also list tasks dropped in the period, marked. Default false.")]),
+        ApiActionSpec(name: "session.list", tier: .query,
+                      summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere.",
+                      fields: [ApiField("period", .string, "Which span. Default today.",
+                                        allowed: ["today", "yesterday", "week"]),
+                               ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
+                               ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
         ApiActionSpec(name: "capture.parse", tier: .query,
                       summary: "Read a typed capture line: its text, its due date, and the project it names.",
                       fields: [ApiField("text", .string, required: true,
@@ -324,6 +332,9 @@ extension ApiField {
         case .integer: out["type"] = .string("integer")
         case .boolean: out["type"] = .string("boolean")
         case .any: break  // a string, a number, or an array of strings, depending on the key
+        case .stringList:
+            out["type"] = .string("array")
+            out["items"] = .object(["type": .string("string")])
         case .taskRefList:
             out["type"] = .string("array")
             out["items"] = ApiField("item", .taskRef, description).schema

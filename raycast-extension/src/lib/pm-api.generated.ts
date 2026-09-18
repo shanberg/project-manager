@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.13.0";
+export const API_CONTRACT_VERSION = "1.14.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -178,6 +178,18 @@ export interface SessionDeleteInput {
   sessionDigest?: string;
   /** Which session of that date. Default 0. */
   sessionOrdinal?: number;
+}
+
+/** The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere. */
+export interface SessionListInput {
+  /** Which span. Default today. */
+  period?: "today" | "yesterday" | "week";
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
+  /** First day to include, YYYY-MM-DD. Overrides the period's start. */
+  since?: string;
+  /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
+  until?: string;
 }
 
 /** Append a note to the current session, starting one if needed. */
@@ -468,6 +480,7 @@ export interface ApiInputs {
   "project.setPartOf": ProjectSetPartOfInput;
   "project.unarchive": ProjectUnarchiveInput;
   "session.delete": SessionDeleteInput;
+  "session.list": SessionListInput;
   "session.note": SessionNoteInput;
   "session.rename": SessionRenameInput;
   "session.start": SessionStartInput;
@@ -526,6 +539,7 @@ export const API_TIERS: Record<
   "project.setPartOf": "mutation",
   "project.unarchive": "mutation",
   "session.delete": "mutation",
+  "session.list": "query",
   "session.note": "mutation",
   "session.rename": "mutation",
   "session.start": "mutation",

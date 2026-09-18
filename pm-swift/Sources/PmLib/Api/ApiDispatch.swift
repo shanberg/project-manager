@@ -118,6 +118,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "new": input.new.map(JSONValue.bool),
         "since": input.since.map(JSONValue.string),
         "until": input.until.map(JSONValue.string),
+        "projects": input.projects.map { .array($0.map(JSONValue.string)) },
     ]
 }
 
@@ -511,6 +512,19 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if dropped > 0 { summary += ", \(dropped) dropped" }
         summary += projects > 1 ? " across \(projects) projects." : "."
         return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(items))
+
+    case "session.list":
+        let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
+        let list = try sessionList(in: range, projects: input.projects)
+        let done = list.sittings.reduce(0) { $0 + $1.finished.count }
+            + list.elsewhere.filter { !$0.dropped }.count
+        let projects = Set(list.sittings.map(\.projectFolder)).count
+        var summary = list.sittings.isEmpty
+            ? "No sittings"
+            : "\(list.sittings.count) sitting\(list.sittings.count == 1 ? "" : "s")"
+        if projects > 1 { summary += " in \(projects) projects" }
+        if done > 0 { summary += ", \(done) done" }
+        return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
 
     case "capture.parse":
         let line = input.text ?? ""

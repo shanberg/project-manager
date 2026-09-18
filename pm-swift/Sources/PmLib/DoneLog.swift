@@ -276,7 +276,7 @@ public struct DoneRange: Equatable {
     public let start: Date
     public let end: Date
 
-    /// `today` is the day `now` falls in; `week` is the calendar week, by the reader's own first
+    /// `today` is the day `now` falls in, `yesterday` the one before it; `week` is the calendar week, by the reader's own first
     /// weekday. `since` and `until` are local dates, both inclusive, and override the period's ends.
     public static func resolve(period: String?, since: String?, until: String?, now: Date = Date(),
                                calendar: Calendar = .current) throws -> DoneRange {
@@ -286,6 +286,10 @@ public struct DoneRange: Equatable {
         if period == "week", let week = calendar.dateInterval(of: .weekOfYear, for: now) {
             start = week.start
             end = week.end
+        }
+        if period == "yesterday", let before = calendar.date(byAdding: .day, value: -1, to: today) {
+            start = before
+            end = today
         }
         if let since { start = try localDay(since, calendar: calendar) }
         if let until {

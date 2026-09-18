@@ -29,6 +29,8 @@ private func dispatch(cmd: String, args: [String]) {
         runNotes(args: args)
     case "done":
         runDone(args: args)
+    case "day":
+        runDay(args: args)
     case "api":
         runApi(args: args)
     case "mcp":
