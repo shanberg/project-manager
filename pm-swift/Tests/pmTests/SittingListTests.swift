@@ -263,6 +263,16 @@ final class SittingListTests: XCTestCase {
                        "Intro\n- plain bullet\n\nEnd")
     }
 
+    /// Prose is sometimes structured and sometimes not (docs/views.md D4): a name wins, then an opening
+    /// subheading, then the first paragraph.
+    func testALedeIsTheNameElseTheSubheadingElseTheFirstParagraph() {
+        XCTAssertEqual(sittingLede(name: "Week in review", prose: "#### Nav\nMore"), "Week in review")
+        XCTAssertEqual(sittingLede(name: "", prose: "\n#### Nav breakpoints\n- a bullet"), "Nav breakpoints")
+        XCTAssertEqual(sittingLede(name: "", prose: "Came back to the nav.\nStill on it.\n\nLater."),
+                       "Came back to the nav.\nStill on it.")
+        XCTAssertEqual(sittingLede(name: "", prose: ""), "")
+    }
+
     func testYesterdayIsTheDayBefore() throws {
         let now = moment(18, 10)
         let yesterday = try DoneRange.resolve(period: "yesterday", since: nil, until: nil, now: now, calendar: calendar)

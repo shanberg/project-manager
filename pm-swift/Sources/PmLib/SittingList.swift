@@ -34,6 +34,10 @@ public struct SittingEntry: Codable, Equatable {
     public let projectFolder: String
     public let projectName: String
     public let isArchived: Bool
+    /// The project's `pm-color` and `pm-icon`, as its frontmatter writes them, for the chip a view draws
+    /// beside every sitting. Nil when it has none.
+    public var projectColor: String? = nil
+    public var projectIcon: String? = nil
     /// The sitting as a `SessionRef` names it: its ISO date, which of that date's sittings (0 is the
     /// newest), and the digest of its label.
     public let session: String
@@ -242,6 +246,22 @@ func clockTime(_ time: String, on day: Date, calendar: Calendar = .current) -> D
     return calendar.date(bySettingHour: parts.hour ?? 0, minute: parts.minute ?? 0, second: 0, of: day)
 }
 
+/// What a sitting was about, in a line or a paragraph: its name if someone gave it one, else its first
+/// subheading, else the first paragraph of its prose. What a week draws for each sitting (docs/views.md
+/// D4, D5), since seven days of prose in full is a document rather than a view. Empty for a sitting that
+/// is only tasks.
+public func sittingLede(name: String, prose: String) -> String {
+    if !name.isEmpty { return name }
+    let first = prose.components(separatedBy: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    if let first, first.range(of: #"^#{1,6}\s+\S"#, options: .regularExpression) != nil {
+        return first.replacingOccurrences(of: #"^#{1,6}\s+"#, with: "", options: .regularExpression)
+    }
+    let paragraph = prose.components(separatedBy: "\n\n").first {
+        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    return (paragraph ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// A sitting's writing without its task lines, which the view draws as rows of their own.
 func sittingProse(_ body: String) -> String {
     body.components(separatedBy: "\n")
@@ -311,10 +331,17 @@ public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Dat
             }
             guard let read = try? notesShow(rawText: rawText) else { continue }
             let picks = PickLog.resolved(projectPath: projectPath, notes: read.notes, todos: read.todos)
-            answer = answer.merged(with: sittings(
+            var part = sittings(
                 projectFolder: folder, isArchived: scope.isArchived, notes: read.notes, todos: read.todos,
                 picks: picks, doneEvents: DoneLog.standing(DoneLog.events(projectPath: projectPath)),
-                in: range, notesModified: modified, now: now))
+                in: range, notesModified: modified, now: now)
+            let color = projectColor(rawText: rawText)?.value
+            let icon = projectIcon(rawText: rawText)?.value
+            for i in part.sittings.indices {
+                part.sittings[i].projectColor = color
+                part.sittings[i].projectIcon = icon
+            }
+            answer = answer.merged(with: part)
         }
     }
     return answer.sorted()

@@ -26,6 +26,9 @@ enum CanvasAddCommand: CaseIterable {
     /// see `CanvasFolderCard` — and asked for on its own because an open panel that takes files and
     /// folders both makes opening a folder mean choosing it.
     case folder
+    /// A Day view: the sittings of today across every project (docs/views.md). A text node carrying
+    /// `pmView`, set to another day or narrowed to some projects from its own menu.
+    case dayView
     /// The project's own note — offered only by a board that is a project's and hasn't got it. See
     /// `CanvasProjectNoteCard`, which owns the question of when.
     case projectNote
@@ -43,6 +46,7 @@ enum CanvasAddCommand: CaseIterable {
         // No ellipsis: there is nothing to ask. The board already knows which document this is — that
         // is the whole difference between it and New File….
         case .projectNote: return "New Project Note"
+        case .dayView: return "New Day View"
         }
     }
 

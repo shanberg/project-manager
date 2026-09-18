@@ -596,6 +596,10 @@ extension CanvasBoardView {
                 running.state = selectedLinkCards.allSatisfy(\.keepsPageRunning) ? .on : .off
                 addSessionMenu(menu, card: card)
             }
+        case .text where nodeViews[id] is CanvasViewNodeView:
+            // A view has no text to edit — its text is the one line Obsidian shows — so its menu is its
+            // two settings: when, and which projects (docs/views.md D2).
+            addViewMenus(menu)
         case .text:
             // Named for what it edits, like every sibling in this switch — "Edit Address…" on a link,
             // "Rename Frame…" below. A bare "Edit" was the only item in the menu that made you work
@@ -668,6 +672,65 @@ extension CanvasBoardView {
 
         let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
         item.submenu = shows
+    }
+
+    /// The view cards in the selection — what the Period and Projects menus act on.
+    private var selectedViewCards: [CanvasViewNodeView] {
+        selection.compactMap { nodeViews[$0] as? CanvasViewNodeView }
+    }
+
+    /// A view's two settings, as radio lists — ticked only where every selected view agrees, like Shows.
+    private func addViewMenus(_ menu: NSMenu) {
+        let cards = selectedViewCards
+        guard !cards.isEmpty else { return }
+        let periods = NSMenu(title: "Period")
+        var choices = CanvasViewSpec.Period.relative
+        // A card pinned to a date keeps that date on offer, so the tick has somewhere to be.
+        for card in cards { if case .day = card.model.spec.period, !choices.contains(card.model.spec.period) {
+            choices.append(card.model.spec.period)
+        } }
+        for period in choices {
+            let item = add(periods, period.title, #selector(setViewPeriod(_:)))
+            item.representedObject = period.value
+            item.state = cards.allSatisfy { $0.model.spec.period == period } ? .on : .off
+        }
+        menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
+
+        let projects = NSMenu(title: "Projects")
+        for (title, value) in [(CanvasViewSpec.Projects.everything.title, "everything"),
+                               (CanvasViewSpec.Projects.board.title, "board")] {
+            let item = add(projects, title, #selector(setViewProjects(_:)))
+            item.representedObject = value
+            let wanted: CanvasViewSpec.Projects = value == "board" ? .board : .everything
+            item.state = cards.allSatisfy { $0.model.spec.projects == wanted } ? .on : .off
+        }
+        menu.addItem(withTitle: "Projects", action: nil, keyEquivalent: "").submenu = projects
+    }
+
+    @objc func setViewPeriod(_ sender: Any?) {
+        guard let value = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        let period = CanvasViewSpec.Period(value: value)
+        changeViews("Show \(period.title)") { $0.period = period }
+    }
+
+    @objc func setViewProjects(_ sender: Any?) {
+        guard let value = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        let projects: CanvasViewSpec.Projects = value == "board" ? .board : .everything
+        changeViews("Show \(projects.title)") { $0.projects = projects }
+    }
+
+    /// Change a setting on every selected view, as one undoable edit to the document — the settings are
+    /// on the node, like Shows.
+    private func changeViews(_ actionName: String, _ change: @escaping (inout CanvasViewSpec) -> Void) {
+        let ids = Set(selectedViewCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.change(actionName) { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                guard var spec = CanvasViewSpec.of(doc.nodes[index]) else { continue }
+                change(&spec)
+                CanvasViewSpec.set(spec, on: &doc.nodes[index])
+            }
+        }
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -1137,6 +1200,7 @@ extension CanvasBoardView {
         case .file: addFileCard(at: where_)
         case .folder: addFolderCard(at: where_)
         case .projectNote: addProjectNoteCard(at: where_)
+        case .dayView: addViewCard(.newDay, at: where_)
         }
     }
 
@@ -1207,6 +1271,16 @@ extension CanvasBoardView {
                                                       width: 250, height: 60)),
                          actionName: "Add Card")
         beginEditing(id)
+    }
+
+    /// A view card (docs/views.md): a text node whose text says what it is, for Obsidian, and whose
+    /// `pmView` says what Folio draws in its place. Tall, because a day is a column.
+    func addViewCard(_ spec: CanvasViewSpec, at where_: CanvasPoint?) {
+        let at = where_ ?? centreOfVisibleBoard
+        var node = CanvasNode(content: .text(spec.noteText),
+                              frame: CanvasRect(x: at.x - 180, y: at.y - 240, width: 360, height: 480))
+        CanvasViewSpec.set(spec, on: &node)
+        addCard(node, actionName: "Add View")
     }
 
     /// Ask for a web address, and hand back a usable one or nothing at all.

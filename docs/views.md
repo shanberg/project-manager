@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times) and 2 (`session.list`, `pm day`) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`) and 3 (the Day card, reading only) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -342,6 +342,33 @@ view's CLI command. Because every view is a contract query first (the model's ru
 formatter per view in PmLib, not a second implementation. It is plain markdown with `[[links]]`,
 so pasting it into Obsidian gives you links that work.
 
+### As built (step 3)
+
+`CanvasViewSpec` (the node's settings), `CanvasDayCard` (the model and the drawing) and
+`CanvasViewNodeView` (the card on the board).
+
+- **Made from the add list** as **New Day View**: Today, across everything, 360×480. Its menu is
+  **Period** (Today, Yesterday, This Week, and a pinned date when the file has one) and **Projects**
+  (All Projects, Projects on This Board). Both are one undoable change to the node, like Shows.
+  Choose Date… and naming projects in the menu aren't built. A pinned date or a `pmProjects` list
+  written in the file works.
+- **Polled, every 20 seconds while the card exists.** A day moves in files the app never opens, and
+  nothing announces all of them. The same poll rolls a Today card over at midnight and takes *now*
+  off a sitting that has gone quiet. A card scrolled off the board stops polling, as a project card
+  lets go of its store.
+- **One list, not the rail yet.** A day is drawn as D5's list: the start time in a gutter, the project
+  chip, prose in full, tasks. A week is a caption per day and a lede per sitting. The chip already
+  carries the sitting's name, so a week's lede comes from the prose, and one that only repeats the name
+  is left out. The rail, week and month layouts are D9's.
+- **The chip** is the project's `pm-icon` where it can be drawn, else its `pm-color` as a dot. So
+  `session.list` now carries `projectColor` and `projectIcon`.
+- **Rows** are the project card's parts (`TaskStatusIcon`, `RenderedNote`, the origin chip's look),
+  drawn from `SittingTask` rather than from `Todo`, since a view holds no store. A task that's both
+  written and finished in the sitting is drawn once, deduped by `ref`.
+- **Clicking a project chip** opens that project. It works once the card is stepped into, as every
+  control on a card does. Nothing else acts yet, since acting is step 4.
+- Zoomed out, the card is one line: *Today: 4 sittings · 7 done*.
+
 ## Calendars, eventually
 
 Sketched only so that the views leave room for it. Nothing here is decided.
@@ -390,7 +417,7 @@ Each step ships on its own.
    day getting one.
 2. ✓ **`session.list` and `pm day` (D8).** Tests cover attributing a completion to the sitting it fell
    in, a completion in no sitting, and a completion after midnight staying with the evening's sitting.
-3. **The view card and Day (D2, D3, D5).** A text node carrying `pmView`, the row vocabulary with the
+3. ✓ **The view card and Day (D2, D3, D5).** A text node carrying `pmView`, the row vocabulary with the
    project chip, the rail and the Week lede. Reading only.
 4. **Acting from a view (D6).** Acquire-on-act through `StoreRegistry`, and the undo route. A
    `CanvasUndoRouteTests` case covers a tick on a Day row being undone by ⌘Z on the board.
