@@ -78,6 +78,7 @@ final class CanvasPageDragOriginTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         TestApp.start()
+        HeldButtons.stand(in: true)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
                           styleMask: [.titled], backing: .buffered, defer: false)
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
@@ -102,6 +103,7 @@ final class CanvasPageDragOriginTests: XCTestCase {
 
     override func tearDown() async throws {
         window?.orderOut(nil)
+        HeldButtons.stand(in: false)
         try await super.tearDown()
     }
 
@@ -155,6 +157,7 @@ final class CanvasPageDragOriginTests: XCTestCase {
         // with nothing to end it. Everything is posted first and the runloop is turned below, where an
         // up is already at the head of the queue.
         drag(to: zone, steps: 6, pumping: false)
+        HeldButtons.mask = 0  // the release is the up the loop is handed below
         seeOutAnyTrackingLoop(in: window, at: page.convert(zone, to: nil), for: 1.5)
         try await settle()
         let seen = try await counts()
@@ -279,6 +282,7 @@ final class CanvasPageDragOriginTests: XCTestCase {
                                              pressure: type == .leftMouseUp ? 0 : 1) else {
             return XCTFail("could not make a \(type) event")
         }
+        HeldButtons.mask = type == .leftMouseUp ? 0 : 1
         switch type {
         case .leftMouseDown: page.mouseDown(with: event)
         case .leftMouseDragged: page.mouseDragged(with: event)
@@ -318,6 +322,32 @@ final class CanvasPageDragOriginTests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         }
     }
+}
+
+/// **The buttons the page hears are down are the real mouse's, not the event's.** WebKit fills in a
+/// mouse event's `buttons` from `NSEvent.pressedMouseButtons` — the hardware, whatever the event being
+/// delivered says — and a `mouseup` while a button is still down is a chorded release, which the page
+/// hears as a `pointermove` rather than a `pointerup`. So a run with someone clicking alongside it
+/// loses its `pointerup` whenever a real click happens to be down at the release.
+///
+/// Stood in for while these tests run, so the page hears the buttons the posted events hold: down from
+/// a press until its release, whatever anyone is doing with the real mouse.
+private enum HeldButtons {
+    nonisolated(unsafe) static var mask = 0
+    private nonisolated(unsafe) static var standing = false
+
+    static func stand(in on: Bool) {
+        guard on != standing,
+              let real = class_getClassMethod(NSEvent.self, #selector(getter: NSEvent.pressedMouseButtons)),
+              let ours = class_getClassMethod(NSEvent.self, #selector(getter: NSEvent.pmHeldButtons)) else { return }
+        method_exchangeImplementations(real, ours)
+        standing = on
+        mask = 0
+    }
+}
+
+private extension NSEvent {
+    @objc class var pmHeldButtons: Int { HeldButtons.mask }
 }
 
 /// A board that only says what it was asked.

@@ -104,9 +104,19 @@ extension CanvasBoardView {
     /// `…` gets from `cardActionsMenu` — so the header and the contextual menu cannot offer different
     /// verbs for the same tile.
     ///
-    /// **Nil in a workspace of one tile**, which is the project-note view: a tile that already fills the
-    /// room has nothing to maximize.
+    /// **A card's too, and it had none.** ⌥⌘Return fills the window with a card on the board, which is
+    /// a tiling of one card, and a tiling of one has neither a handlebar nor — under the rule below — a
+    /// capsule button, so the way back was a key or a menu item you had to already know was there. The
+    /// card filling the window gets Restore, and one card selected on the board gets the Maximize that
+    /// would get it there.
+    ///
+    /// **Otherwise nil in a workspace of one tile**, which is the project-note view: a tile that already
+    /// fills the room has nothing to maximize and nothing to put back.
     var tileControls: CanvasHeaderModel.TileControls? {
+        if maximizedCard != nil, isTiled {
+            return CanvasHeaderModel.TileControls(isMaximized: true, isCard: true)
+        }
+        if maximizableCard != nil { return CanvasHeaderModel.TileControls(isMaximized: false, isCard: true) }
         guard let tiling, tiling.ids.count > 1, focusedTile != nil else { return nil }
         return CanvasHeaderModel.TileControls(isMaximized: tiling.maximized != nil)
     }

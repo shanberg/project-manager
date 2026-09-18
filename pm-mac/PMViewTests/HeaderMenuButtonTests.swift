@@ -38,6 +38,37 @@ final class HeaderMenuButtonTests: XCTestCase {
         XCTAssertTrue(opened.first === control)
     }
 
+    /// ⌃Return opens the same menu against the same button: a changed token opens it once, and the
+    /// token the button first appears with opens nothing.
+    func testAChangedTokenOpensAgainstTheButton() throws {
+        TestApp.start()
+        final class Token: ObservableObject { @Published var value = 7 }
+        struct Host: View {
+            @ObservedObject var token: Token
+            let open: (NSView) -> Void
+            var body: some View {
+                HeaderMenuButton(symbol: "ellipsis", help: "Actions", openToken: token.value, open: open)
+            }
+        }
+        var opened: [NSView] = []
+        let token = Token()
+        let hosting = NSHostingView(rootView: Host(token: token) { opened.append($0) })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 80, height: 40), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertTrue(opened.isEmpty, "appearing opened the menu")
+
+        token.value += 1
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertTrue(opened.first === controls(in: hosting).first)
+    }
+
     private func controls(in view: NSView) -> [NSControl] {
         view.subviews.flatMap { ($0 as? NSControl).map { [$0] } ?? controls(in: $0) }
     }

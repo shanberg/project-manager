@@ -29,6 +29,9 @@ final class CanvasLinkZones {
     struct Zone: Equatable {
         let url: URL
         let rect: CGRect
+        /// Drawn outside the card's scroll view — a folder card's way back, in its header — so where the
+        /// list has scrolled to has no say over it. See `CanvasNodeView.link(at:)`.
+        var fixed = false
     }
 
     /// Per reporter, so one piece of text leaving takes only its own links with it.
@@ -95,9 +98,14 @@ final class CanvasLinkZones {
     /// A point's grace around each rectangle: a run's typographic bounds are exactly as tall as the
     /// line, and a press on the underline's lower edge is a press on the link.
     func link(at point: CGPoint) -> URL? {
+        zone(at: point)?.url
+    }
+
+    /// The zone drawn at `point`, in `space` — `link(at:)` with whether it scrolls.
+    func zone(at point: CGPoint) -> Zone? {
         for reported in zones.values {
             if let zone = reported.first(where: { $0.rect.insetBy(dx: -1, dy: -1).contains(point) }) {
-                return zone.url
+                return zone
             }
         }
         return nil
@@ -158,9 +166,10 @@ extension View {
         modifier(LinkRowZone(list: list, slot: slot))
     }
 
-    /// Report this whole view as a link to `url`, to the card it is on.
-    func reportsLinkZone(_ url: URL) -> some View {
-        modifier(ViewLinkZone(url: url))
+    /// Report this whole view as a link to `url`, to the card it is on. `fixed` is for a link drawn
+    /// outside the card's scroll view — see `CanvasLinkZones.Zone.fixed`.
+    func reportsLinkZone(_ url: URL, fixed: Bool = false) -> some View {
+        modifier(ViewLinkZone(url: url, fixed: fixed))
     }
 }
 
@@ -207,6 +216,7 @@ private struct TextLinkZones: ViewModifier {
 
 private struct ViewLinkZone: ViewModifier {
     let url: URL
+    let fixed: Bool
     @Environment(\.canvasLinkZones) private var registry
     @State private var id = UUID()
 
@@ -215,7 +225,8 @@ private struct ViewLinkZone: ViewModifier {
             content.background {
                 GeometryReader { proxy in
                     let zone = CanvasLinkZones.Zone(url: url,
-                                                    rect: proxy.frame(in: .named(CanvasLinkZones.space)))
+                                                    rect: proxy.frame(in: .named(CanvasLinkZones.space)),
+                                                    fixed: fixed)
                     Color.clear
                         .onChange(of: zone, initial: true) { _, now in registry.set([now], for: id) }
                         .onDisappear { registry.clear(id) }

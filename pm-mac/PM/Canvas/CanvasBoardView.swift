@@ -517,6 +517,8 @@ final class CanvasBoardView: NSView {
 
     /// Told when the selection changes, so the floating bar can follow it.
     var onSelectionChanged: ((Set<String>) -> Void)?
+    /// ⌃Return: open the header's `…`, which only the pane can reach. See `showCardActions`.
+    var onShowCardActions: (() -> Void)?
 
     init(store: CanvasDocumentStore, scrollView: NSScrollView) {
         self.store = store

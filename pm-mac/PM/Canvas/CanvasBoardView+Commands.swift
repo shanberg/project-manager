@@ -469,37 +469,77 @@ extension CanvasBoardView {
         addTileSection(menu, id: id)
     }
 
-    /// What the card you are standing in can be told — the focused tile, else the card you have
-    /// stepped into — as the header's `…` opens it.
+    /// What the cards you are standing in can be told — the focused tile, else the card you have
+    /// stepped into, else the selection — as the header's `…` opens it.
     ///
-    /// **The same menu a right-click on it gives, not a list of its own.** The header's menu used to be
+    /// **The same menu a right-click on them gives, not a list of its own.** The header's menu used to be
     /// written out separately, in SwiftUI, and so knew only what somebody had remembered to copy into
     /// it: the page's commands and four of the tile's. Anything a kind of card added to its contextual
     /// menu — a project card's Shows, a folder card's View — was missing from the one menu that is
     /// always on screen. Built here, a card's commands appear in both places or in neither.
     func cardActionsMenu() -> NSMenu? {
-        guard let id = actionsCard else { return nil }
-        if !selection.contains(id) { selection = [id] }
+        guard let target = actionsTarget else { return nil }
+        if !target.ids.isSubset(of: selection) { selection = target.ids }
         menuPoint = nil
         menuDivider = nil
         let menu = NSMenu()
-        if tiling?.ids.contains(id) == true {
+        if target.ids.count == 1, let id = target.anchor, tiling?.ids.contains(id) == true {
             menuTile = id
             buildTileMenu(menu, id: id)
         } else {
             menuTile = nil
-            buildCardMenu(menu, id: id)
+            buildCardMenu(menu, id: target.anchor)
         }
         return menu
     }
 
-    /// The one card the header's `…` is about: the focused tile, else the page you have stepped into,
-    /// else the one card selected. Nil for several, for none, and for a line — a line's menu is about
-    /// the line, and the header's is about a card.
-    var actionsCard: String? {
-        if let id = focusedTile ?? engagedPageCard?.node.id { return id }
-        guard selection.count == 1, let id = selection.first, document.node(id: id) != nil else { return nil }
-        return id
+    /// The cards the header's `…` is about — see `CanvasCardActions.target` for the rule.
+    var actionsTarget: CanvasCardActions.Target? {
+        CanvasCardActions.target(focused: focusedTile ?? engagedPageCard?.node.id,
+                                 selection: selection, kind: cardKind)
+    }
+
+    /// What sort of card `id` is, as far as its menu goes — nil for a line.
+    func cardKind(_ id: String) -> CanvasCardActions.Kind? {
+        guard let node = document.node(id: id) else { return nil }
+        switch node.content {
+        case .file:
+            let card = nodeViews[id] as? CanvasFileNodeView
+            if card?.projectFolderName != nil { return .project }
+            return card?.folderURL != nil ? .folder : .file
+        case .link: return .link
+        case .text: return .text
+        case .group: return .frame
+        }
+    }
+
+    /// The folder toggle in the header, when the `…` is about folder cards and nothing else. Reads as
+    /// icons only when every one of them is — see `CanvasHeaderModel.FolderControls`.
+    var folderControls: CanvasHeaderModel.FolderControls? {
+        guard let target = actionsTarget, let anchor = target.anchor, cardKind(anchor) == .folder else {
+            return nil
+        }
+        let icons = target.ids.allSatisfy { id in
+            document.node(id: id).map { CanvasFolderOptions.of($0).view == .icons } ?? false
+        }
+        return CanvasHeaderModel.FolderControls(view: icons ? .icons : .list)
+    }
+
+    /// The header's folder toggle: every folder card it is about, to the view it offers.
+    func toggleFolderView() {
+        guard let target = actionsTarget, let current = folderControls?.view else { return }
+        if !target.ids.isSubset(of: selection) { selection = target.ids }
+        let next: CanvasFolderView = current == .list ? .icons : .list
+        setFolderOptions("View \(next.title)") { $0.view = next }
+    }
+
+    /// ⌃Return — the header's `…`, from the keyboard. Control is what makes a click a right-click on a
+    /// Mac, and Return is what this board acts with, so ⌃Return is the contextual menu without the
+    /// pointer. Opened against the header's button, so it is the same menu in the same place however
+    /// you asked for it. See `HeaderMenuButton.openToken`.
+    @objc func showCardActions(_ sender: Any?) {
+        guard actionsTarget != nil else { return NSSound.beep() }
+        onShowCardActions?()
     }
 
     /// The tile a right-click in a tiled view is about: the one it landed on, else the one whose
@@ -517,9 +557,20 @@ extension CanvasBoardView {
     /// `includingTiling` is false for the one caller that groups the tiling commands itself under a
     /// header of their own — see `addTileSection`. Everywhere else they belong in the run of the
     /// menu, because everywhere else there is only one kind of object to act on.
-    private func buildCardMenu(_ menu: NSMenu, id: String, includingTiling: Bool = true) {
-        guard let node = document.node(id: id) else { return }
+    ///
+    /// `id` nil is several cards of different kinds, from the header's `…`: no card's own block leads,
+    /// only what every card answers to — see `CanvasCardActions.target`.
+    private func buildCardMenu(_ menu: NSMenu, id: String?, includingTiling: Bool = true) {
+        if let id, let node = document.node(id: id) {
+            addOwnCommands(menu, id: id, node: node)
+        } else if id != nil {
+            return
+        }
+        addCommonCommands(menu, includingTiling: includingTiling)
+    }
 
+    /// The block a kind of card brings to its menu — a project's, a folder's, a page's.
+    private func addOwnCommands(_ menu: NSMenu, id: String, node: CanvasNode) {
         switch node.content {
         case .file(let path, _):
             // A project's notes card opens the project, and that item comes first: it is a card
@@ -561,7 +612,11 @@ extension CanvasBoardView {
             // A folder card's own two: where it points, and how it lays that out. First, as a project
             // card's are, because they are what this card is rather than what any file card can do.
             if (nodeViews[id] as? CanvasFileNodeView)?.folderURL != nil {
-                add(menu, "Change Folder\u{2026}", #selector(changeFolder(_:)))
+                // One card's, since it asks where: several cards pointed at one new folder is not a
+                // thing anybody sets out to do.
+                if selectedFolderCards.count == 1 {
+                    add(menu, "Change Folder\u{2026}", #selector(changeFolder(_:)))
+                }
                 addFolderViewMenu(menu)
                 menu.addItem(.separator())
             }
@@ -658,7 +713,10 @@ extension CanvasBoardView {
             // thing you most want beside the board — see `ProjectTab`.
             add(menu, "Open Frame in New Tab", #selector(openSelectedFrameInTab))
         }
+    }
 
+    /// What every card answers to, whatever it is.
+    private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool) {
         if includingTiling { addTiling(menu) }
         menu.addItem(.separator())
         // All four carry their keys, for the reason Fill Window does — see `addTiling`. A contextual
@@ -1220,7 +1278,8 @@ extension CanvasBoardView {
     private func addCommandItems(_ menu: NSMenu, tabs: Bool) {
         for command in CanvasAddCommand.offered(projectNote: offersProjectNoteCard)
         where !tabs || command.makesTile {
-            let item = add(menu, command.title, tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
+            let item = add(menu, command.title(knowsFolder: knowsFolder),
+                           tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
             item.representedObject = command
         }
     }
@@ -1332,6 +1391,9 @@ extension CanvasBoardView {
     /// want beside a project nine times in ten, and the tenth is Change Folder… on the card — cheaper
     /// than an open panel every time for the nine. A board that isn't a project's has no such guess
     /// and asks, as it always did.
+    /// Whether New Folder will put this board's project folder down rather than asking for one.
+    var knowsFolder: Bool { CanvasProjectNoteCard.projectFolder(forCanvasAt: store.url) != nil }
+
     func addFolderCard(at where_: CanvasPoint?) {
         if let project = CanvasProjectNoteCard.projectFolder(forCanvasAt: store.url) {
             addFileCard(project, at: where_, folder: true)
@@ -2195,6 +2257,8 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // selection or not at all. See `CanvasTiling.commandTitle`.
             (item as? NSMenuItem)?.title = tileCommandTitle
             return canRunTileCommand
+        case #selector(showCardActions(_:)):
+            return actionsTarget != nil
         case #selector(maximizeTile(_:)):
             (item as? NSMenuItem)?.title = maximizeTileTitle
             // Live whenever there is something to put back, or a tile picked out of several to fill

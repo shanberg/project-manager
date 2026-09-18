@@ -223,13 +223,18 @@ class CanvasNodeView: NSView {
     func link(at point: NSPoint) -> URL? {
         guard !isSimplified, let space = linkSpace else { return nil }
         let local = space.convert(point, from: superview)
-        guard space.bounds.contains(local), let url = linkZones.link(at: local) else { return nil }
-        if let scroller = CanvasNodeView.scroller(in: space),
+        guard space.bounds.contains(local), let zone = linkZones.zone(at: local) else { return nil }
+        if !zone.fixed, let scroller = CanvasNodeView.scroller(in: space),
            !scroller.bounds.contains(scroller.convert(point, from: superview)) {
             return nil
         }
-        return url
+        return zone.url
     }
+
+    /// Follow `url` inside the card rather than out of it, if this card has somewhere to take it —
+    /// a folder card goes into a folder it lists. False sends it where links go: the Finder, the
+    /// browser, the document's app. See `CanvasBoardView.mouseUp`.
+    func followsInPlace(_ url: URL) -> Bool { false }
 
     /// The row of a reorderable list of links under `point`, in the superview's coordinates, under the
     /// same conditions `link(at:)` answers under. See `CanvasLinkZones.List`.

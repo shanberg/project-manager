@@ -46,6 +46,13 @@ enum CanvasAddCommand: CaseIterable {
         }
     }
 
+    /// The title on a board that may already know the answer. New Folder on a project's board puts the
+    /// project's own folder down without asking (`CanvasProjectNoteCard.projectFolder`), so there it
+    /// loses its ellipsis for the reason New Project Note never had one — there is nothing to ask.
+    func title(knowsFolder: Bool) -> String {
+        self == .folder && knowsFolder ? "New Folder" : title
+    }
+
     /// Whether what this makes can be a tile. A frame is a container of cards rather than a card, so
     /// there is no tile it could become — adding one to a tiled view would be an edit made entirely
     /// behind it. Dimmed while tiled, and left out of a tile's strip, where every item is a tab.

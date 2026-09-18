@@ -465,7 +465,13 @@ extension CanvasBoardView {
             linkReorder = nil
             // Let go without going anywhere: follow it. The first click of a run only — a
             // double-click on a link is one link, opened once.
-            if event.clickCount == 1 { NSWorkspace.shared.open(url) }
+            // A card that can take it somewhere itself — a folder card going into a folder — does.
+            guard event.clickCount == 1 else { break }
+            if let here = link(at: convert(event.locationInWindow, from: nil)), here.url == url,
+               nodeViews[here.card]?.followsInPlace(url) == true {
+                break
+            }
+            NSWorkspace.shared.open(url)
         case .marquee, nil:
             break
         }

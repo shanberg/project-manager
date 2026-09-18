@@ -21,8 +21,8 @@ import SwiftUI
 /// **The per-kind run leads, the tile's verbs follow, the menu ends it.** Scopes widening left to right
 /// is the rule the whole row follows — the page inside the card, the tile the card is in, then the board
 /// in the capsule beside this one — and it is also the reading order: what is this, then where is it,
-/// then what else. Today only a web tile has a per-kind run; a project tile or an image will bring
-/// their own, into the same slot.
+/// then what else. A web card's run is its page controls and a folder's is its view toggle; a project
+/// card or an image will bring their own, into the same slot.
 ///
 /// **Fixed slots outside the menu**, and the fixedness is the design rather than an accident of what
 /// fitted. A tile's verbs are conditional — a grid has no master to promote into, a grid of both rows
@@ -48,11 +48,17 @@ struct CanvasTileCapsule: View {
             if let page = focus.page {
                 CanvasPageControls(model: model, page: page)
             }
+            if let folder = focus.folder {
+                // Drawn as where a click goes, as maximize is — see `FolderControls`.
+                let next: CanvasFolderView = folder.view == .list ? .icons : .list
+                HeaderSymbolButton(symbol: next == .icons ? "square.grid.2x2" : "list.bullet",
+                                   help: "View \(next.title)", action: model.toggleFolderView)
+            }
             if let tile = focus.tile {
                 // The air between the two runs, and only when there are two. `groupGap` says "same
                 // scope, different job", which is exactly the relation between a page and the tile it
                 // is in — a divider would say they were different scopes, and they are not.
-                if focus.page != nil { HeaderGap() }
+                if hasKindRun { HeaderGap() }
                 HeaderSymbolButton(symbol: tile.isMaximized ? "arrow.down.right.and.arrow.up.left"
                                                             : "arrow.up.left.and.arrow.down.right",
                                    help: maximizeHelp(tile),
@@ -62,7 +68,7 @@ struct CanvasTileCapsule: View {
             // and a gap would make the maximize button a group of one. With no tile run to join it
             // becomes the second group itself, and takes the air.
             // With nothing before it — one card selected, no page, no tile — it is the whole capsule.
-            if focus.tile == nil, focus.page != nil { HeaderGap() }
+            if focus.tile == nil, hasKindRun { HeaderGap() }
             overflow
         }
         // Safe to animate because neither changes the capsule's width: a glyph swapped inside a hit
@@ -75,6 +81,9 @@ struct CanvasTileCapsule: View {
         .accessibilityLabel(Text(label))
     }
 
+    /// Whether the capsule leads with controls for the kind of thing you are in — a page's, a folder's.
+    private var hasKindRun: Bool { focus.page != nil || focus.folder != nil }
+
     private var label: String {
         guard let host = focus.page?.host, !host.isEmpty else { return "Tile controls" }
         return "Tile controls, " + host
@@ -83,7 +92,12 @@ struct CanvasTileCapsule: View {
     /// A tooltip that a changing selection cannot make stale: it says which way the toggle goes, and
     /// the toggle's direction is the same fact its glyph is already showing.
     private func maximizeHelp(_ tile: CanvasHeaderModel.TileControls) -> String {
-        tile.isMaximized ? "Put the workspace back" : "Fill the window with this tile"
+        switch (tile.isMaximized, tile.isCard) {
+        case (true, true): return "Put the board back"
+        case (false, true): return "Fill the window with this card"
+        case (true, false): return "Put the workspace back"
+        case (false, false): return "Fill the window with this tile"
+        }
     }
 
     /// Everything else, in one menu — the card's contextual menu, built by the board.
@@ -95,7 +109,8 @@ struct CanvasTileCapsule: View {
     /// tile gives, so a card's commands arrive here for nothing. See `HeaderMenuButton`.
     private var overflow: some View {
         HeaderMenuButton(symbol: "ellipsis",
-                         help: focus.tile == nil ? "What this card can be told" : "What this tile can be told",
+                         help: CanvasCardActions.help(count: focus.cards, tile: focus.tile?.isCard == false),
+                         openToken: model.cardActionsToken,
                          open: model.showCardActions)
     }
 }

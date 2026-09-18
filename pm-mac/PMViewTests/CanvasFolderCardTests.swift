@@ -200,4 +200,88 @@ final class CanvasFolderCardTests: XCTestCase {
         }
         XCTAssertEqual(seen, ["Sub", "one.md", "two.md"])
     }
+
+    // MARK: Going into folders
+
+    /// A click on a folder row goes into it, in the card; the way back is its parent; and the card's
+    /// own folder is where it starts and stops.
+    func testTheCardGoesIntoItsFoldersAndBack() throws {
+        make(["top.md"], folders: ["Docs", "Docs/Specs"])
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Docs/brief.md").path, contents: Data())
+        let model = CanvasFolderModel(url: root)
+        defer { model.stop() }
+        XCTAssertFalse(model.isInside)
+
+        XCTAssertTrue(model.go(to: root.appendingPathComponent("Docs")))
+        XCTAssertTrue(model.isInside)
+        XCTAssertEqual(model.listing.entries.map(\.name), ["Specs", "brief.md"])
+        XCTAssertEqual(model.parent.standardizedFileURL.path, root.standardizedFileURL.path)
+
+        XCTAssertTrue(model.go(to: model.parent))
+        XCTAssertFalse(model.isInside)
+        XCTAssertEqual(model.listing.entries.map(\.name), ["Docs", "top.md"])
+    }
+
+    /// Only down from the card's own folder: a folder beside it — even one whose name starts the same —
+    /// or a file is not the card's to show, and goes where links go.
+    func testTheCardStaysInsideItsOwnFolder() throws {
+        make(["top.md"], folders: ["Docs"])
+        let sibling = root.deletingLastPathComponent().appendingPathComponent(root.lastPathComponent + " old")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sibling) }
+        let model = CanvasFolderModel(url: root)
+        defer { model.stop() }
+
+        XCTAssertFalse(model.go(to: sibling))
+        XCTAssertFalse(model.go(to: root.deletingLastPathComponent()))
+        XCTAssertFalse(model.go(to: root.appendingPathComponent("top.md")))
+        XCTAssertFalse(model.isInside)
+    }
+
+    /// The folder you are in going away takes the card back to its own, not to an empty card with a
+    /// way back to nowhere.
+    func testAFolderDeletedUnderTheCardSendsItHome() throws {
+        make(["top.md"], folders: ["Docs"])
+        let model = CanvasFolderModel(url: root)
+        defer { model.stop() }
+        model.go(to: root.appendingPathComponent("Docs"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Docs"))
+
+        let deadline = Date().addingTimeInterval(3)
+        while model.isInside, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        XCTAssertFalse(model.isInside)
+        XCTAssertEqual(model.listing.entries.map(\.name), ["top.md"])
+    }
+
+    /// The way back sits in the header, outside the list's scroll view, and says so — otherwise a list
+    /// scrolled down would make it unclickable, as a row scrolled out of sight is.
+    func testAFixedZoneSaysItIsFixed() {
+        let zones = CanvasLinkZones()
+        zones.set([.init(url: root, rect: CGRect(x: 0, y: 0, width: 20, height: 20), fixed: true)], for: UUID())
+        XCTAssertEqual(zones.zone(at: CGPoint(x: 5, y: 5))?.fixed, true)
+        XCTAssertEqual(zones.link(at: CGPoint(x: 5, y: 5)), root)
+    }
+
+    /// The icon view draws what a file looks like: a picture gets a thumbnail from Quick Look, remembered
+    /// for the next rebuild; a folder is left to its icon.
+    func testAPictureHasAThumbnail() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pm-thumb-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let image = NSImage(size: NSSize(width: 64, height: 48), flipped: false) { rect in
+            NSColor.systemOrange.setFill()
+            rect.fill()
+            return true
+        }
+        let rep = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        let file = dir.appendingPathComponent("orange.png")
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: file)
+        let entry = try XCTUnwrap(CanvasFolderListing.read(dir).entries.first)
+
+        let thumbnails = await CanvasFolderThumbnails()
+        let made = await thumbnails.image(for: entry, side: 40)
+        XCTAssertNotNil(made)
+        let again = await thumbnails.image(for: entry, side: 40)
+        XCTAssertTrue(made === again, "asked Quick Look twice for an unchanged file")
+    }
 }

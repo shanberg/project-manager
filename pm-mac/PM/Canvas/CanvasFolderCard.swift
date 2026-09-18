@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import QuickLookThumbnailing
 import PmLib
 
 /// What a folder dropped on a board shows: its name, how much is in it, and what that is.
@@ -10,10 +11,14 @@ import PmLib
 /// top level: folders first, then everything else, in the Finder's own order.
 ///
 /// **Every row is a link.** Reported to the card's `CanvasLinkZones`, so the board treats a row the
-/// way it treats a link in a note: a click opens it where it belongs — a folder in the Finder, a
-/// document in its app — and a drag carries it out as a card of its own, the same file card it would
-/// have made dropped from the Finder. Nothing needs stepping into first, and the card itself still opens
-/// the folder on a double-click, like any file card.
+/// way it treats a link in a note: a click opens a document in its app, and a drag carries it out as a
+/// card of its own, the same file card it would have made dropped from the Finder. Nothing needs
+/// stepping into first, and the card itself still opens the folder on a double-click, like any file card.
+///
+/// **A folder is gone into, here.** A click on a folder row used to open it in the Finder, which made
+/// the card good for exactly one level: everything below the top was a window somewhere else. Now the
+/// card shows it, with a way back in its header (see `CanvasFolderModel.go(to:)`), as a Finder window
+/// does. The Finder is still one item away, in the card's menu.
 ///
 /// **Laid out the way you set it.** The card's View menu offers the Finder's list and icon views and its
 /// sort orders — see `CanvasFolderOptions` — and Change Folder… points it somewhere else.
@@ -80,11 +85,14 @@ struct CanvasFolderCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: folder.url.path))
+            if folder.isInside {
+                back
+            }
+            Image(nsImage: NSWorkspace.shared.icon(forFile: folder.location.path))
                 .resizable()
                 .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(folder.url.lastPathComponent)
+                Text(folder.location.lastPathComponent)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -97,6 +105,21 @@ struct CanvasFolderCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The way out of a folder the card went into: a link to the folder it is in, which the card follows
+    /// in place as it does any folder — so it works without stepping in, like every row, and dragging it
+    /// carries that folder off as a card of its own. Outside the scroll view, so it says `fixed`.
+    private var back: some View {
+        Image(systemName: "chevron.left")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 18, height: 22)
+            .contentShape(Rectangle())
+            .reportsLinkZone(folder.parent, fixed: true)
+            .help("Back to \(folder.parent.lastPathComponent)")
+            .accessibilityLabel(Text("Back to \(folder.parent.lastPathComponent)"))
+            .accessibilityAddTraits(.isLink)
     }
 
     private func row(_ entry: CanvasFolderEntry) -> some View {
@@ -129,9 +152,7 @@ struct CanvasFolderCard: View {
 
     private func cell(_ entry: CanvasFolderEntry) -> some View {
         VStack(spacing: 3) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
-                .resizable()
-                .frame(width: 40, height: 40)
+            CanvasFolderThumbnail(entry: entry, side: 40)
             Text(entry.name)
                 .font(.system(size: 11))
                 .multilineTextAlignment(.center)
@@ -144,6 +165,54 @@ struct CanvasFolderCard: View {
         .reportsLinkZone(entry.url)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isLink)
+    }
+}
+
+/// An item in the icon view: what the file looks like, as the Finder's icon view shows it, over the
+/// generic icon until that arrives.
+///
+/// **The picture is the reason to choose icons.** A grid of identical document icons is a list with
+/// worse names; a grid of the photographs, pages and slides themselves is how you find the one you
+/// meant. A folder keeps its folder icon — its "thumbnail" is the same thing.
+struct CanvasFolderThumbnail: View {
+    let entry: CanvasFolderEntry
+    let side: CGFloat
+    @State private var picture: NSImage?
+
+    var body: some View {
+        Image(nsImage: picture ?? NSWorkspace.shared.icon(forFile: entry.url.path))
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: side, height: side)
+            // Keyed on the entry, which carries the modification date: a file saved again is drawn again.
+            .task(id: entry) {
+                picture = entry.isFolder ? nil : await CanvasFolderThumbnails.shared.image(for: entry, side: side)
+            }
+    }
+}
+
+/// Quick Look's pictures of a folder's files, remembered for as long as the app is up.
+///
+/// Remembered because a card is rebuilt more often than its files change — a re-sort, a resize, the
+/// board scrolling it back into view — and each rebuild asking Quick Look again would redraw every icon
+/// as a generic one first. Keyed on the file and when it was last written, so an edited file is asked
+/// for afresh rather than drawn stale.
+@MainActor
+final class CanvasFolderThumbnails {
+    static let shared = CanvasFolderThumbnails()
+    private let cache = NSCache<NSString, NSImage>()
+
+    /// The file's thumbnail at `side` points on a Retina screen, or nil when Quick Look has nothing
+    /// better than an icon — in which case the icon is what the card already shows.
+    func image(for entry: CanvasFolderEntry, side: CGFloat) async -> NSImage? {
+        let key = "\(entry.url.path)|\(entry.modified?.timeIntervalSinceReferenceDate ?? 0)|\(side)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let request = QLThumbnailGenerator.Request(fileAt: entry.url, size: CGSize(width: side, height: side),
+                                                   scale: 2, representationTypes: .thumbnail)
+        guard let made = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+        else { return nil }
+        cache.setObject(made.nsImage, forKey: key)
+        return made.nsImage
     }
 }
 
@@ -310,14 +379,21 @@ struct CanvasFolderListing: Equatable {
 /// (a copy of forty files) is read once, a moment after it settles.
 @MainActor
 final class CanvasFolderModel: ObservableObject {
+    /// The folder the card is of — what it stores, and where it starts.
     let url: URL
+    /// The folder it is showing: `url`, or one inside it that a click went into.
+    ///
+    /// **Kept here and not on the node**, unlike the view and the sort. Those are how you set the card
+    /// up; this is where you happen to be looking, like how far a list is scrolled, and a board opened
+    /// tomorrow should show the folder the card is of rather than wherever it was left.
+    @Published private(set) var location: URL
     @Published private(set) var listing: CanvasFolderListing
     /// How the card lays the folder out, as its node says — kept in step by `CanvasFileNodeView.update`.
     /// A new sort is a new read, since the cap is applied after sorting.
     @Published var options: CanvasFolderOptions {
         didSet {
             guard options.sort != oldValue.sort else { return }
-            listing = CanvasFolderListing.read(url, sort: options.sort)
+            listing = CanvasFolderListing.read(location, sort: options.sort)
         }
     }
 
@@ -326,9 +402,42 @@ final class CanvasFolderModel: ObservableObject {
 
     init(url: URL, options: CanvasFolderOptions = CanvasFolderOptions()) {
         self.url = url
+        location = url
         self.options = options
         listing = CanvasFolderListing.read(url, sort: options.sort)
         watch()
+    }
+
+    /// Whether the card is showing a folder inside the one it is of, and so has a way back.
+    var isInside: Bool { !Self.same(location, url) }
+
+    /// Where the way back goes: the folder the one showing is in.
+    var parent: URL { location.deletingLastPathComponent() }
+
+    /// Show `folder`, if it is the card's own folder or one inside it. A folder elsewhere is not this
+    /// card's to wander into — it answers false, and the link opens where links go.
+    @discardableResult
+    func go(to folder: URL) -> Bool {
+        guard Self.contains(url, folder), CanvasFolderListing.isFolder(folder) else { return false }
+        guard !Self.same(folder, location) else { return true }
+        location = folder
+        listing = CanvasFolderListing.read(folder, sort: options.sort)
+        source?.cancel()
+        source = nil
+        watch()
+        return true
+    }
+
+    /// Whether `inner` is `outer` or somewhere under it — compared by path components, so a sibling
+    /// whose name merely starts the same ("Docs" and "Docs old") is not inside.
+    static func contains(_ outer: URL, _ inner: URL) -> Bool {
+        let outer = outer.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let inner = inner.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        return inner.count >= outer.count && Array(inner.prefix(outer.count)) == outer
+    }
+
+    private static func same(_ a: URL, _ b: URL) -> Bool {
+        a.standardizedFileURL.resolvingSymlinksInPath().path == b.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     /// Stop watching. The card calls this when it goes, since a dispatch source outliving its card is a
@@ -340,7 +449,7 @@ final class CanvasFolderModel: ObservableObject {
     }
 
     private func watch() {
-        let descriptor = open(url.path, O_EVTONLY)
+        let descriptor = open(location.path, O_EVTONLY)
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
                                                                eventMask: [.write, .rename, .delete],
@@ -358,7 +467,13 @@ final class CanvasFolderModel: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let next = CanvasFolderListing.read(self.url, sort: self.options.sort)
+                // The folder you were in went away — deleted, or renamed out from under the card. Back
+                // to the one the card is of, rather than an empty card with a way back to nowhere.
+                if self.isInside, !CanvasFolderListing.isFolder(self.location) {
+                    self.go(to: self.url)
+                    return
+                }
+                let next = CanvasFolderListing.read(self.location, sort: self.options.sort)
                 if next != self.listing { self.listing = next }
             }
         }

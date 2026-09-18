@@ -296,6 +296,11 @@ final class CanvasFileNodeView: CanvasNodeView {
         releaseFolder()
     }
 
+    /// A folder under the one this card lists is gone into, in the card — see `CanvasFolderCard`.
+    override func followsInPlace(_ url: URL) -> Bool {
+        folder?.go(to: url) ?? false
+    }
+
     private func releaseFolder() {
         folder?.stop()
         folder = nil

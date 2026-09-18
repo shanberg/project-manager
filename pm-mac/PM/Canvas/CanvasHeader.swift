@@ -52,9 +52,13 @@ final class CanvasHeaderModel {
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
     var focusedTile: TileControls?
-    /// Whether there is one card to open a `…` for — one selected, a tile focused, or a page stepped
-    /// into. See `CanvasBoardView.actionsCard`.
-    var hasCard = false
+    /// How many cards the `…` is about — a focused tile, a page stepped into, or the selection — and
+    /// zero when there is no card menu to open. See `CanvasCardActions.target`.
+    var cards = 0
+    /// A folder card's layout, when the `…` is about folder cards and nothing else. See `FolderControls`.
+    var folder: FolderControls?
+    /// Bumped to open the `…` from the keyboard, against the button, exactly as a click would.
+    var cardActionsToken = 0
 
     /// The one capsule that is about what you are *in* — see `CanvasTileCapsule`.
     ///
@@ -67,13 +71,13 @@ final class CanvasHeaderModel {
     /// tile is an engaged card on an untiled board, and a focused tile with no page is every tile that
     /// isn't a web card.
     ///
-    /// **And with neither, for one selected card**, as its `…` alone: the menu is the card's own
-    /// contextual menu (`CanvasBoardView.cardActionsMenu`), so a folder or a note selected on the board
-    /// has as much in it as a tile does. Nil only when there is no one card — nothing selected, or
-    /// several.
+    /// **And with neither, for selected cards**, as their `…`: the menu is the cards' own contextual
+    /// menu (`CanvasBoardView.cardActionsMenu`), so a folder or a note selected on the board has as much
+    /// in it as a tile does, and six selected cards have what a right-click on them has. Nil only when
+    /// there is no card to act on — nothing selected, or a line.
     var focus: Focus? {
-        guard page != nil || focusedTile != nil || hasCard else { return nil }
-        return Focus(page: page, tile: focusedTile)
+        guard page != nil || focusedTile != nil || cards > 0 else { return nil }
+        return Focus(page: page, tile: focusedTile, folder: folder, cards: max(cards, 1))
     }
 
     /// What the focused-tile capsule draws: the controls for whatever kind of thing you are in, and the
@@ -81,6 +85,19 @@ final class CanvasHeaderModel {
     struct Focus: Equatable {
         var page: Page?
         var tile: TileControls?
+        var folder: FolderControls?
+        /// How many cards the `…` acts on, which its tooltip says.
+        var cards = 1
+    }
+
+    /// A folder card's run in the capsule: the one setting you change often enough to want outside a
+    /// submenu, as the Finder keeps its view buttons in the toolbar rather than only in View.
+    ///
+    /// **One toggle, drawn as where it goes**, the way maximize is: two views is a switch, not a choice
+    /// of four. `view` is what the cards show now — several folder cards set differently read as list,
+    /// so the button offers icons, and a click makes them agree.
+    struct FolderControls: Equatable {
+        var view: CanvasFolderView
     }
 
     var titlebar = TitlebarButtonMetrics.unmeasured
@@ -191,6 +208,9 @@ final class CanvasHeaderModel {
     /// state rather than a second copy of the board's rules.
     struct TileControls: Equatable {
         var isMaximized = false
+        /// A card on the board rather than a tile in a workspace: it fills the window alone, and
+        /// restoring puts the board back. See `CanvasBoardView.maximizeCard`.
+        var isCard = false
     }
 
     struct Find: Equatable {
@@ -233,6 +253,9 @@ final class CanvasHeaderModel {
     /// it. Kept in step with the document by `CanvasPaneController.documentChanged`; the board owns the
     /// question (`CanvasBoardView.offersProjectNoteCard`).
     var offersProjectNote = false
+    /// Whether New Folder already knows which folder — a project's board does. See
+    /// `CanvasAddCommand.title(knowsFolder:)`.
+    var knowsFolder = false
     /// What the `+` menu's Add Card from Canvas lists — the cards a tiled view isn't showing, and
     /// nothing while there is no tiled view. Kept in step by `CanvasPaneController.refreshExistingCards`
     /// for the reason `offersProjectNote` is.
@@ -297,6 +320,9 @@ final class CanvasHeaderModel {
     /// own contextual menu for it (`CanvasBoardView.cardActionsMenu`).
     @ObservationIgnored
     var showCardActions: (NSView) -> Void = { _ in }
+    /// Switch the folder cards the `…` is about between list and icons — see `FolderControls`.
+    @ObservationIgnored
+    var toggleFolderView: () -> Void = {}
 }
 
 // MARK: - The pill
@@ -442,7 +468,7 @@ struct CanvasControlCapsule: View {
             // from `CanvasAddCommand` so they can't drift apart in wording or in what they offer again.
             // What can't be a tile is dimmed while tiled — see `CanvasAddCommand.makesTile`.
             ForEach(CanvasAddCommand.offered(projectNote: model.offersProjectNote), id: \.self) { command in
-                Button(command.title) { model.add(command) }
+                Button(command.title(knowsFolder: model.knowsFolder)) { model.add(command) }
                     .disabled(model.tiling != nil && !command.makesTile)
             }
             // The cards already on the board that the tiled view isn't showing. Absent rather than dim

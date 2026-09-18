@@ -198,6 +198,11 @@ enum MainMenu {
         tidy.keyEquivalentModifierMask = [.control, .option]
         // Same answerer again; the menu is the board's own, so the two lists can't drift apart.
         menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = CanvasBoardView.sizeMenu()
+        // The selected cards' contextual menu, opened under the header's `…` — see
+        // `CanvasBoardView.showCardActions` for the key.
+        let actions = menu.addItem(withTitle: "Show Card Actions",
+                                   action: #selector(CanvasBoardView.showCardActions(_:)), keyEquivalent: "\r")
+        actions.keyEquivalentModifierMask = [.control]
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())

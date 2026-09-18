@@ -871,6 +871,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.showCardActions = { [weak self] anchor in
             self?.scroll.board.cardActionsMenu()?.popUpBelow(anchor)
         }
+        header.toggleFolderView = { [weak self] in self?.scroll.board.toggleFolderView() }
+        // ⌃Return opens the same menu from the same button — the board has the command, the header
+        // has the place.
+        scroll.board.onShowCardActions = { [weak self] in self?.header.cardActionsToken += 1 }
+        // Whether New Folder asks. The board's file does not move under a pane, so once is enough.
+        header.knowsFolder = scroll.board.knowsFolder
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —
@@ -1198,8 +1204,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // itself in and out on this value.
         let controls = scroll.board.tileControls
         if header.focusedTile != controls { header.focusedTile = controls }
-        let hasCard = scroll.board.actionsCard != nil
-        if header.hasCard != hasCard { header.hasCard = hasCard }
+        let cards = scroll.board.actionsTarget?.ids.count ?? 0
+        if header.cards != cards { header.cards = cards }
+        let folder = scroll.board.folderControls
+        if header.folder != folder { header.folder = folder }
     }
 
     // MARK: Undo, on a board that can hold two kinds of document

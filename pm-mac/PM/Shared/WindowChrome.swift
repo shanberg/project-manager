@@ -505,6 +505,9 @@ struct HeaderMenuButton: View {
     let symbol: String
     /// The tooltip, and what the control is called.
     let help: String
+    /// Changed to open the menu without a click — from a key, say — against this same button. The
+    /// value the button first appears with opens nothing.
+    var openToken = 0
     /// Show the menu against this view — `NSMenu.popUpBelow(_:)` does the positioning.
     let open: (NSView) -> Void
     @State private var hovering = false
@@ -515,28 +518,43 @@ struct HeaderMenuButton: View {
             .foregroundStyle(.secondary)
             .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
             .accessibilityHidden(true)
-            .overlay(MenuPressArea(help: help, open: open, hovering: $hovering))
+            .overlay(MenuPressArea(help: help, openToken: openToken, open: open, hovering: $hovering))
             .modifier(HeaderHoverCapsule(visible: hovering))
     }
 }
 
 private struct MenuPressArea: NSViewRepresentable {
     let help: String
+    let openToken: Int
     let open: (NSView) -> Void
     @Binding var hovering: Bool
 
-    func makeNSView(context: Context) -> Control { Control() }
+    func makeNSView(context: Context) -> Control {
+        let control = Control()
+        control.openToken = openToken
+        return control
+    }
 
     func updateNSView(_ view: Control, context: Context) {
         view.open = open
         view.hovered = { hovering = $0 }
         view.toolTip = help
         view.setAccessibilityLabel(help)
+        if view.openToken != openToken {
+            view.openToken = openToken
+            // After the update, not inside it: a menu runs its own tracking loop, and SwiftUI would be
+            // left mid-transaction for as long as the menu is open.
+            DispatchQueue.main.async { [weak view] in
+                guard let view, view.window != nil else { return }
+                view.open(view)
+            }
+        }
     }
 
     final class Control: NSControl {
         var open: (NSView) -> Void = { _ in }
         var hovered: (Bool) -> Void = { _ in }
+        var openToken = 0
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func mouseDown(with event: NSEvent) {
