@@ -183,7 +183,44 @@ public enum PickLog {
         }
     }
 
+    /// The events that take `events` back, newest first: a `released` naming each pick, a fresh `picked`
+    /// for each release, and each `retargeted` pointed the other way. What undo appends — never a
+    /// deletion, because the log is append-only and a reversal is itself something that happened.
+    ///
+    /// A pick restored by undo is a new event with a new id rather than the old one revived, so a
+    /// later undo of the undo cancels exactly it.
+    public static func reversing(_ events: [PickEvent], source: String?,
+                                 at: String = timestamp()) -> [PickEvent] {
+        events.reversed().map { event in
+            switch event.event {
+            case .picked:
+                return PickEvent(at: at, event: .released, task: event.task, into: event.into,
+                                 reverses: event.id, source: source)
+            case .released:
+                return PickEvent(at: at, event: .picked, task: event.task, into: event.into, source: source)
+            case .retargeted:
+                var task = event.task
+                task.digest = event.to ?? task.digest
+                return PickEvent(at: at, event: .retargeted, task: task, retargets: event.retargets,
+                                 to: event.task.digest, source: source)
+            }
+        }
+    }
+
+    /// Now, the way every event says when it happened.
+    public static func timestamp(_ date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
     // MARK: Reading
+
+    /// The events with these ids, in the order they were written.
+    public static func events(ids: [String], projectPath: String) -> [PickEvent] {
+        let wanted = Set(ids)
+        return events(projectPath: projectPath).filter { wanted.contains($0.id) }
+    }
 
     public static func events(projectPath: String) -> [PickEvent] {
         guard let text = try? String(contentsOfFile: logPath(projectPath: projectPath), encoding: .utf8)

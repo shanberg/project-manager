@@ -324,4 +324,108 @@ final class PickLogTests: XCTestCase {
         call("task.pick", ["project": "W-1", "tasks": [gone]])
         XCTAssertEqual(try String(contentsOfFile: notesPath, encoding: .utf8), before)
     }
+    // MARK: Focus picks up (D3), and undo takes it back (D4)
+
+    private func focused() -> String? {
+        tasks().first { $0["isFocused"] as? Bool == true }?["text"] as? String
+    }
+
+    func testFocusingAnOldTaskPicksItUp() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        let result = call("task.focus", ["project": "W-1", "task": reference("Email Dana")])
+        XCTAssertEqual(result["summary"] as? String, "Picked up and focused \u{201C}Email Dana\u{201D}.")
+        XCTAssertEqual(focused(), "Email Dana")
+        XCTAssertEqual(picked("Email Dana")?["into"] as? String, today)
+        XCTAssertEqual((result["sidecar"] as? [[String: Any]])?.count, 1,
+                       "The result names what it appended, so the app can take it back")
+    }
+
+    func testFocusingWithoutPickIsOnlyNavigation() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        call("task.focus", ["project": "W-1", "task": reference("Email Dana"), "pick": false])
+        XCTAssertEqual(focused(), "Email Dana")
+        XCTAssertNil(picked("Email Dana"))
+    }
+
+    func testFocusingATaskAlreadyHerePicksNothingUp() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        let result = call("task.focus", ["project": "W-1", "task": reference("Review the contract")])
+        XCTAssertNil(result["sidecar"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PickLog.logPath(projectPath: projectPath)))
+    }
+
+    /// The whole gesture, reversed as one: focus goes back and the pick is released.
+    func testUndoingAFocusThatPickedUpTakesBothBack() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        let focusBefore = focused()
+        call("task.focus", ["project": "W-1", "task": reference("Email Dana")])
+        let undone = call("journal.undo", ["project": "W-1"])
+        XCTAssertNotNil(undone["revision"], "\(undone)")
+        XCTAssertEqual(focused(), focusBefore)
+        XCTAssertNil(picked("Email Dana"))
+        XCTAssertEqual(PickLog.events(projectPath: projectPath).map(\.event), [.picked, .released])
+    }
+
+    /// A pick with no document change behind it is still reversible from another surface.
+    func testUndoingAPickThatChangedNoNotesReleasesIt() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        call("task.pick", ["project": "W-1", "task": reference("Email Dana")])
+        let undone = call("journal.undo", ["project": "W-1"])
+        XCTAssertEqual(undone["summary"] as? String, "Reversed: Picked up \u{201C}Email Dana\u{201D}.", "\(undone)")
+        XCTAssertNil(picked("Email Dana"))
+
+        // And reversing the reversal picks it up again, as a new event.
+        let entries = call("journal.list", ["project": "W-1"])["data"] as? [[String: Any]] ?? []
+        let reversal = try XCTUnwrap(entries.first?["id"] as? String)
+        call("journal.undo", ["entry": reversal])
+        XCTAssertEqual(picked("Email Dana")?["into"] as? String, today)
+        let events = PickLog.events(projectPath: projectPath)
+        XCTAssertEqual(events.map(\.event), [.picked, .released, .picked])
+        XCTAssertEqual(Set(events.map(\.id)).count, 3)
+    }
+
+    /// All or nothing: when the file has moved on, the document half is refused and the pick stays.
+    func testAnUndoTheDocumentRefusesLeavesThePickAlone() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        call("task.focus", ["project": "W-1", "task": reference("Email Dana")])
+        let text = try String(contentsOfFile: notesPath, encoding: .utf8)
+        try (text + "\nA line written in Obsidian.\n").write(toFile: notesPath, atomically: true, encoding: .utf8)
+        let refused = call("journal.undo", ["project": "W-1"])
+        XCTAssertEqual((refused["error"] as? [String: Any])?["code"] as? String, "conflict", "\(refused)")
+        XCTAssertEqual(picked("Email Dana")?["into"] as? String, today)
+        XCTAssertEqual(PickLog.events(projectPath: projectPath).count, 1)
+    }
+
+    /// Undoing a rename puts the pick back on the old words, so it keeps being drawn.
+    func testUndoingARenameKeepsThePick() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault()
+        call("task.pick", ["project": "W-1", "task": reference("Email Dana")])
+        call("task.setText", ["project": "W-1", "task": reference("Email Dana"), "text": "Email Dana today"])
+        call("journal.undo", ["project": "W-1"])
+        XCTAssertEqual(picked("Email Dana")?["into"] as? String, today)
+    }
+
+    func testReversingIsTheMirrorOfEachEvent() throws {
+        let picked = try pick("Email Dana", into: 0, in: doc, id: "p1")
+        let released = PickEvent(id: "r1", at: "t", event: .released, task: picked.task, into: picked.into,
+                                 reverses: "p1")
+        var renamedTask = picked.task
+        renamedTask.digest = "old"
+        let retargeted = PickEvent(id: "t1", at: "t", event: .retargeted, task: renamedTask,
+                                   retargets: ["p1"], to: "new")
+        let back = PickLog.reversing([picked, released, retargeted], source: "app", at: "now")
+        XCTAssertEqual(back.map(\.event), [.retargeted, .picked, .released], "Newest first")
+        XCTAssertEqual(back[0].task.digest, "new")
+        XCTAssertEqual(back[0].to, "old")
+        XCTAssertEqual(back[0].retargets, ["p1"])
+        XCTAssertNotEqual(back[1].id, "p1", "A pick restored is a new event")
+        XCTAssertEqual(back[2].reverses, "p1")
+    }
 }

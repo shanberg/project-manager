@@ -11,7 +11,7 @@ import PmLib
 /// Named distinctly from PmLib's own `apiContractVersion`, which is in scope here — a file-scope
 /// `let` of the same name would shadow it silently, and a check comparing the two would then be
 /// comparing a thing with itself.
-let generatedFromContractVersion = "1.12.0"
+let generatedFromContractVersion = "1.13.0"
 
 /// Every action the contract publishes.
 ///
@@ -89,7 +89,7 @@ enum PMAction: String, CaseIterable, Sendable {
     case taskDone = "task.done"
     /// Drop a task, or several, along with their open subtasks: close them without their being done.
     case taskDrop = "task.drop"
-    /// Make this the project's focused task.
+    /// Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false.
     case taskFocus = "task.focus"
     /// A project's tasks, each with the reference needed to act on it.
     case taskList = "task.list"

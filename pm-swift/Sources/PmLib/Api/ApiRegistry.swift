@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.12.0"
+public let apiContractVersion = "1.13.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -107,8 +107,9 @@ public enum ApiRegistry {
                       fields: [project, optionalTask, tasks, revision],
                       oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.focus", tier: .mutation,
-                      summary: "Make this the project's focused task.",
-                      fields: [project, task]),
+                      summary: "Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false.",
+                      fields: [project, task,
+                               ApiField("pick", .boolean, "Pick the task up into the current session when it's from an older one. Default true.")]),
         ApiActionSpec(name: "task.pick", tier: .mutation,
                       summary: "Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up.",
                       fields: [project, optionalTask, tasks, revision],

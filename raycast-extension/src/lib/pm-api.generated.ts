@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.12.0";
+export const API_CONTRACT_VERSION = "1.13.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -286,8 +286,10 @@ export interface TaskDropInput {
   tasks?: TaskRef[];
 }
 
-/** Make this the project's focused task. */
+/** Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false. */
 export interface TaskFocusInput {
+  /** Pick the task up into the current session when it's from an older one. Default true. */
+  pick?: boolean;
   /** Project name or unambiguous prefix. */
   project: string;
   /** The task to act on. */

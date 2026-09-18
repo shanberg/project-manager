@@ -98,6 +98,8 @@ This means `pm api describe` will list fewer things than the quick bar's `>` men
   focus,                           // where focus ended up, if it moved
   relocated                        // a TaskRef healed against drift; see task-identity.md
                                    // (`summary` says so too, in a second sentence)
+  sidecar                          // events appended to the project's pick log, when any were
+                                   // (task.pick, task.release, a focus that picked up); see sessions.md
 }
 ```
 
@@ -237,6 +239,8 @@ A single-task write still sends nothing. Its digest already names its one task, 
 **Reversing is guarded by the revision.** An entry records the revision it produced; `journal.undo` reverses it only if the file is still exactly that. Anything else returns `conflict`, because reversing then would silently discard whatever was written since — including a line typed into Obsidian a minute ago.
 
 **Undo walks back rather than oscillating.** A reversal is a write and is journaled as one, which is what makes it reversible in turn — but it is skipped when choosing what to undo next, as is anything already reversed. Undoing repeatedly therefore steps back through the history, across surfaces, and it works because reversing a write leaves the file at exactly the revision the write before it produced, so the next entry back is once again reversible.
+
+**Picks are reversed with the write that made them.** An entry that appended to a project's pick log lists those events' ids in `sidecar`, and `journal.undo` appends the events that cancel them — only after the document half has passed its revision check, so a refused undo leaves the picks alone too. A pick that changed nothing in the notes is journaled with no document behind it, and reversing it needs no check: a `released` cancels only the pick it names. `task.focus` picks an older task up by default (`pick: false` makes it navigation only), so its entry carries both halves. See [sessions.md](sessions.md) D4.
 
 This closes the hole the panel's undo stack left: it is in memory and app-only, so nothing could reverse a write made by Raycast, by `pm`, by a model — or by the app itself after a relaunch.
 

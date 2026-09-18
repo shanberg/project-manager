@@ -103,6 +103,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "sessionOrdinal": input.sessionOrdinal.map { JSONValue.number(Double($0)) },
         "sessionDigest": input.sessionDigest.map(JSONValue.string),
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
+        "pick": input.pick.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
         "waiting": input.waiting.map(JSONValue.string),
         "clearWaiting": input.clearWaiting.map(JSONValue.bool),
@@ -174,8 +175,13 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             try undoTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
         }
     case "task.focus":
-        return try editing(spec, input, options) { notes, at in
-            applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
+        guard input.pick ?? true else {
+            return try editing(spec, input, options) { notes, at in
+                applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
+            }
+        }
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try focusing(input, context, source: options.source)
         }
     case "task.pick":
         return try document(spec, input, options) { (context: DocumentContext) in
@@ -537,15 +543,41 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         guard let entry = candidate else {
             throw ApiError(.staleReference, "There's no write on record to reverse.")
         }
-        guard entry.undoable, let notesPath = entry.notesPath,
-              let restored = ApiJournal.snapshot(entry.revisionBefore) else {
+        // What the write appended to the pick log, looked up now: an entry names its events by id.
+        let appended = (entry.sidecar ?? []).isEmpty ? []
+            : entry.project.map { PickLog.events(ids: entry.sidecar ?? [], projectPath: $0) } ?? []
+        guard entry.undoable, entry.notesPath != nil || !appended.isEmpty else {
+            throw ApiError(.unsupportedAction,
+                           "\(entry.action) can't be reversed — there's no document behind it.",
+                           detail: .string(entry.id))
+        }
+        let cancelling = PickLog.reversing(appended, source: options.source)
+        guard let notesPath = entry.notesPath else {
+            // Picks alone, with no document behind them. Nothing to check: a `released` cancels only the
+            // pick it names, so reversing one can never undo anything else.
+            if !options.dryRun, let project = entry.project {
+                try PickLog.append(cancelling, projectPath: project)
+                ApiJournal.recordSidecar(action: spec.name, project: project,
+                                         summary: reversalSummary(of: entry), ids: cancelling.map(\.id),
+                                         source: options.source, reverses: entry.id)
+            }
+            return ApiResult(action: spec.name,
+                             summary: options.dryRun
+                                 ? "Would reverse: \(strippedSummary(of: entry))."
+                                 : reversalSummary(of: entry) + ".",
+                             dryRun: options.dryRun,
+                             data: try JSONValue.encoding(entry),
+                             sidecar: options.dryRun ? nil : cancelling)
+        }
+        guard let restored = ApiJournal.snapshot(entry.revisionBefore) else {
             throw ApiError(.unsupportedAction,
                            "\(entry.action) can't be reversed — there's no document behind it.",
                            detail: .string(entry.id))
         }
         let current = try String(contentsOfFile: notesPath, encoding: .utf8)
         // The safety the journal exists to provide: reverse only what is still exactly as this write
-        // left it. Anything else and an undo would be discarding an edit made since, unseen.
+        // left it. Anything else and an undo would be discarding an edit made since, unseen. The picks
+        // are held to the same check: half an undo is worse than none.
         guard revision(of: current) == entry.revisionAfter else {
             throw ApiError(.conflict,
                            "That file has changed since this write, so reversing it would discard the change.",
@@ -561,11 +593,14 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let io = makeNotesIO(notesPath: notesPath, config: config)
         if !options.dryRun {
             try io.writeContent(path: notesPath, content: restored)
+            // Document first: the picks are appended only once it has been restored.
+            if let project = entry.project { try PickLog.append(cancelling, projectPath: project) }
             // The reversal is itself a write, and is journaled as one — so it can be reversed too,
             // and so the record doesn't quietly omit the biggest changes anybody makes.
             ApiJournal.record(action: spec.name, project: entry.project, notesPath: notesPath,
                               summary: reversalSummary(of: entry), before: current, after: restored,
-                              changed: undone, source: options.source, reverses: entry.id)
+                              changed: undone, source: options.source, reverses: entry.id,
+                              sidecar: cancelling.map(\.id))
         }
         return ApiResult(action: spec.name,
                          summary: options.dryRun
@@ -574,7 +609,8 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: revision(of: restored), changed: undone,
                          focus: after.first(where: \.isFocused).map(reference(to:)),
                          dryRun: options.dryRun,
-                         data: try JSONValue.encoding(entry))
+                         data: try JSONValue.encoding(entry),
+                         sidecar: options.dryRun || cancelling.isEmpty ? nil : cancelling)
 
     // MARK: Queries
     case "project.list":
@@ -784,12 +820,21 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
         // record of something that didn't happen, and an undo offered for it would do harm.
         ApiJournal.record(action: spec.name, project: handle.projectPath, notesPath: handle.notesPath,
                           summary: phrase.past, before: rawText, after: outcome.rawText,
-                          changed: changes, source: options.source)
+                          changed: changes, source: options.source,
+                          sidecar: outcome.sidecar.map(\.id))
     }
     // After the notes, for the same reason the journal is: a pick into a sitting whose heading failed
     // to write would name a sitting that isn't there.
     if !options.dryRun {
         try PickLog.append(outcome.sidecar, projectPath: handle.projectPath)
+        // A pick that changed nothing in the notes is still a write, and still something another
+        // surface should be able to take back — so it is journaled on its own, with no document behind
+        // it. Reversing it needs no revision check: a `released` only cancels the pick it names.
+        if outcome.rawText == rawText, !outcome.sidecar.isEmpty {
+            ApiJournal.recordSidecar(action: spec.name, project: handle.projectPath,
+                                     summary: phrase.past, ids: outcome.sidecar.map(\.id),
+                                     source: options.source)
+        }
     }
     return ApiResult(action: spec.name,
                      summary: told.sentence(dryRun: options.dryRun),
@@ -798,7 +843,8 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
                      focus: after.first(where: \.isFocused).map(reference(to:)),
                      relocated: outcome.relocated,
                      dryRun: options.dryRun,
-                     data: outcome.data)
+                     data: outcome.data,
+                     sidecar: options.dryRun || outcome.sidecar.isEmpty ? nil : outcome.sidecar)
 }
 
 /// The `document` pipeline for the actions that are a `ProjectNotes -> ProjectNotes` transform.
@@ -853,11 +899,24 @@ private func resolve(_ reference: TaskRefInput, in text: String, batch: Bool) th
 
 // MARK: - Picking up
 
-/// `task.pick`: record that each task was picked up into the current sitting.
-///
-/// Starts the sitting when the project is cold, the one change to the notes a pick can make — and only
-/// when something is actually picked, so asking to pick up a task that's already here writes nothing.
-private func picking(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+/// What picking up a set of references came to, before anyone words it.
+private struct PickUp {
+    /// The text with the current sitting in it — started, if the project was cold. Only worth writing
+    /// when `events` isn't empty: nothing picked, nothing should start.
+    var rawText: String
+    var events: [PickEvent] = []
+    var picked: [String] = []
+    var alreadyHere = 0
+    var alreadyPicked = 0
+    var relocated = false
+    var into: PickedInto
+    var intoIndex: Int
+}
+
+/// Pick up each reference into the current sitting, skipping the ones already in it or already picked
+/// up into it. Shared by `task.pick` and by the focus that picks up (docs/sessions.md D4).
+private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: DocumentContext,
+                    source: String) throws -> PickUp {
     let session = try currentSession(in: context.rawText, lastEdited: context.lastEdited)
     let text = session.rawText
     let notes = normalizeFocusMarker(notes: try parseNotes(markdown: text))
@@ -868,43 +927,78 @@ private func picking(_ input: ApiInput, _ context: DocumentContext, source: Stri
     let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
     let at = timestamp()
 
-    var events: [PickEvent] = []
-    var picked: [String] = []
-    var alreadyHere = 0, alreadyPicked = 0
-    var relocated = false
+    var out = PickUp(rawText: text, into: into, intoIndex: session.sessionIndex)
     var seen = Set<String>()
-    for reference in try references(input) {
-        guard let position = try resolve(reference, in: text, batch: input.tasks != nil) else { continue }
-        relocated = relocated || position.relocated
+    for reference in references {
+        guard let position = try resolve(reference, in: text, batch: batch) else { continue }
+        out.relocated = out.relocated || position.relocated
         guard seen.insert("\(position.sessionIndex):\(position.lineIndex)").inserted,
               let todo = todos.first(where: {
                   $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
               }) else { continue }
-        if todo.sessionIndex == session.sessionIndex { alreadyHere += 1; continue }
+        if todo.sessionIndex == session.sessionIndex { out.alreadyHere += 1; continue }
         if standing.contains(where: { $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
-            && $0.intoIndex == session.sessionIndex }) { alreadyPicked += 1; continue }
+            && $0.intoIndex == session.sessionIndex }) { out.alreadyPicked += 1; continue }
         guard let task = PickLog.task(todo, in: notes) else {
             throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading PM can't date, so it can't be picked up.",
                            detail: .string("task"))
         }
-        events.append(PickEvent(at: at, event: .picked, task: task, into: into, source: source))
-        picked.append(todo.text)
+        out.events.append(PickEvent(at: at, event: .picked, task: task, into: into, source: source))
+        out.picked.append(todo.text)
     }
+    return out
+}
 
-    let data: JSONValue = .object(["into": .string(into.session),
-                                   "intoIndex": .number(Double(session.sessionIndex))])
-    guard !events.isEmpty else {
-        let finding = alreadyPicked > 0 && alreadyHere == 0
+/// `task.pick`: record that each task was picked up into the current sitting.
+///
+/// Starts the sitting when the project is cold, the one change to the notes a pick can make — and only
+/// when something is actually picked, so asking to pick up a task that's already here writes nothing.
+private func picking(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let result = try pickUp(try references(input), batch: input.tasks != nil, context, source: source)
+    let data: JSONValue = .object(["into": .string(result.into.session),
+                                   "intoIndex": .number(Double(result.intoIndex))])
+    guard !result.events.isEmpty else {
+        let finding = result.alreadyPicked > 0 && result.alreadyHere == 0
             ? (input.tasks == nil ? "That task is already picked up" : "Those tasks are already picked up")
             : (input.tasks == nil ? "That task is already in this session" : "Those tasks are already in this session")
         // The original text, not the one with a new sitting spliced in: nothing was picked, so nothing
         // should start.
-        return Outcome(rawText: context.rawText, relocated: relocated, note: .statement(finding), data: data)
+        return Outcome(rawText: context.rawText, relocated: result.relocated, note: .statement(finding), data: data)
     }
-    let what = picked.count == 1 ? "\u{201C}\(picked[0])\u{201D}" : "\(picked.count) tasks"
-    return Outcome(rawText: text, relocated: relocated,
+    let what = result.picked.count == 1 ? "\u{201C}\(result.picked[0])\u{201D}" : "\(result.picked.count) tasks"
+    return Outcome(rawText: result.rawText, relocated: result.relocated,
                    note: Phrase(past: "Picked up \(what)", future: "pick up \(what)"),
-                   data: data, sidecar: events)
+                   data: data, sidecar: result.events)
+}
+
+/// `task.focus`, picking up: focusing a task from an older sitting is working on it now, so it is
+/// picked up into the current one first (docs/sessions.md D3). A task that can't be picked up — under
+/// a heading PM can't date, or in a project whose current heading it can't — is focused all the same:
+/// the pick is a record kept alongside the focus, never a reason to refuse it.
+private func focusing(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let reference = try references(input)[0]
+    var text = context.rawText
+    var events: [PickEvent] = []
+    var relocated = false
+    if let result = try? pickUp([reference], batch: false, context, source: source), !result.events.isEmpty {
+        text = result.rawText
+        events = result.events
+        relocated = result.relocated
+    }
+    // Resolved again against the text the pick left, which may have a sitting spliced in above the
+    // task. The reference names it by date, so that finds the same line.
+    let at = try resolveTaskRef(reference.ref, rawText: text)
+    let focused = try editTodosPreservingFormat(rawText: text) { notes in
+        applyFocusToTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
+                           lineIndex: at.lineIndex)
+    } ?? text
+    guard let picked = events.first?.task.text else {
+        return Outcome(rawText: focused, relocated: relocated || at.relocated)
+    }
+    let what = "\u{201C}\(picked)\u{201D}"
+    return Outcome(rawText: focused, relocated: relocated || at.relocated,
+                   note: Phrase(past: "Picked up and focused \(what)", future: "pick up and focus \(what)"),
+                   sidecar: events)
 }
 
 /// `task.release`: put each task back — cancel its pick into the named sitting, or its latest pick when
@@ -962,11 +1056,7 @@ private func retargeting(_ at: ResolvedTaskRef, from context: DocumentContext, t
                       retargets: picks.map(\.event.id), to: task.digest, source: source)]
 }
 
-private func timestamp(_ date: Date = Date()) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.string(from: date)
-}
+private func timestamp(_ date: Date = Date()) -> String { PickLog.timestamp(date) }
 
 // MARK: - Pieces
 

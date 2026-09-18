@@ -38,10 +38,15 @@ public struct JournalEntry: Codable, Equatable {
     /// reversible in turn. But it must not be what the *next* undo picks, or undo would oscillate
     /// between two states instead of walking back through the history.
     public var reverses: String?
+    /// The ids of the events this write appended to the project's pick log (docs/sessions.md D4).
+    /// Reversing the entry appends the events that cancel them, once the document half has passed its
+    /// check — all or nothing.
+    public var sidecar: [String]?
 
     public init(id: String, at: String, source: String, action: String, project: String?,
                 notesPath: String?, summary: String, revisionBefore: String?, revisionAfter: String?,
-                changed: [ApiChange], undoable: Bool, reverses: String? = nil) {
+                changed: [ApiChange], undoable: Bool, reverses: String? = nil, sidecar: [String]? = nil) {
+        self.sidecar = sidecar
         self.id = id
         self.at = at
         self.source = source
@@ -106,13 +111,24 @@ public enum ApiJournal {
     @discardableResult
     static func record(action: String, project: String?, notesPath: String?, summary: String,
                        before: String, after: String, changed: [ApiChange], source: String,
-                       reverses: String? = nil) -> JournalEntry? {
+                       reverses: String? = nil, sidecar: [String] = []) -> JournalEntry? {
         let entry = JournalEntry(
             id: "", at: timestamp, source: source, action: action, project: project,
             notesPath: notesPath, summary: summary,
             revisionBefore: store(before), revisionAfter: store(after),
-            changed: changed, undoable: true, reverses: reverses)
+            changed: changed, undoable: true, reverses: reverses,
+            sidecar: sidecar.isEmpty ? nil : sidecar)
         return append(entry)
+    }
+
+    /// A write that only appended to a project's pick log — Pick Up on a task, into a sitting that
+    /// already exists. Undoable, with no document behind it.
+    @discardableResult
+    static func recordSidecar(action: String, project: String, summary: String, ids: [String],
+                              source: String, reverses: String? = nil) -> JournalEntry? {
+        append(JournalEntry(id: "", at: timestamp, source: source, action: action, project: project,
+                            notesPath: nil, summary: summary, revisionBefore: nil, revisionAfter: nil,
+                            changed: [], undoable: true, reverses: reverses, sidecar: ids))
     }
 
     /// Record a write with no document behind it — a project created, a config key set. Reviewable,
@@ -127,7 +143,9 @@ public enum ApiJournal {
 
     private static func append(_ entry: JournalEntry) -> JournalEntry? {
         var stamped = entry
-        stamped.id = "\(entry.at)/\(entry.revisionAfter ?? revision(of: entry.at + entry.action))"
+        // A pick-only entry has no revision to tell it apart from another in the same second; its
+        // events' ids do.
+        stamped.id = "\(entry.at)/\(entry.revisionAfter ?? revision(of: entry.at + entry.action + (entry.sidecar ?? []).joined()))"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(stamped),

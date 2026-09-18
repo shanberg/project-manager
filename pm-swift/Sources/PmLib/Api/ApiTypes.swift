@@ -131,6 +131,9 @@ public struct ApiInput: Codable, Equatable {
     public var partOf: String?
     public var clearPartOf: Bool?
     public var advanceFocus: Bool?
+    /// `task.focus`: pick the task up into the current session when it's from an older one. Default
+    /// true — see docs/sessions.md D3.
+    public var pick: Bool?
     public var label: String?
     public var prose: String?
     public var title: String?
@@ -219,10 +222,14 @@ public struct ApiResult: Codable, Equatable {
     public var dryRun: Bool
     /// A query's payload.
     public var data: JSONValue?
+    /// What the write appended to the project's pick log, when it appended anything — so a caller that
+    /// keeps its own undo can take exactly these back. Absent otherwise, and on a dry run.
+    public var sidecar: [PickEvent]?
 
     public init(action: String, summary: String, revision: String? = nil, changed: [ApiChange] = [],
                 focus: TaskRefInput? = nil, relocated: Bool = false, dryRun: Bool = false,
-                data: JSONValue? = nil) {
+                data: JSONValue? = nil, sidecar: [PickEvent]? = nil) {
+        self.sidecar = sidecar
         self.action = action
         self.summary = summary
         self.revision = revision
