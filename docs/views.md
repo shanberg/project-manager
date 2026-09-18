@@ -3,8 +3,7 @@
 **Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers) and 7 (Coming up, Projects, Copy as Text) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
-goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
-for them. An inbox was considered and decided against.
+goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below) but not built. An inbox was considered and decided against.
 
 ## The problem
 
@@ -538,7 +537,7 @@ query and no contract change: every layout draws an answer the view already had,
   there, and what's overdue heads today in red. In the month, each day lists what fits and then "+N
   more", today leads with "N overdue", and days already past are faint.
 - **Day's month doesn't show what fell due.** That's Coming up's question, and a board wanting both
-  puts the two cards side by side. Calendar events (below) are still only room left in the design.
+  puts the two cards side by side. Calendar events (below) are decided but not yet drawn.
 - **Copy as Text** is the same document in every layout: the answer over the span drawn.
 - **A bigger card says more** (`CanvasCalendarDetail`). The layout doesn't just stretch: sizes are
   measured in the card's own units, before its zoom, and each day or block says what fits.
@@ -555,27 +554,71 @@ query and no contract change: every layout draws an answer the view already had,
     day becomes large dots and a week's blocks drop to a name. The node view only tells the card
     (`CanvasOnScreen`) when the board's zoom crosses that line, so zooming redraws it once.
 
-## Calendars, eventually
+## Calendars
 
-Sketched only so that the views leave room for it. Nothing here is decided.
+Decided 2026-09-18. Not built.
 
 **The ask:** subscribe to a calendar, associate it with a project or area, and see its events among the
-sittings.
+sittings, in the views that cover that project.
 
-- **Where events come from.** EventKit is the likely source in the app: every account the Mac already
-  has, behind one permission prompt, with no sign-in for PM to handle. It strains the contract-first
-  rule, because a CLI binary asking for calendar access is its own problem, so events may be app-only
-  at first. An `.ics` subscription URL is the portable alternative if that matters.
-- **Association is a calendar plus a match**, stored in the project's frontmatter beside `pm-color`.
-  Few people keep a calendar per project. The 1:1 area is "events titled *1:1 Priya* in Work", not a
-  whole calendar. Calendar identifiers aren't stable across Macs, so the stored form needs care.
-- **Events are read, never written, and never stored.** They're read live and aren't copied into the
-  vault or a sidecar. The calendar stays the truth about the calendar.
-- **What it gives the views.** Events are a fourth row type, read-only, drawn in the rail, week and
-  month layouts. A sitting started during an associated event could take the event's title, so the
-  meeting and its notes read as one row. A period could be anchored to an event ("since the last 1:1"
-  as the calendar says it, not only as the notes do). A gesture like *take notes for this meeting*
-  could start a sitting in the associated area.
+### C1 — Events come from EventKit, in the app only
+
+Every account the Mac already has, behind one permission prompt (`requestFullAccessToEvents`, with an
+`NSCalendarsFullAccessUsageDescription`), and no sign-in for Folio to handle. **This breaks the
+contract-first rule, on purpose:** a CLI binary asking for calendar access is its own problem, so the
+contract, `pm` and Raycast get no events at first. An `.ics` subscription URL is the portable
+alternative, and the way back to the contract if another surface ever needs events.
+
+**Events are read, never written, and never stored.** They're read live and aren't copied into the
+vault or a sidecar. The calendar stays the truth about the calendar.
+
+### C2 — A project names its calendars, and what to match in them, in frontmatter
+
+Beside `pm-color`, under `pm-events`: a list of calendars, each with the queries its events must match.
+
+```yaml
+pm-events:
+  - calendar: Work              # the calendar's title
+    account: iCloud             # optional; only when two calendars share a title
+    match: ["1:1 Priya", "Priya / Stuart"]
+  - calendar: Launch            # no match: every event in the calendar
+```
+
+- **A calendar is named by its title and account**, not `calendarIdentifier`, which isn't stable across
+  Macs. A name that matches nothing is kept, and just draws nothing, so a vault synced to a Mac
+  without that account loses nothing.
+- **`match` takes several query strings, and an event matches if any one does**: case-insensitive
+  "contains", on the title. A series gets renamed, and a person has two recurring meetings, so one
+  string wasn't enough. No `match` means the whole calendar; few people keep a calendar per project, so
+  that's the rarer case.
+- **Title only, no attendees.** People are out of scope (Not in this pass), and a title is what you can
+  see and type.
+
+### C3 — The association is the filter
+
+A view shows the events associated with the projects it already covers (D2), and nothing else. A W-1
+Day card shows W-1's meetings, and a card across the board shows every project's. There's no separate
+filter on the card and no "all calendars": an event with no project to belong to has no row to be.
+The views stay about the work and don't become a second calendar app.
+
+### C4 — Events are a fourth row type, read-only
+
+Drawn first in the rail, week and month layouts (D9), in the project's colour and visibly unlike a
+sitting: an event is a span that was scheduled, a sitting is a start that happened. Whether they join
+the plain list, and how, waits until they've been seen on the rail. Copy as Text includes them.
+
+### Build order
+
+1. **PmLib, no EventKit.** Read and write `pm-events`, and a pure matcher (a calendar title, an account
+   and an event title against a project's entries). Tests cover several `match` strings, no `match`,
+   a missing account, and a calendar that isn't there.
+2. **The app.** An EventKit reader, the usage string, and **Show Events From…** on the project and area
+   menus: pick calendars, add query strings, and it writes the frontmatter.
+3. **The views.** Events for the card's projects, drawn in the rail, week and month.
+4. **Later.** A sitting started during an associated event takes the event's title, so the meeting and
+   its notes read as one row. A period anchored to an event ("since the last 1:1" as the calendar says
+   it, not only as the notes do). **Take Notes for This Meeting**, starting a sitting in the associated
+   area.
 
 ## No inbox, by decision
 
