@@ -14,9 +14,26 @@ import PmLib
 /// not a view, and the card draws its text as the text card it also is. An unknown period or projects
 /// value falls back to the default rather than to nothing.
 struct CanvasViewSpec: Equatable {
-    /// Which question. The set is closed (D1); Day is the first.
+    /// Which question. The set is closed (D1).
     enum Kind: String, CaseIterable {
+        /// What did I sit down to? `session.list`.
         case day
+        /// What am I blocked on? `task.waiting` — the Waiting window's answer, on a board.
+        case waiting
+        /// Where did I say *that*? `task.search`, for the words in `query`.
+        case search
+
+        /// What the card is called where it has to be one word: zoomed out, and to VoiceOver.
+        var title: String {
+            switch self {
+            case .day: return "Day"
+            case .waiting: return "Waiting"
+            case .search: return "Search"
+            }
+        }
+
+        /// Whether *when* means anything to it. Waiting is about now, and a search is about words.
+        var hasPeriod: Bool { self == .day }
     }
 
     /// When (D2). A relative period follows the clock, so a Today card left on a board is tomorrow's
@@ -97,12 +114,15 @@ struct CanvasViewSpec: Equatable {
     var kind: Kind
     var period: Period = .today
     var projects: Projects = .everything
+    /// What a Search view looks for. Empty until it's told.
+    var query: String = ""
 
     // MARK: On the node
 
     static let viewKey = "pmView"
     static let periodKey = "pmPeriod"
     static let projectsKey = "pmProjects"
+    static let queryKey = "pmQuery"
 
     /// The view this node is, or nil for a node that isn't one — anything but a text node, a text node
     /// without the key, or one naming a view this build doesn't have.
@@ -112,6 +132,7 @@ struct CanvasViewSpec: Equatable {
               let kind = Kind(rawValue: raw.trimmingCharacters(in: .whitespaces).lowercased()) else { return nil }
         var spec = CanvasViewSpec(kind: kind)
         if case .string(let period)? = node.extra[periodKey] { spec.period = Period(value: period) }
+        if case .string(let query)? = node.extra[queryKey] { spec.query = query }
         switch node.extra[projectsKey] {
         case .string(let value)? where value.trimmingCharacters(in: .whitespaces).lowercased() == "board":
             spec.projects = .board
@@ -134,6 +155,8 @@ struct CanvasViewSpec: Equatable {
     static func set(_ spec: CanvasViewSpec, on node: inout CanvasNode) {
         node.extra[viewKey] = .string(spec.kind.rawValue)
         node.extra[periodKey] = spec.period == .today ? nil : .string(spec.period.value)
+        let query = spec.query.trimmingCharacters(in: .whitespaces)
+        node.extra[queryKey] = query.isEmpty ? nil : .string(query)
         switch spec.projects {
         case .everything: node.extra[projectsKey] = nil
         case .board: node.extra[projectsKey] = .string("board")
@@ -145,11 +168,15 @@ struct CanvasViewSpec: Equatable {
     var noteText: String {
         switch kind {
         case .day: return "\(period.title), across projects: a Folio view."
+        case .waiting: return "What I'm waiting on, across projects: a Folio view."
+        case .search: return "A search of every project's tasks: a Folio view."
         }
     }
 
     /// A new Day card: today, across everything.
     static let newDay = CanvasViewSpec(kind: .day)
+    static let newWaiting = CanvasViewSpec(kind: .waiting)
+    static let newSearch = CanvasViewSpec(kind: .search)
 
     /// The card's caption for a period: "Today · Fri, Sep 18", or the week it covers.
     func caption(for range: DoneRange, calendar: Calendar = .current) -> String {
@@ -184,6 +211,8 @@ struct CanvasDayRow: Identifiable, Equatable {
     let pickedUp: Bool
     /// Where the line is, for acting on it. Nil for a line that's gone, which can only be read.
     var ref: TaskRefInput? = nil
+    /// Whether the line itself says what it's waiting on — so Stop Waiting has a token to clear.
+    var declaresWait = false
 }
 
 enum CanvasDayRows {

@@ -156,9 +156,14 @@ public extension WaitTarget {
 /// notes and already carries the wait, so asking it this second question costs a filter. Callers with a
 /// warmed index of their own (the macOS app has one) should group their own rows instead — see
 /// `waitingGroups`, which is the part with the rules in it.
+///
+/// `projects` narrows the *tasks* to those projects' — what they wait on can be anywhere, and still
+/// resolves against every folder.
 public func waitingBuckets(includeArchived: Bool = false,
-                           includeActive: Bool = true) throws -> [WaitingBucket] {
-    let hits = try searchableTasks(includeArchived: includeArchived, includeActive: includeActive)
+                           includeActive: Bool = true,
+                           projects: [String]? = nil) throws -> [WaitingBucket] {
+    let hits = try searchableTasks(includeArchived: includeArchived, includeActive: includeActive,
+                                   projects: projects)
         .filter { $0.effectiveWaiting != nil }
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)

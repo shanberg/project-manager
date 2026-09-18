@@ -731,26 +731,34 @@ extension CanvasBoardView {
     private func addViewMenus(_ menu: NSMenu) {
         let cards = selectedViewCards
         guard !cards.isEmpty else { return }
+        // Only a Day has a *when*: Waiting is about now, and a search is about words.
+        if cards.allSatisfy({ $0.spec.kind.hasPeriod }) { addPeriodMenu(menu, cards) }
+        addProjectsMenu(menu, cards)
+    }
+
+    private func addPeriodMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
         let periods = NSMenu(title: "Period")
         var choices = CanvasViewSpec.Period.relative
         // A card pinned to a date keeps that date on offer, so the tick has somewhere to be.
-        for card in cards { if case .day = card.model.spec.period, !choices.contains(card.model.spec.period) {
-            choices.append(card.model.spec.period)
+        for card in cards { if case .day = card.spec.period, !choices.contains(card.spec.period) {
+            choices.append(card.spec.period)
         } }
         for period in choices {
             let item = add(periods, period.title, #selector(setViewPeriod(_:)))
             item.representedObject = period.value
-            item.state = cards.allSatisfy { $0.model.spec.period == period } ? .on : .off
+            item.state = cards.allSatisfy { $0.spec.period == period } ? .on : .off
         }
         menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
+    }
 
+    private func addProjectsMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
         let projects = NSMenu(title: "Projects")
         for (title, value) in [(CanvasViewSpec.Projects.everything.title, "everything"),
                                (CanvasViewSpec.Projects.board.title, "board")] {
             let item = add(projects, title, #selector(setViewProjects(_:)))
             item.representedObject = value
             let wanted: CanvasViewSpec.Projects = value == "board" ? .board : .everything
-            item.state = cards.allSatisfy { $0.model.spec.projects == wanted } ? .on : .off
+            item.state = cards.allSatisfy { $0.spec.projects == wanted } ? .on : .off
         }
         menu.addItem(withTitle: "Projects", action: nil, keyEquivalent: "").submenu = projects
     }
@@ -1276,6 +1284,8 @@ extension CanvasBoardView {
         case .folder: addFolderCard(at: where_)
         case .projectNote: addProjectNoteCard(at: where_)
         case .dayView: addViewCard(.newDay, at: where_)
+        case .waitingView: addViewCard(.newWaiting, at: where_)
+        case .searchView: addViewCard(.newSearch, at: where_)
         }
     }
 

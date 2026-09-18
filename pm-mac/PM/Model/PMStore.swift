@@ -884,6 +884,18 @@ final class PMStore {
         }
     }
 
+    /// Stop waiting on several tasks at once, as one write and one step — a view's selection. Only the
+    /// lines that declare a wait are given: one that inherits its wait has no token to clear.
+    func clearWaiting(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(pickingUp: todos, then: then) { project in
+            try PMContract.perform(.taskSetWaiting, PMContract.input(project: project) {
+                $0.tasks = todos.map(\.reference)
+                $0.clearWaiting = true
+            })
+        }
+    }
+
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
     func editText(_ todo: Todo, text: String, then: (@MainActor () -> Void)? = nil) {
         mutating(pickingUp: [todo], then: then) { project in

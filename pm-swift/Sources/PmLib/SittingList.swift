@@ -284,6 +284,21 @@ extension TaskState {
 
 // MARK: - Across the vault
 
+/// The folders a `projects` field names: each by name or prefix, as a `[[link]]` or bare, and a master
+/// with its members, since a master already rolls them up. The one reading of the field, for every query
+/// that takes it.
+public func projectFolders(named projects: [String]) throws -> Set<String> {
+    var folders = Set<String>()
+    for name in projects {
+        let written = ProjectPartOf.writtenName(in: name) ?? name
+        folders.insert((try resolveProjectPath(nameOrPrefix: written) as NSString).lastPathComponent)
+    }
+    for membership in try projectMemberships() {
+        if let master = membership.master, folders.contains(master) { folders.insert(membership.member) }
+    }
+    return folders
+}
+
 /// Every sitting dated in `range`, across projects, with its tasks and prose.
 ///
 /// `projects` narrows it to those projects, by name or prefix, as `[[links]]` or bare. A master brings
@@ -298,18 +313,7 @@ public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Dat
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
 
-    var only: Set<String>?
-    if let projects {
-        var folders = Set<String>()
-        for name in projects {
-            let written = ProjectPartOf.writtenName(in: name) ?? name
-            folders.insert((try resolveProjectPath(nameOrPrefix: written) as NSString).lastPathComponent)
-        }
-        for membership in try projectMemberships() {
-            if let master = membership.master, folders.contains(master) { folders.insert(membership.member) }
-        }
-        only = folders
-    }
+    let only = try projects.map(projectFolders(named:))
 
     var answer = SittingList()
     var seen = Set<String>()

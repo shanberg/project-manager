@@ -126,6 +126,55 @@ final class CanvasDayRowUndoTests: XCTestCase {
         XCTAssertEqual(try todayRows().1.first { $0.text == "Email Dana" }?.state, .open, "⌘Z brought the task back")
     }
 
+    /// Stop Waiting from a Waiting view's row clears the token through the project's store, as one step
+    /// ⌘Z takes back — and the Waiting answer follows.
+    func testStopWaitingFromAWaitingRowIsTakenBackByUndo() throws {
+        _ = try api("project.create") { $0.title = "Launch"; $0.domain = "W" }
+        _ = try api("project.create") { $0.title = "Site"; $0.domain = "W" }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Ship it waiting: [[W-2 Site]]" }
+        let hit = try XCTUnwrap(try waitingBuckets().first?.tasks.first, "the task is waiting")
+        let row = CanvasTaskLists.row(hit)
+        XCTAssertTrue(CanvasDayAction.offered(forTasks: [row]).contains(.stopWaiting))
+
+        var lastEditedProject: PMStore?
+        let actions = CanvasDayActions { [unowned self] in projectKey(forFolder: $0) }
+        actions.onActed = { lastEditedProject = $0 }
+        defer { actions.releaseAll() }
+        let settled = expectation(description: "act settled")
+        actions.perform(.stopWaiting, on: [row], inProject: hit.projectFolder) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+        XCTAssertTrue(try waitingBuckets().isEmpty, "the wait is cleared on disk")
+
+        let project = try XCTUnwrap(lastEditedProject, "the act became the board's last edit")
+        let undone = expectation(description: "undone")
+        project.undo()
+        project.reload { undone.fulfill() }
+        wait(for: [undone], timeout: 5)
+        XCTAssertEqual(try waitingBuckets().first?.tasks.map(\.text), ["Ship it"], "⌘Z put the wait back")
+    }
+
+    /// A search hit in a day's second sitting names that sitting, so a tick lands on its line — not on the
+    /// first sitting's line of the same number, which here says the same thing.
+    func testATickOnASearchHitLandsInItsOwnSitting() throws {
+        _ = try api("project.create") { $0.title = "Launch"; $0.domain = "W" }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Call Dana" }
+        _ = try api("session.start") { $0.project = "W-1"; $0.new = true }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Call Dana" }
+
+        let hits = try searchableTasks().filter { $0.text == "Call Dana" }
+        XCTAssertEqual(hits.compactMap(\.sessionOrdinal).sorted(), [0, 1], "one in each sitting")
+        let second = try XCTUnwrap(hits.first { $0.sessionOrdinal == 1 })
+
+        let actions = CanvasDayActions { [unowned self] in projectKey(forFolder: $0) }
+        defer { actions.releaseAll() }
+        let settled = expectation(description: "act settled")
+        actions.perform(.complete, on: [CanvasTaskLists.row(second)], inProject: second.projectFolder) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+
+        let open = try searchableTasks().filter { $0.text == "Call Dana" }
+        XCTAssertEqual(open.map(\.sessionOrdinal), [0], "the second sitting's was ticked, the first's is still open")
+    }
+
     /// A selection is one sitting, so one project: two ticks are one step, and one ⌘Z takes both back.
     func testASelectionIsOneStepOnItsProject() throws {
         _ = try api("project.create") { $0.title = "Day Under Test"; $0.domain = "W" }

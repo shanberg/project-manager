@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card) and 4 (acting from a row) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row) and 5 (Waiting and Search) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -408,6 +408,36 @@ so pasting it into Obsidian gives you links that work.
   choosing another lens takes `pmSitting` off.
 - **Not yet:** opening a sitting's note in the card.
 
+### As built (step 5)
+
+`CanvasTaskLists` (the answer as groups and rows), `CanvasTaskListCard` (the model and the drawing), and
+`CanvasViewRow`, the one task row every view draws, split out of the Day card so the three can't drift.
+
+- **Made from the add list** as **New Waiting View** and **New Search View**. `pmView` is `waiting` or
+  `search`, and a search keeps its words in `pmQuery`. Their menu is **Projects** only: Waiting is
+  about now and a search is about words, so neither has a Period.
+- **Waiting** draws `task.waiting`'s groups as the Waiting window does: the target as the heading,
+  released first, in green, with "This landed". **Search** draws `task.search`'s ranking for what's in
+  its field, the best 50. It searches as you type, and keeps the words on the node, as one undoable
+  change, when you press Return or leave the field.
+- **Each row carries its project's chip** after it (the `pm-color` dot or icon, then the name, and a
+  due date when it has one). So `task.search` and `task.waiting` rows now carry `projectColor` and
+  `projectIcon`, as `session.list`'s sittings do.
+- **Acting is step 4's.** Complete, Drop, Focus, Edit Task… and Copy, plus **Stop Waiting** on a row
+  whose own line says what it waits on. There's no Pick Up or Put Back, since there's no sitting in
+  view to pick into. A selection is one project's rows, the way a Day's is one sitting's, so it's still
+  one store and one ⌘Z. ⇧ extends through that project's rows across groups.
+- **The contract (1.15.0).** `task.search` and `task.waiting` take `projects`, read as `session.list`
+  reads it (`projectFolders(named:)`). On Waiting it narrows the *tasks*, and what they wait on still
+  resolves anywhere. Hits carry `sessionOrdinal`, so a ref names the sitting whole.
+- **Found on the way, and fixed: a write could land in the wrong sitting.** A task named by date alone
+  means that day's *first* sitting. The store's references (`Todo.reference`) and the Waiting window's
+  never sent the ordinal, so a tick on a task in a day's second sitting went to the first sitting's line
+  of the same number whenever the two said the same thing. `Todo` now knows its `sessionOrdinal` from
+  the parse, and every reference the app writes with carries it.
+- **Polled every 30 seconds**, not 20: these walks read every project, where a Day only reads the
+  ones touched in its span.
+
 ## Calendars, eventually
 
 Sketched only so that the views leave room for it. Nothing here is decided.
@@ -460,7 +490,7 @@ Each step ships on its own.
    project chip, the rail and the Week lede. Reading only.
 4. ✓ **Acting from a view (D6).** Acquire-on-act through `StoreRegistry`, and the undo route. A
    `CanvasUndoRouteTests` case covers a tick on a Day row being undone by ⌘Z on the board.
-5. **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
+5. ✓ **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
    card is general before another query is written.
 6. **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
 7. **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.

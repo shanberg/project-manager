@@ -182,7 +182,11 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     }
     var todos: [Todo] = []
     var foundFocused = false
+    // How many sittings each heading date has had so far: the next one's ordinal.
+    var sittingsOn: [String: Int] = [:]
     for (sessionIndex, session) in notes.sessions.enumerated() {
+        let ordinal = sittingsOn[session.date, default: 0]
+        sittingsOn[session.date] = ordinal + 1
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         // The stable half of a TaskRef coordinate, carried on every task so a reader never has to
         // re-derive it from the heading. nil only for a session heading this parser didn't write.
@@ -203,7 +207,7 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
             // the next write.
             let isFocused = content.focused && !foundFocused
             if isFocused { foundFocused = true }
-            todos.append(Todo(
+            var todo = Todo(
                 text: text,
                 checked: state.isClosed,
                 state: state,
@@ -217,7 +221,9 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                 waiting: content.waiting,
                 digest: taskDigest(text),
                 sessionISODate: isoDate
-            ))
+            )
+            todo.sessionOrdinal = ordinal
+            todos.append(todo)
             lineIndex += 1
         }
     }

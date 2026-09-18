@@ -21,7 +21,10 @@ import PmLib
 extension Todo {
     /// This task as the contract names it: session date, line, and the digest of its text.
     var reference: TaskRefInput {
+        // The ordinal too, when the date names the sitting: without it a reference means the day's first
+        // sitting, and a line there with the same text and number would be taken for this one.
         TaskRefInput(session: sessionISODate ?? String(sessionIndex),
+                     sessionOrdinal: sessionISODate != nil && sessionOrdinal > 0 ? sessionOrdinal : nil,
                      line: lineIndex,
                      digest: digest)
     }

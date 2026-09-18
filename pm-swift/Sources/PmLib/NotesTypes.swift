@@ -111,6 +111,10 @@ public struct Todo: Codable, Equatable {
     public var digest: String?
     /// The ISO date of this task's session, the stable half of a `TaskRef` coordinate.
     public var sessionISODate: String?
+    /// Which of its day's sittings this task's is, counting from the first — the other half of naming a
+    /// sitting by date, in a project sat down to twice that day. A reference without it names the first,
+    /// and a line there with the same text and number is taken for this one.
+    public var sessionOrdinal: Int = 0
     /// The latest sitting this task was picked up into, when it has been (docs/sessions.md D2). Filled
     /// in by a read that knows the project folder, since the picks live beside the notes, not in them.
     public var picked: PickMark?

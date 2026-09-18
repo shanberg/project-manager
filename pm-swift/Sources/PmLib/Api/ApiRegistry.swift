@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.14.0"
+public let apiContractVersion = "1.15.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -261,11 +261,15 @@ public enum ApiRegistry {
                                ApiField("project", .string, "Break ties toward this project. Defaults to the focused one."),
                                ApiField("scope", .string, "Which projects to search. Default all.",
                                         allowed: ["active", "archive", "all"]),
+                               ApiField("projects", .stringList,
+                                        "Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. Default every project."),
                                ApiField("limit", .integer, "How many to return. Default 20.", minimum: 0)]),
         ApiActionSpec(name: "task.waiting", tier: .query,
                       summary: "Everything you're waiting on, grouped by what it's waiting on.",
                       fields: [ApiField("scope", .string, "Which projects to look in. Default active.",
-                                        allowed: ["active", "archive", "all"])]),
+                                        allowed: ["active", "archive", "all"]),
+                               ApiField("projects", .stringList,
+                                        "Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. What they wait on can be anywhere. Default every project.")]),
         ApiActionSpec(name: "task.done", tier: .query,
                       summary: "What got done: tasks completed in a period, across every project, newest first.",
                       fields: [ApiField("period", .string, "Which span. Default today.",

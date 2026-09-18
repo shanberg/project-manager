@@ -154,6 +154,75 @@ final class WaitingListTests: XCTestCase {
         }
     }
 
+    /// `projects` narrows the tasks, not what they wait on: W-2's wait on W-1 still resolves, and
+    /// still reads as released, when W-1 isn't among the projects asked about.
+    func testProjectsNarrowTheTasksButNotWhatTheyWaitOn() throws {
+        try withVault { active, archive in
+            try write(project: "W-2 Launch", in: active,
+                      tasks: "- [ ] Ship the release waiting: [[W-1 Website Refresh]]")
+            try write(project: "W-3 Docs", in: active,
+                      tasks: "- [ ] Proofread waiting: [[W-1 Website Refresh]]")
+            try write(project: "W-1 Website Refresh", in: archive, tasks: "- [x] Land it")
+
+            let buckets = try waitingBuckets(projects: ["[[W-2]]"])
+            XCTAssertEqual(buckets.count, 1)
+            XCTAssertEqual(buckets.first?.state, "released")
+            XCTAssertEqual(buckets.first?.tasks.map(\.text), ["Ship the release"])
+            XCTAssertEqual(try waitingBuckets().first?.tasks.count, 2)
+        }
+    }
+
+    /// A search hit names its sitting whole — date *and* which of the day's sittings — so a write aimed
+    /// at a task in a day's second sitting lands on that line, not on the first sitting's line of the
+    /// same number.
+    func testAHitInADaysSecondSittingCarriesItsOrdinal() throws {
+        try withVault { active, _ in
+            let docs = active.appendingPathComponent("W-2 Launch/docs")
+            try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+            let markdown = """
+            # Launch
+
+            ## Sessions
+
+            ### Wed, Feb 25, 2026 9:00 AM
+
+            - [ ] Morning task
+
+            ### Wed, Feb 25, 2026 2:00 PM
+
+            - [ ] Afternoon task
+
+            """
+            let url = docs.appendingPathComponent("Notes - Launch.md")
+            try markdown.write(to: url, atomically: true, encoding: .utf8)
+
+            let hits = try searchableTasks()
+            let afternoon = try XCTUnwrap(hits.first { $0.text == "Afternoon task" })
+            XCTAssertEqual(afternoon.sessionOrdinal, 1)
+            XCTAssertEqual(hits.first { $0.text == "Morning task" }?.sessionOrdinal, 0)
+
+            let ref = afternoon.ref
+            let notes = normalizeFocusMarker(notes: try parseNotes(markdown: markdown))
+            let resolved = try resolveTaskRef(
+                TaskRef(sessionDate: ref.session, sessionOrdinal: ref.sessionOrdinal ?? 0,
+                        lineIndex: ref.line, digest: ref.digest), notes: notes)
+            XCTAssertFalse(resolved.relocated, "the ref should name the line where it is, not find it by text")
+            let todo = try parseTodos(notes: notes)
+                .first { $0.sessionIndex == resolved.sessionIndex && $0.lineIndex == resolved.lineIndex }
+            XCTAssertEqual(todo?.text, "Afternoon task")
+        }
+    }
+
+    /// `projects` on a search: only those projects' tasks, a master bringing its members.
+    func testSearchNarrowsToProjects() throws {
+        try withVault { active, _ in
+            try write(project: "W-2 Launch", in: active, tasks: "- [ ] Email Dana")
+            try write(project: "W-3 Docs", in: active, tasks: "- [ ] Email Priya")
+            XCTAssertEqual(try searchableTasks(projects: ["W-3"]).map(\.text), ["Email Priya"])
+            XCTAssertEqual(try searchableTasks().count, 2)
+        }
+    }
+
     // MARK: Vault plumbing
 
     /// Run `body` against a throwaway PARA vault, with `PM_CONFIG_HOME` pointed at it.

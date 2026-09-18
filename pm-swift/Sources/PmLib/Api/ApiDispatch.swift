@@ -466,7 +466,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
     case "task.search":
         let scope = input.scope ?? "all"
         let hits = try searchableTasks(includeArchived: scope != "active",
-                                       includeActive: scope != "archive")
+                                       includeActive: scope != "archive", projects: input.projects)
         // The bias toward the project you're in is the focused one unless a caller says otherwise —
         // the same tie-break the quick bar has always applied, now available to everything.
         let focused = try input.project.map(projectKey(of:)) ?? focusedProjectKey()
@@ -484,7 +484,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         // waiting on anything any more — they were put down.
         let scope = input.scope ?? "active"
         let buckets = try waitingBuckets(includeArchived: scope != "active",
-                                         includeActive: scope != "archive")
+                                         includeActive: scope != "archive", projects: input.projects)
         let count = buckets.reduce(0) { $0 + $1.tasks.count }
         let released = buckets.filter { $0.state == "released" }.count
         var summary = "Nothing is waiting."

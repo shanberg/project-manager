@@ -223,3 +223,108 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(CanvasDayRows.markdown([rows[2]]), "- [x] p2")
     }
 }
+
+// MARK: - Waiting and Search (step 5)
+
+extension CanvasViewSpecTests {
+    /// A search hit as the contract sends one. Its initializer is PmLib's own, so a test reads one off
+    /// the wire, which is what the card is handed anyway.
+    private func hit(_ text: String, project: String = "W-1 Launch", session: String = "2026-09-18",
+                     ordinal: Int = 0, line: Int = 0, waiting: String? = nil) throws -> TaskSearchHit {
+        var object: [String: Any] = [
+            "projectFolder": project, "projectName": String(project.dropFirst(4)), "projectKey": "/p:\(project)",
+            "isArchived": false, "text": text, "isFocused": false, "session": session,
+            "sessionOrdinal": ordinal, "line": line, "digest": "d-\(text)",
+        ]
+        if let waiting { object["waiting"] = waiting; object["effectiveWaiting"] = waiting }
+        return try JSONDecoder().decode(TaskSearchHit.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    func testWaitingAndSearchAreViewsAndSearchKeepsItsWords() {
+        XCTAssertEqual(CanvasViewSpec.of(node(["pmView": .string("waiting")]))?.kind, .waiting)
+        let search = CanvasViewSpec.of(node(["pmView": .string("search"), "pmQuery": .string("email dana")]))
+        XCTAssertEqual(search?.kind, .search)
+        XCTAssertEqual(search?.query, "email dana")
+        XCTAssertFalse(CanvasViewSpec.Kind.waiting.hasPeriod, "Waiting is about now")
+        XCTAssertFalse(CanvasViewSpec.Kind.search.hasPeriod, "a search is about words")
+
+        var card = node(["pmView": .string("search")])
+        CanvasViewSpec.set(CanvasViewSpec(kind: .search, query: "  email dana "), on: &card)
+        XCTAssertEqual(card.extra["pmQuery"], .string("email dana"))
+        CanvasViewSpec.set(.newSearch, on: &card)
+        XCTAssertEqual(card.extra, ["pmView": .string("search")], "an empty search carries no query")
+    }
+
+    /// The contract's buckets are the groups, in its order (released first), each heading a target.
+    func testWaitingGroupsAreTheContractsBuckets() throws {
+        let released = WaitingBucket(target: "W-2 Site", title: "Site", folder: "W-2 Site", state: "released",
+                                     tasks: [try hit("Ship it", waiting: "W-2 Site")])
+        let person = WaitingBucket(target: "Dana", title: "Dana", folder: nil, state: "unresolved",
+                                   tasks: [try hit("Proofread", line: 1, waiting: "Dana"),
+                                           try hit("Sign off", line: 2)])
+        let groups = CanvasTaskLists.groups(waiting: [released, person])
+        XCTAssertEqual(groups.map(\.title), ["Site", "Dana"])
+        XCTAssertEqual(groups.map(\.folder), ["W-2 Site", nil])
+        XCTAssertEqual(groups.map(\.id), ["waiting/W-2 Site", "waiting/dana"])
+        XCTAssertEqual(CanvasTaskLists.summary(.waiting, groups), "3 tasks · 2 things · 1 released")
+        XCTAssertEqual(CanvasTaskLists.summary(.waiting, []), "Nothing waiting")
+    }
+
+    /// Ranked by the contract's own ranking, as one list with no heading, and capped.
+    func testSearchIsOneRankedList() throws {
+        let hits = [try hit("Book the venue"), try hit("Email Dana about the venue", line: 1),
+                    try hit("Email Dana", line: 2)]
+        let groups = CanvasTaskLists.groups(search: hits, query: "email dana")
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertNil(groups.first?.title)
+        XCTAssertEqual(groups.first?.hits.map(\.text), ["Email Dana", "Email Dana about the venue"])
+        XCTAssertEqual(CanvasTaskLists.summary(.search, groups), "2 matches")
+        XCTAssertTrue(CanvasTaskLists.groups(search: hits, query: "passport").isEmpty)
+
+        let many = try (0..<80).map { try hit("Email \($0)", line: $0) }
+        XCTAssertEqual(CanvasTaskLists.groups(search: many, query: "email").first?.hits.count,
+                       CanvasTaskLists.searchLimit)
+    }
+
+    /// A hit's row carries its whole ref — the sitting's ordinal too — and whether its own line waits.
+    func testAHitsRowCanBeActedOn() throws {
+        let row = CanvasTaskLists.row(try hit("Call Dana", ordinal: 1, line: 3, waiting: "Dana"))
+        XCTAssertEqual(row.ref, TaskRefInput(session: "2026-09-18", sessionOrdinal: 1, line: 3, digest: "d-Call Dana"))
+        XCTAssertTrue(row.declaresWait)
+        XCTAssertEqual(row.state, .open)
+        XCTAssertNotEqual(CanvasTaskLists.rowID(try hit("Call Dana", ordinal: 0, line: 3)), row.id,
+                          "the same line number in a day's other sitting is another row")
+    }
+
+    /// No sitting to pick up from or put back into; Stop Waiting where a line says what it waits on.
+    func testATaskRowOffersItsVerbs() throws {
+        let plain = CanvasTaskLists.row(try hit("Book the venue"))
+        let waits = CanvasTaskLists.row(try hit("Ship it", line: 1, waiting: "W-2 Site"))
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [plain]), [.complete, .drop, .focus])
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [plain, waits]), [.complete, .drop, .stopWaiting])
+        XCTAssertEqual(CanvasDayAction.stopWaiting.count(of: [plain, waits], among: [plain, waits]), 1)
+        XCTAssertEqual(CanvasDayAction.stopWaiting.title(count: 2), "Stop Waiting on 2 Tasks")
+        var gone = plain
+        gone.ref = nil
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [gone]), [], "a row that can't be named can't be acted on")
+    }
+
+    /// A selection on a task list is one project's rows, in the order they're drawn across its groups;
+    /// a click in another project's row starts over there.
+    func testATaskListSelectionStaysInOneProject() throws {
+        let a1 = try hit("One"), b1 = try hit("Two", project: "W-2 Site")
+        let a2 = try hit("Three", line: 1)
+        let groups = [CanvasTaskGroup(id: "x", title: "X", state: "pending", folder: nil, hits: [a1, b1]),
+                      CanvasTaskGroup(id: "y", title: "Y", state: "pending", folder: nil, hits: [a2])]
+        let order = CanvasTaskLists.order(groups)
+        XCTAssertEqual(order["W-1 Launch"], [CanvasTaskLists.rowID(a1), CanvasTaskLists.rowID(a2)])
+
+        var selection = CanvasDaySelection()
+        selection.click(CanvasTaskLists.rowID(a1), in: "W-1 Launch", modifiers: [], order: order["W-1 Launch"]!)
+        selection.click(CanvasTaskLists.rowID(a2), in: "W-1 Launch", modifiers: .shift, order: order["W-1 Launch"]!)
+        XCTAssertEqual(selection.count, 2, "⇧ reaches across groups within the project")
+        selection.click(CanvasTaskLists.rowID(b1), in: "W-2 Site", modifiers: .command, order: order["W-2 Site"]!)
+        XCTAssertEqual(selection.count, 1)
+        XCTAssertTrue(selection.contains(CanvasTaskLists.rowID(b1), in: "W-2 Site"))
+    }
+}

@@ -10,6 +10,7 @@ enum CanvasDayAction: Equatable {
     case focus
     case pickUp
     case putBack
+    case stopWaiting
     case edit(String)
 
     /// Which of these a selection offers, from what its rows know. The store has the last word when the
@@ -37,6 +38,22 @@ enum CanvasDayAction: Equatable {
         offered(for: [row], in: sitting)
     }
 
+    /// What a row offers on a view that lists tasks rather than sittings — Waiting, Search. There's no
+    /// sitting to pick up from or put back into, so those are left for the project card; Stop Waiting
+    /// is offered where a row's own line says what it waits on.
+    ///
+    /// A selection there is one project's rows (`CanvasDaySelection`, locked to the project), so it's
+    /// still one store and one step.
+    static func offered(forTasks rows: [CanvasDayRow]) -> [CanvasDayAction] {
+        guard !rows.isEmpty, rows.allSatisfy({ $0.ref != nil }) else { return [] }
+        let open = rows.filter { $0.state == .open }
+        var actions: [CanvasDayAction] = [open.isEmpty ? .reopen : .complete]
+        if !open.isEmpty { actions.append(.drop) }
+        if rows.count == 1, !open.isEmpty { actions.append(.focus) }
+        if rows.contains(where: \.declaresWait) { actions.append(.stopWaiting) }
+        return actions
+    }
+
     var title: String { title(count: 1) }
 
     /// The menu's words, with the count in when there's more than one — counting only the rows the act
@@ -51,6 +68,7 @@ enum CanvasDayAction: Equatable {
             case .focus: return "Focus"
             case .pickUp: return "Pick Up"
             case .putBack: return "Put Back"
+            case .stopWaiting: return "Stop Waiting"
             case .edit: return "Edit Task…"
             }
         }
@@ -60,6 +78,7 @@ enum CanvasDayAction: Equatable {
         case .drop: return "Drop \(count) \(tasks)"
         case .pickUp: return "Pick Up \(count) \(tasks)"
         case .putBack: return "Put Back \(count) \(tasks)"
+        case .stopWaiting: return "Stop Waiting on \(count) \(tasks)"
         case .focus: return "Focus"
         case .edit: return "Edit Task…"
         }
@@ -73,6 +92,7 @@ enum CanvasDayAction: Equatable {
         case .drop: return rows.filter { $0.state == .open }.count
         case .pickUp: return CanvasDayRows.roots(of: rows.filter { $0.state == .open }, in: all).count
         case .putBack: return CanvasDayRows.roots(of: rows, in: all).filter(\.pickedUp).count
+        case .stopWaiting: return rows.filter(\.declaresWait).count
         }
     }
 
@@ -85,6 +105,7 @@ enum CanvasDayAction: Equatable {
         case .focus: return "arrow.right.circle"
         case .pickUp: return "arrow.down.to.line"
         case .putBack: return "arrow.uturn.up"
+        case .stopWaiting: return "clock.badge.xmark"
         case .edit: return "pencil"
         }
     }
@@ -175,6 +196,11 @@ final class CanvasDayActions {
                 let picked = store.trees(todos.filter { $0.picked != nil })
                 guard !picked.isEmpty else { return finish() }
                 store.putBack(picked, then: landed)
+            case .stopWaiting:
+                // Only the lines that say it: an inheritor's wait is cleared on its parent.
+                let declared = todos.filter { $0.waiting != nil }
+                guard !declared.isEmpty else { return finish() }
+                store.clearWaiting(declared, then: landed)
             case .edit(let text):
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard todos.count == 1, !trimmed.isEmpty, trimmed != todos[0].text else { return finish() }

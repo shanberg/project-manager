@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.14.0";
+export const API_CONTRACT_VERSION = "1.15.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -372,6 +372,8 @@ export interface TaskSearchInput {
   limit?: number;
   /** Break ties toward this project. Defaults to the focused one. */
   project?: string;
+  /** Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
   /** Words to look for, in any order. */
   query: string;
   /** Which projects to search. Default all. */
@@ -430,6 +432,8 @@ export interface TaskUnwrapInput {
 
 /** Everything you're waiting on, grouped by what it's waiting on. */
 export interface TaskWaitingInput {
+  /** Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. What they wait on can be anywhere. Default every project. */
+  projects?: string[];
   /** Which projects to look in. Default active. */
   scope?: "active" | "archive" | "all";
 }
