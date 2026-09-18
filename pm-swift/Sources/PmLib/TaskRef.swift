@@ -134,8 +134,14 @@ public func sessionISODate(heading: String) -> String? {
 ///   ("Follow up" twice in a project), and once the position check has failed, healing would be a
 ///   guess. Refusing returns the caller to a re-read, which is cheap; completing the wrong task isn't.
 public func resolveTaskRef(_ ref: TaskRef, notes: ProjectNotes) throws -> ResolvedTaskRef {
+    try resolveTaskRef(ref, notes: notes, todos: try parseTodos(notes: notes))
+}
+
+/// `resolveTaskRef` against tasks already parsed from `notes`, for a caller resolving many references
+/// against one read — the pick log resolves every pick on every read, and parsing the document once per
+/// pick would make a read cost what the log's length is.
+func resolveTaskRef(_ ref: TaskRef, notes: ProjectNotes, todos: [Todo]) throws -> ResolvedTaskRef {
     let sessionIndex = try sessionIndex(for: ref, notes: notes)
-    let todos = try parseTodos(notes: notes)
 
     let atPosition = todos.first { $0.sessionIndex == sessionIndex && $0.lineIndex == ref.lineIndex }
 

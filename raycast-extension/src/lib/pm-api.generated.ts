@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.11.0";
+export const API_CONTRACT_VERSION = "1.12.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -304,10 +304,40 @@ export interface TaskListInput {
   project?: string;
 }
 
+/** Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up. */
+export interface TaskPickInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+}
+
 /** How many of a project's tasks are done. Dropped tasks are left out of the total. */
 export interface TaskProgressInput {
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
+}
+
+/** Put back a picked-up task, or several: take it out of the session it was picked up into. The task itself isn't touched. */
+export interface TaskReleaseInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The ISO date of the session it was picked up into. Default: its latest pick. */
+  session?: string;
+  /** Digest of that session's label, to catch a session that has since changed. */
+  sessionDigest?: string;
+  /** Which session of that date. Default 0. */
+  sessionOrdinal?: number;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
 /** Re-open a completed or dropped task, or several, and put focus back. */
@@ -447,7 +477,9 @@ export interface ApiInputs {
   "task.drop": TaskDropInput;
   "task.focus": TaskFocusInput;
   "task.list": TaskListInput;
+  "task.pick": TaskPickInput;
   "task.progress": TaskProgressInput;
+  "task.release": TaskReleaseInput;
   "task.reopen": TaskReopenInput;
   "task.search": TaskSearchInput;
   "task.setDue": TaskSetDueInput;
@@ -503,7 +535,9 @@ export const API_TIERS: Record<
   "task.drop": "mutation",
   "task.focus": "mutation",
   "task.list": "query",
+  "task.pick": "mutation",
   "task.progress": "query",
+  "task.release": "mutation",
   "task.reopen": "mutation",
   "task.search": "query",
   "task.setDue": "mutation",

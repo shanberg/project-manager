@@ -111,6 +111,9 @@ public struct Todo: Codable, Equatable {
     public var digest: String?
     /// The ISO date of this task's session, the stable half of a `TaskRef` coordinate.
     public var sessionISODate: String?
+    /// The latest sitting this task was picked up into, when it has been (docs/sessions.md D2). Filled
+    /// in by a read that knows the project folder, since the picks live beside the notes, not in them.
+    public var picked: PickMark?
 
     /// `state`, when given, wins over `checked`, so the two can't be constructed disagreeing.
     public init(text: String, checked: Bool, state: TaskState? = nil, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, waiting: String? = nil, effectiveWaiting: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
@@ -145,11 +148,16 @@ public struct NotesShowOutput: Codable {
     /// variable from the tasks it describes is a pair that can drift, and the whole point of it is
     /// that it can't. See docs/api-contract.md.
     public var revision: String
+    /// Every pick that still stands and still resolves, oldest first — what a sitting draws as the old
+    /// tasks it picked up. Empty for a read made without the project folder to hand.
+    public var picks: [TaskPick]
 
-    public init(notes: ProjectNotes, todos: [Todo], focusedKey: String? = nil, revision: String) {
+    public init(notes: ProjectNotes, todos: [Todo], focusedKey: String? = nil, revision: String,
+                picks: [TaskPick] = []) {
         self.notes = notes
         self.todos = todos
         self.focusedKey = focusedKey
         self.revision = revision
+        self.picks = picks
     }
 }

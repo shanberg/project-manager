@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17. D6, dropped, built 2026-09-17 (build order step 1); the rest not yet. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. D6, dropped, and the pick log with its contract (build order steps 1 and 2) built 2026-09-17; nothing draws picks yet. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -70,7 +70,8 @@ One event per line:
   guessed at, and it is never an error. The log is a record of what happened, not a claim about the file.
 - `released` cancels the latest `picked` of the same task into the same sitting, the way `reopened`
   cancels a completion. It carries `reverses: <id>`, so undo can name what it is taking back.
-- `retargeted` (`from` digest → `to` digest) is appended when `task.setText` edits a picked task, so a
+- `retargeted` (the task's old digest in `task`, the new one in `to`, and the ids of the picks it carries in
+  `retargets`) is appended when `task.setText` edits a picked task, so a
   rename through PM keeps its pick. A rename made in Obsidian loses it: the pick goes stale and stops
   being drawn. That's the same price the done log pays for not hooking, and it's cheap here because
   picking again is one gesture.
@@ -104,7 +105,9 @@ things you finished in it.
 
 Contract: `task.pick` and `task.release` (mutations; input is a task reference, plus an optional session
 reference for `release`). `task.focus` gains `pick` (default `true`). Every task read gains `picked`:
-`{ "into": "2026-09-17", "at": "…" }`, or absent. Contract **1.12.0** (1.11.0 was `task.drop`).
+`{ "into": "2026-09-17", "at": "…" }`, or absent, and a read lists every standing pick in `picks`.
+Contract **1.12.0** has `task.pick`, `task.release` and `picked` (1.11.0 was `task.drop`); `task.focus`'s
+`pick` arrives with the focus work in step 4, as **1.13.0**.
 
 ### D4 — Focus picks up, and undo takes it back as one step
 

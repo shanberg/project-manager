@@ -177,13 +177,26 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return try editing(spec, input, options) { notes, at in
             applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
         }
+    case "task.pick":
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try picking(input, context, source: options.source)
+        }
+    case "task.release":
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try releasing(input, context, source: options.source)
+        }
     case "task.setText":
-        return try editing(spec, input, options) { notes, at in
+        return try document(spec, input, options) { (context: DocumentContext) in
             guard let text = input.text, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
                 throw PmError.emptyTodoText
             }
-            return setTextOnTodoAt(notes: notes, sessionIndex: at.sessionIndex,
-                                   lineIndex: at.lineIndex, text: text)
+            let at = try resolveTaskRef(try taskRef(input), rawText: context.rawText)
+            let renamed = try editTodosPreservingFormat(rawText: context.rawText) { notes in
+                setTextOnTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
+                                lineIndex: at.lineIndex, text: text)
+            } ?? context.rawText
+            return Outcome(rawText: renamed, relocated: at.relocated,
+                           sidecar: try retargeting(at, from: context, to: renamed, source: options.source))
         }
     case "task.setDue":
         return try editing(spec, input, options) { notes, at in
@@ -702,6 +715,17 @@ struct Outcome {
     var note: Phrase?
     /// Anything the action knows that a diff of tasks can't show — which session it just opened.
     var data: JSONValue?
+    /// Events for the project's pick log, appended after the notes are written. A pick changes nothing
+    /// in the notes (unless it had to start a sitting), so this is most of what those actions do.
+    var sidecar: [PickEvent] = []
+}
+
+/// What an action that needs more than the text gets to see: when the project was last edited, for
+/// the ones that resolve the current session, and where it lives, for the ones that read its pick log.
+struct DocumentContext {
+    let rawText: String
+    let lastEdited: Date?
+    let projectPath: String
 }
 
 /// Read once, transform, diff, and write unless this is a dry run.
@@ -722,6 +746,14 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
 /// notes file is already resolved.
 private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
                       _ apply: (String, Date?) throws -> Outcome) throws -> ApiResult {
+    try document(spec, input, options) { (context: DocumentContext) in
+        try apply(context.rawText, context.lastEdited)
+    }
+}
+
+/// `document`, for the actions that read or write the project's pick log as well as its notes.
+private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
+                      _ apply: (DocumentContext) throws -> Outcome) throws -> ApiResult {
     let handle = try resolveNotesHandle(project: try resolvedProject(input))
     let lastEdited = notesLastEdited(path: handle.notesPath)
     let rawText = try handle.io.readContent(path: handle.notesPath)
@@ -735,7 +767,8 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
     }
     let before = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: rawText)))
 
-    let outcome = try apply(rawText, lastEdited)
+    let outcome = try apply(DocumentContext(rawText: rawText, lastEdited: lastEdited,
+                                            projectPath: handle.projectPath))
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
@@ -752,6 +785,11 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
         ApiJournal.record(action: spec.name, project: handle.projectPath, notesPath: handle.notesPath,
                           summary: phrase.past, before: rawText, after: outcome.rawText,
                           changed: changes, source: options.source)
+    }
+    // After the notes, for the same reason the journal is: a pick into a sitting whose heading failed
+    // to write would name a sitting that isn't there.
+    if !options.dryRun {
+        try PickLog.append(outcome.sidecar, projectPath: handle.projectPath)
     }
     return ApiResult(action: spec.name,
                      summary: told.sentence(dryRun: options.dryRun),
@@ -811,6 +849,123 @@ private func resolve(_ reference: TaskRefInput, in text: String, batch: Bool) th
         if case .staleReference = error, batch { return nil }
         throw error
     }
+}
+
+// MARK: - Picking up
+
+/// `task.pick`: record that each task was picked up into the current sitting.
+///
+/// Starts the sitting when the project is cold, the one change to the notes a pick can make — and only
+/// when something is actually picked, so asking to pick up a task that's already here writes nothing.
+private func picking(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let session = try currentSession(in: context.rawText, lastEdited: context.lastEdited)
+    let text = session.rawText
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: text))
+    let todos = try parseTodos(notes: notes)
+    guard let into = PickLog.sitting(at: session.sessionIndex, in: notes) else {
+        throw ApiError(.writeFailed, "The current session's heading isn't a date PM can name.")
+    }
+    let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
+    let at = timestamp()
+
+    var events: [PickEvent] = []
+    var picked: [String] = []
+    var alreadyHere = 0, alreadyPicked = 0
+    var relocated = false
+    var seen = Set<String>()
+    for reference in try references(input) {
+        guard let position = try resolve(reference, in: text, batch: input.tasks != nil) else { continue }
+        relocated = relocated || position.relocated
+        guard seen.insert("\(position.sessionIndex):\(position.lineIndex)").inserted,
+              let todo = todos.first(where: {
+                  $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
+              }) else { continue }
+        if todo.sessionIndex == session.sessionIndex { alreadyHere += 1; continue }
+        if standing.contains(where: { $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
+            && $0.intoIndex == session.sessionIndex }) { alreadyPicked += 1; continue }
+        guard let task = PickLog.task(todo, in: notes) else {
+            throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading PM can't date, so it can't be picked up.",
+                           detail: .string("task"))
+        }
+        events.append(PickEvent(at: at, event: .picked, task: task, into: into, source: source))
+        picked.append(todo.text)
+    }
+
+    let data: JSONValue = .object(["into": .string(into.session),
+                                   "intoIndex": .number(Double(session.sessionIndex))])
+    guard !events.isEmpty else {
+        let finding = alreadyPicked > 0 && alreadyHere == 0
+            ? (input.tasks == nil ? "That task is already picked up" : "Those tasks are already picked up")
+            : (input.tasks == nil ? "That task is already in this session" : "Those tasks are already in this session")
+        // The original text, not the one with a new sitting spliced in: nothing was picked, so nothing
+        // should start.
+        return Outcome(rawText: context.rawText, relocated: relocated, note: .statement(finding), data: data)
+    }
+    let what = picked.count == 1 ? "\u{201C}\(picked[0])\u{201D}" : "\(picked.count) tasks"
+    return Outcome(rawText: text, relocated: relocated,
+                   note: Phrase(past: "Picked up \(what)", future: "pick up \(what)"),
+                   data: data, sidecar: events)
+}
+
+/// `task.release`: put each task back — cancel its pick into the named sitting, or its latest pick when
+/// no sitting is named. The task itself isn't touched.
+private func releasing(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: context.rawText))
+    let todos = try parseTodos(notes: notes)
+    let sitting = input.session == nil ? nil : try sessionIndex(input, in: notes)
+    let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
+    let at = timestamp()
+
+    var events: [PickEvent] = []
+    var released: [String] = []
+    var relocated = false
+    for reference in try references(input) {
+        guard let position = try resolve(reference, in: context.rawText, batch: input.tasks != nil) else { continue }
+        relocated = relocated || position.relocated
+        guard let pick = standing.last(where: {
+            $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
+                && (sitting == nil || $0.intoIndex == sitting)
+        }), !events.contains(where: { $0.reverses == pick.event.id }) else { continue }
+        events.append(PickEvent(at: at, event: .released, task: pick.event.task, into: pick.event.into,
+                                reverses: pick.event.id, source: source))
+        released.append(pick.event.task.text)
+    }
+    guard !events.isEmpty else {
+        return Outcome(rawText: context.rawText, relocated: relocated,
+                       note: .statement(input.tasks == nil ? "That task isn't picked up"
+                                                           : "None of those tasks are picked up"))
+    }
+    let what = released.count == 1 ? "\u{201C}\(released[0])\u{201D}" : "\(released.count) tasks"
+    return Outcome(rawText: context.rawText, relocated: relocated,
+                   note: Phrase(past: "Put back \(what)", future: "put back \(what)"), sidecar: events)
+}
+
+/// The `retargeted` a rename owes the picks of the task it renamed, so they follow it rather than go
+/// stale. Nothing when the task wasn't picked up, or its text didn't change.
+private func retargeting(_ at: ResolvedTaskRef, from context: DocumentContext, to renamed: String,
+                         source: String) throws -> [PickEvent] {
+    let before = normalizeFocusMarker(notes: try parseNotes(markdown: context.rawText))
+    let beforeTodos = try parseTodos(notes: before)
+    let picks = PickLog.resolved(projectPath: context.projectPath, notes: before, todos: beforeTodos)
+        .filter { $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }
+    guard !picks.isEmpty else { return [] }
+    let after = normalizeFocusMarker(notes: try parseNotes(markdown: renamed))
+    guard let todo = try parseTodos(notes: after).first(where: {
+              $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }),
+          let was = beforeTodos.first(where: {
+              $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }),
+          let task = PickLog.task(todo, in: after) else { return [] }
+    let from = was.digest ?? taskDigest(was.text)
+    guard task.digest != from else { return [] }
+    return [PickEvent(at: timestamp(), event: .retargeted, task: PickedTask(
+                session: task.session, ordinal: task.ordinal, line: task.line, digest: from, text: task.text),
+                      retargets: picks.map(\.event.id), to: task.digest, source: source)]
+}
+
+private func timestamp(_ date: Date = Date()) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
 }
 
 // MARK: - Pieces

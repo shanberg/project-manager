@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.11.0"
+public let apiContractVersion = "1.12.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -109,6 +109,17 @@ public enum ApiRegistry {
         ApiActionSpec(name: "task.focus", tier: .mutation,
                       summary: "Make this the project's focused task.",
                       fields: [project, task]),
+        ApiActionSpec(name: "task.pick", tier: .mutation,
+                      summary: "Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up.",
+                      fields: [project, optionalTask, tasks, revision],
+                      oneOf: [["task", "tasks"]]),
+        ApiActionSpec(name: "task.release", tier: .mutation,
+                      summary: "Put back a picked-up task, or several: take it out of the session it was picked up into. The task itself isn't touched.",
+                      fields: [project, optionalTask, tasks, revision,
+                               ApiField("session", .string, "The ISO date of the session it was picked up into. Default: its latest pick."),
+                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
+                               ApiField("sessionDigest", .string, "Digest of that session's label, to catch a session that has since changed.")],
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.diveIn", tier: .mutation,
                       summary: "Move focus to the first open leaf under the focused task.",
                       fields: [project]),

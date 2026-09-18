@@ -98,8 +98,12 @@ final class DryRunTests: XCTestCase {
         // change the test itself made behind the API's back.
         if let notes = notesPath, var text = try? String(contentsOfFile: notes, encoding: .utf8) {
             text += "\n### Mon, Jan 6, 2025 Old sitting\n"
+            // And an older one that left work open, for `task.pick` and `task.release`: one task picked
+            // up for real below, so there's a pick to put back, and one left for the preview to pick.
+            text += "\n### Sun, Jan 5, 2025\n\n- [ ] Call the florist\n- [ ] Order the flowers\n"
             try? text.write(toFile: notes, atomically: true, encoding: .utf8)
         }
+        call("task.pick", ["project": "W-1", "task": reference("Call the florist")])
         call("notes.addLink", ["project": "W-1", "text": "https://example.com", "label": "Brief"])
         call("project.focus", ["project": "W-1"])
         // A folder in the areas root with nothing in it — what `project.adopt` acts on. Made directly
@@ -147,6 +151,8 @@ final class DryRunTests: XCTestCase {
             "task.reopen": ["project": "W-1", "task": reference("Send the invoice")],
             "task.drop": ["project": "W-1", "task": reference("Review the contract")],
             "task.focus": ["project": "W-1", "task": reference("Book the venue")],
+            "task.pick": ["project": "W-1", "task": reference("Order the flowers")],
+            "task.release": ["project": "W-1", "task": reference("Call the florist")],
             "task.diveIn": ["project": "W-1"],
             "task.setDue": ["project": "W-1", "task": reference("Book the venue"), "due": "2026-12-01"],
             "task.setWaiting": ["project": "W-1", "task": reference("Book the venue"),
