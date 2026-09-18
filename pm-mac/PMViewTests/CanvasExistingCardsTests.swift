@@ -147,14 +147,15 @@ final class CanvasExistingCardsTests: XCTestCase {
 
     /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers.
     func testEveryKindOfCardIsOfferedAndTheProjectNoteOnlyWhenMissing() {
-        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .frame, .link, .file, .folder])
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .frame, .link, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView])
         XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).last, .projectNote)
         XCTAssertEqual(CanvasAddCommand.folder.title, "New Folder\u{2026}")
+        XCTAssertEqual(CanvasAddCommand.dayView.title, "New Day View")
     }
 
     /// A tile's strip offers what can be a tab: everything but a frame.
     func testATabCanBeAnythingButAFrame() {
         XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).filter(\.makesTile),
-                       [.card, .link, .file, .folder, .projectNote])
+                       [.card, .link, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView, .projectNote])
     }
 }

@@ -144,8 +144,20 @@ public struct TaskSearchHit: Codable, Equatable, Sendable, SearchableTask {
     public let effectiveWaiting: String?
     public let isFocused: Bool
     public let session: String?
+    /// Which of the day's sittings `session` means, when a day has more than one. Nil in an answer from
+    /// an older binary, which meant the first.
+    public var sessionOrdinal: Int? = nil
     public let line: Int
     public let digest: String?
+    /// The project's `pm-color` and `pm-icon`, for drawing its chip beside the task — what `session.list`
+    /// carries for a sitting, so a view's rows look like their project wherever they're listed.
+    public var projectColor: String? = nil
+    public var projectIcon: String? = nil
+
+    /// Where the line is, whole: what a write aimed at this task sends.
+    public var ref: TaskRefInput {
+        TaskRefInput(session: session, sessionOrdinal: sessionOrdinal, line: line, digest: digest)
+    }
 }
 
 /// Every open task in every project, for a search with no index behind it.
@@ -153,27 +165,43 @@ public struct TaskSearchHit: Codable, Equatable, Sendable, SearchableTask {
 /// The macOS app keeps a warmed index and doesn't call this; the CLI and a model have nothing warmed
 /// and would rather pay one scan than maintain one. A project whose notes can't be read is skipped
 /// rather than failing the search — one unreadable file shouldn't hide every other project's work.
-public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = true) throws -> [TaskSearchHit] {
+///
+/// `projects` narrows it to those projects, as `session.list` reads the same field (`projectFolders`).
+public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = true,
+                            projects: [String]? = nil) throws -> [TaskSearchHit] {
+    try openTasks(includeArchived: includeArchived, includeActive: includeActive, projects: projects).map(\.hit)
+}
+
+/// The walk behind every cross-project task list: each open task as a hit, beside the `Todo` it came
+/// from, for a caller that needs to know more about the line than a hit says (`dueTasks` wants the
+/// line's own due date, where a hit carries the one it inherits).
+func openTasks(includeArchived: Bool = true, includeActive: Bool = true,
+               projects: [String]? = nil) throws -> [(hit: TaskSearchHit, todo: Todo)] {
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
+    let only = try projects.map(projectFolders(named:))
     // "Active" means everything in hand, which is both the projects and the areas — an area's tasks are
     // no less findable for the thing they belong to not having an end.
     var scopes: [ProjectScope] = []
     if includeActive { scopes.append(contentsOf: [.active, .areas]) }
     if includeArchived { scopes.append(.archive) }
 
-    var hits: [TaskSearchHit] = []
+    var hits: [(hit: TaskSearchHit, todo: Todo)] = []
     for scope in scopes {
         let base = scope.path(in: paths)
         let archived = scope.isArchived
         for folder in (try? getFolders(basePath: base, scope: scope, domainCodes: codes)) ?? [] {
+            if let only, !only.contains(folder) { continue }
             let projectPath = (base as NSString).appendingPathComponent(folder)
             guard let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil,
                   let rawText = try? String(contentsOfFile: notesPath, encoding: .utf8),
-                  let notes = try? parseNotes(markdown: rawText),
-                  let todos = try? parseTodos(notes: normalizeFocusMarker(notes: notes)) else { continue }
+                  let parsed = try? parseNotes(markdown: rawText) else { continue }
+            let notes = normalizeFocusMarker(notes: parsed)
+            guard let todos = try? parseTodos(notes: notes) else { continue }
+            let color = projectColor(rawText: rawText)?.value
+            let icon = projectIcon(rawText: rawText)?.value
             for todo in todosWithEffectiveWaiting(todosWithEffectiveDueDates(todos)) where !todo.checked {
-                hits.append(TaskSearchHit(
+                hits.append((TaskSearchHit(
                     projectFolder: folder,
                     projectName: projectTitle(fromFolderName: folder),
                     projectKey: "\(base):\(folder)",
@@ -184,8 +212,11 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
                     effectiveWaiting: todo.effectiveWaiting,
                     isFocused: todo.isFocused,
                     session: todo.sessionISODate,
+                    sessionOrdinal: todo.sessionISODate == nil ? nil : todo.sessionOrdinal,
                     line: todo.lineIndex,
-                    digest: todo.digest))
+                    digest: todo.digest,
+                    projectColor: color,
+                    projectIcon: icon), todo))
             }
         }
     }

@@ -35,7 +35,9 @@ its header.
 **The rule under all of them** is `currentSessionPreservingFormat`
 ([SessionWindow.swift](../pm-swift/Sources/PmLib/SessionWindow.swift)): today's session is joined
 unless the project has been left alone for 90 minutes, when a second heading is started and labelled
-with the time. An empty heading is always joined. Only *today* is considered, so a sitting that runs
+with the time. (Since 2026-09-18 every new heading carries its start time, the first of the day too,
+and a name goes after it: `9:10 AM · Week in review`. See [views.md](views.md) D4.) An empty heading is
+always joined. Only *today* is considered, so a sitting that runs
 past midnight becomes two.
 
 ## What is wrong with it

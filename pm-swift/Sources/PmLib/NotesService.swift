@@ -57,7 +57,7 @@ public func notesShow(project: String) throws -> NotesShowOutput {
 /// `notesShow` for a pre-resolved handle — lets callers resolve once and reuse the notes path
 /// (e.g. to set up a file watch) without a second project-directory scan.
 public func notesShow(handle: NotesHandle) throws -> NotesShowOutput {
-    try notesShow(rawText: try handle.io.readContent(path: handle.notesPath))
+    try notesShow(rawText: try handle.io.readContent(path: handle.notesPath), projectPath: handle.projectPath)
 }
 
 /// The read itself, with the document already in hand.
@@ -67,11 +67,15 @@ public func notesShow(handle: NotesHandle) throws -> NotesShowOutput {
 /// takes the raw text rather than a `ProjectNotes` because the revision is of *bytes*: parse first
 /// and the bytes are gone, so the tasks and the revision would come from two different reads of a
 /// file a person also edits in Obsidian.
-public func notesShow(rawText: String) throws -> NotesShowOutput {
+///
+/// `projectPath`, when given, is where the pick log is read from, so every task carries `picked` and the
+/// read carries `picks`. Without it the read is the document alone.
+public func notesShow(rawText: String, projectPath: String? = nil) throws -> NotesShowOutput {
     let notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
     let todos = todosWithEffectiveWaiting(todosWithEffectiveDueDates(try parseTodos(notes: notes)))
     let focusedKey = todos.first(where: { $0.isFocused }).map { "\($0.sessionIndex):\($0.lineIndex)" }
-    return NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey, revision: revision(of: rawText))
+    let read = NotesShowOutput(notes: notes, todos: todos, focusedKey: focusedKey, revision: revision(of: rawText))
+    return projectPath.map { read.attachingPicks(projectPath: $0) } ?? read
 }
 
 /// Apply a format-preserving todo mutation and write it back. The transform receives freshly-parsed
@@ -547,7 +551,15 @@ public func pruneEmptySessions(project: String) throws -> Int {
 @discardableResult
 public func pruneEmptySessions(handle: NotesHandle) throws -> Int {
     let rawText = try handle.io.readContent(path: handle.notesPath)
-    guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText) else { return 0 }
+    // A sitting that picked something up has that to show for itself, even with nothing under its
+    // heading. Asked only when the log exists, so a project nobody has picked in reads nothing more.
+    var keeping = Set<Int>()
+    if FileManager.default.fileExists(atPath: PickLog.logPath(projectPath: handle.projectPath)) {
+        let notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
+        keeping = Set(PickLog.resolved(projectPath: handle.projectPath, notes: notes,
+                                       todos: try parseTodos(notes: notes)).map(\.intoIndex))
+    }
+    guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText, keeping: keeping) else { return 0 }
     let wasEdited = notesLastEdited(path: handle.notesPath)
     try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
     if let wasEdited {

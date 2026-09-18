@@ -158,6 +158,37 @@ final class PMStoreTests: XCTestCase {
         XCTAssertTrue(raw.contains("[x] First task"), "the tick did not reach the file:\n\(raw)")
     }
 
+    // MARK: Dropping
+
+    /// Dropped is closed but not done: struck from what's left, and out of the total rather than
+    /// counted in the done.
+    func testDroppingATaskWritesItAndTakesItOutOfTheTotal() throws {
+        let store = try store(withTasks: "First task\nSecond task")
+        let first = try XCTUnwrap(store.todos.first)
+        mutateAndWait(store) { done in store.drop([first], then: done) }
+
+        XCTAssertEqual(store.todos.first?.state, .dropped)
+        let raw = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        XCTAssertTrue(raw.contains("[-] First task"), "the drop did not reach the file:\n\(raw)")
+        XCTAssertEqual(store.progress.done, 0)
+        XCTAssertEqual(store.progress.total, 1)
+    }
+
+    /// A selection swept over finished work doesn't turn it into dropped work, and the whole drop is
+    /// one ⌘Z however many tasks it took.
+    func testDroppingASelectionLeavesDoneWorkAndIsOneUndoStep() throws {
+        let store = try store(withTasks: "First task\nSecond task\nThird task")
+        let first = try XCTUnwrap(store.todos.first)
+        mutateAndWait(store) { done in store.complete(first, advanceFocus: false, then: done) }
+        let beforeDrop = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+
+        mutateAndWait(store) { done in store.drop(store.todos, then: done) }
+        XCTAssertEqual(store.todos.map(\.state), [.done, .dropped, .dropped])
+
+        store.undo()
+        try waitForFile(store) { $0 == beforeDrop }
+    }
+
     // MARK: Undo
 
     /// **The property undo exists for.** The store banks the pre-edit document, so undoing restores
@@ -294,6 +325,10 @@ final class PMStoreTests: XCTestCase {
         store.undo(try first())
         try waitForFile(store) { !$0.contains("[x]") }
 
+        // Before `toggleAll` below closes everything: a drop only touches open tasks.
+        store.drop([try first()])
+        try waitForFile(store) { $0.contains("[-]") }
+
         store.toggleAll(store.todos)
         try waitForFile(store) { $0.components(separatedBy: "[x]").count > 2 }
 
@@ -345,6 +380,177 @@ final class PMStoreTests: XCTestCase {
         }
         XCTFail("the file never reached the expected state, or the store never re-read it",
                 file: file, line: line)
+    }
+}
+
+// MARK: - Picking up, and undoing it (docs/sessions.md D3, D4)
+
+extension PMStoreTests {
+
+    /// A project with one task in today's sitting and two left open in one from two weeks ago.
+    private func storeWithAnOldSitting() throws -> PMStore {
+        let store = try store(withTasks: "Review the contract")
+        let path = try XCTUnwrap(store.notesPath)
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        try (text + "\n### Wed, Sep 2, 2026\n\nCalled about the venue.\n\n- [ ] Email Dana\n- [ ] Book the venue\n")
+            .write(toFile: path, atomically: true, encoding: .utf8)
+        try loadAndWait(store)
+        return store
+    }
+
+    private func task(_ text: String, in store: PMStore) throws -> Todo {
+        try XCTUnwrap(store.todos.first { $0.text == text }, "no task \(text)")
+    }
+
+    private func events(_ store: PMStore) throws -> [PickEvent.Kind] {
+        PickLog.events(projectPath: try XCTUnwrap(store.projectPath)).map(\.event)
+    }
+
+    /// Wait for a condition on the store that a reload will make true.
+    private func waitFor(_ store: PMStore, file: StaticString = #filePath, line: UInt = #line,
+                         _ condition: @escaping () -> Bool) {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if condition() { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTFail("the store never got there", file: file, line: line)
+    }
+
+    /// The whole gesture is one step: ⌘Z puts the focus back and releases the pick, ⇧⌘Z does both again.
+    func testAFocusThatPicksUpIsOneStepThatUndoTakesBackWhole() throws {
+        let store = try storeWithAnOldSitting()
+        let focusedBefore = store.todos.first(where: \.isFocused)?.text
+        mutateAndWait(store) { done in store.focus(try! self.task("Email Dana", in: store), then: done) }
+        XCTAssertEqual(store.todos.first(where: \.isFocused)?.text, "Email Dana")
+        XCTAssertNotNil(try task("Email Dana", in: store).picked)
+        XCTAssertEqual(store.undoStack.count, 1)
+        XCTAssertEqual(store.undoMenuTitle, "Undo Pick Up")
+
+        store.undo()
+        waitFor(store) { store.todos.first { $0.text == "Email Dana" }?.picked == nil }
+        XCTAssertEqual(store.todos.first(where: \.isFocused)?.text, focusedBefore)
+        XCTAssertEqual(try events(store), [.picked, .released])
+        XCTAssertEqual(store.redoMenuTitle, "Redo Pick Up")
+
+        store.redo()
+        waitFor(store) { store.todos.first { $0.text == "Email Dana" }?.picked != nil }
+        XCTAssertEqual(store.todos.first(where: \.isFocused)?.text, "Email Dana")
+        XCTAssertEqual(try events(store), [.picked, .released, .picked], "A new pick, not the old one revived")
+    }
+
+    /// A focus that picked nothing up is navigation, as it always was.
+    func testAFocusThatPicksNothingUpCostsNoStep() throws {
+        let store = try storeWithAnOldSitting()
+        mutateAndWait(store) { done in store.focus(try! self.task("Email Dana", in: store), then: done) }
+        mutateAndWait(store) { done in store.focus(try! self.task("Review the contract", in: store), then: done) }
+        mutateAndWait(store) { done in store.focus(try! self.task("Email Dana", in: store), then: done) }
+        XCTAssertEqual(store.undoStack.count, 1, "Only the first focus picked anything up")
+    }
+
+    func testPickUpAndPutBackAreEachOneStep() throws {
+        let store = try storeWithAnOldSitting()
+        let before = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        let old = [try task("Email Dana", in: store), try task("Book the venue", in: store)]
+        XCTAssertTrue(old.allSatisfy(store.canPickUp))
+        XCTAssertFalse(store.canPickUp(try task("Review the contract", in: store)))
+
+        mutateAndWait(store) { done in store.pickUp(old, then: done) }
+        XCTAssertEqual(try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8), before,
+                       "Picking up leaves the notes alone")
+        XCTAssertEqual(store.picks.count, 2)
+        XCTAssertFalse(store.canPickUp(try task("Email Dana", in: store)))
+
+        mutateAndWait(store) { done in store.putBack([try! self.task("Email Dana", in: store)], then: done) }
+        XCTAssertEqual(store.picks.count, 1)
+        XCTAssertEqual(store.undoStack.count, 2)
+        XCTAssertEqual(store.undoMenuTitle, "Undo Put Back")
+
+        store.undo()
+        waitFor(store) { store.picks.count == 2 }
+        store.undo()
+        waitFor(store) { store.picks.isEmpty }
+    }
+
+    /// Ticking an old task picks it up first, and ⌘Z reopens it and releases the pick together.
+    func testTickingAnOldTaskPicksItUpAndUndoTakesBothBack() throws {
+        let store = try storeWithAnOldSitting()
+        let before = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        mutateAndWait(store) { done in
+            store.complete(try! self.task("Email Dana", in: store), advanceFocus: false, then: done)
+        }
+        XCTAssertEqual(try task("Email Dana", in: store).state, .done)
+        XCTAssertNotNil(try task("Email Dana", in: store).picked)
+        XCTAssertEqual(store.undoStack.count, 1)
+
+        store.undo()
+        try waitForFile(store) { $0 == before }
+        waitFor(store) { store.picks.isEmpty }
+        XCTAssertEqual(try events(store), [.picked, .released])
+    }
+
+    /// Adding a subtask to an old task is working on it now: the tree is picked up, the child lands under
+    /// its parent where it was written, and ⌘Z takes the task and the pick back together.
+    func testAddingASubtaskToAnOldTaskPicksUpItsTree() throws {
+        let store = try storeWithAnOldSitting()
+        let before = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Send the shortlist", relativeTo: try! self.task("Email Dana", in: store),
+                          position: .child, then: done)
+        }
+        let child = try task("Send the shortlist", in: store)
+        XCTAssertEqual(child.sessionIndex, try task("Email Dana", in: store).sessionIndex,
+                       "The subtask is written under its parent, in the old sitting")
+        XCTAssertEqual(child.depth, 1)
+        XCTAssertEqual(PickLog.events(projectPath: try XCTUnwrap(store.projectPath)).map(\.task.text), ["Email Dana"],
+                       "The pick names the tree's root")
+        XCTAssertNotNil(child.picked)
+        XCTAssertEqual(store.undoStack.count, 1)
+
+        store.undo()
+        try waitForFile(store) { $0 == before }
+        waitFor(store) { store.picks.isEmpty }
+    }
+
+    /// A new task beside a top-level one is a new task of that sitting, not work on a tree.
+    func testAddingBesideAnOldTopLevelTaskPicksNothingUp() throws {
+        let store = try storeWithAnOldSitting()
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Ask about parking", relativeTo: try! self.task("Book the venue", in: store),
+                          position: .after, then: done)
+        }
+        XCTAssertNotNil(try? task("Ask about parking", in: store))
+        XCTAssertTrue(store.picks.isEmpty)
+    }
+
+    /// Focus the app moved on its own is the app's choice, not yours, and picks nothing up.
+    func testFocusAdvancingOnItsOwnPicksNothingUp() throws {
+        let store = try storeWithAnOldSitting()
+        mutateAndWait(store) { done in
+            store.complete(try! self.task("Review the contract", in: store), advanceFocus: true, then: done)
+        }
+        XCTAssertEqual(store.todos.first(where: \.isFocused)?.text, "Email Dana")
+        XCTAssertTrue(store.picks.isEmpty)
+    }
+
+    /// All or nothing: an undo whose document can't be written leaves the picks alone.
+    func testAnUndoWhoseDocumentCannotBeWrittenLeavesThePicksAlone() throws {
+        let store = try storeWithAnOldSitting()
+        mutateAndWait(store) { done in store.focus(try! self.task("Email Dana", in: store), then: done) }
+        let path = try XCTUnwrap(store.notesPath)
+        let folder = (path as NSString).deletingLastPathComponent
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o444], ofItemAtPath: path)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder)
+            try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+        }
+        let failures = store.writeFailure?.token ?? 0
+        store.undo()
+        waitFor(store) { (store.writeFailure?.token ?? 0) > failures }
+        XCTAssertEqual(try events(store), [.picked])
+        XCTAssertEqual(store.undoStack.count, 1, "The step is still there to try again")
     }
 }
 

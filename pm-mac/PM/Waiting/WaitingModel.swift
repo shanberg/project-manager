@@ -104,9 +104,7 @@ final class WaitingModel {
             for (project, hits) in byProject {
                 var input = ApiInput()
                 input.project = project
-                input.tasks = hits.map {
-                    TaskRefInput(session: $0.session ?? "", line: $0.line, digest: $0.digest)
-                }
+                input.tasks = hits.map(\.ref)
                 input.clearWaiting = true
                 do { _ = try PMContract.perform(.taskSetWaiting, input) }
                 catch { failures.append(PMContract.message(for: error)) }

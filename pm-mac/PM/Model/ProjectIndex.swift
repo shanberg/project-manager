@@ -215,8 +215,8 @@ final class ProjectIndex {
                 }
                 let summary = out.notes.summary.trimmingCharacters(in: .whitespacesAndNewlines)
                 return Recent(projectKey: r.projectKey, name: r.name,
-                              done: out.todos.filter { $0.checked }.count,
-                              total: out.todos.count,
+                              done: out.todos.progress.done,
+                              total: out.todos.progress.total,
                               nextDue: Self.earliestDue(out.todos),
                               summary: summary.isEmpty ? nil : summary,
                               focusedText: Self.heroTaskText(out.todos, shorteningCodes: shortening,
@@ -379,8 +379,8 @@ final class ProjectIndex {
                     continue
                 }
                 let out = read.output
-                warmed.append(item.entry(done: out.todos.filter { $0.checked }.count,
-                                         total: out.todos.count,
+                warmed.append(item.entry(done: out.todos.progress.done,
+                                         total: out.todos.progress.total,
                                          nextTask: Self.heroTaskText(out.todos,
                                                                      shorteningCodes: shortening,
                                                                      in: groups),

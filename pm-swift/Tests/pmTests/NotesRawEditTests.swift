@@ -748,7 +748,7 @@ final class NotesRawEditTests: XCTestCase {
         let day = try parseSessionDateArgument("2025-04-01")
         let updated = try XCTUnwrap(appendSessionNotePreservingFormat(
             rawText: Self.datedFixture(), prose: "Fresh start.", date: day))
-        XCTAssertTrue(updated.contains("## Sessions\n\n### \(formatSessionDate(day))\n\nFresh start."),
+        XCTAssertTrue(updated.contains("## Sessions\n\n### \(formatSessionDate(day)) \(sessionTimeLabel(day))\n\nFresh start."),
                       "New session heads the list, carrying the note")
         XCTAssertTrue(updated.contains("Kicked things off with a quick sync."), "Older sessions untouched")
     }

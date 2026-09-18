@@ -72,14 +72,16 @@ final class SessionWindowTests: XCTestCase {
         XCTAssertTrue(sessions[1].body.contains("Todo one"), "The old session is untouched")
     }
 
-    /// The day's first session carries no label, exactly as it always did.
-    func testFirstSessionOfTheDayIsUnlabelled() throws {
+    /// The day's first sitting says when it began too: a day read across projects is put in order by
+    /// these times (docs/views.md D4).
+    func testFirstSessionOfTheDayCarriesItsTime() throws {
         let session = try XCTUnwrap(currentSessionPreservingFormat(
             rawText: Self.empty, lastEdited: now.addingTimeInterval(-30 * 3600), now: now))
         XCTAssertTrue(session.started)
         let sessions = try parseNotes(markdown: session.rawText).sessions
         XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions[0].label, "")
+        XCTAssertEqual(sessions[0].label, sessionTimeLabel(now))
+        XCTAssertEqual(sessions[0].startTime, sessionTimeLabel(now))
     }
 
     /// A heading with nothing under it is a sitting that never started, so writing into it starts it —
@@ -98,12 +100,54 @@ final class SessionWindowTests: XCTestCase {
         XCTAssertEqual(try parseNotes(markdown: session.rawText).sessions.count, 1)
     }
 
-    /// An explicit label wins over the automatic time — `session.start` passes the one the caller named.
-    func testAGivenLabelWinsOverTheTime() throws {
+    /// A name `session.start` was given goes after the time rather than in place of it.
+    func testAGivenNameFollowsTheTime() throws {
         let session = try XCTUnwrap(currentSessionPreservingFormat(
             rawText: fixture(today: now), lastEdited: now.addingTimeInterval(-3 * 3600), now: now,
             label: "Standup"))
-        XCTAssertEqual(try parseNotes(markdown: session.rawText).sessions[0].label, "Standup")
+        let started = try parseNotes(markdown: session.rawText).sessions[0]
+        XCTAssertEqual(started.label, "\(sessionTimeLabel(now)) · Standup")
+        XCTAssertEqual(started.startTime, sessionTimeLabel(now))
+        XCTAssertEqual(started.name, "Standup")
+    }
+
+    // MARK: The time and the name
+
+    /// Every heading anyone has written still parses, and means what it meant.
+    func testALabelIsATimeANameBothOrNeither() {
+        let cases: [(String, String?, String)] = [
+            ("", nil, ""),
+            ("9:10 AM", "9:10 AM", ""),
+            ("9:10 AM · Week in review", "9:10 AM", "Week in review"),
+            ("Week in review", nil, "Week in review"),
+            ("3:15 pm", "3:15 PM", ""),
+            ("3:15 PM Standup", "3:15 PM", "Standup"),
+            ("10:30 sync", nil, "10:30 sync"),
+        ]
+        for (label, time, name) in cases {
+            let parsed = SessionLabel(parsing: label)
+            XCTAssertEqual(parsed.time, time, label)
+            XCTAssertEqual(parsed.name, name, label)
+        }
+        XCTAssertEqual(SessionLabel(time: "9:10 AM", name: "Week in review").text, "9:10 AM · Week in review")
+        XCTAssertEqual(SessionLabel(time: "9:10 AM", name: " ").text, "9:10 AM")
+        XCTAssertEqual(SessionLabel(time: nil, name: "Week in review").text, "Week in review")
+    }
+
+    /// Renaming changes the name and keeps the time; clearing the name leaves the time.
+    func testRenamingKeepsTheTime() throws {
+        let raw = "# P\n\n## Sessions\n\n### \(formatSessionDate(now)) 9:10 AM\n\nNote\n"
+        let named = try XCTUnwrap(renameSessionPreservingFormat(rawText: raw, sessionIndex: 0, label: "Week in review"))
+        XCTAssertEqual(try parseNotes(markdown: named).sessions[0].label, "9:10 AM · Week in review")
+        let renamed = try XCTUnwrap(renameSessionPreservingFormat(rawText: named, sessionIndex: 0, label: "Planning"))
+        XCTAssertEqual(try parseNotes(markdown: renamed).sessions[0].label, "9:10 AM · Planning")
+        let cleared = try XCTUnwrap(renameSessionPreservingFormat(rawText: renamed, sessionIndex: 0, label: ""))
+        XCTAssertEqual(try parseNotes(markdown: cleared).sessions[0].label, "9:10 AM")
+
+        // A sitting from before times were kept has none to keep.
+        let old = "# P\n\n## Sessions\n\n### \(formatSessionDate(now))\n\nNote\n"
+        let oldNamed = try XCTUnwrap(renameSessionPreservingFormat(rawText: old, sessionIndex: 0, label: "Planning"))
+        XCTAssertEqual(try parseNotes(markdown: oldNamed).sessions[0].label, "Planning")
     }
 
     /// Forcing skips the window: a warm session is left as it is and a new one leads.

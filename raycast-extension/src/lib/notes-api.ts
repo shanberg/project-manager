@@ -60,6 +60,8 @@ export interface Todo {
   digest?: string | null;
   /** ISO date of this task's session — the half of its address that survives a session being started. */
   sessionISODate?: string | null;
+  /** The latest session this task was picked up into, when an older task has been (docs/sessions.md). */
+  picked?: { into: string; at: string } | null;
 }
 
 export interface NotesShowOutput {

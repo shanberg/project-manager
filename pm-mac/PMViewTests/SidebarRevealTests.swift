@@ -13,6 +13,13 @@ import SwiftUI
 ///
 /// A model of the split view rather than the controller, which won't compile alone: the same items,
 /// thicknesses, priorities and collapse behaviour.
+///
+/// **The model doesn't show the defect.** Given time to run, every animated reveal here goes from 0
+/// to 180 in about a quarter of a second, however the pane was collapsed. Tests that asserted a
+/// zero-wide pane passed only because `turn()` used to return on the first runloop source, often
+/// before the animation had drawn a frame; the same early return made the one below fail in a full
+/// run, where more sources are waiting. So what's left is the workaround's own path, measured once
+/// the animation is over. The defect lives in something the real window has and this one doesn't.
 @MainActor
 final class SidebarRevealTests: XCTestCase {
 
@@ -81,26 +88,10 @@ final class SidebarRevealTests: XCTestCase {
         return split
     }
 
+    /// The whole of `seconds`, well past the split view's animation. `run(mode:before:)` returns after
+    /// the first source it handles, which can be at once.
     private func turn(_ seconds: TimeInterval = 0.8) {
-        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(seconds))
-    }
-
-    /// The defect, so the workaround can be dropped the day AppKit stops needing it.
-    func testAnAnimatedRevealOfAWindowOpenedWithoutTheSidebarIsZeroWide() {
-        let split = open(startsWithSidebar: false)
-        split.toggleSidebar(nil)
-        turn()
-        XCTAssertFalse(split.sidebarItem.isCollapsed)
-        XCTAssertEqual(split.sidebarWidth, 0, "AppKit shows this sidebar now — `collapsedByToggle` can go")
-    }
-
-    func testTheAutoHideShapeIsTheSame() {
-        let split = open(startsWithSidebar: true)
-        split.sidebarItem.isCollapsed = true
-        turn()
-        split.toggleSidebar(nil)
-        turn()
-        XCTAssertEqual(split.sidebarWidth, 0, "AppKit shows this sidebar now — `collapsedByToggle` can go")
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
     /// The workaround: shown directly once, and animated both ways from then on.
@@ -115,16 +106,6 @@ final class SidebarRevealTests: XCTestCase {
         split.toggleSidebar(nil)
         turn()
         XCTAssertGreaterThanOrEqual(split.sidebarWidth, 180)
-    }
-
-    func testDraggingTheDividerToTheEdgeIsTheSame() {
-        let split = open(startsWithSidebar: true)
-        split.splitView.setPosition(0, ofDividerAt: 0)
-        turn()
-        XCTAssertTrue(split.sidebarItem.isCollapsed)
-        split.toggleSidebar(nil)
-        turn()
-        XCTAssertEqual(split.sidebarWidth, 0, "AppKit shows this sidebar now — `collapsedByToggle` can go")
     }
 
     /// The control: hidden by the animated toggle, it animates back at its width.

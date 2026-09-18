@@ -103,12 +103,14 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "sessionOrdinal": input.sessionOrdinal.map { JSONValue.number(Double($0)) },
         "sessionDigest": input.sessionDigest.map(JSONValue.string),
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
+        "pick": input.pick.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
         "waiting": input.waiting.map(JSONValue.string),
         "clearWaiting": input.clearWaiting.map(JSONValue.bool),
         "partOf": input.partOf.map(JSONValue.string),
         "clearPartOf": input.clearPartOf.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
+        "includeDropped": input.includeDropped.map(JSONValue.bool),
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
         "now": input.now.map(JSONValue.string),
@@ -116,6 +118,9 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "new": input.new.map(JSONValue.bool),
         "since": input.since.map(JSONValue.string),
         "until": input.until.map(JSONValue.string),
+        "before": input.before.map(JSONValue.string),
+        "activity": input.activity.map(JSONValue.bool),
+        "projects": input.projects.map { .array($0.map(JSONValue.string)) },
     ]
 }
 
@@ -162,21 +167,45 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                                             lineIndex: at.lineIndex,
                                             advanceFocus: input.advanceFocus ?? true)
         }
+    case "task.drop":
+        return try editing(spec, input, options) { notes, at in
+            try dropTodoWithDescendants(notes: notes, sessionIndex: at.sessionIndex,
+                                        lineIndex: at.lineIndex,
+                                        advanceFocus: input.advanceFocus ?? true)
+        }
     case "task.reopen":
         return try editing(spec, input, options) { notes, at in
             try undoTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
         }
     case "task.focus":
-        return try editing(spec, input, options) { notes, at in
-            applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
+        guard input.pick ?? true else {
+            return try editing(spec, input, options) { notes, at in
+                applyFocusToTodoAt(notes: notes, sessionIndex: at.sessionIndex, lineIndex: at.lineIndex)
+            }
+        }
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try focusing(input, context, source: options.source)
+        }
+    case "task.pick":
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try picking(input, context, source: options.source)
+        }
+    case "task.release":
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try releasing(input, context, source: options.source)
         }
     case "task.setText":
-        return try editing(spec, input, options) { notes, at in
+        return try document(spec, input, options) { (context: DocumentContext) in
             guard let text = input.text, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
                 throw PmError.emptyTodoText
             }
-            return setTextOnTodoAt(notes: notes, sessionIndex: at.sessionIndex,
-                                   lineIndex: at.lineIndex, text: text)
+            let at = try resolveTaskRef(try taskRef(input), rawText: context.rawText)
+            let renamed = try editTodosPreservingFormat(rawText: context.rawText) { notes in
+                setTextOnTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
+                                lineIndex: at.lineIndex, text: text)
+            } ?? context.rawText
+            return Outcome(rawText: renamed, relocated: at.relocated,
+                           sidecar: try retargeting(at, from: context, to: renamed, source: options.source))
         }
     case "task.setDue":
         return try editing(spec, input, options) { notes, at in
@@ -439,7 +468,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
     case "task.search":
         let scope = input.scope ?? "all"
         let hits = try searchableTasks(includeArchived: scope != "active",
-                                       includeActive: scope != "archive")
+                                       includeActive: scope != "archive", projects: input.projects)
         // The bias toward the project you're in is the focused one unless a caller says otherwise —
         // the same tie-break the quick bar has always applied, now available to everything.
         let focused = try input.project.map(projectKey(of:)) ?? focusedProjectKey()
@@ -457,7 +486,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         // waiting on anything any more — they were put down.
         let scope = input.scope ?? "active"
         let buckets = try waitingBuckets(includeArchived: scope != "active",
-                                         includeActive: scope != "archive")
+                                         includeActive: scope != "archive", projects: input.projects)
         let count = buckets.reduce(0) { $0 + $1.tasks.count }
         let released = buckets.filter { $0.state == "released" }.count
         var summary = "Nothing is waiting."
@@ -474,13 +503,53 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let scope = input.scope ?? "all"
         let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
         let items = try doneTasks(in: range, includeArchived: scope != "active",
-                                  includeActive: scope != "archive")
+                                  includeActive: scope != "archive",
+                                  includeDropped: input.includeDropped == true)
+        let done = items.filter { !$0.dropped }
         let projects = Set(items.map(\.projectFolder)).count
-        let summary = items.isEmpty
-            ? "Nothing done."
-            : "\(items.count) task\(items.count == 1 ? "" : "s") done"
-                + (projects > 1 ? " across \(projects) projects." : ".")
+        let dropped = items.count - done.count
+        var summary = done.isEmpty
+            ? "Nothing done"
+            : "\(done.count) task\(done.count == 1 ? "" : "s") done"
+        if dropped > 0 { summary += ", \(dropped) dropped" }
+        summary += projects > 1 ? " across \(projects) projects." : "."
         return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(items))
+
+    case "session.list":
+        let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
+        let list = try sessionList(in: range, projects: input.projects)
+        let done = list.sittings.reduce(0) { $0 + $1.finished.count }
+            + list.elsewhere.filter { !$0.dropped }.count
+        let projects = Set(list.sittings.map(\.projectFolder)).count
+        var summary = list.sittings.isEmpty
+            ? "No sittings"
+            : "\(list.sittings.count) sitting\(list.sittings.count == 1 ? "" : "s")"
+        if projects > 1 { summary += " in \(projects) projects" }
+        if done > 0 { summary += ", \(done) done" }
+        return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
+
+    case "task.due":
+        let due = try dueTasks(until: input.until, projects: input.projects)
+        let today = isoDay(Date())
+        let overdue = due.filter { ($0.due.map { String($0.prefix(10)) } ?? "") < today }.count
+        let projects = Set(due.map(\.projectFolder)).count
+        var summary = due.isEmpty ? "Nothing due." : "\(due.count) due"
+        if !due.isEmpty {
+            if overdue > 0 { summary += ", \(overdue) overdue" }
+            summary += projects > 1 ? " across \(projects) projects." : "."
+        }
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(due))
+
+    case "task.leftovers":
+        let list = try leftoverTasks(before: input.before, projects: input.projects)
+        let tasks = list.taskCount
+        var summary = "Nothing left open."
+        if tasks > 0 {
+            summary = "\(tasks) task\(tasks == 1 ? "" : "s") left open in \(list.sittingCount) "
+                + "sitting\(list.sittingCount == 1 ? "" : "s")"
+            summary += list.projects.count > 1 ? " across \(list.projects.count) projects." : "."
+        }
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(list))
 
     case "capture.parse":
         let line = input.text ?? ""
@@ -513,15 +582,41 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         guard let entry = candidate else {
             throw ApiError(.staleReference, "There's no write on record to reverse.")
         }
-        guard entry.undoable, let notesPath = entry.notesPath,
-              let restored = ApiJournal.snapshot(entry.revisionBefore) else {
+        // What the write appended to the pick log, looked up now: an entry names its events by id.
+        let appended = (entry.sidecar ?? []).isEmpty ? []
+            : entry.project.map { PickLog.events(ids: entry.sidecar ?? [], projectPath: $0) } ?? []
+        guard entry.undoable, entry.notesPath != nil || !appended.isEmpty else {
+            throw ApiError(.unsupportedAction,
+                           "\(entry.action) can't be reversed — there's no document behind it.",
+                           detail: .string(entry.id))
+        }
+        let cancelling = PickLog.reversing(appended, source: options.source)
+        guard let notesPath = entry.notesPath else {
+            // Picks alone, with no document behind them. Nothing to check: a `released` cancels only the
+            // pick it names, so reversing one can never undo anything else.
+            if !options.dryRun, let project = entry.project {
+                try PickLog.append(cancelling, projectPath: project)
+                ApiJournal.recordSidecar(action: spec.name, project: project,
+                                         summary: reversalSummary(of: entry), ids: cancelling.map(\.id),
+                                         source: options.source, reverses: entry.id)
+            }
+            return ApiResult(action: spec.name,
+                             summary: options.dryRun
+                                 ? "Would reverse: \(strippedSummary(of: entry))."
+                                 : reversalSummary(of: entry) + ".",
+                             dryRun: options.dryRun,
+                             data: try JSONValue.encoding(entry),
+                             sidecar: options.dryRun ? nil : cancelling)
+        }
+        guard let restored = ApiJournal.snapshot(entry.revisionBefore) else {
             throw ApiError(.unsupportedAction,
                            "\(entry.action) can't be reversed — there's no document behind it.",
                            detail: .string(entry.id))
         }
         let current = try String(contentsOfFile: notesPath, encoding: .utf8)
         // The safety the journal exists to provide: reverse only what is still exactly as this write
-        // left it. Anything else and an undo would be discarding an edit made since, unseen.
+        // left it. Anything else and an undo would be discarding an edit made since, unseen. The picks
+        // are held to the same check: half an undo is worse than none.
         guard revision(of: current) == entry.revisionAfter else {
             throw ApiError(.conflict,
                            "That file has changed since this write, so reversing it would discard the change.",
@@ -537,11 +632,14 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let io = makeNotesIO(notesPath: notesPath, config: config)
         if !options.dryRun {
             try io.writeContent(path: notesPath, content: restored)
+            // Document first: the picks are appended only once it has been restored.
+            if let project = entry.project { try PickLog.append(cancelling, projectPath: project) }
             // The reversal is itself a write, and is journaled as one — so it can be reversed too,
             // and so the record doesn't quietly omit the biggest changes anybody makes.
             ApiJournal.record(action: spec.name, project: entry.project, notesPath: notesPath,
                               summary: reversalSummary(of: entry), before: current, after: restored,
-                              changed: undone, source: options.source, reverses: entry.id)
+                              changed: undone, source: options.source, reverses: entry.id,
+                              sidecar: cancelling.map(\.id))
         }
         return ApiResult(action: spec.name,
                          summary: options.dryRun
@@ -550,18 +648,28 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: revision(of: restored), changed: undone,
                          focus: after.first(where: \.isFocused).map(reference(to:)),
                          dryRun: options.dryRun,
-                         data: try JSONValue.encoding(entry))
+                         data: try JSONValue.encoding(entry),
+                         sidecar: options.dryRun || cancelling.isEmpty ? nil : cancelling)
 
     // MARK: Queries
     case "project.list":
         let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
         let codes = Array(config.domains.keys)
         let scope = input.scope ?? "active"
+        if input.activity == true {
+            let scopes = ProjectScope.allCases.filter { scope == "all" || scope == $0.rawValue }
+            let summaries = try projectSummaries(scopes: scopes, kind: input.kind, projects: input.projects)
+            return ApiResult(action: spec.name,
+                             summary: "\(summaries.count) result\(summaries.count == 1 ? "" : "s").",
+                             data: try JSONValue.encoding(summaries))
+        }
+        let only = try input.projects.map(projectFolders(named:))
         let wanted = input.kind.flatMap(ProjectKind.init(rawValue:))
         var entries: [JSONValue] = []
         for scopeCase in ProjectScope.allCases where scope == "all" || scope == scopeCase.rawValue {
             let base = scopeCase.path(in: paths)
             for folder in (try? getFolders(basePath: base, scope: scopeCase, domainCodes: codes)) ?? [] {
+                if let only, !only.contains(folder) { continue }
                 let kind = ProjectKind.of(folderName: folder)
                 guard wanted == nil || wanted == kind else { continue }
                 entries.append(.object([
@@ -624,11 +732,13 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: read.revision, data: try JSONValue.encoding(due))
     case "task.progress":
         let read = try readProject(input)
-        let done = read.todos.filter(\.checked).count
-        return ApiResult(action: spec.name, summary: "\(done) of \(read.todos.count) done.",
+        let (done, total) = read.todos.progress
+        let dropped = read.todos.count - total
+        return ApiResult(action: spec.name, summary: "\(done) of \(total) done.",
                          revision: read.revision,
                          data: .object(["done": .number(Double(done)),
-                                        "total": .number(Double(read.todos.count))]))
+                                        "dropped": .number(Double(dropped)),
+                                        "total": .number(Double(total))]))
     case "focus.get":
         guard let folder = focusedProjectFolder() else {
             return ApiResult(action: spec.name, summary: "No focused project.", data: .null)
@@ -689,6 +799,17 @@ struct Outcome {
     var note: Phrase?
     /// Anything the action knows that a diff of tasks can't show — which session it just opened.
     var data: JSONValue?
+    /// Events for the project's pick log, appended after the notes are written. A pick changes nothing
+    /// in the notes (unless it had to start a sitting), so this is most of what those actions do.
+    var sidecar: [PickEvent] = []
+}
+
+/// What an action that needs more than the text gets to see: when the project was last edited, for
+/// the ones that resolve the current session, and where it lives, for the ones that read its pick log.
+struct DocumentContext {
+    let rawText: String
+    let lastEdited: Date?
+    let projectPath: String
 }
 
 /// Read once, transform, diff, and write unless this is a dry run.
@@ -709,6 +830,14 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
 /// notes file is already resolved.
 private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
                       _ apply: (String, Date?) throws -> Outcome) throws -> ApiResult {
+    try document(spec, input, options) { (context: DocumentContext) in
+        try apply(context.rawText, context.lastEdited)
+    }
+}
+
+/// `document`, for the actions that read or write the project's pick log as well as its notes.
+private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions,
+                      _ apply: (DocumentContext) throws -> Outcome) throws -> ApiResult {
     let handle = try resolveNotesHandle(project: try resolvedProject(input))
     let lastEdited = notesLastEdited(path: handle.notesPath)
     let rawText = try handle.io.readContent(path: handle.notesPath)
@@ -722,7 +851,8 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
     }
     let before = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: rawText)))
 
-    let outcome = try apply(rawText, lastEdited)
+    let outcome = try apply(DocumentContext(rawText: rawText, lastEdited: lastEdited,
+                                            projectPath: handle.projectPath))
     let after = try parseTodos(notes: normalizeFocusMarker(notes: parseNotes(markdown: outcome.rawText)))
     let changes = diffTodos(before: before, after: after)
 
@@ -738,7 +868,21 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
         // record of something that didn't happen, and an undo offered for it would do harm.
         ApiJournal.record(action: spec.name, project: handle.projectPath, notesPath: handle.notesPath,
                           summary: phrase.past, before: rawText, after: outcome.rawText,
-                          changed: changes, source: options.source)
+                          changed: changes, source: options.source,
+                          sidecar: outcome.sidecar.map(\.id))
+    }
+    // After the notes, for the same reason the journal is: a pick into a sitting whose heading failed
+    // to write would name a sitting that isn't there.
+    if !options.dryRun {
+        try PickLog.append(outcome.sidecar, projectPath: handle.projectPath)
+        // A pick that changed nothing in the notes is still a write, and still something another
+        // surface should be able to take back — so it is journaled on its own, with no document behind
+        // it. Reversing it needs no revision check: a `released` only cancels the pick it names.
+        if outcome.rawText == rawText, !outcome.sidecar.isEmpty {
+            ApiJournal.recordSidecar(action: spec.name, project: handle.projectPath,
+                                     summary: phrase.past, ids: outcome.sidecar.map(\.id),
+                                     source: options.source)
+        }
     }
     return ApiResult(action: spec.name,
                      summary: told.sentence(dryRun: options.dryRun),
@@ -747,7 +891,8 @@ private func document(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOp
                      focus: after.first(where: \.isFocused).map(reference(to:)),
                      relocated: outcome.relocated,
                      dryRun: options.dryRun,
-                     data: outcome.data)
+                     data: outcome.data,
+                     sidecar: options.dryRun || outcome.sidecar.isEmpty ? nil : outcome.sidecar)
 }
 
 /// The `document` pipeline for the actions that are a `ProjectNotes -> ProjectNotes` transform.
@@ -799,6 +944,193 @@ private func resolve(_ reference: TaskRefInput, in text: String, batch: Bool) th
         throw error
     }
 }
+
+// MARK: - Picking up
+
+/// What picking up a set of references came to, before anyone words it.
+private struct PickUp {
+    /// The text with the current sitting in it — started, if the project was cold. Only worth writing
+    /// when `events` isn't empty: nothing picked, nothing should start.
+    var rawText: String
+    var events: [PickEvent] = []
+    var picked: [String] = []
+    var alreadyHere = 0
+    var alreadyPicked = 0
+    var relocated = false
+    var into: PickedInto
+    var intoIndex: Int
+}
+
+/// Pick up each reference into the current sitting, skipping the ones already in it or already picked
+/// up into it. Shared by `task.pick` and by the focus that picks up (docs/sessions.md D4).
+private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: DocumentContext,
+                    source: String) throws -> PickUp {
+    let session = try currentSession(in: context.rawText, lastEdited: context.lastEdited)
+    let text = session.rawText
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: text))
+    let todos = try parseTodos(notes: notes)
+    guard let into = PickLog.sitting(at: session.sessionIndex, in: notes) else {
+        throw ApiError(.writeFailed, "The current session's heading isn't a date PM can name.")
+    }
+    let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
+    let at = timestamp()
+
+    // What's already picked up into the current sitting, as the trees it covers. A pick written before
+    // picks named trees can name a subtask; it covers that subtask's tree all the same.
+    let pickedHere = Set(standing.filter { $0.intoIndex == session.sessionIndex }.compactMap { pick in
+        todos.first { $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex }
+            .map { treeKey(TaskTree.root(of: $0, in: todos)) }
+    })
+
+    var out = PickUp(rawText: text, into: into, intoIndex: session.sessionIndex)
+    var seen = Set<String>()
+    for reference in references {
+        guard let position = try resolve(reference, in: text, batch: batch) else { continue }
+        out.relocated = out.relocated || position.relocated
+        guard let touched = todos.first(where: {
+                  $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
+              }) else { continue }
+        // A pick names the tree, by its root: working on a subtask is working on the task it's part of,
+        // and the root is the line that says what that is (docs/sessions.md D3).
+        let todo = TaskTree.root(of: touched, in: todos)
+        guard seen.insert(treeKey(todo)).inserted else { continue }
+        if todo.sessionIndex == session.sessionIndex { out.alreadyHere += 1; continue }
+        if pickedHere.contains(treeKey(todo)) { out.alreadyPicked += 1; continue }
+        guard let task = PickLog.task(todo, in: notes) else {
+            throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading PM can't date, so it can't be picked up.",
+                           detail: .string("task"))
+        }
+        out.events.append(PickEvent(at: at, event: .picked, task: task, into: into, source: source))
+        out.picked.append(todo.text)
+    }
+    return out
+}
+
+private func treeKey(_ root: Todo) -> String { "\(root.sessionIndex):\(root.lineIndex)" }
+
+/// `task.pick`: record that each task's tree was picked up into the current sitting.
+///
+/// Starts the sitting when the project is cold, the one change to the notes a pick can make — and only
+/// when something is actually picked, so asking to pick up a task that's already here writes nothing.
+private func picking(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let result = try pickUp(try references(input), batch: input.tasks != nil, context, source: source)
+    let data: JSONValue = .object(["into": .string(result.into.session),
+                                   "intoIndex": .number(Double(result.intoIndex))])
+    guard !result.events.isEmpty else {
+        let finding = result.alreadyPicked > 0 && result.alreadyHere == 0
+            ? (input.tasks == nil ? "That task is already picked up" : "Those tasks are already picked up")
+            : (input.tasks == nil ? "That task is already in this session" : "Those tasks are already in this session")
+        // The original text, not the one with a new sitting spliced in: nothing was picked, so nothing
+        // should start.
+        return Outcome(rawText: context.rawText, relocated: result.relocated, note: .statement(finding), data: data)
+    }
+    let what = result.picked.count == 1 ? "\u{201C}\(result.picked[0])\u{201D}" : "\(result.picked.count) tasks"
+    return Outcome(rawText: result.rawText, relocated: result.relocated,
+                   note: Phrase(past: "Picked up \(what)", future: "pick up \(what)"),
+                   data: data, sidecar: result.events)
+}
+
+/// `task.focus`, picking up: focusing a task from an older sitting is working on it now, so it is
+/// picked up into the current one first (docs/sessions.md D3). A task that can't be picked up — under
+/// a heading PM can't date, or in a project whose current heading it can't — is focused all the same:
+/// the pick is a record kept alongside the focus, never a reason to refuse it.
+private func focusing(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let reference = try references(input)[0]
+    var text = context.rawText
+    var events: [PickEvent] = []
+    var relocated = false
+    if let result = try? pickUp([reference], batch: false, context, source: source), !result.events.isEmpty {
+        text = result.rawText
+        events = result.events
+        relocated = result.relocated
+    }
+    // Resolved again against the text the pick left, which may have a sitting spliced in above the
+    // task. The reference names it by date, so that finds the same line.
+    let at = try resolveTaskRef(reference.ref, rawText: text)
+    let focused = try editTodosPreservingFormat(rawText: text) { notes in
+        applyFocusToTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
+                           lineIndex: at.lineIndex)
+    } ?? text
+    guard let picked = events.first?.task.text else {
+        return Outcome(rawText: focused, relocated: relocated || at.relocated)
+    }
+    let what = "\u{201C}\(picked)\u{201D}"
+    return Outcome(rawText: focused, relocated: relocated || at.relocated,
+                   note: Phrase(past: "Picked up and focused \(what)", future: "pick up and focus \(what)"),
+                   sidecar: events)
+}
+
+/// `task.release`: put each task back — cancel its pick into the named sitting, or its latest pick when
+/// no sitting is named. The task itself isn't touched.
+private func releasing(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: context.rawText))
+    let todos = try parseTodos(notes: notes)
+    let sitting = input.session == nil ? nil : try sessionIndex(input, in: notes)
+    let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
+    let at = timestamp()
+
+    var events: [PickEvent] = []
+    var released: [String] = []
+    var relocated = false
+    // Each standing pick, by the tree it covers.
+    func root(_ pick: PickLog.Resolved) -> String? {
+        todos.first { $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex }
+            .map { treeKey(TaskTree.root(of: $0, in: todos)) }
+    }
+    for reference in try references(input) {
+        guard let position = try resolve(reference, in: context.rawText, batch: input.tasks != nil) else { continue }
+        relocated = relocated || position.relocated
+        guard let touched = todos.first(where: {
+            $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
+        }) else { continue }
+        // Putting back any line of a picked tree puts the tree back. Without a sitting named, that's
+        // the tree's latest pick; every pick into that one sitting goes with it, since a pick written
+        // before picks named trees may name a subtask and would otherwise leave the tree standing.
+        let tree = TaskTree.root(of: touched, in: todos)
+        let covering = standing.filter { root($0) == treeKey(tree) && (sitting == nil || $0.intoIndex == sitting) }
+        guard let latest = covering.last else { continue }
+        let cancelled = covering.filter { $0.intoIndex == latest.intoIndex }
+            .filter { pick in !events.contains { $0.reverses == pick.event.id } }
+        guard !cancelled.isEmpty else { continue }
+        for pick in cancelled {
+            events.append(PickEvent(at: at, event: .released, task: pick.event.task, into: pick.event.into,
+                                    reverses: pick.event.id, source: source))
+        }
+        released.append(tree.text)
+    }
+    guard !events.isEmpty else {
+        return Outcome(rawText: context.rawText, relocated: relocated,
+                       note: .statement(input.tasks == nil ? "That task isn't picked up"
+                                                           : "None of those tasks are picked up"))
+    }
+    let what = released.count == 1 ? "\u{201C}\(released[0])\u{201D}" : "\(released.count) tasks"
+    return Outcome(rawText: context.rawText, relocated: relocated,
+                   note: Phrase(past: "Put back \(what)", future: "put back \(what)"), sidecar: events)
+}
+
+/// The `retargeted` a rename owes the picks of the task it renamed, so they follow it rather than go
+/// stale. Nothing when the task wasn't picked up, or its text didn't change.
+private func retargeting(_ at: ResolvedTaskRef, from context: DocumentContext, to renamed: String,
+                         source: String) throws -> [PickEvent] {
+    let before = normalizeFocusMarker(notes: try parseNotes(markdown: context.rawText))
+    let beforeTodos = try parseTodos(notes: before)
+    let picks = PickLog.resolved(projectPath: context.projectPath, notes: before, todos: beforeTodos)
+        .filter { $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }
+    guard !picks.isEmpty else { return [] }
+    let after = normalizeFocusMarker(notes: try parseNotes(markdown: renamed))
+    guard let todo = try parseTodos(notes: after).first(where: {
+              $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }),
+          let was = beforeTodos.first(where: {
+              $0.sessionIndex == at.sessionIndex && $0.lineIndex == at.lineIndex }),
+          let task = PickLog.task(todo, in: after) else { return [] }
+    let from = was.digest ?? taskDigest(was.text)
+    guard task.digest != from else { return [] }
+    return [PickEvent(at: timestamp(), event: .retargeted, task: PickedTask(
+                session: task.session, ordinal: task.ordinal, line: task.line, digest: from, text: task.text),
+                      retargets: picks.map(\.event.id), to: task.digest, source: source)]
+}
+
+private func timestamp(_ date: Date = Date()) -> String { PickLog.timestamp(date) }
 
 // MARK: - Pieces
 

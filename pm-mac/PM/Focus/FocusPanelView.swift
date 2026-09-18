@@ -231,7 +231,7 @@ struct FocusPanelView: View {
             // directionally and an in-place edit wipes.
             if isEditingText {
                 InlineTextEditor(seed: hero.text, placeholder: "Task text", submitLabel: "Save",
-                                 leadingIcon: AnyView(TaskStatusIcon(checked: hero.checked, size: heroIconSize))) { text in
+                                 leadingIcon: AnyView(TaskStatusIcon(state: hero.state, size: heroIconSize))) { text in
                     store.editText(hero, text: text)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
@@ -245,7 +245,7 @@ struct FocusPanelView: View {
             // Editors whose row/edit lands BELOW: due edit, Add After (sibling), Add Subtask.
             if isEditingDue {
                 DueEditor(seed: String((hero.dueDate ?? hero.effectiveDueDate ?? "").prefix(10)),
-                          leadingIcon: AnyView(TaskStatusIcon(checked: hero.checked, size: heroIconSize))) { newDue in
+                          leadingIcon: AnyView(TaskStatusIcon(state: hero.state, size: heroIconSize))) { newDue in
                     store.setDue(hero, due: newDue)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
@@ -313,11 +313,8 @@ struct FocusPanelView: View {
     private func heroLine(_ hero: Todo) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Button(action: { store.toggle(hero) }) {
-                Image(systemName: hero.checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: heroIconSize))
-                    .foregroundStyle(hero.checked ? Color.accentColor : Color.secondary)
-                    .symbolReplaceIfAvailable()
-                    .bounceIfAvailable(hero.checked)
+                TaskStatusIcon(state: hero.state, size: heroIconSize)
+                    .bounceIfAvailable(hero.state == .done)
             }
             .buttonStyle(.plain)
             .background(WindowDragExcluder())

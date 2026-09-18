@@ -224,7 +224,14 @@ enum HeaderMetrics {
     /// Inside a run of text, so words don't sit against the item beside them.
     static let textInset: CGFloat = 6
     /// The capsule's own inset around its row.
-    static let capsuleInset = (horizontal: 6.0, vertical: 4.0)
+    ///
+    /// **Equal in x and y, on purpose.** Every item's own highlight or hover capsule is a true
+    /// `Capsule()` sized to its frame, so its radius is exactly `itemHeight / 2`; the outer glass
+    /// capsule's radius is that plus this inset. Two stadiums only share a center — read as one
+    /// shape nested in another, corners included — when the margin between them is the same on
+    /// every side. A tab sitting at either end of the row makes this visible: unequal insets show a
+    /// tighter gap top-and-bottom than left-and-right against the outer capsule.
+    static let capsuleInset = (horizontal: 4.0, vertical: 4.0)
     /// The pill's, which is looser because it holds a name rather than controls.
     static let pillInset = (horizontal: 14.0, vertical: 7.0)
 }

@@ -51,9 +51,15 @@ func diffTodos(before: [Todo], after: [Todo]) -> [ApiChange] {
         if old.text != new.text {
             changes.append(ApiChange(kind: .renamed, ref: reference(to: new), was: old.text, now: new.text))
         }
-        if old.checked != new.checked {
-            changes.append(ApiChange(kind: new.checked ? .completed : .reopened,
-                                     ref: reference(to: new), now: new.text))
+        if old.state != new.state {
+            let kind: ApiChange.Kind = {
+                switch new.state {
+                case .done: return .completed
+                case .dropped: return .dropped
+                case .open: return .reopened
+                }
+            }()
+            changes.append(ApiChange(kind: kind, ref: reference(to: new), now: new.text))
         }
         if old.waiting != new.waiting {
             changes.append(ApiChange(kind: .blocked, ref: reference(to: new),
@@ -163,6 +169,9 @@ func summarize(action: String, changes: [ApiChange], batch: Bool = false) -> Phr
     case "task.complete":
         let what = many(count(.completed)) ?? "\(quoted(.completed) ?? "the task")\(extra(count(.completed)))"
         phrase = Phrase(past: "Completed \(what)", future: "complete \(what)")
+    case "task.drop":
+        let what = many(count(.dropped)) ?? "\(quoted(.dropped) ?? "the task")\(extra(count(.dropped)))"
+        phrase = Phrase(past: "Dropped \(what)", future: "drop \(what)")
     case "task.reopen":
         let what = many(count(.reopened)) ?? (quoted(.reopened) ?? "the task")
         phrase = Phrase(past: "Re-opened \(what)", future: "re-open \(what)")
@@ -217,7 +226,7 @@ func summarize(action: String, changes: [ApiChange], batch: Bool = false) -> Phr
     // A completion moves focus, and where it went is what you want to know next — but not when the
     // sentence is already about focus, and not when focus landed on the very task being described,
     // which is what adding a child task does.
-    let subject = quoted(.completed) ?? quoted(.added) ?? quoted(.renamed)
+    let subject = quoted(.completed) ?? quoted(.dropped) ?? quoted(.added) ?? quoted(.renamed)
     if action != "task.focus", action != "task.diveIn",
        let landed = quoted(.focused), landed != subject {
         phrase = phrase.appending(past: "Focus moves to \(landed)", future: "moving focus to \(landed)")

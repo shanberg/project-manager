@@ -1222,14 +1222,33 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     ///
     /// "Edited last" rather than "whatever has focus", because that is what a person means by ⌘Z. You
     /// tick a task, you press ⌘Z, and you expect the tick back — not the card you nudged before it.
-    @objc func undo(_ sender: Any?) {
-        if let project = scroll.board.lastEditedProject, project.canUndo { return project.undo() }
-        store.undoManager.undo()
+    /// Except while you are typing: then ⌘Z is the editor's, as it is in every text field on the Mac.
+    /// See `CanvasUndoRoute` for the order.
+    @objc func undo(_ sender: Any?) { act(redoing: false) }
+
+    @objc func redo(_ sender: Any?) { act(redoing: true) }
+
+    /// Send ⌘Z or ⇧⌘Z where `CanvasUndoRoute` says. The editor's stack is asked here as well as in
+    /// the menu: the menu used to name the card's typing while the key went to the project or the
+    /// board underneath it.
+    private func act(redoing: Bool) {
+        let editing = scroll.board.engagedCardUndoManager
+        let project = scroll.board.lastEditedProject
+        switch route(editing: editing, project: project, redoing: redoing) {
+        case .editor:
+            guard let editing else { return }
+            redoing ? editing.redo() : editing.undo()
+        case .project:
+            guard let project else { return }
+            redoing ? project.redo() : project.undo()
+        case .board:
+            redoing ? store.undoManager.redo() : store.undoManager.undo()
+        }
     }
 
-    @objc func redo(_ sender: Any?) {
-        if let project = scroll.board.lastEditedProject, project.canRedo { return project.redo() }
-        store.undoManager.redo()
+    private func route(editing: UndoManager?, project: PMStore?, redoing: Bool) -> CanvasUndoRoute {
+        CanvasUndoRoute.route(editorOpen: editing != nil,
+                              projectCanAct: project.map { redoing ? $0.canRedo : $0.canUndo } ?? false)
     }
 
     /// What the Edit menu says, and whether it says it at all.
@@ -1238,21 +1257,22 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// can say which one it is about to act on: "Undo Complete Task" and "Undo Move Card" are the
     /// difference between a command you can trust and one you have to try.
     private func validateUndo(_ item: NSMenuItem, redoing: Bool) -> Bool {
-        // The card you are typing in comes first — while its editor is open, ⌘Z is that editor's, and
-        // the menu has to say so or the key it is the shortcut for never arrives. See
-        // `undoManagerForContent`.
-        if let editing = scroll.board.engagedCardUndoManager {
+        let editing = scroll.board.engagedCardUndoManager
+        let project = scroll.board.lastEditedProject
+        switch route(editing: editing, project: project, redoing: redoing) {
+        case .editor:
+            guard let editing else { return false }
             item.title = redoing ? editing.redoMenuItemTitle : editing.undoMenuItemTitle
             return redoing ? editing.canRedo : editing.canUndo
-        }
-        if let project = scroll.board.lastEditedProject, redoing ? project.canRedo : project.canUndo {
-            item.title = redoing ? "Redo" : "Undo"
+        case .project:
+            guard let project else { return false }
+            item.title = redoing ? project.redoMenuTitle : project.undoMenuTitle
             return true
+        case .board:
+            let manager = store.undoManager
+            item.title = redoing ? manager.redoMenuItemTitle : manager.undoMenuItemTitle
+            return redoing ? manager.canRedo : manager.canUndo
         }
-        let manager = store.undoManager
-        let can = redoing ? manager.canRedo : manager.canUndo
-        item.title = redoing ? manager.redoMenuItemTitle : manager.undoMenuItemTitle
-        return can
     }
 
     private func noteOutsideChange() {

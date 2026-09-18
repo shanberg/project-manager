@@ -10,8 +10,8 @@ import Foundation
 // These helpers reuse the tested model logic to decide *what* changes, then splice just
 // those lines into the original markdown, leaving every other byte verbatim.
 
-/// Task line: optional indent + "- ", a "[ ]"/"[x]" checkbox, then content.
-private let rawTaskPattern = try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+/// Task line: optional indent + "- ", a "[ ]"/"[x]"/"[-]" checkbox, then content.
+private let rawTaskPattern = try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX-])\]\s+(.*)$"#)
 /// Session heading: matches NotesParse's sessionHeading exactly so session indexing aligns with parseTodos.
 private let rawSessionHeadingPattern = try? NSRegularExpression(
     pattern: #"^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})(?:\s+(.*))?$"#
@@ -772,10 +772,12 @@ public func appendSessionNotePreservingFormat(rawText: String, prose: String, la
                                              sessionIndex: current.sessionIndex, body: combined)
 }
 
-/// Rename a session's label (the trailing text after the date), preserving format. The heading line
-/// is rebuilt from its captured date parts + the new label — `"### <date>"` or `"### <date> <label>"`,
-/// matching the parser exactly — so the date and the session's body are untouched. An empty label
-/// removes the trailing text. Returns nil if the session can't be located.
+/// Rename a session, preserving format. `label` is the new *name*: the time the sitting began stays,
+/// so renaming never loses it, and an empty name leaves just the time (`SessionLabel`). A `label` that
+/// carries a time of its own sets both, which is how a whole heading can still be written back. The
+/// heading line is rebuilt from its captured date parts — `"### <date>"` or `"### <date> <label>"`,
+/// matching the parser exactly — so the date and the session's body are untouched. Returns nil if the
+/// session can't be located.
 public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, label: String) -> String? {
     var lines = rawText.components(separatedBy: "\n")
     guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex),
@@ -787,7 +789,10 @@ public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, la
           let r3 = Range(m.range(at: 3), in: line),
           let r4 = Range(m.range(at: 4), in: line) else { return nil }
     let date = "\(line[r1]), \(line[r2]) \(line[r3]), \(line[r4])"
-    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    let was = m.numberOfRanges > 5 ? Range(m.range(at: 5), in: line).map { String(line[$0]) } ?? "" : ""
+    var renamed = SessionLabel(parsing: label)
+    if renamed.time == nil { renamed.time = SessionLabel(parsing: was).time }
+    let trimmed = renamed.text
     lines[heading] = trimmed.isEmpty ? "### \(date)" : "### \(date) \(trimmed)"
     return lines.joined(separator: "\n")
 }
@@ -875,10 +880,16 @@ public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) ->
 /// take prose or tasks with it. Returns nil when there's nothing to prune, so the caller can skip the
 /// write. Sessions are walked back-to-front: each deletion only shifts lines *after* the headings
 /// still to be examined.
-public func pruneEmptySessionsPreservingFormat(rawText: String) -> (rawText: String, removed: Int)? {
+///
+/// `keeping` names sessions, by index, to leave alone however empty they look — a sitting whose
+/// only content is what it picked up (docs/sessions.md D2) has nothing under its heading, and is not
+/// empty.
+public func pruneEmptySessionsPreservingFormat(rawText: String,
+                                               keeping: Set<Int> = []) -> (rawText: String, removed: Int)? {
     var lines = rawText.components(separatedBy: "\n")
     var removed = 0
-    for heading in rawSessionHeadingLineNumbers(lines).reversed() {
+    for (index, heading) in rawSessionHeadingLineNumbers(lines).enumerated().reversed() {
+        if keeping.contains(index) { continue }
         let end = rawSessionEnd(lines, headingLine: heading)
         let hasContent = lines[(heading + 1)..<end].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         if hasContent { continue }
@@ -903,13 +914,14 @@ public struct PastedTask: Equatable, Sendable {
     public var depth: Int
     public var text: String
     public var due: String?
-    public var checked: Bool
+    /// Kept as it was where the block came from: a dropped task pasted elsewhere is still dropped.
+    public var state: TaskState
 
-    public init(depth: Int, text: String, due: String? = nil, checked: Bool = false) {
+    public init(depth: Int, text: String, due: String? = nil, state: TaskState = .open) {
         self.depth = depth
         self.text = text
         self.due = due
-        self.checked = checked
+        self.state = state
     }
 }
 
@@ -920,7 +932,7 @@ private func taskBlockLines(_ block: [PastedTask], rootIndent: Int, prefix: Stri
     let marker = prefix.drop { $0 == " " }
     return block.map { task in
         let indent = String(repeating: " ", count: rootIndent + max(0, task.depth) * 2)
-        let box = task.checked ? "[x]" : "[ ]"
+        let box = "[\(task.state.box)]"
         let text = task.text.trimmingCharacters(in: .whitespaces)
         let dueSuffix = (task.due?.isEmpty == false) ? " due: \(task.due!)" : ""
         return "\(indent)\(marker)\(box) \(text)\(dueSuffix)"

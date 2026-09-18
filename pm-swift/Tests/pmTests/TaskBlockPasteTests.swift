@@ -72,7 +72,7 @@ final class TaskBlockPasteTests: XCTestCase {
     func testCheckedAndDueSurvive() throws {
         let out = try XCTUnwrap(insertTaskBlockPreservingFormat(
             rawText: Self.markdown, anchorSessionIndex: 0, anchorLineIndex: 2,
-            block: [PastedTask(depth: 0, text: "Done one", due: "2026-03-01", checked: true)]))
+            block: [PastedTask(depth: 0, text: "Done one", due: "2026-03-01", state: .done)]))
         XCTAssertTrue(out.contains("- [x] Done one due: 2026-03-01"))
     }
 

@@ -178,11 +178,15 @@ public func normalizeFocusMarker(notes: ProjectNotes) -> ProjectNotes {
 
 public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
     guard let todoLinePattern = todoLinePattern else {
-        throw PmError.notesRegexError(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+        throw PmError.notesRegexError(pattern: #"^(\s*-\s+)\[([ xX-])\]\s+(.*)$"#)
     }
     var todos: [Todo] = []
     var foundFocused = false
+    // How many sittings each heading date has had so far: the next one's ordinal.
+    var sittingsOn: [String: Int] = [:]
     for (sessionIndex, session) in notes.sessions.enumerated() {
+        let ordinal = sittingsOn[session.date, default: 0]
+        sittingsOn[session.date] = ordinal + 1
         let context = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         // The stable half of a TaskRef coordinate, carried on every task so a reader never has to
         // re-derive it from the heading. nil only for a session heading this parser didn't write.
@@ -195,7 +199,7 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                   let r3 = Range(m.range(at: 3), in: line) else { continue }
             let leadingSpaces = line.prefix(while: { $0 == " " }).count
             let depth = leadingSpaces / 2
-            let checked = line[r2].lowercased() == "x"
+            let state = line[r2].first.flatMap(TaskState.init(box:)) ?? .open
             let content = TaskContent.split(String(line[r3]))
             let dueDate = content.due
             let text = content.text
@@ -203,9 +207,10 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
             // the next write.
             let isFocused = content.focused && !foundFocused
             if isFocused { foundFocused = true }
-            todos.append(Todo(
+            var todo = Todo(
                 text: text,
-                checked: checked,
+                checked: state.isClosed,
+                state: state,
                 rawLine: line,
                 context: context,
                 depth: depth,
@@ -216,7 +221,9 @@ public func parseTodos(notes: ProjectNotes) throws -> [Todo] {
                 waiting: content.waiting,
                 digest: taskDigest(text),
                 sessionISODate: isoDate
-            ))
+            )
+            todo.sessionOrdinal = ordinal
+            todos.append(todo)
             lineIndex += 1
         }
     }
@@ -302,7 +309,7 @@ public func todosWithEffectiveWaiting(_ todos: [Todo]) -> [Todo] {
 }
 
 private let todoLinePattern: NSRegularExpression? = {
-    try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+    try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX-])\]\s+(.*)$"#)
 }()
 
 public extension Todo {
@@ -361,6 +368,15 @@ public extension Array where Element == Todo {
     /// A focused task that is waiting still wins — focus advancement skips waits, so getting there
     /// took a deliberate act, and this reports what the document says rather than overruling it.
     var heroTask: Todo? { first(where: \.isFocused) ?? availableTasks.first }
+
+    /// **How far along it is.** Done out of everything that still counts.
+    ///
+    /// A dropped task leaves the total rather than counting as done: a project whose leftovers were let
+    /// go of is finished, and "5 of 5 done" when two of them weren't would be a lie. The ring, the
+    /// switcher, Siri and `task.progress` all read it here, so they can't come to disagree.
+    var progress: (done: Int, total: Int) {
+        (filter { $0.state == .done }.count, filter { $0.state != .dropped }.count)
+    }
 }
 
 // MARK: - Now-style focus advance (parent's first leaf, else next sibling's first leaf, else parent)
@@ -525,6 +541,25 @@ public func nextDiveInLeaf(todos: [Todo]) -> Todo? {
 
 /// Complete the todo at (sessionIndex, lineIndex) and all its descendants. Optionally move focus to next open todo (now-style: parent's first leaf, else next sibling first leaf, else parent).
 public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) throws -> ProjectNotes {
+    try closeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex,
+                                 as: .done, advanceFocus: advanceFocus)
+}
+
+/// Drop the todo at (sessionIndex, lineIndex) and its open descendants: close them without their being
+/// done. Focus moves on exactly as it does for a completion — a dropped task is as finished with as a
+/// done one, as far as what to work on next goes.
+public func dropTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int, advanceFocus: Bool) throws -> ProjectNotes {
+    try closeTodoWithDescendants(notes: notes, sessionIndex: sessionIndex, lineIndex: lineIndex,
+                                 as: .dropped, advanceFocus: advanceFocus)
+}
+
+/// Close a task and its subtree as `state`, done or dropped.
+///
+/// Only *open* lines in the subtree are touched. A child already done stays done when its parent is
+/// dropped — it was done — and a child already dropped stays dropped when its parent is completed.
+/// Closing is never a way to rewrite what already happened to a task.
+private func closeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, lineIndex: Int,
+                                      as state: TaskState, advanceFocus: Bool) throws -> ProjectNotes {
     let todos = todosWithEffectiveWaiting(try parseTodos(notes: notes))
     guard sessionIndex < notes.sessions.count else { return notes }
     let sessionTodos = todos.filter { $0.sessionIndex == sessionIndex }.sorted { $0.lineIndex < $1.lineIndex }
@@ -554,13 +589,13 @@ public func completeTodoWithDescendants(notes: ProjectNotes, sessionIndex: Int, 
         }
         let check = String(line[r2])
         let content = String(line[r3])
-        let isUnchecked = check.lowercased() != "x"
-        let shouldComplete = indicesToComplete.contains(taskCount) && isUnchecked
-        if shouldComplete {
-            // A completed task keeps its due but drops focus — where focus lands next is decided below.
-            var completed = TaskContent.split(content)
-            completed.focused = false
-            outLines.append("\(String(line[r1]))[x] \(completed.render())")
+        let isOpen = check == " "
+        let shouldClose = indicesToComplete.contains(taskCount) && isOpen
+        if shouldClose {
+            // A closed task keeps its due but loses focus — where focus lands next is decided below.
+            var closed = TaskContent.split(content)
+            closed.focused = false
+            outLines.append("\(String(line[r1]))[\(state.box)] \(closed.render())")
         } else {
             outLines.append(line)
         }

@@ -60,7 +60,8 @@ Only tiers 1 and 2 are published to every adapter.
 **Tier 1 — mutations.** Pure domain, work headless, mean the same thing everywhere.
 
 ```
-task.add          task.complete    task.reopen      task.focus
+task.add          task.complete    task.drop        task.reopen      task.focus
+task.pick         task.release
 task.diveIn       task.setDue      task.setText     task.wrap
 task.unwrap       task.move        task.delete
 session.start     session.note     session.rename   session.delete   session.prune
@@ -74,12 +75,21 @@ config.set
 ```
 project.list   project.get     notes.get      task.list
 task.search    task.waiting    task.whatsDue  task.progress
-focus.get      capture.parse   config.get
+task.done      session.list    focus.get      capture.parse
+config.get
 ```
 
 `capture.parse` and `task.search` moved out of the macOS app into PmLib to be published. `capture.parse` reads a line the way the quick bar does — `due:friday`, `due:in 2w`, a trailing `@project` — so every surface accepts the same phrasing. `task.search` ranks on whole words rather than the subsequence matching that finds projects, because you remember a task as some of the words in it.
 
 `task.waiting` is the same walk asked a different question: every task with a `waiting:` token, grouped by what it's waiting on, released groups first. It is a query rather than a window feature because the grouping has rules in it — which spellings of a target are one target, which band a group sorts into — and a second implementation of those rules beside the first is exactly what this contract exists to prevent. The macOS Waiting window is one adapter over it.
+
+In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries `sessionOrdinal` (which of its day's sittings it's in) and its project's `projectColor` and `projectIcon`. They're the Waiting and Search views' queries. See [views.md](views.md) step 5.
+
+`task.due` (1.17.0) is the deadline horizon across projects: open tasks due by `until` (`today`, `week` for the next seven days, or a date), overdue first, each line listed when it states a date itself. It's a new action rather than a widened `task.whatsDue`, which answers for one project as `Todo`s. In the same version, `project.list` takes `projects`, and `activity: true` reads each project for its `lastActivity`, newest sitting, open count and soonest due. See [views.md](views.md) step 7.
+
+`task.leftovers` (1.16.0) is the pile across projects: open tasks in sittings older than `before` (`today`, `yesterday`, `week` for before this week, or a date), grouped by project and then by sitting, oldest first. Each sitting comes with its lede, and each task with its ref and its last pick-up. See [views.md](views.md) step 6.
+
+`session.list` (1.14.0) is the day across projects: every sitting dated in a span, in the order the day went, with its prose and its tasks by role. Completions are given to sittings by time, from the done log. See [views.md](views.md) D8.
 
 Both brought their vocabulary with them. The due-date presets — "Today", "This Weekend", "Next Week" — are now `PmLib.duePresets`, read by the parser *and* offered by the app's due menu, so the words a menu shows and the words a typed line is matched against cannot drift apart. `TaskSearch` ranks anything conforming to `SearchableTask`, so the app's warmed index and a fresh scan share one ranking; the app keeps its index, and the CLI and MCP pay one scan rather than maintaining one.
 
@@ -97,6 +107,8 @@ This means `pm api describe` will list fewer things than the quick bar's `>` men
   focus,                           // where focus ended up, if it moved
   relocated                        // a TaskRef healed against drift; see task-identity.md
                                    // (`summary` says so too, in a second sentence)
+  sidecar                          // events appended to the project's pick log, when any were
+                                   // (task.pick, task.release, a focus that picked up); see sessions.md
 }
 ```
 
@@ -211,7 +223,7 @@ Three mutations stay on `NotesService`, each because the contract has no action 
 
 ### Batches, and the revision
 
-`task.complete`, `task.reopen`, `task.setDue` and `task.delete` take either a `task` or a list of `tasks` — exactly one, which a `required` list can't express, so the registry gained a small `oneOf` and the published schema says so. A batch is one read, one write, one journal entry, and one step to undo: a selection a person acted on in a single gesture comes back in a single gesture.
+`task.complete`, `task.drop`, `task.reopen`, `task.pick`, `task.release`, `task.setDue` and `task.delete` take either a `task` or a list of `tasks` — exactly one, which a `required` list can't express, so the registry gained a small `oneOf` and the published schema says so. A batch is one read, one write, one journal entry, and one step to undo: a selection a person acted on in a single gesture comes back in a single gesture.
 
 Within a batch, references are resolved against the text **as it evolves**, and a reference that no longer names anything is skipped rather than failing the batch. That is what "act on this selection" has to mean: completing a parent completes its children, deleting one removes them, so a child that came along in the same selection has already been dealt with by the time its turn arrives.
 
@@ -236,6 +248,8 @@ A single-task write still sends nothing. Its digest already names its one task, 
 **Reversing is guarded by the revision.** An entry records the revision it produced; `journal.undo` reverses it only if the file is still exactly that. Anything else returns `conflict`, because reversing then would silently discard whatever was written since — including a line typed into Obsidian a minute ago.
 
 **Undo walks back rather than oscillating.** A reversal is a write and is journaled as one, which is what makes it reversible in turn — but it is skipped when choosing what to undo next, as is anything already reversed. Undoing repeatedly therefore steps back through the history, across surfaces, and it works because reversing a write leaves the file at exactly the revision the write before it produced, so the next entry back is once again reversible.
+
+**Picks are reversed with the write that made them.** An entry that appended to a project's pick log lists those events' ids in `sidecar`, and `journal.undo` appends the events that cancel them — only after the document half has passed its revision check, so a refused undo leaves the picks alone too. A pick that changed nothing in the notes is journaled with no document behind it, and reversing it needs no check: a `released` cancels only the pick it names. `task.focus` picks an older task up by default (`pick: false` makes it navigation only), so its entry carries both halves. See [sessions.md](sessions.md) D4.
 
 This closes the hole the panel's undo stack left: it is in memory and app-only, so nothing could reverse a write made by Raycast, by `pm`, by a model — or by the app itself after a relaunch.
 

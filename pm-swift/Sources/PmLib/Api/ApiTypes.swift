@@ -131,6 +131,9 @@ public struct ApiInput: Codable, Equatable {
     public var partOf: String?
     public var clearPartOf: Bool?
     public var advanceFocus: Bool?
+    /// `task.focus`: pick the task up into the current session when it's from an older one. Default
+    /// true — see docs/sessions.md D3.
+    public var pick: Bool?
     public var label: String?
     public var prose: String?
     public var title: String?
@@ -144,6 +147,8 @@ public struct ApiInput: Codable, Equatable {
     public var key: String?
     public var value: JSONValue?
     public var includeCompleted: Bool?
+    /// `task.done`: list what was dropped in the period too.
+    public var includeDropped: Bool?
     public var limit: Int?
     public var now: String?
     /// A journal entry's id.
@@ -157,6 +162,12 @@ public struct ApiInput: Codable, Equatable {
     /// A report's first and last days, YYYY-MM-DD, both inclusive.
     public var since: String?
     public var until: String?
+    /// `project.list`: read each project for what's happening in it.
+    public var activity: Bool?
+    /// `task.leftovers`: how old a sitting has to be — `today`, `yesterday`, `week` or YYYY-MM-DD.
+    public var before: String?
+    /// `session.list`: the projects to look in, by name, prefix or `[[link]]`.
+    public var projects: [String]?
 
     public init() {}
 }
@@ -180,6 +191,8 @@ public struct ApiOptions: Equatable {
 public struct ApiChange: Codable, Equatable {
     public enum Kind: String, Codable {
         case added, removed, completed, reopened, retimed, renamed, moved, focused, unfocused
+        /// Closed without being done.
+        case dropped
         /// What the task is waiting on was set, changed, or cleared.
         case blocked
     }
@@ -215,10 +228,14 @@ public struct ApiResult: Codable, Equatable {
     public var dryRun: Bool
     /// A query's payload.
     public var data: JSONValue?
+    /// What the write appended to the project's pick log, when it appended anything — so a caller that
+    /// keeps its own undo can take exactly these back. Absent otherwise, and on a dry run.
+    public var sidecar: [PickEvent]?
 
     public init(action: String, summary: String, revision: String? = nil, changed: [ApiChange] = [],
                 focus: TaskRefInput? = nil, relocated: Bool = false, dryRun: Bool = false,
-                data: JSONValue? = nil) {
+                data: JSONValue? = nil, sidecar: [PickEvent]? = nil) {
+        self.sidecar = sidecar
         self.action = action
         self.summary = summary
         self.revision = revision

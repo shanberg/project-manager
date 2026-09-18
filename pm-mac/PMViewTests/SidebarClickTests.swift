@@ -161,9 +161,10 @@ final class SidebarClickTests: XCTestCase {
         return headers + (keys.firstIndex(of: key) ?? 0)
     }
 
-    /// Move the selection the way the table moves it, and let SwiftUI publish it back.
+    /// Move the selection the way the table moves it, and let SwiftUI publish it back. The whole of
+    /// the wait: `run(mode:before:)` returns after the first source it handles, which can be at once.
     private func select(row: Int) {
         table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.3))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
     }
 }

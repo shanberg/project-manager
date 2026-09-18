@@ -156,6 +156,8 @@ targets:
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Project/SessionBlocks.swift
+      - path: PM/Project/SessionPicks.swift
+      - path: PM/Project/TaskDropResolver.swift
       - path: PM/Canvas/CanvasPageBudget.swift
       - path: PM/Canvas/CanvasPageHandover.swift
       - path: PM/Canvas/CanvasPageKeys.swift
@@ -198,6 +200,8 @@ targets:
       - path: PM/Canvas/CanvasPagePaint.swift
       - path: PM/Canvas/CanvasPictureView.swift
       - path: PM/Canvas/CanvasSearch.swift
+      - path: PM/Canvas/CanvasUndoRoute.swift
+      - path: PM/Presentation/SessionNoteMerge.swift
       - path: PM/Shared/Coalescer.swift
       - path: PM/Shared/FrameMeter.swift
       - path: PM/Shared/ObservationRelay.swift
@@ -213,6 +217,11 @@ targets:
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift
       - path: PM/Canvas/CanvasCardActions.swift
+      - path: PM/Canvas/CanvasViewSpec.swift
+      - path: PM/Canvas/CanvasViewCalendar.swift
+      - path: PM/Canvas/CanvasDayActions.swift
+      - path: PM/Canvas/CanvasTaskLists.swift
+      - path: PM/Model/StoreRegistry.swift
       - path: PM/Canvas/CanvasLinkZones.swift
       - path: PM/Project/RenderedNote.swift
       - path: PM/Canvas/CanvasPageView.swift

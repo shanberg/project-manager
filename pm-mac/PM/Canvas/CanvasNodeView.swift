@@ -121,6 +121,10 @@ class CanvasNodeView: NSView {
     /// Build the view for a card, by what the card is.
     static func make(node: CanvasNode, board: CanvasBoardView, scale: Double) -> CanvasNodeView {
         switch node.content {
+        // A text node carrying a view this build knows is drawn as that view's answer; one naming a view
+        // it doesn't is the text card it also is. See `CanvasViewSpec`.
+        case .text where CanvasViewSpec.of(node) != nil:
+            return CanvasViewNodeView(node: node, board: board, scale: scale)
         case .text: return CanvasTextNodeView(node: node, board: board, scale: scale)
         case .file: return CanvasFileNodeView(node: node, board: board, scale: scale)
         case .link: return CanvasLinkNodeView(node: node, board: board, scale: scale)

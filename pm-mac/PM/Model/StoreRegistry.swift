@@ -1,4 +1,5 @@
 import Foundation
+import PmLib
 
 /// Vends the app's `PMStore`s, one per project, shared by everything showing that project.
 ///
@@ -51,6 +52,13 @@ final class StoreRegistry {
     /// changes on disk.
     var liveStores: [PMStore] { Array(stores.values) }
 
-    /// The notes files every live store is showing, for the watcher to keep an eye on.
-    var watchedNotesPaths: [String] { liveStores.compactMap(\.notesPath) }
+    /// The notes files every live store is showing, for the watcher to keep an eye on — and each
+    /// project's pick log beside them, because a pick made from `pm` or Raycast usually leaves the notes
+    /// untouched, and would otherwise not show until something else changed. A log that doesn't exist
+    /// yet costs a failed `stat` per poll and starts counting the moment it is written.
+    var watchedNotesPaths: [String] {
+        liveStores.flatMap { store in
+            [store.notesPath, store.projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
+        }
+    }
 }

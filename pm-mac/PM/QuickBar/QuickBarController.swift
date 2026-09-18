@@ -881,6 +881,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
                                                          lineIndex: task.lineIndex, advanceFocus: true)
             return outcome(after)
 
+        case .drop:
+            guard let task else { return nil }
+            return outcome(try? dropTodoWithDescendants(notes: notes, sessionIndex: task.sessionIndex,
+                                                        lineIndex: task.lineIndex, advanceFocus: true))
+
         case .undoLast:
             // The same key `PMStore.undoLast` reads, split the same way.
             guard let key = store.lastCompletedKey else { return nil }
@@ -974,7 +979,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         switch command {
         // Not editTask or wrapTask: opening the panel's editor is what those already do, so ⌘ has
         // nothing left to add. setDue only opens one when it can't read the date it was given.
-        case .complete, .undoLast, .diveIn, .setDue: return .focusPanel
+        case .complete, .drop, .undoLast, .diveIn, .setDue: return .focusPanel
         case .sessionNote, .startSession: return .sessionEditor
         case .archiveProject, .unarchiveProject: return .window
         default: return nil
@@ -991,6 +996,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         switch command {
         case .complete:
             return task.map { "Completed “\(QuickBarModel.truncate($0.text, 44))”" }
+        case .drop:
+            return task.map { "Dropped “\(QuickBarModel.truncate($0.text, 44))”" }
         case .undoLast:
             return "Put the last completed task back"
         case .diveIn:
@@ -1030,6 +1037,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .complete:
             return task.map { "Couldn't complete “\(QuickBarModel.truncate($0.text, 44))”" }
                 ?? "Couldn't complete the focused task"
+        case .drop:
+            return task.map { "Couldn't drop “\(QuickBarModel.truncate($0.text, 44))”" }
+                ?? "Couldn't drop the focused task"
         case .undoLast: return "Couldn't put the last completed task back"
         case .diveIn: return "Couldn't move the focus"
         case .setDue: return "Couldn't set the due date"
@@ -1092,6 +1102,10 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .complete:
             guard let store, let task else { break }
             store.complete(task, then: landed)
+            return
+        case .drop:
+            guard let store, let task else { break }
+            store.drop([task], then: landed)
             return
         case .diveIn:
             guard let store else { break }

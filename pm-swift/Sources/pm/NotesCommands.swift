@@ -101,11 +101,14 @@ func runNotesSessionAdd(args: [String], dateStr: String?) {
             date = nil
         }
         let rawText = try io.readContent(path: notesPath)
-        if let updated = sessionAddPreservingFormat(rawText: rawText, label: label, date: date ?? Date()) {
+        // A sitting started now says when (docs/views.md D4). One added for another day was not sat down
+        // to at any time this call knows, so it gets a name and no time.
+        let heading = date == nil ? SessionLabel(time: sessionTimeLabel(), name: label).text : label
+        if let updated = sessionAddPreservingFormat(rawText: rawText, label: heading, date: date ?? Date()) {
             try io.writeContent(path: notesPath, content: updated)
         } else {
             // No "## Sessions" heading to splice into; fall back to the model round-trip.
-            let notes = addSession(notes: try parseNotes(markdown: rawText), label: label, date: date)
+            let notes = addSession(notes: try parseNotes(markdown: rawText), label: heading, date: date)
             try writeNotesFile(notesPath: notesPath, notes: notes, notesIO: io)
         }
         let sessionDate = formatSessionDate(date ?? Date())

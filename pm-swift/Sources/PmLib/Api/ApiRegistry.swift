@@ -20,7 +20,7 @@ public enum ApiTier: String, Codable, CaseIterable {
 
 public struct ApiField: Equatable {
     public enum Kind: String, Equatable {
-        case string, integer, boolean, taskRef, taskRefList, any
+        case string, integer, boolean, taskRef, taskRefList, stringList, any
     }
     public let name: String
     public let kind: Kind
@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.10.0"
+public let apiContractVersion = "1.17.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -97,13 +97,30 @@ public enum ApiRegistry {
                       fields: [project, optionalTask, tasks, revision,
                                ApiField("advanceFocus", .boolean, "Move focus onward afterwards. Default true.")],
                       oneOf: [["task", "tasks"]]),
+        ApiActionSpec(name: "task.drop", tier: .mutation,
+                      summary: "Drop a task, or several, along with their open subtasks: close them without their being done.",
+                      fields: [project, optionalTask, tasks, revision,
+                               ApiField("advanceFocus", .boolean, "Move focus onward afterwards. Default true.")],
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.reopen", tier: .mutation,
-                      summary: "Re-open a completed task, or several, and put focus back.",
+                      summary: "Re-open a completed or dropped task, or several, and put focus back.",
                       fields: [project, optionalTask, tasks, revision],
                       oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.focus", tier: .mutation,
-                      summary: "Make this the project's focused task.",
-                      fields: [project, task]),
+                      summary: "Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false.",
+                      fields: [project, task,
+                               ApiField("pick", .boolean, "Pick the task up into the current session when it's from an older one. Default true.")]),
+        ApiActionSpec(name: "task.pick", tier: .mutation,
+                      summary: "Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up.",
+                      fields: [project, optionalTask, tasks, revision],
+                      oneOf: [["task", "tasks"]]),
+        ApiActionSpec(name: "task.release", tier: .mutation,
+                      summary: "Put back a picked-up task, or several: take it out of the session it was picked up into. The task itself isn't touched.",
+                      fields: [project, optionalTask, tasks, revision,
+                               ApiField("session", .string, "The ISO date of the session it was picked up into. Default: its latest pick."),
+                               ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
+                               ApiField("sessionDigest", .string, "Digest of that session's label, to catch a session that has since changed.")],
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.diveIn", tier: .mutation,
                       summary: "Move focus to the first open leaf under the focused task.",
                       fields: [project]),
@@ -212,7 +229,11 @@ public enum ApiRegistry {
                       fields: [ApiField("scope", .string, "Which folder to list. Default active.",
                                         allowed: ["active", "areas", "archive", "all"]),
                                ApiField("kind", .string, "Only this kind. Default both.",
-                                        allowed: ProjectKind.allCases.map(\.rawValue))]),
+                                        allowed: ProjectKind.allCases.map(\.rawValue)),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members."),
+                               ApiField("activity", .boolean,
+                                        "Also read each project for what's happening in it: lastActivity (the later of its newest sitting's start and its notes' last write), its newest sitting and what it was about, how many tasks are open, and the soonest due. Sorted newest activity first. Default false.")]),
         ApiActionSpec(name: "project.adoptable", tier: .query,
                       summary: "Folders in the areas root that could become areas but haven't yet.",
                       fields: []),
@@ -223,13 +244,13 @@ public enum ApiRegistry {
         ApiActionSpec(name: "task.list", tier: .query,
                       summary: "A project's tasks, each with the reference needed to act on it.",
                       fields: [optionalProject,
-                               ApiField("includeCompleted", .boolean, "Include completed tasks. Default false."),
+                               ApiField("includeCompleted", .boolean, "Include completed and dropped tasks. Default false."),
                                ApiField("limit", .integer, "Cap the number returned.", minimum: 0)]),
         ApiActionSpec(name: "task.whatsDue", tier: .query,
                       summary: "Open tasks with a due date, soonest first.",
                       fields: [optionalProject, ApiField("limit", .integer, "Cap the number returned.", minimum: 0)]),
         ApiActionSpec(name: "task.progress", tier: .query,
-                      summary: "How many of a project's tasks are done.", fields: [optionalProject]),
+                      summary: "How many of a project's tasks are done. Dropped tasks are left out of the total.", fields: [optionalProject]),
         ApiActionSpec(name: "focus.get", tier: .query,
                       summary: "The focused project and its focused task.", fields: []),
         ApiActionSpec(name: "config.get", tier: .query, summary: "The pm configuration.", fields: []),
@@ -244,11 +265,15 @@ public enum ApiRegistry {
                                ApiField("project", .string, "Break ties toward this project. Defaults to the focused one."),
                                ApiField("scope", .string, "Which projects to search. Default all.",
                                         allowed: ["active", "archive", "all"]),
+                               ApiField("projects", .stringList,
+                                        "Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. Default every project."),
                                ApiField("limit", .integer, "How many to return. Default 20.", minimum: 0)]),
         ApiActionSpec(name: "task.waiting", tier: .query,
                       summary: "Everything you're waiting on, grouped by what it's waiting on.",
                       fields: [ApiField("scope", .string, "Which projects to look in. Default active.",
-                                        allowed: ["active", "archive", "all"])]),
+                                        allowed: ["active", "archive", "all"]),
+                               ApiField("projects", .stringList,
+                                        "Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. What they wait on can be anywhere. Default every project.")]),
         ApiActionSpec(name: "task.done", tier: .query,
                       summary: "What got done: tasks completed in a period, across every project, newest first.",
                       fields: [ApiField("period", .string, "Which span. Default today.",
@@ -256,7 +281,28 @@ public enum ApiRegistry {
                                ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
                                ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
                                ApiField("scope", .string, "Which projects to look in. Default all.",
-                                        allowed: ["active", "archive", "all"])]),
+                                        allowed: ["active", "archive", "all"]),
+                               ApiField("includeDropped", .boolean, "Also list tasks dropped in the period, marked. Default false.")]),
+        ApiActionSpec(name: "session.list", tier: .query,
+                      summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere.",
+                      fields: [ApiField("period", .string, "Which span. Default today.",
+                                        allowed: ["today", "yesterday", "week"]),
+                               ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
+                               ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
+        ApiActionSpec(name: "task.due", tier: .query,
+                      summary: "Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one.",
+                      fields: [ApiField("until", .string,
+                                        "How far ahead: today, week (the next seven days, the default), or through a day given as YYYY-MM-DD."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area.")]),
+        ApiActionSpec(name: "task.leftovers", tier: .query,
+                      summary: "Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up.",
+                      fields: [ApiField("before", .string,
+                                        "How old a sitting has to be: before today (the default), before yesterday, before this week, or before a day given as YYYY-MM-DD."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area.")]),
         ApiActionSpec(name: "capture.parse", tier: .query,
                       summary: "Read a typed capture line: its text, its due date, and the project it names.",
                       fields: [ApiField("text", .string, required: true,
@@ -306,6 +352,9 @@ extension ApiField {
         case .integer: out["type"] = .string("integer")
         case .boolean: out["type"] = .string("boolean")
         case .any: break  // a string, a number, or an array of strings, depending on the key
+        case .stringList:
+            out["type"] = .string("array")
+            out["items"] = .object(["type": .string("string")])
         case .taskRefList:
             out["type"] = .string("array")
             out["items"] = ApiField("item", .taskRef, description).schema

@@ -17,10 +17,13 @@ import PmLib
 enum PMCommandRunner {
     static func run(_ command: PMCommand, store: PMStore) {
         switch command {
-        // The task in hand. These are the three the store answers directly.
+        // The task in hand. These are the four the store answers directly.
         case .complete:
             guard let focused = store.focusedTodo else { return }
             store.complete(focused)
+        case .drop:
+            guard let focused = store.focusedTodo else { return }
+            store.drop([focused])
         case .undoLast:
             store.undoLast()
         case .diveIn:

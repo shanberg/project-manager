@@ -76,6 +76,9 @@ final class PMStore {
     /// The colour chosen in Project Settings, from the same frontmatter — see `ProjectColor`.
     private(set) var color: ProjectColor?
     private(set) var todos: [Todo] = []
+    /// Every standing pick that still resolves in this read: which older task was picked up into which
+    /// sitting (docs/sessions.md D2). Each task also carries its latest one as `Todo.picked`.
+    private(set) var picks: [TaskPick] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
     ///
@@ -150,13 +153,29 @@ final class PMStore {
     /// time. Restoring one writes the bytes back verbatim, so undo is format-preserving like every edit.
     struct DocSnapshot: Equatable { let notesPath: String; let raw: String }
 
-    /// Undo/redo history of pre-mutation document snapshots, for in-app edits (move, complete,
-    /// due, text, add, wrap, unwrap…). Coarse but reliable: each step restores the full prior document.
+    /// One ⌘Z: the whole gesture, which may have changed the document, the project's pick log, or both
+    /// (docs/sessions.md D4). A focus that picked a task up is one step that puts the focus back *and*
+    /// releases the pick; a tick that picked up reopens the task and releases it.
+    struct UndoStep: Equatable {
+        /// The bytes to restore, when the gesture changed the file.
+        var document: DocSnapshot?
+        /// What the gesture appended to the pick log: undo appends the events that cancel these, and
+        /// the step it banks for redo carries the ones it appended.
+        var picks: [PickEvent] = []
+        /// What the Edit menu calls this step, when it has a name of its own — "Pick Up".
+        var name: String?
+    }
+
+    /// Undo/redo history for in-app edits (move, complete, due, text, add, wrap, unwrap, pick up…).
+    /// Coarse but reliable: each step restores the full prior document, and takes back what it picked up.
     /// Published so the menu/keyboard affordances can reflect availability; cleared on a project switch.
-    private(set) var undoStack: [DocSnapshot] = []
-    private(set) var redoStack: [DocSnapshot] = []
+    private(set) var undoStack: [UndoStep] = []
+    private(set) var redoStack: [UndoStep] = []
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
+    /// "Undo Pick Up", or plain "Undo" for a step without a name of its own.
+    var undoMenuTitle: String { undoStack.last?.name.map { "Undo \($0)" } ?? "Undo" }
+    var redoMenuTitle: String { redoStack.last?.name.map { "Redo \($0)" } ?? "Redo" }
     /// Cap the history so a long session can't grow it without bound.
     private let maxHistory = 100
 
@@ -240,6 +259,7 @@ final class PMStore {
         ("icon", { $0.icon as Any }),
         ("color", { $0.color as Any }),
         ("todos", { $0.todos }),
+        ("picks", { $0.picks }),
         ("waitTargets", { $0.waitTargets }),
         ("focusedKey", { $0.focusedKey as Any }),
         ("lastEditedAt", { $0.lastEditedAt as Any }),
@@ -311,12 +331,8 @@ final class PMStore {
     /// This project's current task: the focused one, else the first available one.
     var heroTodo: Todo? { todos.heroTask }
 
-    /// Completion progress as (done, total). Total counts all parsed todos.
-    var progress: (done: Int, total: Int) {
-        let total = todos.count
-        let done = todos.filter { $0.checked }.count
-        return (done, total)
-    }
+    /// Completion progress as (done, total). Dropped tasks are out of both — see `[Todo].progress`.
+    var progress: (done: Int, total: Int) { todos.progress }
 
     /// A stable key for a todo, matching `focusedKey` format ("sessionIndex:lineIndex").
     static func key(for todo: Todo) -> String { "\(todo.sessionIndex):\(todo.lineIndex)" }
@@ -362,6 +378,7 @@ final class PMStore {
             icon = nil
             color = nil
             todos = []
+            picks = []
             lastEditedAt = nil
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
@@ -395,7 +412,8 @@ final class PMStore {
                 // Read the bytes here rather than through `notesShow(handle:)`, because the icon lives
                 // in frontmatter the parsed notes don't carry — one read, handed to both.
                 let raw = try handle.io.readContent(path: handle.notesPath)
-                let output = try notesShow(rawText: raw)
+                // With the folder, so the read carries the picks that live beside the notes.
+                let output = try notesShow(rawText: raw, projectPath: handle.projectPath)
                 Log.write("notesShow ok: todos=\(output.todos.count)")
                 // Set here, on the IO queue, rather than beside the published state: a batch reads it
                 // from the same queue, so it always sees the newest read that has actually finished.
@@ -428,6 +446,7 @@ final class PMStore {
                     self.icon = icon
                     self.color = color
                     self.todos = output.todos
+                    self.picks = output.picks
                     self.resolveWaits()
                     self.lastEditedAt = lastEdited
                     self.focusedKey = output.focusedKey
@@ -580,6 +599,19 @@ final class PMStore {
     private func mutate(recordsUndo: Bool = true,
                         then: (@MainActor () -> Void)? = nil,
                         _ work: @escaping (String) throws -> Void) {
+        mutating(recordsUndo: recordsUndo, then: then) { project in
+            try work(project)
+            return []
+        }
+    }
+
+    /// `mutate`, for a write that may also append to the project's pick log. `work` returns what it
+    /// appended, and a step is banked when it appended anything — whatever `recordsUndo` says, because
+    /// a focus that picked something up has done more than navigate (docs/sessions.md D4). That step
+    /// carries the document too when the bytes moved, so undoing it takes back the whole gesture.
+    private func mutating(recordsUndo: Bool = true, named stepName: String? = nil,
+                          then: (@MainActor () -> Void)? = nil,
+                          _ work: @escaping (String) throws -> [PickEvent]) {
         // **A completion is always called**, the rule `reload` states for its own: a caller waiting on
         // `then` — the quick bar's receipt, a surface giving a store back to the registry — is stranded
         // if it only runs when the write happened. With no project there is nothing to write to, and that
@@ -598,9 +630,12 @@ final class PMStore {
             // mutation is an edit inside the notes document. The reload that follows resolves again, which
             // keeps a folder moved from outside mid-write a thing the store recovers from.
             let handle = try? resolveNotesHandle(project: name)
-            let before = recordsUndo ? handle.flatMap { try? Self.snapshot($0) } : nil
+            // Read even when this write doesn't record undo on its own account: whether it will is only
+            // known once it has said whether it picked anything up.
+            let before = handle.flatMap { try? Self.snapshot($0) }
+            var picks: [PickEvent] = []
             do {
-                try work(name)
+                picks = try work(name)
             } catch {
                 let message = PMContract.message(for: error)
                 Task { @MainActor in self?.noteWriteFailure(message) }
@@ -613,8 +648,11 @@ final class PMStore {
             // through the contract and so has no result to report a revision back in.
             let after = handle.flatMap { try? Self.snapshot($0) }
             if let after { self?.seenRevision.value = revision(of: after.raw) }
-            if let before, let after, before.raw != after.raw {
-                Task { @MainActor in self?.recordUndo(before) }
+            let changed = before.flatMap { before in after.map { before.raw != $0.raw } } ?? false
+            if !picks.isEmpty || (recordsUndo && changed) {
+                let step = UndoStep(document: changed ? before : nil, picks: picks,
+                                    name: picks.isEmpty ? nil : stepName)
+                Task { @MainActor in self?.recordUndo(step) }
             }
             Task { @MainActor in self?.reload(then: then) }
         }
@@ -634,48 +672,70 @@ final class PMStore {
         writeFailure = WriteFailure(message: message, token: writeFailures)
     }
 
-    /// Push a pre-edit snapshot onto the undo stack (capped), invalidating any pending redo.
-    private func recordUndo(_ snap: DocSnapshot) {
-        undoStack.append(snap)
+    /// Push a step onto the undo stack (capped), invalidating any pending redo.
+    private func recordUndo(_ step: UndoStep) {
+        undoStack.append(step)
         if undoStack.count > maxHistory { undoStack.removeFirst(undoStack.count - maxHistory) }
         redoStack.removeAll()
     }
 
-    /// Restore the most recent pre-edit document, banking the current one for redo. No-op when empty.
+    /// Take back the most recent step, banking what it replaced for redo. No-op when empty.
     func undo() { restore(from: \.undoStack, to: \.redoStack) }
 
-    /// Re-apply the most recently undone document, banking the current one for undo. No-op when empty.
+    /// Re-apply the most recently undone step, banking what it replaced for undo. No-op when empty.
     func redo() { restore(from: \.redoStack, to: \.undoStack) }
 
-    /// Shared undo/redo primitive: pop a snapshot off `source`, write it to disk, and bank the pre-write
-    /// document onto `dest` so the move is reversible. Reload paints the restored state.
-    private func restore(from source: ReferenceWritableKeyPath<PMStore, [DocSnapshot]>,
-                         to dest: ReferenceWritableKeyPath<PMStore, [DocSnapshot]>) {
-        guard let name = projectName, let target = self[keyPath: source].last else { return }
+    /// Shared undo/redo primitive: pop a step off `source`, write its document back and append the
+    /// events that cancel its picks, and bank the reverse onto `dest` so the move is reversible. Reload
+    /// paints the restored state.
+    ///
+    /// **Document first, and all or nothing.** The picks are appended only once the document has been
+    /// written: a restore that fails leaves the log alone and the step on the stack, because half an
+    /// undo is worse than none.
+    private func restore(from source: ReferenceWritableKeyPath<PMStore, [UndoStep]>,
+                         to dest: ReferenceWritableKeyPath<PMStore, [UndoStep]>) {
+        guard let name = projectName, let step = self[keyPath: source].last else { return }
+        let projectPath = self.projectPath
         io.async { [weak self] in
-            // One resolution for both the banked snapshot and the write, as in `mutate`. If it fails, that
-            // is reported and nothing is written — which is what the second resolution used to do anyway.
-            let handle: NotesHandle
-            do {
-                handle = try resolveNotesHandle(project: name)
-            } catch {
-                let message = String(describing: error)
-                Task { @MainActor in self?.noteWriteFailure(message) }
-                return
+            var banked: DocSnapshot?
+            if let target = step.document {
+                // One resolution for both the banked snapshot and the write, as in `mutate`. If it fails,
+                // that is reported and nothing is written.
+                let handle: NotesHandle
+                do {
+                    handle = try resolveNotesHandle(project: name)
+                } catch {
+                    let message = String(describing: error)
+                    Task { @MainActor in self?.noteWriteFailure(message) }
+                    return
+                }
+                banked = try? Self.snapshot(handle)
+                do {
+                    try handle.io.writeContent(path: handle.notesPath, content: target.raw)
+                    self?.seenRevision.value = revision(of: target.raw)
+                } catch {
+                    let message = String(describing: error)
+                    Task { @MainActor in self?.noteWriteFailure(message) }
+                    return
+                }
             }
-            let current = try? Self.snapshot(handle)
-            do {
-                try handle.io.writeContent(path: handle.notesPath, content: target.raw)
-                self?.seenRevision.value = revision(of: target.raw)
-            } catch {
-                let message = String(describing: error)
-                Task { @MainActor in self?.noteWriteFailure(message) }
-                return
+            var appended: [PickEvent] = []
+            if !step.picks.isEmpty, let projectPath {
+                let cancelling = PickLog.reversing(step.picks, source: "app")
+                do {
+                    try PickLog.append(cancelling, projectPath: projectPath)
+                    appended = cancelling
+                } catch {
+                    let message = PMContract.message(for: error)
+                    Task { @MainActor in self?.noteWriteFailure(message) }
+                }
             }
             Task { @MainActor in
                 guard let self else { return }
                 if !self[keyPath: source].isEmpty { self[keyPath: source].removeLast() }
-                if let current { self[keyPath: dest].append(current) }
+                if banked != nil || !appended.isEmpty {
+                    self[keyPath: dest].append(UndoStep(document: banked, picks: appended, name: step.name))
+                }
                 self.reload()
             }
         }
@@ -696,7 +756,7 @@ final class PMStore {
         lastCompletedKey = Self.key(for: todo)
         lastCompletedRef = todo.reference
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        mutate(then: then) { project in
+        mutating(pickingUp: [todo], then: then) { project in
             try PMContract.perform(.taskComplete, PMContract.input(project: project, task: todo) {
                 $0.advanceFocus = advanceFocus
             })
@@ -726,19 +786,89 @@ final class PMStore {
         }
     }
 
+    /// Focus a task you chose — and, when it is from an older sitting, pick it up into the current
+    /// one (docs/sessions.md D3).
+    ///
+    /// Focus is navigation, not a content edit, so on its own it stays out of the undo history. A focus
+    /// that picked something up has done more than navigate, and is one step: ⌘Z puts the focus back
+    /// and releases the pick, and the Edit menu calls it Undo Pick Up.
     func focus(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
-        // Focus is navigation, not a content edit, so keep it out of the undo history.
-        mutate(recordsUndo: false, then: then) {
-            try PMContract.perform(.taskFocus, PMContract.input(project: $0, task: todo))
+        mutating(recordsUndo: false, named: "Pick Up", then: then) {
+            try PMContract.perform(.taskFocus, PMContract.input(project: $0, task: todo)).sidecar ?? []
         }
     }
 
-    func undo(_ todo: Todo) {
-        mutate { try PMContract.perform(.taskReopen, PMContract.input(project: $0, task: todo)) }
+    /// Pick Up: take older tasks up into the current sitting without moving their lines. One step.
+    func pickUp(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(named: "Pick Up", then: then) { project in
+            try PMContract.perform(.taskPick, Self.references(todos, project: project)).sidecar ?? []
+        }
+    }
+
+    /// Put Back: take each task's latest pick back. The tasks aren't touched. One step.
+    func putBack(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(named: "Put Back", then: then) { project in
+            try PMContract.perform(.taskRelease, Self.references(todos, project: project)).sidecar ?? []
+        }
+    }
+
+    /// Whether Pick Up has something to do for `todo`: it is open, and its tree is neither written in the
+    /// latest sitting nor already picked up into it — a pick takes the whole tree (docs/sessions.md D3).
+    /// The contract has the last word — a project left long enough starts a new sitting, and then
+    /// everything is older — but a menu item that says what it will usually do beats one that is always
+    /// there.
+    func canPickUp(_ todo: Todo) -> Bool {
+        guard !todo.checked else { return false }
+        guard !willStartNewSession, let current = todaySessionIndex else { return true }
+        return todo.sessionIndex != current
+            && !SessionPicks.pickedPositions(into: current, picks: picks, todos: todos).contains(TaskPosition(todo))
+    }
+
+    /// The distinct trees `todos` belong to, by their roots — what Pick Up and Put Back act on, and so
+    /// what their menu items count.
+    func trees(_ selection: [Todo]) -> [Todo] {
+        TaskTree.roots(of: selection, in: todos)
+    }
+
+    /// One task as `task`, several as `tasks` — the either-or every batchable action takes.
+    private nonisolated static func references(_ todos: [Todo], project: String) -> ApiInput {
+        PMContract.input(project: project) { input in
+            if todos.count == 1 { input.task = todos[0].reference } else { input.tasks = todos.map(\.reference) }
+        }
+    }
+
+    /// `mutate`, for a write that works on tasks — which picks them up into the current sitting first
+    /// (docs/sessions.md D3: ticking or editing an old task is the clearest sign you worked on it now).
+    ///
+    /// The pick is never a reason to refuse the write: a task PM can't pick up is ticked all the same.
+    /// And it is taken back if the write it came with is refused, because it only happened as part of
+    /// that write. Both land in one step, so ⌘Z reopens the task and releases the pick together.
+    private func mutating(pickingUp todos: [Todo], then: (@MainActor () -> Void)? = nil,
+                          _ work: @escaping (String) throws -> Void) {
+        let projectPath = self.projectPath
+        mutating(then: then) { project in
+            let picked = todos.isEmpty ? []
+                : ((try? PMContract.perform(.taskPick, Self.references(todos, project: project)))?.sidecar ?? [])
+            do {
+                try work(project)
+            } catch {
+                if !picked.isEmpty, let projectPath {
+                    try? PickLog.append(PickLog.reversing(picked, source: "app"), projectPath: projectPath)
+                }
+                throw error
+            }
+            return picked
+        }
+    }
+
+    func undo(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try PMContract.perform(.taskReopen, PMContract.input(project: $0, task: todo)) }
     }
 
     func setDue(_ todo: Todo, due: String?, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { project in
+        mutating(pickingUp: [todo], then: then) { project in
             try PMContract.perform(.taskSetDue, PMContract.input(project: project, task: todo) {
                 if let due { $0.due = due } else { $0.clearDue = true }
             })
@@ -747,16 +877,28 @@ final class PMStore {
 
     /// Set or clear what a task is waiting on.
     func setWaiting(_ todo: Todo, waiting: String?, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { project in
+        mutating(pickingUp: [todo], then: then) { project in
             try PMContract.perform(.taskSetWaiting, PMContract.input(project: project, task: todo) {
                 if let waiting { $0.waiting = waiting } else { $0.clearWaiting = true }
             })
         }
     }
 
+    /// Stop waiting on several tasks at once, as one write and one step — a view's selection. Only the
+    /// lines that declare a wait are given: one that inherits its wait has no token to clear.
+    func clearWaiting(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(pickingUp: todos, then: then) { project in
+            try PMContract.perform(.taskSetWaiting, PMContract.input(project: project) {
+                $0.tasks = todos.map(\.reference)
+                $0.clearWaiting = true
+            })
+        }
+    }
+
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
-    func editText(_ todo: Todo, text: String) {
-        mutate { project in
+    func editText(_ todo: Todo, text: String, then: (@MainActor () -> Void)? = nil) {
+        mutating(pickingUp: [todo], then: then) { project in
             try PMContract.perform(.taskSetText, PMContract.input(project: project, task: todo) {
                 $0.text = text
             })
@@ -906,8 +1048,8 @@ final class PMStore {
     /// Complete every open task in `todos`, or — when they're all complete already — reopen them all.
     /// Mirrors how a Mac checkbox batch behaves on a mixed selection: the majority action is "finish
     /// what's left". Completion is in place, so no index shifting to worry about.
-    func toggleAll(_ todos: [Todo]) {
-        guard !todos.isEmpty else { return }
+    func toggleAll(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
         let open = todos.filter { !$0.checked }
         let targets = open.isEmpty ? todos : open
         let completing = !open.isEmpty
@@ -917,7 +1059,9 @@ final class PMStore {
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
         let seen = seenRevision
-        mutate { project in
+        // Finishing old work picks it up; reopening it doesn't — you didn't work on it, you took back
+        // saying you had.
+        mutating(pickingUp: completing ? targets : [], then: then) { project in
             try PMContract.perform(completing ? .taskComplete : .taskReopen,
                                    PMContract.input(project: project) {
                 $0.tasks = targets.map(\.reference)
@@ -925,6 +1069,25 @@ final class PMStore {
                 // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
                 // still moves focus if one of the completed tasks was holding it.
                 if completing { $0.advanceFocus = false }
+            })
+        }
+    }
+
+    /// Drop every open task in `todos`, with their open subtasks: closed, not done. One edit, one ⌘Z.
+    ///
+    /// Closed tasks in the selection are left alone rather than turned from done into dropped — a
+    /// selection swept across an old session's leftovers takes its finished work along for the ride,
+    /// and that work was done. Focus moves on from a lone dropped task the way it does from a
+    /// completed one; a batch doesn't march it once per task, the same as `toggleAll`.
+    func drop(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        let targets = todos.filter { !$0.checked }
+        guard !targets.isEmpty else { then?(); return }
+        let seen = seenRevision
+        mutate(then: then) { project in
+            try PMContract.perform(.taskDrop, PMContract.input(project: project) {
+                $0.tasks = targets.map(\.reference)
+                $0.revision = seen.value
+                if targets.count > 1 { $0.advanceFocus = false }
             })
         }
     }
@@ -1037,9 +1200,15 @@ final class PMStore {
 
     /// Add a task. `then` runs once the document has been re-read, so a caller that needs to find the
     /// task it just wrote has a list that contains it.
+    ///
+    /// A task added *into* a tree — a child of any task, or beside a subtask — is work on that tree, so
+    /// the tree is picked up into the current sitting first, as editing a line of it would
+    /// (docs/sessions.md D3). One step: ⌘Z takes the task and the pick back together. Beside a top-level
+    /// task is a new task of the sitting, not part of a tree, and picks nothing up.
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
                  position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { project in
+        let intoTree = anchor.flatMap { anchor in position.map { $0 == .child || anchor.depth > 0 } } ?? false
+        mutating(pickingUp: intoTree ? anchor.map { [$0] } ?? [] : [], then: then) { project in
             try PMContract.perform(.taskAdd, PMContract.input(project: project) { input in
                 input.text = text
                 input.due = due

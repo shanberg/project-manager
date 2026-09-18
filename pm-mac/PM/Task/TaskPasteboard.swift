@@ -71,7 +71,7 @@ enum TaskPasteboard {
             var indent: Int
             var text: String
             var due: String?
-            var checked: Bool
+            var state: TaskState
         }
 
         var rows: [Raw] = []
@@ -86,12 +86,12 @@ enum TaskPasteboard {
             body = stripListMarker(body)
 
             // A checkbox, if there is one.
-            var checked = false
+            var state = TaskState.open
             if body.count >= 3, body.hasPrefix("[") {
                 let box = body[body.index(body.startIndex, offsetBy: 1)]
                 if body[body.index(body.startIndex, offsetBy: 2)] == "]",
-                   box == " " || box == "x" || box == "X" {
-                    checked = (box != " ")
+                   let read = TaskState(box: box) {
+                    state = read
                     body = String(body.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 }
             }
@@ -111,7 +111,7 @@ enum TaskPasteboard {
             if body.hasSuffix(" @") { body = String(body.dropLast(2)).trimmingCharacters(in: .whitespaces) }
 
             guard !body.isEmpty else { continue }
-            rows.append(Raw(indent: indent, text: body, due: due, checked: checked))
+            rows.append(Raw(indent: indent, text: body, due: due, state: state))
         }
         guard !rows.isEmpty else { return [] }
 
@@ -121,7 +121,7 @@ enum TaskPasteboard {
         let offsets = Set(rows.map { $0.indent - base }).filter { $0 > 0 }
         let step = offsets.min() ?? 2
         return rows.map {
-            PastedTask(depth: ($0.indent - base) / step, text: $0.text, due: $0.due, checked: $0.checked)
+            PastedTask(depth: ($0.indent - base) / step, text: $0.text, due: $0.due, state: $0.state)
         }
     }
 

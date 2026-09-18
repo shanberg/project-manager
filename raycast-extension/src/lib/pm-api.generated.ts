@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.10.0";
+export const API_CONTRACT_VERSION = "1.17.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -138,8 +138,12 @@ export interface ProjectGetInput {
 
 /** Every project and area, each with its kind. */
 export interface ProjectListInput {
+  /** Also read each project for what's happening in it: lastActivity (the later of its newest sitting's start and its notes' last write), its newest sitting and what it was about, how many tasks are open, and the soonest due. Sorted newest activity first. Default false. */
+  activity?: boolean;
   /** Only this kind. Default both. */
   kind?: "project" | "area";
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. */
+  projects?: string[];
   /** Which folder to list. Default active. */
   scope?: "active" | "areas" | "archive" | "all";
 }
@@ -178,6 +182,18 @@ export interface SessionDeleteInput {
   sessionDigest?: string;
   /** Which session of that date. Default 0. */
   sessionOrdinal?: number;
+}
+
+/** The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere. */
+export interface SessionListInput {
+  /** Which span. Default today. */
+  period?: "today" | "yesterday" | "week";
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
+  /** First day to include, YYYY-MM-DD. Overrides the period's start. */
+  since?: string;
+  /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
+  until?: string;
 }
 
 /** Append a note to the current session, starting one if needed. */
@@ -260,6 +276,8 @@ export interface TaskDiveInInput {
 
 /** What got done: tasks completed in a period, across every project, newest first. */
 export interface TaskDoneInput {
+  /** Also list tasks dropped in the period, marked. Default false. */
+  includeDropped?: boolean;
   /** Which span. Default today. */
   period?: "today" | "week";
   /** Which projects to look in. Default all. */
@@ -270,17 +288,49 @@ export interface TaskDoneInput {
   until?: string;
 }
 
-/** Make this the project's focused task. */
+/** Drop a task, or several, along with their open subtasks: close them without their being done. */
+export interface TaskDropInput {
+  /** Move focus onward afterwards. Default true. */
+  advanceFocus?: boolean;
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+}
+
+/** Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one. */
+export interface TaskDueInput {
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area. */
+  projects?: string[];
+  /** How far ahead: today, week (the next seven days, the default), or through a day given as YYYY-MM-DD. */
+  until?: string;
+}
+
+/** Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false. */
 export interface TaskFocusInput {
+  /** Pick the task up into the current session when it's from an older one. Default true. */
+  pick?: boolean;
   /** Project name or unambiguous prefix. */
   project: string;
   /** The task to act on. */
   task: TaskRef;
 }
 
+/** Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up. */
+export interface TaskLeftoversInput {
+  /** How old a sitting has to be: before today (the default), before yesterday, before this week, or before a day given as YYYY-MM-DD. */
+  before?: string;
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area. */
+  projects?: string[];
+}
+
 /** A project's tasks, each with the reference needed to act on it. */
 export interface TaskListInput {
-  /** Include completed tasks. Default false. */
+  /** Include completed and dropped tasks. Default false. */
   includeCompleted?: boolean;
   /** Cap the number returned. */
   limit?: number;
@@ -288,13 +338,43 @@ export interface TaskListInput {
   project?: string;
 }
 
-/** How many of a project's tasks are done. */
+/** Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up. */
+export interface TaskPickInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+}
+
+/** How many of a project's tasks are done. Dropped tasks are left out of the total. */
 export interface TaskProgressInput {
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
 }
 
-/** Re-open a completed task, or several, and put focus back. */
+/** Put back a picked-up task, or several: take it out of the session it was picked up into. The task itself isn't touched. */
+export interface TaskReleaseInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The ISO date of the session it was picked up into. Default: its latest pick. */
+  session?: string;
+  /** Digest of that session's label, to catch a session that has since changed. */
+  sessionDigest?: string;
+  /** Which session of that date. Default 0. */
+  sessionOrdinal?: number;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+}
+
+/** Re-open a completed or dropped task, or several, and put focus back. */
 export interface TaskReopenInput {
   /** Project name or unambiguous prefix. */
   project: string;
@@ -312,6 +392,8 @@ export interface TaskSearchInput {
   limit?: number;
   /** Break ties toward this project. Defaults to the focused one. */
   project?: string;
+  /** Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
   /** Words to look for, in any order. */
   query: string;
   /** Which projects to search. Default all. */
@@ -370,6 +452,8 @@ export interface TaskUnwrapInput {
 
 /** Everything you're waiting on, grouped by what it's waiting on. */
 export interface TaskWaitingInput {
+  /** Only these projects' tasks, by name, prefix or [[link]]. A master brings its members. What they wait on can be anywhere. Default every project. */
+  projects?: string[];
   /** Which projects to look in. Default active. */
   scope?: "active" | "archive" | "all";
 }
@@ -420,6 +504,7 @@ export interface ApiInputs {
   "project.setPartOf": ProjectSetPartOfInput;
   "project.unarchive": ProjectUnarchiveInput;
   "session.delete": SessionDeleteInput;
+  "session.list": SessionListInput;
   "session.note": SessionNoteInput;
   "session.rename": SessionRenameInput;
   "session.start": SessionStartInput;
@@ -428,9 +513,14 @@ export interface ApiInputs {
   "task.delete": TaskDeleteInput;
   "task.diveIn": TaskDiveInInput;
   "task.done": TaskDoneInput;
+  "task.drop": TaskDropInput;
+  "task.due": TaskDueInput;
   "task.focus": TaskFocusInput;
+  "task.leftovers": TaskLeftoversInput;
   "task.list": TaskListInput;
+  "task.pick": TaskPickInput;
   "task.progress": TaskProgressInput;
+  "task.release": TaskReleaseInput;
   "task.reopen": TaskReopenInput;
   "task.search": TaskSearchInput;
   "task.setDue": TaskSetDueInput;
@@ -475,6 +565,7 @@ export const API_TIERS: Record<
   "project.setPartOf": "mutation",
   "project.unarchive": "mutation",
   "session.delete": "mutation",
+  "session.list": "query",
   "session.note": "mutation",
   "session.rename": "mutation",
   "session.start": "mutation",
@@ -483,9 +574,14 @@ export const API_TIERS: Record<
   "task.delete": "mutation",
   "task.diveIn": "mutation",
   "task.done": "query",
+  "task.drop": "mutation",
+  "task.due": "query",
   "task.focus": "mutation",
+  "task.leftovers": "query",
   "task.list": "query",
+  "task.pick": "mutation",
   "task.progress": "query",
+  "task.release": "mutation",
   "task.reopen": "mutation",
   "task.search": "query",
   "task.setDue": "mutation",

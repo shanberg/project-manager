@@ -20,6 +20,17 @@ final class NotesTodosTests: XCTestCase {
         XCTAssertEqual(todos.count, 0)
     }
 
+    /// Each task knows which of its day's sittings it's in, so a reference by date can name the second.
+    func testParseTodosCountsADaysSittings() throws {
+        let notes = ProjectNotes(title: "T", sessions: [
+            Session(date: "Tue, Feb 24, 2025", label: "", body: "- [ ] Before"),
+            Session(date: "Wed, Feb 25, 2025", label: "9:00 AM", body: "- [ ] Morning"),
+            Session(date: "Wed, Feb 25, 2025", label: "2:00 PM", body: "- [ ] Afternoon"),
+        ])
+        let todos = try parseTodos(notes: notes)
+        XCTAssertEqual(todos.map(\.sessionOrdinal), [0, 0, 1])
+    }
+
     /// Unchecked todo: text, checked false, context is session date when label empty.
     func testParseTodosUncheckedTodo() throws {
         let session = Session(date: "Wed, Feb 25, 2025", label: "", body: "- [ ] First task")

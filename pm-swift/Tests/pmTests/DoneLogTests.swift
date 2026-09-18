@@ -56,6 +56,37 @@ final class DoneLogTests: XCTestCase {
                        [.completed])
     }
 
+    // MARK: Dropping
+
+    func testDroppingIsADropNotACompletion() throws {
+        XCTAssertEqual(try changes("- [ ] Email Dana", "- [-] Email Dana").map(\.event), [.dropped])
+        XCTAssertEqual(try changes("- [-] Email Dana", "- [ ] Email Dana").map(\.event), [.reopened])
+    }
+
+    /// Done, then decided it wasn't: a reopening and a drop, in that order, so the drop is what stands.
+    func testDoneToDroppedIsLoggedAsTheTwoThingsItIs() throws {
+        let events = try changes("- [x] Email Dana", "- [-] Email Dana")
+        XCTAssertEqual(events.map(\.event), [.reopened, .dropped])
+        XCTAssertEqual(DoneLog.standing([event(.completed, events[0].digest, "2026-09-15T10:00:00Z")] + events)
+            .map(\.event), [.dropped])
+    }
+
+    /// A baseline written before dropping existed has two counts, not three. Reading it must find
+    /// nothing changed rather than a ghost of dropped tasks.
+    func testATwoCountBaselineReadsAsNoneDropped() throws {
+        let now = DoneLog.counts(of: try todos("- [ ] A\n- [x] B"))
+        let old = now.mapValues { Array($0.prefix(2)) }
+        XCTAssertEqual(DoneLog.changes(from: old, to: now, todos: try todos("- [ ] A\n- [x] B"),
+                                       at: "2026-09-16T10:00:00Z").count, 0)
+    }
+
+    func testAReopeningCancelsADrop() {
+        XCTAssertEqual(DoneLog.standing([
+            event(.dropped, "a", "2026-09-01T10:00:00Z"),
+            event(.reopened, "a", "2026-09-02T10:00:00Z"),
+        ]).count, 0)
+    }
+
     // MARK: What still stands
 
     private func event(_ kind: DoneEvent.Kind, _ digest: String, _ at: String) -> DoneEvent {
@@ -241,6 +272,32 @@ final class DoneLogTests: XCTestCase {
         call("task.complete", ["project": "W-1", "task": reference("Book the venue")])
         call("task.delete", ["project": "W-1", "task": reference("Book the venue")])
         XCTAssertEqual(done(), ["Book the venue"])
+    }
+
+    /// What got done leaves out what was let go of, unless it's asked for — and then says which is which.
+    func testADropIsLeftOutOfWhatGotDone() throws {
+        try XCTSkipUnless(haveBinary)
+        vault()
+        call("task.complete", ["project": "W-1", "task": reference("Review the contract")])
+        let drop = call("task.drop", ["project": "W-1", "task": reference("Book the venue")])
+        XCTAssertEqual(drop["summary"] as? String, "Dropped \u{201C}Book the venue\u{201D}.")
+        XCTAssertEqual(done(), ["Review the contract"])
+        let both = call("task.done", ["includeDropped": true])
+        XCTAssertEqual(both["summary"] as? String, "1 task done, 1 dropped.")
+        let dropped = (both["data"] as? [[String: Any]] ?? []).filter { $0["dropped"] as? Bool == true }
+        XCTAssertEqual(dropped.compactMap { $0["text"] as? String }, ["Book the venue"])
+    }
+
+    /// A dropped task leaves the total, so a project whose leftovers were let go of reads as finished.
+    func testProgressLeavesDroppedTasksOutOfTheTotal() throws {
+        try XCTSkipUnless(haveBinary)
+        vault()
+        let before = call("task.progress", ["project": "W-1"])["data"] as? [String: Any] ?? [:]
+        let total = try XCTUnwrap(before["total"] as? Int)
+        call("task.drop", ["project": "W-1", "task": reference("Book the venue")])
+        let after = call("task.progress", ["project": "W-1"])["data"] as? [String: Any] ?? [:]
+        XCTAssertEqual(after["total"] as? Int, total - 1)
+        XCTAssertEqual(after["dropped"] as? Int, 1)
     }
 
     func testOutOfRangeIsLeftOut() throws {
