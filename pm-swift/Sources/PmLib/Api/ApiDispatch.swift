@@ -927,18 +927,27 @@ private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: Docume
     let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
     let at = timestamp()
 
+    // What's already picked up into the current sitting, as the trees it covers. A pick written before
+    // picks named trees can name a subtask; it covers that subtask's tree all the same.
+    let pickedHere = Set(standing.filter { $0.intoIndex == session.sessionIndex }.compactMap { pick in
+        todos.first { $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex }
+            .map { treeKey(TaskTree.root(of: $0, in: todos)) }
+    })
+
     var out = PickUp(rawText: text, into: into, intoIndex: session.sessionIndex)
     var seen = Set<String>()
     for reference in references {
         guard let position = try resolve(reference, in: text, batch: batch) else { continue }
         out.relocated = out.relocated || position.relocated
-        guard seen.insert("\(position.sessionIndex):\(position.lineIndex)").inserted,
-              let todo = todos.first(where: {
+        guard let touched = todos.first(where: {
                   $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
               }) else { continue }
+        // A pick names the tree, by its root: working on a subtask is working on the task it's part of,
+        // and the root is the line that says what that is (docs/sessions.md D3).
+        let todo = TaskTree.root(of: touched, in: todos)
+        guard seen.insert(treeKey(todo)).inserted else { continue }
         if todo.sessionIndex == session.sessionIndex { out.alreadyHere += 1; continue }
-        if standing.contains(where: { $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex
-            && $0.intoIndex == session.sessionIndex }) { out.alreadyPicked += 1; continue }
+        if pickedHere.contains(treeKey(todo)) { out.alreadyPicked += 1; continue }
         guard let task = PickLog.task(todo, in: notes) else {
             throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading PM can't date, so it can't be picked up.",
                            detail: .string("task"))
@@ -949,7 +958,9 @@ private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: Docume
     return out
 }
 
-/// `task.pick`: record that each task was picked up into the current sitting.
+private func treeKey(_ root: Todo) -> String { "\(root.sessionIndex):\(root.lineIndex)" }
+
+/// `task.pick`: record that each task's tree was picked up into the current sitting.
 ///
 /// Starts the sitting when the project is cold, the one change to the notes a pick can make — and only
 /// when something is actually picked, so asking to pick up a task that's already here writes nothing.
@@ -1013,16 +1024,31 @@ private func releasing(_ input: ApiInput, _ context: DocumentContext, source: St
     var events: [PickEvent] = []
     var released: [String] = []
     var relocated = false
+    // Each standing pick, by the tree it covers.
+    func root(_ pick: PickLog.Resolved) -> String? {
+        todos.first { $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex }
+            .map { treeKey(TaskTree.root(of: $0, in: todos)) }
+    }
     for reference in try references(input) {
         guard let position = try resolve(reference, in: context.rawText, batch: input.tasks != nil) else { continue }
         relocated = relocated || position.relocated
-        guard let pick = standing.last(where: {
+        guard let touched = todos.first(where: {
             $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
-                && (sitting == nil || $0.intoIndex == sitting)
-        }), !events.contains(where: { $0.reverses == pick.event.id }) else { continue }
-        events.append(PickEvent(at: at, event: .released, task: pick.event.task, into: pick.event.into,
-                                reverses: pick.event.id, source: source))
-        released.append(pick.event.task.text)
+        }) else { continue }
+        // Putting back any line of a picked tree puts the tree back. Without a sitting named, that's
+        // the tree's latest pick; every pick into that one sitting goes with it, since a pick written
+        // before picks named trees may name a subtask and would otherwise leave the tree standing.
+        let tree = TaskTree.root(of: touched, in: todos)
+        let covering = standing.filter { root($0) == treeKey(tree) && (sitting == nil || $0.intoIndex == sitting) }
+        guard let latest = covering.last else { continue }
+        let cancelled = covering.filter { $0.intoIndex == latest.intoIndex }
+            .filter { pick in !events.contains { $0.reverses == pick.event.id } }
+        guard !cancelled.isEmpty else { continue }
+        for pick in cancelled {
+            events.append(PickEvent(at: at, event: .released, task: pick.event.task, into: pick.event.into,
+                                    reverses: pick.event.id, source: source))
+        }
+        released.append(tree.text)
     }
     guard !events.isEmpty else {
         return Outcome(rawText: context.rawText, relocated: relocated,

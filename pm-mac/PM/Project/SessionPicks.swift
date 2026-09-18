@@ -35,26 +35,31 @@ struct PileRow {
 }
 
 enum SessionPicks {
-    /// The older tasks picked up into the sitting at `index`, in the order they were picked up.
+    /// The older task trees picked up into the sitting at `index`, in the order they were picked up,
+    /// each drawn whole: its root, carrying the origin chip, and every task under it, indented as in
+    /// its own sitting.
     ///
-    /// A task picked up into the same sitting twice (picked, put back, picked again) is one row. The
-    /// log's reader already folds that; this holds the line anyway, because a duplicate row id is what
-    /// makes `ForEach` animate the wrong row.
-    static func pickedUp(into index: Int, picks: [TaskPick], todos: [Todo]) -> [Todo] {
+    /// **A pick is a tree** (docs/sessions.md D3). A subtask on its own says too little — "Send the
+    /// invoice" needs the line above it — so ticking one picks up the task it belongs to, and this draws
+    /// the lot. A pick written before picks named trees can name a subtask; it draws its tree the same.
+    ///
+    /// A tree picked up into the same sitting twice (picked, put back, picked again, or two of its
+    /// subtasks picked by an older build) is drawn once. The log's reader folds some of that already;
+    /// this holds the line anyway, because a duplicate row id is what makes `ForEach` animate the wrong
+    /// row.
+    static func pickedUp(into index: Int, picks: [TaskPick], todos: [Todo]) -> [PileRow] {
         var byPosition: [TaskPosition: Todo] = [:]
         for todo in todos { byPosition[TaskPosition(todo)] = todo }
-        var seen = Set<TaskPosition>()
-        return picks.compactMap { pick in
-            guard pick.intoIndex == index else { return nil }
-            let position = TaskPosition(session: pick.sessionIndex, line: pick.lineIndex)
-            guard seen.insert(position).inserted else { return nil }
-            return byPosition[position]
+        let named = picks.filter { $0.intoIndex == index }
+            .compactMap { byPosition[TaskPosition(session: $0.sessionIndex, line: $0.lineIndex)] }
+        return TaskTree.roots(of: named, in: todos).flatMap { root in
+            TaskTree.members(of: root, in: todos).map { PileRow(todo: $0, showsOrigin: TaskPosition($0) == TaskPosition(root)) }
         }
     }
 
-    /// Every task picked up into the sitting at `index`, as positions.
-    static func pickedPositions(into index: Int, picks: [TaskPick]) -> Set<TaskPosition> {
-        Set(picks.filter { $0.intoIndex == index }.map { TaskPosition(session: $0.sessionIndex, line: $0.lineIndex) })
+    /// Every task picked up into the sitting at `index`, trees included, as positions.
+    static func pickedPositions(into index: Int, picks: [TaskPick], todos: [Todo]) -> Set<TaskPosition> {
+        Set(pickedUp(into: index, picks: picks, todos: todos).map { TaskPosition($0.todo) })
     }
 
     /// The pile: open work from every sitting in one group, newest origin first, in place of a caption
@@ -72,7 +77,7 @@ enum SessionPicks {
     /// drawn right under its parent would only be repeating the parent's chip.
     static func pile(todos: [Todo], excluding current: Int?, picks: [TaskPick],
                      visible: (Todo) -> Bool) -> [PileRow] {
-        let alreadyDrawn = current.map { pickedPositions(into: $0, picks: picks) } ?? []
+        let alreadyDrawn = current.map { pickedPositions(into: $0, picks: picks, todos: todos) } ?? []
         let rows = todos
             .filter { $0.sessionIndex != current && !alreadyDrawn.contains(TaskPosition($0)) && visible($0) }
             .sorted { ($0.sessionIndex, $0.lineIndex) < ($1.sessionIndex, $1.lineIndex) }
@@ -95,8 +100,11 @@ enum SessionPicks {
 
     /// The trailing mark on a task that has been picked up since it was written — "picked up Sep 17" —
     /// so an old sitting says what became of its leftovers instead of looking abandoned.
+    ///
+    /// On a tree's top line only. Every line of a picked tree carries the fact, and the mark on each of
+    /// them would say one thing as many times as the tree has lines.
     static func pickedMark(_ todo: Todo, now: Date = Date()) -> String? {
-        guard let picked = todo.picked, let day = day(iso: picked.into, now: now) else { return nil }
+        guard todo.depth == 0, let picked = todo.picked, let day = day(iso: picked.into, now: now) else { return nil }
         return "picked up \(day)"
     }
 

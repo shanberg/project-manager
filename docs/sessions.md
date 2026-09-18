@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17. Build order steps 1–4 (dropped, the pick log and its contract, drawing, focus and undo) built 2026-09-17, and step 5 (the drags) 2026-09-18. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. Build order steps 1–4 (dropped, the pick log and its contract, drawing, focus and undo) built 2026-09-17, and step 5 (the drags) 2026-09-18. Picks became tree-shaped the same day (D3, *A pick is a tree*). Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -109,6 +109,22 @@ For the same reason, **ticking or editing an old task picks it up** first. Finis
 clearest possible sign you worked on it in this sitting. This is also what lets a sitting show the old
 things you finished in it.
 
+**A pick is a tree** (decided 2026-09-18). A subtask on its own says too little: "Send the invoice"
+needs the line above it to say what it's an invoice *for*. So whatever picks up a task picks up the
+**tree it belongs to**, named in the log by its top-level task, the root. Focusing, ticking or editing
+any line of a tree picks up the tree. So does **adding a task into it**, as a child of any task or
+beside a subtask, since that's as clear a sign as any that you're working on it again. The new task is
+written under its parent, in the sitting the tree was written in, and ⌘Z takes it and the pick back as
+one step. A task added beside a *top-level* task is a new task of that sitting and picks nothing up.
+
+- **Put Back** on any line of a picked tree puts the tree back.
+- **Pick Up** and **Put Back** count trees, so three subtasks of one task are "Pick Up".
+- Every line of a picked tree carries `picked` on reads, but the "picked up Sep 17" mark on an old
+  sitting is drawn on the root's line only.
+- A pick written before this, naming a subtask, covers that subtask's tree the same way, so nothing in
+  an existing log needed rewriting. The shared rule is `TaskTree` in PmLib: a task and the contiguous
+  run of deeper tasks after it, never crossing a sitting heading.
+
 Contract: `task.pick` and `task.release` (mutations; input is a task reference, plus an optional session
 reference for `release`). `task.focus` gains `pick` (default `true`). Every task read gains `picked`:
 `{ "into": "2026-09-17", "at": "…" }`, or absent, and a read lists every standing pick in `picks`.
@@ -164,9 +180,9 @@ did pick it up, you just didn't finish it.
 
 ### D5 — What a card draws
 
-**A session** draws, in order: its prose, the tasks written in it, then **Picked up** — the older tasks
-picked up into it, each with a quiet origin chip ("Sep 2"). Hovering the chip shows the sentence the
-task was written in. Clicking it scrolls to the origin. Ticking a picked-up row ticks the origin line.
+**A session** draws, in order: its prose, the tasks written in it, then **Picked up** — the older task
+trees picked up into it, each drawn whole with its subtasks indented under it, and its root carrying a
+quiet origin chip ("Sep 2"). Hovering the chip shows the sentence the task was written in. Clicking it scrolls to the origin. Ticking a picked-up row ticks the origin line.
 It's one task drawn in two places, and both places show its state.
 
 **An old session** marks a task that has been picked up since, with a trailing "picked up Sep 17" in the

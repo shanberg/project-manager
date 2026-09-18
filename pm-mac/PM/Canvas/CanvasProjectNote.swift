@@ -166,7 +166,7 @@ struct CanvasProjectNote: View {
             blocks(for: session, at: index).compactMap { block in
                 if case .task(let identified) = block { return identified.todo }
                 return nil
-            } + pickedRows(into: index).map(\.todo)
+            } + pickedRows(into: index).map(\.row.todo)
         }
         switch shows.layout {
         case .sittings:
@@ -817,8 +817,8 @@ struct CanvasProjectNote: View {
         // (docs/sessions.md D5).
         if !picked.isEmpty {
             groupCaption("Picked up")
-            ForEach(picked) { identified in
-                row(identified.todo, place: .picked(into: index), showsOrigin: true)
+            ForEach(picked) { entry in
+                row(entry.row.todo, place: .picked(into: index), showsOrigin: entry.row.showsOrigin)
             }
         }
     }
@@ -850,12 +850,13 @@ struct CanvasProjectNote: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The tasks picked up into the sitting at `index` that this card draws: the finished ones only
-    /// where the card draws finished work, and only what the find leaves standing.
-    private func pickedRows(into index: Int) -> [IdentifiedTodo] {
+    /// The task trees picked up into the sitting at `index` that this card draws: the finished lines
+    /// only where the card draws finished work, and only what the find leaves standing. Each tree's
+    /// root carries the origin chip; the lines under it are indented beneath it and don't repeat it.
+    private func pickedRows(into index: Int) -> [PileEntry] {
         SessionPicks.pickedUp(into: index, picks: store.picks, todos: store.todos)
-            .filter { shows.showsTask(checked: $0.checked) && matches($0) }
-            .map { IdentifiedTodo(id: "picked\(index)/\(PMStore.key(for: $0))", todo: $0) }
+            .filter { shows.showsTask(checked: $0.todo.checked) && matches($0.todo) }
+            .map { PileEntry(id: "picked\(index)/\(PMStore.key(for: $0.todo))", row: $0) }
     }
 
     /// The pile's rows, identified the way a sitting's are — by raw line and occurrence within its

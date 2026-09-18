@@ -489,6 +489,40 @@ extension PMStoreTests {
         XCTAssertEqual(try events(store), [.picked, .released])
     }
 
+    /// Adding a subtask to an old task is working on it now: the tree is picked up, the child lands under
+    /// its parent where it was written, and ⌘Z takes the task and the pick back together.
+    func testAddingASubtaskToAnOldTaskPicksUpItsTree() throws {
+        let store = try storeWithAnOldSitting()
+        let before = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Send the shortlist", relativeTo: try! self.task("Email Dana", in: store),
+                          position: .child, then: done)
+        }
+        let child = try task("Send the shortlist", in: store)
+        XCTAssertEqual(child.sessionIndex, try task("Email Dana", in: store).sessionIndex,
+                       "The subtask is written under its parent, in the old sitting")
+        XCTAssertEqual(child.depth, 1)
+        XCTAssertEqual(PickLog.events(projectPath: try XCTUnwrap(store.projectPath)).map(\.task.text), ["Email Dana"],
+                       "The pick names the tree's root")
+        XCTAssertNotNil(child.picked)
+        XCTAssertEqual(store.undoStack.count, 1)
+
+        store.undo()
+        try waitForFile(store) { $0 == before }
+        waitFor(store) { store.picks.isEmpty }
+    }
+
+    /// A new task beside a top-level one is a new task of that sitting, not work on a tree.
+    func testAddingBesideAnOldTopLevelTaskPicksNothingUp() throws {
+        let store = try storeWithAnOldSitting()
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Ask about parking", relativeTo: try! self.task("Book the venue", in: store),
+                          position: .after, then: done)
+        }
+        XCTAssertNotNil(try? task("Ask about parking", in: store))
+        XCTAssertTrue(store.picks.isEmpty)
+    }
+
     /// Focus the app moved on its own is the app's choice, not yours, and picks nothing up.
     func testFocusAdvancingOnItsOwnPicksNothingUp() throws {
         let store = try storeWithAnOldSitting()

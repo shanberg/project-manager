@@ -161,7 +161,7 @@ final class PickLogTests: XCTestCase {
     private var notesPath = ""
 
     /// A project with a task in today's sitting and two left open in one from two weeks ago.
-    private func vault() throws {
+    private func vault(tree: Bool = false) throws {
         let fm = FileManager.default
         root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         let configDir = (root as NSString).appendingPathComponent("config")
@@ -184,7 +184,8 @@ final class PickLogTests: XCTestCase {
         // Appended: `## Sessions` is the last section and sittings run newest first, so the end of the
         // file is the oldest one.
         let text = try String(contentsOfFile: notesPath, encoding: .utf8)
-        try (text + "\n### Wed, Sep 2, 2026\n\nCalled about the venue.\n\n- [ ] Email Dana\n- [ ] Book the venue\n")
+        let offsite = tree ? "- [ ] Plan the offsite\n  - [ ] Find a room\n  - [ ] Book catering\n" : ""
+        try (text + "\n### Wed, Sep 2, 2026\n\nCalled about the venue.\n\n- [ ] Email Dana\n- [ ] Book the venue\n" + offsite)
             .write(toFile: notesPath, atomically: true, encoding: .utf8)
     }
 
@@ -325,6 +326,56 @@ final class PickLogTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: notesPath, encoding: .utf8), before)
     }
     // MARK: Focus picks up (D3), and undo takes it back (D4)
+
+    // MARK: A pick is a tree
+
+    /// Picking up a subtask picks up the task it belongs to, and every line of that tree says so.
+    func testPickingUpASubtaskPicksUpItsTree() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault(tree: true)
+        let result = call("task.pick", ["project": "W-1", "task": reference("Book catering")])
+        XCTAssertEqual(result["summary"] as? String, "Picked up \u{201C}Plan the offsite\u{201D}.")
+        XCTAssertEqual(PickLog.events(projectPath: projectPath).map(\.task.text), ["Plan the offsite"],
+                       "The pick names the root")
+        for text in ["Plan the offsite", "Find a room", "Book catering"] {
+            XCTAssertEqual(picked(text)?["into"] as? String, today, text)
+        }
+        XCTAssertNil(picked("Email Dana"))
+
+        let again = call("task.pick", ["project": "W-1", "task": reference("Find a room")])
+        XCTAssertEqual(again["summary"] as? String, "That task is already picked up.",
+                       "Another line of a picked tree has nothing left to pick up")
+    }
+
+    func testFocusingASubtaskPicksUpItsTree() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault(tree: true)
+        call("task.focus", ["project": "W-1", "task": reference("Find a room")])
+        XCTAssertEqual(focused(), "Find a room")
+        XCTAssertEqual(PickLog.events(projectPath: projectPath).map(\.task.text), ["Plan the offsite"])
+    }
+
+    /// Putting back any line of a picked tree puts the tree back — including a pick an older build
+    /// wrote naming a subtask, which would otherwise leave the tree standing.
+    func testPuttingBackAnyLineOfATreePutsTheTreeBack() throws {
+        try XCTSkipUnless(haveBinary)
+        try vault(tree: true)
+        let notes = normalizeFocusMarker(notes: try parseNotes(markdown: try String(contentsOfFile: notesPath, encoding: .utf8)))
+        let todos = try parseTodos(notes: notes)
+        let room = try XCTUnwrap(todos.first { $0.text == "Find a room" })
+        let today = try XCTUnwrap(notes.sessions.firstIndex { !$0.body.contains("Plan the offsite") })
+        try PickLog.append([PickEvent(at: PickLog.timestamp(), event: .picked,
+                                      task: try XCTUnwrap(PickLog.task(room, in: notes)),
+                                      into: try XCTUnwrap(PickLog.sitting(at: today, in: notes)))],
+                           projectPath: projectPath)
+        XCTAssertNotNil(picked("Book catering"), "An older pick of a subtask covers its tree")
+
+        let result = call("task.release", ["project": "W-1", "task": reference("Book catering")])
+        XCTAssertEqual(result["summary"] as? String, "Put back \u{201C}Plan the offsite\u{201D}.")
+        for text in ["Plan the offsite", "Find a room", "Book catering"] {
+            XCTAssertNil(picked(text), text)
+        }
+    }
 
     private func focused() -> String? {
         tasks().first { $0["isFocused"] as? Bool == true }?["text"] as? String

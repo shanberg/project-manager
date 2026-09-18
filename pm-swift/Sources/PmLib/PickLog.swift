@@ -112,7 +112,8 @@ public struct TaskPick: Codable, Equatable, Sendable {
     /// The pick's id — what Put Back and undo name when they take it back.
     public var id: String
     public var at: String
-    /// Where the task is now.
+    /// Where the task the pick names is now. A pick covers that task's whole tree (`TaskTree`); new
+    /// picks name the root, and one written before picks named trees may name a subtask.
     public var sessionIndex: Int
     public var lineIndex: Int
     /// The sitting it was picked up into: its ISO date, and its index in this read.
@@ -335,13 +336,20 @@ extension NotesShowOutput {
         var out = self
         out.picks = resolved.map(\.pick)
         for pick in resolved {
-            guard let i = out.todos.firstIndex(where: {
+            guard let named = todos.first(where: {
                 $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex
             }) else { continue }
-            // Oldest first, so the last one written wins. By when it happened rather than by which
-            // sitting is newer: picking an old task back into an older sitting is odd, but it's what
-            // was last done to it.
-            out.todos[i].picked = PickMark(into: pick.event.into?.session ?? "", at: pick.event.at)
+            // A pick covers the whole tree it names, so every line of it says so — including the tree
+            // an older pick named by a subtask. Oldest first, so the last one written wins. By when it
+            // happened rather than by which sitting is newer: picking an old task back into an older
+            // sitting is odd, but it's what was last done to it.
+            let mark = PickMark(into: pick.event.into?.session ?? "", at: pick.event.at)
+            for member in TaskTree.members(of: TaskTree.root(of: named, in: todos), in: todos) {
+                guard let i = out.todos.firstIndex(where: {
+                    $0.sessionIndex == member.sessionIndex && $0.lineIndex == member.lineIndex
+                }) else { continue }
+                out.todos[i].picked = mark
+            }
         }
         return out
     }

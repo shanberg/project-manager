@@ -814,16 +814,22 @@ final class PMStore {
         }
     }
 
-    /// Whether Pick Up has something to do for `todo`: it is open, and neither written in the latest
-    /// sitting nor already picked up into it. The contract has the last word — a project left long
-    /// enough starts a new sitting, and then everything is older — but a menu item that says what it
-    /// will usually do beats one that is always there.
+    /// Whether Pick Up has something to do for `todo`: it is open, and its tree is neither written in the
+    /// latest sitting nor already picked up into it — a pick takes the whole tree (docs/sessions.md D3).
+    /// The contract has the last word — a project left long enough starts a new sitting, and then
+    /// everything is older — but a menu item that says what it will usually do beats one that is always
+    /// there.
     func canPickUp(_ todo: Todo) -> Bool {
         guard !todo.checked else { return false }
         guard !willStartNewSession, let current = todaySessionIndex else { return true }
-        return todo.sessionIndex != current && !picks.contains {
-            $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex && $0.intoIndex == current
-        }
+        return todo.sessionIndex != current
+            && !SessionPicks.pickedPositions(into: current, picks: picks, todos: todos).contains(TaskPosition(todo))
+    }
+
+    /// The distinct trees `todos` belong to, by their roots — what Pick Up and Put Back act on, and so
+    /// what their menu items count.
+    func trees(_ selection: [Todo]) -> [Todo] {
+        TaskTree.roots(of: selection, in: todos)
     }
 
     /// One task as `task`, several as `tasks` — the either-or every batchable action takes.
@@ -1182,9 +1188,15 @@ final class PMStore {
 
     /// Add a task. `then` runs once the document has been re-read, so a caller that needs to find the
     /// task it just wrote has a list that contains it.
+    ///
+    /// A task added *into* a tree — a child of any task, or beside a subtask — is work on that tree, so
+    /// the tree is picked up into the current sitting first, as editing a line of it would
+    /// (docs/sessions.md D3). One step: ⌘Z takes the task and the pick back together. Beside a top-level
+    /// task is a new task of the sitting, not part of a tree, and picks nothing up.
     func addTodo(text: String, due: String? = nil, relativeTo anchor: Todo? = nil,
                  position: TaskInsertPosition? = nil, then: (@MainActor () -> Void)? = nil) {
-        mutate(then: then) { project in
+        let intoTree = anchor.flatMap { anchor in position.map { $0 == .child || anchor.depth > 0 } } ?? false
+        mutating(pickingUp: intoTree ? anchor.map { [$0] } ?? [] : [], then: then) { project in
             try PMContract.perform(.taskAdd, PMContract.input(project: project) { input in
                 input.text = text
                 input.due = due

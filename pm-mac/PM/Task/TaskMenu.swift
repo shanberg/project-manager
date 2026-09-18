@@ -84,14 +84,15 @@ struct TaskMenu: View {
         }
         // Picking up takes an older task into the current sitting without moving its line; putting
         // back takes that pick away (docs/sessions.md D3). Each counts only the tasks it would act on.
-        let pickable = scope.filter(store.canPickUp)
+        // Both act on whole trees, so both count trees: three subtasks of one task are one pick.
+        let pickable = store.trees(scope.filter(store.canPickUp))
         if !pickable.isEmpty {
             Button { store.pickUp(pickable) } label: {
                 Label(isMulti ? "Pick Up \(pickable.count) Task\(pickable.count == 1 ? "" : "s")" : "Pick Up",
                       systemImage: "arrow.down.to.line")
             }
         }
-        let pickedUp = scope.filter { $0.picked != nil }
+        let pickedUp = store.trees(scope.filter { $0.picked != nil })
         if !pickedUp.isEmpty {
             Button { store.putBack(pickedUp) } label: {
                 Label(isMulti ? "Put Back \(pickedUp.count) Task\(pickedUp.count == 1 ? "" : "s")" : "Put Back",

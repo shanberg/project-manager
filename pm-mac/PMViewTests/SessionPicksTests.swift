@@ -27,7 +27,7 @@ final class SessionPicksTests: XCTestCase {
         let florist = task("Call the florist", session: 1, line: 0)
         let picks = [pick(venue, into: 0), pick(dana, into: 0), pick(florist, into: 1)]
         let drawn = SessionPicks.pickedUp(into: 0, picks: picks, todos: [florist, dana, venue])
-        XCTAssertEqual(drawn.map(\.text), ["Book the venue", "Email Dana"])
+        XCTAssertEqual(drawn.map(\.todo.text), ["Book the venue", "Email Dana"])
     }
 
     /// Two picks of one task into one sitting are one row: a duplicate id is what makes `ForEach`
@@ -37,6 +37,31 @@ final class SessionPicksTests: XCTestCase {
         let drawn = SessionPicks.pickedUp(into: 0, picks: [pick(dana, into: 0), pick(dana, into: 0)],
                                           todos: [dana])
         XCTAssertEqual(drawn.count, 1)
+    }
+
+    /// A pick is a tree: a picked subtask draws the task it belongs to, and everything under it,
+    /// with the chip on the top line only.
+    func testAPickedSubtaskDrawsItsWholeTree() {
+        let offsite = task("Plan the offsite", session: 2, line: 0)
+        let room = task("Find a room", session: 2, line: 1, depth: 1)
+        let catering = task("Book catering", session: 2, line: 2, depth: 1)
+        let dana = task("Email Dana", session: 2, line: 3)
+        let todos = [offsite, room, catering, dana]
+        let drawn = SessionPicks.pickedUp(into: 0, picks: [pick(catering, into: 0)], todos: todos)
+        XCTAssertEqual(drawn.map(\.todo.text), ["Plan the offsite", "Find a room", "Book catering"])
+        XCTAssertEqual(drawn.map(\.showsOrigin), [true, false, false])
+    }
+
+    /// Two picks inside one tree (two subtasks picked by an older build, or the root and a subtask)
+    /// draw the tree once.
+    func testTwoPicksInOneTreeDrawItOnce() {
+        let offsite = task("Plan the offsite", session: 2, line: 0)
+        let room = task("Find a room", session: 2, line: 1, depth: 1)
+        let catering = task("Book catering", session: 2, line: 2, depth: 1)
+        let drawn = SessionPicks.pickedUp(into: 0, picks: [pick(room, into: 0), pick(catering, into: 0),
+                                                           pick(offsite, into: 0)],
+                                          todos: [offsite, room, catering])
+        XCTAssertEqual(drawn.map(\.todo.text), ["Plan the offsite", "Find a room", "Book catering"])
     }
 
     // MARK: The pile
@@ -51,6 +76,18 @@ final class SessionPicksTests: XCTestCase {
         let rows = SessionPicks.pile(todos: [today, florist, venue, dana].shuffled(), excluding: 0,
                                      picks: [pick(dana, into: 0)]) { _ in true }
         XCTAssertEqual(rows.map(\.todo.text), ["Call the florist", "Book the venue"])
+    }
+
+    /// The pile leaves out the whole of a tree the latest sitting picked up, not only the line the pick
+    /// names — the tree is drawn above it.
+    func testThePileLeavesOutAPickedTreeWhole() {
+        let today = task("Draft the agenda", session: 0, line: 0, iso: "2026-09-17")
+        let offsite = task("Plan the offsite", session: 2, line: 0)
+        let room = task("Find a room", session: 2, line: 1, depth: 1)
+        let dana = task("Email Dana", session: 2, line: 2)
+        let rows = SessionPicks.pile(todos: [today, offsite, room, dana], excluding: 0,
+                                     picks: [pick(room, into: 0)]) { _ in true }
+        XCTAssertEqual(rows.map(\.todo.text), ["Email Dana"])
     }
 
     /// A Tasks card is nothing but the pile, so nothing is left out of it.
@@ -89,6 +126,11 @@ final class SessionPicksTests: XCTestCase {
         XCTAssertNil(SessionPicks.pickedMark(dana, now: now))
         dana.picked = PickMark(into: "2026-09-17", at: "2026-09-17T15:00:00Z")
         XCTAssertEqual(SessionPicks.pickedMark(dana, now: now), "picked up Sep 17")
+
+        // Every line of a picked tree carries the fact; only the top line says it.
+        var room = task("Find a room", session: 2, line: 1, depth: 1)
+        room.picked = dana.picked
+        XCTAssertNil(SessionPicks.pickedMark(room, now: now))
     }
 
     // MARK: The sentence it was written in
