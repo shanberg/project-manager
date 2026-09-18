@@ -863,8 +863,8 @@ final class PMStore {
         }
     }
 
-    func undo(_ todo: Todo) {
-        mutate { try PMContract.perform(.taskReopen, PMContract.input(project: $0, task: todo)) }
+    func undo(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try PMContract.perform(.taskReopen, PMContract.input(project: $0, task: todo)) }
     }
 
     func setDue(_ todo: Todo, due: String?, then: (@MainActor () -> Void)? = nil) {
@@ -885,8 +885,8 @@ final class PMStore {
     }
 
     /// Replace a task's text in place (checkbox, due, focus, and indent preserved).
-    func editText(_ todo: Todo, text: String) {
-        mutating(pickingUp: [todo]) { project in
+    func editText(_ todo: Todo, text: String, then: (@MainActor () -> Void)? = nil) {
+        mutating(pickingUp: [todo], then: then) { project in
             try PMContract.perform(.taskSetText, PMContract.input(project: project, task: todo) {
                 $0.text = text
             })

@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`) and 3 (the Day card, reading only) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card) and 4 (acting from a row) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -365,9 +365,32 @@ so pasting it into Obsidian gives you links that work.
 - **Rows** are the project card's parts (`TaskStatusIcon`, `RenderedNote`, the origin chip's look),
   drawn from `SittingTask` rather than from `Todo`, since a view holds no store. A task that's both
   written and finished in the sitting is drawn once, deduped by `ref`.
-- **Clicking a project chip** opens that project. It works once the card is stepped into, as every
-  control on a card does. Nothing else acts yet, since acting is step 4.
+- **Clicking a project chip** opens that project.
 - Zoomed out, the card is one line: *Today: 4 sittings · 7 done*.
+
+### As built (step 4)
+
+`CanvasDayActions`, and the rows in `CanvasDayCard`.
+
+- **A row's box ticks and unticks it**, and its contextual menu offers the row's verbs: Complete or
+  Reopen, Drop Task, Focus, Pick Up (from a sitting that isn't the project's current one), Put Back (on
+  a tree picked up into the current one), Edit Task… (retyped in place, Return to save, Esc to leave),
+  and Go to *Project*. The menu comes from what the row knows (`CanvasDayAction.offered`). The store
+  has the last word when the act lands, so Pick Up on a task the store says can't be picked up does
+  nothing.
+- **Acquired on the act.** The first act on a project's row takes that project's store from
+  `StoreRegistry`, and the card keeps it until the card goes, since letting go would throw away the
+  history ⌘Z needs. A view that's only looked at holds nothing open.
+- **⌘Z** takes the act back through `CanvasUndoRoute`'s project route: an act that leaves a step on
+  its store makes that store the board's `lastEditedProject`, as a tick on a project card does.
+- **The act lands on the line the row read, or not at all.** The row's `ref` is resolved against the
+  store's own read with its digest. A line changed since the view last looked is refused with a beep,
+  and the card looks again.
+- **Drawn ahead of the scan.** A tick, untick or drop draws in its new state at once, and stays so
+  until a scan that began after the write lands.
+- **A view card takes its first click**, as a project card does, so the box ticks on it.
+- **Not yet:** multi-select on rows, so the open question on selections across projects is still
+  open. Also not built: opening a sitting's note in the card, and dragging a row off as a card (D7).
 
 ## Calendars, eventually
 
@@ -419,7 +442,7 @@ Each step ships on its own.
    in, a completion in no sitting, and a completion after midnight staying with the evening's sitting.
 3. ✓ **The view card and Day (D2, D3, D5).** A text node carrying `pmView`, the row vocabulary with the
    project chip, the rail and the Week lede. Reading only.
-4. **Acting from a view (D6).** Acquire-on-act through `StoreRegistry`, and the undo route. A
+4. ✓ **Acting from a view (D6).** Acquire-on-act through `StoreRegistry`, and the undo route. A
    `CanvasUndoRouteTests` case covers a tick on a Day row being undone by ⌘Z on the board.
 5. **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
    card is general before another query is written.

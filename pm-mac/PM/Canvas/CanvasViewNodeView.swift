@@ -5,15 +5,20 @@ import SwiftUI
 /// A view card on a board: a text node carrying `pmView`, drawn as the answer it names rather than as
 /// its text (docs/views.md D3). See `CanvasViewSpec`.
 ///
-/// **Reading only, for now.** Stepping in lets you scroll it and go to a project from its chip; ticking,
-/// picking up and editing from a view are the next step (D6), and arrive through `StoreRegistry`
-/// acquired on the act rather than held for every project in view.
+/// **A place you work** (D6). A row ticks, drops, picks up and retypes the way the same row does on a
+/// project card, through its own project's store — taken when you act, not for every project in view.
+/// See `CanvasDayActions`.
 final class CanvasViewNodeView: CanvasNodeView {
     let model: CanvasDayModel
+    let actions: CanvasDayActions
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         model = CanvasDayModel(spec: CanvasViewSpec.of(node) ?? .newDay)
+        actions = CanvasDayActions { ProjectIndex.shared.projectKey(forFolder: $0) }
         super.init(node: node, board: board, scale: scale)
+        // The act is now the thing ⌘Z takes back — `CanvasUndoRoute`'s project route, as a tick on a
+        // project card is.
+        actions.onActed = { [weak self] store in self?.board.lastEditedProject = store }
         model.boardProjects = boardProjectFolders()
         model.onChange = { [weak self] in
             // The zoomed-out face is one label, built from the summary rather than observing it.
@@ -46,9 +51,14 @@ final class CanvasViewNodeView: CanvasNodeView {
                                           symbol: "calendar"))
         }
         let view = NSHostingView(rootView:
-            CanvasDayCard(model: model, zoom: contentZoom) { folder in
-                WindowManager.shared.open(named: folder)
-            }
+            CanvasDayCard(model: model, zoom: contentZoom,
+                          onOpenProject: { folder in WindowManager.shared.open(named: folder) },
+                          onAct: { [weak self] act, row, sitting in
+                              guard let self else { return }
+                              self.actions.perform(act, on: row, inProject: sitting.projectFolder) { [weak self] in
+                                  self?.model.settle(row.id)
+                              }
+                          })
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         )
         view.setAccessibilityLabel(accessibilityFallback)
@@ -59,9 +69,19 @@ final class CanvasViewNodeView: CanvasNodeView {
     override var zoomsItsContent: Bool { true }
     override func contentZoomChanged() { contentChanged() }
 
-    /// There's nothing here to type into. Stepping in is for scrolling and the chips, which a rebuild
-    /// would only interrupt.
-    override func engagementChanged() {}
+    /// A row takes its own click, as a project card's does: the box ticks on the first one.
+    override var engagesOnClick: Bool { !isSimplified }
+
+    /// Stepping in hands the keyboard to the card, for a row being retyped; stepping out takes it back.
+    /// Nothing is rebuilt, which would only interrupt the scroll.
+    override func engagementChanged() {
+        guard let content = subviews.first else { return }
+        if isEngaged {
+            window?.makeFirstResponder(content)
+        } else if (window?.firstResponder as? NSView)?.isDescendant(of: content) == true {
+            window?.makeFirstResponder(board)
+        }
+    }
 
     override var accessibilityFallback: String {
         let summary = model.summary
@@ -70,6 +90,9 @@ final class CanvasViewNodeView: CanvasNodeView {
 
     override func prepareForRemoval() {
         model.stop()
+        if let store = board.lastEditedProject,
+           actions.heldStores.contains(where: { $0 === store }) { board.lastEditedProject = nil }
+        actions.releaseAll()
     }
 
     /// The file paths on the board when `boardProjectFolders` last resolved them. `update` runs on every

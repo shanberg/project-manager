@@ -130,3 +130,34 @@ final class CanvasViewSpecTests: XCTestCase {
         XCTAssertEqual(CanvasDayRows.summary(SittingList()), "No sittings")
     }
 }
+
+extension CanvasViewSpecTests {
+    private func entry(current: Bool) throws -> SittingEntry {
+        let base = """
+        {"projectFolder": "W-1 Redesign", "projectName": "Redesign", "isArchived": false,
+         "session": "2026-09-18", "sessionOrdinal": 0, "sessionDigest": "d", "startTime": null,
+         "startedAt": null, "name": "", "prose": "", "isCurrent": \(current),
+         "written": [], "picked": [], "finished": [], "dropped": []}
+        """
+        return try JSONDecoder().decode(SittingEntry.self, from: Data(base.utf8))
+    }
+
+    private func row(_ state: TaskState, pickedUp: Bool = false, ref: Bool = true) -> CanvasDayRow {
+        CanvasDayRow(id: "r", text: "t", state: state, depth: 0, origin: nil, pickedUp: pickedUp,
+                     ref: ref ? TaskRefInput(session: "2026-09-18", sessionOrdinal: 0, line: 0, digest: "x") : nil)
+    }
+
+    /// A row offers the project card's verbs for it, as far as the row alone can say (D6).
+    func testARowOffersWhatItCanBeToldToDo() throws {
+        let now = try entry(current: true), before = try entry(current: false)
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.open), in: now), [.complete, .drop, .focus])
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.open), in: before), [.complete, .drop, .focus, .pickUp],
+                       "An older sitting's open task can be picked up into the current one")
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.open, pickedUp: true), in: now),
+                       [.complete, .drop, .focus, .putBack])
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.done), in: now), [.reopen])
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.dropped), in: before), [.reopen])
+        XCTAssertEqual(CanvasDayAction.offered(for: row(.open, ref: false), in: now), [],
+                       "A line that's gone can only be read")
+    }
+}

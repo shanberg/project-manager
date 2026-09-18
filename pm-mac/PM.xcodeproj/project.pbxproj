@@ -275,11 +275,13 @@
 		B70CAD446EBE1A0CF7F186E1 /* CanvasUndoRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2076051C361CE8919637AA2 /* CanvasUndoRouteTests.swift */; };
 		B7E723016700033A0D293827 /* CanvasCardSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F948EEFBB8F60C1F23B327A1 /* CanvasCardSessionTests.swift */; };
 		B84E5F957D041170F2F483B5 /* CanvasWorkspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15C47D64D956721382F9DC1 /* CanvasWorkspaces.swift */; };
+		B87455105F9CD0C596F96FF1 /* StoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEAC5A29157104A97390627 /* StoreRegistry.swift */; };
 		B88326FF99730FF53AEFF84C /* CanvasWebSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B78492229004D23C8950DF6 /* CanvasWebSession.swift */; };
 		B8E1F7C55E70007FBCB2C37E /* TokenTextLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 752EE233AC836B99051CA1A4 /* TokenTextLabel.swift */; };
 		B8E98D041D89F9689764F9F5 /* CanvasCardShowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E64D763E4CB8157EC30D74 /* CanvasCardShowsTests.swift */; };
 		B9378BF4A8E83D1E9A830DBE /* HeaderChromeMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67BE510BEC3BAA46D3DEBDFC /* HeaderChromeMotionTests.swift */; };
 		B99E33C923922E536CC14BC1 /* CanvasColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32A09525B56826B0BA2CF331 /* CanvasColors.swift */; };
+		BC05F5DD8F1F620FF0EAA4E5 /* CanvasDayActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDD62025AA752FD00AAB0D42 /* CanvasDayActions.swift */; };
 		BC9CDB1622A873222BFB609E /* FrameMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E973D36CA5E6F39110E907DE /* FrameMeter.swift */; };
 		BCDB9FA4597D3182C47B6BDF /* SymbolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CF06385083F7356F9004AC /* SymbolCatalog.swift */; };
 		BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B358A62B026F88C33AA9FF42 /* MenubarRing.swift */; };
@@ -304,6 +306,7 @@
 		C604CAD25A5756F4BDDB768A /* NoteImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7702E7B244533507CDCE64 /* NoteImagePaste.swift */; };
 		C6EE1DC31599591525EE561E /* CanvasProjectNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6465910607523CF24D6AC4F3 /* CanvasProjectNote.swift */; };
 		C83907E7511B656D4836494A /* CanvasWebPopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1737DDEF16F7384ABE0A1B33 /* CanvasWebPopup.swift */; };
+		C85095528918EF6D1CF2BF7D /* CanvasDayActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDD62025AA752FD00AAB0D42 /* CanvasDayActions.swift */; };
 		C89BE76C77766C12EB934EAC /* CanvasPageVisits.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF98EC9D2FC7D99B6A853347 /* CanvasPageVisits.swift */; };
 		C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
@@ -609,6 +612,7 @@
 		BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindow.swift; sourceTree = "<group>"; };
 		BD092E03A33DCBBD701D682B /* CanvasDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDownload.swift; sourceTree = "<group>"; };
 		BDA89E834EE4D1D194BB78EA /* CanvasPageCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageCapsule.swift; sourceTree = "<group>"; };
+		BDD62025AA752FD00AAB0D42 /* CanvasDayActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDayActions.swift; sourceTree = "<group>"; };
 		BE12AF236B77E3727D0F3C5F /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
 		C0127A158FF1A3C19DE0375C /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		C0C8253F2276A9484CE883B2 /* CanvasSoftEdge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSoftEdge.swift; sourceTree = "<group>"; };
@@ -930,6 +934,7 @@
 				32A09525B56826B0BA2CF331 /* CanvasColors.swift */,
 				F3C5DEB7BEC96D76A2CA6F0F /* CanvasColorWash.swift */,
 				4EF0D38D9DB80542D10BF94C /* CanvasContentBlocker.swift */,
+				BDD62025AA752FD00AAB0D42 /* CanvasDayActions.swift */,
 				6C6A3E4DB69C6E7602D699DC /* CanvasDayCard.swift */,
 				1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */,
 				BD092E03A33DCBBD701D682B /* CanvasDownload.swift */,
@@ -1311,6 +1316,7 @@
 				E5BBF3AFA4A429746C79F2AA /* CanvasColorWash.swift in Sources */,
 				A68A33BCA5759E3EDCC460F9 /* CanvasColors.swift in Sources */,
 				E72FC312F57CA385A3CD74C8 /* CanvasContentBlocker.swift in Sources */,
+				C85095528918EF6D1CF2BF7D /* CanvasDayActions.swift in Sources */,
 				F475AA255919556069153BB3 /* CanvasDayCard.swift in Sources */,
 				749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */,
 				D03FA622658B6829E2F3F433 /* CanvasDownload.swift in Sources */,
@@ -1520,6 +1526,7 @@
 				9EAA799DD02106212FBBD6FA /* CanvasClippingTests.swift in Sources */,
 				B99E33C923922E536CC14BC1 /* CanvasColors.swift in Sources */,
 				EC5DDBD9CEB89DEDF27D7732 /* CanvasCrossingTests.swift in Sources */,
+				BC05F5DD8F1F620FF0EAA4E5 /* CanvasDayActions.swift in Sources */,
 				687ED4FFFF9C488BAA3797DB /* CanvasDocumentStore.swift in Sources */,
 				3CBC4EA247E3EE0D95FF9943 /* CanvasDocumentStoreTests.swift in Sources */,
 				5A9486688C17ACFB4F83D027 /* CanvasDrop.swift in Sources */,
@@ -1652,6 +1659,7 @@
 				3A7D8CAA7F82F8A2C614A6E4 /* SessionPicksTests.swift in Sources */,
 				2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */,
 				BE241853058C8E947E918C73 /* SidebarRevealTests.swift in Sources */,
+				B87455105F9CD0C596F96FF1 /* StoreRegistry.swift in Sources */,
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				31AD6AAB106EC029FD8151CE /* TabBarGrowthTests.swift in Sources */,
 				F762E435E788D3F0722C1D73 /* TabDragTests.swift in Sources */,

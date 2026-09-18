@@ -30,6 +30,12 @@ final class CanvasDayModel {
     /// Told when an answer lands, for the zoomed-out summary the node view draws itself.
     @ObservationIgnored var onChange: (() -> Void)?
 
+    /// Rows acted on whose write hasn't come back through a scan yet, drawn in the state they're going
+    /// to: a tick shows as ticked on the click, not a scan later.
+    private(set) var pending: [String: TaskState] = [:]
+    /// Rows whose act has settled, so the next answer to land has seen it.
+    @ObservationIgnored private var settled: Set<String> = []
+
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private let queue = DispatchQueue(label: "com.stuarthanberg.pm.dayview", qos: .utility)
     /// Rising, so a slow scan can't land over a newer one.
@@ -67,6 +73,18 @@ final class CanvasDayModel {
         timer = nil
     }
 
+    /// Show `row` as `state` until its write has been read back.
+    func expect(_ state: TaskState, for row: String) {
+        pending[row] = state
+    }
+
+    /// `row`'s write has landed or been refused: look again, and draw what's there once that answer is
+    /// in. A scan already under way began before the write, so it's overtaken rather than believed.
+    func settle(_ row: String) {
+        settled.insert(row)
+        reload()
+    }
+
     var summary: String {
         list.map(CanvasDayRows.summary) ?? ""
     }
@@ -95,8 +113,12 @@ final class CanvasDayModel {
                     self.failure = nil
                     if range != self.range { self.range = range }
                     if list != self.list { self.list = list }
+                    for row in self.settled { self.pending[row] = nil }
+                    self.settled = []
                 case .failure(let error):
                     self.failure = String(describing: error)
+                    for row in self.settled { self.pending[row] = nil }
+                    self.settled = []
                 }
                 self.onChange?()
             }
@@ -114,6 +136,13 @@ struct CanvasDayCard: View {
     /// The card's zoom, applied to the type, as a text card's is.
     var zoom: Double = 1
     var onOpenProject: (String) -> Void = { _ in }
+    /// Do something to a row, in its sitting's project (docs/views.md D6). Nil draws the card read-only.
+    var onAct: ((CanvasDayAction, CanvasDayRow, SittingEntry) -> Void)?
+
+    /// The row being retyped, and what it says so far.
+    @State private var editing: String?
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
 
     private static let gutter: CGFloat = 62
 
@@ -257,7 +286,7 @@ struct CanvasDayCard: View {
                     let rows = CanvasDayRows.rows(sitting)
                     if !rows.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(rows) { row($0) }
+                            ForEach(rows) { row($0, in: sitting) }
                         }
                         .padding(.top, sitting.prose.isEmpty ? 0 : 3)
                     }
@@ -318,15 +347,30 @@ struct CanvasDayCard: View {
 
     // MARK: Rows
 
-    private func row(_ row: CanvasDayRow) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            TaskStatusIcon(state: row.state, size: 12 * zoom)
-            Text(row.text)
-                .font(.system(size: 12.5 * zoom))
-                .foregroundStyle(row.state == .open ? .primary : .secondary)
-                .strikethrough(row.state == .dropped, color: .secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .layoutPriority(1)
+    private func row(_ row: CanvasDayRow, in sitting: SittingEntry) -> some View {
+        let state = model.pending[row.id] ?? row.state
+        let acts = onAct == nil ? [] : CanvasDayAction.offered(for: row, in: sitting)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            checkbox(row, state: state, in: sitting, acts: acts)
+            if editing == row.id {
+                TextField("Task", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5 * zoom))
+                    .focused($fieldFocused)
+                    .onAppear { fieldFocused = true }
+                    .onSubmit {
+                        onAct?(.edit(draft), row, sitting)
+                        editing = nil
+                    }
+                    .onExitCommand { editing = nil }
+            } else {
+                Text(row.text)
+                    .font(.system(size: 12.5 * zoom))
+                    .foregroundStyle(state == .open ? .primary : .secondary)
+                    .strikethrough(state == .dropped, color: .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+            }
             Spacer(minLength: 4)
             if let origin = row.origin {
                 Text(row.pickedUp ? "\(origin) · picked up" : origin)
@@ -340,6 +384,51 @@ struct CanvasDayCard: View {
             }
         }
         .padding(.leading, Double(row.depth) * 11 * zoom)
+        .contentShape(Rectangle())
+        .contextMenu {
+            // The project card's menu for a row, as far as a row alone can answer it, and Go to Project.
+            if row.ref != nil, onAct != nil {
+                ForEach(acts, id: \.title) { act in
+                    Button { perform(act, row, in: sitting) } label: { Label(act.title, systemImage: act.symbol) }
+                }
+                Button {
+                    draft = row.text
+                    editing = row.id
+                } label: { Label(CanvasDayAction.edit("").title, systemImage: CanvasDayAction.edit("").symbol) }
+                Divider()
+            }
+            Button { onOpenProject(sitting.projectFolder) } label: {
+                Label("Go to \(sitting.projectName)", systemImage: "arrow.turn.down.right")
+            }
+        }
+    }
+
+    /// The row's box, which ticks and unticks it where it can be acted on, and is only a picture where
+    /// it can't — a line that's gone, or a card drawn for a test.
+    @ViewBuilder
+    private func checkbox(_ row: CanvasDayRow, state: TaskState, in sitting: SittingEntry,
+                          acts: [CanvasDayAction]) -> some View {
+        let toggle: CanvasDayAction? = acts.contains(.complete) ? .complete : acts.contains(.reopen) ? .reopen : nil
+        if let toggle {
+            Button { perform(toggle, row, in: sitting) } label: {
+                TaskStatusIcon(state: state, size: 12 * zoom).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(toggle.title)
+        } else {
+            TaskStatusIcon(state: state, size: 12 * zoom)
+        }
+    }
+
+    /// Act, drawing the row as it's about to be where that's certain.
+    private func perform(_ act: CanvasDayAction, _ row: CanvasDayRow, in sitting: SittingEntry) {
+        switch act {
+        case .complete: model.expect(.done, for: row.id)
+        case .reopen: model.expect(.open, for: row.id)
+        case .drop: model.expect(.dropped, for: row.id)
+        default: break
+        }
+        onAct?(act, row, sitting)
     }
 
     // MARK: Also finished

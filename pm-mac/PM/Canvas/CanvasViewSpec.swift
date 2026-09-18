@@ -182,6 +182,8 @@ struct CanvasDayRow: Identifiable, Equatable {
     let origin: String?
     /// Whether this row is a picked-up tree's root, which says so beside its chip.
     let pickedUp: Bool
+    /// Where the line is, for acting on it. Nil for a line that's gone, which can only be read.
+    var ref: TaskRefInput? = nil
 }
 
 enum CanvasDayRows {
@@ -198,7 +200,7 @@ enum CanvasDayRows {
             if let key { guard seen.insert(key).inserted else { return } }
             out.append(CanvasDayRow(id: key ?? "\(role)/\(out.count)/\(task.text)", text: task.text,
                                     state: state(task.state), depth: depth, origin: origin,
-                                    pickedUp: pickedUp))
+                                    pickedUp: pickedUp, ref: task.ref))
         }
         for task in sitting.written { add(task, role: "written", depth: task.depth, origin: nil) }
         for task in sitting.picked {
