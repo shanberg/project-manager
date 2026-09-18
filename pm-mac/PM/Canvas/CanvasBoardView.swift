@@ -488,8 +488,16 @@ final class CanvasBoardView: NSView {
     /// While a card's editor is open, ⌘Z means that editor — the way it does in every text field on
     /// the Mac — rather than the board the card is standing on. What the board gets is one step for
     /// the whole session, when you step out. See `CanvasTextNodeView.editingUndo`.
+    ///
+    /// A project card with a session note open is the same case: the note is a text editor, and ⌘Z
+    /// there is the note's typing — not the project's whole-file history, and not the board's. See
+    /// `SessionNoteTakeover.typing`.
     var engagedCardUndoManager: UndoManager? {
-        nodeViews.values.compactMap { $0 as? CanvasTextNodeView }.first { $0.isEngaged }?.editingUndo
+        for card in nodeViews.values where card.isEngaged {
+            if let text = card as? CanvasTextNodeView, let undo = text.editingUndo { return undo }
+            if let file = card as? CanvasFileNodeView, let undo = file.projectDisplay.noteUndo { return undo }
+        }
+        return nil
     }
 
     /// The project card you have stepped into, if any — the board's current project.

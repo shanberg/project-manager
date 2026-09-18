@@ -200,6 +200,8 @@ targets:
       - path: PM/Canvas/CanvasPagePaint.swift
       - path: PM/Canvas/CanvasPictureView.swift
       - path: PM/Canvas/CanvasSearch.swift
+      - path: PM/Canvas/CanvasUndoRoute.swift
+      - path: PM/Presentation/SessionNoteMerge.swift
       - path: PM/Shared/Coalescer.swift
       - path: PM/Shared/FrameMeter.swift
       - path: PM/Shared/ObservationRelay.swift

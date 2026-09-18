@@ -398,13 +398,15 @@ final class HeaderChromeMotionTests: XCTestCase {
         }.max() ?? 0
     }
 
-    /// Run the change, then read the capsules every frame or so until the animation is over.
+    /// Run the change, then read the capsules every frame until the animation is over. A sample is a
+    /// frame's worth of real time — `run(mode:before:)` would return on the first source, so a count of
+    /// samples would say nothing about how long something lasted.
     private func sample(for seconds: TimeInterval, _ change: () -> Void) -> [[CGRect]] {
         change()
         var track: [[CGRect]] = []
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.016))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.016))
             window.contentView?.layoutSubtreeIfNeeded()
             track.append(capsules())
         }

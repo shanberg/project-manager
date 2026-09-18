@@ -79,6 +79,9 @@ struct SessionNoteTakeover: View {
     var startsAt: NSRange? = nil
     /// Every caret move, for a host that wants to put you back there later.
     var onSelectionChange: ((NSRange) -> Void)? = nil
+    /// Told the editor's undo stack when it opens (`true`) and closes (`false`), so the host can send
+    /// ⌘Z to it while it is up. See `typing`.
+    var onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil
 
     @State private var text: String
     /// The prose this takeover opened with, and the identity of the session it opened *on*.
@@ -106,15 +109,29 @@ struct SessionNoteTakeover: View {
     @State private var hostWindow: NSWindow?
     /// The bar's measured height, fed to the editor as its text-container top inset.
     @State private var barHeight: CGFloat = 0
+    /// The undo stack for what is typed here — the note and the label beside it — and nothing else.
+    ///
+    /// **Its own, never the window's.** On a board the window's stack is the canvas document's, so
+    /// typing landed among card moves, stayed there after the note closed, and pointed at a text view
+    /// that no longer existed. And ⌘Z went past it anyway: a text view doesn't answer `undo:`, so the
+    /// key reached the board, which sent it to the project's stack of whole-file snapshots — whose most
+    /// recent step was, as often as not, this editor's own save. One ⌘Z to fix a typo put the file
+    /// back to before the paragraph, with the paragraph still on screen. The host is told about this
+    /// stack (`onTypingUndo`) so that ⌘Z here means this editor, the way it does in any text field.
+    ///
+    /// One per opening, emptied on the way out: what's on it belongs to this text view.
+    @State private var typing = UndoManager()
     /// Whether this window is the active one — what `HeaderChrome` reads.
     @Environment(\.controlActiveState) private var controlActiveState
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
          onOpenProject: @escaping (String) -> Void,
          onBack: @escaping () -> Void, startsAt: NSRange? = nil,
-         onSelectionChange: ((NSRange) -> Void)? = nil) {
+         onSelectionChange: ((NSRange) -> Void)? = nil,
+         onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil) {
         self.startsAt = startsAt
         self.onSelectionChange = onSelectionChange
+        self.onTypingUndo = onTypingUndo
         self.index = index
         self.session = session
         self.projectName = projectName
@@ -143,14 +160,7 @@ struct SessionNoteTakeover: View {
         ZStack(alignment: .top) {
             // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
             // it and a relative link can be followed back out of it.
-            MarkdownTextEditor(onOpenProject: onOpenProject,
-                               text: $text, onSubmit: onBack,
-                               placeholder: "Write a note…",
-                               noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
-                               opensAtStart: true,
-                               startsAt: startsAt,
-                               onSelectionChange: onSelectionChange,
-                               topInset: barHeight)
+            editor
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
                 // Prose wants the readable cap as much as the task rows do; it used to inherit it from
@@ -180,11 +190,39 @@ struct SessionNoteTakeover: View {
         .reportEditorFrame()
         // Auto-save on every way out: Back / Escape / outside-click remove the view (onDisappear); a
         // blur-hide leaves the view mounted but resigns key.
-        .onDisappear { commit() }
+        .onDisappear {
+            commit()
+            typing.removeAllActions()
+            onTypingUndo?(typing, false)
+        }
+        .onAppear { onTypingUndo?(typing, true) }
+        // The note as the file has it, followed while nothing here is unsaved — see
+        // `SessionNoteMerge.adopting`. An undo or an edit made anywhere else shows up here rather than
+        // being hidden behind a copy that no longer matches, and then dropped by the next save.
+        .onChange(of: currentBody()) { _, onDisk in
+            guard let adopted = SessionNoteMerge.adopting(onDisk: onDisk, edited: text, seed: seed)
+            else { return }
+            text = adopted
+            seed = adopted
+        }
         .background(WindowAccessor { hostWindow = $0 })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
             if let hostWindow, (note.object as? NSWindow) === hostWindow { commit() }
         }
+    }
+
+    /// The prose editor, on this takeover's own undo stack. See `typing`.
+    private var editor: some View {
+        var editor = MarkdownTextEditor(onOpenProject: onOpenProject,
+                                        text: $text, onSubmit: onBack,
+                                        placeholder: "Write a note…",
+                                        noteURL: store.notesPath.map { URL(fileURLWithPath: $0) },
+                                        opensAtStart: true,
+                                        startsAt: startsAt,
+                                        onSelectionChange: onSelectionChange,
+                                        topInset: barHeight)
+        editor.undoManager = typing
+        return editor
     }
 
     /// The takeover's header: a back button in its own glass circle, then the identity pill — the

@@ -252,7 +252,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// walks the responder chain to the window's. A host hands one in when its own ⌘Z means something
     /// else while this editor is open: a canvas card is a session inside a document whose stack is
     /// about cards, and typing in it must not put a hundred steps on that. See
-    /// `CanvasTextNodeView.editingUndo`.
+    /// `CanvasTextNodeView.editingUndo`. A session note on a project card is the same case twice over:
+    /// the window's stack there is the board's, and the project's own is whole-file snapshots — see
+    /// `SessionNoteTakeover.typing`.
     var undoManager: UndoManager?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -406,9 +408,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
             scrollView.scrollerInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
         }
         if textView.string != text {
-            textView.string = text
-            // An edit made from outside doesn't run through `didChangeText`, which is where the empty
-            // note otherwise notices it has gained or lost its placeholder.
+            // Through the undo stack, never `string =`. See `ShortcutTextView.replaceFromOutside`.
+            if let shortcuts = textView as? ShortcutTextView {
+                shortcuts.replaceFromOutside(text)
+            } else {
+                textView.string = text
+            }
+            // A text view that won't take the edit as one of its own — see `replaceFromOutside` — has
+            // been set outright, which doesn't run through `didChangeText`, where the empty note
+            // otherwise notices it has gained or lost its placeholder.
             textView.needsDisplay = true
             if opensAtStart {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -479,7 +487,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
+            // Only a real difference is written back. Text put in from outside arrives here too, in
+            // the middle of `updateNSView`, carrying the very value the binding already holds — and
+            // setting a binding during a view update is a write SwiftUI objects to even when it's equal.
+            if parent.text != textView.string { parent.text = textView.string }
             highlight(textView)
             reportHeight(textView)
         }
@@ -1020,7 +1031,55 @@ final class ShortcutTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         if drewPlaceholder != showsPlaceholder { needsDisplay = true }
-        refreshCompletions()
+        // Completions answer typing. A merge that happens to leave the caret after a `[[` is not
+        // somebody asking for a project list.
+        if !replacingFromOutside { refreshCompletions() }
+    }
+
+    /// Set while `replaceFromOutside` is putting text in, so `didChangeText` can tell it from typing.
+    private var replacingFromOutside = false
+
+    /// Put in text that came from outside the editor — a merge on save, a note that changed on disk,
+    /// a draft restored or emptied — as an edit the undo stack knows about.
+    ///
+    /// **Never `string =` on a view that has been typed in.** The typing already on the undo stack
+    /// holds ranges into the text as it was, and assigning `string` swaps that text out from under
+    /// them without a word to the stack. The next ⌘Z then replays a range against text it doesn't
+    /// describe: shorter text and AppKit raises `NSRangeException` out of `NSUndoTyping`; longer and
+    /// it quietly rewrites the wrong characters. Nor can the stale steps be picked off afterwards —
+    /// their target is AppKit's own `NSUndoTyping`, not this view or its storage, so
+    /// `removeAllActions(withTarget:)` finds nothing to remove.
+    ///
+    /// So the change goes in the way a paste would, and becomes a step of its own: undo takes the
+    /// outside change back, and the typing under it still lines up. Only the span that actually
+    /// differs is replaced, which keeps that step as small as the change was.
+    func replaceFromOutside(_ newText: String) {
+        let old = string as NSString
+        let new = newText as NSString
+        let shorter = min(old.length, new.length)
+        var prefix = 0
+        while prefix < shorter, old.character(at: prefix) == new.character(at: prefix) { prefix += 1 }
+        var suffix = 0
+        while suffix < shorter - prefix,
+              old.character(at: old.length - 1 - suffix) == new.character(at: new.length - 1 - suffix) {
+            suffix += 1
+        }
+        let range = NSRange(location: prefix, length: old.length - prefix - suffix)
+        let replacement = new.substring(with: NSRange(location: prefix, length: new.length - prefix - suffix))
+        // The same text again is no edit, and must not leave an empty step for ⌘Z to spend a press on.
+        guard range.length > 0 || !replacement.isEmpty else { return }
+
+        replacingFromOutside = true
+        defer { replacingFromOutside = false }
+        breakUndoCoalescing()
+        // Refused only by a view that isn't editable, which has no typing to fall out of step with.
+        guard shouldChangeText(in: range, replacementString: replacement) else {
+            string = newText
+            return
+        }
+        textStorage?.replaceCharacters(in: range, with: replacement)
+        didChangeText()
+        breakUndoCoalescing()
     }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity,

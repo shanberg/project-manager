@@ -41,6 +41,24 @@ enum SessionNoteMerge {
         return .merged(onDisk + separator(between: onDisk, and: additions) + additions)
     }
 
+    /// What an open surface should now show, when the note on disk has moved underneath it — or nil to
+    /// keep what it has.
+    ///
+    /// **Only a surface with nothing unsaved follows.** One that is still holding what it last wrote
+    /// has no edit of its own to lose, so it takes the new text and agrees with it; the file is the
+    /// truth and the surface was only showing it. One with unsaved typing keeps it, and the next save
+    /// goes through `resolve`.
+    ///
+    /// Not following is how a note was lost. An undo made elsewhere put the file back to before a
+    /// paragraph while the editor went on showing it. Left alone, the surface still agreed with its
+    /// seed, so it wrote nothing on the way out — the paragraph was gone from the file while the
+    /// screen said otherwise. And with any typing after it, `resolve` read the rolled-back file as
+    /// somebody else's work, kept it, and kept only what had been typed since the last save.
+    static func adopting(onDisk: String, edited: String, seed: String) -> String? {
+        guard edited == seed, onDisk != seed else { return nil }
+        return onDisk
+    }
+
     /// The join between what they wrote and what we added.
     ///
     /// Usually nothing: our additions begin with the newlines we typed to leave their text behind, and

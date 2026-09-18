@@ -248,7 +248,13 @@ struct CanvasProjectNote: View {
                                     onOpenProject: onOpenProject,
                                     onBack: { openNote = nil },
                                     startsAt: display.returnCaret,
-                                    onSelectionChange: { display.noteCaret = $0 })
+                                    onSelectionChange: { display.noteCaret = $0 },
+                                    onTypingUndo: { stack, open in
+                                        // Closing one note and opening another can report in either
+                                        // order, so only the stack that is leaving clears.
+                                        if open { display.noteUndo = stack }
+                                        else if display.noteUndo === stack { display.noteUndo = nil }
+                                    })
             } else {
                 list
             }
@@ -1378,6 +1384,10 @@ final class CanvasProjectCardDisplay {
     /// Where a note reopened by a return starts its caret; nil for a note opened any other way.
     @ObservationIgnored
     var returnCaret: NSRange?
+    /// The open note's own undo stack, while a note is open — what ⌘Z means on this card until it
+    /// closes. See `CanvasBoardView.engagedCardUndoManager` and `SessionNoteTakeover.typing`.
+    @ObservationIgnored
+    var noteUndo: UndoManager?
 
     /// How many task rows the query left standing, written back by the card so the find field can say
     /// so. Nil while nothing is being searched for — which is not the same as zero, and the field says

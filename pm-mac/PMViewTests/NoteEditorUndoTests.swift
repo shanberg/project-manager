@@ -58,3 +58,82 @@ final class NoteEditorUndoTests: XCTestCase {
         XCTAssertEqual(view.string, "")
     }
 }
+
+/// Text put into a note from outside — a merge on save, the file changing underneath an open note —
+/// and what that does to the typing already on the undo stack. See `ShortcutTextView.replaceFromOutside`.
+@MainActor
+final class NoteEditorOutsideTextTests: XCTestCase {
+
+    /// Each edit in a test is its own event, as it would be in the app. The undo manager groups by
+    /// run-loop pass, so without a turn between them every edit in the test is one group and one ⌘Z
+    /// takes the lot — which passes or fails for reasons that have nothing to do with the editor.
+    private func endEvent() {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+
+    private func type(_ text: String, into editor: NoteEditor) {
+        editor.view.insertText(text, replacementRange: editor.view.selectedRange())
+        editor.view.breakUndoCoalescing()
+        endEvent()
+    }
+
+    private func putFromOutside(_ text: String, into editor: NoteEditor) {
+        editor.view.replaceFromOutside(text)
+        endEvent()
+    }
+
+    /// The crash this replaces: typing on the stack, the text swapped for a shorter one, then ⌘Z.
+    /// Assigning `string` left the typing step pointing past the end, and AppKit raised
+    /// `NSRangeException` from inside the undo.
+    func testUndoAfterShorterOutsideTextStillLinesUp() throws {
+        let editor = NoteEditor()
+        editor.reset()
+        type("hello world", into: editor)
+        putFromOutside("hi", into: editor)
+        XCTAssertEqual(editor.text, "hi")
+
+        let undo = try XCTUnwrap(editor.view.undoManager)
+        undo.undo()
+        XCTAssertEqual(editor.text, "hello world")
+        undo.undo()
+        XCTAssertEqual(editor.text, "")
+    }
+
+    /// A merge that adds text somebody else wrote, with typing either side of it: each ⌘Z takes back
+    /// exactly one of the three, in order.
+    func testOutsideTextIsOneStepAmongTheTyping() throws {
+        let editor = NoteEditor()
+        editor.reset()
+        type("abc", into: editor)
+        putFromOutside("abc\n\nfrom elsewhere", into: editor)
+        editor.view.setSelectedRange(NSRange(location: (editor.text as NSString).length, length: 0))
+        type(" d", into: editor)
+        XCTAssertEqual(editor.text, "abc\n\nfrom elsewhere d")
+
+        let undo = try XCTUnwrap(editor.view.undoManager)
+        undo.undo()
+        XCTAssertEqual(editor.text, "abc\n\nfrom elsewhere")
+        undo.undo()
+        XCTAssertEqual(editor.text, "abc")
+        undo.undo()
+        XCTAssertEqual(editor.text, "")
+    }
+
+    /// Only the span that differs is replaced, so a change at the end leaves the start alone — and
+    /// the same text again is no step at all.
+    func testOnlyTheDifferenceIsReplaced() throws {
+        let editor = NoteEditor()
+        editor.reset("one two three")
+        endEvent()
+        let undo = try XCTUnwrap(editor.view.undoManager)
+        undo.removeAllActions()
+
+        putFromOutside("one two three", into: editor)
+        XCTAssertFalse(undo.canUndo)
+
+        putFromOutside("one two four", into: editor)
+        XCTAssertEqual(editor.text, "one two four")
+        undo.undo()
+        XCTAssertEqual(editor.text, "one two three")
+    }
+}
