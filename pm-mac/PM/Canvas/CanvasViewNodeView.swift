@@ -44,6 +44,8 @@ final class CanvasViewNodeView: CanvasNodeView {
 
     private(set) var model: Model
     let actions: CanvasDayActions
+    /// How large the card is on screen, kept current as the board zooms.
+    private let onScreen = CanvasOnScreen()
 
     /// What the node says this card is.
     var spec: CanvasViewSpec { model.spec }
@@ -52,6 +54,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         model = Model(CanvasViewSpec.of(node) ?? .newDay)
         actions = CanvasDayActions { ProjectIndex.shared.projectKey(forFolder: $0) }
         super.init(node: node, board: board, scale: scale)
+        onScreen.finePrintReadable = CanvasCalendarDetail.finePrintReadable(zoom: contentZoom, scale: scale)
         // The act is now the thing ⌘Z takes back — `CanvasUndoRoute`'s project route, as a tick on a
         // project card is.
         actions.onActed = { [weak self] store in self?.board.lastEditedProject = store }
@@ -98,6 +101,10 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// since a card set to this board's projects follows the board.
     override func update(node: CanvasNode, scale: Double) {
         super.update(node: node, scale: scale)
+        // Every frame of a zoom passes here; the card hears of it only when its small print crosses
+        // from readable to not, or back.
+        let readable = CanvasCalendarDetail.finePrintReadable(zoom: contentZoom, scale: scale)
+        if readable != onScreen.finePrintReadable { onScreen.finePrintReadable = readable }
         if let spec = CanvasViewSpec.of(node), spec != self.spec {
             switch model {
             case .day(let day) where spec.kind == .day: day.spec = spec
@@ -171,7 +178,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         switch model {
         case .day(let day):
             root = AnyView(CanvasDayCard(
-                model: day, zoom: contentZoom,
+                model: day, zoom: contentZoom, onScreen: onScreen,
                 onOpenProject: { folder in WindowManager.shared.open(named: folder) },
                 onAct: { [weak self] act, rows, sitting in
                     guard let self else { return }
@@ -193,7 +200,7 @@ final class CanvasViewNodeView: CanvasNodeView {
                 }))
         case .tasks(let tasks):
             root = AnyView(CanvasTaskListCard(
-                model: tasks, zoom: contentZoom,
+                model: tasks, zoom: contentZoom, onScreen: onScreen,
                 onOpenProject: { folder in WindowManager.shared.open(named: folder) },
                 onAct: { [weak self] act, rows, folder in
                     guard let self else { return }

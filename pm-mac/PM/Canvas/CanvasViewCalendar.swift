@@ -208,3 +208,84 @@ extension SittingEntry {
     /// Which sitting this is, across projects.
     var id: String { "\(projectFolder)/\(session)/\(sessionOrdinal)/\(sessionDigest)" }
 }
+
+// MARK: - How much a calendar says
+
+/// How much a week's block or a month's day says, from the room it has — a card made larger shows more,
+/// rather than the same few words in bigger boxes — and from how large its type is on screen: zoomed out
+/// far enough that the small print is a grey texture, it gives way to colour, which still reads.
+///
+/// Sizes here are the card's own units, before its zoom: what fits at 1×.
+enum CanvasCalendarDetail {
+    /// Whether a calendar's smallest type, 9.5pt at 1×, is at least 7pt on screen. Below it a day is its
+    /// colours. `CanvasDetail.simplifiedBelow` is further out still, where the card is one label.
+    static func finePrintReadable(zoom: Double, scale: Double) -> Bool { 9.5 * zoom * scale >= 7 }
+
+    /// How a month's day on a Day card draws its sittings.
+    enum MonthCell: Equatable {
+        /// A dot each, in its project's colour.
+        case dots
+        /// A line each — its project — the last saying how many more when they don't all fit.
+        case names(shown: Int)
+        /// Two lines each: its project, then what it was about.
+        case ledes
+    }
+
+    /// A line each when there's width for a name and lines for more than a count; two lines each when
+    /// every sitting has room for its lede.
+    static func monthCell(sittings count: Int, width: CGFloat, lines: Int, readable: Bool) -> MonthCell {
+        guard readable, count > 0, width >= 64, lines >= 1 else { return .dots }
+        if width >= 100, count * 2 <= lines { return .ledes }
+        if count <= lines { return .names(shown: count) }
+        // The last line is "+N more"; one line is no room for a name and a count.
+        return lines >= 2 ? .names(shown: lines - 1) : .dots
+    }
+
+    /// What a week's block has room for beyond its project: lines of lede, whether it says what came of
+    /// the sitting ("3 done · 1 dropped"), and how many of the tasks it finished are listed.
+    struct Block: Equatable {
+        var time = true
+        var lede = 0
+        var counts = false
+        var tasks = 0
+    }
+
+    /// `lines` is how many lines of 12.5pt fit below the project's name. The first goes to the lede, as
+    /// it always has; then what came of it, then the tasks it finished, and what's left lengthens the
+    /// lede to three. A column too narrow for words — or type too small to read — is a block of colour
+    /// and a name.
+    static func weekBlock(lines: Int, width: CGFloat, finished: Int, readable: Bool) -> Block {
+        guard readable, width >= 64 else { return Block(time: false) }
+        var block = Block()
+        var left = max(0, lines)
+        guard left > 0 else { return block }
+        block.lede = 1
+        left -= 1
+        if left > 0, finished > 0 || lines > 1 { block.counts = true; left -= 1 }
+        block.tasks = min(finished, left)
+        left -= block.tasks
+        block.lede += min(2, left)
+        return block
+    }
+
+    /// How a Coming up week's column draws its rows.
+    enum Column: Equatable {
+        /// A size down, with the project's mark.
+        case compact
+        /// Full size, with the mark.
+        case regular
+        /// Full size, with the project's name after its mark, as the list has it.
+        case named
+    }
+
+    static func column(width: CGFloat) -> Column {
+        width >= 240 ? .named : width >= 150 ? .regular : .compact
+    }
+
+    /// How tall an hour is in a week's grid: at least `minimum`, and more when the card has height
+    /// to spare, so the working day fills it rather than stopping halfway down.
+    static func perHour(available: CGFloat, hours: Int, minimum: CGFloat) -> CGFloat {
+        guard hours > 0 else { return minimum }
+        return max(minimum, (available / CGFloat(hours)).rounded(.down))
+    }
+}

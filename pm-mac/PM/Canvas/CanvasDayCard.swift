@@ -146,6 +146,8 @@ struct CanvasDayCard: View {
     let model: CanvasDayModel
     /// The card's zoom, applied to the type, as a text card's is.
     var zoom: Double = 1
+    /// How large the card is on screen, which a week and a month say less at when it's small.
+    var onScreen = CanvasOnScreen()
     var onOpenProject: (String) -> Void = { _ in }
     /// Do something to a row, in its sitting's project (docs/views.md D6). Nil draws the card read-only.
     var onAct: ((CanvasDayAction, [CanvasDayRow], SittingEntry) -> Void)?
@@ -257,12 +259,13 @@ struct CanvasDayCard: View {
         } else if let list = model.list, let span {
             // A week or a month is drawn even when it's empty: an empty week is still seven days.
             if model.spec.shownLayout == .week {
-                CanvasDayWeek(span: span, list: list, zoom: zoom, onOpenProject: onOpenProject,
+                CanvasDayWeek(span: span, list: list, zoom: zoom, onScreen: onScreen, onOpenProject: onOpenProject,
                               onOpenDay: onOpenDay, sittingCard: sittingCard)
             } else {
                 CanvasMonthGrid(span: span, zoom: zoom, isQuiet: { !$0.hasPrefix(span.month ?? $0) },
-                                onOpenDay: onOpenDay) { day, _ in
-                    CanvasDayMonthCell(sittings: CanvasTimeGrid.ordered(list.sittings.filter { $0.session == day }), zoom: zoom)
+                                onOpenDay: onOpenDay) { day, room in
+                    CanvasDayMonthCell(sittings: CanvasTimeGrid.ordered(list.sittings.filter { $0.session == day }),
+                                       room: room, zoom: zoom, readable: onScreen.finePrintReadable)
                 }
             }
         } else if let list = model.list {

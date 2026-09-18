@@ -540,6 +540,20 @@ query and no contract change: every layout draws an answer the view already had,
 - **Day's month doesn't show what fell due.** That's Coming up's question, and a board wanting both
   puts the two cards side by side. Calendar events (below) are still only room left in the design.
 - **Copy as Text** is the same document in every layout: the answer over the span drawn.
+- **A bigger card says more** (`CanvasCalendarDetail`). The layout doesn't just stretch: sizes are
+  measured in the card's own units, before its zoom, and each day or block says what fits.
+  - **Day's week.** The hours stretch to fill the card's height. Each block takes what it needs of
+    the room before the next one begins: first a line of lede, then what came of the sitting, then
+    the tasks it finished, then up to three lines of lede. It never runs into the next block. How
+    tall it's drawn reflects what it says, not how long the sitting ran (D5).
+  - **Day's month.** A day with room shows a line per sitting (its project, plus the time when the
+    day is wide). With twice the room it adds each sitting's lede. Cramped, it shows dots.
+  - **Coming up's week.** Columns go from compact rows with the project's mark, to full-size rows,
+    to rows with the project's name, as the list has them.
+  - **Coming up's month.** A task's words run to two lines when the day has room for all of them.
+  - **Zoomed out.** When the board is too far out for the 9.5pt type to be 7pt on screen, a month's
+    day becomes large dots and a week's blocks drop to a name. The node view only tells the card
+    (`CanvasOnScreen`) when the board's zoom crosses that line, so zooming redraws it once.
 
 ## Calendars, eventually
 
