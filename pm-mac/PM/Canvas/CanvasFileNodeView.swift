@@ -77,6 +77,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         super.update(node: node, scale: scale)
         let wanted = CanvasCardShows.of(node)
         if projectDisplay.shows != wanted { projectDisplay.shows = wanted }
+        let options = CanvasFolderOptions.of(node)
+        if let folder, folder.options != options { folder.options = options }
     }
 
     override func contentChanged() {
@@ -153,7 +155,7 @@ final class CanvasFileNodeView: CanvasNodeView {
         guard let url = location.url else { return missingView(path) }
 
         if CanvasFolderListing.isFolder(url) {
-            let model = folder ?? CanvasFolderModel(url: url)
+            let model = folder ?? CanvasFolderModel(url: url, options: CanvasFolderOptions.of(node))
             folder = model
             return NSHostingView(rootView: CanvasFolderCard(folder: model).canvasLinkZones(linkZones))
         }
@@ -240,6 +242,12 @@ final class CanvasFileNodeView: CanvasNodeView {
             board.lastEditedProject = store
         }
         return store
+    }
+
+    /// The folder this card lists, when its path is one — what Change Folder… starts from. See
+    /// `CanvasFolderCard`.
+    var folderURL: URL? {
+        location.url.flatMap { CanvasFolderListing.isFolder($0) ? $0 : nil }
     }
 
     /// Whether this card shows a project rather than a file.

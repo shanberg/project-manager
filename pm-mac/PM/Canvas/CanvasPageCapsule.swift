@@ -116,44 +116,6 @@ struct CanvasPageControls: View {
     }
 }
 
-// MARK: - What a page adds to the tile's menu
-
-/// The page's half of the focused tile's `…` — see `CanvasTileCapsule`, which owns the menu.
-///
-/// **Commands that were only ever on the card's own right-click menu.** Stepping into a card took that
-/// menu away: a right-click inside a live page is the *page's* menu now — Open Link as New Card, Add
-/// Link to Project, and WebKit's own items — which is right, and it means the card's menu is reachable
-/// only by stepping out first, from the one state where you are most likely to want it.
-///
-/// **Menu items rather than buttons.** Copy Address and Open in Browser each measured 26pt of a row
-/// whose address field is 104pt at the narrow end, and each is a thing you do once in a session. A menu
-/// is the shape for commands worth reaching and not worth staring at.
-///
-/// The last three are per *site* rather than per page — four cards on one tracker are one sign-in — so
-/// they name the card's own site and not wherever the page has wandered to.
-struct CanvasPageMenuItems: View {
-    var model: CanvasHeaderModel
-    let page: CanvasHeaderModel.Page
-
-    var body: some View {
-        Button("Copy Address", action: model.pageCopyAddress)
-        Button("Open in Browser", action: model.pageOpenInBrowser)
-        Button("Open Page as New Card", action: model.pageOpenAsNewCard)
-        Divider()
-        Button("Sign In to \(page.site)\u{2026}", action: model.pageSignIn)
-        Button("Sign Out of \(page.site)", action: model.pageSignOut)
-        Toggle("Block Ads on \(page.site)", isOn: Binding(
-            get: { page.isFiltered }, set: model.pageSetFiltered))
-        Picker("Identify \(page.site) As", selection: Binding(
-            get: { page.identity }, set: model.pageSetIdentity)) {
-            ForEach(CanvasBrowserIdentity.allCases, id: \.self) { Text($0.title).tag($0) }
-        }
-        Divider()
-        Toggle(CanvasCardMedia.keepRunningTitle(1), isOn: Binding(
-            get: { page.keepsRunning }, set: model.pageSetKeepRunning))
-    }
-}
-
 // MARK: - Back, and everywhere Back has been
 
 /// Back, with the pages behind it on a press-and-hold.

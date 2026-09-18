@@ -61,7 +61,8 @@ struct CanvasTileCapsule: View {
             // The menu joins the tile's own verbs at the ordinary spacing — it *is* the rest of them,
             // and a gap would make the maximize button a group of one. With no tile run to join it
             // becomes the second group itself, and takes the air.
-            if focus.tile == nil { HeaderGap() }
+            // With nothing before it — one card selected, no page, no tile — it is the whole capsule.
+            if focus.tile == nil, focus.page != nil { HeaderGap() }
             overflow
         }
         // Safe to animate because neither changes the capsule's width: a glyph swapped inside a hit
@@ -85,42 +86,16 @@ struct CanvasTileCapsule: View {
         tile.isMaximized ? "Put the workspace back" : "Fill the window with this tile"
     }
 
-    /// Everything else, in one menu — which is the point of merging the capsules.
+    /// Everything else, in one menu — the card's contextual menu, built by the board.
     ///
-    /// **Innermost first.** The page's items are about the thing you are reading; the tile's are about
-    /// the frame around it; Remove takes the frame away and goes last, as Delete does everywhere. A
-    /// separator between the two groups rather than a heading, because the titles already say which is
-    /// which — "Copy Address" and "Remove from Tiled View" are not going to be confused for each other.
-    ///
-    /// Rename and Arrange are **not** here: both are about the workspace rather than about this tile,
-    /// and both already have a home — the chip's own menu and the board's view options. A tile menu
-    /// carrying them would be the third place to look for one command.
+    /// **One menu, two ways in.** It was a list of its own — the page's items, then four of the tile's —
+    /// and that copy was the problem: every command a kind of card added to its right-click menu had to
+    /// be added here as well, and the ones nobody remembered were missing from the only menu that is
+    /// always on screen. It is now `CanvasBoardView.cardActionsMenu`, which is what right-clicking the
+    /// tile gives, so a card's commands arrive here for nothing. See `HeaderMenuButton`.
     private var overflow: some View {
-        Menu {
-            if let page = focus.page {
-                CanvasPageMenuItems(model: model, page: page)
-            }
-            if let tile = focus.tile {
-                if focus.page != nil { Divider() }
-                if tile.canPromote {
-                    Button("Make This the Master Tile", action: model.promoteTile)
-                }
-                if let pin = tile.pinTitle {
-                    Button(pin, action: model.pinTile)
-                }
-                Divider()
-                // Last, as Delete is everywhere: it is the one that takes something away. "Remove"
-                // rather than "Close" because it destroys nothing — a tile is a view of a card, and the
-                // card stays exactly where the board says it is. See `CanvasBoardView.removeFromTiling`.
-                Button("Remove from Tiled View", action: model.removeTile)
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
-        .headerHoverHighlight()
-        .help(focus.tile == nil ? "What this card can be told" : "What this tile can be told")
+        HeaderMenuButton(symbol: "ellipsis",
+                         help: focus.tile == nil ? "What this card can be told" : "What this tile can be told",
+                         open: model.showCardActions)
     }
 }

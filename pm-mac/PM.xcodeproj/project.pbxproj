@@ -54,6 +54,7 @@
 		236EE0E625E50DC308E2B496 /* CanvasPageHandoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB98746EBDDA3B6B0491156B /* CanvasPageHandoverTests.swift */; };
 		2371DC5BCADB7D6D25C25E5F /* TaskDeleteConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */; };
 		23A1806BB7BA7D0E7F2B00AD /* CanvasAddressCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A7834DF1EA6B93EEF334BF /* CanvasAddressCompletionTests.swift */; };
+		23DAF2FCB7EA9C07761B0839 /* HeaderMenuButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB8898C08D2730345688C09 /* HeaderMenuButtonTests.swift */; };
 		24F8436279997AFB022835C8 /* ProjectContentPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ECFDF5D89C4016A603F2DEF /* ProjectContentPane.swift */; };
 		26E4B15FFCCAA17908C2747E /* ProjectCodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEB4BC2DF1073FE4608E2138 /* ProjectCodes.swift */; };
 		27683EE9DA04C934CD7C4312 /* CanvasViewStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C611BFA8DE3DED1B89E9683A /* CanvasViewStateTests.swift */; };
@@ -661,6 +662,7 @@
 		E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsControls.swift; sourceTree = "<group>"; };
 		E973D36CA5E6F39110E907DE /* FrameMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMeter.swift; sourceTree = "<group>"; };
 		E9B1046B02C6010B0334E290 /* PMContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMContract.swift; sourceTree = "<group>"; };
+		EAB8898C08D2730345688C09 /* HeaderMenuButtonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderMenuButtonTests.swift; sourceTree = "<group>"; };
 		EAD443CC703258050F7EC610 /* CanvasPageDragOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageDragOriginTests.swift; sourceTree = "<group>"; };
 		EB0B459EB3C100D07716A611 /* CanvasOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasOverlayView.swift; sourceTree = "<group>"; };
 		ED144519BADFC5F999653A16 /* CanvasSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelectionTests.swift; sourceTree = "<group>"; };
@@ -1114,6 +1116,7 @@
 				D7B6419B2F04A2F01E15E55C /* Fixtures.swift */,
 				27DDC23EA5C93A952C4FA6D1 /* FlippedShadowTests.swift */,
 				67BE510BEC3BAA46D3DEBDFC /* HeaderChromeMotionTests.swift */,
+				EAB8898C08D2730345688C09 /* HeaderMenuButtonTests.swift */,
 				7FD1105C811101E44B91CD44 /* HiddenPaneGeometryTests.swift */,
 				E2F8F56F78DF923A9D75CC79 /* MentionPopoverGeometryTests.swift */,
 				969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */,
@@ -1603,6 +1606,7 @@
 				2D242CCEB7B954842C3145A6 /* FlippedShadowTests.swift in Sources */,
 				BC9CDB1622A873222BFB609E /* FrameMeter.swift in Sources */,
 				B9378BF4A8E83D1E9A830DBE /* HeaderChromeMotionTests.swift in Sources */,
+				23DAF2FCB7EA9C07761B0839 /* HeaderMenuButtonTests.swift in Sources */,
 				A0F5213BE92ADC6928B39D68 /* HiddenPaneGeometryTests.swift in Sources */,
 				3FEC031D0F1B3A201EEC0567 /* MarkdownTextEditor.swift in Sources */,
 				788B84519EFA792C3B3E8523 /* MentionPopover.swift in Sources */,
@@ -1720,7 +1724,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.43.1;
+				MARKETING_VERSION = 0.44.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1867,7 +1871,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.43.1;
+				MARKETING_VERSION = 0.44.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

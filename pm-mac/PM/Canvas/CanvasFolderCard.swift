@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PmLib
 
 /// What a folder dropped on a board shows: its name, how much is in it, and what that is.
 ///
@@ -14,8 +15,11 @@ import SwiftUI
 /// have made dropped from the Finder. Nothing needs stepping into first, and the card itself still opens
 /// the folder on a double-click, like any file card.
 ///
-/// Stored as the file card it always was — a path, which Obsidian keeps — so nothing about the `.canvas`
-/// changes and a board opened in Obsidian still has the card.
+/// **Laid out the way you set it.** The card's View menu offers the Finder's list and icon views and its
+/// sort orders — see `CanvasFolderOptions` — and Change Folder… points it somewhere else.
+///
+/// Stored as the file card it always was — a path, which Obsidian keeps, plus the view settings as two
+/// optional keys Obsidian ignores — so a board opened in Obsidian still has the card.
 struct CanvasFolderCard: View {
     @ObservedObject var folder: CanvasFolderModel
 
@@ -30,21 +34,47 @@ struct CanvasFolderCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(folder.listing.entries) { entry in
-                            row(entry)
-                        }
-                        if folder.listing.total > folder.listing.entries.count {
-                            Text("and \(folder.listing.total - folder.listing.entries.count) more")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                        }
+                    switch folder.options.view {
+                    case .list: list
+                    case .icons: icons
                     }
-                    .padding(.vertical, 4)
                 }
             }
+        }
+    }
+
+    private var list: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(folder.listing.entries) { entry in
+                row(entry)
+            }
+            more
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// The Finder's icon view: a grid that reflows to the card's width, each item its icon over its name.
+    private var icons: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 76, maximum: 110), spacing: 4, alignment: .top)],
+                      spacing: 6) {
+                ForEach(folder.listing.entries) { entry in
+                    cell(entry)
+                }
+            }
+            .padding(.horizontal, 8)
+            more
+        }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private var more: some View {
+        if folder.listing.total > folder.listing.entries.count {
+            Text("and \(folder.listing.total - folder.listing.entries.count) more")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
         }
     }
 
@@ -79,6 +109,15 @@ struct CanvasFolderCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
+            // The column the list is sorted by, the one thing a list sorted by date has to show to make
+            // sense. Name needs no column: it is already the row.
+            if let detail = folder.options.sort.detail(of: entry) {
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: 24)
@@ -86,6 +125,118 @@ struct CanvasFolderCard: View {
         .reportsLinkZone(entry.url)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isLink)
+    }
+
+    private func cell(_ entry: CanvasFolderEntry) -> some View {
+        VStack(spacing: 3) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
+                .resizable()
+                .frame(width: 40, height: 40)
+            Text(entry.name)
+                .font(.system(size: 11))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .truncationMode(.middle)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .reportsLinkZone(entry.url)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isLink)
+    }
+}
+
+/// How a folder card is laid out, and the order it lists things in — set from the card's View menu.
+///
+/// **Kept on the node, in the file**, the bargain `CanvasCardShows` made: this is something you *set*,
+/// it is a fact about the card rather than the machine, and two cards on one folder — a list by date
+/// beside the icons — are two different cards only if each remembers which it is. Absent keys are the
+/// Finder's defaults, so a card never touched writes nothing and an old `.canvas` reads as it always did.
+struct CanvasFolderOptions: Equatable {
+    var view: CanvasFolderView = .list
+    var sort: CanvasFolderSort = .name
+
+    static let viewKey = "pmFolderView"
+    static let sortKey = "pmFolderSort"
+
+    /// What `node` says, with anything PM can't read falling back to the default — a hand-edited typo
+    /// should draw a folder, not a blank card.
+    static func of(_ node: CanvasNode) -> CanvasFolderOptions {
+        var options = CanvasFolderOptions()
+        if case .string(let raw)? = node.extra[viewKey], let view = CanvasFolderView(rawValue: raw) {
+            options.view = view
+        }
+        if case .string(let raw)? = node.extra[sortKey], let sort = CanvasFolderSort(rawValue: raw) {
+            options.sort = sort
+        }
+        return options
+    }
+
+    /// Put these on a card — as the absence of each key at its default, so a card changed and changed
+    /// back leaves the file exactly as it found it.
+    func set(on node: inout CanvasNode) {
+        node.extra[Self.viewKey] = view == .list ? nil : .string(view.rawValue)
+        node.extra[Self.sortKey] = sort == .name ? nil : .string(sort.rawValue)
+    }
+}
+
+/// The Finder's two views that fit a card. Columns and Gallery are ways of walking a tree, and a card
+/// is one folder's top level.
+enum CanvasFolderView: String, CaseIterable {
+    case list, icons
+
+    /// The Finder's own words, from its View menu.
+    var title: String {
+        switch self {
+        case .list: return "as List"
+        case .icons: return "as Icons"
+        }
+    }
+}
+
+/// What a folder card sorts by. Folders stay on top whichever it is, as the card always kept them.
+enum CanvasFolderSort: String, CaseIterable {
+    case name, kind, modified, size
+
+    var title: String {
+        switch self {
+        case .name: return "Name"
+        case .kind: return "Kind"
+        case .modified: return "Date Modified"
+        case .size: return "Size"
+        }
+    }
+
+    /// Whether `a` goes before `b`. Dates and sizes run the way the Finder's do on first click — newest
+    /// and largest first, since that is the question a sort by either is asking — and anything the two
+    /// can't tell apart falls back to the name.
+    func precedes(_ a: CanvasFolderEntry, _ b: CanvasFolderEntry) -> Bool {
+        switch self {
+        case .name: break
+        case .kind:
+            let order = a.kind.localizedStandardCompare(b.kind)
+            if order != .orderedSame { return order == .orderedAscending }
+        case .modified:
+            if a.modified != b.modified { return (a.modified ?? .distantPast) > (b.modified ?? .distantPast) }
+        case .size:
+            if a.size != b.size { return (a.size ?? -1) > (b.size ?? -1) }
+        }
+        return a.name.localizedStandardCompare(b.name) == .orderedAscending
+    }
+
+    /// What a list row shows beside the name for this sort, or nil when the name is the whole story.
+    /// A folder has no size worth saying without walking it, so it says nothing, as the Finder's "--".
+    func detail(of entry: CanvasFolderEntry) -> String? {
+        switch self {
+        case .name: return nil
+        case .kind: return entry.kind
+        case .modified:
+            return entry.modified.map { $0.formatted(.relative(presentation: .named)) }
+        case .size:
+            guard !entry.isFolder, let size = entry.size else { return nil }
+            return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        }
     }
 }
 
@@ -95,6 +246,10 @@ struct CanvasFolderEntry: Identifiable, Equatable {
     let name: String
     /// A folder you can go into. A package — an app, a bundle — is a file here, as it is in the Finder.
     let isFolder: Bool
+    var kind = ""
+    var modified: Date?
+    /// Bytes, for a file. Nil for a folder, which would have to be walked to be weighed.
+    var size: Int?
     var id: URL { url }
 }
 
@@ -109,21 +264,28 @@ struct CanvasFolderListing: Equatable {
     /// that takes seconds to build to show you the first twenty.
     static let limit = 500
 
-    /// Read `url`'s top level: hidden files skipped, folders first, then the Finder's own name order.
-    static func read(_ url: URL, limit: Int = limit) -> CanvasFolderListing {
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .localizedNameKey]
+    /// Read `url`'s top level: hidden files skipped, folders first, then in `sort`'s order — the Finder's
+    /// own name order by default. Sorted before the cap, so a folder of thousands sorted by date shows
+    /// the newest, not the newest of whichever came first by name.
+    static func read(_ url: URL, sort: CanvasFolderSort = .name, limit: Int = limit) -> CanvasFolderListing {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .localizedNameKey,
+                                      .localizedTypeDescriptionKey, .contentModificationDateKey, .fileSizeKey]
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
             return CanvasFolderListing()
         }
         let entries = urls.map { item -> CanvasFolderEntry in
             let values = try? item.resourceValues(forKeys: Set(keys))
+            let isFolder = values?.isDirectory == true && values?.isPackage != true
             return CanvasFolderEntry(url: item,
                                      name: values?.localizedName ?? item.lastPathComponent,
-                                     isFolder: values?.isDirectory == true && values?.isPackage != true)
+                                     isFolder: isFolder,
+                                     kind: values?.localizedTypeDescription ?? "",
+                                     modified: values?.contentModificationDate,
+                                     size: isFolder ? nil : values?.fileSize)
         }.sorted { a, b in
             if a.isFolder != b.isFolder { return a.isFolder }
-            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            return sort.precedes(a, b)
         }
         return CanvasFolderListing(entries: Array(entries.prefix(limit)), total: entries.count)
     }
@@ -150,13 +312,22 @@ struct CanvasFolderListing: Equatable {
 final class CanvasFolderModel: ObservableObject {
     let url: URL
     @Published private(set) var listing: CanvasFolderListing
+    /// How the card lays the folder out, as its node says — kept in step by `CanvasFileNodeView.update`.
+    /// A new sort is a new read, since the cap is applied after sorting.
+    @Published var options: CanvasFolderOptions {
+        didSet {
+            guard options.sort != oldValue.sort else { return }
+            listing = CanvasFolderListing.read(url, sort: options.sort)
+        }
+    }
 
     private var source: DispatchSourceFileSystemObject?
     private var pending: DispatchWorkItem?
 
-    init(url: URL) {
+    init(url: URL, options: CanvasFolderOptions = CanvasFolderOptions()) {
         self.url = url
-        listing = CanvasFolderListing.read(url)
+        self.options = options
+        listing = CanvasFolderListing.read(url, sort: options.sort)
         watch()
     }
 
@@ -187,7 +358,7 @@ final class CanvasFolderModel: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let next = CanvasFolderListing.read(self.url)
+                let next = CanvasFolderListing.read(self.url, sort: self.options.sort)
                 if next != self.listing { self.listing = next }
             }
         }

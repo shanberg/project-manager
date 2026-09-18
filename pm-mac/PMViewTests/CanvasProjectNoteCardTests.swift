@@ -71,6 +71,19 @@ final class CanvasProjectNoteCardTests: XCTestCase {
         XCTAssertNil(CanvasProjectNoteCard.notes(forCanvasAt: root.appendingPathComponent("docs/Bare.canvas")))
     }
 
+    /// New Folder on a project's board puts the project's own folder there — from `docs/` or from the
+    /// top — and a board that isn't a project's has no guess to make.
+    func testAProjectsBoardKnowsItsFolder() throws {
+        let root = try project("W-001 Walkable")
+        XCTAssertEqual(CanvasProjectNoteCard.projectFolder(forCanvasAt: root.appendingPathComponent("docs/Walkable.canvas"))?
+                        .standardizedFileURL.path, root.standardizedFileURL.path)
+        XCTAssertEqual(CanvasProjectNoteCard.projectFolder(forCanvasAt: root.appendingPathComponent("Walkable.canvas"))?
+                        .standardizedFileURL.path, root.standardizedFileURL.path)
+        let loose = vault.appendingPathComponent("Boards")
+        try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
+        XCTAssertNil(CanvasProjectNoteCard.projectFolder(forCanvasAt: loose.appendingPathComponent("ideas.canvas")))
+    }
+
     // MARK: Whether it is already there
 
     private func board(_ paths: [String]) -> CanvasDocument {

@@ -404,13 +404,24 @@ struct HeaderHoverHighlight: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .modifier(HeaderHoverCapsule(visible: hovering && enabled))
+            .onHover { hovering = $0 }
+    }
+}
+
+/// The hover capsule itself, for a control that learns about the pointer some other way — see
+/// `HeaderMenuButton`, whose AppKit half is what the pointer is over.
+struct HeaderHoverCapsule: ViewModifier {
+    var visible: Bool
+
+    func body(content: Content) -> some View {
+        content
             .background {
                 Capsule()
                     .fill(.primary.opacity(0.07))
-                    .opacity(hovering && enabled ? 1 : 0)
+                    .opacity(visible ? 1 : 0)
             }
-            .onHover { hovering = $0 }
-            .animation(Motion.animation(.easeOut(duration: 0.12)), value: hovering)
+            .animation(Motion.animation(.easeOut(duration: 0.12)), value: visible)
     }
 }
 
@@ -484,5 +495,82 @@ struct HeaderSymbolButton: View {
         }
         .buttonStyle(.plain)
         .headerHoverHighlight(enabled: enabled)
+    }
+}
+
+/// A header glyph that opens an AppKit menu, on mouse-down and just below itself, as a pull-down does.
+///
+/// **For a menu something else already builds.** A SwiftUI `Menu` has to spell out its items in
+/// SwiftUI, which is how the focus capsule's `…` came to be a second, hand-kept copy of a card's
+/// contextual menu — one that every new kind of card had to remember to extend, and the folder card
+/// didn't. This takes an `NSMenu` built wherever the commands live, so the two menus are one.
+///
+/// The click lands on an `NSControl`, not on SwiftUI: a control is what carves a press out of the
+/// titlebar's window-drag band (see `WindowDragBlocker`), and it hands `open` a view to position the
+/// menu against. The glyph and its hover capsule are drawn in SwiftUI like every other header item.
+struct HeaderMenuButton: View {
+    let symbol: String
+    /// The tooltip, and what the control is called.
+    let help: String
+    /// Show the menu against this view — `NSMenu.popUpBelow(_:)` does the positioning.
+    let open: (NSView) -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
+            .accessibilityHidden(true)
+            .overlay(MenuPressArea(help: help, open: open, hovering: $hovering))
+            .modifier(HeaderHoverCapsule(visible: hovering))
+    }
+}
+
+private struct MenuPressArea: NSViewRepresentable {
+    let help: String
+    let open: (NSView) -> Void
+    @Binding var hovering: Bool
+
+    func makeNSView(context: Context) -> Control { Control() }
+
+    func updateNSView(_ view: Control, context: Context) {
+        view.open = open
+        view.hovered = { hovering = $0 }
+        view.toolTip = help
+        view.setAccessibilityLabel(help)
+    }
+
+    final class Control: NSControl {
+        var open: (NSView) -> Void = { _ in }
+        var hovered: (Bool) -> Void = { _ in }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            hovered(false)
+            open(self)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero,
+                                           options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                           owner: self))
+        }
+        override func mouseEntered(with event: NSEvent) { hovered(true) }
+        override func mouseExited(with event: NSEvent) { hovered(false) }
+
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .menuButton }
+        override func accessibilityPerformPress() -> Bool { open(self); return true }
+    }
+}
+
+extension NSMenu {
+    /// Pop up as a pull-down from `view`: its leading edge, a few points under it.
+    func popUpBelow(_ view: NSView) {
+        let y = view.isFlipped ? view.bounds.maxY + 4 : view.bounds.minY - 4
+        popUp(positioning: nil, at: NSPoint(x: view.bounds.minX, y: y), in: view)
     }
 }
