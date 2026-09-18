@@ -123,14 +123,14 @@ final class SessionPicksTests: XCTestCase {
     func testAPickedUpTaskSaysWhenOnItsOwnLine() {
         let now = ISO8601DateFormatter().date(from: "2026-09-17T12:00:00Z")!
         var dana = task("Email Dana", session: 2, line: 0)
-        XCTAssertNil(SessionPicks.pickedMark(dana, now: now))
+        XCTAssertNil(SessionPicks.pickedDay(dana, now: now))
         dana.picked = PickMark(into: "2026-09-17", at: "2026-09-17T15:00:00Z")
-        XCTAssertEqual(SessionPicks.pickedMark(dana, now: now), "picked up Sep 17")
+        XCTAssertEqual(SessionPicks.pickedDay(dana, now: now), "Sep 17")
 
         // Every line of a picked tree carries the fact; only the top line says it.
         var room = task("Find a room", session: 2, line: 1, depth: 1)
         room.picked = dana.picked
-        XCTAssertNil(SessionPicks.pickedMark(room, now: now))
+        XCTAssertNil(SessionPicks.pickedDay(room, now: now))
     }
 
     // MARK: The sentence it was written in

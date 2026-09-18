@@ -35,24 +35,26 @@ struct CanvasViewRow<Trailing: View, Menu: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap * zoom) {
             checkbox
-            if isEditing {
-                // The field every inline task editor uses, with its `[[…]]` completion and a typing
-                // history of its own for ⌘Z (`TokenClickField.typingUndo`).
-                CompletingTextField(text: $draft, placeholder: "Task",
-                                    onSubmit: onSubmitEdit,
-                                    onCancel: onCancelEdit,
-                                    onOpenProject: onOpenProject)
-                    .frame(height: 21)
-            } else {
-                Text(row.text)
-                    .font(.system(size: TaskRowMetrics.textSize * zoom))
-                    .foregroundStyle(state == .open ? .primary : .secondary)
-                    .strikethrough(state == .dropped, color: .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
+            // The project card's line: the badges give way to the words, not the other way round.
+            TaskLineLayout(gap: 6 * zoom) {
+                if isEditing {
+                    // The field every inline task editor uses, with its `[[…]]` completion and a typing
+                    // history of its own for ⌘Z (`TokenClickField.typingUndo`).
+                    CompletingTextField(text: $draft, placeholder: "Task",
+                                        onSubmit: onSubmitEdit,
+                                        onCancel: onCancelEdit,
+                                        onOpenProject: onOpenProject)
+                        .frame(height: 21)
+                } else {
+                    Text(row.text)
+                        .font(.system(size: TaskRowMetrics.textSize * zoom))
+                        .foregroundStyle(state == .open ? .primary : .secondary)
+                        .strikethrough(state == .dropped, color: .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 4 * zoom) { trailing() }
             }
-            Spacer(minLength: 4)
-            trailing()
         }
         .padding(.leading, Double(row.depth) * TaskRowMetrics.indentStep * zoom)
         .background(TaskThreads(depth: row.depth, leading: 0, zoom: zoom))

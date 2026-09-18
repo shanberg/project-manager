@@ -1,0 +1,137 @@
+import SwiftUI
+
+/// A task's words, the badges after them, and an optional control that appears over the words' end.
+///
+/// **The words keep their width.** A badge column beside the text used to take whatever it needed and
+/// leave the text the rest, so a narrow card with a date, a pick-up and a count wrapped a task into a
+/// thin strip three lines deep. Now the badges stay on the line only while the text keeps at least
+/// `minTextShare` of it. Past that they go to a line of their own under the text, the way Reminders
+/// puts a task's details under it, and the words get the full width back.
+///
+/// **The third view is a ghost**: a control that shows on hover, like the card's "＋date". It is
+/// placed at the end of the text's first line, over the words, and takes no room. A control that
+/// held its space while invisible cost every task the width of a button nobody could see.
+struct TaskLineLayout: Layout {
+    /// Between the words and the badges on one line.
+    var gap: CGFloat = 6
+    /// Between the words and the badges on a line of their own.
+    var stackSpacing: CGFloat = 1
+    /// The least of a line the words keep before its badges move under them.
+    var minTextShare: CGFloat = 0.7
+
+    private struct Placement {
+        var text: CGRect
+        var badges: CGRect
+        var ghost: CGRect?
+        var textBaseline: CGFloat
+        var size: CGSize
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        place(width: proposal.width, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let placement = place(width: bounds.width, subviews)
+        func put(_ index: Int, _ rect: CGRect) {
+            guard subviews.indices.contains(index) else { return }
+            subviews[index].place(at: CGPoint(x: bounds.minX + rect.minX, y: bounds.minY + rect.minY),
+                                  proposal: ProposedViewSize(rect.size))
+        }
+        put(0, placement.text)
+        put(1, placement.badges)
+        if let ghost = placement.ghost { put(2, ghost) }
+    }
+
+    /// The text's first baseline, so the row can line the box up with the words.
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout ()) -> CGFloat? {
+        guard guide == .firstTextBaseline else { return nil }
+        let placement = place(width: bounds.width, subviews)
+        return placement.text.minY + placement.textBaseline
+    }
+
+    private func place(width: CGFloat?, _ subviews: Subviews) -> Placement {
+        guard let text = subviews.first else { return Placement(text: .zero, badges: .zero, textBaseline: 0, size: .zero) }
+        let badges = subviews.count > 1 ? subviews[1] : nil
+        let badgeSize = badges?.sizeThatFits(.unspecified) ?? .zero
+        let hasBadges = badgeSize.width > 0.5
+        let badgeRoom = hasBadges ? gap + badgeSize.width : 0
+
+        let textWidth: CGFloat?
+        let inline: Bool
+        if let width {
+            inline = !hasBadges || width - badgeRoom >= width * minTextShare
+            textWidth = inline ? max(width - badgeRoom, 0) : width
+        } else {
+            inline = true
+            textWidth = nil
+        }
+        let textProposal = ProposedViewSize(width: textWidth, height: nil)
+        let textSize = text.sizeThatFits(textProposal)
+        let textBaseline = text.dimensions(in: textProposal)[VerticalAlignment.firstTextBaseline]
+        let columnWidth = textWidth ?? textSize.width
+        let total = width ?? (columnWidth + badgeRoom)
+
+        var textRect = CGRect(x: 0, y: 0, width: columnWidth, height: textSize.height)
+        var badgeRect = CGRect.zero
+        if hasBadges, let badges {
+            let badgeBaseline = badges.dimensions(in: .unspecified)[VerticalAlignment.firstTextBaseline]
+            if inline {
+                // Baselines level; whichever reaches higher sets the top.
+                var badgeY = textBaseline - badgeBaseline
+                if badgeY < 0 {
+                    textRect.origin.y = -badgeY
+                    badgeY = 0
+                }
+                badgeRect = CGRect(x: total - badgeSize.width, y: badgeY,
+                                   width: badgeSize.width, height: badgeSize.height)
+            } else {
+                badgeRect = CGRect(x: 0, y: textRect.maxY + stackSpacing,
+                                   width: badgeSize.width, height: badgeSize.height)
+            }
+        }
+
+        var ghostRect: CGRect?
+        if subviews.count > 2 {
+            let ghost = subviews[2]
+            let size = ghost.sizeThatFits(.unspecified)
+            let baseline = ghost.dimensions(in: .unspecified)[VerticalAlignment.firstTextBaseline]
+            ghostRect = CGRect(x: textRect.maxX - size.width, y: textRect.minY + textBaseline - baseline,
+                               width: size.width, height: size.height)
+        }
+
+        let height = max(textRect.maxY, hasBadges ? badgeRect.maxY : 0)
+        return Placement(text: textRect, badges: badgeRect, ghost: ghostRect, textBaseline: textBaseline,
+                         size: CGSize(width: total, height: height))
+    }
+}
+
+/// The mask that fades the end of a task's first line out from under a ghost control, so "＋date" sits
+/// on the words' trailing edge rather than printed over them.
+struct TaskLineFade: View {
+    /// Whether the ghost is showing. When it isn't, the mask lets everything through.
+    let active: Bool
+    /// How much of the line's end to clear.
+    let clearWidth: CGFloat
+    /// The first line's height, which is all the ghost covers.
+    let lineHeight: CGFloat
+    var fadeWidth: CGFloat = 16
+
+    var body: some View {
+        if active {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: fadeWidth)
+                    Color.clear.frame(width: clearWidth)
+                }
+                .frame(height: lineHeight)
+                Color.black
+            }
+        } else {
+            Color.black
+        }
+    }
+}

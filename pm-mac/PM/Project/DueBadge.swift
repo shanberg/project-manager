@@ -20,7 +20,6 @@ enum DueBadge {
     static func chip(_ text: String, style: DueChipStyle) -> some View {
         Text(text)
             .font(.caption2.weight(style.weight))
-            .italic(style.italic)
             // A relative badge rewrites itself as the days tick down, and "in 2d" → "in 3d" shouldn't
             // shift the row's layout to do it.
             .monospacedDigit()
@@ -38,18 +37,11 @@ enum DueBadge {
             .foregroundStyle(style.text)
     }
 
-    /// The read-only form: a task's date as it stands, or nothing at all.
-    ///
-    /// No "＋date" affordance and no menu — a card is a clipping, and an empty control offering to set
-    /// something the card cannot set is worse than a quiet row. A task with no date simply has no badge.
-    @ViewBuilder static func reading(_ todo: Todo) -> some View {
-        if let shown = todo.dueDate.map({ (raw: $0, own: true) })
-            ?? todo.effectiveDueDate.map({ (raw: $0, own: false) }) {
-            chip(RelativeDue.short(shown.raw),
-                 style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
-                .help("Due " + RelativeDue.full(shown.raw))
-        }
-    }
+    /// How wide the empty "＋date" chip draws: what a task's words clear for it on hover.
+    static let emptyChipWidth: CGFloat = {
+        let font = NSFont.systemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption2).pointSize)
+        return ceil(("＋date" as NSString).size(withAttributes: [.font: font]).width) + 10
+    }()
 }
 
 struct DueChipStyle {
@@ -58,15 +50,13 @@ struct DueChipStyle {
     var stroke: Color?
     var fill: Color
     var weight: Font.Weight
-    /// A date the task inherited from an ancestor rather than owns. Italic, as an inherited wait is
-    /// (`WaitRunStyle`): the one lever that reads as *reported* rather than as *less important*.
-    var italic: Bool
 
-    init(due: String, own: Bool, done: Bool) {
+    /// A task's own date. An inherited one isn't drawn as a chip: the parent's chip is right above,
+    /// and repeating it down every subtask was most of what crowded a tree's words.
+    init(due: String, done: Bool) {
         // A completed task's date is a record rather than a deadline, so it reads at the quietest step
-        // of the scale — no tint, no fill, no extra weight — while keeping the slant that says whose
-        // date it is.
-        let state: DueState = done ? .later : DueState(due: due, own: own)
+        // of the scale — no tint, no fill, no extra weight.
+        let state: DueState = done ? .later : DueState(due: due, own: true)
         let tint: Color
         switch state {
         case .overdue: tint = Color(nsColor: .systemRed)
@@ -75,11 +65,10 @@ struct DueChipStyle {
         }
         text = tint
         stroke = nil
-        italic = !own
-        if own, state == .overdue {
+        if state == .overdue {
             fill = tint.opacity(0.14)
             weight = .semibold
-        } else if own, state == .soon {
+        } else if state == .soon {
             fill = .clear
             weight = .medium
         } else {
@@ -88,14 +77,12 @@ struct DueChipStyle {
         }
     }
 
-    private init(text: Color, stroke: Color?, fill: Color, weight: Font.Weight, italic: Bool) {
-        self.text = text; self.stroke = stroke; self.fill = fill
-        self.weight = weight; self.italic = italic
+    private init(text: Color, stroke: Color?, fill: Color, weight: Font.Weight) {
+        self.text = text; self.stroke = stroke; self.fill = fill; self.weight = weight
     }
 
     /// The "＋date" affordance on a task with no date at all — a control, so it stays quiet.
-    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear,
-                                    weight: .regular, italic: false)
+    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear, weight: .regular)
 }
 
 
@@ -115,12 +102,8 @@ struct DueChip: View {
     /// Open the precise picker, for a date the presets haven't got.
     let onPickCustom: () -> Void
 
-    /// The date this chip is showing, and whether the task owns it or inherited it from an ancestor.
-    private var shown: (raw: String, own: Bool)? {
-        if let own = todo.dueDate { return (own, true) }
-        if let inherited = todo.effectiveDueDate { return (inherited, false) }
-        return nil
-    }
+    /// The task's own date. An inherited one is the parent's to show (see `DueChipStyle.init`).
+    private var shown: String? { todo.dueDate }
 
     private var hasDate: Bool { shown != nil }
     private var showing: Bool { hasDate || reveal || isEditing }
@@ -133,8 +116,7 @@ struct DueChip: View {
             menuItems
         } label: {
             if let shown {
-                DueBadge.chip(RelativeDue.short(shown.raw),
-                     style: DueChipStyle(due: shown.raw, own: shown.own, done: todo.checked))
+                DueBadge.chip(RelativeDue.short(shown), style: DueChipStyle(due: shown, done: todo.checked))
             } else {
                 DueBadge.chip("＋date", style: .empty)
             }
@@ -185,9 +167,34 @@ struct DueChip: View {
             return "Due \(RelativeDue.full(own))  ·  click to edit"
         }
         if let eff = todo.effectiveDueDate {
-            return "Inherited due \(RelativeDue.full(eff))  ·  click to set this task's own"
+            return "Inherits due \(RelativeDue.full(eff))  ·  click to set this task's own"
         }
         return "Set due date"
     }
 
 }
+
+/// A subtask whose parent is overdue says so with a dot, not the parent's date again: the date is on the
+/// parent's line, and the dot is what keeps the branch from looking fine further down.
+struct InheritedOverdueDot: View {
+    let due: String
+
+    /// The dot for `todo`, when a date it inherits has passed and it isn't finished.
+    static func due(for todo: Todo) -> String? {
+        guard todo.dueDate == nil, todo.state == .open, let inherited = todo.effectiveDueDate,
+              RelativeDue.isOverdue(inherited) else { return nil }
+        return inherited
+    }
+
+    var body: some View {
+        Circle()
+            .fill(Color(nsColor: .systemRed))
+            .frame(width: 6, height: 6)
+            // Centred on the words' x-height rather than sat on their baseline.
+            .alignmentGuide(.firstTextBaseline) { dimensions in dimensions.height / 2 + 3.5 }
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            .help("Parent overdue · due \(RelativeDue.full(due))")
+    }
+}
+

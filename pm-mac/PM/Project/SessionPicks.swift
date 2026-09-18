@@ -98,14 +98,14 @@ enum SessionPicks {
         return (sameYear ? thisYear : otherYear).string(from: date)
     }
 
-    /// The trailing mark on a task that has been picked up since it was written — "picked up Sep 17" —
-    /// so an old sitting says what became of its leftovers instead of looking abandoned.
+    /// The day a task has been picked up into since it was written — drawn "↗ Sep 17" after it — so an
+    /// old sitting says what became of its leftovers instead of looking abandoned.
     ///
     /// On a tree's top line only. Every line of a picked tree carries the fact, and the mark on each of
     /// them would say one thing as many times as the tree has lines.
-    static func pickedMark(_ todo: Todo, now: Date = Date()) -> String? {
-        guard todo.depth == 0, let picked = todo.picked, let day = day(iso: picked.into, now: now) else { return nil }
-        return "picked up \(day)"
+    static func pickedDay(_ todo: Todo, now: Date = Date()) -> String? {
+        guard todo.depth == 0, let picked = todo.picked else { return nil }
+        return day(iso: picked.into, now: now)
     }
 
     // MARK: The sentence it was written in

@@ -1012,6 +1012,12 @@ struct CanvasProjectNote: View {
         let rowID = rowID(todo, place)
         let isOrigin = place == .origin
         let size = TaskRowMetrics.textSize
+        let dueRevealed = hovering == rowID || activeEditor == EditorTarget(key: rowID, kind: .due)
+        let dueChip = DueChip(todo: todo,
+                              isEditing: activeEditor == EditorTarget(key: rowID, kind: .due),
+                              reveal: hovering == rowID,
+                              onPick: { store.setDue(todo, due: $0) },
+                              onPickCustom: { open(.due, on: todo, place: place) })
         return HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap) {
             Button { store.toggle(todo) } label: {
                 TaskStatusIcon(state: todo.state, size: TaskRowMetrics.boxSize(depth: todo.depth))
@@ -1021,49 +1027,59 @@ struct CanvasProjectNote: View {
             .buttonStyle(.plain)
             .help(todo.checked ? "Reopen" : "Complete")
 
-            TokenTextLabel(attributed: taskLineAttributed(todo, wait: store.wait(for: todo),
-                                                          size: size),
-                           onOpenProject: onOpenProject)
-                .alignmentGuide(.firstTextBaseline) { _ in
-                    TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused)
+            // The words, what follows them, and "＋date" on hover — see `TaskLineLayout` for why the
+            // badges give way to the words rather than the other way round.
+            TaskLineLayout {
+                TokenTextLabel(attributed: taskLineAttributed(todo, wait: store.wait(for: todo),
+                                                              size: size),
+                               onOpenProject: onOpenProject)
+                    .alignmentGuide(.firstTextBaseline) { _ in
+                        TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .mask(TaskLineFade(active: todo.dueDate == nil && dueRevealed,
+                                       clearWidth: DueBadge.emptyChipWidth,
+                                       lineHeight: TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused) + 5))
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // Said on the task's own line, and in the pile: the sitting it was written in has
+                    // since picked it up. Not on the copy under Picked up, which is standing in that
+                    // sitting.
+                    if isOrigin, let day = SessionPicks.pickedDay(todo) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Image(systemName: "arrow.up.right")
+                            Text(day)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .help("Picked up on \(day)")
+                    }
+                    if showsOrigin { originChip(todo) }
+                    // A parent says how far through its subtasks it is, the way Things counts a
+                    // checklist. Only while it is open: a finished parent's count is a record nobody is
+                    // working from.
+                    if todo.state == .open, let count = subtaskCounts[key], count.total > 0 {
+                        Text("\(count.done)/\(count.total)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                            .help("\(count.done) of \(count.total) subtasks done")
+                    }
+                    if todo.dueDate != nil {
+                        dueChip
+                    } else if let due = InheritedOverdueDot.due(for: todo) {
+                        InheritedOverdueDot(due: due)
+                    }
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                // Sized before the spacer beside it: both are flexible, and an HStack splits what is
-                // left between its flexible children — so without this the words and the empty gap take
-                // half the card each and every task wraps.
-                .layoutPriority(1)
 
-            Spacer(minLength: 4)
-
-            // Said on the task's own line, and in the pile: the sitting it was written in has since
-            // picked it up. Not on the copy under Picked up, which is standing in that sitting.
-            if isOrigin, let mark = SessionPicks.pickedMark(todo) {
-                Text(mark)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .fixedSize()
+                // Revealed on hover, exactly as in the window, and over the words' end rather than
+                // beside them. Shown unconditionally it put a dashed "＋date" on every dateless task on
+                // the card at once; laid out invisibly it cost every one of them the chip's width.
+                if todo.dueDate == nil { dueChip }
             }
-            if showsOrigin { originChip(todo) }
-            // A parent says how far through its subtasks it is, the way Things counts a checklist.
-            // Only while it is open: a finished parent's count is a record nobody is working from.
-            if todo.state == .open, let count = subtaskCounts[key], count.total > 0 {
-                Text("\(count.done)/\(count.total)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
-                    .help("\(count.done) of \(count.total) subtasks done")
-            }
-
-            // Revealed on hover, exactly as in the window. Shown unconditionally it put a dashed
-            // "＋date" on every dateless task on the card at once, which on a board of project cards is
-            // a lot of empty controls competing with the tasks they are attached to. The card takes the
-            // pointer once you have stepped into it, so it has a hover state to hang this off after all.
-            DueChip(todo: todo,
-                    isEditing: activeEditor == EditorTarget(key: rowID, kind: .due),
-                    reveal: hovering == rowID,
-                    onPick: { store.setDue(todo, due: $0) },
-                    onPickCustom: { open(.due, on: todo, place: place) })
         }
         .onHover { inside in
             hovering = inside ? rowID : (hovering == rowID ? nil : hovering)
