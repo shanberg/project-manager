@@ -9,7 +9,7 @@ import SwiftUI
 /// project card, through its own project's store — taken when you act, not for every project in view.
 /// See `CanvasDayActions`.
 final class CanvasViewNodeView: CanvasNodeView {
-    /// What the card draws: a Day's sittings, or a list of tasks (Waiting, Search).
+    /// What the card draws: a Day's sittings, or a list of tasks (Waiting, Search, Leftovers).
     enum Model {
         case day(CanvasDayModel)
         case tasks(CanvasTaskListModel)
@@ -17,7 +17,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         @MainActor init(_ spec: CanvasViewSpec) {
             switch spec.kind {
             case .day: self = .day(CanvasDayModel(spec: spec))
-            case .waiting, .search: self = .tasks(CanvasTaskListModel(spec: spec))
+            case .waiting, .search, .leftovers: self = .tasks(CanvasTaskListModel(spec: spec))
             }
         }
 
@@ -107,12 +107,14 @@ final class CanvasViewNodeView: CanvasNodeView {
         }
     }
 
-    /// What the card is called in one word or two: its period for a Day, else its kind.
+    /// What the card is called in one word or two: its period for a Day, else its kind — and for
+    /// Leftovers the cut-off, when it isn't today.
     private var name: String {
         switch spec.kind {
         case .day: return spec.period.title
         case .waiting: return "Waiting"
         case .search: return spec.query.isEmpty ? "Search" : "Search “\(spec.query)”"
+        case .leftovers: return spec.period == .today ? "Leftovers" : "Leftovers \(spec.period.beforeTitle)"
         }
     }
 
@@ -121,6 +123,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .day: return "calendar"
         case .waiting: return "clock"
         case .search: return "magnifyingglass"
+        case .leftovers: return "tray.full"
         }
     }
 
@@ -142,7 +145,12 @@ final class CanvasViewNodeView: CanvasNodeView {
                         for row in rows { day.settle(CanvasDayRows.key(row, in: sitting)) }
                     }
                 },
-                sittingCard: { [weak self] sitting in self?.sittingCardProvider(sitting) }))
+                sittingCard: { [weak self] sitting in
+                    self?.sittingCardProvider(project: sitting.projectFolder,
+                                              session: SessionRef(date: sitting.session, ordinal: sitting.sessionOrdinal,
+                                                                  digest: sitting.sessionDigest.isEmpty ? nil : sitting.sessionDigest),
+                                              title: [sitting.projectName, sitting.name])
+                }))
         case .tasks(let tasks):
             root = AnyView(CanvasTaskListCard(
                 model: tasks, zoom: contentZoom,
@@ -154,7 +162,11 @@ final class CanvasViewNodeView: CanvasNodeView {
                         for row in rows { tasks.settle("\(folder)/\(row.id)") }
                     }
                 },
-                onKeepQuery: { [weak self] query in self?.keepQuery(query) }))
+                onKeepQuery: { [weak self] query in self?.keepQuery(query) },
+                sittingCard: { [weak self] sitting in
+                    self?.sittingCardProvider(project: sitting.projectFolder, session: sitting.ref,
+                                              title: [sitting.projectName, sitting.dateLabel])
+                }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         view.setAccessibilityLabel(accessibilityFallback)
@@ -215,8 +227,9 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// What a sitting dragged off this card carries: a project card of that one sitting (docs/views.md
     /// D7), in the board's own clipping flavour, so the board makes exactly that card where it lands —
     /// and its name as text for anywhere else.
-    private func sittingCardProvider(_ sitting: SittingEntry) -> NSItemProvider? {
-        guard let document = CanvasSittingPin.card(for: sitting, resolver: board.store.resolver) else { return nil }
+    private func sittingCardProvider(project folder: String, session: SessionRef, title: [String]) -> NSItemProvider? {
+        guard let document = CanvasSittingPin.card(project: folder, session: session,
+                                                   resolver: board.store.resolver) else { return nil }
         let data = Data(document.serialized().utf8)
         let provider = NSItemProvider()
         provider.registerDataRepresentation(forTypeIdentifier: CanvasClipping.pasteboardType.rawValue,
@@ -224,8 +237,8 @@ final class CanvasViewNodeView: CanvasNodeView {
             done(data, nil)
             return nil
         }
-        let title = [sitting.projectName, sitting.name].filter { !$0.isEmpty }.joined(separator: " — ")
-        provider.registerObject(title as NSString, visibility: .all)
+        let name = title.filter { !$0.isEmpty }.joined(separator: " — ")
+        provider.registerObject(name as NSString, visibility: .all)
         return provider
     }
 

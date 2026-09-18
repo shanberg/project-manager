@@ -38,18 +38,24 @@ enum CanvasDayAction: Equatable {
         offered(for: [row], in: sitting)
     }
 
-    /// What a row offers on a view that lists tasks rather than sittings — Waiting, Search. There's no
-    /// sitting to pick up from or put back into, so those are left for the project card; Stop Waiting
-    /// is offered where a row's own line says what it waits on.
+    /// What a row offers on a view that lists tasks rather than sittings — Waiting, Search, Leftovers.
+    /// Stop Waiting is offered where a row's own line says what it waits on.
+    ///
+    /// `picking` is for Leftovers, where every row is in an older sitting: Pick Up takes it into its own
+    /// project's current sitting (D6), and Put Back is offered on a tree already picked up today. Waiting
+    /// and Search have no sitting in view to pick up from or put back into, so those are left for the
+    /// project card.
     ///
     /// A selection there is one project's rows (`CanvasDaySelection`, locked to the project), so it's
     /// still one store and one step.
-    static func offered(forTasks rows: [CanvasDayRow]) -> [CanvasDayAction] {
+    static func offered(forTasks rows: [CanvasDayRow], picking: Bool = false) -> [CanvasDayAction] {
         guard !rows.isEmpty, rows.allSatisfy({ $0.ref != nil }) else { return [] }
         let open = rows.filter { $0.state == .open }
         var actions: [CanvasDayAction] = [open.isEmpty ? .reopen : .complete]
         if !open.isEmpty { actions.append(.drop) }
         if rows.count == 1, !open.isEmpty { actions.append(.focus) }
+        if picking, open.contains(where: { !$0.pickedUp }) { actions.append(.pickUp) }
+        if picking, rows.contains(where: \.pickedUp) { actions.append(.putBack) }
         if rows.contains(where: \.declaresWait) { actions.append(.stopWaiting) }
         return actions
     }

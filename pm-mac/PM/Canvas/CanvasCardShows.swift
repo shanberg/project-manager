@@ -238,13 +238,20 @@ enum CanvasSittingPin {
     /// can't be found.
     @MainActor
     static func card(for sitting: SittingEntry, resolver: CanvasFileResolver) -> CanvasDocument? {
-        guard let projectPath = try? resolveProjectPath(nameOrPrefix: sitting.projectFolder),
+        card(project: sitting.projectFolder,
+             session: SessionRef(date: sitting.session, ordinal: sitting.sessionOrdinal,
+                                 digest: sitting.sessionDigest.isEmpty ? nil : sitting.sessionDigest),
+             resolver: resolver)
+    }
+
+    /// The same, for a sitting named by its project's folder and its ref — a Leftovers heading's.
+    @MainActor
+    static func card(project folder: String, session: SessionRef, resolver: CanvasFileResolver) -> CanvasDocument? {
+        guard let projectPath = try? resolveProjectPath(nameOrPrefix: folder),
               let notes = (try? resolveNotesPath(projectPath: projectPath)) ?? nil else { return nil }
         var node = CanvasProjectNoteCard.node(for: URL(fileURLWithPath: notes), at: CanvasPoint(x: 0, y: 0),
                                               resolver: resolver)
-        pin(SessionRef(date: sitting.session, ordinal: sitting.sessionOrdinal,
-                       digest: sitting.sessionDigest.isEmpty ? nil : sitting.sessionDigest),
-            on: &node)
+        pin(session, on: &node)
         return CanvasDocument(nodes: [node], edges: [])
     }
 

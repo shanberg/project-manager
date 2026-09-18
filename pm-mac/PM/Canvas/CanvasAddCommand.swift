@@ -29,6 +29,9 @@ enum CanvasAddCommand: CaseIterable {
     /// A Day view: the sittings of today across every project (docs/views.md). A text node carrying
     /// `pmView`, set to another day or narrowed to some projects from its own menu.
     case dayView
+    /// A Leftovers view: tasks left open in older sittings, across projects — Day's pair (docs/views.md
+    /// D1), the pile where Day is the journal.
+    case leftoversView
     /// A Waiting view: what's being waited on, across projects — the Waiting window's answer, on a board.
     case waitingView
     /// A Search view: tasks across projects matching the words in its field.
@@ -51,6 +54,7 @@ enum CanvasAddCommand: CaseIterable {
         // is the whole difference between it and New File….
         case .projectNote: return "New Project Note"
         case .dayView: return "New Day View"
+        case .leftoversView: return "New Leftovers View"
         case .waitingView: return "New Waiting View"
         case .searchView: return "New Search View"
         }

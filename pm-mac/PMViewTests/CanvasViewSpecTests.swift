@@ -327,4 +327,75 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(selection.count, 1)
         XCTAssertTrue(selection.contains(CanvasTaskLists.rowID(b1), in: "W-2 Site"))
     }
+
+    // MARK: Leftovers (step 6)
+
+    /// A Leftovers card is a view with a period, read as a cut-off, and says so in its menu and its note.
+    func testLeftoversReadsItsPeriodAsACutOff() throws {
+        var card = node(["pmView": .string("leftovers"), "pmPeriod": .string("week")])
+        let spec = try XCTUnwrap(CanvasViewSpec.of(card))
+        XCTAssertEqual(spec.kind, .leftovers)
+        XCTAssertTrue(spec.kind.hasPeriod)
+        XCTAssertEqual(spec.period, .week)
+        XCTAssertEqual(spec.period.beforeTitle, "Before This Week")
+        XCTAssertEqual(CanvasViewSpec.Period.today.beforeTitle, "Before Today")
+        XCTAssertEqual(CanvasViewSpec.newLeftovers.noteText, "Tasks left open before today, across projects: a Folio view.")
+        CanvasViewSpec.set(.newLeftovers, on: &card)
+        XCTAssertEqual(card.extra, ["pmView": .string("leftovers")])
+    }
+
+    private func leftovers() -> LeftoverList {
+        func task(_ text: String, line: Int, depth: Int = 0, session: String, picked: PickMark? = nil) -> LeftoverTask {
+            LeftoverTask(text: text, depth: depth, due: nil, waiting: nil, effectiveWaiting: nil, isFocused: false,
+                         ref: TaskRefInput(session: session, sessionOrdinal: 0, line: line, digest: "d-\(text)"),
+                         picked: picked)
+        }
+        let launch = LeftoverProject(
+            projectFolder: "W-1 Launch", projectName: "Launch", isArchived: false,
+            sittings: [
+                LeftoverSitting(session: "2026-09-14", sessionOrdinal: 0, sessionDigest: "s1", startTime: nil,
+                                name: "", lede: "Nav spec",
+                                tasks: [task("Draft the spec", line: 0, session: "2026-09-14")]),
+                LeftoverSitting(session: "2026-09-16", sessionOrdinal: 0, sessionDigest: "s2", startTime: "2:15 PM",
+                                name: "Venue", lede: "Venue",
+                                tasks: [task("Book the venue", line: 0, session: "2026-09-16",
+                                             picked: PickMark(into: CanvasTaskLists.todayISO(), at: "")),
+                                        task("Call the second venue", line: 2, depth: 1, session: "2026-09-16")]),
+            ])
+        let site = LeftoverProject(
+            projectFolder: "W-2 Site", projectName: "Site", isArchived: false,
+            sittings: [LeftoverSitting(session: "2026-09-15", sessionOrdinal: 0, sessionDigest: "s3", startTime: nil,
+                                       name: "", lede: "", tasks: [task("Proofread", line: 0, session: "2026-09-15")])])
+        return LeftoverList(projects: [launch, site])
+    }
+
+    /// One group per sitting, in the contract's order; the first of each project's heads the project.
+    func testLeftoversGroupsAreSittingsUnderTheirProjects() throws {
+        let groups = CanvasTaskLists.groups(leftovers: leftovers())
+        XCTAssertEqual(groups.map(\.folder), ["W-1 Launch", "W-1 Launch", "W-2 Site"])
+        XCTAssertEqual(groups.compactMap(\.sitting?.startsProject), [true, false, true])
+        XCTAssertEqual(groups[1].sitting?.lede, "Venue")
+        XCTAssertEqual(groups[1].sitting?.ref, SessionRef(date: "2026-09-16", ordinal: 0, digest: "s2"),
+                       "enough to drag it off as a card of its own")
+        XCTAssertEqual(groups[1].items.map { $0.row().depth }, [0, 1])
+        XCTAssertEqual(groups[1].items.first?.hit.ref,
+                       TaskRefInput(session: "2026-09-16", sessionOrdinal: 0, line: 0, digest: "d-Book the venue"))
+        XCTAssertEqual(CanvasTaskLists.summary(.leftovers, groups), "4 tasks · 3 sittings · 2 projects")
+        XCTAssertEqual(CanvasTaskLists.summary(.leftovers, []), "Nothing left open")
+        XCTAssertEqual(CanvasTaskLists.order(groups)["W-1 Launch"]?.count, 3, "⇧ reaches across a project's sittings")
+    }
+
+    /// Pick Up where a row isn't already picked up today; Put Back where it is. Neither on Waiting or Search.
+    func testALeftoverOffersPickUpAndPutBack() throws {
+        let items = CanvasTaskLists.groups(leftovers: leftovers()).flatMap(\.items)
+        let old = try XCTUnwrap(items.first { $0.hit.text == "Draft the spec" }).row()
+        let today = try XCTUnwrap(items.first { $0.hit.text == "Book the venue" }).row()
+        XCTAssertFalse(old.pickedUp)
+        XCTAssertTrue(today.pickedUp)
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [old], picking: true), [.complete, .drop, .focus, .pickUp])
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [today], picking: true), [.complete, .drop, .focus, .putBack])
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [old]), [.complete, .drop, .focus])
+        let yesterday = CanvasTaskItem(hit: try hit("Old pick"), picked: PickMark(into: "2020-01-01", at: ""))
+        XCTAssertFalse(yesterday.row().pickedUp, "a pick into an older sitting can be picked up again")
+    }
 }

@@ -22,6 +22,9 @@ struct CanvasViewSpec: Equatable {
         case waiting
         /// Where did I say *that*? `task.search`, for the words in `query`.
         case search
+        /// What have I left open, and where did I write it? `task.leftovers`, from sittings before the
+        /// period (D2: Leftovers reads *when* as "older than").
+        case leftovers
 
         /// What the card is called where it has to be one word: zoomed out, and to VoiceOver.
         var title: String {
@@ -29,11 +32,12 @@ struct CanvasViewSpec: Equatable {
             case .day: return "Day"
             case .waiting: return "Waiting"
             case .search: return "Search"
+            case .leftovers: return "Leftovers"
             }
         }
 
         /// Whether *when* means anything to it. Waiting is about now, and a search is about words.
-        var hasPeriod: Bool { self == .day }
+        var hasPeriod: Bool { self == .day || self == .leftovers }
     }
 
     /// When (D2). A relative period follows the clock, so a Today card left on a board is tomorrow's
@@ -83,6 +87,16 @@ struct CanvasViewSpec: Equatable {
             case .yesterday: return "Yesterday"
             case .week: return "This Week"
             case .day(let iso): return SessionPicks.day(iso: iso) ?? iso
+            }
+        }
+
+        /// What the menu calls it on a Leftovers card, which reads it as a cut-off: "Before Today".
+        var beforeTitle: String {
+            switch self {
+            case .today: return "Before Today"
+            case .yesterday: return "Before Yesterday"
+            case .week: return "Before This Week"
+            case .day: return "Before \(title)"
             }
         }
 
@@ -170,6 +184,7 @@ struct CanvasViewSpec: Equatable {
         case .day: return "\(period.title), across projects: a Folio view."
         case .waiting: return "What I'm waiting on, across projects: a Folio view."
         case .search: return "A search of every project's tasks: a Folio view."
+        case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), across projects: a Folio view."
         }
     }
 
@@ -177,6 +192,7 @@ struct CanvasViewSpec: Equatable {
     static let newDay = CanvasViewSpec(kind: .day)
     static let newWaiting = CanvasViewSpec(kind: .waiting)
     static let newSearch = CanvasViewSpec(kind: .search)
+    static let newLeftovers = CanvasViewSpec(kind: .leftovers)
 
     /// The card's caption for a period: "Today · Fri, Sep 18", or the week it covers.
     func caption(for range: DoneRange, calendar: Calendar = .current) -> String {

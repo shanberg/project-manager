@@ -743,8 +743,11 @@ extension CanvasBoardView {
         for card in cards { if case .day = card.spec.period, !choices.contains(card.spec.period) {
             choices.append(card.spec.period)
         } }
+        // A Leftovers card reads the period as a cut-off, and its menu says so — unless it's chosen with a
+        // Day card, where one set of words has to mean both.
+        let before = cards.allSatisfy { $0.spec.kind == .leftovers }
         for period in choices {
-            let item = add(periods, period.title, #selector(setViewPeriod(_:)))
+            let item = add(periods, before ? period.beforeTitle : period.title, #selector(setViewPeriod(_:)))
             item.representedObject = period.value
             item.state = cards.allSatisfy { $0.spec.period == period } ? .on : .off
         }
@@ -766,7 +769,8 @@ extension CanvasBoardView {
     @objc func setViewPeriod(_ sender: Any?) {
         guard let value = (sender as? NSMenuItem)?.representedObject as? String else { return }
         let period = CanvasViewSpec.Period(value: value)
-        changeViews("Show \(period.title)") { $0.period = period }
+        let before = selectedViewCards.allSatisfy { $0.spec.kind == .leftovers }
+        changeViews("Show \(before ? period.beforeTitle : period.title)") { $0.period = period }
     }
 
     @objc func setViewProjects(_ sender: Any?) {
@@ -1284,6 +1288,7 @@ extension CanvasBoardView {
         case .folder: addFolderCard(at: where_)
         case .projectNote: addProjectNoteCard(at: where_)
         case .dayView: addViewCard(.newDay, at: where_)
+        case .leftoversView: addViewCard(.newLeftovers, at: where_)
         case .waitingView: addViewCard(.newWaiting, at: where_)
         case .searchView: addViewCard(.newSearch, at: where_)
         }

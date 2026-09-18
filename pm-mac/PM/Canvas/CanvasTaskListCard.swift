@@ -4,10 +4,10 @@ import SwiftUI
 
 // MARK: - The model
 
-/// The answer a Waiting or Search card draws, kept current while the card is up.
+/// The answer a Waiting, Search or Leftovers card draws, kept current while the card is up.
 ///
-/// **Its own scan, like the Waiting window's and the Day card's.** `task.waiting` and `task.search` are
-/// the walks the CLI and a model make, which is the point: one answer, every surface (rule 1). Their
+/// **Its own scan, like the Waiting window's and the Day card's.** `task.waiting`, `task.search` and
+/// `task.leftovers` are the walks the CLI and a model make, which is the point: one answer, every surface (rule 1). Their
 /// rows carry whole refs, so everything drawn can be acted on.
 ///
 /// **Polled**, for the Day card's reason: a wait lands, or a task is ticked, in files the app never
@@ -101,6 +101,7 @@ final class CanvasTaskListModel {
         generation += 1
         let mine = generation
         let kind = spec.kind
+        let before = spec.period.value
         let query = self.query.trimmingCharacters(in: .whitespaces)
         let projects: [String]?
         switch spec.projects {
@@ -118,6 +119,8 @@ final class CanvasTaskListModel {
                     // Nothing typed asks nothing, and walking every project to answer it would be waste.
                     if query.isEmpty { return [] }
                     return CanvasTaskLists.groups(search: try searchableTasks(projects: projects), query: query)
+                case .leftovers:
+                    return CanvasTaskLists.groups(leftovers: try leftoverTasks(before: before, projects: projects))
                 case .day:
                     return []
                 }
@@ -144,11 +147,14 @@ final class CanvasTaskListModel {
 
 // MARK: - The card
 
-/// A Waiting or Search card: tasks from across projects, each with its project's chip, acted on as the
-/// same task on its project card is (docs/views.md D6, step 5).
+/// A Waiting, Search or Leftovers card: tasks from across projects, each with its project's chip, acted
+/// on as the same task on its project card is (docs/views.md D6, steps 5 and 6).
 ///
 /// Waiting draws `task.waiting`'s groups — what's being waited on as the heading, released first — as
-/// the Waiting window does. Search draws `task.search`'s ranking for the words in its field.
+/// the Waiting window does. Search draws `task.search`'s ranking for the words in its field. Leftovers
+/// draws `task.leftovers`' pile: each project, and under it each sitting that left something open, oldest
+/// first, with what that sitting was about — and Pick Up, which takes a task into its own project's
+/// current sitting.
 struct CanvasTaskListCard: View {
     let model: CanvasTaskListModel
     var zoom: Double = 1
@@ -157,6 +163,8 @@ struct CanvasTaskListCard: View {
     var onAct: ((CanvasDayAction, [CanvasDayRow], _ folder: String) -> Void)?
     /// Keep what the search field says, on the node.
     var onKeepQuery: (String) -> Void = { _ in }
+    /// The card a Leftovers sitting dragged off this one makes (D7). Nil: sittings don't drag.
+    var sittingCard: ((CanvasLeftoverSitting) -> NSItemProvider?)?
 
     @State private var editing: String?
     @State private var draft = ""
@@ -195,7 +203,7 @@ struct CanvasTaskListCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(model.spec.kind == .search ? "Search" : "Waiting On")
+                Text(title)
                     .font(.system(size: 13 * zoom, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -205,8 +213,8 @@ struct CanvasTaskListCard: View {
                     .lineLimit(1)
             }
             if model.spec.kind == .search { searchField }
-            if model.spec.projects != .everything {
-                Text(model.spec.projects.title)
+            if let caption {
+                Text(caption)
                     .font(.system(size: 11 * zoom))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -214,6 +222,22 @@ struct CanvasTaskListCard: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+
+    private var title: String {
+        switch model.spec.kind {
+        case .search: return "Search"
+        case .leftovers: return "Left Open"
+        case .waiting, .day: return "Waiting On"
+        }
+    }
+
+    /// Which projects, when it isn't all of them — and for Leftovers, how old a sitting has to be.
+    private var caption: String? {
+        var parts: [String] = []
+        if model.spec.kind == .leftovers { parts.append(model.spec.period.beforeTitle) }
+        if model.spec.projects != .everything { parts.append(model.spec.projects.title) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Not where the body already says so in words.
@@ -262,6 +286,7 @@ struct CanvasTaskListCard: View {
         case .search:
             let query = model.query.trimmingCharacters(in: .whitespaces)
             return query.isEmpty ? "Type the words you remember." : "Nothing matches “\(query)”."
+        case .leftovers: return "Nothing left open \(model.spec.period.beforeTitle.lowercased())."
         case .day: return ""
         }
     }
@@ -280,10 +305,47 @@ struct CanvasTaskListCard: View {
     @ViewBuilder private func groupBlock(_ group: CanvasTaskGroup, among groups: [CanvasTaskGroup]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let title = group.title { heading(title, group) }
-            ForEach(group.hits, id: \.viewKey) { hit in row(hit, among: groups) }
+            if let sitting = group.sitting { sittingHeading(sitting) }
+            ForEach(group.items, id: \.key) { item in row(item, among: groups) }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.top, group.sitting.map { $0.startsProject ? 10 : 4 } ?? 6)
+        .padding(.bottom, group.sitting == nil ? 6 : 2)
+    }
+
+    /// A Leftovers sitting: its project above the first of them, then when it was and what it was about.
+    /// The sitting drags off as a card of its own, as a Day card's does.
+    @ViewBuilder private func sittingHeading(_ sitting: CanvasLeftoverSitting) -> some View {
+        if sitting.startsProject {
+            Button { onOpenProject(sitting.projectFolder) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    CanvasProjectMark(color: sitting.projectColor, icon: sitting.projectIcon, zoom: zoom)
+                    Text(sitting.projectName)
+                        .font(.system(size: 12 * zoom, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Go to \(sitting.projectName)")
+            .padding(.bottom, 2)
+        }
+        VStack(alignment: .leading, spacing: 1) {
+            Text(sitting.dateLabel)
+                .font(.system(size: 11 * zoom, weight: .medium))
+                .foregroundStyle(.secondary)
+            if !sitting.lede.isEmpty {
+                Text(sitting.lede)
+                    .font(.system(size: 11 * zoom))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
+        .help(sittingCard == nil ? "" : "Drag to make a card of this sitting")
+        .padding(.bottom, 1)
     }
 
     /// What's being waited on, as the Waiting window heads it: released in green with the news, a
@@ -318,18 +380,19 @@ struct CanvasTaskListCard: View {
 
     // MARK: A row
 
-    private func row(_ hit: TaskSearchHit, among groups: [CanvasTaskGroup]) -> some View {
-        let row = CanvasTaskLists.row(hit)
+    private func row(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup]) -> some View {
+        let hit = item.hit
+        let row = item.row()
         let folder = hit.projectFolder
-        let state = model.pending[CanvasTaskLists.key(hit)] ?? row.state
-        let acts = onAct == nil ? [] : CanvasDayAction.offered(forTasks: [row])
+        let state = model.pending[item.key] ?? row.state
+        let acts = onAct == nil ? [] : offered([row])
         return CanvasViewRow(
             row: row, state: state,
             isSelected: model.selection.contains(row.id, in: folder),
             isEngaged: model.isEngaged, zoom: zoom,
             toggle: acts.contains(.complete) ? .complete : acts.contains(.reopen) ? .reopen : nil,
-            onToggle: { perform(state == .open ? .complete : .reopen, [hit]) },
-            isEditing: editing == CanvasTaskLists.key(hit), draft: $draft,
+            onToggle: { perform(state == .open ? .complete : .reopen, [item]) },
+            isEditing: editing == item.key, draft: $draft,
             onSubmitEdit: {
                 onAct?(.edit(draft), [row], folder)
                 editing = nil
@@ -340,62 +403,82 @@ struct CanvasTaskListCard: View {
             onClick: {
                 guard onAct != nil, editing == nil else { return }
                 if NSApp.currentEvent?.clickCount == 2 {
-                    if NSEvent.modifierFlags.contains(.option) || state != .open { beginEditing(hit) }
-                    else { perform(.focus, [hit]) }
+                    if NSEvent.modifierFlags.contains(.option) || state != .open { beginEditing(item) }
+                    else { perform(.focus, [item]) }
                 } else {
                     model.selection.click(row.id, in: folder, modifiers: NSEvent.modifierFlags,
                                           order: CanvasTaskLists.order(groups)[folder] ?? [row.id])
                 }
             },
             drag: {
-                NSItemProvider(object: CanvasDayRows.markdown(targets(hit, among: groups).map(CanvasTaskLists.row)) as NSString)
+                NSItemProvider(object: CanvasDayRows.markdown(targets(item, among: groups).map { $0.row() }) as NSString)
             },
-            trailing: { chip(hit) },
-            menu: { menu(hit, among: groups) })
+            trailing: { chip(item) },
+            menu: { menu(item, among: groups) })
     }
 
-    /// The project chip, after the task: where it lives, and a way there.
-    private func chip(_ hit: TaskSearchHit) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
+    /// What `rows` offer here: Pick Up and Put Back on Leftovers, where there's an older sitting to pick
+    /// up from.
+    private func offered(_ rows: [CanvasDayRow]) -> [CanvasDayAction] {
+        CanvasDayAction.offered(forTasks: rows, picking: model.spec.kind == .leftovers)
+    }
+
+    /// What follows the task: when it's due, and where it lives and a way there — or, on Leftovers, whose
+    /// heading already says where, when it was last picked up.
+    private func chip(_ item: CanvasTaskItem) -> some View {
+        let hit = item.hit
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
             if let due = hit.due, let label = SessionPicks.day(iso: due) {
                 Text(label)
                     .font(.system(size: 10 * zoom))
                     .foregroundStyle(.secondary)
             }
-            Button { onOpenProject(hit.projectFolder) } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    CanvasProjectMark(color: hit.projectColor, icon: hit.projectIcon, zoom: zoom)
-                    Text(hit.projectName)
+            if model.spec.kind == .leftovers {
+                if item.depth == 0, let picked = item.picked, let day = SessionPicks.day(iso: picked.into) {
+                    Text(item.row().pickedUp ? "picked up today" : "picked up \(day)")
                         .font(.system(size: 10 * zoom))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(.tertiary)
                 }
-                .contentShape(Rectangle())
+            } else {
+                Button { onOpenProject(hit.projectFolder) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        CanvasProjectMark(color: hit.projectColor, icon: hit.projectIcon, zoom: zoom)
+                        Text(hit.projectName)
+                            .font(.system(size: 10 * zoom))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Go to \(hit.projectName)")
             }
-            .buttonStyle(.plain)
-            .help("Go to \(hit.projectName)")
         }
         .fixedSize()
     }
 
-    /// The rows a command on `hit` acts on: the selection when it's in it, else the row alone.
-    private func targets(_ hit: TaskSearchHit, among groups: [CanvasTaskGroup]) -> [TaskSearchHit] {
-        let ids = model.selection.targets(clicked: CanvasTaskLists.rowID(hit), in: hit.projectFolder)
-        return groups.flatMap(\.hits).filter { $0.projectFolder == hit.projectFolder && ids.contains(CanvasTaskLists.rowID($0)) }
+    /// The rows a command on `item` acts on: the selection when it's in it, else the row alone.
+    private func targets(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup]) -> [CanvasTaskItem] {
+        let folder = item.hit.projectFolder
+        let ids = model.selection.targets(clicked: CanvasTaskLists.rowID(item.hit), in: folder)
+        return groups.flatMap(\.items).filter {
+            $0.hit.projectFolder == folder && ids.contains(CanvasTaskLists.rowID($0.hit))
+        }
     }
 
-    @ViewBuilder private func menu(_ hit: TaskSearchHit, among groups: [CanvasTaskGroup]) -> some View {
-        let scope = targets(hit, among: groups)
-        let rows = scope.map(CanvasTaskLists.row)
+    @ViewBuilder private func menu(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup]) -> some View {
+        let scope = targets(item, among: groups)
+        let rows = scope.map { $0.row() }
+        let hit = item.hit
         if onAct != nil {
-            let acts = CanvasDayAction.offered(forTasks: rows)
+            let acts = offered(rows)
             ForEach(acts, id: \.title) { act in
                 Button { perform(act, scope) } label: {
                     Label(act.title(count: act.count(of: rows, among: rows)), systemImage: act.symbol)
                 }
             }
             if scope.count == 1 {
-                Button { beginEditing(hit) } label: {
+                Button { beginEditing(item) } label: {
                     Label(CanvasDayAction.edit("").title, systemImage: CanvasDayAction.edit("").symbol)
                 }
             }
@@ -410,21 +493,21 @@ struct CanvasTaskListCard: View {
         }
     }
 
-    private func beginEditing(_ hit: TaskSearchHit) {
-        draft = hit.text
-        editing = CanvasTaskLists.key(hit)
+    private func beginEditing(_ item: CanvasTaskItem) {
+        draft = item.hit.text
+        editing = item.key
     }
 
-    /// Act, drawing the rows as they're about to be where that's certain. Every hit is one project's.
-    private func perform(_ act: CanvasDayAction, _ hits: [TaskSearchHit]) {
-        guard let folder = hits.first?.projectFolder else { return }
-        for hit in hits {
+    /// Act, drawing the rows as they're about to be where that's certain. Every item is one project's.
+    private func perform(_ act: CanvasDayAction, _ items: [CanvasTaskItem]) {
+        guard let folder = items.first?.hit.projectFolder else { return }
+        for item in items {
             switch act {
-            case .complete: model.expect(.done, for: CanvasTaskLists.key(hit))
-            case .drop: model.expect(.dropped, for: CanvasTaskLists.key(hit))
+            case .complete: model.expect(.done, for: item.key)
+            case .drop: model.expect(.dropped, for: item.key)
             default: break
             }
         }
-        onAct?(act, hits.map(CanvasTaskLists.row), folder)
+        onAct?(act, items.map { $0.row() }, folder)
     }
 }

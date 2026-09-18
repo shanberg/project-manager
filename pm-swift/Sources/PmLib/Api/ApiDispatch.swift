@@ -118,6 +118,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "new": input.new.map(JSONValue.bool),
         "since": input.since.map(JSONValue.string),
         "until": input.until.map(JSONValue.string),
+        "before": input.before.map(JSONValue.string),
         "projects": input.projects.map { .array($0.map(JSONValue.string)) },
     ]
 }
@@ -525,6 +526,17 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if projects > 1 { summary += " in \(projects) projects" }
         if done > 0 { summary += ", \(done) done" }
         return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
+
+    case "task.leftovers":
+        let list = try leftoverTasks(before: input.before, projects: input.projects)
+        let tasks = list.taskCount
+        var summary = "Nothing left open."
+        if tasks > 0 {
+            summary = "\(tasks) task\(tasks == 1 ? "" : "s") left open in \(list.sittingCount) "
+                + "sitting\(list.sittingCount == 1 ? "" : "s")"
+            summary += list.projects.count > 1 ? " across \(list.projects.count) projects." : "."
+        }
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(list))
 
     case "capture.parse":
         let line = input.text ?? ""

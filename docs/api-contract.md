@@ -85,6 +85,8 @@ config.get
 
 In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries `sessionOrdinal` (which of its day's sittings it's in) and its project's `projectColor` and `projectIcon`. They're the Waiting and Search views' queries. See [views.md](views.md) step 5.
 
+`task.leftovers` (1.16.0) is the pile across projects: open tasks in sittings older than `before` (`today`, `yesterday`, `week` for before this week, or a date), grouped by project and then by sitting, oldest first. Each sitting comes with its lede, and each task with its ref and its last pick-up. See [views.md](views.md) step 6.
+
 `session.list` (1.14.0) is the day across projects: every sitting dated in a span, in the order the day went, with its prose and its tasks by role. Completions are given to sittings by time, from the done log. See [views.md](views.md) D8.
 
 Both brought their vocabulary with them. The due-date presets — "Today", "This Weekend", "Next Week" — are now `PmLib.duePresets`, read by the parser *and* offered by the app's due menu, so the words a menu shows and the words a typed line is matched against cannot drift apart. `TaskSearch` ranks anything conforming to `SearchableTask`, so the app's warmed index and a fresh scan share one ranking; the app keeps its index, and the CLI and MCP pay one scan rather than maintaining one.

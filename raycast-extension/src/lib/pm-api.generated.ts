@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.15.0";
+export const API_CONTRACT_VERSION = "1.16.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -308,6 +308,14 @@ export interface TaskFocusInput {
   task: TaskRef;
 }
 
+/** Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up. */
+export interface TaskLeftoversInput {
+  /** How old a sitting has to be: before today (the default), before yesterday, before this week, or before a day given as YYYY-MM-DD. */
+  before?: string;
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area. */
+  projects?: string[];
+}
+
 /** A project's tasks, each with the reference needed to act on it. */
 export interface TaskListInput {
   /** Include completed and dropped tasks. Default false. */
@@ -495,6 +503,7 @@ export interface ApiInputs {
   "task.done": TaskDoneInput;
   "task.drop": TaskDropInput;
   "task.focus": TaskFocusInput;
+  "task.leftovers": TaskLeftoversInput;
   "task.list": TaskListInput;
   "task.pick": TaskPickInput;
   "task.progress": TaskProgressInput;
@@ -554,6 +563,7 @@ export const API_TIERS: Record<
   "task.done": "query",
   "task.drop": "mutation",
   "task.focus": "mutation",
+  "task.leftovers": "query",
   "task.list": "query",
   "task.pick": "mutation",
   "task.progress": "query",

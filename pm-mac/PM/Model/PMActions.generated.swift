@@ -11,7 +11,7 @@ import PmLib
 /// Named distinctly from PmLib's own `apiContractVersion`, which is in scope here — a file-scope
 /// `let` of the same name would shadow it silently, and a check comparing the two would then be
 /// comparing a thing with itself.
-let generatedFromContractVersion = "1.15.0"
+let generatedFromContractVersion = "1.16.0"
 
 /// Every action the contract publishes.
 ///
@@ -93,6 +93,8 @@ enum PMAction: String, CaseIterable, Sendable {
     case taskDrop = "task.drop"
     /// Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false.
     case taskFocus = "task.focus"
+    /// Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up.
+    case taskLeftovers = "task.leftovers"
     /// A project's tasks, each with the reference needed to act on it.
     case taskList = "task.list"
     /// Pick up a task from an older session into the current one, or several. The task isn't moved: it stays where it was written, and the current session shows it as picked up.
@@ -126,7 +128,7 @@ enum PMAction: String, CaseIterable, Sendable {
         switch self {
         case .configSet, .journalUndo, .notesAddLink, .notesSetDetail, .projectAdopt, .projectArchive, .projectCreate, .projectFocus, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionDelete, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskComplete, .taskDelete, .taskDiveIn, .taskDrop, .taskFocus, .taskPick, .taskRelease, .taskReopen, .taskSetDue, .taskSetText, .taskSetWaiting, .taskUnwrap, .taskWrap:
             return .mutation
-        case .captureParse, .configGet, .focusGet, .journalList, .notesGet, .projectAdoptable, .projectGet, .projectList, .sessionList, .taskDone, .taskList, .taskProgress, .taskSearch, .taskWaiting, .taskWhatsDue:
+        case .captureParse, .configGet, .focusGet, .journalList, .notesGet, .projectAdoptable, .projectGet, .projectList, .sessionList, .taskDone, .taskLeftovers, .taskList, .taskProgress, .taskSearch, .taskWaiting, .taskWhatsDue:
             return .query
         case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel:
             return .affordance
@@ -140,7 +142,7 @@ enum PMAction: String, CaseIterable, Sendable {
     /// a debug build can say so at the call site instead — see `PMContract.perform`.
     var requiredFields: [String] {
         switch self {
-        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .configGet, .focusGet, .journalList, .journalUndo, .projectAdoptable, .projectList, .sessionList, .taskDone, .taskList, .taskProgress, .taskWaiting, .taskWhatsDue:
+        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .configGet, .focusGet, .journalList, .journalUndo, .projectAdoptable, .projectList, .sessionList, .taskDone, .taskLeftovers, .taskList, .taskProgress, .taskWaiting, .taskWhatsDue:
             return []
         case .captureParse:
             return ["text"]
@@ -177,7 +179,7 @@ enum PMAction: String, CaseIterable, Sendable {
     /// that take either, `due` or `clearDue` for the one that both sets and clears.
     var exclusiveGroups: [[String]] {
         switch self {
-        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionDelete, .sessionList, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskFocus, .taskList, .taskProgress, .taskSearch, .taskSetText, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
+        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionDelete, .sessionList, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskFocus, .taskLeftovers, .taskList, .taskProgress, .taskSearch, .taskSetText, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
             return []
         case .taskComplete, .taskDelete, .taskDrop, .taskPick, .taskRelease, .taskReopen:
             return [["task", "tasks"]]

@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row) and 5 (Waiting and Search) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search) and 6 (Leftovers) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -117,8 +117,8 @@ that has happened, across the chosen projects, since you last met. It costs noth
 sittings are already known. With calendars (below), the anchor could be an event as well as a
 sitting.
 
-Leftovers reads *when* as "older than". Its default is sittings before today, and a week ago is the
-weekly-review setting. Waiting ignores it, and Search takes `pmQuery`.
+Leftovers reads *when* as "older than". Its default is sittings before today, and before this week is
+the weekly-review setting (as built: step 6). Waiting ignores it, and Search takes `pmQuery`.
 
 The contract's field is `projects`, not `scope`: `task.done` already uses `scope` for
 active/archive/all, and one word shouldn't mean two things in one manifest.
@@ -438,6 +438,38 @@ so pasting it into Obsidian gives you links that work.
 - **Polled every 30 seconds**, not 20: these walks read every project, where a Day only reads the
   ones touched in its span.
 
+### As built (step 6)
+
+`Leftovers.swift` in PmLib (the query), and the Waiting and Search card grown a third kind rather than a
+new card: `CanvasTaskGroup` now holds items, each a hit plus the depth and pick that only Leftovers has.
+
+- **What counts.** An open task whose line is in a dated sitting older than the cut-off. A task in no
+  sitting has no "where did I write it", so it isn't listed. Waiting tasks are listed, since a wait is
+  still something you left open.
+- **A picked-up task is still left over.** Picking something up says you're on it, not that it's done,
+  and the pile is where you see that you've picked it up three sittings running. Each task carries its
+  last pick-up (`PickMark`), and the row says "picked up Sep 15" or "picked up today".
+- **Depth counts listed ancestors only.** A subtask of a finished task starts a tree of its own rather
+  than hanging indented under nothing.
+- **Order.** Projects by their oldest leftover, oldest first, so the one left longest leads. Within a
+  project, sittings oldest first, and within a day the earlier sitting first.
+- **`before`** is `today` (the default), `yesterday`, `week` or a date. **`week` means before this
+  week**, from the reader's first weekday, not seven days ago (D2 said "a week ago"). That way a
+  Leftovers card set to it and a Day card set to This Week split the time between them with no gap and
+  no overlap, which is the weekly review. The card's Period menu says **Before Today / Before Yesterday
+  / Before This Week** when only Leftovers cards are chosen.
+- **Projects.** Absent, it's active projects and areas: an archived project's open tasks were put down,
+  not left. Named, an archived project is read too, since you asked for it. There's no cheap skip rule
+  as `session.list` has, because a leftover is old by definition, so it reads every project, as
+  `task.waiting` does.
+- **The card** heads each project with its mark and name (a way to it), then each sitting with its
+  date, time and lede. A sitting's heading drags off as a card of that one sitting (D7), as a Day's does.
+  Rows offer step 4's verbs plus **Pick Up**, which goes into the task's own project's current sitting
+  (starting one if it has none), and **Put Back** on a tree picked up today. A selection is one
+  project's rows, across its sittings.
+- **The contract (1.16.0)** adds `task.leftovers` with `before` and `projects`. `LeftoverProject.hit`
+  turns a leftover into the `TaskSearchHit` every task-list surface draws.
+
 ## Calendars, eventually
 
 Sketched only so that the views leave room for it. Nothing here is decided.
@@ -492,7 +524,7 @@ Each step ships on its own.
    `CanvasUndoRouteTests` case covers a tick on a Day row being undone by ⌘Z on the board.
 5. ✓ **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
    card is general before another query is written.
-6. **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
+6. ✓ **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
 7. **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
 8. **The week and month layouts (D9).** They're last because they are the most drawing and the least
    new data, and because the calendar design should be settled before the week grid's shape is fixed.
@@ -530,7 +562,7 @@ settings or the layouts should still leave each goal with an answer, or say why 
 | Get oriented in the morning: where was I, what's due, what's unblocked | Day (yesterday) · Coming up · Waiting |
 | Shut down: close out today, note where to resume | Day (today) · Leftovers, acted on |
 | Keep and reread the journal | Day in the rail, week and month layouts |
-| The weekly review | Day (week) · Leftovers (a week ago) · Projects · Waiting |
+| The weekly review | Day (week) · Leftovers (before this week) · Projects · Waiting |
 | Report out: standup, weekly update, client status | Day (week), Copy as Text (D10) |
 | Plan the week | **Not answered.** Intentions aren't recorded anywhere, so this needs its own design |
 | Prepare for a 1:1 | Day or Leftovers anchored `since:[[the area]]` (D2), and later a calendar event |

@@ -153,6 +153,50 @@ final class CanvasDayRowUndoTests: XCTestCase {
         XCTAssertEqual(try waitingBuckets().first?.tasks.map(\.text), ["Ship it"], "⌘Z put the wait back")
     }
 
+    /// Pick Up from a Leftovers row takes the task into its own project's current sitting — started for
+    /// it, since the project has none today — and ⌘Z on the board takes the pick back (D6).
+    func testPickUpFromLeftoversIsTakenBackByUndo() throws {
+        _ = try api("project.create") { $0.title = "Launch"; $0.domain = "W" }
+        let projectPath = try resolveProjectPath(nameOrPrefix: "W-1")
+        let notesPath = try XCTUnwrap(try resolveNotesPath(projectPath: projectPath))
+        let heading = DateFormatter()
+        heading.locale = Locale(identifier: "en_US_POSIX")
+        heading.dateFormat = "EEE, MMM d, yyyy"
+        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: Date())!
+        let text = try String(contentsOfFile: notesPath, encoding: .utf8)
+        let marker = try XCTUnwrap(text.range(of: "## Sessions\n"))
+        try text.replacingCharacters(in: marker, with: "## Sessions\n\n### \(heading.string(from: threeDaysAgo))\n\n- [ ] Ship it\n")
+            .write(toFile: notesPath, atomically: true, encoding: .utf8)
+
+        let groups = CanvasTaskLists.groups(leftovers: try leftoverTasks())
+        let item = try XCTUnwrap(groups.first?.items.first, "the task is left over")
+        XCTAssertEqual(item.hit.text, "Ship it")
+        XCTAssertNil(item.picked)
+        XCTAssertTrue(CanvasDayAction.offered(forTasks: [item.row()], picking: true).contains(.pickUp))
+
+        var lastEditedProject: PMStore?
+        let actions = CanvasDayActions { [unowned self] in projectKey(forFolder: $0) }
+        actions.onActed = { lastEditedProject = $0 }
+        defer { actions.releaseAll() }
+        let settled = expectation(description: "act settled")
+        actions.perform(.pickUp, on: [item.row()], inProject: item.hit.projectFolder) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+
+        let picked = try XCTUnwrap(CanvasTaskLists.groups(leftovers: try leftoverTasks()).first?.items.first,
+                                   "a picked-up task is still left over")
+        XCTAssertEqual(picked.picked?.into, CanvasTaskLists.todayISO(), "into today's sitting, in its own project")
+        XCTAssertTrue(picked.row().pickedUp)
+        XCTAssertEqual(CanvasDayAction.offered(forTasks: [picked.row()], picking: true),
+                       [.complete, .drop, .focus, .putBack], "picked up, it can be put back")
+
+        let project = try XCTUnwrap(lastEditedProject, "the act became the board's last edit")
+        let undone = expectation(description: "undone")
+        project.undo()
+        project.reload { undone.fulfill() }
+        wait(for: [undone], timeout: 5)
+        XCTAssertNil(try leftoverTasks().projects.first?.sittings.first?.tasks.first?.picked, "⌘Z took the pick back")
+    }
+
     /// A search hit in a day's second sitting names that sitting, so a tick lands on its line — not on the
     /// first sitting's line of the same number, which here says the same thing.
     func testATickOnASearchHitLandsInItsOwnSitting() throws {
