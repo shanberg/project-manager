@@ -89,7 +89,7 @@ final class ScrollEdgeEffectTests: XCTestCase {
         split.addSplitViewItem(item)
         window.contentViewController = split
         window.setContentSize(NSSize(width: 1000, height: 600))
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         // Scrolled a little, so there is unambiguously content under the band.
         document.scroll(NSPoint(x: 400, y: 1400))
         settle(1.0)

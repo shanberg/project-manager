@@ -18,7 +18,7 @@ final class NoteEditorReturnTests: XCTestCase {
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: editor.frame(width: 400, height: 300))
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         return (window, Self.textView(in: window.contentView))
     }

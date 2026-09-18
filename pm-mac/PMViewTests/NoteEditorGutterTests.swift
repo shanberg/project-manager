@@ -17,7 +17,7 @@ final class NoteEditorGutterTests: XCTestCase {
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: editor)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         return (window, Self.textView(in: window.contentView))
     }

@@ -104,7 +104,7 @@ final class TabBarGrowthTests: XCTestCase {
             host.topAnchor.constraint(equalTo: container.topAnchor),
             host.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 200),
         ])
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         settle(0.6)
     }
 

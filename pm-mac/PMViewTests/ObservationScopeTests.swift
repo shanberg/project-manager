@@ -147,7 +147,7 @@ final class ObservationScopeTests: XCTestCase {
         host.frame = container.bounds
         host.autoresizingMask = [.width, .height]
         container.addSubview(host)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         settle()
     }
 

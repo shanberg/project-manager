@@ -24,15 +24,15 @@ final class CanvasPageDragOriginTests: XCTestCase {
     /// dragging does; the right is HTML5 drag-and-drop, with a zone that claims the drop by preventing
     /// the default on `dragover`. Everything that arrives is counted in `window.seen`.
     private static let html = """
-        <html><body style="margin:0;font:12px system-ui">
+        <html><meta name="color-scheme" content="light dark"><body style="margin:0;font:12px system-ui">
         <div id="ptr" style="position:absolute;left:0;top:0;width:280px">
-          <div class="row" data-id="A" style="height:60px;background:#eeeeee">A</div>
-          <div class="row" data-id="B" style="height:60px;background:#dddddd">B</div>
-          <div class="row" data-id="C" style="height:60px;background:#cccccc">C</div>
+          <div class="row" data-id="A" style="height:60px;background:rgba(128,128,128,.15)">A</div>
+          <div class="row" data-id="B" style="height:60px;background:rgba(128,128,128,.3)">B</div>
+          <div class="row" data-id="C" style="height:60px;background:rgba(128,128,128,.45)">C</div>
         </div>
         <div id="dnd" style="position:absolute;left:300px;top:0;width:280px">
-          <div id="grab" draggable="true" style="height:60px;background:#ddddee">grab</div>
-          <div id="zone" style="height:120px;background:#eedddd">zone</div>
+          <div id="grab" draggable="true" style="height:60px;background:rgba(64,96,255,.25)">grab</div>
+          <div id="zone" style="height:120px;background:rgba(255,64,64,.25)">zone</div>
         </div>
         <script>
         window.seen = {};
@@ -89,8 +89,10 @@ final class CanvasPageDragOriginTests: XCTestCase {
         configuration.websiteDataStore = .nonPersistent()
         page = CanvasPageView(frame: root.bounds, configuration: configuration)
         page.dropFallback = board
+        // Quiet for anyone working while this runs: the page opts into dark, and so does the frame before it paints.
+        page.underPageBackgroundColor = .windowBackgroundColor
         root.addSubview(page)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
 
         page.loadHTMLString(Self.html, baseURL: URL(string: "https://page.invalid/"))
         try await until("the page loads") {

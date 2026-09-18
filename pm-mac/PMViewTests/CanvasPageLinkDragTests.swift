@@ -21,7 +21,7 @@ final class CanvasPageLinkDragTests: XCTestCase {
     private var page: CanvasPageView!
 
     private static let html = """
-        <html><body style="margin:0;font:16px system-ui">
+        <html><meta name="color-scheme" content="light dark"><body style="margin:0;font:16px system-ui">
         <a href="https://one.example/first" style="position:absolute;left:20px;top:20px;display:block;width:200px;height:40px">first</a>
         <a href="https://two.example/second" style="position:absolute;left:20px;top:120px;display:block;width:200px;height:40px">second</a>
         <script>window.ready = true;</script>
@@ -37,7 +37,9 @@ final class CanvasPageLinkDragTests: XCTestCase {
         configuration.websiteDataStore = .nonPersistent()
         page = CanvasPageView(frame: NSRect(x: 0, y: 0, width: 600, height: 400), configuration: configuration)
         window.contentView = page
-        window.makeKeyAndOrderFront(nil)
+        // Quiet for anyone working while this runs: the page opts into dark, and so does the frame before it paints.
+        page.underPageBackgroundColor = .windowBackgroundColor
+        window.orderFront(nil)
         page.loadHTMLString(Self.html, baseURL: URL(string: "https://page.invalid/"))
         let deadline = Date().addingTimeInterval(5)
         while (try? await page.evaluateJavaScript("window.ready === true")) as? Bool != true {

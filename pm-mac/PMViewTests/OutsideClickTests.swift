@@ -27,7 +27,7 @@ final class OutsideClickTests: XCTestCase {
                                       .fullSizeContentView],
                           backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
 
         dismissals = 0
         monitor = OutsideClickMonitor()

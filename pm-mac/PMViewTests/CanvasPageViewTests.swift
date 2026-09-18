@@ -17,7 +17,7 @@ final class CanvasPageViewTests: XCTestCase {
 
     /// Six regions, one kind of thing each. Positioned absolutely so the points below are exact.
     private static let html = """
-        <html><body style="margin:0">
+        <html><meta name="color-scheme" content="light dark"><body style="margin:0">
         <textarea style="position:absolute;left:0;top:0;width:200px;height:100px"></textarea>
         <p style="position:absolute;left:300px;top:0;width:200px;height:100px;margin:0">words</p>
         <input type="checkbox" style="position:absolute;left:0;top:150px;width:40px;height:40px">
@@ -61,6 +61,8 @@ final class CanvasPageViewTests: XCTestCase {
         configuration.websiteDataStore = .nonPersistent()
         page = CanvasPageView(frame: root.bounds, configuration: configuration)
         page.dropFallback = board
+        // Quiet for anyone working while this runs: the page opts into dark, and so does the frame before it paints.
+        page.underPageBackgroundColor = .windowBackgroundColor
         root.addSubview(page)
         window.orderFront(nil)
 

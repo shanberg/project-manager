@@ -94,7 +94,7 @@ final class HeaderChromeMotionTests: XCTestCase {
         wide.safeAreaRegions = []
         wide.frame = NSRect(x: 0, y: 0, width: 1000, height: 60)
         container.addSubview(wide)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         settle(0.4)
 
         let empty = container.hitTest(NSPoint(x: 60, y: 30))
@@ -299,7 +299,7 @@ final class HeaderChromeMotionTests: XCTestCase {
             host.topAnchor.constraint(equalTo: container.topAnchor),
             host.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
         ])
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         settle(0.5)
         XCTAssertEqual(capsules().count, startsShowing ? 3 : 2, "SwiftUI never built the capsules")
     }
@@ -329,7 +329,7 @@ final class HeaderChromeMotionTests: XCTestCase {
             neighbour.widthAnchor.constraint(equalToConstant: 120),
             neighbour.heightAnchor.constraint(equalToConstant: 28),
         ])
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         settle(0.5)
     }
 

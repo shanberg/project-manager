@@ -85,7 +85,7 @@ final class NoteEditor {
         view.isRichText = false
         view.allowsUndo = true
         window.contentView = view
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         window.makeFirstResponder(view)
     }
 
@@ -242,7 +242,7 @@ final class TaskField {
         coordinator.field = field
         field.frame = NSRect(x: 10, y: 10, width: 380, height: 24)
         window.contentView?.addSubview(field)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         window.makeFirstResponder(field)
         guard let editor = field.currentEditor() as? NSTextView else { return nil }
         self.editor = editor

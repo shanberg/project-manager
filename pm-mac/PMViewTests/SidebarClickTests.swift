@@ -122,7 +122,7 @@ final class SidebarClickTests: XCTestCase {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 700),
                           styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: Harness(carded: carded, keys: keys, box: box))
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         table = try XCTUnwrap(waitForTable(), "SwiftUI's List never built a table view")
         let expected = keys.count + carded.count + (carded.isEmpty ? 1 : 2)
         XCTAssertEqual(table.numberOfRows, expected, "the list isn't shaped the way the tests read it")

@@ -28,6 +28,8 @@ final class CanvasWebPopupTests: XCTestCase {
             if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
                 popup = CanvasWebPopup.present(with: configuration, features: windowFeatures, userAgent: nil,
                                                over: parent)
+                // The popup's page opts into dark too; this covers the sheet before it paints.
+                popup?.underPageBackgroundColor = .windowBackgroundColor
                 return popup
             }
             if let url = navigationAction.request.url { flattened.append(url) }
@@ -41,13 +43,13 @@ final class CanvasWebPopupTests: XCTestCase {
     /// `about:blank` rather than a URL off the network, so the test needs no host to be up: a popup
     /// opened that way inherits the opener's origin, which is exactly the relationship under test.
     private static let page = """
-    <html><body><script>
+    <html><meta name="color-scheme" content="light dark"><body><script>
     window.received = null;
     addEventListener('message', function (event) { window.received = event.data; });
     function popup(features) {
       var opened = window.open('about:blank', '', features);
       if (!opened) { return 'flattened'; }
-      opened.document.write('<scr' + 'ipt>window.opener.postMessage("hello", "*");<' + '/script>');
+      opened.document.write('<meta name="color-scheme" content="light dark"><scr' + 'ipt>window.opener.postMessage("hello", "*");<' + '/script>');
       return 'opened';
     }
     </script></body></html>

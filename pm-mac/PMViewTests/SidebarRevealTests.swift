@@ -74,7 +74,7 @@ final class SidebarRevealTests: XCTestCase {
                               styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.contentViewController = split
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         window.setFrame(NSRect(x: 100, y: 100, width: 1000, height: 700), display: true)
         windows.append(window)
         turn()
