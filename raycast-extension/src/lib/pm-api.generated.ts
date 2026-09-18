@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.16.0";
+export const API_CONTRACT_VERSION = "1.17.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -138,8 +138,12 @@ export interface ProjectGetInput {
 
 /** Every project and area, each with its kind. */
 export interface ProjectListInput {
+  /** Also read each project for what's happening in it: lastActivity (the later of its newest sitting's start and its notes' last write), its newest sitting and what it was about, how many tasks are open, and the soonest due. Sorted newest activity first. Default false. */
+  activity?: boolean;
   /** Only this kind. Default both. */
   kind?: "project" | "area";
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. */
+  projects?: string[];
   /** Which folder to list. Default active. */
   scope?: "active" | "areas" | "archive" | "all";
 }
@@ -296,6 +300,14 @@ export interface TaskDropInput {
   task?: TaskRef;
   /** Several tasks, acted on in one write. Give this or `task`, not both. */
   tasks?: TaskRef[];
+}
+
+/** Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one. */
+export interface TaskDueInput {
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area. */
+  projects?: string[];
+  /** How far ahead: today, week (the next seven days, the default), or through a day given as YYYY-MM-DD. */
+  until?: string;
 }
 
 /** Make this the project's focused task. A task from an older session is picked up into the current one as well, unless pick is false. */
@@ -502,6 +514,7 @@ export interface ApiInputs {
   "task.diveIn": TaskDiveInInput;
   "task.done": TaskDoneInput;
   "task.drop": TaskDropInput;
+  "task.due": TaskDueInput;
   "task.focus": TaskFocusInput;
   "task.leftovers": TaskLeftoversInput;
   "task.list": TaskListInput;
@@ -562,6 +575,7 @@ export const API_TIERS: Record<
   "task.diveIn": "mutation",
   "task.done": "query",
   "task.drop": "mutation",
+  "task.due": "query",
   "task.focus": "mutation",
   "task.leftovers": "query",
   "task.list": "query",

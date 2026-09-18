@@ -18,6 +18,9 @@ import SwiftUI
 final class CanvasTaskListModel {
     private(set) var groups: [CanvasTaskGroup]?
     private(set) var failure: String?
+    /// The same answer as markdown, for Copy as Text (docs/views.md D10) — PmLib's words for it, made
+    /// from the contract's answer in the same look.
+    private(set) var text: String?
 
     /// What the card is set to, from the node.
     var spec: CanvasViewSpec { didSet { if spec != oldValue { query = spec.query; reload() } } }
@@ -102,6 +105,7 @@ final class CanvasTaskListModel {
         let mine = generation
         let kind = spec.kind
         let before = spec.period.value
+        let beforeTitle = spec.period.beforeTitle.lowercased()
         let query = self.query.trimmingCharacters(in: .whitespaces)
         let projects: [String]?
         switch spec.projects {
@@ -110,26 +114,33 @@ final class CanvasTaskListModel {
         case .named(let names): projects = names
         }
         queue.async { [weak self] in
-            let result = Result { () throws -> [CanvasTaskGroup] in
-                if projects?.isEmpty == true { return [] }
+            let result = Result { () throws -> ([CanvasTaskGroup], String) in
+                let none = projects?.isEmpty == true
                 switch kind {
                 case .waiting:
-                    return CanvasTaskLists.groups(waiting: try waitingBuckets(projects: projects))
+                    let buckets = none ? [] : try waitingBuckets(projects: projects)
+                    return (CanvasTaskLists.groups(waiting: buckets), ViewMarkdown.waiting(buckets))
                 case .search:
                     // Nothing typed asks nothing, and walking every project to answer it would be waste.
-                    if query.isEmpty { return [] }
-                    return CanvasTaskLists.groups(search: try searchableTasks(projects: projects), query: query)
+                    if query.isEmpty || none { return ([], ViewMarkdown.search([], query: query)) }
+                    let groups = CanvasTaskLists.groups(search: try searchableTasks(projects: projects), query: query)
+                    return (groups, ViewMarkdown.search(groups.flatMap(\.hits), query: query))
                 case .leftovers:
-                    return CanvasTaskLists.groups(leftovers: try leftoverTasks(before: before, projects: projects))
-                case .day:
-                    return []
+                    let list = none ? LeftoverList() : try leftoverTasks(before: before, projects: projects)
+                    return (CanvasTaskLists.groups(leftovers: list), ViewMarkdown.leftovers(list, before: beforeTitle))
+                case .comingUp:
+                    let due = none ? [] : try dueTasks(until: before, projects: projects)
+                    return (CanvasTaskLists.groups(due: due), ViewMarkdown.due(due))
+                case .day, .projects:
+                    return ([], "")
                 }
             }
             Task { @MainActor in
                 guard let self, mine == self.generation else { return }
                 switch result {
-                case .success(let groups):
+                case .success(let (groups, text)):
                     self.failure = nil
+                    self.text = text
                     if groups != self.groups {
                         self.groups = groups
                         self.selection.keep(within: CanvasTaskLists.order(groups))
@@ -228,14 +239,15 @@ struct CanvasTaskListCard: View {
         switch model.spec.kind {
         case .search: return "Search"
         case .leftovers: return "Left Open"
-        case .waiting, .day: return "Waiting On"
+        case .comingUp: return "Coming Up"
+        case .waiting, .day, .projects: return "Waiting On"
         }
     }
 
     /// Which projects, when it isn't all of them — and for Leftovers, how old a sitting has to be.
     private var caption: String? {
         var parts: [String] = []
-        if model.spec.kind == .leftovers { parts.append(model.spec.period.beforeTitle) }
+        if model.spec.kind.hasPeriod { parts.append(model.spec.kind.title(of: model.spec.period)) }
         if model.spec.projects != .everything { parts.append(model.spec.projects.title) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -287,7 +299,9 @@ struct CanvasTaskListCard: View {
             let query = model.query.trimmingCharacters(in: .whitespaces)
             return query.isEmpty ? "Type the words you remember." : "Nothing matches “\(query)”."
         case .leftovers: return "Nothing left open \(model.spec.period.beforeTitle.lowercased())."
-        case .day: return ""
+        case .comingUp:
+            return model.spec.period == .today ? "Nothing due today." : "Nothing due \(model.spec.period.dueTitle.lowercased())."
+        case .day, .projects: return ""
         }
     }
 
@@ -350,7 +364,23 @@ struct CanvasTaskListCard: View {
 
     /// What's being waited on, as the Waiting window heads it: released in green with the news, a
     /// project you can go to, or a name as written.
-    private func heading(_ title: String, _ group: CanvasTaskGroup) -> some View {
+    @ViewBuilder private func heading(_ title: String, _ group: CanvasTaskGroup) -> some View {
+        if model.spec.kind == .comingUp {
+            dayHeading(title, overdue: group.state == "overdue")
+        } else {
+            waitingHeading(title, group)
+        }
+    }
+
+    /// A day on Coming up, and what's past due in red above them all.
+    private func dayHeading(_ title: String, overdue: Bool) -> some View {
+        Text(title)
+            .font(.system(size: 12 * zoom, weight: .semibold))
+            .foregroundStyle(overdue ? Color.red : .primary)
+            .padding(.bottom, 2)
+    }
+
+    private func waitingHeading(_ title: String, _ group: CanvasTaskGroup) -> some View {
         let released = group.state == "released"
         return VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -428,10 +458,13 @@ struct CanvasTaskListCard: View {
     private func chip(_ item: CanvasTaskItem) -> some View {
         let hit = item.hit
         return HStack(alignment: .firstTextBaseline, spacing: 4) {
-            if let due = hit.due, let label = SessionPicks.day(iso: due) {
+            // On Coming up the day is the heading, so only what's past it says its date — in red.
+            let overdue = hit.due.map { String($0.prefix(10)) < CanvasTaskLists.todayISO() } ?? false
+            if let due = hit.due, let label = SessionPicks.day(iso: String(due.prefix(10))),
+               model.spec.kind != .comingUp || overdue {
                 Text(label)
                     .font(.system(size: 10 * zoom))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(model.spec.kind == .comingUp ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
             }
             if model.spec.kind == .leftovers {
                 if item.depth == 0, let picked = item.picked, let day = SessionPicks.day(iso: picked.into) {

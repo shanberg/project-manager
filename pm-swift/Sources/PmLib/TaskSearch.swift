@@ -169,6 +169,14 @@ public struct TaskSearchHit: Codable, Equatable, Sendable, SearchableTask {
 /// `projects` narrows it to those projects, as `session.list` reads the same field (`projectFolders`).
 public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = true,
                             projects: [String]? = nil) throws -> [TaskSearchHit] {
+    try openTasks(includeArchived: includeArchived, includeActive: includeActive, projects: projects).map(\.hit)
+}
+
+/// The walk behind every cross-project task list: each open task as a hit, beside the `Todo` it came
+/// from, for a caller that needs to know more about the line than a hit says (`dueTasks` wants the
+/// line's own due date, where a hit carries the one it inherits).
+func openTasks(includeArchived: Bool = true, includeActive: Bool = true,
+               projects: [String]? = nil) throws -> [(hit: TaskSearchHit, todo: Todo)] {
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
     let only = try projects.map(projectFolders(named:))
@@ -178,7 +186,7 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
     if includeActive { scopes.append(contentsOf: [.active, .areas]) }
     if includeArchived { scopes.append(.archive) }
 
-    var hits: [TaskSearchHit] = []
+    var hits: [(hit: TaskSearchHit, todo: Todo)] = []
     for scope in scopes {
         let base = scope.path(in: paths)
         let archived = scope.isArchived
@@ -193,7 +201,7 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
             let color = projectColor(rawText: rawText)?.value
             let icon = projectIcon(rawText: rawText)?.value
             for todo in todosWithEffectiveWaiting(todosWithEffectiveDueDates(todos)) where !todo.checked {
-                hits.append(TaskSearchHit(
+                hits.append((TaskSearchHit(
                     projectFolder: folder,
                     projectName: projectTitle(fromFolderName: folder),
                     projectKey: "\(base):\(folder)",
@@ -208,7 +216,7 @@ public func searchableTasks(includeArchived: Bool = true, includeActive: Bool = 
                     line: todo.lineIndex,
                     digest: todo.digest,
                     projectColor: color,
-                    projectIcon: icon))
+                    projectIcon: icon), todo))
             }
         }
     }

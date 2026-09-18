@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search) and 6 (Leftovers) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers) and 7 (Coming up, Projects, Copy as Text) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are sketched here only far enough that the views leave room
@@ -470,6 +470,37 @@ new card: `CanvasTaskGroup` now holds items, each a hit plus the depth and pick 
 - **The contract (1.16.0)** adds `task.leftovers` with `before` and `projects`. `LeftoverProject.hit`
   turns a leftover into the `TaskSearchHit` every task-list surface draws.
 
+### As built (step 7)
+
+`DueList.swift`, `ProjectActivity.swift` and `ViewMarkdown.swift` in PmLib; `CanvasProjectsCard` in the
+app, with Coming up as a fourth kind on the task-list card.
+
+- **Coming up is `task.due`, not a widened `task.whatsDue`.** `whatsDue` answers for one project, as
+  `Todo`s, and defaults to the focused project. A cross-project answer needs each task's project, so
+  widening it would make one action return two shapes depending on its fields. `task.due` takes
+  `until` and `projects` and returns `TaskSearchHit`s, like every other cross-project list.
+- **A line's own date.** A subtask under a dated task inherits the date, and listing a task and its five
+  steps as six things due Friday would be one deadline said six times. So a line is listed when it
+  states a date itself. **Overdue is always in.**
+- **Coming up's `week` is the next seven days**, not the calendar week: on a Friday the calendar week
+  ends tomorrow, and Monday's deadline matters on Friday. Its menu says **Due Today / Next 7 Days**
+  (no Yesterday), and a new card starts at Next 7 Days. The card groups by day: **Overdue** in red,
+  then Today, Tomorrow and the date. Only an overdue row repeats its date.
+- **Projects is `project.list` with `activity: true`**, which reads each project for `lastActivity` (the
+  later of its newest sitting's start and its notes' last write, as D8 said), its newest sitting and
+  lede, how many tasks are open, and the soonest due. It's opt-in because it reads every project, and
+  a plain list shouldn't pay for that. `project.list` also takes `projects`.
+- **Moving and Quiet.** The card splits at two weeks untouched (`projectQuietAfter`), newest first in
+  each. A row says "3 days ago" and "12 open · next due Sep 19". Clicking goes to the project, dragging
+  makes its card, and hovering shows the last sitting's lede. Its menu has **Projects** only.
+- **Copy as Text** is on every view card's menu (**Copy 3 Views as Text** for several, joined). Each
+  view has one formatter in `ViewMarkdown`, over the contract's answer: `##` for the view, `###` for its
+  groups, task lines with their boxes, projects as `[[folder]]` (the way PM writes a project anywhere
+  else), and dates written out rather than "today", since text is read later than it's copied. The
+  CLI has the same words: `pm day --markdown`, and new `pm leftovers` and `pm due`. Waiting, Search and
+  Projects have no CLI command of their own yet.
+- **The contract (1.17.0)** adds `task.due`, and `activity` and `projects` on `project.list`.
+
 ## Calendars, eventually
 
 Sketched only so that the views leave room for it. Nothing here is decided.
@@ -525,7 +556,7 @@ Each step ships on its own.
 5. ✓ **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
    card is general before another query is written.
 6. ✓ **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
-7. **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
+7. ✓ **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
 8. **The week and month layouts (D9).** They're last because they are the most drawing and the least
    new data, and because the calendar design should be settled before the week grid's shape is fixed.
 

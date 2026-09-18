@@ -262,7 +262,7 @@ public enum DoneLog {
         return formatter.string(from: date)
     }
 
-    static func date(_ timestamp: String) -> Date? {
+    public static func date(_ timestamp: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: timestamp)
@@ -302,7 +302,7 @@ public struct DoneRange: Equatable {
     /// Midnight at the start of a `YYYY-MM-DD` in the reader's timezone. Not `parseSessionDateArgument`,
     /// which pins noon UTC so a heading formats the same everywhere — a report's "Tuesday" is the
     /// reader's Tuesday.
-    static func localDay(_ string: String, calendar: Calendar) throws -> Date {
+    public static func localDay(_ string: String, calendar: Calendar) throws -> Date {
         let parts = string.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3,
               let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))

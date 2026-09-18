@@ -119,6 +119,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "since": input.since.map(JSONValue.string),
         "until": input.until.map(JSONValue.string),
         "before": input.before.map(JSONValue.string),
+        "activity": input.activity.map(JSONValue.bool),
         "projects": input.projects.map { .array($0.map(JSONValue.string)) },
     ]
 }
@@ -527,6 +528,18 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if done > 0 { summary += ", \(done) done" }
         return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
 
+    case "task.due":
+        let due = try dueTasks(until: input.until, projects: input.projects)
+        let today = isoDay(Date())
+        let overdue = due.filter { ($0.due.map { String($0.prefix(10)) } ?? "") < today }.count
+        let projects = Set(due.map(\.projectFolder)).count
+        var summary = due.isEmpty ? "Nothing due." : "\(due.count) due"
+        if !due.isEmpty {
+            if overdue > 0 { summary += ", \(overdue) overdue" }
+            summary += projects > 1 ? " across \(projects) projects." : "."
+        }
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(due))
+
     case "task.leftovers":
         let list = try leftoverTasks(before: input.before, projects: input.projects)
         let tasks = list.taskCount
@@ -643,11 +656,20 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
         let codes = Array(config.domains.keys)
         let scope = input.scope ?? "active"
+        if input.activity == true {
+            let scopes = ProjectScope.allCases.filter { scope == "all" || scope == $0.rawValue }
+            let summaries = try projectSummaries(scopes: scopes, kind: input.kind, projects: input.projects)
+            return ApiResult(action: spec.name,
+                             summary: "\(summaries.count) result\(summaries.count == 1 ? "" : "s").",
+                             data: try JSONValue.encoding(summaries))
+        }
+        let only = try input.projects.map(projectFolders(named:))
         let wanted = input.kind.flatMap(ProjectKind.init(rawValue:))
         var entries: [JSONValue] = []
         for scopeCase in ProjectScope.allCases where scope == "all" || scope == scopeCase.rawValue {
             let base = scopeCase.path(in: paths)
             for folder in (try? getFolders(basePath: base, scope: scopeCase, domainCodes: codes)) ?? [] {
+                if let only, !only.contains(folder) { continue }
                 let kind = ProjectKind.of(folderName: folder)
                 guard wanted == nil || wanted == kind else { continue }
                 entries.append(.object([

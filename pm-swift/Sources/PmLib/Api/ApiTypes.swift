@@ -162,6 +162,8 @@ public struct ApiInput: Codable, Equatable {
     /// A report's first and last days, YYYY-MM-DD, both inclusive.
     public var since: String?
     public var until: String?
+    /// `project.list`: read each project for what's happening in it.
+    public var activity: Bool?
     /// `task.leftovers`: how old a sitting has to be — `today`, `yesterday`, `week` or YYYY-MM-DD.
     public var before: String?
     /// `session.list`: the projects to look in, by name, prefix or `[[link]]`.

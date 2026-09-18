@@ -1,11 +1,13 @@
 import Foundation
 import PmLib
 
-/// `pm day [today|yesterday|week|YYYY-MM-DD] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--project NAME]…`
-/// — the sittings of a day across projects, in the order the day went, with their prose kept in. `pm done`
-/// is the checklist; this is the journal. `pm api call session.list` is the same answer as JSON.
+/// `pm day [today|yesterday|week|YYYY-MM-DD] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--project NAME]…
+/// [--markdown]` — the sittings of a day across projects, in the order the day went, with their prose kept
+/// in. `pm done` is the checklist; this is the journal. `--markdown` is the Day card's Copy as Text
+/// (docs/views.md D10), and `pm api call session.list` is the same answer as JSON.
 func runDay(args: [String]) {
-    let usage = "Usage: pm day [today|yesterday|week|YYYY-MM-DD] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--project NAME]…"
+    let usage = "Usage: pm day [today|yesterday|week|YYYY-MM-DD] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--project NAME]… [--markdown]"
+    var markdown = false
     var period: String?
     var since: String?
     var until: String?
@@ -15,6 +17,7 @@ func runDay(args: [String]) {
         let arg = args[index]
         switch arg {
         case "today", "yesterday", "week": period = arg
+        case "--markdown": markdown = true
         case "--since" where index + 1 < args.count: index += 1; since = args[index]
         case "--until" where index + 1 < args.count: index += 1; until = args[index]
         case "--project" where index + 1 < args.count: index += 1; projects.append(args[index])
@@ -30,7 +33,7 @@ func runDay(args: [String]) {
     do {
         let range = try DoneRange.resolve(period: period, since: since, until: until)
         let list = try sessionList(in: range, projects: projects.isEmpty ? nil : projects)
-        print(dayText(list, range: range), terminator: "")
+        print(markdown ? ViewMarkdown.day(list) : dayText(list, range: range), terminator: "")
     } catch {
         stderr(String(describing: error))
         exit(1)
@@ -143,4 +146,64 @@ func dayText(_ list: SittingList, range: DoneRange, now: Date = Date(),
         }
     }
     return out.joined(separator: "\n") + "\n"
+}
+
+/// `pm leftovers [today|yesterday|week|YYYY-MM-DD] [--project NAME]…` — open tasks left in sittings before
+/// then, across projects, as the Leftovers card's Copy as Text reads (docs/views.md D10). `week` is before
+/// this week. `pm api call task.leftovers` is the same answer as JSON.
+func runLeftovers(args: [String]) {
+    let usage = "Usage: pm leftovers [today|yesterday|week|YYYY-MM-DD] [--project NAME]…"
+    guard let (when, projects) = periodAndProjects(args, periods: ["today", "yesterday", "week"]) else {
+        stderr(usage)
+        exit(1)
+    }
+    do {
+        let list = try leftoverTasks(before: when, projects: projects)
+        let title: String
+        switch when {
+        case nil, "today": title = "before today"
+        case "yesterday": title = "before yesterday"
+        case "week": title = "before this week"
+        case let date?: title = "before \(date)"
+        }
+        print(ViewMarkdown.leftovers(list, before: title), terminator: "")
+    } catch {
+        stderr(String(describing: error))
+        exit(1)
+    }
+}
+
+/// `pm due [today|week|YYYY-MM-DD] [--project NAME]…` — open tasks due by then across projects, overdue
+/// first, as the Coming up card's Copy as Text reads. `week` is the next seven days, the default.
+/// `pm api call task.due` is the same answer as JSON.
+func runDue(args: [String]) {
+    let usage = "Usage: pm due [today|week|YYYY-MM-DD] [--project NAME]…"
+    guard let (until, projects) = periodAndProjects(args, periods: ["today", "week"]) else {
+        stderr(usage)
+        exit(1)
+    }
+    do {
+        print(ViewMarkdown.due(try dueTasks(until: until, projects: projects)), terminator: "")
+    } catch {
+        stderr(String(describing: error))
+        exit(1)
+    }
+}
+
+/// One period word or date, and any number of `--project NAME`; nil for anything else.
+private func periodAndProjects(_ args: [String], periods: Set<String>) -> (String?, [String]?)? {
+    var when: String?
+    var projects: [String] = []
+    var index = 0
+    while index < args.count {
+        let arg = args[index]
+        switch arg {
+        case _ where periods.contains(arg): when = arg
+        case "--project" where index + 1 < args.count: index += 1; projects.append(args[index])
+        case _ where arg.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil: when = arg
+        default: return nil
+        }
+        index += 1
+    }
+    return (when, projects.isEmpty ? nil : projects)
 }

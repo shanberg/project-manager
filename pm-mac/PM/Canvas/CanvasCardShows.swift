@@ -244,14 +244,15 @@ enum CanvasSittingPin {
              resolver: resolver)
     }
 
-    /// The same, for a sitting named by its project's folder and its ref — a Leftovers heading's.
+    /// The same, for a sitting named by its project's folder and its ref — a Leftovers heading's. With no
+    /// sitting, the project's card as it comes: a Projects row dragged off.
     @MainActor
-    static func card(project folder: String, session: SessionRef, resolver: CanvasFileResolver) -> CanvasDocument? {
+    static func card(project folder: String, session: SessionRef?, resolver: CanvasFileResolver) -> CanvasDocument? {
         guard let projectPath = try? resolveProjectPath(nameOrPrefix: folder),
               let notes = (try? resolveNotesPath(projectPath: projectPath)) ?? nil else { return nil }
         var node = CanvasProjectNoteCard.node(for: URL(fileURLWithPath: notes), at: CanvasPoint(x: 0, y: 0),
                                               resolver: resolver)
-        pin(session, on: &node)
+        if let session { pin(session, on: &node) }
         return CanvasDocument(nodes: [node], edges: [])
     }
 

@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.16.0"
+public let apiContractVersion = "1.17.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -229,7 +229,11 @@ public enum ApiRegistry {
                       fields: [ApiField("scope", .string, "Which folder to list. Default active.",
                                         allowed: ["active", "areas", "archive", "all"]),
                                ApiField("kind", .string, "Only this kind. Default both.",
-                                        allowed: ProjectKind.allCases.map(\.rawValue))]),
+                                        allowed: ProjectKind.allCases.map(\.rawValue)),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members."),
+                               ApiField("activity", .boolean,
+                                        "Also read each project for what's happening in it: lastActivity (the later of its newest sitting's start and its notes' last write), its newest sitting and what it was about, how many tasks are open, and the soonest due. Sorted newest activity first. Default false.")]),
         ApiActionSpec(name: "project.adoptable", tier: .query,
                       summary: "Folders in the areas root that could become areas but haven't yet.",
                       fields: []),
@@ -287,6 +291,12 @@ public enum ApiRegistry {
                                ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
                                ApiField("projects", .stringList,
                                         "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
+        ApiActionSpec(name: "task.due", tier: .query,
+                      summary: "Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one.",
+                      fields: [ApiField("until", .string,
+                                        "How far ahead: today, week (the next seven days, the default), or through a day given as YYYY-MM-DD."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every active project and area.")]),
         ApiActionSpec(name: "task.leftovers", tier: .query,
                       summary: "Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up.",
                       fields: [ApiField("before", .string,

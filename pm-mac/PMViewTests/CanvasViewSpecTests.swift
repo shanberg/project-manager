@@ -398,4 +398,65 @@ extension CanvasViewSpecTests {
         let yesterday = CanvasTaskItem(hit: try hit("Old pick"), picked: PickMark(into: "2020-01-01", at: ""))
         XCTAssertFalse(yesterday.row().pickedUp, "a pick into an older sitting can be picked up again")
     }
+
+    // MARK: Coming up and Projects (step 7)
+
+    /// Coming up reads its period as a horizon and has no yesterday; a new one starts a week out.
+    /// Projects has no period at all.
+    func testComingUpAndProjectsAreViews() throws {
+        let comingUp = try XCTUnwrap(CanvasViewSpec.of(node(["pmView": .string("coming-up")])))
+        XCTAssertEqual(comingUp.kind, .comingUp)
+        XCTAssertEqual(comingUp.kind.periods, [.today, .week])
+        XCTAssertEqual(comingUp.kind.title(of: .week), "Next 7 Days")
+        XCTAssertEqual(comingUp.kind.title(of: .today), "Due Today")
+        XCTAssertEqual(CanvasViewSpec.Kind.leftovers.title(of: .week), "Before This Week")
+        XCTAssertEqual(CanvasViewSpec.Kind.day.title(of: .week), "This Week")
+        var card = node(["pmView": .string("coming-up")])
+        CanvasViewSpec.set(.newComingUp, on: &card)
+        XCTAssertEqual(card.extra, ["pmView": .string("coming-up"), "pmPeriod": .string("week")])
+
+        XCTAssertEqual(CanvasViewSpec.of(node(["pmView": .string("projects")]))?.kind, .projects)
+        XCTAssertFalse(CanvasViewSpec.Kind.projects.hasPeriod)
+    }
+
+    /// Overdue under one heading, then Today, Tomorrow, and the date.
+    func testComingUpGroupsByDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Chicago")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 12))!
+        func due(_ text: String, _ day: String, line: Int) throws -> TaskSearchHit {
+            var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(try hit(text, line: line))) as! [String: Any]
+            object["due"] = day
+            return try JSONDecoder().decode(TaskSearchHit.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let hits = [try due("Old", "2026-09-10", line: 0), try due("Older", "2026-09-16", line: 1),
+                    try due("Now", "2026-09-18", line: 2), try due("Next", "2026-09-19", line: 3),
+                    try due("Later", "2026-09-22", line: 4)]
+        let groups = CanvasTaskLists.groups(due: hits, now: now, calendar: calendar)
+        XCTAssertEqual(groups.map(\.title), ["Overdue", "Today", "Tomorrow", "Tue, Sep 22"])
+        XCTAssertEqual(groups.map(\.state), ["overdue", nil, nil, nil])
+        XCTAssertEqual(groups.first?.hits.count, 2)
+        XCTAssertEqual(CanvasTaskLists.summary(.comingUp, groups), "5 due · 2 overdue")
+        XCTAssertEqual(CanvasTaskLists.summary(.comingUp, []), "Nothing due")
+    }
+
+    /// When a project was last worked on, as a person says it; what's open and next due under its name.
+    func testAProjectRowSaysHowLongItsBeen() {
+        let now = Date()
+        func project(daysAgo: Double?) -> ProjectSummary {
+            var summary = ProjectSummary(folder: "W-1 Launch", name: "Launch", kind: "project", scope: "active", path: "")
+            summary.lastActivity = daysAgo.map { ISO8601DateFormatter().string(from: now.addingTimeInterval(-$0 * 86_400)) }
+            return summary
+        }
+        XCTAssertEqual(CanvasProjectRows.lastWorked(project(daysAgo: 0), now: now), "Today")
+        XCTAssertEqual(CanvasProjectRows.lastWorked(project(daysAgo: 3), now: now), "3 days ago")
+        XCTAssertEqual(CanvasProjectRows.lastWorked(project(daysAgo: 21), now: now), "3 weeks ago")
+        XCTAssertEqual(CanvasProjectRows.lastWorked(project(daysAgo: nil), now: now), "Never")
+        var busy = project(daysAgo: 1)
+        busy.open = 4
+        busy.nextDue = "2026-09-22"
+        XCTAssertTrue(CanvasProjectRows.detail(busy).hasPrefix("4 open · next due "))
+        XCTAssertEqual(CanvasProjectRows.detail(project(daysAgo: 1)), "Nothing open")
+        XCTAssertEqual(CanvasProjectRows.summary([busy, project(daysAgo: 40)], now: now), "1 moving · 1 quiet")
+    }
 }

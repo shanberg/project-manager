@@ -31,6 +31,10 @@ private func dispatch(cmd: String, args: [String]) {
         runDone(args: args)
     case "day":
         runDay(args: args)
+    case "leftovers":
+        runLeftovers(args: args)
+    case "due":
+        runDue(args: args)
     case "api":
         runApi(args: args)
     case "mcp":

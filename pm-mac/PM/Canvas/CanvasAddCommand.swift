@@ -32,6 +32,10 @@ enum CanvasAddCommand: CaseIterable {
     /// A Leftovers view: tasks left open in older sittings, across projects — Day's pair (docs/views.md
     /// D1), the pile where Day is the journal.
     case leftoversView
+    /// A Coming up view: what's due across projects, overdue first — the deadline horizon.
+    case comingUpView
+    /// A Projects view: every project, moving or gone quiet — the portfolio.
+    case projectsView
     /// A Waiting view: what's being waited on, across projects — the Waiting window's answer, on a board.
     case waitingView
     /// A Search view: tasks across projects matching the words in its field.
@@ -55,6 +59,8 @@ enum CanvasAddCommand: CaseIterable {
         case .projectNote: return "New Project Note"
         case .dayView: return "New Day View"
         case .leftoversView: return "New Leftovers View"
+        case .comingUpView: return "New Coming Up View"
+        case .projectsView: return "New Projects View"
         case .waitingView: return "New Waiting View"
         case .searchView: return "New Search View"
         }

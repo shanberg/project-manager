@@ -9,15 +9,18 @@ import SwiftUI
 /// project card, through its own project's store — taken when you act, not for every project in view.
 /// See `CanvasDayActions`.
 final class CanvasViewNodeView: CanvasNodeView {
-    /// What the card draws: a Day's sittings, or a list of tasks (Waiting, Search, Leftovers).
+    /// What the card draws: a Day's sittings, a list of tasks (Waiting, Search, Leftovers, Coming up), or
+    /// the projects themselves.
     enum Model {
         case day(CanvasDayModel)
         case tasks(CanvasTaskListModel)
+        case projects(CanvasProjectsModel)
 
         @MainActor init(_ spec: CanvasViewSpec) {
             switch spec.kind {
             case .day: self = .day(CanvasDayModel(spec: spec))
-            case .waiting, .search, .leftovers: self = .tasks(CanvasTaskListModel(spec: spec))
+            case .waiting, .search, .leftovers, .comingUp: self = .tasks(CanvasTaskListModel(spec: spec))
+            case .projects: self = .projects(CanvasProjectsModel(spec: spec))
             }
         }
 
@@ -25,6 +28,16 @@ final class CanvasViewNodeView: CanvasNodeView {
             switch self {
             case .day(let model): return model.spec
             case .tasks(let model): return model.spec
+            case .projects(let model): return model.spec
+            }
+        }
+
+        /// Which model a kind is drawn by — a change of kind within one keeps the model.
+        static func family(_ kind: CanvasViewSpec.Kind) -> Int {
+            switch kind {
+            case .day: return 0
+            case .waiting, .search, .leftovers, .comingUp: return 1
+            case .projects: return 2
             }
         }
     }
@@ -64,6 +77,10 @@ final class CanvasViewNodeView: CanvasNodeView {
             tasks.boardProjects = boardProjectFolders()
             tasks.onChange = changed
             tasks.start()
+        case .projects(let projects):
+            projects.boardProjects = boardProjectFolders()
+            projects.onChange = changed
+            projects.start()
         }
     }
 
@@ -71,6 +88,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         switch model {
         case .day(let day): day.stop()
         case .tasks(let tasks): tasks.stop()
+        case .projects(let projects): projects.stop()
         }
     }
 
@@ -83,7 +101,8 @@ final class CanvasViewNodeView: CanvasNodeView {
         if let spec = CanvasViewSpec.of(node), spec != self.spec {
             switch model {
             case .day(let day) where spec.kind == .day: day.spec = spec
-            case .tasks(let tasks) where spec.kind != .day: tasks.spec = spec
+            case .tasks(let tasks) where Model.family(spec.kind) == 1: tasks.spec = spec
+            case .projects(let projects) where spec.kind == .projects: projects.spec = spec
             default:
                 stopModel()
                 model = Model(spec)
@@ -96,6 +115,7 @@ final class CanvasViewNodeView: CanvasNodeView {
             switch model {
             case .day(let day): if folders != day.boardProjects { day.boardProjects = folders }
             case .tasks(let tasks): if folders != tasks.boardProjects { tasks.boardProjects = folders }
+            case .projects(let projects): if folders != projects.boardProjects { projects.boardProjects = folders }
             }
         }
     }
@@ -104,6 +124,16 @@ final class CanvasViewNodeView: CanvasNodeView {
         switch model {
         case .day(let day): return day.summary
         case .tasks(let tasks): return tasks.summary
+        case .projects(let projects): return projects.summary
+        }
+    }
+
+    /// The card's answer as markdown, for Copy as Text (docs/views.md D10), or nil before it has one.
+    var text: String? {
+        switch model {
+        case .day(let day): return day.list.map { ViewMarkdown.day($0) }
+        case .tasks(let tasks): return tasks.text
+        case .projects(let projects): return projects.text
         }
     }
 
@@ -115,6 +145,8 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .waiting: return "Waiting"
         case .search: return spec.query.isEmpty ? "Search" : "Search “\(spec.query)”"
         case .leftovers: return spec.period == .today ? "Leftovers" : "Leftovers \(spec.period.beforeTitle)"
+        case .comingUp: return "Coming Up"
+        case .projects: return "Projects"
         }
     }
 
@@ -124,6 +156,8 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .waiting: return "clock"
         case .search: return "magnifyingglass"
         case .leftovers: return "tray.full"
+        case .comingUp: return "calendar.badge.clock"
+        case .projects: return "square.grid.2x2"
         }
     }
 
@@ -167,6 +201,13 @@ final class CanvasViewNodeView: CanvasNodeView {
                     self?.sittingCardProvider(project: sitting.projectFolder, session: sitting.ref,
                                               title: [sitting.projectName, sitting.dateLabel])
                 }))
+        case .projects(let projects):
+            root = AnyView(CanvasProjectsCard(
+                model: projects, zoom: contentZoom,
+                onOpenProject: { folder in WindowManager.shared.open(named: folder) },
+                projectCard: { [weak self] project in
+                    self?.sittingCardProvider(project: project.folder, session: nil, title: [project.name])
+                }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         view.setAccessibilityLabel(accessibilityFallback)
@@ -203,6 +244,8 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .tasks(let tasks):
             tasks.isEngaged = isEngaged
             if !isEngaged { tasks.selection.clear() }
+        case .projects:
+            break
         }
         guard let content = subviews.first else { return }
         if isEngaged {
@@ -227,7 +270,7 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// What a sitting dragged off this card carries: a project card of that one sitting (docs/views.md
     /// D7), in the board's own clipping flavour, so the board makes exactly that card where it lands —
     /// and its name as text for anywhere else.
-    private func sittingCardProvider(project folder: String, session: SessionRef, title: [String]) -> NSItemProvider? {
+    private func sittingCardProvider(project folder: String, session: SessionRef?, title: [String]) -> NSItemProvider? {
         guard let document = CanvasSittingPin.card(project: folder, session: session,
                                                    resolver: board.store.resolver) else { return nil }
         let data = Data(document.serialized().utf8)

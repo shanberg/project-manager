@@ -85,6 +85,8 @@ config.get
 
 In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries `sessionOrdinal` (which of its day's sittings it's in) and its project's `projectColor` and `projectIcon`. They're the Waiting and Search views' queries. See [views.md](views.md) step 5.
 
+`task.due` (1.17.0) is the deadline horizon across projects: open tasks due by `until` (`today`, `week` for the next seven days, or a date), overdue first, each line listed when it states a date itself. It's a new action rather than a widened `task.whatsDue`, which answers for one project as `Todo`s. In the same version, `project.list` takes `projects`, and `activity: true` reads each project for its `lastActivity`, newest sitting, open count and soonest due. See [views.md](views.md) step 7.
+
 `task.leftovers` (1.16.0) is the pile across projects: open tasks in sittings older than `before` (`today`, `yesterday`, `week` for before this week, or a date), grouped by project and then by sitting, oldest first. Each sitting comes with its lede, and each task with its ref and its last pick-up. See [views.md](views.md) step 6.
 
 `session.list` (1.14.0) is the day across projects: every sitting dated in a span, in the order the day went, with its prose and its tasks by role. Completions are given to sittings by time, from the done log. See [views.md](views.md) D8.

@@ -128,6 +128,43 @@ enum CanvasTaskLists {
         return formatter.string(from: now)
     }
 
+    /// `task.due`'s answer by day: everything overdue under one heading, then a heading per day — "Today",
+    /// "Tomorrow", then the date.
+    static func groups(due hits: [TaskSearchHit], now: Date = Date(), calendar: Calendar = .current) -> [CanvasTaskGroup] {
+        let today = isoDay(now, calendar: calendar)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now).map { isoDay($0, calendar: calendar) }
+        var groups: [(id: String, title: String, overdue: Bool, hits: [TaskSearchHit])] = []
+        for hit in hits {
+            let day = String((hit.due ?? "").prefix(10))
+            let id = day < today ? "overdue" : day
+            if groups.last?.id != id {
+                let title: String
+                switch day {
+                case _ where day < today: title = "Overdue"
+                case today: title = "Today"
+                case tomorrow: title = "Tomorrow"
+                default: title = longDay(day, calendar: calendar)
+                }
+                groups.append((id, title, day < today, []))
+            }
+            groups[groups.count - 1].hits.append(hit)
+        }
+        return groups.map {
+            CanvasTaskGroup(id: "due/\($0.id)", title: $0.title, state: $0.overdue ? "overdue" : nil, folder: nil,
+                            hits: $0.hits)
+        }
+    }
+
+    /// "Tue, Sep 22" — a day ahead is near enough that its year goes without saying.
+    private static func longDay(_ iso: String, calendar: Calendar) -> String {
+        guard let day = try? DoneRange.localDay(iso, calendar: calendar) else { return iso }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "EEE, MMM d"
+        return formatter.string(from: day)
+    }
+
     /// A hit as a view's row: what `CanvasViewRow` draws and `CanvasDayActions` acts on. Unique within
     /// its project, which is as far as a selection reaches.
     static func row(_ hit: TaskSearchHit) -> CanvasDayRow { CanvasTaskItem(hit: hit).row() }
@@ -160,6 +197,12 @@ enum CanvasTaskLists {
             return parts.joined(separator: " · ")
         case .search:
             return tasks == 0 ? "No matches" : "\(tasks) match\(tasks == 1 ? "" : "es")"
+        case .comingUp:
+            guard tasks > 0 else { return "Nothing due" }
+            let overdue = groups.filter { $0.state == "overdue" }.reduce(0) { $0 + $1.hits.count }
+            var parts = ["\(tasks) due"]
+            if overdue > 0 { parts.append("\(overdue) overdue") }
+            return parts.joined(separator: " · ")
         case .leftovers:
             guard tasks > 0 else { return "Nothing left open" }
             let projects = Set(groups.compactMap(\.folder)).count
@@ -167,7 +210,7 @@ enum CanvasTaskLists {
                          "\(groups.count) sitting\(groups.count == 1 ? "" : "s")"]
             if projects > 1 { parts.append("\(projects) projects") }
             return parts.joined(separator: " · ")
-        case .day:
+        case .day, .projects:
             return ""
         }
     }
@@ -176,4 +219,48 @@ enum CanvasTaskLists {
 extension TaskSearchHit {
     /// Which row this is on a view card — `CanvasTaskLists.key`.
     var viewKey: String { CanvasTaskLists.key(self) }
+}
+
+// MARK: - What the Projects view draws
+
+/// The pure half of the Projects view (docs/views.md step 7): which projects are moving, and how long
+/// each has been left.
+enum CanvasProjectRows {
+    /// When a project was last worked on, as a person says it: "Today", "Yesterday", "3 days ago",
+    /// "5 weeks ago", and past a year the date. "Never" for a project with nothing to go by.
+    static func lastWorked(_ summary: ProjectSummary, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let last = summary.lastActivity.flatMap(DoneLog.date) else { return "Never" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: last),
+                                           to: calendar.startOfDay(for: now)).day ?? 0
+        switch days {
+        case ..<1: return "Today"
+        case 1: return "Yesterday"
+        case 2..<14: return "\(days) days ago"
+        case 14..<60: return "\(days / 7) weeks ago"
+        case 60..<365: return "\(days / 30) months ago"
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM yyyy"
+            return formatter.string(from: last)
+        }
+    }
+
+    /// The line under a project's name: what's open, what's next due.
+    static func detail(_ summary: ProjectSummary) -> String {
+        var parts = [summary.open == 0 ? "Nothing open" : "\(summary.open) open"]
+        if let due = summary.nextDue, let day = SessionPicks.day(iso: String(due.prefix(10))) {
+            parts.append("next due \(day)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The card's one line.
+    static func summary(_ summaries: [ProjectSummary], now: Date = Date()) -> String {
+        guard !summaries.isEmpty else { return "No projects" }
+        let (moving, quiet) = ViewMarkdown.split(summaries, now: now)
+        var parts: [String] = []
+        if !moving.isEmpty { parts.append("\(moving.count) moving") }
+        if !quiet.isEmpty { parts.append("\(quiet.count) quiet") }
+        return parts.joined(separator: " · ")
+    }
 }

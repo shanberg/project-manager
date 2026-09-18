@@ -731,23 +731,35 @@ extension CanvasBoardView {
     private func addViewMenus(_ menu: NSMenu) {
         let cards = selectedViewCards
         guard !cards.isEmpty else { return }
-        // Only a Day has a *when*: Waiting is about now, and a search is about words.
+        // Only some views have a *when*: Waiting and Projects are about now, and a search is about words.
         if cards.allSatisfy({ $0.spec.kind.hasPeriod }) { addPeriodMenu(menu, cards) }
         addProjectsMenu(menu, cards)
+        // Every view reads as text (docs/views.md D10): the same answer as a document, for the standup or
+        // the client's update. Several cards are one document, in the order they were chosen.
+        add(menu, cards.count > 1 ? "Copy \(cards.count) Views as Text" : "Copy as Text", #selector(copyViewsAsText(_:)))
+    }
+
+    @objc func copyViewsAsText(_ sender: Any?) {
+        let texts = selectedViewCards.compactMap(\.text)
+        guard !texts.isEmpty else { return NSSound.beep() }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(texts.joined(separator: "\n"), forType: .string)
     }
 
     private func addPeriodMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
         let periods = NSMenu(title: "Period")
-        var choices = CanvasViewSpec.Period.relative
+        // Cards of one kind get that kind's words — Leftovers reads a period as a cut-off, Coming up as a
+        // horizon. A mix gets the plain ones, which have to mean every kind at once.
+        let kinds = Set(cards.map(\.spec.kind))
+        let kind = kinds.count == 1 ? kinds.first : nil
+        var choices = kind?.periods ?? CanvasViewSpec.Period.relative
         // A card pinned to a date keeps that date on offer, so the tick has somewhere to be.
         for card in cards { if case .day = card.spec.period, !choices.contains(card.spec.period) {
             choices.append(card.spec.period)
         } }
-        // A Leftovers card reads the period as a cut-off, and its menu says so — unless it's chosen with a
-        // Day card, where one set of words has to mean both.
-        let before = cards.allSatisfy { $0.spec.kind == .leftovers }
         for period in choices {
-            let item = add(periods, before ? period.beforeTitle : period.title, #selector(setViewPeriod(_:)))
+            let item = add(periods, kind?.title(of: period) ?? period.title, #selector(setViewPeriod(_:)))
             item.representedObject = period.value
             item.state = cards.allSatisfy { $0.spec.period == period } ? .on : .off
         }
@@ -769,8 +781,9 @@ extension CanvasBoardView {
     @objc func setViewPeriod(_ sender: Any?) {
         guard let value = (sender as? NSMenuItem)?.representedObject as? String else { return }
         let period = CanvasViewSpec.Period(value: value)
-        let before = selectedViewCards.allSatisfy { $0.spec.kind == .leftovers }
-        changeViews("Show \(before ? period.beforeTitle : period.title)") { $0.period = period }
+        let kinds = Set(selectedViewCards.map(\.spec.kind))
+        let title = kinds.count == 1 ? kinds.first!.title(of: period) : period.title
+        changeViews("Show \(title)") { $0.period = period }
     }
 
     @objc func setViewProjects(_ sender: Any?) {
@@ -1289,6 +1302,8 @@ extension CanvasBoardView {
         case .projectNote: addProjectNoteCard(at: where_)
         case .dayView: addViewCard(.newDay, at: where_)
         case .leftoversView: addViewCard(.newLeftovers, at: where_)
+        case .comingUpView: addViewCard(.newComingUp, at: where_)
+        case .projectsView: addViewCard(.newProjects, at: where_)
         case .waitingView: addViewCard(.newWaiting, at: where_)
         case .searchView: addViewCard(.newSearch, at: where_)
         }

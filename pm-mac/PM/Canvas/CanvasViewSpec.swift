@@ -25,6 +25,10 @@ struct CanvasViewSpec: Equatable {
         /// What have I left open, and where did I write it? `task.leftovers`, from sittings before the
         /// period (D2: Leftovers reads *when* as "older than").
         case leftovers
+        /// What's due, and when? `task.due`: overdue, then the days up to the period's end.
+        case comingUp = "coming-up"
+        /// Which projects are moving, and which have gone quiet? `project.list` with its activity.
+        case projects
 
         /// What the card is called where it has to be one word: zoomed out, and to VoiceOver.
         var title: String {
@@ -33,11 +37,26 @@ struct CanvasViewSpec: Equatable {
             case .waiting: return "Waiting"
             case .search: return "Search"
             case .leftovers: return "Leftovers"
+            case .comingUp: return "Coming Up"
+            case .projects: return "Projects"
             }
         }
 
-        /// Whether *when* means anything to it. Waiting is about now, and a search is about words.
-        var hasPeriod: Bool { self == .day || self == .leftovers }
+        /// Whether *when* means anything to it. Waiting and Projects are about now, and a search is about
+        /// words.
+        var hasPeriod: Bool { self == .day || self == .leftovers || self == .comingUp }
+
+        /// The periods its menu offers, in order: Coming up looks ahead, so it has no yesterday.
+        var periods: [Period] { self == .comingUp ? [.today, .week] : Period.relative }
+
+        /// What its menu calls `period`: a Day's span, Leftovers' cut-off, Coming up's horizon.
+        func title(of period: Period) -> String {
+            switch self {
+            case .leftovers: return period.beforeTitle
+            case .comingUp: return period.dueTitle
+            default: return period.title
+            }
+        }
     }
 
     /// When (D2). A relative period follows the clock, so a Today card left on a board is tomorrow's
@@ -97,6 +116,16 @@ struct CanvasViewSpec: Equatable {
             case .yesterday: return "Before Yesterday"
             case .week: return "Before This Week"
             case .day: return "Before \(title)"
+            }
+        }
+
+        /// What the menu calls it on a Coming up card, which reads it as a horizon: `week` is the next
+        /// seven days (`dueCutoff`), where a Day's week is the calendar's.
+        var dueTitle: String {
+            switch self {
+            case .today, .yesterday: return "Due Today"
+            case .week: return "Next 7 Days"
+            case .day: return "Through \(title)"
             }
         }
 
@@ -185,6 +214,8 @@ struct CanvasViewSpec: Equatable {
         case .waiting: return "What I'm waiting on, across projects: a Folio view."
         case .search: return "A search of every project's tasks: a Folio view."
         case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), across projects: a Folio view."
+        case .comingUp: return "What's due, across projects: a Folio view."
+        case .projects: return "Every project, and when it was last worked on: a Folio view."
         }
     }
 
@@ -193,6 +224,9 @@ struct CanvasViewSpec: Equatable {
     static let newWaiting = CanvasViewSpec(kind: .waiting)
     static let newSearch = CanvasViewSpec(kind: .search)
     static let newLeftovers = CanvasViewSpec(kind: .leftovers)
+    /// Coming up starts a week out: today alone is a to-do list, and the horizon is the point.
+    static let newComingUp = CanvasViewSpec(kind: .comingUp, period: .week)
+    static let newProjects = CanvasViewSpec(kind: .projects)
 
     /// The card's caption for a period: "Today · Fri, Sep 18", or the week it covers.
     func caption(for range: DoneRange, calendar: Calendar = .current) -> String {
