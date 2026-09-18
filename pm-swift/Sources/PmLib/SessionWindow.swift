@@ -42,21 +42,77 @@ public func notesLastEdited(path: String) -> Date? {
     (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
 }
 
-/// The label an additional session started on a day that already has one carries: the clock time it
-/// began.
+/// The time a sitting's heading carries: the clock time it began, as `9:10 AM`.
 ///
-/// A heading is identified by its date, so two on the same day are identical without this — two
-/// "Tue, Aug 26, 2026" rules across the list with no way to tell which sitting is which. The time is
-/// local, because it names the moment you sat down rather than a coordinate anything matches on (the
-/// *date* is pinned to UTC by `formatSessionDate` precisely because that one is matched on).
-///
-/// Only the second and later sessions of a day get one. The first carries no label, exactly as before,
-/// so a project worked on once a day never grows a decoration it has no use for.
+/// Every sitting PM starts carries one (docs/views.md D4). It began as the way to tell two sittings of
+/// one day apart, and only the second and later got it; a day read across projects needs to be put in
+/// order, and a heading with no time can't be. The time is local, because it names the moment you sat
+/// down rather than a coordinate anything matches on (the *date* is pinned to UTC by
+/// `formatSessionDate` precisely because that one is matched on).
 public func sessionTimeLabel(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "h:mm a"
     return formatter.string(from: date)
+}
+
+/// What follows the date in a sitting's heading, taken apart: the time it began, and the name someone
+/// gave it.
+///
+/// ```
+/// ### Thu, Sep 18, 2026 9:10 AM
+/// ### Thu, Sep 18, 2026 9:10 AM · Week in review
+/// ### Thu, Sep 18, 2026 Week in review        (named before sittings kept their time)
+/// ### Thu, Sep 18, 2026                        (started before sittings kept their time)
+/// ```
+///
+/// **One field on disk, two in meaning.** The heading pattern captures everything after the date as
+/// the label, and `Session.label` stays exactly that, so a `SessionRef`'s digest and every heading
+/// already written are untouched. Before this, the time *was* the label, and naming a sitting threw it
+/// away. Keeping them apart is what lets a rename keep the time.
+///
+/// A time is `h:mm` and AM or PM, what `sessionTimeLabel` writes; anything else is a name, so "10:30
+/// sync" is a sitting named that, not one that began at half past ten.
+public struct SessionLabel: Equatable, Sendable {
+    public var time: String?
+    public var name: String
+
+    public init(time: String?, name: String) {
+        self.time = time
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public init(parsing label: String) {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        guard let m = Self.pattern.firstMatch(in: trimmed, range: range),
+              let t = Range(m.range(at: 1), in: trimmed) else {
+            self.init(time: nil, name: trimmed)
+            return
+        }
+        let name = Range(m.range(at: 2), in: trimmed).map { String(trimmed[$0]) } ?? ""
+        self.init(time: String(trimmed[t]).uppercased(), name: name)
+    }
+
+    /// As the heading writes it.
+    public var text: String {
+        switch (time, name.isEmpty) {
+        case (nil, _): return name
+        case (let time?, true): return time
+        case (let time?, false): return "\(time) · \(name)"
+        }
+    }
+
+    /// A leading time, then optionally a name after ` · ` (or, hand-written, after plain spaces).
+    private static let pattern = try! NSRegularExpression(
+        pattern: #"^(\d{1,2}:\d{2}\s?[AaPp][Mm])(?:(?:\s*·\s*|\s+)(.*))?$"#)
+}
+
+extension Session {
+    /// The time this sitting began, as its heading says — nil for one started before sittings kept it.
+    public var startTime: String? { SessionLabel(parsing: label).time }
+    /// The name someone gave this sitting, or empty.
+    public var name: String { SessionLabel(parsing: label).name }
 }
 
 /// What `currentSessionPreservingFormat` found or made.
@@ -79,20 +135,21 @@ public struct CurrentSession: Equatable {
 ///
 /// Three outcomes, in the order they're checked:
 ///
-/// - **no session for today** — one is started, unlabelled. The first write of the day, unchanged
-///   from what every surface did before the idle window existed.
+/// - **no session for today** — one is started, headed with the time it began (`SessionLabel`).
 /// - **today's session is still warm, or has nothing in it yet** — that one. An *empty* session is
 ///   reused however old it is: a heading with no note and no tasks is a sitting that hasn't started,
 ///   so writing into it is starting it, and stacking a second empty heading on the first would be the
 ///   rule arguing with the sweep that exists to remove them (`pruneEmptySessions`).
-/// - **today's session has been left alone past the window** — a new one, labelled with the time so
-///   the two dated headings can be told apart.
+/// - **today's session has been left alone past the window** — a new one, headed with its time too.
+///
+/// An empty heading that is joined keeps the time it was made with. That's when someone asked for a
+/// sitting, and re-stamping it would break a `SessionRef` an open editor already holds for it.
 ///
 /// Returns nil when there's no `## Sessions` heading to splice into, which is the same "caller should
 /// fall back" nil `sessionAddPreservingFormat` returns.
 ///
-/// `label`, when given, is used verbatim for a session this call starts and overrides the automatic
-/// time label — it's what `session.start` passes when the caller named the sitting.
+/// `label`, when given, is the name of a session this call starts, written after its time — it's what
+/// `session.start` passes when the caller named the sitting.
 ///
 /// `forcingNew` skips the window: a warm session is left alone and a new one is started beside it.
 /// Still not over an *empty* one, which is already new — only `session.start` asks for it, when
@@ -111,8 +168,7 @@ public func currentSessionPreservingFormat(rawText: String, lastEdited: Date?, n
         }
     }
 
-    // A second sitting on the same day needs telling apart from the first; the day's first doesn't.
-    let newLabel = label ?? (existing == nil ? "" : sessionTimeLabel(now))
+    let newLabel = SessionLabel(time: sessionTimeLabel(now), name: label ?? "").text
     guard let withSession = sessionAddPreservingFormat(rawText: rawText, label: newLabel, date: now),
           let index = try parseNotes(markdown: withSession).sessions.firstIndex(where: { $0.date == today })
     else { return nil }

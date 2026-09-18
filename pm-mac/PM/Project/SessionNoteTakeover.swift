@@ -139,9 +139,9 @@ struct SessionNoteTakeover: View {
         self.onOpenProject = onOpenProject
         self.onBack = onBack
         _text = State(initialValue: sessionNoteBody(body: session.body))
-        _label = State(initialValue: session.label)
+        _label = State(initialValue: session.name)
         _seed = State(initialValue: sessionNoteBody(body: session.body))
-        _seedLabel = State(initialValue: session.label)
+        _seedLabel = State(initialValue: session.name)
         _ref = State(initialValue: store.sessionRef(at: index)
             ?? SessionRef(index: index, digest: sessionDigest(session.label)))
     }
@@ -292,7 +292,8 @@ struct SessionNoteTakeover: View {
     /// read as a form where this is a title.
     private var sessionLine: some View {
         HStack(spacing: 4) {
-            Text(session.date)
+            // The time is fixed, like the date: it says when the sitting began. Only the name is typed.
+            Text(session.startTime.map { "\(session.date) \($0)" } ?? session.date)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -422,7 +423,8 @@ struct SessionNoteTakeover: View {
         store.renameSession(ref, label: trimmed)
         seedLabel = trimmed
         // The reference asserted the old label; after the rename it has to describe the session as it
-        // now is, or a second commit from this same editor would be refused as stale.
-        ref.digest = sessionDigest(trimmed)
+        // now is, or a second commit from this same editor would be refused as stale. The rename keeps
+        // the sitting's time, so the heading is the time and the new name (`SessionLabel`).
+        ref.digest = sessionDigest(SessionLabel(time: session.startTime, name: trimmed).text)
     }
 }

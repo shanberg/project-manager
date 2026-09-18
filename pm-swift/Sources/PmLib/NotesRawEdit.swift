@@ -772,10 +772,12 @@ public func appendSessionNotePreservingFormat(rawText: String, prose: String, la
                                              sessionIndex: current.sessionIndex, body: combined)
 }
 
-/// Rename a session's label (the trailing text after the date), preserving format. The heading line
-/// is rebuilt from its captured date parts + the new label — `"### <date>"` or `"### <date> <label>"`,
-/// matching the parser exactly — so the date and the session's body are untouched. An empty label
-/// removes the trailing text. Returns nil if the session can't be located.
+/// Rename a session, preserving format. `label` is the new *name*: the time the sitting began stays,
+/// so renaming never loses it, and an empty name leaves just the time (`SessionLabel`). A `label` that
+/// carries a time of its own sets both, which is how a whole heading can still be written back. The
+/// heading line is rebuilt from its captured date parts — `"### <date>"` or `"### <date> <label>"`,
+/// matching the parser exactly — so the date and the session's body are untouched. Returns nil if the
+/// session can't be located.
 public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, label: String) -> String? {
     var lines = rawText.components(separatedBy: "\n")
     guard let heading = rawSessionHeadingLineNumber(lines, sessionIndex: sessionIndex),
@@ -787,7 +789,10 @@ public func renameSessionPreservingFormat(rawText: String, sessionIndex: Int, la
           let r3 = Range(m.range(at: 3), in: line),
           let r4 = Range(m.range(at: 4), in: line) else { return nil }
     let date = "\(line[r1]), \(line[r2]) \(line[r3]), \(line[r4])"
-    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    let was = m.numberOfRanges > 5 ? Range(m.range(at: 5), in: line).map { String(line[$0]) } ?? "" : ""
+    var renamed = SessionLabel(parsing: label)
+    if renamed.time == nil { renamed.time = SessionLabel(parsing: was).time }
+    let trimmed = renamed.text
     lines[heading] = trimmed.isEmpty ? "### \(date)" : "### \(date) \(trimmed)"
     return lines.joined(separator: "\n")
 }
