@@ -35,6 +35,8 @@ private func dispatch(cmd: String, args: [String]) {
         runLeftovers(args: args)
     case "due":
         runDue(args: args)
+    case "backfill-times":
+        runBackfillTimes(args: args)
     case "api":
         runApi(args: args)
     case "mcp":

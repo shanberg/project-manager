@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.17.0";
+export const API_CONTRACT_VERSION = "1.18.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -168,6 +168,12 @@ export interface ProjectSetPartOfInput {
 
 /** Move a project or area back out of the archive, to wherever its kind lives. */
 export interface ProjectUnarchiveInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+}
+
+/** Give every session whose heading has no start time a best guess: the earliest thing the journal, done log or pick log recorded in it that day, else 9:00 AM. */
+export interface SessionBackfillTimesInput {
   /** Project name or unambiguous prefix. */
   project: string;
 }
@@ -503,6 +509,7 @@ export interface ApiInputs {
   "project.rename": ProjectRenameInput;
   "project.setPartOf": ProjectSetPartOfInput;
   "project.unarchive": ProjectUnarchiveInput;
+  "session.backfillTimes": SessionBackfillTimesInput;
   "session.delete": SessionDeleteInput;
   "session.list": SessionListInput;
   "session.note": SessionNoteInput;
@@ -564,6 +571,7 @@ export const API_TIERS: Record<
   "project.rename": "mutation",
   "project.setPartOf": "mutation",
   "project.unarchive": "mutation",
+  "session.backfillTimes": "mutation",
   "session.delete": "mutation",
   "session.list": "query",
   "session.note": "mutation",

@@ -65,6 +65,7 @@ task.pick         task.release
 task.diveIn       task.setDue      task.setText     task.wrap
 task.unwrap       task.move        task.delete
 session.start     session.note     session.rename   session.delete   session.prune
+session.backfillTimes
 notes.setDetails  notes.addLink
 project.create    project.rename   project.archive  project.unarchive  project.focus
 config.set
@@ -84,6 +85,8 @@ config.get
 `task.waiting` is the same walk asked a different question: every task with a `waiting:` token, grouped by what it's waiting on, released groups first. It is a query rather than a window feature because the grouping has rules in it — which spellings of a target are one target, which band a group sorts into — and a second implementation of those rules beside the first is exactly what this contract exists to prevent. The macOS Waiting window is one adapter over it.
 
 In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries `sessionOrdinal` (which of its day's sittings it's in) and its project's `projectColor` and `projectIcon`. They're the Waiting and Search views' queries. See [views.md](views.md) step 5.
+
+`session.backfillTimes` (1.18.0) gives every sitting whose heading has no start time a best guess, as a one-off migration: the earliest moment the journal, the done log or the pick log recorded in that sitting on its own day, rounded down to five minutes, else a 9:00 AM placeholder — kept between any timed sittings either side of it that day. One write per project, so one journal entry and one undo. `pm backfill-times` runs it across every project, previewing unless given `--write`. In the same version a `SessionRef` whose digest was taken before its heading gained a time still resolves: only the time is forgiven, so a renamed sitting still fails the check.
 
 `task.due` (1.17.0) is the deadline horizon across projects: open tasks due by `until` (`today`, `week` for the next seven days, or a date), overdue first, each line listed when it states a date itself. It's a new action rather than a widened `task.whatsDue`, which answers for one project as `Todo`s. In the same version, `project.list` takes `projects`, and `activity: true` reads each project for its `lastActivity`, newest sitting, open count and soonest due. See [views.md](views.md) step 7.
 

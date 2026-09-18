@@ -121,11 +121,11 @@ public func resolveSessionRef(_ ref: SessionRef, notes: ProjectNotes) throws -> 
     }
 
     guard let digest = ref.digest else { return ResolvedSessionRef(index: named) }
-    if sessionDigest(sessions[named].label) == digest { return ResolvedSessionRef(index: named) }
+    if names(sessions[named], digest) { return ResolvedSessionRef(index: named) }
 
     // Searched among that day's sittings rather than the whole document: a label is only meaningful
     // beside its date, and "Kickoff" recurring in a later month is a different sitting, not this one.
-    let elsewhere = sameDate.filter { sessionDigest(sessions[$0].label) == digest }
+    let elsewhere = sameDate.filter { names(sessions[$0], digest) }
     guard elsewhere.count == 1, let moved = elsewhere.first else {
         let found = sessions[named].label.isEmpty ? "an unlabelled session" : "“\(sessions[named].label)”"
         throw PmError.staleReference(
@@ -134,4 +134,16 @@ public func resolveSessionRef(_ ref: SessionRef, notes: ProjectNotes) throws -> 
                 : "\(elsewhere.count) sessions that day share that label, so which one you meant can't be recovered")
     }
     return ResolvedSessionRef(index: moved, relocated: true)
+}
+
+/// Whether `digest` names this sitting: its label as it stands, or — for a reference taken before the
+/// heading kept a time — its label without the time.
+///
+/// A heading that gains a time is the same sitting. `session.backfillTimes` gives every old sitting
+/// one, and a sitting card pinned to `Kickoff` before that has a digest of `Kickoff`, not of
+/// `9:00 AM · Kickoff`; refusing it would unpin every card on every board at once. Only a time is
+/// forgiven — a renamed sitting still fails the check, which is what the digest is for.
+private func names(_ session: Session, _ digest: String) -> Bool {
+    sessionDigest(session.label) == digest
+        || (session.startTime != nil && sessionDigest(session.name) == digest)
 }

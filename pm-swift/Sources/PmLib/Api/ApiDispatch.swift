@@ -319,6 +319,28 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             }
             return Outcome(rawText: out, note: Phrase(past: "Renamed the session", future: "rename the session"))
         }
+    case "session.backfillTimes":
+        // A migration, once per project: see `SessionTimes`. One write for the whole document, so it is
+        // one journal entry and one undo however many sittings it dates.
+        return try document(spec, input, options) { (context: DocumentContext) in
+            let evidence = SessionTimes.evidence(projectPath: context.projectPath)
+            guard let result = try SessionTimes.backfill(rawText: context.rawText, evidence: evidence)
+            else {
+                return Outcome(rawText: context.rawText,
+                               note: .statement("Every session already has a time"),
+                               data: .array([]))
+            }
+            let count = result.guesses.count
+            let guessed = result.guesses.filter { $0.basis != .placeholder }.count
+            let sessions = count == 1 ? "1 session" : "\(count) sessions"
+            let from = guessed == count ? "from the record"
+                : guessed == 0 ? "placeholder times"
+                : "\(guessed) from the record, \(count - guessed) placeholder"
+            return Outcome(rawText: result.rawText,
+                           note: Phrase(past: "Gave \(sessions) a time (\(from))",
+                                        future: "give \(sessions) a time (\(from))"),
+                           data: try JSONValue.encoding(result.guesses))
+        }
     case "session.delete":
         return try document(spec, input, options) { rawText in
             let notes = try parseNotes(markdown: rawText)

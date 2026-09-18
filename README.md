@@ -65,6 +65,7 @@ pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
 pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--dropped]   # What got done, across every project
+pm backfill-times [--write] [<project>]   # Give sessions from before headings kept a time a best guess
 pm part-of <project> [<master> | --clear]   # Put a project under a master project, or show both sides
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes session note <project> <text>   # Appends to today's session, creating it if needed

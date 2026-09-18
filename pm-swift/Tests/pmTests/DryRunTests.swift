@@ -166,6 +166,8 @@ final class DryRunTests: XCTestCase {
             "session.rename": ["project": "W-1", "session": "0", "label": "Kickoff"],
             // Index 1: the empty sitting `seed()` appends. Session 0 holds the seeded tasks.
             "session.delete": ["project": "W-1", "session": "1"],
+            // The empty sitting `seed()` appends has no time, so there is something to date.
+            "session.backfillTimes": ["project": "W-1"],
             "notes.setDetail": ["project": "W-1", "key": "summary", "value": "A new summary."],
             "notes.addLink": ["project": "W-1", "text": "https://example.org"],
             "project.create": ["title": "Something New", "domain": "W"],
