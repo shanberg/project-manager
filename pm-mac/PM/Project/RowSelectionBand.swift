@@ -11,15 +11,23 @@ struct RowSelectionBand: View {
     let isSelected: Bool
     let isEmphasized: Bool
     let isHovering: Bool
+    var body: some View {
+        RowSelectionFill(isSelected: isSelected, isEmphasized: isEmphasized, isHovering: isHovering)
+            .clipShape(RoundedRectangle(cornerRadius: ReadableWidth.bandCornerRadius, style: .continuous))
+    }
+}
+
+/// The band's tint without its shape, for something drawn on the band that has to match it — the hover
+/// "＋date" on a card, whose backing is the card and this.
+struct RowSelectionFill: View {
+    let isSelected: Bool
+    let isEmphasized: Bool
+    let isHovering: Bool
     /// Whether the row's window is the key window — a selection in an inactive window is muted, as in
     /// every native list.
     @Environment(\.controlActiveState) private var controlActiveState
-    var body: some View {
-        fill.clipShape(RoundedRectangle(cornerRadius: ReadableWidth.bandCornerRadius,
-                                        style: .continuous))
-    }
 
-    @ViewBuilder private var fill: some View {
+    var body: some View {
         if isSelected {
             isEmphasized && controlActiveState != .inactive
                 ? Color.accentColor.opacity(0.28)

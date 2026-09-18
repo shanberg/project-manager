@@ -10,7 +10,10 @@ import SwiftUI
 ///
 /// **The third view is a ghost**: a control that shows on hover, like the card's "＋date". It is
 /// placed at the end of the text's first line, over the words, and takes no room. A control that
-/// held its space while invisible cost every task the width of a button nobody could see.
+/// held its space while invisible cost every task the width of a button nobody could see. It brings
+/// its own backing to cover the words it sits on: the words are never masked, because a mask on a
+/// hosted AppKit text view kept the size it had when it switched on and cut off every line but the
+/// first.
 struct TaskLineLayout: Layout {
     /// Between the words and the badges on one line.
     var gap: CGFloat = 6
@@ -104,34 +107,5 @@ struct TaskLineLayout: Layout {
         let height = max(textRect.maxY, hasBadges ? badgeRect.maxY : 0)
         return Placement(text: textRect, badges: badgeRect, ghost: ghostRect, textBaseline: textBaseline,
                          size: CGSize(width: total, height: height))
-    }
-}
-
-/// The mask that fades the end of a task's first line out from under a ghost control, so "＋date" sits
-/// on the words' trailing edge rather than printed over them.
-struct TaskLineFade: View {
-    /// Whether the ghost is showing. When it isn't, the mask lets everything through.
-    let active: Bool
-    /// How much of the line's end to clear.
-    let clearWidth: CGFloat
-    /// The first line's height, which is all the ghost covers.
-    let lineHeight: CGFloat
-    var fadeWidth: CGFloat = 16
-
-    var body: some View {
-        if active {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    Color.black
-                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: fadeWidth)
-                    Color.clear.frame(width: clearWidth)
-                }
-                .frame(height: lineHeight)
-                Color.black
-            }
-        } else {
-            Color.black
-        }
     }
 }

@@ -1038,9 +1038,6 @@ struct CanvasProjectNote: View {
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .mask(TaskLineFade(active: todo.dueDate == nil && dueRevealed,
-                                       clearWidth: DueBadge.emptyChipWidth,
-                                       lineHeight: TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused) + 5))
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // Said on the task's own line, and in the pile: the sitting it was written in has
@@ -1078,7 +1075,15 @@ struct CanvasProjectNote: View {
                 // Revealed on hover, exactly as in the window, and over the words' end rather than
                 // beside them. Shown unconditionally it put a dashed "＋date" on every dateless task on
                 // the card at once; laid out invisibly it cost every one of them the chip's width.
-                if todo.dueDate == nil { dueChip }
+                if todo.dueDate == nil {
+                    dueChip.background {
+                        if dueRevealed {
+                            DueGhostBacking(isSelected: selection.contains(key),
+                                            isEmphasized: engagement.isEngaged,
+                                            isHovering: hovering == rowID && activeEditor == nil)
+                        }
+                    }
+                }
             }
         }
         .onHover { inside in
@@ -1666,5 +1671,31 @@ struct SessionHeading: View {
                 .frame(height: 1)
         }
         .help(heading.full)
+    }
+}
+
+/// What the hover "＋date" sits on: the card and the row's band over it, faded in from the left, so the
+/// chip reads as laid on the end of the words rather than printed across them.
+private struct DueGhostBacking: View {
+    let isSelected: Bool
+    let isEmphasized: Bool
+    let isHovering: Bool
+    var fade: CGFloat = 16
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: CanvasPalette.card)
+            RowSelectionFill(isSelected: isSelected, isEmphasized: isEmphasized, isHovering: isHovering)
+        }
+        .mask {
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: fade)
+                Color.black
+            }
+        }
+        .padding(.leading, -fade)
+        .padding(.vertical, -2)
+        .allowsHitTesting(false)
     }
 }

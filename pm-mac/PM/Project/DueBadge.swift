@@ -36,12 +36,6 @@ enum DueBadge {
             }
             .foregroundStyle(style.text)
     }
-
-    /// How wide the empty "＋date" chip draws: what a task's words clear for it on hover.
-    static let emptyChipWidth: CGFloat = {
-        let font = NSFont.systemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption2).pointSize)
-        return ceil(("＋date" as NSString).size(withAttributes: [.font: font]).width) + 10
-    }()
 }
 
 struct DueChipStyle {
