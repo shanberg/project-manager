@@ -1257,7 +1257,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             return redoing ? editing.canRedo : editing.canUndo
         }
         if let project = scroll.board.lastEditedProject, redoing ? project.canRedo : project.canUndo {
-            item.title = redoing ? "Redo" : "Undo"
+            item.title = redoing ? project.redoMenuTitle : project.undoMenuTitle
             return true
         }
         let manager = store.undoManager

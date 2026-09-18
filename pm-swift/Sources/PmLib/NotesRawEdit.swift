@@ -875,10 +875,16 @@ public func deleteSessionPreservingFormat(rawText: String, sessionIndex: Int) ->
 /// take prose or tasks with it. Returns nil when there's nothing to prune, so the caller can skip the
 /// write. Sessions are walked back-to-front: each deletion only shifts lines *after* the headings
 /// still to be examined.
-public func pruneEmptySessionsPreservingFormat(rawText: String) -> (rawText: String, removed: Int)? {
+///
+/// `keeping` names sessions, by index, to leave alone however empty they look — a sitting whose
+/// only content is what it picked up (docs/sessions.md D2) has nothing under its heading, and is not
+/// empty.
+public func pruneEmptySessionsPreservingFormat(rawText: String,
+                                               keeping: Set<Int> = []) -> (rawText: String, removed: Int)? {
     var lines = rawText.components(separatedBy: "\n")
     var removed = 0
-    for heading in rawSessionHeadingLineNumbers(lines).reversed() {
+    for (index, heading) in rawSessionHeadingLineNumbers(lines).enumerated().reversed() {
+        if keeping.contains(index) { continue }
         let end = rawSessionEnd(lines, headingLine: heading)
         let hasContent = lines[(heading + 1)..<end].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         if hasContent { continue }

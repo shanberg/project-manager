@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17. D6, dropped, the pick log with its contract, and the drawing (build order steps 1–3) built 2026-09-17; the app draws picks but can't make one yet (that's step 4). Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. Build order steps 1–4 (dropped, the pick log and its contract, drawing, focus and undo) built 2026-09-17; the drags (step 5) remain. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -143,6 +143,13 @@ events the write appended. Reversing an entry checks the document revision exact
 only if that passes appends the cancelling events. The same all-or-nothing rule applies. A pick with no
 document change behind it (Pick Up on a task, into a sitting that already exists) has no revision to
 check, and reversing it is always safe, because a `released` can only cancel the pick it names.
+
+As built: the Task menu has no Pick Up. Its commands act on the focused task, and focusing already
+picks it up, so the item would never have anything to do; Pick Up and Put Back live on the row's
+contextual menu. Setting a due date or a wait counts as editing, and picks up too. Reopening and
+dropping don't: reopening takes back saying you'd done it, and a sweep of dropped leftovers would fill
+today's Picked up with things you decided not to do. The empty-session sweep on open keeps a sitting
+whose only content is what it picked up.
 
 **Things undo deliberately leaves alone.** Undoing an edit that happens to delete a picked task doesn't
 touch the log. The pick goes stale and stops being drawn, and redoing the edit's reversal brings it

@@ -551,7 +551,15 @@ public func pruneEmptySessions(project: String) throws -> Int {
 @discardableResult
 public func pruneEmptySessions(handle: NotesHandle) throws -> Int {
     let rawText = try handle.io.readContent(path: handle.notesPath)
-    guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText) else { return 0 }
+    // A sitting that picked something up has that to show for itself, even with nothing under its
+    // heading. Asked only when the log exists, so a project nobody has picked in reads nothing more.
+    var keeping = Set<Int>()
+    if FileManager.default.fileExists(atPath: PickLog.logPath(projectPath: handle.projectPath)) {
+        let notes = normalizeFocusMarker(notes: try parseNotes(markdown: rawText))
+        keeping = Set(PickLog.resolved(projectPath: handle.projectPath, notes: notes,
+                                       todos: try parseTodos(notes: notes)).map(\.intoIndex))
+    }
+    guard let result = pruneEmptySessionsPreservingFormat(rawText: rawText, keeping: keeping) else { return 0 }
     let wasEdited = notesLastEdited(path: handle.notesPath)
     try handle.io.writeContent(path: handle.notesPath, content: result.rawText)
     if let wasEdited {

@@ -412,6 +412,14 @@ final class PickLogTests: XCTestCase {
         XCTAssertEqual(picked("Email Dana")?["into"] as? String, today)
     }
 
+    /// A sitting whose only content is what it picked up has nothing under its heading, and the sweep
+    /// on open must not take it for empty.
+    func testTheEmptySessionSweepKeepsASittingThatPickedSomethingUp() throws {
+        let cold = doc.replacingOccurrences(of: "Picking the venue back up.\n\n", with: "")
+        XCTAssertEqual(pruneEmptySessionsPreservingFormat(rawText: cold)?.removed, 1)
+        XCTAssertNil(pruneEmptySessionsPreservingFormat(rawText: cold, keeping: [0]))
+    }
+
     func testReversingIsTheMirrorOfEachEvent() throws {
         let picked = try pick("Email Dana", into: 0, in: doc, id: "p1")
         let released = PickEvent(id: "r1", at: "t", event: .released, task: picked.task, into: picked.into,

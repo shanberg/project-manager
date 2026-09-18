@@ -82,6 +82,22 @@ struct TaskMenu: View {
         if !isMulti, !todo.checked, !todo.isFocused {
             Button { store.focus(todo) } label: { Label("Focus", systemImage: "arrow.right.circle") }
         }
+        // Picking up takes an older task into the current sitting without moving its line; putting
+        // back takes that pick away (docs/sessions.md D3). Each counts only the tasks it would act on.
+        let pickable = scope.filter(store.canPickUp)
+        if !pickable.isEmpty {
+            Button { store.pickUp(pickable) } label: {
+                Label(isMulti ? "Pick Up \(pickable.count) Task\(pickable.count == 1 ? "" : "s")" : "Pick Up",
+                      systemImage: "arrow.down.to.line")
+            }
+        }
+        let pickedUp = scope.filter { $0.picked != nil }
+        if !pickedUp.isEmpty {
+            Button { store.putBack(pickedUp) } label: {
+                Label(isMulti ? "Put Back \(pickedUp.count) Task\(pickedUp.count == 1 ? "" : "s")" : "Put Back",
+                      systemImage: "arrow.uturn.up")
+            }
+        }
         if !isMulti {
             Button { openEditor(.edit) } label: { Label("Edit Task…", systemImage: "pencil") }
         }
@@ -131,9 +147,9 @@ struct TaskMenu: View {
         .keyboardShortcut(.delete, modifiers: .command)
         Divider()
         // Global document undo/redo — discoverable here; the ⌘Z / ⇧⌘Z shortcuts live on the surface.
-        Button { store.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+        Button { store.undo() } label: { Label(store.undoMenuTitle, systemImage: "arrow.uturn.backward") }
             .disabled(!store.canUndo)
-        Button { store.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+        Button { store.redo() } label: { Label(store.redoMenuTitle, systemImage: "arrow.uturn.forward") }
             .disabled(!store.canRedo)
     }
 }
