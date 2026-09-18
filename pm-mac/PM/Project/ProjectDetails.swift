@@ -19,6 +19,10 @@ struct ProjectDetailsView: View {
     /// brief would otherwise lead with six lines of empty prompts above the work. There, an empty brief
     /// is simply not drawn, and Edit Details on the card's menu is the way in.
     var showsPlaceholders = true
+    /// Where the brief's text starts and ends. A card sets it under the title's words, past the
+    /// progress pie, so the title and its brief read as one block.
+    var leadingInset: CGFloat = 12
+    var trailingInset: CGFloat = 12
 
     var body: some View {
         // Nothing at all, rather than an empty band. Without placeholders there is no content, but the
@@ -57,8 +61,10 @@ struct ProjectDetailsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.leading, leadingInset)
+            .padding(.trailing, trailingInset)
+            .padding(.top, 2)
+            .padding(.bottom, 12)
             // Double-click anywhere in the details band switches to edit mode — including the empty
             // placeholders, so a project with no details yet can gain them right here.
             //
@@ -88,7 +94,7 @@ struct ProjectDetailsView: View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(["Summary", "Problem", "Goals", "Approach", "Links", "Learnings"], id: \.self) { title in
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(title)
+                    BriefLabel(title)
                     Text("Add \(title.lowercased())…")
                         .font(Self.bodyFont)
                         .foregroundStyle(.quaternary)
@@ -106,13 +112,15 @@ struct ProjectDetailsView: View {
     private static let bodyFont = Font.system(size: 13, design: .serif)
 
     private func readContent(_ n: ProjectNotes) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // The summary is the lede: no label, set larger, it opens the brief.
+        VStack(alignment: .leading, spacing: 12) {
+            // The summary is the lede: no label, it opens the brief. In the secondary colour and not
+            // much larger than the copy under it — the title above is what is large now, and this is
+            // the line of notes Things keeps under a project's name.
             if !n.summary.isBlank {
                 Text(n.summary)
-                    .font(.system(size: 15, design: .serif))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(2)
+                    .font(.system(size: 14, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2.5)
                     .fixedSize(horizontal: false, vertical: true)
             }
             proseBlock("Problem", n.problem)
@@ -135,7 +143,7 @@ struct ProjectDetailsView: View {
     @ViewBuilder private func proseBlock(_ title: String, _ body: String) -> some View {
         if !body.isBlank {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(title)
+                BriefLabel(title)
                 Text(body)
                     .font(Self.bodyFont)
                     .foregroundStyle(.secondary)
@@ -149,7 +157,7 @@ struct ProjectDetailsView: View {
         let nonEmpty = items.enumerated().filter { !$0.element.isBlank }
         if !nonEmpty.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(title)
+                BriefLabel(title)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(nonEmpty, id: \.offset) { idx, item in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -174,7 +182,7 @@ struct ProjectDetailsView: View {
         let nonEmpty = items.filter { !$0.isBlank }
         if !nonEmpty.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(title)
+                BriefLabel(title)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(nonEmpty, id: \.self) { item in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -191,17 +199,19 @@ struct ProjectDetailsView: View {
     }
 }
 
-/// An editorial section label: uppercase, letter-spaced, tertiary — a quiet "eyebrow" above detail
-/// copy. Shared by the read view, the Links block, and the details editor so all three read alike.
-private struct Eyebrow: View {
+/// A section label in the brief — Goals, Links — and anywhere on a card that wants a sub-heading
+/// quieter than a sitting's: Projects, Picked up, Still open.
+///
+/// Sentence case, a touch heavier than the text around it, in the secondary colour: Craft's quiet
+/// heading. It used to be tracked capitals at ten points, a magazine's eyebrow, which read as louder
+/// than it was meant to at the size it was drawn and as a different publication from the tasks below.
+struct BriefLabel: View {
     let title: String
     init(_ title: String) { self.title = title }
     var body: some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .textCase(.uppercase)
-            .tracking(0.9)
-            .foregroundStyle(.tertiary)
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(.secondary)
     }
 }
 
@@ -409,7 +419,7 @@ private struct DetailsEditor: View {
 
     private func field<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Eyebrow(title)
+            BriefLabel(title)
             content()
         }
     }
@@ -484,7 +494,7 @@ private struct LinksBlock: View {
     var body: some View {
         if !usable.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow("Links")
+                BriefLabel("Links")
                 let slots = links.movableLinkSlots
                 ForEach(Array(links.enumerated()).filter { isUsable($0.element) }, id: \.offset) { index, link in
                     if let children = link.children, !children.isEmpty {
@@ -520,14 +530,32 @@ private struct LinksBlock: View {
         if isSafeURL(urlStr), let url = URL(string: urlStr) {
             // Show the label (or a tidied host if unlabeled) beside the site's favicon; the full URL
             // moves to the hover tooltip so the row stays compact.
+            // The site's name trails the label, quietly, the way Craft's link blocks say where they go:
+            // "Design file … figma.com". Only when there is a label — an unlabelled link *is* its host.
             let pretty = prettyURL(urlStr)
-            HStack(spacing: 6) {
+            let host = hostName(url)
+            HStack(alignment: .center, spacing: 8) {
                 FaviconView(host: url.host ?? pretty)
-                Link(label.isEmpty ? pretty : label, destination: url)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // Plain, so the label is drawn in the text's own colour: a list of links in link blue
+                // is a column of the one colour on the card, and the favicon already says "link".
+                Link(destination: url) {
+                    Text(label.isEmpty ? pretty : label)
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+                Spacer(minLength: 6)
+                if !label.isEmpty, let host {
+                    Text(host)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
+            .padding(.vertical, 1)
             .help(urlStr)
             // The whole row, favicon included, is the link a board follows — see `CanvasLinkZones`.
             .reportsLinkZone(url)
@@ -540,6 +568,13 @@ private struct LinksBlock: View {
     private func isSafeURL(_ s: String) -> Bool {
         let t = s.lowercased()
         return t.hasPrefix("http://") || t.hasPrefix("https://")
+    }
+
+    /// `www.figma.com` → `figma.com`: the name a site goes by.
+    private func hostName(_ url: URL) -> String? {
+        guard var host = url.host, !host.isEmpty else { return nil }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        return host
     }
 
     private func prettyURL(_ s: String) -> String {
@@ -559,14 +594,19 @@ private struct FaviconView: View {
     @State private var image: NSImage?
 
     var body: some View {
+        // On a small tile, as Craft sets a link's icon: a favicon is drawn for a browser tab, and loose
+        // on the page some are a white square and some are nothing at all. The tile gives every one of
+        // them the same footprint and the globe somewhere to sit.
         Group {
             if let image {
                 Image(nsImage: image).resizable().interpolation(.high)
+                    .frame(width: 13, height: 13)
             } else {
-                Image(systemName: "globe").foregroundStyle(.tertiary)
+                Image(systemName: "globe").font(.system(size: 10)).foregroundStyle(.tertiary)
             }
         }
-        .frame(width: 14, height: 14)
+        .frame(width: 20, height: 20)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.06)))
         .task(id: host) { image = await FaviconLoader.shared.favicon(for: host) }
     }
 }

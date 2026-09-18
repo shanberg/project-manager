@@ -180,3 +180,75 @@ enum SessionPicks {
         return formatter
     }()
 }
+
+/// A sitting's date, said the way a person would say it at the top of a section.
+///
+/// The file keeps `Thu, Sep 18, 2026` — a heading Obsidian shows as written, and one that has to be
+/// parsed to be anything else. On a card that was the caption, in grey, at the smallest size the card
+/// has, and every sitting on it looked like every other one. A heading earns its place by saying which
+/// sitting *this* is: today's, yesterday's, Monday's. Past a week the day of the week stops being how
+/// anybody places a date, and the date itself takes over.
+///
+/// Two parts, because a heading says the one that matters and keeps the other beside it: "Today" with
+/// "Sep 18" after it, "Aug 22" with "Fri" — and the time the sitting began after either, where its
+/// heading has one. Store-free and SwiftUI-free, like the rest of this file.
+enum SessionDay {
+    struct Heading: Equatable {
+        /// What the heading says: "Today", "Yesterday", "Monday", "Aug 22".
+        var day: String
+        /// What sits after it, quietly: the date beside a relative day, the weekday beside a date.
+        var detail: String?
+        /// The whole date, for the note's own header: "Thursday, September 18, 2026 · 9:10 AM".
+        var full: String
+    }
+
+    /// `time` is the sitting's start as its heading keeps it (`Session.startTime`), said after the date:
+    /// "Today … Sep 18 · 9:10 AM". A sitting from before headings kept the time has none, and says
+    /// the date alone.
+    static func heading(_ stored: String, time: String? = nil, now: Date = Date(),
+                        calendar: Calendar = .current) -> Heading {
+        func with(_ text: String?) -> String? {
+            let joined = [text, time].compactMap { $0 }.joined(separator: " · ")
+            return joined.isEmpty ? nil : joined
+        }
+        guard let iso = sessionISODate(heading: stored), let date = localDay(iso, calendar: calendar)
+        else { return Heading(day: stored, detail: time, full: with(stored) ?? stored) }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: now)).day ?? 0
+        let short = SessionPicks.day(iso: iso, now: now, calendar: calendar) ?? stored
+        let full = with(fullFormatter.string(from: date)) ?? stored
+        switch days {
+        case 0: return Heading(day: "Today", detail: with(short), full: full)
+        case 1: return Heading(day: "Yesterday", detail: with(short), full: full)
+        case -1: return Heading(day: "Tomorrow", detail: with(short), full: full)
+        case 2...6: return Heading(day: weekday.string(from: date), detail: with(short), full: full)
+        default: return Heading(day: short, detail: with(shortWeekday.string(from: date)), full: full)
+        }
+    }
+
+    /// The ISO day as midnight *here*. Parsed in UTC it would be the evening before for anyone west of
+    /// Greenwich, and "Today" would say "Yesterday" all afternoon.
+    private static func localDay(_ iso: String, calendar: Calendar) -> Date? {
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    private static let weekday: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEEE")
+        return formatter
+    }()
+
+    private static let shortWeekday: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE")
+        return formatter
+    }()
+
+    private static let fullFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        return formatter
+    }()
+}

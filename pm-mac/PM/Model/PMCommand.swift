@@ -106,7 +106,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .complete: return "checkmark.circle"
+        case .complete: return "checkmark.square"
         case .drop: return "xmark.circle"
         case .undoLast: return "arrow.uturn.backward"
         case .diveIn: return "arrow.down.to.line"

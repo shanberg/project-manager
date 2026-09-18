@@ -33,7 +33,7 @@ struct CanvasViewRow<Trailing: View, Menu: View>: View {
     @ViewBuilder var menu: () -> Menu
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap * zoom) {
             checkbox
             if isEditing {
                 // The field every inline task editor uses, with its `[[…]]` completion and a typing
@@ -45,7 +45,7 @@ struct CanvasViewRow<Trailing: View, Menu: View>: View {
                     .frame(height: 21)
             } else {
                 Text(row.text)
-                    .font(.system(size: 12.5 * zoom))
+                    .font(.system(size: TaskRowMetrics.textSize * zoom))
                     .foregroundStyle(state == .open ? .primary : .secondary)
                     .strikethrough(state == .dropped, color: .secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -54,8 +54,9 @@ struct CanvasViewRow<Trailing: View, Menu: View>: View {
             Spacer(minLength: 4)
             trailing()
         }
-        .padding(.leading, Double(row.depth) * 11 * zoom)
-        .padding(.vertical, 1)
+        .padding(.leading, Double(row.depth) * TaskRowMetrics.indentStep * zoom)
+        .background(TaskThreads(depth: row.depth, leading: 0, zoom: zoom))
+        .padding(.vertical, 2 * zoom)
         .padding(.horizontal, 4)
         .background(RowSelectionBand(isSelected: isSelected, isEmphasized: isEngaged, isHovering: false))
         // The band reaches into the margin; the row's text stays lined up with what's above it.
@@ -69,14 +70,19 @@ struct CanvasViewRow<Trailing: View, Menu: View>: View {
 
     @ViewBuilder private var checkbox: some View {
         if let toggle {
-            Button(action: onToggle) {
-                TaskStatusIcon(state: state, size: 12 * zoom).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(toggle.title)
+            Button(action: onToggle) { box.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help(toggle.title)
         } else {
-            TaskStatusIcon(state: state, size: 12 * zoom)
+            box
         }
+    }
+
+    /// The box, centred in the column every row's box sits in — the project card's, so a view's tree
+    /// nests on the same step.
+    private var box: some View {
+        TaskStatusIcon(state: state, size: TaskRowMetrics.boxSize(depth: row.depth) * zoom)
+            .frame(width: TaskRowMetrics.boxColumn * zoom)
     }
 }
 

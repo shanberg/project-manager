@@ -423,7 +423,7 @@ struct PMShortcuts: AppShortcutsProvider {
                     phrases: ["Complete my \(.applicationName) task",
                               "Complete the focused task in \(.applicationName)",
                               "Complete \(\.$task) in \(.applicationName)"],
-                    shortTitle: "Complete Task", systemImageName: "checkmark.circle")
+                    shortTitle: "Complete Task", systemImageName: "checkmark.square")
         AppShortcut(intent: AddTaskIntent(),
                     phrases: ["Add a task to \(.applicationName)",
                               "Add a task to \(\.$project) in \(.applicationName)"],

@@ -100,10 +100,13 @@ struct CanvasProjectNote: View {
     @State private var scrollToken = 0
 
     /// Where a depth-0 row's content begins, and what one level of nesting costs — the pointer's depth
-    /// is measured against these, so they have to be the row's real metrics. A card's step is half the
-    /// window's for the reason `indent(_:)` gives: a card is a narrower column.
-    private static let rowContentInset: CGFloat = 12
-    private static let indentStep: CGFloat = 11
+    /// is measured against these, so they have to be the row's real metrics. See `TaskRowMetrics`.
+    private static let rowContentInset: CGFloat = TaskRowMetrics.margin
+    private static let indentStep: CGFloat = TaskRowMetrics.indentStep
+    /// The card's margin, either side — every block on it lines up on this.
+    private static let margin: CGFloat = TaskRowMetrics.margin
+    /// Where the brief and the member projects start: under the title's words, past its progress pie.
+    private static let briefInset: CGFloat = TaskRowMetrics.margin + 16 + 8
     /// Associated-object key holding a drag's end sentinel on its item provider — see `DragEndSentinel`.
     private nonisolated(unsafe) static var dragSentinelKey: UInt8 = 0
     /// The session whose note has taken the card over, by index, or nil when the card is showing the
@@ -111,6 +114,10 @@ struct CanvasProjectNote: View {
     /// commits against that, which is what makes it safe for the list underneath to be reindexed by
     /// somebody else while it is open.
     @State private var openNote: Int?
+
+    /// Every open parent's subtasks, done and all — see `countSubtasks`. Held rather than worked out per
+    /// row, which would walk the task list once for every row drawn.
+    @State private var subtaskCounts: [String: (done: Int, total: Int)] = [:]
 
     /// Whether the brief is being edited rather than read. The details view keeps the text; this is
     /// only which of its two faces is up.
@@ -351,6 +358,7 @@ struct CanvasProjectNote: View {
             reportMatches()
         }
         .onChange(of: store.todos) { _, _ in reportMatches() }
+        .onChange(of: store.todos, initial: true) { _, todos in subtaskCounts = Self.countSubtasks(todos) }
         .onChange(of: display.findStepRequest) { _, _ in stepFind(display.findStepDirection) }
         .onChange(of: commands.newSessionRequest) { _, _ in
             beginCurrentSession(forcingNew: commands.newSessionForcing)
@@ -446,8 +454,12 @@ struct CanvasProjectNote: View {
                     // as long as you are in it. Hiding it would make Edit Details on such a card do
                     // nothing visible.
                     if shows.brief || editingDetails {
+                        // Read under the title's words; edited at the card's full width, where the
+                        // fields have the room they need.
                         ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
-                                           showsPlaceholders: false)
+                                           showsPlaceholders: false,
+                                           leadingInset: editingDetails ? Self.margin : Self.briefInset,
+                                           trailingInset: Self.margin)
                     }
                     if shows.brief { members }
                     switch shows.layout {
@@ -463,7 +475,8 @@ struct CanvasProjectNote: View {
                     }
                     footer
                 }
-                .padding(.vertical, 10)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .coordinateSpace(name: TaskDropResolver.coordinateSpace)
                 .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
@@ -510,7 +523,7 @@ struct CanvasProjectNote: View {
                 Capsule().fill(Color.accentColor).frame(height: 2)
             }
             .padding(.leading, Self.rowContentInset + CGFloat(target.depth) * Self.indentStep)
-            .padding(.trailing, 12)
+            .padding(.trailing, Self.margin)
             // Centre the 6pt dot on the boundary line.
             .offset(y: target.gapY - 3)
             .allowsHitTesting(false)
@@ -598,7 +611,7 @@ struct CanvasProjectNote: View {
                 store.addTodo(text: text, due: due)
                 activeEditor = nil
             } onCancel: { activeEditor = nil }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, Self.margin)
                 .padding(.top, 4)
         } else if engagement.actsImmediately, activeEditor == nil, store.hasLoaded {
             // `hasLoaded`, because a store that has not read the file yet has no sessions and no tasks
@@ -619,10 +632,10 @@ struct CanvasProjectNote: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 11))
-                Text(title).font(.system(size: 12.5))
+                Text(title).font(.system(size: TaskRowMetrics.textSize))
             }
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Self.margin)
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
@@ -658,53 +671,51 @@ struct CanvasProjectNote: View {
     @ViewBuilder private var members: some View {
         let entry = indexEntry
         let rows = (entry?.members ?? []).compactMap { name in store.allProjects.first { $0.name == name } }
-        if let master = entry?.partOf {
-            Button { onOpenProject(master) } label: {
-                Label("Part of \(projectTitle(fromFolderName: master))", systemImage: "square.stack.3d.up")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
-        }
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Projects")
-                    .font(.system(size: 10, weight: .semibold))
-                    .textCase(.uppercase)
-                    .tracking(0.9)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 2)
+                BriefLabel("Projects")
+                    .padding(.bottom, 1)
                 ForEach(rows) { member in
                     Button { onOpenProject(member.name) } label: { memberRow(member) }
                         .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+            .padding(.leading, Self.briefInset)
+            .padding(.trailing, Self.margin)
+            .padding(.bottom, 12)
         }
     }
 
+    /// A member project, the way Things lists a project in an area: its progress as a pie, its name,
+    /// and what is next in it, quietly, after.
     private func memberRow(_ member: PMStore.ProjectEntry) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Group {
+                if member.isArchived {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ProgressPie(done: member.ownDone, total: member.ownTotal, tint: .secondary,
+                                showsProgress: member.showsProgress)
+                        .frame(width: 11, height: 11)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                }
+            }
+            .help(member.isArchived ? "Done"
+                  : !member.showsProgress ? "Ongoing"
+                  : member.ownTotal > 0 ? "\(member.ownDone) of \(member.ownTotal) done" : "No tasks")
             Text(member.shortName)
                 .font(.system(size: 12.5))
                 .lineLimit(1)
+                .layoutPriority(1)
             if let task = member.nextTask {
                 Text(task)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 6)
-            if member.isArchived {
-                Text("Done").font(.system(size: 11)).foregroundStyle(.tertiary)
-            } else if member.showsProgress, member.ownTotal > 0 {
-                Text("\(member.ownDone)/\(member.ownTotal)")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
@@ -714,9 +725,37 @@ struct CanvasProjectNote: View {
     @ViewBuilder private var title: some View {
         let name = displayName
         if !name.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // A member's master, as the crumb above the title — where a thing's parent goes — rather
+            // than a line under it that read like the first line of the brief.
+            if let master = indexEntry?.partOf {
+                Button { onOpenProject(master) } label: {
+                    HStack(spacing: 3) {
+                        Text(projectTitle(fromFolderName: master))
+                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Part of \(projectTitle(fromFolderName: master))")
+                .padding(.horizontal, Self.margin)
+                .padding(.bottom, 3)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // How far through the project is, as a pie before its name — Things' project mark.
+                // Not before the file has been read: an empty pie there would be a claim of nothing
+                // done that the next moment contradicts.
+                let progress = store.progress
+                ProgressPie(done: progress.done, total: progress.total, tint: .accentColor,
+                            showsProgress: store.kind.showsProgress)
+                    .frame(width: 16, height: 16)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+                    .opacity(store.hasLoaded ? 1 : 0)
+                    .help(!store.kind.showsProgress ? "Ongoing — nothing to finish"
+                          : progress.total > 0 ? "\(progress.done) of \(progress.total) done" : "No tasks yet")
                 Text(name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .lineLimit(2)
                     .foregroundStyle(store.hasLoaded ? AnyShapeStyle(.primary)
                                                      : AnyShapeStyle(.secondary))
@@ -733,8 +772,8 @@ struct CanvasProjectNote: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, Self.margin)
+            .padding(.bottom, 6)
         }
     }
 
@@ -793,12 +832,10 @@ struct CanvasProjectNote: View {
         let isEmpty = session.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let showsEmpty = isEmpty && shows.showsProse(ofSessionAt: index) && display.find.isEmpty
         if (!blocks.isEmpty || !picked.isEmpty || showsEmpty), !caption.isEmpty {
-            Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 3)
-                .padding(.top, index == 0 ? 0 : 8)
+            SessionHeading(session: session)
+                .padding(.horizontal, Self.margin)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { openNote = index }
@@ -808,9 +845,9 @@ struct CanvasProjectNote: View {
         ForEach(blocks) { block in
             switch block {
             case .prose(_, let text):
-                RenderedNote(prose: text, font: .systemFont(ofSize: 12.5),
+                RenderedNote(prose: text, font: .systemFont(ofSize: TaskRowMetrics.textSize),
                              noteURL: noteURL, maxImageHeight: 240)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, Self.margin)
                     .padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -850,15 +887,13 @@ struct CanvasProjectNote: View {
         }
     }
 
-    /// A group's caption inside the card — a sitting's own, or Picked up and Still open — in the one
-    /// quiet style captions have here.
+    /// A group's caption inside the card — Picked up and Still open — in the brief's label style: a
+    /// sub-heading under a sitting's heading, not a second kind of heading.
     private func groupCaption(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 3)
-            .padding(.top, 4)
+        BriefLabel(text)
+            .padding(.horizontal, Self.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -902,7 +937,7 @@ struct CanvasProjectNote: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Self.margin)
         .padding(.vertical, 2)
         .contextMenu { sessionMenu(at: index) }
     }
@@ -931,7 +966,7 @@ struct CanvasProjectNote: View {
                     store.editText(todo, text: text)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, Self.margin)
             } else {
                 line(todo, place: place, showsOrigin: showsOrigin)
             }
@@ -941,7 +976,7 @@ struct CanvasProjectNote: View {
                     store.setDue(todo, due: due)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, Self.margin)
             }
             if activeEditor == EditorTarget(key: key, kind: .waiting) {
                 InlineTextEditor(seed: todo.waiting ?? "", placeholder: "Waiting on…",
@@ -952,7 +987,7 @@ struct CanvasProjectNote: View {
                     store.setWaiting(todo, waiting: trimmed.isEmpty ? nil : trimmed)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, Self.margin)
             }
             if activeEditor == EditorTarget(key: key, kind: .add) {
                 AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
@@ -960,7 +995,7 @@ struct CanvasProjectNote: View {
                     store.addTodo(text: text, due: due, relativeTo: todo, position: addPosition)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, Self.margin)
                     .padding(.leading, indent(todo.depth + (addPosition == .child ? 1 : 0)))
             }
         }
@@ -976,18 +1011,21 @@ struct CanvasProjectNote: View {
         let key = PMStore.key(for: todo)
         let rowID = rowID(todo, place)
         let isOrigin = place == .origin
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+        let size = TaskRowMetrics.textSize
+        return HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap) {
             Button { store.toggle(todo) } label: {
-                TaskStatusIcon(state: todo.state, size: 12.5)
+                TaskStatusIcon(state: todo.state, size: TaskRowMetrics.boxSize(depth: todo.depth))
+                    .frame(width: TaskRowMetrics.boxColumn)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(todo.checked ? "Reopen" : "Complete")
 
             TokenTextLabel(attributed: taskLineAttributed(todo, wait: store.wait(for: todo),
-                                                          size: 12.5),
+                                                          size: size),
                            onOpenProject: onOpenProject)
                 .alignmentGuide(.firstTextBaseline) { _ in
-                    TokenTextLabel.firstBaseline(size: 12.5, focused: todo.isFocused)
+                    TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused)
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 // Sized before the spacer beside it: both are flexible, and an HStack splits what is
@@ -1007,6 +1045,15 @@ struct CanvasProjectNote: View {
                     .fixedSize()
             }
             if showsOrigin { originChip(todo) }
+            // A parent says how far through its subtasks it is, the way Things counts a checklist.
+            // Only while it is open: a finished parent's count is a record nobody is working from.
+            if todo.state == .open, let count = subtaskCounts[key], count.total > 0 {
+                Text("\(count.done)/\(count.total)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+                    .help("\(count.done) of \(count.total) subtasks done")
+            }
 
             // Revealed on hover, exactly as in the window. Shown unconditionally it put a dashed
             // "＋date" on every dateless task on the card at once, which on a board of project cards is
@@ -1022,9 +1069,11 @@ struct CanvasProjectNote: View {
             hovering = inside ? rowID : (hovering == rowID ? nil : hovering)
             rowHover.set(key, inside: inside)
         }
-        .padding(.leading, 12 + indent(todo.depth))
-        .padding(.trailing, 12)
-        .padding(.vertical, 2)
+        .padding(.leading, Self.margin + indent(todo.depth))
+        .padding(.trailing, Self.margin)
+        .padding(.vertical, 3)
+        // Before the band in the chain, so drawn over its tint: a selected subtask keeps its threads.
+        .background(TaskThreads(depth: todo.depth, leading: Self.margin))
         // Outside the depth indent, so a subtask's highlight starts where every other row's does — a
         // band that stepped in with the text would read as a second kind of row. The same view the
         // window's list paints, so a selection looks like a selection wherever you made it.
@@ -1132,9 +1181,31 @@ struct CanvasProjectNote: View {
         }
     }
 
-    /// A subtask's step in, half the window's. A card is a narrower column than a window's, and the
-    /// nesting has to leave room for the sentence.
-    private func indent(_ depth: Int) -> Double { Double(depth) * 11 }
+    /// A subtask's step in: its box under its parent's first word. See `TaskRowMetrics`.
+    private func indent(_ depth: Int) -> Double { Double(depth) * TaskRowMetrics.indentStep }
+
+    /// How many of each task's descendants are done, keyed like a row. One walk, in document order,
+    /// with the ancestors on a stack — a task is a descendant of everything above it on the stack.
+    /// A dropped subtask is neither done nor left to do, so it is not counted at all.
+    static func countSubtasks(_ todos: [Todo]) -> [String: (done: Int, total: Int)] {
+        var out: [String: (done: Int, total: Int)] = [:]
+        var stack: [Todo] = []
+        for todo in todos {
+            if let last = stack.last, last.sessionIndex != todo.sessionIndex { stack.removeAll() }
+            while let last = stack.last, last.depth >= todo.depth { stack.removeLast() }
+            if todo.state != .dropped {
+                for ancestor in stack {
+                    let key = PMStore.key(for: ancestor)
+                    var count = out[key] ?? (0, 0)
+                    count.total += 1
+                    if todo.state == .done { count.done += 1 }
+                    out[key] = count
+                }
+            }
+            stack.append(todo)
+        }
+        return out
+    }
 
     /// Whether a task survives the find. Its own text only, not its ancestors': filtering by a parent
     /// would pull in every child of a matching task and read as "3 matches" over a dozen rows — the
@@ -1474,7 +1545,9 @@ private struct CardTitleButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .foregroundStyle(hovering || configuration.isPressed ? .primary : .secondary)
+                // Tertiary at rest: two verbs beside the title, there when you look for them and not
+                // competing with the name they act on.
+                .foregroundStyle(hovering || configuration.isPressed ? .primary : .tertiary)
                 .padding(3)
                 .background(
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -1485,5 +1558,97 @@ private struct CardTitleButtonStyle: ButtonStyle {
                 .onHover { hovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
+    }
+}
+
+/// Progress as Things draws it beside a project: a ring, filled as a pie by how much is done.
+///
+/// A pie rather than a bar or "3/8", because it is read at a glance and at eleven points — the fraction
+/// is in the tooltip for anyone who wants the number.
+///
+/// Something with nothing to finish — an area — gets the dashed ring the menubar and the switcher give
+/// it, rather than a pie stuck at empty that would say it hadn't been started.
+struct ProgressPie: View {
+    let done: Int
+    let total: Int
+    var tint: Color = .accentColor
+    var showsProgress = true
+
+    private var fraction: Double { total > 0 ? min(Double(done) / Double(total), 1) : 0 }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            let line = max(side / 11, 1.1)
+            ZStack {
+                if showsProgress {
+                    Circle().strokeBorder(tint, lineWidth: line)
+                    PieSlice(fraction: fraction)
+                        .fill(tint)
+                        .padding(line * 2)
+                } else {
+                    Circle().strokeBorder(tint, style: StrokeStyle(lineWidth: line, dash: [line * 1.6]))
+                }
+            }
+            .frame(width: side, height: side)
+        }
+        .accessibilityElement()
+        .accessibilityLabel(Text(showsProgress ? "\(done) of \(total) done" : "Ongoing"))
+    }
+
+    private struct PieSlice: Shape {
+        var fraction: Double
+        var animatableData: Double {
+            get { fraction }
+            set { fraction = newValue }
+        }
+
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            guard fraction > 0 else { return path }
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            path.move(to: center)
+            path.addArc(center: center, radius: min(rect.width, rect.height) / 2,
+                        startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * fraction),
+                        clockwise: false)
+            path.closeSubpath()
+            return path
+        }
+    }
+}
+
+/// A sitting's heading on a card: which day it was, in the accent, its name after it, and the date and
+/// time it began at the far end — with a hairline under it, so a card of sittings reads as sections of one
+/// document rather than as one list with dates scattered through it. Things' heading, Craft's rule.
+struct SessionHeading: View {
+    let session: Session
+
+    var body: some View {
+        let heading = SessionDay.heading(session.date, time: session.startTime)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // The name, not the label: the label on disk carries the time too, which is said at
+                // the far end with the date rather than run into the name.
+                (Text(heading.day).foregroundStyle(Color.accentColor)
+                 + Text(session.name.isEmpty ? "" : " · \(session.name)").foregroundStyle(.secondary)
+                    .fontWeight(.regular))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                Spacer(minLength: 8)
+                if let detail = heading.detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            Rectangle()
+                .fill(Color.primary.opacity(0.09))
+                .frame(height: 1)
+        }
+        .help(heading.full)
     }
 }

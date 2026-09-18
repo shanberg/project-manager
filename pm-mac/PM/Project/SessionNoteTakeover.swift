@@ -105,6 +105,8 @@ struct SessionNoteTakeover: View {
     /// Whether the pointer is over the label field, which is how a plain-looking line of header text
     /// says it's editable.
     @State private var labelHovering = false
+    /// Whether the pointer is over the way back, which is plain text until it is.
+    @State private var backHovering = false
     /// The window this takeover is in, so the save-on-blur only fires for *this* window losing key.
     @State private var hostWindow: NSWindow?
     /// The bar's measured height, fed to the editor as its text-container top inset.
@@ -157,6 +159,7 @@ struct SessionNoteTakeover: View {
         // and siblings in a stack propagate their preferences to the stack's parent beyond any doubt.
         // Read off an overlay it never arrived, leaving `barHeight` at zero and the first lines of the
         // note underneath the bar.
+        VStack(spacing: 0) {
         ZStack(alignment: .top) {
             // ⌘↩ → auto-saves. The note's own file goes in so a dropped file can be linked relative to
             // it and a relative link can be followed back out of it.
@@ -170,10 +173,9 @@ struct SessionNoteTakeover: View {
                 .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            // Same chrome as the task list's header — this stands in the same titlebar strip, so it
-            // floats the same way: a back button and an identity pill in glass, over a scrim that
-            // fades out rather than a bar that ends in a rule. Cap inside the scrim, as there: the
-            // title stays at the width of the prose it heads, the scrim spans the pane.
+            // The sitting's heading, over a scrim that fades out, so prose scrolled up under it goes
+            // quietly. Cap inside the scrim: the heading stays at the width of the prose it heads, the
+            // scrim spans the pane.
             header
                 .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
                 .background(SoftHeaderScrim())
@@ -182,6 +184,9 @@ struct SessionNoteTakeover: View {
                 })
         }
         .onPreferenceChange(BarHeightKey.self) { barHeight = $0 }
+            footer
+                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Fill the window. The takeover used to negotiate a height with a window that sized itself to
         // its content; a real window's height is the user's, so the editor takes what it's given.
@@ -232,16 +237,39 @@ struct SessionNoteTakeover: View {
     /// it's where the two-line "name over detail" pill finally earns its second line: out in the task
     /// column the project's name stands alone, but here the note needs saying *which* session it is,
     /// and the date is the only thing that answers that.
+    /// The sitting's heading, as the card draws it over the sitting — the day in the accent, the name
+    /// beside it — at the size of a page's title, with the way back above it and a hairline under it.
+    /// Opening a note reads as going *into* the heading you double-clicked, the way a Craft page opens
+    /// from its block, rather than as a second window's chrome arriving over the card.
     private var header: some View {
-        HStack(spacing: 8) {
+        let heading = SessionDay.heading(session.date, time: session.startTime)
+        return VStack(alignment: .leading, spacing: 8) {
             backButton
-            identityPill
-            Spacer(minLength: 12)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(heading.day)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                        .fixedSize()
+                    labelField
+                    Spacer(minLength: 0)
+                }
+                // The time is fixed, like the date: it says when the sitting began. Only the name is
+                // typed.
+                Text(heading.full)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Rectangle()
+                .fill(Color.primary.opacity(0.09))
+                .frame(height: 1)
         }
         .opacity(chrome.contentOpacity)
-        // The card's own gutter, and 8pt below: the header stands over the editor rather than above
+        // The card's own margin, and 8pt below: the header stands over the editor rather than above
         // it, so the gap is the editor's top inset.
-        .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 8)
+        .padding(.horizontal, TaskRowMetrics.margin).padding(.top, 10).padding(.bottom, 8)
         .animation(.easeOut(duration: 0.18), value: controlActiveState)
     }
 
@@ -250,66 +278,35 @@ struct SessionNoteTakeover: View {
         HeaderChrome(active: controlActiveState)
     }
 
-    /// Back to the task list. Its own circle of glass at the leading edge, separate from the pill, the
-    /// way Messages keeps its leading button apart from the name it sits beside — this is an action,
-    /// and the pill is a label.
+    /// Back to the task list, named for where it goes: the project. A breadcrumb rather than a glass
+    /// button — the heading under it is what this view is, and the way out is a quiet line above it.
     private var backButton: some View {
         Button(action: onBack) {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
+            HStack(spacing: 3) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(projectName.isEmpty ? "Back" : projectName)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(backHovering ? .primary : .secondary)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(4)
-        .headerBacking(in: Circle())
+        .onHover { backHovering = $0 }
         .background(WindowDragExcluder())
         .help("Back to tasks")
     }
 
-    /// The project's name over the session's date and label.
-    ///
-    /// No gesture of its own, because it holds a text field: the label is edited in place here. A
-    /// pill that responded to a press would be promising one to something whose actual job is to take
-    /// a caret.
-    private var identityPill: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(projectName.isEmpty ? "Note" : projectName)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            sessionLine
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .headerBacking(in: Capsule())
-        .background(WindowDragExcluder())
-    }
-
-    /// The session's identity line under the project name: its date, fixed, and its label, editable in
-    /// place. The field is plain until the pointer is over it — a bordered box in a titlebar strip would
-    /// read as a form where this is a title.
-    private var sessionLine: some View {
-        HStack(spacing: 4) {
-            // The time is fixed, like the date: it says when the sitting began. Only the name is typed.
-            Text(session.startTime.map { "\(session.date) \($0)" } ?? session.date)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            labelField
-        }
-    }
-
     /// The label field, sized to its own text rather than to whatever width is going spare.
     ///
-    /// A `TextField` takes every point it is offered. Inside a pill whose whole job is to hug its
-    /// contents that meant the pill stretched most of the way across the window — the field's old
-    /// `maxWidth: 240` was a cap on the damage, not a fix, because a flexible frame still claims the
-    /// width it's proposed. The hidden `Text` behind it is a width template instead: the label when
-    /// there is one, the placeholder when there isn't. The stack sizes to the template, which is
-    /// ordinary text and asks for exactly what it needs, and the field fills it — so the field is as
-    /// wide as what it's showing and grows a character at a time as you type.
+    /// A `TextField` takes every point it is offered, and a header that hugs its contents stretched
+    /// most of the way across the window — the field's old `maxWidth: 240` was a cap on the damage, not
+    /// a fix, because a flexible frame still claims the width it's proposed. The hidden `Text` behind it
+    /// is a width template instead: the label when there is one, the placeholder when there isn't. The
+    /// template is ordinary text and asks for exactly what it needs, and the field fills it — so the
+    /// field is as wide as what it's showing and grows a character at a time as you type.
     ///
     /// The trailing padding is caret room. Sized to the glyphs alone, the insertion point at the end
     /// of the text sits on the field's last pixel.
@@ -318,15 +315,19 @@ struct SessionNoteTakeover: View {
     /// so it claimed the full proposal and took the stack with it — the template was along for the ride
     /// rather than setting the width. Overlay content doesn't participate in layout at all: the hidden
     /// `Text` alone decides the size, and the field is handed exactly that.
+    ///
+    /// Plain until the pointer is over it: a bordered box beside a heading would read as a form where
+    /// this is a title.
     private var labelField: some View {
-        Text(label.isEmpty ? "Add a label" : label)
-            .font(.caption)
+        Text(label.isEmpty ? "Add a name" : label)
+            .font(Self.labelFont)
             .lineLimit(1)
             .hidden()
             .overlay(alignment: .leading) {
-                TextField("Add a label", text: $label)
+                TextField("Add a name", text: $label)
                     .textFieldStyle(.plain)
-                    .font(.caption)
+                    .font(Self.labelFont)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     // Return in the label field renames the session it was opened on, resolved the
                     // same way the note's own save resolves it.
@@ -338,8 +339,32 @@ struct SessionNoteTakeover: View {
         .background(RoundedRectangle(cornerRadius: 4)
             .fill(Color.primary.opacity(labelHovering ? 0.07 : 0)))
         .onHover { labelHovering = $0 }
-        .help("Session label")
+        .help("Session name")
         .background(WindowDragExcluder())
+    }
+
+    private static let labelFont = Font.system(size: 15)
+
+    /// Under the note: the sitting's open tasks, so writing about them doesn't mean forgetting they are
+    /// there, and the key that closes the note — the one thing about this view you can't see.
+    private var footer: some View {
+        let open = store.todos.filter { $0.sessionIndex == index && $0.state == .open }.count
+        return VStack(spacing: 0) {
+            Rectangle().fill(Color.primary.opacity(0.09)).frame(height: 1)
+            HStack(spacing: 6) {
+                if open > 0 {
+                    TaskStatusIcon(size: 10)
+                    Text(open == 1 ? "1 open task in this session" : "\(open) open tasks in this session")
+                }
+                Spacer(minLength: 8)
+                Text("⌘↩ Done")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .padding(.vertical, 7)
+        }
+        .padding(.horizontal, TaskRowMetrics.margin)
+        .opacity(chrome.contentOpacity)
     }
 
     /// Write the current text back to the session's note — the whole body, so a checkbox typed between

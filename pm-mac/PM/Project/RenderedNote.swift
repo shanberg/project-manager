@@ -84,7 +84,10 @@ private struct NoteImage: View {
                 // constrained; the height then follows from the picture's own proportions and the box
                 // is the picture. See `drawnWidth`.
                 .frame(maxWidth: drawnWidth(image), alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                // A hairline, so a screenshot with a white edge still has one on a white card.
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
                 .accessibilityLabel(alt.isEmpty ? "Image" : alt)
                 .help(url.lastPathComponent)
         } else {

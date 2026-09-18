@@ -63,12 +63,12 @@ struct TaskMenu: View {
             Button { store.toggleAll(scope) } label: {
                 allChecked
                     ? Label("Reopen \(scope.count) Tasks", systemImage: "arrow.uturn.backward")
-                    : Label("Complete \(scope.count) Tasks", systemImage: "checkmark.circle")
+                    : Label("Complete \(scope.count) Tasks", systemImage: "checkmark.square")
             }
         } else if todo.checked {
             Button { store.toggle(todo) } label: { Label("Reopen", systemImage: "arrow.uturn.backward") }
         } else {
-            Button { store.toggle(todo) } label: { Label("Complete", systemImage: "checkmark.circle") }
+            Button { store.toggle(todo) } label: { Label("Complete", systemImage: "checkmark.square") }
         }
         // Dropping closes a task that isn't going to be done. It counts only the open tasks in the
         // selection, because those are the only ones it touches — a done task in the sweep stays done.

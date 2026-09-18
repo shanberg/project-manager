@@ -528,7 +528,7 @@ struct QuickBarView: View {
         case .note: return "text.alignleft"
         case .blank: return ""
         case .elsewhere(let below): return below ? "chevron.down" : "chevron.up"
-        case .task: return line.checked ? "checkmark.circle.fill" : "circle"
+        case .task: return TaskStatusIcon.symbol(for: line.checked ? .done : .open)
         }
     }
 

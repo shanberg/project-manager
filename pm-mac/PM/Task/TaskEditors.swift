@@ -11,22 +11,31 @@ import SwiftUI
 
 // MARK: Status glyph
 
-/// A task's leading status glyph — an open circle, or a filled check when done. The inline editors
+/// A task's leading status glyph — an open box, or a filled check when done. The inline editors
 /// (edit / add / wrap / due) render it alongside their input so a task keeps the same visual identity
 /// while it's being modified or created that it has as a normal row. `size` matches the surrounding
 /// context (nil = the list row's default body size; the focus card passes its larger 18pt). A
-/// brand-new task (add / wrap) reads as an empty circle, since it isn't complete yet.
+/// brand-new task (add / wrap) reads as an empty box, since it isn't complete yet.
+///
+/// **A box, not a circle.** A circle is the shape Reminders gave a to-do; the rounded square is the one
+/// Things and Craft give it, and it is the one that reads as "a thing to tick" in a document rather than
+/// a radio button in a list. Every task glyph in the app says the same shape — the focus panel's hero,
+/// the quick bar's preview, the menus' Complete — so a task looks like itself wherever it is drawn.
 struct TaskStatusIcon: View {
     var state: TaskState = .open
     var size: CGFloat? = nil
 
     /// A dropped task is closed but wasn't done, so it never borrows the done check or its accent: an
-    /// unfilled cross in the same quiet colour as an open circle.
-    private var symbol: String {
+    /// unfilled cross in the same quiet colour as an open box.
+    private var symbol: String { Self.symbol(for: state) }
+
+    /// The glyph for a state, for a surface that draws a task's box by name rather than with this view —
+    /// the quick bar's preview.
+    static func symbol(for state: TaskState) -> String {
         switch state {
-        case .open: return "circle"
-        case .done: return "checkmark.circle.fill"
-        case .dropped: return "xmark.circle"
+        case .open: return "square"
+        case .done: return "checkmark.square.fill"
+        case .dropped: return "xmark.square"
         }
     }
 
@@ -35,6 +44,64 @@ struct TaskStatusIcon: View {
             .font(size.map { Font.system(size: $0) } ?? .body)
             .foregroundStyle(state == .done ? Color.accentColor : Color.secondary)
             .symbolReplaceIfAvailable()
+    }
+}
+
+// MARK: A task row's measurements
+
+/// What a task row is laid out on — the project card's rows and every view card's, which are one row
+/// vocabulary drawn by the same pieces (docs/views.md rule 3), so they are one set of numbers.
+///
+/// **A subtask's box sits under its parent's first word.** That is what the step is: the box's column
+/// plus the gap after it. Nested that way a tree reads as sentences that belong to the sentence above
+/// them — Things' checklist, Craft's nested blocks — rather than as a second list that happens to start
+/// a little further in. The box is drawn centred in a fixed column, so the smaller box a subtask gets
+/// doesn't move its words off the column its siblings' words are on.
+enum TaskRowMetrics {
+    /// The words.
+    static let textSize: CGFloat = 13
+    /// A top-level task's box, and a subtask's, one step smaller: the level is said by the size as well
+    /// as the indent, which is what lets a narrow card keep the indent modest.
+    static let boxSize: CGFloat = 13
+    static let subtaskBoxSize: CGFloat = 11
+    /// The column a box is centred in, whatever its size.
+    static let boxColumn: CGFloat = 16
+    /// Between the box and the words.
+    static let gap: CGFloat = 8
+    /// One level of nesting: exactly the box column and its gap.
+    static let indentStep: CGFloat = boxColumn + gap
+    /// A card's margin, either side.
+    static let margin: CGFloat = 16
+
+    static func boxSize(depth: Int) -> CGFloat { depth == 0 ? boxSize : subtaskBoxSize }
+}
+
+/// The threads down the left of a subtask: one hairline per level above it, through the middle of each
+/// ancestor's box, so a tree shows where it ends without anything being drawn around it.
+///
+/// Drawn per row, full height, so consecutive rows join into one line and the line stops where the tree
+/// does — the next row at the parent's depth has no thread at that level. Always on, and faint: it is
+/// structure, not a control.
+struct TaskThreads: View {
+    let depth: Int
+    /// Where depth 0's box column begins, in the row's own coordinates.
+    var leading: CGFloat = TaskRowMetrics.margin
+    var zoom: Double = 1
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<max(depth, 0), id: \.self) { level in
+                Rectangle()
+                    .fill(Color.primary.opacity(0.11))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .offset(x: (leading + CGFloat(level) * TaskRowMetrics.indentStep
+                                + TaskRowMetrics.boxColumn / 2) * zoom - 0.5)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

@@ -166,4 +166,46 @@ final class SessionPicksTests: XCTestCase {
         XCTAssertTrue(SessionPicks.originHelp(tasks[0], sessions: sessions, tasks: tasks)
             .hasSuffix("deposit by Friday, so:"))
     }
+
+    // MARK: A sitting's heading
+
+    /// Noon on Fri, Sep 18, 2026 in the test's own calendar, so "today" doesn't depend on the clock.
+    private var friday: (now: Date, calendar: Calendar) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 12))!
+        return (now, calendar)
+    }
+
+    func testARecentSittingIsNamedForItsDayAndKeepsTheDateBesideIt() {
+        let (now, calendar) = friday
+        let today = SessionDay.heading("Fri, Sep 18, 2026", time: "10:40 AM", now: now, calendar: calendar)
+        XCTAssertEqual(today.day, "Today")
+        XCTAssertEqual(today.detail?.hasSuffix(" · 10:40 AM"), true)
+        XCTAssertEqual(SessionDay.heading("Thu, Sep 17, 2026", now: now, calendar: calendar).day, "Yesterday")
+        let tuesday = SessionDay.heading("Tue, Sep 15, 2026", now: now, calendar: calendar)
+        XCTAssertNotEqual(tuesday.day, "Today")
+        XCTAssertNotNil(tuesday.detail, "a weekday keeps its date beside it")
+    }
+
+    /// A day parsed at UTC midnight is the evening before west of Greenwich; the heading has to be the
+    /// day the file says, wherever it's read.
+    func testTodayIsTodayWestOfGreenwich() {
+        var (now, calendar) = friday
+        now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 21))!
+        XCTAssertEqual(SessionDay.heading("Fri, Sep 18, 2026", now: now, calendar: calendar).day, "Today")
+    }
+
+    func testAnOlderSittingIsNamedForItsDate() {
+        let (now, calendar) = friday
+        let old = SessionDay.heading("Sat, Aug 22, 2026", now: now, calendar: calendar)
+        XCTAssertEqual(old.day, SessionPicks.day(iso: "2026-08-22", now: now, calendar: calendar))
+        XCTAssertNotNil(old.detail)
+    }
+
+    func testAHeadingItCannotReadIsShownAsWritten() {
+        let heading = SessionDay.heading("Someday", now: friday.now, calendar: friday.calendar)
+        XCTAssertEqual(heading.day, "Someday")
+        XCTAssertNil(heading.detail)
+    }
 }
