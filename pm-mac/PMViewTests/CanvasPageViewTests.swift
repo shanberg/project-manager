@@ -337,6 +337,43 @@ final class CanvasPageViewTests: XCTestCase {
         return try XCTUnwrap(NSEvent(cgEvent: event))
     }
 
+    // MARK: Pointer lock
+
+    /// The Escape that takes the pointer back from a page does only that; the next one steps out of
+    /// the card, as every Escape the page doesn't want does.
+    ///
+    /// The lock itself can't be taken here — WebKit wants an active window, and the test app never is
+    /// one — so `holdsPointer` is set by hand, the way the card's delegate sets it when WebKit grants
+    /// and ends a lock. The second Escape is the control: it proves the key really does come back up
+    /// the chain in this harness, so the first one staying put means something.
+    func testEscapeThatReleasesThePointerDoesNotAlsoStepOut() async throws {
+        page.nextResponder = board
+        window.makeFirstResponder(page)
+        _ = try await page.evaluateJavaScript(
+            "window.keys = 0; addEventListener('keydown', () => window.keys++); true")
+
+        page.holdsPointer = true
+        page.keyDown(with: try escape())
+        try await until("the page sees the first Escape") {
+            (try? await self.page.evaluateJavaScript("window.keys")) as? Int == 1
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(board.calls.contains("cancel"), "calls: \(board.calls)")
+
+        // What WebKit's `_webViewDidLosePointerLock:` tells the card, and the card tells the page.
+        page.holdsPointer = false
+        page.keyDown(with: try escape())
+        try await until("the second Escape reaches the card") { self.board.calls.contains("cancel") }
+    }
+
+    private func escape() throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                       timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: window.windowNumber, context: nil,
+                                       characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                       isARepeat: false, keyCode: 53))
+    }
+
     // MARK: Helpers
 
     private func until(_ what: String, timeout: TimeInterval = 5, _ done: () async -> Bool) async throws {
@@ -359,6 +396,7 @@ private final class Recorder: NSView {
     override func draggingExited(_ sender: NSDraggingInfo?) { calls.append("exited") }
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { calls.append("performed"); return true }
+    override func cancelOperation(_ sender: Any?) { calls.append("cancel") }
 }
 
 /// A drag of one thing — a link, unless it is given something else — at a point in window coordinates.

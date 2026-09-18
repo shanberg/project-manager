@@ -1041,8 +1041,16 @@ final class CanvasLinkNodeView: CanvasNodeView {
             // rewritten with no navigation for a delegate to be asked about at all.
             capturingTitle = false
             if let web { window?.makeFirstResponder(web) }
-        } else if let web, (window?.firstResponder as? NSView)?.isDescendant(of: web) == true {
-            window?.makeFirstResponder(board)
+        } else {
+            // A page that still has the pointer when you've stepped out of it has the mouse for a card
+            // that no longer takes clicks. Asked of the main frame only, which is where a page that
+            // wants the pointer nearly always asks for it.
+            if let page = web as? CanvasPageView, page.holdsPointer {
+                page.evaluateJavaScript("document.exitPointerLock()")
+            }
+            if let web, (window?.firstResponder as? NSView)?.isDescendant(of: web) == true {
+                window?.makeFirstResponder(board)
+            }
         }
         board.pageStateChanged()
     }
@@ -1764,5 +1772,37 @@ extension CanvasLinkNodeView: WKUIDelegate {
         board.report("\(origin.host) asked for \(wants). Web cards don't get it — open it in your "
             + "browser.")
         decisionHandler(.deny)
+    }
+
+    // MARK: Pointer lock
+
+    /// A page asking for the pointer — `requestPointerLock()`, which is how a game or a 3D view gets
+    /// raw mouse movement instead of a cursor that stops at the edge of the screen.
+    ///
+    /// **WebKit's only door for this is private.** Pointer lock is switched on in every web view, but
+    /// the grant goes through `WKUIDelegatePrivate`, and a delegate that doesn't answer it is a refusal:
+    /// the page gets `pointerlockerror` and nothing else happens, which is how this looked for as long
+    /// as cards had no answer. Safari answers the same method. Folio ships Developer ID, not through
+    /// the App Store, so the private selector costs nothing but the chance WebKit renames it.
+    ///
+    /// Only for a page you are working in: a card you have stepped into, or a tile. WebKit already
+    /// insists on a click in the page first, and a card that isn't taking clicks can't be given one —
+    /// this says so in the one place a later change to that could make it untrue.
+    ///
+    /// Said out loud, as every browser says it: the cursor vanishes, and the one way back has to be
+    /// on screen when it does.
+    @objc(_webViewDidRequestPointerLock:completionHandler:)
+    func webViewDidRequestPointerLock(_ webView: WKWebView, completionHandler: @escaping (Bool) -> Void) {
+        guard takesItsOwnClicks, webView.window?.isKeyWindow == true,
+              let page = webView as? CanvasPageView else { return completionHandler(false) }
+        page.holdsPointer = true
+        board.report("\(host) has the pointer. Press Esc to get it back.")
+        completionHandler(true)
+    }
+
+    /// The lock ended — Escape, the page letting go, or the window losing the keyboard.
+    @objc(_webViewDidLosePointerLock:)
+    func webViewDidLosePointerLock(_ webView: WKWebView) {
+        (webView as? CanvasPageView)?.holdsPointer = false
     }
 }

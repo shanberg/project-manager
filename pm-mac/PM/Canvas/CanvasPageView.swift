@@ -226,6 +226,41 @@ final class CanvasPageView: WKWebView {
         return answer as? Bool ?? false
     }
 
+    // MARK: Pointer lock
+
+    /// Whether the page has the pointer — a game or a 3D view that asked for raw mouse movement. Kept by
+    /// the card as WebKit grants and ends it; see `CanvasLinkNodeView`'s pointer-lock delegate methods.
+    var holdsPointer = false
+
+    /// Whether the Escape now walking up the responder chain is the one that took the pointer back.
+    private var escapeReleasedPointer = false
+
+    /// Note an Escape that is about to end a pointer lock, before WebKit ends it.
+    ///
+    /// Asked here because it can't be asked afterwards: WebKit releases the pointer inside this call,
+    /// synchronously, so by the time the key comes back up the chain the lock is already gone. Set on
+    /// every key rather than only on Escape, so a page that swallows its Escape can't leave the flag
+    /// standing for the next one.
+    override func keyDown(with event: NSEvent) {
+        escapeReleasedPointer = holdsPointer && event.keyCode == 53
+        super.keyDown(with: event)
+    }
+
+    /// **Escape out of a pointer lock does that and nothing more.** The page hands the key back as it
+    /// hands back any Escape it didn't want, and walked on up it steps out of the card, or out of the
+    /// tile — two things at once for one press, and the second one is what nobody meant. Every browser
+    /// stops at the first. The Escape after that is the card's as it always was.
+    ///
+    /// Passed on rather than `super`: `NSView` doesn't implement `cancelOperation:` — see
+    /// `CanvasNodeView.cancelOperation`.
+    override func cancelOperation(_ sender: Any?) {
+        guard !escapeReleasedPointer else {
+            escapeReleasedPointer = false
+            return
+        }
+        nextResponder?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+    }
+
     // MARK: The other two buttons
 
     /// What was under the pointer when the menu was asked for, since the menu itself cannot be asked.
