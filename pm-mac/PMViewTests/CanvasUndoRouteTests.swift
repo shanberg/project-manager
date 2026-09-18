@@ -126,6 +126,63 @@ final class CanvasDayRowUndoTests: XCTestCase {
         XCTAssertEqual(try todayRows().1.first { $0.text == "Email Dana" }?.state, .open, "⌘Z brought the task back")
     }
 
+    /// A selection is one sitting, so one project: two ticks are one step, and one ⌘Z takes both back.
+    func testASelectionIsOneStepOnItsProject() throws {
+        _ = try api("project.create") { $0.title = "Day Under Test"; $0.domain = "W" }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Email Dana" }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Book the venue" }
+        let (sitting, rows) = try todayRows()
+        XCTAssertEqual(rows.count, 2)
+
+        var lastEditedProject: PMStore?
+        let actions = CanvasDayActions { [unowned self] in projectKey(forFolder: $0) }
+        actions.onActed = { lastEditedProject = $0 }
+        defer { actions.releaseAll() }
+        let settled = expectation(description: "act settled")
+        actions.perform(.complete, on: rows, inProject: sitting.projectFolder) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+        XCTAssertEqual(try todayRows().1.map(\.state), [.done, .done])
+
+        let project = try XCTUnwrap(lastEditedProject)
+        XCTAssertEqual(project.undoStack.count, 1, "One gesture, one step")
+        let undone = expectation(description: "undone")
+        project.undo()
+        project.reload { undone.fulfill() }
+        wait(for: [undone], timeout: 5)
+        XCTAssertEqual(try todayRows().1.map(\.state), [.open, .open])
+    }
+
+    /// A sitting dragged off a view: the card it carries, read back by the board's own drop reader, is a
+    /// project card on that project's notes, drawing that one sitting (docs/views.md D7).
+    func testASittingDraggedOffIsACardOfThatSitting() throws {
+        _ = try api("project.create") { $0.title = "Day Under Test"; $0.domain = "W" }
+        _ = try api("task.add") { $0.project = "W-1"; $0.text = "Email Dana" }
+        let (sitting, _) = try todayRows()
+        let resolver = CanvasFileResolver(canvas: vault.appendingPathComponent("PARA/Board.canvas"),
+                                          vaultRoot: vault.appendingPathComponent("PARA"))
+        let document = try XCTUnwrap(CanvasSittingPin.card(for: sitting, resolver: resolver))
+
+        let pasteboard = NSPasteboard(name: .init("pm-day-drag-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setData(Data(document.serialized().utf8), forType: CanvasClipping.pasteboardType)
+        pasteboard.setString(sitting.projectName, forType: .string)
+        guard case .cards(let dropped)? = CanvasDrop.read(pasteboard, cardsType: CanvasClipping.pasteboardType)
+        else { return XCTFail("The board reads it as a card, not as text") }
+
+        let node = try XCTUnwrap(dropped.nodes.first)
+        XCTAssertEqual(dropped.nodes.count, 1)
+        XCTAssertEqual(CanvasCardShows.of(node), .sitting)
+        guard case .file(let path, nil) = node.content else { return XCTFail("A file card") }
+        XCTAssertFalse(path.hasPrefix("/"), "Stored from the vault root, as Obsidian stores it")
+        let url = try XCTUnwrap(resolver.resolve(path).url)
+        let notes = try parseNotes(markdown: String(contentsOf: url, encoding: .utf8))
+        let pin = try XCTUnwrap(CanvasSittingPin.of(node))
+        let index = try XCTUnwrap(CanvasSittingPin.index(of: pin, in: notes))
+        XCTAssertEqual(sessionISODate(heading: notes.sessions[index].date), sitting.session,
+                       "The card draws the sitting that was dragged")
+    }
+
     /// A row whose line changed under the view is refused, not landed on whatever is there now.
     func testAnActOnALineThatChangedIsRefused() throws {
         _ = try api("project.create") { $0.title = "Day Under Test"; $0.domain = "W" }
@@ -141,5 +198,38 @@ final class CanvasDayRowUndoTests: XCTestCase {
         perform(.complete, row, in: sitting, with: actions)
         XCTAssertFalse(acted)
         XCTAssertEqual(try todayRows().1.first?.state, .open)
+    }
+}
+
+/// ⌘Z while retyping a task is the typing's, not the board's or the project's.
+@MainActor
+final class CanvasTypingUndoTests: XCTestCase {
+    func testAFieldBeingRetypedIsTheEditorWithAHistoryOfItsOwn() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.backgroundColor = .windowBackgroundColor
+        let card = NSView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(card)
+        let field = TokenClickField(string: "Email Dana")
+        field.frame = NSRect(x: 10, y: 10, width: 200, height: 22)
+        card.addSubview(field)
+
+        XCTAssertNil(CanvasUndoRoute.typingUndo(in: card), "Nothing is being typed yet")
+        XCTAssertTrue(window.makeFirstResponder(field))
+        let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+        editor.insertText(" today", replacementRange: NSRange(location: 10, length: 0))
+        editor.breakUndoCoalescing()
+
+        let typing = try XCTUnwrap(CanvasUndoRoute.typingUndo(in: card))
+        XCTAssertTrue(typing === field.typingUndo)
+        XCTAssertFalse(typing === window.undoManager, "Not the window's, which on a board is the canvas")
+        XCTAssertTrue(typing.canUndo)
+        XCTAssertEqual(CanvasUndoRoute.route(editorOpen: true, projectCanAct: true), .editor)
+        typing.undo()
+        XCTAssertEqual(editor.string, "Email Dana", "⌘Z took back the typing")
+
+        let elsewhere = NSView()
+        window.contentView!.addSubview(elsewhere)
+        XCTAssertNil(CanvasUndoRoute.typingUndo(in: elsewhere), "Only the card with the caret in it")
     }
 }

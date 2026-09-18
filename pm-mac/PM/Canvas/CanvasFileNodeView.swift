@@ -77,6 +77,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         super.update(node: node, scale: scale)
         let wanted = CanvasCardShows.of(node)
         if projectDisplay.shows != wanted { projectDisplay.shows = wanted }
+        let pinned = CanvasSittingPin.of(node)
+        if projectDisplay.sitting != pinned { projectDisplay.sitting = pinned }
         let options = CanvasFolderOptions.of(node)
         if let folder, folder.options != options { folder.options = options }
     }

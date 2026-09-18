@@ -50,6 +50,13 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
     /// The reference card: the brief alone, parked beside something else, changing only when the
     /// project's shape does.
     case brief
+    /// One sitting, named by `pmSitting` — last week's 1:1 pinned beside this week's (docs/views.md D7).
+    /// Made by dragging a sitting off a view rather than chosen from the menu, since it needs a sitting
+    /// to name. A card whose sitting can't be found draws the project, as a typo in `pmShows` does.
+    case sitting
+
+    /// What the Shows menu offers: the four you can choose without naming a sitting.
+    static let menuCases: [CanvasCardShows] = [.everything, .current, .tasks, .brief]
 
     /// What the menu calls it. Here rather than in the menu, so the word a card is set by and the word
     /// written into the file cannot drift apart.
@@ -59,6 +66,7 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
         case .current: return "Current"
         case .tasks: return "Tasks"
         case .brief: return "Brief"
+        case .sitting: return "One Sitting"
         }
     }
 
@@ -82,13 +90,13 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
     var brief: Bool {
         switch self {
         case .everything, .brief: return true
-        case .current, .tasks: return false
+        case .current, .tasks, .sitting: return false
         }
     }
 
     var prose: ProseScope {
         switch self {
-        case .everything: return .all
+        case .everything, .sitting: return .all
         case .current: return .latest
         case .tasks, .brief: return .none
         }
@@ -96,7 +104,7 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
 
     var tasks: TaskScope {
         switch self {
-        case .everything: return .all
+        case .everything, .sitting: return .all
         case .current, .tasks: return .open
         case .brief: return .none
         }
@@ -113,7 +121,7 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
 
     var layout: Layout {
         switch self {
-        case .everything, .brief: return .sittings
+        case .everything, .brief, .sitting: return .sittings
         case .current: return .pile(withLatest: true)
         case .tasks: return .pile(withLatest: false)
         }
@@ -190,7 +198,64 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
 
     /// Put this on a card — as the absence of the key when it is showing everything, so a card narrowed
     /// and widened again leaves the file exactly as it found it.
+    ///
+    /// Any lens but `sitting` takes `pmSitting` off with it: a card set back to Current has stopped
+    /// being about that sitting, and a stale key would come back to life if somebody typed `sitting`.
     static func set(_ shows: CanvasCardShows, on node: inout CanvasNode) {
         node.extra[key] = shows == .default ? nil : .string(shows.rawValue)
+        if shows != .sitting { node.extra[CanvasSittingPin.key] = nil }
+    }
+}
+
+/// The sitting a `sitting` card draws, as the node keeps it: `pmSitting`, a `SessionRef` spelled as
+/// the contract spells one — `{"date": "2026-09-17", "ordinal": 0, "digest": "…"}`.
+///
+/// Not `pmSession`, which already names a web card's browser session (`CanvasCardSession`).
+enum CanvasSittingPin {
+    static let key = "pmSitting"
+
+    static func of(_ node: CanvasNode) -> SessionRef? {
+        guard case .object(let object)? = node.extra[key],
+              case .string(let date)? = object["date"] else { return nil }
+        var ordinal = 0
+        if case .number(let n)? = object["ordinal"] { ordinal = max(0, Int(n)) }
+        var digest: String?
+        if case .string(let d)? = object["digest"], !d.isEmpty { digest = d }
+        return SessionRef(date: date, ordinal: ordinal, digest: digest)
+    }
+
+    /// Make `node` a card of this one sitting.
+    static func pin(_ ref: SessionRef, on node: inout CanvasNode) {
+        guard let date = ref.date else { return }
+        var object: [String: JSONValue] = ["date": .string(date), "ordinal": .number(Double(ref.ordinal))]
+        if let digest = ref.digest { object["digest"] = .string(digest) }
+        node.extra[key] = .object(object)
+        CanvasCardShows.set(.sitting, on: &node)
+    }
+
+    /// A project card for the project `sitting` is in, pinned to it — what a sitting dragged off a view
+    /// becomes (D7). Stored as every project card is, from the vault root; nil when the project's notes
+    /// can't be found.
+    @MainActor
+    static func card(for sitting: SittingEntry, resolver: CanvasFileResolver) -> CanvasDocument? {
+        guard let projectPath = try? resolveProjectPath(nameOrPrefix: sitting.projectFolder),
+              let notes = (try? resolveNotesPath(projectPath: projectPath)) ?? nil else { return nil }
+        var node = CanvasProjectNoteCard.node(for: URL(fileURLWithPath: notes), at: CanvasPoint(x: 0, y: 0),
+                                              resolver: resolver)
+        pin(SessionRef(date: sitting.session, ordinal: sitting.sessionOrdinal,
+                       digest: sitting.sessionDigest.isEmpty ? nil : sitting.sessionDigest),
+            on: &node)
+        return CanvasDocument(nodes: [node], edges: [])
+    }
+
+    /// Which session in `notes` the pin names, or nil when none does.
+    ///
+    /// By its label first, which finds it among a day's sittings even if they've been reordered; then
+    /// by date and position alone, so renaming a sitting doesn't turn its card into the whole project.
+    static func index(of ref: SessionRef, in notes: ProjectNotes) -> Int? {
+        if let hit = try? resolveSessionRef(ref, notes: notes) { return hit.index }
+        var loose = ref
+        loose.digest = nil
+        return (try? resolveSessionRef(loose, notes: notes))?.index
     }
 }

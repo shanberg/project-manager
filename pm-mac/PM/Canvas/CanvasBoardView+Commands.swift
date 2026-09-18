@@ -709,7 +709,7 @@ extension CanvasBoardView {
         let cards = selectedProjectCards
         guard !cards.isEmpty else { return }
         let shows = NSMenu(title: "Shows")
-        for preset in CanvasCardShows.allCases {
+        for preset in CanvasCardShows.menuCases {
             let entry = add(shows, preset.title, #selector(setShowsPreset(_:)))
             entry.representedObject = preset.rawValue
             // Ticked only when every selected card agrees, which is how a mixed selection reads as

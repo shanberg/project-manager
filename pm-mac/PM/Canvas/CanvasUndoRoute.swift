@@ -1,3 +1,5 @@
+import AppKit
+
 /// Which of a board's histories ⌘Z and ⇧⌘Z act on.
 ///
 /// A board window answers `undo:` itself, on the pane, because it holds more than one document and
@@ -25,5 +27,21 @@ enum CanvasUndoRoute: Equatable {
         if editorOpen { return .editor }
         if projectCanAct { return .project }
         return .board
+    }
+}
+
+extension CanvasUndoRoute {
+    /// The typing history of a one-line field being edited inside `card`, when it keeps one of its own —
+    /// a task retyped on a project card or a Day row. It is the editor case above, like a text card's.
+    ///
+    /// Only a stack that isn't the window's: a field that never asked for its own registers on the
+    /// window's, which on a board is the canvas document — naming that as "the editor" would take the
+    /// project's turn away and then act as the board anyway.
+    @MainActor
+    static func typingUndo(in card: NSView) -> UndoManager? {
+        guard let window = card.window, let editor = window.firstResponder as? NSTextView,
+              editor.isFieldEditor, editor.isDescendant(of: card),
+              let undo = editor.undoManager, undo !== window.undoManager else { return nil }
+        return undo
     }
 }

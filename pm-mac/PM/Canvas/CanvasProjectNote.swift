@@ -134,7 +134,17 @@ struct CanvasProjectNote: View {
         display.returnCaret = returning.caret
         openNote = resolved.index
     }
-    private var shows: CanvasCardShows { display.shows }
+    /// What the card draws: its lens, except a `sitting` card whose sitting can't be found, which draws
+    /// the project — the fallback a typo in `pmShows` gets (docs/views.md D7).
+    private var shows: CanvasCardShows {
+        display.shows == .sitting && pinnedSession == nil ? .everything : display.shows
+    }
+
+    /// The one sitting a `sitting` card draws, by its index in the document.
+    private var pinnedSession: Int? {
+        guard display.shows == .sitting, let ref = display.sitting, let notes else { return nil }
+        return CanvasSittingPin.index(of: ref, in: notes)
+    }
 
     /// The sessions this card draws, each with the index it has in the document.
     ///
@@ -147,7 +157,9 @@ struct CanvasProjectNote: View {
     /// sitting before it, so there is no prefix of this list that describes what such a card shows. A
     /// session that ends up contributing nothing loses its caption on its own — see `session_`.
     private var shownSessions: [(index: Int, session: Session)] {
-        (notes?.sessions ?? []).enumerated().map { (index: $0.offset, session: $0.element) }
+        let all = (notes?.sessions ?? []).enumerated().map { (index: $0.offset, session: $0.element) }
+        guard shows == .sitting, let pinned = pinnedSession else { return all }
+        return all.filter { $0.index == pinned }
     }
 
     /// Every visible task row's key, in the order the card is drawing them — what a ⇧-click ranges
@@ -1361,6 +1373,8 @@ final class CanvasProjectCardCommands {
 @Observable
 final class CanvasProjectCardDisplay {
     var shows = CanvasCardShows.default
+    /// The sitting a `sitting` card draws, from `pmSitting`.
+    var sitting: SessionRef?
 
     /// What the board's find is looking for, while this is the card you are standing in.
     ///

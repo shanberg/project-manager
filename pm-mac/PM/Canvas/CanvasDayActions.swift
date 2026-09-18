@@ -2,7 +2,7 @@ import AppKit
 import PmLib
 
 /// What a Day row can be told to do (docs/views.md D6) — the project card's verbs for a row, less the
-/// ones that need the rows around it (the positional adds, wrap, a selection).
+/// ones that need the rows around it (the positional adds, wrap).
 enum CanvasDayAction: Equatable {
     case complete
     case reopen
@@ -12,35 +12,67 @@ enum CanvasDayAction: Equatable {
     case putBack
     case edit(String)
 
-    /// Which of these a row offers, from what the row itself knows. The store has the last word when the
+    /// Which of these a selection offers, from what its rows know. The store has the last word when the
     /// act lands — a project left long enough starts a new sitting, and then Pick Up means something
     /// after all — but a menu that says what it will usually do beats one that is always the same.
     ///
+    /// A selection is one sitting's rows (`CanvasDaySelection`), so it is one project and every act on
+    /// it is one step on that project's history.
+    ///
     /// Pick Up only from a sitting that isn't the project's current one: a row in the current sitting is
     /// already there. Put Back only on a tree picked up into the current sitting, since that's the pick
-    /// Put Back takes away.
+    /// Put Back takes away. Focus and editing are for one row.
+    static func offered(for rows: [CanvasDayRow], in sitting: SittingEntry) -> [CanvasDayAction] {
+        guard !rows.isEmpty, rows.allSatisfy({ $0.ref != nil }) else { return [] }
+        let open = rows.filter { $0.state == .open }
+        var actions: [CanvasDayAction] = [open.isEmpty ? .reopen : .complete]
+        if !open.isEmpty { actions.append(.drop) }
+        if rows.count == 1, !open.isEmpty { actions.append(.focus) }
+        if !open.isEmpty, !sitting.isCurrent { actions.append(.pickUp) }
+        if sitting.isCurrent, rows.contains(where: \.pickedUp) { actions.append(.putBack) }
+        return actions
+    }
+
     static func offered(for row: CanvasDayRow, in sitting: SittingEntry) -> [CanvasDayAction] {
-        guard row.ref != nil else { return [] }
-        switch row.state {
-        case .open:
-            var actions: [CanvasDayAction] = [.complete, .drop, .focus]
-            if !sitting.isCurrent { actions.append(.pickUp) }
-            if row.pickedUp, sitting.isCurrent { actions.append(.putBack) }
-            return actions
-        case .done, .dropped:
-            return [.reopen]
+        offered(for: [row], in: sitting)
+    }
+
+    var title: String { title(count: 1) }
+
+    /// The menu's words, with the count in when there's more than one — counting only the rows the act
+    /// touches, as `TaskMenu` does. The rows it acts on are the caller's to count.
+    func title(count: Int) -> String {
+        let tasks = count == 1 ? "Task" : "Tasks"
+        guard count > 1 else {
+            switch self {
+            case .complete: return "Complete"
+            case .reopen: return "Reopen"
+            case .drop: return "Drop Task"
+            case .focus: return "Focus"
+            case .pickUp: return "Pick Up"
+            case .putBack: return "Put Back"
+            case .edit: return "Edit Task…"
+            }
+        }
+        switch self {
+        case .complete: return "Complete \(count) \(tasks)"
+        case .reopen: return "Reopen \(count) \(tasks)"
+        case .drop: return "Drop \(count) \(tasks)"
+        case .pickUp: return "Pick Up \(count) \(tasks)"
+        case .putBack: return "Put Back \(count) \(tasks)"
+        case .focus: return "Focus"
+        case .edit: return "Edit Task…"
         }
     }
 
-    var title: String {
+    /// How many of `rows` this act touches, for its title: every row for a tick or untick, the open ones
+    /// for a drop, the trees for a pick (three subtasks of one task are one pick).
+    func count(of rows: [CanvasDayRow], among all: [CanvasDayRow]) -> Int {
         switch self {
-        case .complete: return "Complete"
-        case .reopen: return "Reopen"
-        case .drop: return "Drop Task"
-        case .focus: return "Focus"
-        case .pickUp: return "Pick Up"
-        case .putBack: return "Put Back"
-        case .edit: return "Edit Task…"
+        case .complete, .reopen, .focus, .edit: return rows.count
+        case .drop: return rows.filter { $0.state == .open }.count
+        case .pickUp: return CanvasDayRows.roots(of: rows.filter { $0.state == .open }, in: all).count
+        case .putBack: return CanvasDayRows.roots(of: rows, in: all).filter(\.pickedUp).count
         }
     }
 
@@ -87,16 +119,31 @@ final class CanvasDayActions {
     var heldProjects: [String] { held.keys.sorted() }
     var heldStores: [PMStore] { Array(held.values) }
 
-    /// Do `action` to `row`, a task in the project in `folder`. `then` runs once it has settled, landed
-    /// or refused — always, so a row drawn as it's about to be is never left that way.
+    /// Do `action` to `row`, a task in the project in `folder`.
     func perform(_ action: CanvasDayAction, on row: CanvasDayRow, inProject folder: String,
                  then: (@MainActor () -> Void)? = nil) {
+        perform(action, on: [row], inProject: folder, then: then)
+    }
+
+    /// Do `action` to `rows` — one sitting's, so one project's — as one step on that project's history.
+    /// `then` runs once it has settled, landed or refused, always, so a row drawn as it's about to be is
+    /// never left that way.
+    ///
+    /// **All or nothing.** If any row's line has changed since the view last looked, nothing is done: the
+    /// selection you acted on is no longer the one on disk, and doing part of it would be a guess.
+    func perform(_ action: CanvasDayAction, on rows: [CanvasDayRow], inProject folder: String,
+                 then: (@MainActor () -> Void)? = nil) {
         let finish: @MainActor () -> Void = { then?() }
-        guard let ref = row.ref, let key = projectKey(folder) else { NSSound.beep(); return finish() }
+        let refs = rows.compactMap(\.ref)
+        guard !refs.isEmpty, refs.count == rows.count, let key = projectKey(folder) else {
+            NSSound.beep()
+            return finish()
+        }
         let store = acquire(key)
         whenLoaded(store) {
-            guard let todo = Self.todo(ref, in: store) else {
-                // The line moved or went since the view last looked. Looking again is the answer.
+            let todos = refs.compactMap { Self.todo($0, in: store) }
+            guard todos.count == refs.count else {
+                // A line moved or went since the view last looked. Looking again is the answer.
                 NSSound.beep()
                 return finish()
             }
@@ -105,25 +152,33 @@ final class CanvasDayActions {
                 if store.undoStack.count > before { self?.onActed(store) }
                 finish()
             }
+            let open = todos.filter { !$0.checked }
             switch action {
             case .complete:
-                guard !todo.checked else { return finish() }
-                store.complete(todo, advanceFocus: false, then: landed)
+                guard !open.isEmpty else { return finish() }
+                if open.count == 1 { store.complete(open[0], advanceFocus: false, then: landed) }
+                else { store.toggleAll(open, then: landed) }
             case .reopen:
-                guard todo.checked else { return finish() }
-                store.undo(todo, then: landed)
-            case .drop: store.drop([todo], then: landed)
-            case .focus: store.focus(todo, then: landed)
+                let closed = todos.filter(\.checked)
+                guard !closed.isEmpty else { return finish() }
+                if closed.count == 1 { store.undo(closed[0], then: landed) }
+                else { store.toggleAll(closed, then: landed) }
+            case .drop: store.drop(todos, then: landed)
+            case .focus:
+                guard todos.count == 1 else { return finish() }
+                store.focus(todos[0], then: landed)
             case .pickUp:
-                guard store.canPickUp(todo) else { return finish() }
-                store.pickUp(store.trees([todo]), then: landed)
+                let pickable = store.trees(todos.filter(store.canPickUp))
+                guard !pickable.isEmpty else { return finish() }
+                store.pickUp(pickable, then: landed)
             case .putBack:
-                guard todo.picked != nil else { return finish() }
-                store.putBack(store.trees([todo]), then: landed)
+                let picked = store.trees(todos.filter { $0.picked != nil })
+                guard !picked.isEmpty else { return finish() }
+                store.putBack(picked, then: landed)
             case .edit(let text):
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty, trimmed != todo.text else { return finish() }
-                store.editText(todo, text: trimmed, then: landed)
+                guard todos.count == 1, !trimmed.isEmpty, trimmed != todos[0].text else { return finish() }
+                store.editText(todos[0], text: trimmed, then: landed)
             }
         }
     }

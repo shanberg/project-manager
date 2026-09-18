@@ -53,12 +53,13 @@ final class CanvasViewNodeView: CanvasNodeView {
         let view = NSHostingView(rootView:
             CanvasDayCard(model: model, zoom: contentZoom,
                           onOpenProject: { folder in WindowManager.shared.open(named: folder) },
-                          onAct: { [weak self] act, row, sitting in
+                          onAct: { [weak self] act, rows, sitting in
                               guard let self else { return }
-                              self.actions.perform(act, on: row, inProject: sitting.projectFolder) { [weak self] in
-                                  self?.model.settle(row.id)
+                              self.actions.perform(act, on: rows, inProject: sitting.projectFolder) { [weak self] in
+                                  for row in rows { self?.model.settle(CanvasDayRows.key(row, in: sitting)) }
                               }
-                          })
+                          },
+                          sittingCard: { [weak self] sitting in self?.sittingCardProvider(sitting) })
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         )
         view.setAccessibilityLabel(accessibilityFallback)
@@ -75,6 +76,8 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// Stepping in hands the keyboard to the card, for a row being retyped; stepping out takes it back.
     /// Nothing is rebuilt, which would only interrupt the scroll.
     override func engagementChanged() {
+        model.isEngaged = isEngaged
+        if !isEngaged { model.selection.clear() }
         guard let content = subviews.first else { return }
         if isEngaged {
             window?.makeFirstResponder(content)
@@ -93,6 +96,23 @@ final class CanvasViewNodeView: CanvasNodeView {
         if let store = board.lastEditedProject,
            actions.heldStores.contains(where: { $0 === store }) { board.lastEditedProject = nil }
         actions.releaseAll()
+    }
+
+    /// What a sitting dragged off this card carries: a project card of that one sitting (docs/views.md
+    /// D7), in the board's own clipping flavour, so the board makes exactly that card where it lands —
+    /// and its name as text for anywhere else.
+    private func sittingCardProvider(_ sitting: SittingEntry) -> NSItemProvider? {
+        guard let document = CanvasSittingPin.card(for: sitting, resolver: board.store.resolver) else { return nil }
+        let data = Data(document.serialized().utf8)
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: CanvasClipping.pasteboardType.rawValue,
+                                            visibility: .ownProcess) { done in
+            done(data, nil)
+            return nil
+        }
+        let title = [sitting.projectName, sitting.name].filter { !$0.isEmpty }.joined(separator: " — ")
+        provider.registerObject(title as NSString, visibility: .all)
+        return provider
     }
 
     /// The file paths on the board when `boardProjectFolders` last resolved them. `update` runs on every

@@ -389,8 +389,24 @@ so pasting it into Obsidian gives you links that work.
 - **Drawn ahead of the scan.** A tick, untick or drop draws in its new state at once, and stays so
   until a scan that began after the write lands.
 - **A view card takes its first click**, as a project card does, so the box ticks on it.
-- **Not yet:** multi-select on rows, so the open question on selections across projects is still
-  open. Also not built: opening a sitting's note in the card, and dragging a row off as a card (D7).
+- **Selection is one sitting's rows** (`CanvasDaySelection`). A click selects, ⇧ extends, ⌘ toggles,
+  and a right-click moves the highlight onto its row, as on a project card. A click in another sitting
+  starts over there whatever keys are held. A sitting is one project, so everything a selection is
+  told to do is one write and one ⌘Z. The menu counts what each item touches (*Drop 2 Tasks*,
+  *Pick Up 1 Task* for a parent and its subtask), and adds Copy. Double-click focuses an open task
+  and retypes a closed one, or any task with ⌥.
+- **Retyping has its own ⌘Z.** The field (`TokenClickField`, shared with the project card's inline
+  editors) keeps a typing history of its own, and `CanvasUndoRoute.typingUndo` makes it the editor
+  route while the caret is in it. Before, ⌘Z mid-edit went past the typing to the project on a project
+  card, and to the board's canvas stack on a Day row.
+- **Dragging a row off** carries it (or the selection it's in) as markdown, and it lands as a text
+  card, as a task dragged off a project card does. **Dragging a sitting off** by its time or its chip
+  makes the D7 card: a project card with `pmShows: "sitting"` and `pmSitting`. It draws that one
+  sitting, its prose and all its tasks and picks. A pin finds its sitting by label among that day's
+  sittings, then by position, so renaming the sitting keeps the card. A day with no such sitting draws
+  the whole project. One Sitting isn't in the Shows menu, since it needs a sitting to name, and
+  choosing another lens takes `pmSitting` off.
+- **Not yet:** opening a sitting's note in the card.
 
 ## Calendars, eventually
 
@@ -446,20 +462,15 @@ Each step ships on its own.
    `CanvasUndoRouteTests` case covers a tick on a Day row being undone by ⌘Z on the board.
 5. **Waiting and Search as views.** These are adapters over queries that exist, and they prove the
    card is general before another query is written.
-6. **Leftovers (`task.leftovers`)** and **the sitting card (D7).**
+6. **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
 7. **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
 8. **The week and month layouts (D9).** They're last because they are the most drawing and the least
    new data, and because the calendar design should be settled before the week grid's shape is fixed.
 
 ## Open
 
-- **Acting on a selection that spans projects.** Drop 3 Tasks across three projects is three writes
-  to three stores, and so three ⌘Z steps. That breaks sessions.md's one-gesture-one-step rule. The
-  alternatives are a contract batch undone through the journal (one step, but the journal, not the
-  board's undo), or a multi-select limited to one project. The recommendation is the journal batch,
-  since the journal's all-or-nothing rule is exactly the one this needs. It wants a yes or no before
-  step 4.
-
+- **Selections across projects** were settled by not having them: a selection is one sitting's
+  rows (step 4), so a gesture is one project's step.
 
 ## Not in this pass
 

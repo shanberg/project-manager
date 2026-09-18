@@ -1036,8 +1036,8 @@ final class PMStore {
     /// Complete every open task in `todos`, or — when they're all complete already — reopen them all.
     /// Mirrors how a Mac checkbox batch behaves on a mixed selection: the majority action is "finish
     /// what's left". Completion is in place, so no index shifting to worry about.
-    func toggleAll(_ todos: [Todo]) {
-        guard !todos.isEmpty else { return }
+    func toggleAll(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
         let open = todos.filter { !$0.checked }
         let targets = open.isEmpty ? todos : open
         let completing = !open.isEmpty
@@ -1049,7 +1049,7 @@ final class PMStore {
         let seen = seenRevision
         // Finishing old work picks it up; reopening it doesn't — you didn't work on it, you took back
         // saying you had.
-        mutating(pickingUp: completing ? targets : []) { project in
+        mutating(pickingUp: completing ? targets : [], then: then) { project in
             try PMContract.perform(completing ? .taskComplete : .taskReopen,
                                    PMContract.input(project: project) {
                 $0.tasks = targets.map(\.reference)

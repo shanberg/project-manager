@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import PmLib
 
 /// A card that draws the answer to a question about the backbone rather than a document — a *view*
@@ -216,6 +216,44 @@ enum CanvasDayRows {
         return out
     }
 
+    /// A row across the whole card — its id is unique only within its project, and one line can be drawn
+    /// in two sittings of that project (written in one, finished in another), which are the same line.
+    static func key(_ row: CanvasDayRow, in sitting: SittingEntry) -> String {
+        "\(sitting.projectFolder)/\(row.id)"
+    }
+
+    /// The rows of `selected` that no other selected row is above — the trees a selection is, in the
+    /// order they're drawn. `all` is the sitting's rows as drawn, whose depths say what's under what.
+    static func roots(of selected: [CanvasDayRow], in all: [CanvasDayRow]) -> [CanvasDayRow] {
+        let picked = Set(selected.map(\.id))
+        var out: [CanvasDayRow] = []
+        // The chain of rows above the current one, by depth.
+        var above: [CanvasDayRow] = []
+        for row in all {
+            while let last = above.last, last.depth >= row.depth { above.removeLast() }
+            if picked.contains(row.id), !above.contains(where: { picked.contains($0.id) }) { out.append(row) }
+            above.append(row)
+        }
+        return out
+    }
+
+    /// Rows as the markdown they'd be in a note — what a drag off a Day card carries, and so what it
+    /// lands as: a text card, the way a task dragged off a project card does. Indented from the
+    /// shallowest row dragged, so a subtask dragged alone is a task of its own.
+    static func markdown(_ rows: [CanvasDayRow]) -> String {
+        let base = rows.map(\.depth).min() ?? 0
+        return rows.map { row in
+            let box: String
+            switch row.state {
+            case .open: box = "[ ]"
+            case .done: box = "[x]"
+            case .dropped: box = "[-]"
+            }
+            return String(repeating: "  ", count: max(0, row.depth - base)) + "- \(box) \(row.text)"
+        }
+        .joined(separator: "\n")
+    }
+
     /// What a week draws in place of a sitting's tasks: how much came of it.
     static func counts(_ sitting: SittingEntry) -> String {
         var parts: [String] = []
@@ -246,5 +284,66 @@ enum CanvasDayRows {
         case "dropped": return .dropped
         default: return .open
         }
+    }
+}
+
+/// Which rows of a Day card are selected: one sitting's, never more (docs/views.md D6).
+///
+/// **Locked to a sitting**, because a sitting is one project and so one store: whatever a selection is
+/// told to do is one write and one step on that project's history, and ⌘Z takes all of it back. A
+/// selection across projects would be several writes on several stores, and several ⌘Zs for one
+/// gesture. So a click in another sitting starts over there, whatever keys are held.
+///
+/// The picking itself is `RowSelection`'s — the project card's and the window's rules for ⇧ and ⌘ —
+/// over the sitting's rows. Row ids are unique within a sitting, which is all they need to be here.
+struct CanvasDaySelection: Equatable {
+    /// The sitting the selection is in, by `SittingEntry.id`.
+    private(set) var sitting: String?
+    private(set) var rows = RowSelection()
+
+    var isEmpty: Bool { rows.isEmpty }
+    var count: Int { rows.count }
+
+    func contains(_ row: String, in sitting: String) -> Bool {
+        self.sitting == sitting && rows.contains(row)
+    }
+
+    /// A click on `row` in `sitting`, whose rows are `order` as drawn.
+    mutating func click(_ row: String, in sitting: String, modifiers: NSEvent.ModifierFlags, order: [String]) {
+        if self.sitting != sitting {
+            self.sitting = sitting
+            rows = RowSelection()
+            rows.click(row, modifiers: [], in: order)
+        } else {
+            rows.click(row, modifiers: modifiers, in: order)
+        }
+        if rows.isEmpty { self.sitting = nil }
+    }
+
+    /// Finder's rule for a right-click: onto the row, unless it's already in the selection.
+    mutating func revealForContextMenu(_ row: String, in sitting: String) {
+        if self.sitting != sitting {
+            self.sitting = sitting
+            rows = RowSelection()
+        }
+        rows.revealForContextMenu(row)
+    }
+
+    /// What a command on `row` acts on: the selection when the row is in it, else the row alone.
+    func targets(clicked row: String, in sitting: String) -> Set<String> {
+        self.sitting == sitting ? rows.targets(clicked: row) : [row]
+    }
+
+    mutating func clear() {
+        sitting = nil
+        rows.clear()
+    }
+
+    /// Drop what's no longer drawn, after the card looks again. `drawn` is each sitting's row ids.
+    mutating func keep(within drawn: [String: [String]]) {
+        guard let sitting else { return }
+        guard let order = drawn[sitting] else { return clear() }
+        rows.keep(within: order)
+        if rows.isEmpty { self.sitting = nil }
     }
 }

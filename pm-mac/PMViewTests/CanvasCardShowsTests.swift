@@ -139,3 +139,56 @@ final class CanvasCardShowsTests: XCTestCase {
         XCTAssertEqual(CanvasCardShows.parse("notes"), .everything)
     }
 }
+
+// MARK: One sitting (docs/views.md D7)
+
+extension CanvasCardShowsTests {
+    private func fileCard() -> CanvasNode {
+        CanvasNode(content: .file(path: "Projects/W-1 Redesign/docs/Notes - Redesign.md", subpath: nil),
+                   frame: CanvasRect(x: 0, y: 0, width: 360, height: 420))
+    }
+
+    func testASittingCardIsPinnedToItsSitting() {
+        var node = fileCard()
+        CanvasSittingPin.pin(SessionRef(date: "2026-09-17", ordinal: 1, digest: "abc"), on: &node)
+        XCTAssertEqual(CanvasCardShows.of(node), .sitting)
+        XCTAssertEqual(node.extra["pmShows"], .string("sitting"))
+        XCTAssertEqual(CanvasSittingPin.of(node), SessionRef(date: "2026-09-17", ordinal: 1, digest: "abc"))
+        XCTAssertNil(node.extra["pmSession"], "pmSession is a web card's browser session")
+
+        CanvasCardShows.set(.current, on: &node)
+        XCTAssertNil(CanvasSittingPin.of(node), "Another lens takes the pin off with it")
+    }
+
+    func testTheMenuDoesNotOfferOneSitting() {
+        XCTAssertFalse(CanvasCardShows.menuCases.contains(.sitting), "It needs a sitting to name")
+        XCTAssertEqual(Set(CanvasCardShows.menuCases).union([.sitting]), Set(CanvasCardShows.allCases))
+    }
+
+    /// Found by its label among the day's sittings, then by position — a renamed sitting keeps its
+    /// card — and not at all when the day has no such sitting, which draws the project.
+    func testAPinFindsItsSittingOrNothing() throws {
+        let notes = try parseNotes(markdown: """
+        # Redesign
+
+        ## Sessions
+
+        ### Thu, Sep 17, 2026 [4:40 PM · Kickoff]
+
+        Talked.
+
+        ### Thu, Sep 17, 2026 [9:10 AM · Standup]
+
+        ### Wed, Sep 16, 2026
+
+        """)
+        func pin(_ ordinal: Int, _ label: String?) -> SessionRef {
+            SessionRef(date: "2026-09-17", ordinal: ordinal, digest: label.map(sessionDigest))
+        }
+        let kickoff = try XCTUnwrap(notes.sessions.first).label
+        XCTAssertEqual(CanvasSittingPin.index(of: pin(0, kickoff), in: notes), 0)
+        XCTAssertEqual(CanvasSittingPin.index(of: pin(1, kickoff), in: notes), 0, "Reordered, found by label")
+        XCTAssertEqual(CanvasSittingPin.index(of: pin(1, "renamed"), in: notes), 1, "Renamed, found by place")
+        XCTAssertNil(CanvasSittingPin.index(of: SessionRef(date: "2026-09-01", ordinal: 0, digest: nil), in: notes))
+    }
+}

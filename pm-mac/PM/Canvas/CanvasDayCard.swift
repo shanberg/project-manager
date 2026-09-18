@@ -31,8 +31,13 @@ final class CanvasDayModel {
     @ObservationIgnored var onChange: (() -> Void)?
 
     /// Rows acted on whose write hasn't come back through a scan yet, drawn in the state they're going
-    /// to: a tick shows as ticked on the click, not a scan later.
+    /// to: a tick shows as ticked on the click, not a scan later. Keyed by `CanvasDayRows.key`.
     private(set) var pending: [String: TaskState] = [:]
+
+    /// The rows picked, all in one sitting (`CanvasDaySelection`).
+    var selection = CanvasDaySelection()
+    /// Whether the card is stepped into — a selection there is the one you're working in, and drawn so.
+    var isEngaged = false
     /// Rows whose act has settled, so the next answer to land has seen it.
     @ObservationIgnored private var settled: Set<String> = []
 
@@ -112,7 +117,12 @@ final class CanvasDayModel {
                 case .success(let (range, list)):
                     self.failure = nil
                     if range != self.range { self.range = range }
-                    if list != self.list { self.list = list }
+                    if list != self.list {
+                        self.list = list
+                        self.selection.keep(within: Dictionary(
+                            list.sittings.map { ($0.id, CanvasDayRows.rows($0).map(\.id)) },
+                            uniquingKeysWith: { a, _ in a }))
+                    }
                     for row in self.settled { self.pending[row] = nil }
                     self.settled = []
                 case .failure(let error):
@@ -137,12 +147,15 @@ struct CanvasDayCard: View {
     var zoom: Double = 1
     var onOpenProject: (String) -> Void = { _ in }
     /// Do something to a row, in its sitting's project (docs/views.md D6). Nil draws the card read-only.
-    var onAct: ((CanvasDayAction, CanvasDayRow, SittingEntry) -> Void)?
+    var onAct: ((CanvasDayAction, [CanvasDayRow], SittingEntry) -> Void)?
+    /// The card a sitting dragged off this one makes (D7). Nil: sittings don't drag.
+    var sittingCard: ((SittingEntry) -> NSItemProvider?)?
 
     /// The row being retyped, and what it says so far.
     @State private var editing: String?
     @State private var draft = ""
-    @FocusState private var fieldFocused: Bool
+    @State private var hover = RowHoverTracker()
+    @State private var rightClick = RightMouseDownMonitor()
 
     private static let gutter: CGFloat = 62
 
@@ -152,6 +165,24 @@ struct CanvasDayCard: View {
             Divider()
             content
         }
+        .onAppear {
+            rightClick.onRightMouseDown = { [model, hover] in
+                // Only on the card you're in, as on a project card: a highlight moving in a card across
+                // the board from the one you right-clicked is a selection changing where you aren't.
+                guard model.isEngaged, let key = hover.key else { return }
+                let (sitting, row) = Self.split(key)
+                model.selection.revealForContextMenu(row, in: sitting)
+            }
+            rightClick.start()
+        }
+        .onDisappear { rightClick.stop() }
+    }
+
+    /// The hover tracker's key for a row: its sitting and its id, which is unique only within one.
+    private static func hoverKey(_ row: String, _ sitting: String) -> String { sitting + "\u{1}" + row }
+    private static func split(_ key: String) -> (String, String) {
+        let parts = key.split(separator: "\u{1}", maxSplits: 1).map(String.init)
+        return (parts.first ?? "", parts.count > 1 ? parts[1] : "")
     }
 
     private var header: some View {
@@ -255,13 +286,18 @@ struct CanvasDayCard: View {
 
     private func sittingBlock(_ sitting: SittingEntry) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // The time is the sitting's handle: dragged off, it makes a card of this one sitting (D7).
             Text(sitting.startTime ?? "Earlier")
                 .font(.system(size: 11 * zoom).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: Self.gutter * zoom, alignment: .trailing)
                 .lineLimit(1)
+                .contentShape(Rectangle())
+                .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
+                .help(sittingCard == nil ? "" : "Drag to make a card of this sitting")
             VStack(alignment: .leading, spacing: 3) {
                 chip(sitting)
+                    .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
                 if model.spec.period.isSpan {
                     // The chip already says the sitting's name, so the lede is what it says.
                     let lede = sittingLede(name: "", prose: sitting.prose)
@@ -285,8 +321,8 @@ struct CanvasDayCard: View {
                     }
                     let rows = CanvasDayRows.rows(sitting)
                     if !rows.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(rows) { row($0, in: sitting) }
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(rows) { row($0, in: sitting, among: rows) }
                         }
                         .padding(.top, sitting.prose.isEmpty ? 0 : 3)
                     }
@@ -347,22 +383,23 @@ struct CanvasDayCard: View {
 
     // MARK: Rows
 
-    private func row(_ row: CanvasDayRow, in sitting: SittingEntry) -> some View {
-        let state = model.pending[row.id] ?? row.state
-        let acts = onAct == nil ? [] : CanvasDayAction.offered(for: row, in: sitting)
+    private func row(_ row: CanvasDayRow, in sitting: SittingEntry, among rows: [CanvasDayRow]) -> some View {
+        let state = model.pending[CanvasDayRows.key(row, in: sitting)] ?? row.state
+        let selected = model.selection.contains(row.id, in: sitting.id)
+        let order = rows.map(\.id)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            checkbox(row, state: state, in: sitting, acts: acts)
+            checkbox(row, state: state, in: sitting)
             if editing == row.id {
-                TextField("Task", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5 * zoom))
-                    .focused($fieldFocused)
-                    .onAppear { fieldFocused = true }
-                    .onSubmit {
-                        onAct?(.edit(draft), row, sitting)
-                        editing = nil
-                    }
-                    .onExitCommand { editing = nil }
+                // The field every inline task editor uses, with its `[[…]]` completion and a typing
+                // history of its own for ⌘Z (`TokenClickField.typingUndo`).
+                CompletingTextField(text: $draft, placeholder: "Task",
+                                    onSubmit: {
+                                        onAct?(.edit(draft), [row], sitting)
+                                        editing = nil
+                                    },
+                                    onCancel: { editing = nil },
+                                    onOpenProject: onOpenProject)
+                    .frame(height: 21)
             } else {
                 Text(row.text)
                     .font(.system(size: 12.5 * zoom))
@@ -384,33 +421,82 @@ struct CanvasDayCard: View {
             }
         }
         .padding(.leading, Double(row.depth) * 11 * zoom)
+        .padding(.vertical, 1)
+        .padding(.horizontal, 4)
+        .background(RowSelectionBand(isSelected: selected, isEmphasized: model.isEngaged, isHovering: false))
+        // The band reaches into the margin; the row's text stays lined up with the prose above it.
+        .padding(.horizontal, -4)
         .contentShape(Rectangle())
-        .contextMenu {
-            // The project card's menu for a row, as far as a row alone can answer it, and Go to Project.
-            if row.ref != nil, onAct != nil {
-                ForEach(acts, id: \.title) { act in
-                    Button { perform(act, row, in: sitting) } label: { Label(act.title, systemImage: act.symbol) }
+        .onHover { hover.set(Self.hoverKey(row.id, sitting.id), inside: $0) }
+        // `clickCount` rather than a double-tap gesture, which would hold every single click for the
+        // double-click interval — the project card's reason, and its gesture: the first click selects,
+        // the second opens (focus an open task, retype a closed one or with ⌥).
+        .onTapGesture {
+            guard onAct != nil, editing == nil else { return }
+            if NSApp.currentEvent?.clickCount == 2 {
+                if NSEvent.modifierFlags.contains(.option) || state != .open { beginEditing(row) }
+                else { perform(.focus, [row], in: sitting) }
+            } else {
+                model.selection.click(row.id, in: sitting.id, modifiers: NSEvent.modifierFlags, order: order)
+            }
+        }
+        // A task dragged off is its markdown, and lands as a text card — what a task dragged off a
+        // project card does. The selection goes with it when the row is in it.
+        .onDrag {
+            NSItemProvider(object: CanvasDayRows.markdown(targets(row, in: sitting, among: rows)) as NSString)
+        }
+        .contextMenu { menu(row, in: sitting, among: rows) }
+    }
+
+    /// The rows a command on `row` acts on, in the order they're drawn: the selection when the row is in
+    /// it, else the row alone (Finder's rule, and `RowSelection.targets`).
+    private func targets(_ row: CanvasDayRow, in sitting: SittingEntry, among rows: [CanvasDayRow]) -> [CanvasDayRow] {
+        let ids = model.selection.targets(clicked: row.id, in: sitting.id)
+        return rows.filter { ids.contains($0.id) }
+    }
+
+    /// The project card's menu for a row or a selection, as far as rows alone can answer it, and Go to
+    /// Project. Counts say how many rows each item touches, when that's more than one.
+    @ViewBuilder
+    private func menu(_ row: CanvasDayRow, in sitting: SittingEntry, among rows: [CanvasDayRow]) -> some View {
+        let scope = targets(row, in: sitting, among: rows)
+        if onAct != nil {
+            let acts = CanvasDayAction.offered(for: scope, in: sitting)
+            ForEach(acts, id: \.title) { act in
+                Button { perform(act, scope, in: sitting) } label: {
+                    Label(act.title(count: act.count(of: scope, among: rows)), systemImage: act.symbol)
                 }
-                Button {
-                    draft = row.text
-                    editing = row.id
-                } label: { Label(CanvasDayAction.edit("").title, systemImage: CanvasDayAction.edit("").symbol) }
-                Divider()
             }
-            Button { onOpenProject(sitting.projectFolder) } label: {
-                Label("Go to \(sitting.projectName)", systemImage: "arrow.turn.down.right")
+            if scope.count == 1, row.ref != nil {
+                Button { beginEditing(row) } label: {
+                    Label(CanvasDayAction.edit("").title, systemImage: CanvasDayAction.edit("").symbol)
+                }
             }
+            if !acts.isEmpty { Divider() }
+        }
+        Button { TaskPasteboard.copy(markdown: CanvasDayRows.markdown(scope)) } label: {
+            Label(scope.count > 1 ? "Copy \(scope.count) Tasks" : "Copy", systemImage: "doc.on.doc")
+        }
+        Divider()
+        Button { onOpenProject(sitting.projectFolder) } label: {
+            Label("Go to \(sitting.projectName)", systemImage: "arrow.turn.down.right")
         }
     }
 
-    /// The row's box, which ticks and unticks it where it can be acted on, and is only a picture where
-    /// it can't — a line that's gone, or a card drawn for a test.
+    private func beginEditing(_ row: CanvasDayRow) {
+        guard row.ref != nil else { return }
+        draft = row.text
+        editing = row.id
+    }
+
+    /// The row's box, which ticks and unticks that row alone — the selection is the menu's — and is only
+    /// a picture where it can't act: a line that's gone, or a card drawn read-only.
     @ViewBuilder
-    private func checkbox(_ row: CanvasDayRow, state: TaskState, in sitting: SittingEntry,
-                          acts: [CanvasDayAction]) -> some View {
+    private func checkbox(_ row: CanvasDayRow, state: TaskState, in sitting: SittingEntry) -> some View {
+        let acts = onAct == nil ? [] : CanvasDayAction.offered(for: row, in: sitting)
         let toggle: CanvasDayAction? = acts.contains(.complete) ? .complete : acts.contains(.reopen) ? .reopen : nil
         if let toggle {
-            Button { perform(toggle, row, in: sitting) } label: {
+            Button { perform(toggle, [row], in: sitting) } label: {
                 TaskStatusIcon(state: state, size: 12 * zoom).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -420,15 +506,18 @@ struct CanvasDayCard: View {
         }
     }
 
-    /// Act, drawing the row as it's about to be where that's certain.
-    private func perform(_ act: CanvasDayAction, _ row: CanvasDayRow, in sitting: SittingEntry) {
-        switch act {
-        case .complete: model.expect(.done, for: row.id)
-        case .reopen: model.expect(.open, for: row.id)
-        case .drop: model.expect(.dropped, for: row.id)
-        default: break
+    /// Act, drawing the rows as they're about to be where that's certain.
+    private func perform(_ act: CanvasDayAction, _ rows: [CanvasDayRow], in sitting: SittingEntry) {
+        for row in rows {
+            let key = CanvasDayRows.key(row, in: sitting)
+            switch act {
+            case .complete where row.state == .open: model.expect(.done, for: key)
+            case .reopen where row.state != .open: model.expect(.open, for: key)
+            case .drop where row.state == .open: model.expect(.dropped, for: key)
+            default: break
+            }
         }
-        onAct?(act, row, sitting)
+        onAct?(act, rows, sitting)
     }
 
     // MARK: Also finished

@@ -161,3 +161,65 @@ extension CanvasViewSpecTests {
                        "A line that's gone can only be read")
     }
 }
+
+// MARK: Selection, trees and drags
+
+extension CanvasViewSpecTests {
+    /// A selection is one sitting's rows. ⌘ and ⇧ work inside it; a click in another sitting starts
+    /// over there, whatever keys are held, so a selection is always one project's.
+    func testASelectionStaysInOneSitting() {
+        var selection = CanvasDaySelection()
+        let order = ["a", "b", "c"]
+        selection.click("a", in: "S1", modifiers: [], order: order)
+        selection.click("c", in: "S1", modifiers: .shift, order: order)
+        XCTAssertEqual(selection.count, 3)
+        XCTAssertEqual(selection.targets(clicked: "b", in: "S1"), ["a", "b", "c"])
+
+        selection.click("a", in: "S2", modifiers: .command, order: order)
+        XCTAssertEqual(selection.count, 1, "⌘-click in another sitting starts over, not adds")
+        XCTAssertTrue(selection.contains("a", in: "S2"))
+        XCTAssertFalse(selection.contains("a", in: "S1"), "The same row id in another sitting is another row")
+        XCTAssertEqual(selection.targets(clicked: "b", in: "S1"), ["b"], "A row outside it acts alone")
+
+        selection.revealForContextMenu("c", in: "S1")
+        XCTAssertTrue(selection.contains("c", in: "S1"))
+        XCTAssertEqual(selection.count, 1)
+
+        selection.keep(within: ["S2": ["a"]])
+        XCTAssertTrue(selection.isEmpty, "A sitting no longer drawn takes its selection with it")
+    }
+
+    private func tree() -> [CanvasDayRow] {
+        [("p", 0, TaskState.open), ("p1", 1, .open), ("p2", 1, .done), ("q", 0, .open)].map {
+            CanvasDayRow(id: $0.0, text: $0.0, state: $0.2, depth: $0.1, origin: nil, pickedUp: $0.0 == "p",
+                         ref: TaskRefInput(session: "2026-09-18", sessionOrdinal: 0, line: 0, digest: "x"))
+        }
+    }
+
+    func testASelectionCountsItsTreesForPicks() {
+        let rows = tree()
+        XCTAssertEqual(CanvasDayRows.roots(of: rows, in: rows).map(\.id), ["p", "q"])
+        XCTAssertEqual(CanvasDayRows.roots(of: [rows[1], rows[2]], in: rows).map(\.id), ["p1", "p2"],
+                       "Subtasks without their parent are trees of their own")
+        XCTAssertEqual(CanvasDayAction.pickUp.count(of: rows, among: rows), 2)
+        XCTAssertEqual(CanvasDayAction.pickUp.title(count: 2), "Pick Up 2 Tasks")
+        XCTAssertEqual(CanvasDayAction.drop.count(of: rows, among: rows), 3, "Only the open ones drop")
+        XCTAssertEqual(CanvasDayAction.putBack.count(of: rows, among: rows), 1)
+    }
+
+    func testASelectionOffersTheBatchVerbs() throws {
+        let now = try entry(current: true), before = try entry(current: false)
+        let rows = tree()
+        XCTAssertEqual(CanvasDayAction.offered(for: rows, in: before), [.complete, .drop, .pickUp],
+                       "No Focus for more than one")
+        XCTAssertEqual(CanvasDayAction.offered(for: rows, in: now), [.complete, .drop, .putBack])
+        XCTAssertEqual(CanvasDayAction.offered(for: [rows[2]], in: now), [.reopen])
+    }
+
+    /// Dragged off, rows are the lines they'd be in a note — a subtask dragged alone is a task.
+    func testRowsDragAsTheirMarkdown() {
+        let rows = tree()
+        XCTAssertEqual(CanvasDayRows.markdown(rows), "- [ ] p\n  - [ ] p1\n  - [x] p2\n- [ ] q")
+        XCTAssertEqual(CanvasDayRows.markdown([rows[2]]), "- [x] p2")
+    }
+}

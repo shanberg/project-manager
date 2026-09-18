@@ -9,6 +9,18 @@ import PmLib
 final class TokenClickField: NSTextField {
     var onTokenClick: ((NSPoint) -> Bool)?
 
+    /// This field's own typing history, lent to the field editor while it edits here.
+    ///
+    /// A field editor registers its typing on whatever manager its delegate — this field — names, and
+    /// by default that is the window's. On a board the window's manager is the canvas document's, so
+    /// ⌘Z while retyping a task took back a card move, or went past the typing to the project. A stack
+    /// of the field's own, gone with the field, is what every text field on the Mac behaves like. See
+    /// `CanvasUndoRoute.typingUndo`.
+    let typingUndo = UndoManager()
+
+    @objc(undoManagerForTextView:)
+    func undoManager(for view: NSTextView) -> UndoManager? { typingUndo }
+
     override func mouseDown(with event: NSEvent) {
         if onTokenClick?(event.locationInWindow) == true { return }
         super.mouseDown(with: event)
