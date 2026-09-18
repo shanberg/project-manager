@@ -363,6 +363,13 @@ final class CanvasBoardView: NSView {
     /// rather than the selection because a tile command names *this* tile — "make this the master" has
     /// no reading against four selected at once.
     var menuTile: String?
+    /// The picture beside a list of cards while one is highlighted — see `CanvasCardPreview`. Kept here
+    /// because a menu holds its delegate weakly.
+    lazy var cardPreview: CanvasCardPreview = {
+        let preview = CanvasCardPreview()
+        preview.image = { [weak self] id in self?.previewImage(for: id) }
+        return preview
+    }()
     /// The tile that had the focus before this one, for ⌥` — see `focusPreviousTile`.
     var previousTile: String?
     /// Whether ⌥N is choosing where the next card goes, which is what lets the plain arrows and Return

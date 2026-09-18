@@ -102,7 +102,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
             refreshTileCommand()
-            refreshExistingCards()
             rememberViewState()
             keepNamedWorkspaceUpToDate()
             // Derived rather than declared. It used to be set once, on the way in, which was fine
@@ -154,10 +153,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             self, selector: #selector(pageSettingsChanged),
             name: CanvasPageBudget.didChange, object: nil)
         notice.onDismissedByUser = { [weak self] in self?.hidBlockingNotice = true }
-        // Asked once here because the document is already in the store: a board that opens without its
-        // project note has to offer it from the first time the `+` is pulled down, not from the first
-        // edit.
-        refreshProjectNoteOffer()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -846,8 +841,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Point the header's controls at the board and the window.
     private func wireHeader() {
-        header.add = { [weak self] command in self?.scroll.board.add(command, at: nil) }
-        header.addExistingCard = { [weak self] id in self?.scroll.board.addExistingCard(withID: id) }
+        header.showAddMenu = { [weak self] anchor in self?.scroll.board.addMenu().popUpBelow(anchor) }
         header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
         header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
         header.zoomOut = { [weak self] in self?.scroll.zoom(by: 1 / 1.25) }
@@ -875,8 +869,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // ⌃Return opens the same menu from the same button — the board has the command, the header
         // has the place.
         scroll.board.onShowCardActions = { [weak self] in self?.header.cardActionsToken += 1 }
-        // Whether New Folder asks. The board's file does not move under a pane, so once is enough.
-        header.knowsFolder = scroll.board.knowsFolder
         header.setArrangement = { [weak self] arrangement in
             guard let self else { return }
             // The same "choosing an arrangement is a request to tile" rule the View menu follows —
@@ -1167,29 +1159,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // A frame tiles what is inside it, so what the tiling button promises can change without the
         // selection changing at all.
         refreshTileCommand()
-        refreshProjectNoteOffer()
-        refreshExistingCards()
-    }
-
-    /// Keep the `+` menu's fifth item in step with the board.
-    ///
-    /// From the document rather than from the menu opening, because a SwiftUI `Menu` builds its
-    /// content from published state and cannot ask a question at the moment it is pulled down. Cheap
-    /// enough to do on every change — see `CanvasProjectNoteCard.isOn`, which was written for exactly
-    /// this call being on the drag path.
-    private func refreshProjectNoteOffer() {
-        let offers = scroll.board.offersProjectNoteCard
-        if header.offersProjectNote != offers { header.offersProjectNote = offers }
-    }
-
-    /// Keep the `+` menu's Add Card from Canvas in step with the board, for the same reason — from the
-    /// two things that change the list: the document, and which cards are tiles.
-    ///
-    /// A page that loads and learns its title renames its card here only at the next of those. The
-    /// contextual menus and the View menu are built as they open and are always current.
-    private func refreshExistingCards() {
-        let sections = scroll.board.existingCardSections
-        if header.existingCards != sections { header.existingCards = sections }
     }
 
     /// Keep the header's tiling button saying what it would actually do.
