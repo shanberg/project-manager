@@ -25,8 +25,11 @@ extension AppDelegate: NSMenuItemValidation {
         SettingsWindowController.shared.show(selecting: .shortcuts)
     }
 
+    /// File ▸ New Window: always a new window. Reusing one that already shows the focused project is
+    /// "take me there", which is the Open Focused Project hotkey's errand — asked of the menu, it
+    /// brought the window you were already looking at forward, which read as nothing happening.
     @objc func newWindow() {
-        WindowManager.shared.open(projectKey: PMFiles.focusedProjectKey())
+        WindowManager.shared.open(projectKey: PMFiles.focusedProjectKey(), reusingExistingWindow: false)
     }
 
     @objc func closeAllWindows() {

@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .quickNote: { QuickBarController.shared.toggle(mode: .note) },
             .writeSessionNoteFullScreen: { SessionNoteController.shared.toggle() },
             .toggleFocusPanel: { FocusPanelController.shared.toggle() },
-            .openProjectWindow: { [weak self] in self?.newWindow() },
+            .openProjectWindow: { WindowManager.shared.openFocusedProject() },
             .newProject: { [weak self] in self?.newProject() },
             .completeFocusedTask: { [weak self] in self?.completeFocused() },
             .undoLastCompletion: { [weak self] in self?.undoLastCompletion() },
