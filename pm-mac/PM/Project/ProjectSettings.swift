@@ -130,8 +130,7 @@ final class ProjectSettingsModel {
         // One read for both the icon and the preview ring's progress.
         let raw = (try? resolveNotesHandle(project: name)).flatMap { try? $0.io.readContent(path: $0.notesPath) }
         let todos = raw.flatMap { try? notesShow(rawText: $0) }?.todos ?? []
-        done = todos.filter(\.checked).count
-        total = todos.count
+        (done, total) = todos.progress
         originalIcon = raw.flatMap(projectIcon(rawText:))
         originalColor = raw.flatMap(projectColor(rawText:))
         color = originalColor

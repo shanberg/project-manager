@@ -144,6 +144,8 @@ public struct ApiInput: Codable, Equatable {
     public var key: String?
     public var value: JSONValue?
     public var includeCompleted: Bool?
+    /// `task.done`: list what was dropped in the period too.
+    public var includeDropped: Bool?
     public var limit: Int?
     public var now: String?
     /// A journal entry's id.
@@ -180,6 +182,8 @@ public struct ApiOptions: Equatable {
 public struct ApiChange: Codable, Equatable {
     public enum Kind: String, Codable {
         case added, removed, completed, reopened, retimed, renamed, moved, focused, unfocused
+        /// Closed without being done.
+        case dropped
         /// What the task is waiting on was set, changed, or cleared.
         case blocked
     }

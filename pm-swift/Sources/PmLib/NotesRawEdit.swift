@@ -10,8 +10,8 @@ import Foundation
 // These helpers reuse the tested model logic to decide *what* changes, then splice just
 // those lines into the original markdown, leaving every other byte verbatim.
 
-/// Task line: optional indent + "- ", a "[ ]"/"[x]" checkbox, then content.
-private let rawTaskPattern = try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX])\]\s+(.*)$"#)
+/// Task line: optional indent + "- ", a "[ ]"/"[x]"/"[-]" checkbox, then content.
+private let rawTaskPattern = try? NSRegularExpression(pattern: #"^(\s*-\s+)\[([ xX-])\]\s+(.*)$"#)
 /// Session heading: matches NotesParse's sessionHeading exactly so session indexing aligns with parseTodos.
 private let rawSessionHeadingPattern = try? NSRegularExpression(
     pattern: #"^###\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})(?:\s+(.*))?$"#
@@ -903,13 +903,14 @@ public struct PastedTask: Equatable, Sendable {
     public var depth: Int
     public var text: String
     public var due: String?
-    public var checked: Bool
+    /// Kept as it was where the block came from: a dropped task pasted elsewhere is still dropped.
+    public var state: TaskState
 
-    public init(depth: Int, text: String, due: String? = nil, checked: Bool = false) {
+    public init(depth: Int, text: String, due: String? = nil, state: TaskState = .open) {
         self.depth = depth
         self.text = text
         self.due = due
-        self.checked = checked
+        self.state = state
     }
 }
 
@@ -920,7 +921,7 @@ private func taskBlockLines(_ block: [PastedTask], rootIndent: Int, prefix: Stri
     let marker = prefix.drop { $0 == " " }
     return block.map { task in
         let indent = String(repeating: " ", count: rootIndent + max(0, task.depth) * 2)
-        let box = task.checked ? "[x]" : "[ ]"
+        let box = "[\(task.state.box)]"
         let text = task.text.trimmingCharacters(in: .whitespaces)
         let dueSuffix = (task.due?.isEmpty == false) ? " due: \(task.due!)" : ""
         return "\(indent)\(marker)\(box) \(text)\(dueSuffix)"

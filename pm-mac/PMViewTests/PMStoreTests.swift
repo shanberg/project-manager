@@ -158,6 +158,37 @@ final class PMStoreTests: XCTestCase {
         XCTAssertTrue(raw.contains("[x] First task"), "the tick did not reach the file:\n\(raw)")
     }
 
+    // MARK: Dropping
+
+    /// Dropped is closed but not done: struck from what's left, and out of the total rather than
+    /// counted in the done.
+    func testDroppingATaskWritesItAndTakesItOutOfTheTotal() throws {
+        let store = try store(withTasks: "First task\nSecond task")
+        let first = try XCTUnwrap(store.todos.first)
+        mutateAndWait(store) { done in store.drop([first], then: done) }
+
+        XCTAssertEqual(store.todos.first?.state, .dropped)
+        let raw = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+        XCTAssertTrue(raw.contains("[-] First task"), "the drop did not reach the file:\n\(raw)")
+        XCTAssertEqual(store.progress.done, 0)
+        XCTAssertEqual(store.progress.total, 1)
+    }
+
+    /// A selection swept over finished work doesn't turn it into dropped work, and the whole drop is
+    /// one ⌘Z however many tasks it took.
+    func testDroppingASelectionLeavesDoneWorkAndIsOneUndoStep() throws {
+        let store = try store(withTasks: "First task\nSecond task\nThird task")
+        let first = try XCTUnwrap(store.todos.first)
+        mutateAndWait(store) { done in store.complete(first, advanceFocus: false, then: done) }
+        let beforeDrop = try String(contentsOfFile: XCTUnwrap(store.notesPath), encoding: .utf8)
+
+        mutateAndWait(store) { done in store.drop(store.todos, then: done) }
+        XCTAssertEqual(store.todos.map(\.state), [.done, .dropped, .dropped])
+
+        store.undo()
+        try waitForFile(store) { $0 == beforeDrop }
+    }
+
     // MARK: Undo
 
     /// **The property undo exists for.** The store banks the pre-edit document, so undoing restores
@@ -293,6 +324,10 @@ final class PMStoreTests: XCTestCase {
 
         store.undo(try first())
         try waitForFile(store) { !$0.contains("[x]") }
+
+        // Before `toggleAll` below closes everything: a drop only touches open tasks.
+        store.drop([try first()])
+        try waitForFile(store) { $0.contains("[-]") }
 
         store.toggleAll(store.todos)
         try waitForFile(store) { $0.components(separatedBy: "[x]").count > 2 }

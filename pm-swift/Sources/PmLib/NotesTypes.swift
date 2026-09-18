@@ -46,9 +46,46 @@ public struct ProjectNotes: Codable, Equatable {
     }
 }
 
+/// Where a task stands: still to do, done, or dropped — closed without being done.
+///
+/// Dropped exists because an old task you've decided against had two exits and both lied: tick it (it
+/// wasn't done) or delete it (it was real, and the prose around it still mentions it). It is written
+/// `- [-]`, the Obsidian Tasks plugin's spelling for "cancelled", so the file reads right in a vault
+/// that has it. See docs/sessions.md D6.
+public enum TaskState: String, Codable, Equatable, Sendable {
+    case open, done, dropped
+
+    /// The state a checkbox's one character spells, or nil when it isn't a task box PM reads.
+    public init?(box: Character) {
+        switch box {
+        case " ": self = .open
+        case "x", "X": self = .done
+        case "-": self = .dropped
+        default: return nil
+        }
+    }
+
+    /// The character PM writes between the brackets. `X` is read as done and never written.
+    public var box: Character {
+        switch self {
+        case .open: return " "
+        case .done: return "x"
+        case .dropped: return "-"
+        }
+    }
+
+    /// Done or dropped: out of the way either way. What `Todo.checked` has always meant to every
+    /// consumer that hides finished work, which is why dropping a task needed no change from them.
+    public var isClosed: Bool { self != .open }
+}
+
 public struct Todo: Codable, Equatable {
     public var text: String
+    /// Closed — done *or dropped*. Kept under its old name because every surface that filters on it
+    /// (hide what's finished, count what's left) wants a dropped task treated exactly the same way.
+    /// `state` is the one that tells the two apart.
     public var checked: Bool
+    public var state: TaskState
     public var rawLine: String
     public var context: String
     /// Indent depth: 0 = root, 1 = one level in (2 spaces), etc. Derived from leading spaces before "- ".
@@ -75,9 +112,12 @@ public struct Todo: Codable, Equatable {
     /// The ISO date of this task's session, the stable half of a `TaskRef` coordinate.
     public var sessionISODate: String?
 
-    public init(text: String, checked: Bool, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, waiting: String? = nil, effectiveWaiting: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
+    /// `state`, when given, wins over `checked`, so the two can't be constructed disagreeing.
+    public init(text: String, checked: Bool, state: TaskState? = nil, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, waiting: String? = nil, effectiveWaiting: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {
+        let state = state ?? (checked ? .done : .open)
         self.text = text
-        self.checked = checked
+        self.checked = state.isClosed
+        self.state = state
         self.rawLine = rawLine
         self.context = context
         self.depth = depth

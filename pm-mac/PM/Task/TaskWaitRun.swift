@@ -80,9 +80,13 @@ func taskLineAttributed(_ todo: Todo, wait: TaskWait?, size: CGFloat = 13) -> NS
     let weight: NSFont.Weight = todo.isFocused ? .semibold : .regular
     let body = NSFont.systemFont(ofSize: size, weight: weight)
 
+    // A dropped task recedes a step further than a done one: both are struck, but only the done one is
+    // work that happened.
+    let color: NSColor = todo.state == .dropped ? .tertiaryLabelColor
+        : (todo.checked || held) ? .secondaryLabelColor : .labelColor
     var base: [NSAttributedString.Key: Any] = [
         .font: body,
-        .foregroundColor: (todo.checked || held) ? NSColor.secondaryLabelColor : NSColor.labelColor,
+        .foregroundColor: color,
     ]
     if todo.checked { base[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
 

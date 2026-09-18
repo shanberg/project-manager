@@ -60,7 +60,7 @@ Only tiers 1 and 2 are published to every adapter.
 **Tier 1 — mutations.** Pure domain, work headless, mean the same thing everywhere.
 
 ```
-task.add          task.complete    task.reopen      task.focus
+task.add          task.complete    task.drop        task.reopen      task.focus
 task.diveIn       task.setDue      task.setText     task.wrap
 task.unwrap       task.move        task.delete
 session.start     session.note     session.rename   session.delete   session.prune
@@ -211,7 +211,7 @@ Three mutations stay on `NotesService`, each because the contract has no action 
 
 ### Batches, and the revision
 
-`task.complete`, `task.reopen`, `task.setDue` and `task.delete` take either a `task` or a list of `tasks` — exactly one, which a `required` list can't express, so the registry gained a small `oneOf` and the published schema says so. A batch is one read, one write, one journal entry, and one step to undo: a selection a person acted on in a single gesture comes back in a single gesture.
+`task.complete`, `task.drop`, `task.reopen`, `task.setDue` and `task.delete` take either a `task` or a list of `tasks` — exactly one, which a `required` list can't express, so the registry gained a small `oneOf` and the published schema says so. A batch is one read, one write, one journal entry, and one step to undo: a selection a person acted on in a single gesture comes back in a single gesture.
 
 Within a batch, references are resolved against the text **as it evolves**, and a reference that no longer names anything is skipped rather than failing the batch. That is what "act on this selection" has to mean: completing a parent completes its children, deleting one removes them, so a child that came along in the same selection has already been dealt with by the time its turn arrives.
 

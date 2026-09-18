@@ -109,6 +109,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "partOf": input.partOf.map(JSONValue.string),
         "clearPartOf": input.clearPartOf.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
+        "includeDropped": input.includeDropped.map(JSONValue.bool),
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
         "now": input.now.map(JSONValue.string),
@@ -161,6 +162,12 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             try completeTodoWithDescendants(notes: notes, sessionIndex: at.sessionIndex,
                                             lineIndex: at.lineIndex,
                                             advanceFocus: input.advanceFocus ?? true)
+        }
+    case "task.drop":
+        return try editing(spec, input, options) { notes, at in
+            try dropTodoWithDescendants(notes: notes, sessionIndex: at.sessionIndex,
+                                        lineIndex: at.lineIndex,
+                                        advanceFocus: input.advanceFocus ?? true)
         }
     case "task.reopen":
         return try editing(spec, input, options) { notes, at in
@@ -474,12 +481,16 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let scope = input.scope ?? "all"
         let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
         let items = try doneTasks(in: range, includeArchived: scope != "active",
-                                  includeActive: scope != "archive")
+                                  includeActive: scope != "archive",
+                                  includeDropped: input.includeDropped == true)
+        let done = items.filter { !$0.dropped }
         let projects = Set(items.map(\.projectFolder)).count
-        let summary = items.isEmpty
-            ? "Nothing done."
-            : "\(items.count) task\(items.count == 1 ? "" : "s") done"
-                + (projects > 1 ? " across \(projects) projects." : ".")
+        let dropped = items.count - done.count
+        var summary = done.isEmpty
+            ? "Nothing done"
+            : "\(done.count) task\(done.count == 1 ? "" : "s") done"
+        if dropped > 0 { summary += ", \(dropped) dropped" }
+        summary += projects > 1 ? " across \(projects) projects." : "."
         return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(items))
 
     case "capture.parse":
@@ -624,11 +635,13 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                          revision: read.revision, data: try JSONValue.encoding(due))
     case "task.progress":
         let read = try readProject(input)
-        let done = read.todos.filter(\.checked).count
-        return ApiResult(action: spec.name, summary: "\(done) of \(read.todos.count) done.",
+        let (done, total) = read.todos.progress
+        let dropped = read.todos.count - total
+        return ApiResult(action: spec.name, summary: "\(done) of \(total) done.",
                          revision: read.revision,
                          data: .object(["done": .number(Double(done)),
-                                        "total": .number(Double(read.todos.count))]))
+                                        "dropped": .number(Double(dropped)),
+                                        "total": .number(Double(total))]))
     case "focus.get":
         guard let folder = focusedProjectFolder() else {
             return ApiResult(action: spec.name, summary: "No focused project.", data: .null)

@@ -311,12 +311,8 @@ final class PMStore {
     /// This project's current task: the focused one, else the first available one.
     var heroTodo: Todo? { todos.heroTask }
 
-    /// Completion progress as (done, total). Total counts all parsed todos.
-    var progress: (done: Int, total: Int) {
-        let total = todos.count
-        let done = todos.filter { $0.checked }.count
-        return (done, total)
-    }
+    /// Completion progress as (done, total). Dropped tasks are out of both — see `[Todo].progress`.
+    var progress: (done: Int, total: Int) { todos.progress }
 
     /// A stable key for a todo, matching `focusedKey` format ("sessionIndex:lineIndex").
     static func key(for todo: Todo) -> String { "\(todo.sessionIndex):\(todo.lineIndex)" }
@@ -925,6 +921,25 @@ final class PMStore {
                 // `advanceFocus: false` — a batch shouldn't march focus once per task. The backend
                 // still moves focus if one of the completed tasks was holding it.
                 if completing { $0.advanceFocus = false }
+            })
+        }
+    }
+
+    /// Drop every open task in `todos`, with their open subtasks: closed, not done. One edit, one ⌘Z.
+    ///
+    /// Closed tasks in the selection are left alone rather than turned from done into dropped — a
+    /// selection swept across an old session's leftovers takes its finished work along for the ride,
+    /// and that work was done. Focus moves on from a lone dropped task the way it does from a
+    /// completed one; a batch doesn't march it once per task, the same as `toggleAll`.
+    func drop(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        let targets = todos.filter { !$0.checked }
+        guard !targets.isEmpty else { then?(); return }
+        let seen = seenRevision
+        mutate(then: then) { project in
+            try PMContract.perform(.taskDrop, PMContract.input(project: project) {
+                $0.tasks = targets.map(\.reference)
+                $0.revision = seen.value
+                if targets.count > 1 { $0.advanceFocus = false }
             })
         }
     }

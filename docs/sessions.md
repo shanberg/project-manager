@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17, not built. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. D6, dropped, built 2026-09-17 (build order step 1); the rest not yet. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -104,7 +104,7 @@ things you finished in it.
 
 Contract: `task.pick` and `task.release` (mutations; input is a task reference, plus an optional session
 reference for `release`). `task.focus` gains `pick` (default `true`). Every task read gains `picked`:
-`{ "into": "2026-09-17", "at": "…" }`, or absent. Contract **1.11.0**.
+`{ "into": "2026-09-17", "at": "…" }`, or absent. Contract **1.12.0** (1.11.0 was `task.drop`).
 
 ### D4 — Focus picks up, and undo takes it back as one step
 

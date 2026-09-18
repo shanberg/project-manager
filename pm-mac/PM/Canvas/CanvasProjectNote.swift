@@ -755,7 +755,7 @@ struct CanvasProjectNote: View {
         VStack(alignment: .leading, spacing: 0) {
             if activeEditor == EditorTarget(key: key, kind: .edit) {
                 InlineTextEditor(seed: todo.text, placeholder: "Task text", submitLabel: "Save",
-                                 leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked)),
+                                 leadingIcon: AnyView(TaskStatusIcon(state: todo.state)),
                                  onOpenProject: onOpenProject) { text in
                     store.editText(todo, text: text)
                     activeEditor = nil
@@ -766,7 +766,7 @@ struct CanvasProjectNote: View {
             }
             if activeEditor == EditorTarget(key: key, kind: .due) {
                 DueEditor(seed: todo.dueDate ?? "",
-                          leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked))) { due in
+                          leadingIcon: AnyView(TaskStatusIcon(state: todo.state))) { due in
                     store.setDue(todo, due: due)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
@@ -775,7 +775,7 @@ struct CanvasProjectNote: View {
             if activeEditor == EditorTarget(key: key, kind: .waiting) {
                 InlineTextEditor(seed: todo.waiting ?? "", placeholder: "Waiting on…",
                                  submitLabel: "Save",
-                                 leadingIcon: AnyView(TaskStatusIcon(checked: todo.checked)),
+                                 leadingIcon: AnyView(TaskStatusIcon(state: todo.state)),
                                  onOpenProject: onOpenProject) { text in
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     store.setWaiting(todo, waiting: trimmed.isEmpty ? nil : trimmed)
@@ -801,7 +801,7 @@ struct CanvasProjectNote: View {
         let key = PMStore.key(for: todo)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Button { store.toggle(todo) } label: {
-                TaskStatusIcon(checked: todo.checked, size: 12.5)
+                TaskStatusIcon(state: todo.state, size: 12.5)
             }
             .buttonStyle(.plain)
             .help(todo.checked ? "Reopen" : "Complete")

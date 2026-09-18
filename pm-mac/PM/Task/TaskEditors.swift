@@ -17,13 +17,23 @@ import SwiftUI
 /// context (nil = the list row's default body size; the focus card passes its larger 18pt). A
 /// brand-new task (add / wrap) reads as an empty circle, since it isn't complete yet.
 struct TaskStatusIcon: View {
-    var checked: Bool = false
+    var state: TaskState = .open
     var size: CGFloat? = nil
 
+    /// A dropped task is closed but wasn't done, so it never borrows the done check or its accent: an
+    /// unfilled cross in the same quiet colour as an open circle.
+    private var symbol: String {
+        switch state {
+        case .open: return "circle"
+        case .done: return "checkmark.circle.fill"
+        case .dropped: return "xmark.circle"
+        }
+    }
+
     var body: some View {
-        Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+        Image(systemName: symbol)
             .font(size.map { Font.system(size: $0) } ?? .body)
-            .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+            .foregroundStyle(state == .done ? Color.accentColor : Color.secondary)
             .symbolReplaceIfAvailable()
     }
 }

@@ -20,6 +20,7 @@ import PmLib
 enum PMCommand: String, CaseIterable, Identifiable {
     // The task in hand.
     case complete
+    case drop
     case undoLast
     case diveIn
     case narrowFocus
@@ -61,6 +62,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .complete: return "Complete Focused Task"
+        case .drop: return "Drop Focused Task"
         case .undoLast: return "Undo Last Completion"
         case .diveIn: return "Dive In"
         case .narrowFocus: return "Narrow Focus…"
@@ -105,6 +107,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .complete: return "checkmark.circle"
+        case .drop: return "xmark.circle"
         case .undoLast: return "arrow.uturn.backward"
         case .diveIn: return "arrow.down.to.line"
         case .narrowFocus: return "arrow.turn.down.right"
@@ -142,7 +145,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
 
     var menuSection: MenuSection? {
         switch self {
-        case .complete, .undoLast, .diveIn, .narrowFocus, .addAfter, .addBefore,
+        case .complete, .drop, .undoLast, .diveIn, .narrowFocus, .addAfter, .addBefore,
              .editTask, .setDue, .wrapTask:
             return .task
         case .startSession, .sessionNote, .openWindow, .openInFinder, .openInObsidian, .openInEditor,
@@ -195,8 +198,9 @@ enum PMCommand: String, CaseIterable, Identifiable {
              .sessionNote, .startSession, .addLink, .editDetails, .archiveProject, .unarchiveProject:
             return .project
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
-        // submenu — they're the reason the menu gets opened. The menu builds those itself.
-        case .complete, .undoLast, .diveIn, .newProject, .settings:
+        // submenu — they're the reason the menu gets opened. The menu builds those itself. Drop isn't
+        // one of those reasons: it's a decision made in a list, not a glance at the menubar.
+        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings:
             return nil
         }
     }
@@ -259,6 +263,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     var keywords: [String] {
         switch self {
         case .complete: return ["done", "check", "finish", "tick"]
+        case .drop: return ["cancel", "abandon", "skip", "wont", "let go"]
         case .undoLast: return ["undo", "revert", "uncheck"]
         case .diveIn: return ["next", "deeper"]
         case .narrowFocus: return ["child", "under", "subtask"]
@@ -356,7 +361,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .newProject, .settings:
             return true
-        case .complete, .editTask, .setDue, .wrapTask, .narrowFocus, .addAfter, .addBefore:
+        case .complete, .drop, .editTask, .setDue, .wrapTask, .narrowFocus, .addAfter, .addBefore:
             return context.hasFocusedTask
         case .undoLast:
             return context.canUndoCompletion

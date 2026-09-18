@@ -63,7 +63,7 @@ public struct MarkdownListPrefix: Equatable {
     /// `-`, `*`, `+`, or an ordered marker like `3.` / `3)`.
     public let marker: String
     public let spacing: String
-    /// `[ ]`, `[x]` or `[X]` when the item is a task line, without the space that follows it.
+    /// `[ ]`, `[x]`, `[X]` or `[-]` when the item is a task line, without the space that follows it.
     public let checkbox: String?
 
     public init(indent: String, marker: String, spacing: String, checkbox: String?) {
@@ -121,7 +121,7 @@ public func markdownListPrefix(of line: String) -> MarkdownListPrefix? {
     var checkbox: String? = nil
     let rest = line[i...]
     if rest.count >= 3, rest.first == "[", rest.dropFirst(2).first == "]",
-       let mark = rest.dropFirst().first, mark == " " || mark == "x" || mark == "X",
+       let mark = rest.dropFirst().first, TaskState(box: mark) != nil,
        rest.count == 3 || rest.dropFirst(3).first == " " {
         checkbox = String(rest.prefix(3))
     }

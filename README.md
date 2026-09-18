@@ -64,7 +64,7 @@ pm new --area <title>
 pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
-pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD]   # What got done, across every project
+pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--dropped]   # What got done, across every project
 pm part-of <project> [<master> | --clear]   # Put a project under a master project, or show both sides
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
 pm notes session note <project> <text>   # Appends to today's session, creating it if needed
@@ -103,6 +103,8 @@ pm unarchive W-1                   # Move from archive back to active
 **Master projects:** a project can be part of another — `pm part-of W-3 W-1`, or **Part Of…** on a project's menu in the app. The member names its master in its notes' frontmatter (`pm-part-of: "[[W-1 …]]"`), the master lists them under **Projects** on its card and nests them in the sidebar, and its progress and next due date count theirs. One level only. See [docs/combining-projects.md](docs/combining-projects.md).
 
 **In the note editor:** `@` names a project or area — a filtered list, arrow keys, Return — and writes the `[[…]]` the vault reads. `/` opens what a line can carry: make it a task, give it a due date, or start a wait (which hands straight to the `@` picker). A `[[…]]` behaves as one thing: the caret steps over it and backspace takes all of it.
+
+**Dropping a task:** A task you've decided not to do can be dropped rather than ticked or deleted — **Drop Task** on a row's menu, **Drop Focused Task** in the Task menu, or `pm api call task.drop`. It's written `- [-]`, the Obsidian Tasks plugin's spelling for cancelled, and it stays in the sentence it was written in. A dropped task is hidden wherever finished work is, leaves the progress total rather than counting as done, and is left out of `pm done` unless you pass `--dropped`. See [docs/sessions.md](docs/sessions.md).
 
 **Task focus:** Each project has a single focused (“now”) task, shown in the menubar and used by Complete Focused Task, Dive In, etc. How focus moves when you complete a task (parent's first leaf → next sibling’s first leaf → parent, with fallbacks) is documented in [docs/task-focus-flow.md](docs/task-focus-flow.md).
 

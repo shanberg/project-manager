@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.10.0";
+export const API_CONTRACT_VERSION = "1.11.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -260,6 +260,8 @@ export interface TaskDiveInInput {
 
 /** What got done: tasks completed in a period, across every project, newest first. */
 export interface TaskDoneInput {
+  /** Also list tasks dropped in the period, marked. Default false. */
+  includeDropped?: boolean;
   /** Which span. Default today. */
   period?: "today" | "week";
   /** Which projects to look in. Default all. */
@@ -268,6 +270,20 @@ export interface TaskDoneInput {
   since?: string;
   /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
   until?: string;
+}
+
+/** Drop a task, or several, along with their open subtasks: close them without their being done. */
+export interface TaskDropInput {
+  /** Move focus onward afterwards. Default true. */
+  advanceFocus?: boolean;
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
 }
 
 /** Make this the project's focused task. */
@@ -280,7 +296,7 @@ export interface TaskFocusInput {
 
 /** A project's tasks, each with the reference needed to act on it. */
 export interface TaskListInput {
-  /** Include completed tasks. Default false. */
+  /** Include completed and dropped tasks. Default false. */
   includeCompleted?: boolean;
   /** Cap the number returned. */
   limit?: number;
@@ -288,13 +304,13 @@ export interface TaskListInput {
   project?: string;
 }
 
-/** How many of a project's tasks are done. */
+/** How many of a project's tasks are done. Dropped tasks are left out of the total. */
 export interface TaskProgressInput {
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
 }
 
-/** Re-open a completed task, or several, and put focus back. */
+/** Re-open a completed or dropped task, or several, and put focus back. */
 export interface TaskReopenInput {
   /** Project name or unambiguous prefix. */
   project: string;
@@ -428,6 +444,7 @@ export interface ApiInputs {
   "task.delete": TaskDeleteInput;
   "task.diveIn": TaskDiveInInput;
   "task.done": TaskDoneInput;
+  "task.drop": TaskDropInput;
   "task.focus": TaskFocusInput;
   "task.list": TaskListInput;
   "task.progress": TaskProgressInput;
@@ -483,6 +500,7 @@ export const API_TIERS: Record<
   "task.delete": "mutation",
   "task.diveIn": "mutation",
   "task.done": "query",
+  "task.drop": "mutation",
   "task.focus": "mutation",
   "task.list": "query",
   "task.progress": "query",

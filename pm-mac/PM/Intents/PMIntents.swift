@@ -118,8 +118,7 @@ struct ProjectProgressIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let p = project ?? ProjectEntity.focused() else { return .result(value: "0/0", dialog: "No project is focused.") }
         let output = try notesShow(project: p.folder)
-        let total = output.todos.count
-        let done = output.todos.filter { $0.checked }.count
+        let (done, total) = output.todos.progress
         let title = displayTitle(output, folder: p.folder)
         return .result(value: "\(done)/\(total)", dialog: IntentDialog(stringLiteral: "\(done) of \(total) tasks done in \(title)."))
     }

@@ -70,6 +70,15 @@ struct TaskMenu: View {
         } else {
             Button { store.toggle(todo) } label: { Label("Complete", systemImage: "checkmark.circle") }
         }
+        // Dropping closes a task that isn't going to be done. It counts only the open tasks in the
+        // selection, because those are the only ones it touches — a done task in the sweep stays done.
+        let droppable = scope.filter { !$0.checked }
+        if !droppable.isEmpty {
+            Button { store.drop(droppable) } label: {
+                Label(isMulti ? "Drop \(droppable.count) Task\(droppable.count == 1 ? "" : "s")" : "Drop Task",
+                      systemImage: "xmark.circle")
+            }
+        }
         if !isMulti, !todo.checked, !todo.isFocused {
             Button { store.focus(todo) } label: { Label("Focus", systemImage: "arrow.right.circle") }
         }

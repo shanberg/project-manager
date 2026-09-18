@@ -31,6 +31,8 @@ import Foundation
 public struct DoneEvent: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case completed, reopened
+        /// Closed without being done. Logged so the record is whole, and left out of what got done.
+        case dropped
     }
 
     /// When it was noticed, ISO 8601 in UTC. For a write PM made, that is when it happened.
@@ -61,6 +63,8 @@ public struct DoneItem: Codable, Equatable, Sendable {
     public let at: String
     public let text: String
     public let session: String?
+    /// Dropped rather than done. Only ever true in a report that asked for dropped tasks.
+    public let dropped: Bool
 }
 
 public enum DoneLog {
@@ -81,8 +85,15 @@ public enum DoneLog {
         (projectPath as NSString).appendingPathComponent(baselineName)
     }
 
-    /// How many tasks of each text are open and checked. `[open, checked]`, keyed by digest.
+    /// How many tasks of each text are open, done and dropped — `[open, done, dropped]`, keyed by
+    /// digest. A baseline written before dropping existed has `[open, done]`; `triple` reads the
+    /// missing count as zero, which is what it was.
     typealias Counts = [String: [Int]]
+
+    static func triple(_ counts: [Int]?) -> [Int] {
+        let c = counts ?? []
+        return [0, 1, 2].map { $0 < c.count ? c[$0] : 0 }
+    }
 
     private struct Baseline: Codable {
         var tasks: Counts
@@ -161,38 +172,59 @@ public enum DoneLog {
         var out: Counts = [:]
         for todo in todos {
             let digest = todo.digest ?? taskDigest(todo.text)
-            var pair = out[digest] ?? [0, 0]
-            pair[todo.checked ? 1 : 0] += 1
-            out[digest] = pair
+            var counts = out[digest] ?? [0, 0, 0]
+            switch todo.state {
+            case .open: counts[0] += 1
+            case .done: counts[1] += 1
+            case .dropped: counts[2] += 1
+            }
+            out[digest] = counts
         }
         return out
     }
 
     /// The events that take one set of counts to the other. Pure, so the rules are testable without a
     /// file in sight.
+    ///
+    /// A move between two states is only counted when one count fell and the other rose by the same
+    /// task's worth, the rule a completion has always had. Moving straight from done to dropped (or back)
+    /// is logged as the two things it is, a reopening and then the other closing, so `standing` never
+    /// needs to know about more than "a reopening cancels the latest closing".
     static func changes(from old: Counts, to new: Counts, todos: [Todo], at: String) -> [DoneEvent] {
         var events: [DoneEvent] = []
         // Sorted, so one look logs its events in the same order every time.
         for digest in Set(old.keys).union(new.keys).sorted() {
-            let was = old[digest] ?? [0, 0], now = new[digest] ?? [0, 0]
-            let completed = min(max(now[1] - was[1], 0), max(was[0] - now[0], 0))
-            let reopened = min(max(was[1] - now[1], 0), max(now[0] - was[0], 0))
-            guard completed + reopened > 0 else { continue }
+            let was = triple(old[digest]), now = triple(new[digest])
+            func fell(_ i: Int) -> Int { max(was[i] - now[i], 0) }
+            func rose(_ i: Int) -> Int { max(now[i] - was[i], 0) }
+
+            let openToDone = min(fell(0), rose(1))
+            let openToDropped = min(fell(0) - openToDone, rose(2))
+            let doneToOpen = min(fell(1), rose(0))
+            let droppedToOpen = min(fell(2), rose(0) - doneToOpen)
+            let doneToDropped = min(fell(1) - doneToOpen, rose(2) - openToDropped)
+            let droppedToDone = min(fell(2) - droppedToOpen, rose(1) - openToDone)
+
+            let reopened = doneToOpen + droppedToOpen + doneToDropped + droppedToDone
+            let completed = openToDone + droppedToDone
+            let dropped = openToDropped + doneToDropped
+            guard reopened + completed + dropped > 0 else { continue }
             // Every task with this digest has this text; the session is the one the changed task is in,
-            // as near as a count can say — the first checked one for a completion, the first open one
-            // for a reopening.
+            // as near as a count can say — the first one now in the state the event names.
             let matching = todos.filter { ($0.digest ?? taskDigest($0.text)) == digest }
-            guard let any = matching.first else { continue }
-            let checked = matching.first(where: \.checked) ?? any
-            let open = matching.first(where: { !$0.checked }) ?? any
-            for _ in 0..<completed {
-                events.append(DoneEvent(at: at, event: .completed, text: checked.text, digest: digest,
-                                        session: checked.sessionISODate))
+            func example(_ state: TaskState) -> Todo? { matching.first { $0.state == state } ?? matching.first }
+            func log(_ n: Int, _ kind: DoneEvent.Kind, _ state: TaskState) {
+                guard n > 0, let todo = example(state) else { return }
+                for _ in 0..<n {
+                    events.append(DoneEvent(at: at, event: kind, text: todo.text, digest: digest,
+                                            session: todo.sessionISODate))
+                }
             }
-            for _ in 0..<reopened {
-                events.append(DoneEvent(at: at, event: .reopened, text: open.text, digest: digest,
-                                        session: open.sessionISODate))
-            }
+            // Reopenings first: a done task dropped is a reopening *then* a drop, and in the other order
+            // the reopening would cancel the drop it came with.
+            log(reopened, .reopened, .open)
+            log(completed, .completed, .done)
+            log(dropped, .dropped, .dropped)
         }
         return events
     }
@@ -206,15 +238,15 @@ public enum DoneLog {
         return text.split(separator: "\n").compactMap { try? decoder.decode(DoneEvent.self, from: Data($0.utf8)) }
     }
 
-    /// The completions that still stand: each reopening cancels the latest completion of the same task
-    /// before it. Done on the 1st and reopened on the 3rd was not done that week; done again on the 5th
-    /// was done on the 5th.
+    /// The closings that still stand, completions and drops: each reopening cancels the latest closing
+    /// of the same task before it. Done on the 1st and reopened on the 3rd was not done that week; done
+    /// again on the 5th was done on the 5th.
     static func standing(_ events: [DoneEvent]) -> [DoneEvent] {
         var kept: [DoneEvent?] = []
         var open: [String: [Int]] = [:]
         for event in events {
             switch event.event {
-            case .completed:
+            case .completed, .dropped:
                 open[event.digest, default: []].append(kept.count)
                 kept.append(event)
             case .reopened:
@@ -282,8 +314,10 @@ public struct DoneRange: Equatable {
 /// Looks at every project before reading its log, so a task ticked in Obsidian an hour ago is in the
 /// answer rather than waiting for PM to happen to write that project. Archived projects are included by
 /// default: finishing something and archiving it the same week is the most done a thing can be.
+///
+/// Dropped tasks are left out unless `includeDropped` asks for them: the report is what got done.
 public func doneTasks(in range: DoneRange, includeArchived: Bool = true,
-                      includeActive: Bool = true) throws -> [DoneItem] {
+                      includeActive: Bool = true, includeDropped: Bool = false) throws -> [DoneItem] {
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
     var scopes: [ProjectScope] = []
@@ -304,11 +338,14 @@ public func doneTasks(in range: DoneRange, includeArchived: Bool = true,
                 DoneLog.observe(projectPath: projectPath, rawText: rawText)
             }
             for event in DoneLog.standing(DoneLog.events(projectPath: projectPath)) {
-                guard let date = DoneLog.date(event.at), range.contains(date) else { continue }
+                let dropped = event.event == .dropped
+                guard includeDropped || !dropped,
+                      let date = DoneLog.date(event.at), range.contains(date) else { continue }
                 items.append((date, DoneItem(projectFolder: folder,
                                              projectName: projectTitle(fromFolderName: folder),
                                              isArchived: scope.isArchived, at: event.at,
-                                             text: event.text, session: event.session)))
+                                             text: event.text, session: event.session,
+                                             dropped: dropped)))
             }
         }
     }
