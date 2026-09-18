@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17. Build order steps 1–4 (dropped, the pick log and its contract, drawing, focus and undo) built 2026-09-17; the drags (step 5) remain. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. Build order steps 1–4 (dropped, the pick log and its contract, drawing, focus and undo) built 2026-09-17, and step 5 (the drags) 2026-09-18. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -47,6 +47,12 @@ whole target session lit for a pick-up.
 
 Picking up is only offered into the **current** sitting. Picking a task up into an old sitting would be
 rewriting history, and that's what ⌥-drag is for.
+
+As built: without ⌥, a drag has no slot in any sitting but its own and the current one, so a drop into an
+old sitting shows the forbidden cursor rather than moving the line. ⌥ is read live, so pressing it mid-drag
+switches between the lit sitting and the gap. A drag of a selection picks up everything in it that can
+be, as one step. When the project has gone past the idle window, there's no current sitting on the card to
+aim at (a pick would start a new one), so a drag only reorders; Pick Up in the row menu still works.
 
 ### D2 — The record lives in a sidecar, beside the done log
 
@@ -179,7 +185,7 @@ Still open group, with nothing above it, and without its caption, since it's the
 
 As built: a picked-up row and its own line are one task to the selection and the context menu, and two
 rows to hover and inline editors, so an editor opens where you asked for it. Only the task's own line
-can be dragged; dragging an old task onto today is D1, which comes with the drags. Clicking a chip whose
+can be dragged; dragging it onto today's sitting picks it up (D1). Clicking a chip whose
 task has no line drawn on the card (Current's picked-up rows) opens the origin sitting's note.
 
 ### D6 — Dropped

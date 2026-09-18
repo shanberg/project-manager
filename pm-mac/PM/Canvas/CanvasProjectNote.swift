@@ -86,6 +86,8 @@ struct CanvasProjectNote: View {
     /// Every visible task row's extent and depth, collected by preference, in the card's own
     /// coordinate space. What the drop delegate resolves the pointer against.
     @State private var rowFrames: [RowFrame] = []
+    /// Every drawn sitting's whole block, so a drag can light the current one to pick up into it.
+    @State private var sessionFrames: [SessionFrame] = []
     /// The one resolved insertion slot for the drag in flight — where the indicator goes and where the
     /// drop will land.
     @State private var dropTarget: DropTarget?
@@ -447,6 +449,7 @@ struct CanvasProjectNote: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .coordinateSpace(name: TaskDropResolver.coordinateSpace)
                 .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+                .onPreferenceChange(SessionFramesKey.self) { sessionFrames = $0 }
                 .overlay(alignment: .topLeading) { dropIndicator }
                 // **Only the app's own tasks.** The window's list also takes text and files dragged in
                 // from elsewhere; a card cannot, because the board underneath it is already the target
@@ -473,7 +476,17 @@ struct CanvasProjectNote: View {
     /// depth the drop will use. The same mark the window's list paints, so a reorder looks like a
     /// reorder on either surface.
     @ViewBuilder private var dropIndicator: some View {
-        if let target = dropTarget {
+        // A pick-up lands on the whole sitting, not between two of its rows, so the whole sitting is
+        // what lights (docs/sessions.md D1). A gap there would promise a position the pick won't take.
+        if let target = dropTarget, let lit = target.lit {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5))
+                .frame(height: max(lit.maxY - lit.minY, 0))
+                .padding(.horizontal, 6)
+                .offset(y: lit.minY)
+                .allowsHitTesting(false)
+        } else if let target = dropTarget {
             HStack(spacing: 0) {
                 Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                 Capsule().fill(Color.accentColor).frame(height: 2)
@@ -489,19 +502,37 @@ struct CanvasProjectNote: View {
     /// Resolve a pointer into an insertion slot. The geometry is `TaskDropResolver`'s; this supplies
     /// only what the card knows — the rows it drew, and which of them are riding along in the drag.
     ///
-    /// No session frames. A card captions a session only when that session puts something on it, so
-    /// there is no empty session drawn here to drop *into* — the window's list is the surface where an
-    /// empty sitting is a first-class row with somewhere to aim.
+    /// No session frames as slots. A card captions a session only when that session puts something on
+    /// it, so there is no empty session drawn here to drop *into*.
+    ///
+    /// **Across sittings it picks up** (D1): the current sitting's block is offered whole, when
+    /// something in the drag can still be picked up into it, and ⌥ — read live, so pressing it
+    /// mid-drag changes the answer — turns that back into a move.
     private func computeDropTarget(at point: CGPoint) -> DropTarget? {
         guard let key = draggingKey,
               let dragged = store.todos.first(where: { PMStore.key(for: $0) == key })
         else { return nil }
+        let current = pickTarget(for: dragged).flatMap { index in sessionFrames.first { $0.index == index } }
         return TaskDropResolver.resolve(pointer: point,
                                         rows: rowFrames,
                                         sessionFrames: [],
                                         draggedSubtree: store.subtreeKeys(of: dragged),
                                         contentInset: Self.rowContentInset,
-                                        indentStep: Self.indentStep)
+                                        indentStep: Self.indentStep,
+                                        from: dragged.sessionIndex,
+                                        pickingUpInto: current,
+                                        moving: NSEvent.modifierFlags.contains(.option))
+    }
+
+    /// The sitting a drag of `todo` would pick up into: the current one, when it is the latest drawn and
+    /// not about to be replaced by a new one, and something in the drag isn't already there. A project
+    /// left past the idle window has no current sitting on the card to aim at — the pick would start
+    /// one — so there, a drag only reorders.
+    private func pickTarget(for todo: Todo) -> Int? {
+        guard !store.willStartNewSession, let current = store.todaySessionIndex,
+              contextTargets(for: todo).contains(where: store.canPickUp)
+        else { return nil }
+        return current
     }
 
     /// Commit a resolved drop: move the dragged subtree, then clear the drag.
@@ -517,6 +548,9 @@ struct CanvasProjectNote: View {
             store.moveSubtree(source, anchor: anchor, insertAfter: after, depth: target.depth)
         case let .endOfSession(index):
             store.moveSubtree(source, toSession: index)
+        case .pickUp:
+            // The whole drag, the way it was lifted: a selection picks up together, as one step.
+            store.pickUp(contextTargets(for: source).filter(store.canPickUp))
         }
         draggingKey = nil
         dropTarget = nil
@@ -718,7 +752,15 @@ struct CanvasProjectNote: View {
         return name.hasPrefix("Notes - ") ? String(name.dropFirst("Notes - ".count)) : name
     }
 
-    @ViewBuilder private func session_(_ session: Session, at index: Int) -> some View {
+    /// A sitting, published whole so a drag can light it (`TaskDropResolver`, D1). One stack with no
+    /// spacing inside a list with none, so wrapping it changes nothing drawn.
+    private func session_(_ session: Session, at index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) { sessionContent(session, at: index) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SessionFrameReporter(index: index))
+    }
+
+    @ViewBuilder private func sessionContent(_ session: Session, at index: Int) -> some View {
         let blocks = blocks(for: session, at: index)
         let picked = pickedRows(into: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
@@ -999,7 +1041,7 @@ struct CanvasProjectNote: View {
         // there is nowhere to move a card to, the card has the drag from the first press.
         //
         // Not the copy under Picked up, for the reason it publishes no frame. Dragging an old task onto
-        // today's sitting is how you will pick it up (D1), and that arrives with the drags.
+        // today's sitting picks it up (D1); ⌥ makes it a move.
         .ifCondition(isOrigin && activeEditor == nil && engagement.actsImmediately) { view in
             view.onDrag {
                 let dragged = key

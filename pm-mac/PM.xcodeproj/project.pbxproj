@@ -101,6 +101,7 @@
 		44CC6CD4EF657AFAD7AA486E /* CanvasStoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DCD6578456BB1EDE344CF4 /* CanvasStoreRegistry.swift */; };
 		45DD25433C054305789627E1 /* CanvasLinkZonesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAC2997B70435B617C7322E /* CanvasLinkZonesTests.swift */; };
 		46C367160209DA62CE6B4791 /* CanvasCardMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3202FE3BD4B24BE3435D4E9B /* CanvasCardMedia.swift */; };
+		47292CA643985E4885E01438 /* TaskDropResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224912707F104CD2739DBD7B /* TaskDropResolver.swift */; };
 		4825EB706D8D74DCF433CB58 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5AFCE913C956EF623A80D658 /* Assets.xcassets */; };
 		4848686DF492B74125CAE733 /* CanvasPageBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6618A28A1B8350DC6699412 /* CanvasPageBudgetTests.swift */; };
 		4AEFB2701B22CDF1C9269553 /* PMActions.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = F710700FE1C3487CCD8AE9CE /* PMActions.generated.swift */; };
@@ -331,6 +332,7 @@
 		DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */; };
 		DC63275E44146DA8648FB4E8 /* CanvasFade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B13AE0DC6E8B8E42861FE8B /* CanvasFade.swift */; };
 		DC9A24AA5592F0E63136C959 /* PMContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B1046B02C6010B0334E290 /* PMContract.swift */; };
+		DCBE3727B1ACF185A4794A10 /* TaskDropResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D173E62227C8FC949D07AF0 /* TaskDropResolverTests.swift */; };
 		DF0BF2DC5FA2C8EE946A7501 /* CanvasAddCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7067433262B37D02B5188FA8 /* CanvasAddCommand.swift */; };
 		E0EA6383128FFAE94C27E576 /* CanvasFrozenPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9AA0649A13D2116BE4BD38 /* CanvasFrozenPageView.swift */; };
 		E142CE361ED59A68B79B1741 /* TokenLayoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0F632CE9606E7BB260271F /* TokenLayoutManager.swift */; };
@@ -512,6 +514,7 @@
 		7C83138169424E7CE3A881B7 /* Stubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stubs.swift; sourceTree = "<group>"; };
 		7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardShows.swift; sourceTree = "<group>"; };
 		7CE7D0F7288EEEFE8CC72514 /* CanvasClippingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasClippingTests.swift; sourceTree = "<group>"; };
+		7D173E62227C8FC949D07AF0 /* TaskDropResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDropResolverTests.swift; sourceTree = "<group>"; };
 		7D42338655D7420AC0088307 /* ProjectTroubleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTroubleTests.swift; sourceTree = "<group>"; };
 		7D7548520C03B6F6076B86CC /* TaskTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTiming.swift; sourceTree = "<group>"; };
 		7DCC2D8DA411AD495118A4FD /* CanvasBoardKeysTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBoardKeysTests.swift; sourceTree = "<group>"; };
@@ -1115,6 +1118,7 @@
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
 				CD9C0FB324B53991D5DEEEB1 /* TabBarGrowthTests.swift */,
 				CF7D1664371AF585E7945B80 /* TabDragTests.swift */,
+				7D173E62227C8FC949D07AF0 /* TaskDropResolverTests.swift */,
 				52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */,
 				4D0994A8009F7E1F0FCCF13F /* TokenDrawingTests.swift */,
 				F85AFB6E8446384AD4262614 /* WindowDragBandTests.swift */,
@@ -1613,6 +1617,8 @@
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				31AD6AAB106EC029FD8151CE /* TabBarGrowthTests.swift in Sources */,
 				F762E435E788D3F0722C1D73 /* TabDragTests.swift in Sources */,
+				47292CA643985E4885E01438 /* TaskDropResolver.swift in Sources */,
+				DCBE3727B1ACF185A4794A10 /* TaskDropResolverTests.swift in Sources */,
 				8A0D5F773B09992201E04086 /* TaskFieldCompletionTests.swift in Sources */,
 				0FAD7CF6F384B7406B86113E /* TokenDrawingTests.swift in Sources */,
 				28BB1DFA9E040E25661D78D7 /* TokenLayoutManager.swift in Sources */,

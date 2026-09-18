@@ -85,12 +85,18 @@ struct DropTarget: Equatable {
     let gapY: CGFloat
     let depth: Int
     let destination: Destination
+    /// The block to light instead of drawing a gap: set for a pick-up, which lands on a whole sitting
+    /// rather than between two rows, and the indicator has to say so (docs/sessions.md D1).
+    var lit: SessionFrame? = nil
 
     /// Where the move lands. Almost every drop names a task to sit beside, which fixes both the
     /// session and the position within it; a drop on a session with no tasks has only the session.
     enum Destination: Equatable {
         case beside(session: Int, line: Int, after: Bool)
         case endOfSession(Int)
+        /// Not a move at all: pick the dragged tasks up into this sitting, leaving their lines where
+        /// they were written.
+        case pickUp(into: Int)
     }
 }
 
@@ -116,12 +122,44 @@ enum TaskDropResolver {
     ///   - draggedSubtree: `PMStore` keys of the dragged task and its descendants.
     ///   - contentInset: x of a depth-0 row's content — the origin the pointer's depth is measured from.
     ///   - indentStep: horizontal pixels per nesting level.
+    ///   - source: the session the grabbed row was written in.
+    ///   - current: the current sitting's whole block, when a drag may pick up into it.
+    ///   - moving: ⌥ is down, or the list has no sittings to keep apart. Nil `source` means the same.
+    ///
+    /// **Across sittings, a drag picks up** (docs/sessions.md D1). Without ⌥, a drop anywhere on the
+    /// current sitting picks an older task up into it — the whole sitting is the target, because a pick
+    /// has no position — and a slot in any *other* sitting is no slot at all: moving a line between
+    /// sittings is what ⌥ is for, and dropping into an old sitting would be rewriting it. Within the
+    /// task's own sitting, it's a reorder as ever.
     static func resolve(pointer: CGPoint,
                         rows: [RowFrame],
                         sessionFrames: [SessionFrame],
                         draggedSubtree: Set<String>,
                         contentInset: CGFloat,
-                        indentStep: CGFloat) -> DropTarget? {
+                        indentStep: CGFloat,
+                        from source: Int? = nil,
+                        pickingUpInto current: SessionFrame? = nil,
+                        moving: Bool = false) -> DropTarget? {
+        guard let source, !moving else {
+            return slot(pointer: pointer, rows: rows, sessionFrames: sessionFrames,
+                        draggedSubtree: draggedSubtree, contentInset: contentInset, indentStep: indentStep)
+        }
+        if let current, current.index != source, pointer.y >= current.minY, pointer.y < current.maxY {
+            return DropTarget(gapY: current.minY, depth: 0, destination: .pickUp(into: current.index),
+                              lit: current)
+        }
+        let target = slot(pointer: pointer, rows: rows, sessionFrames: sessionFrames,
+                          draggedSubtree: draggedSubtree, contentInset: contentInset, indentStep: indentStep)
+        return target?.session == source ? target : nil
+    }
+
+    /// The gap under the pointer, wherever it is — the geometry every drag shares.
+    private static func slot(pointer: CGPoint,
+                             rows: [RowFrame],
+                             sessionFrames: [SessionFrame],
+                             draggedSubtree: Set<String>,
+                             contentInset: CGFloat,
+                             indentStep: CGFloat) -> DropTarget? {
         let ordered = rows.sorted { $0.minY < $1.minY }
         let candidates = ordered.filter { !draggedSubtree.contains($0.key) }
 
@@ -201,6 +239,16 @@ enum TaskDropResolver {
 
     private static func clamp(_ value: Int, _ low: Int, _ high: Int) -> Int {
         min(max(value, low), max(low, high))
+    }
+}
+
+extension DropTarget {
+    /// The sitting the drop lands in.
+    var session: Int {
+        switch destination {
+        case let .beside(session, _, _): session
+        case let .endOfSession(index), let .pickUp(into: index): index
+        }
     }
 }
 
