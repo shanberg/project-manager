@@ -141,7 +141,8 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// Leftovers the cut-off, when it isn't today.
     private var name: String {
         switch spec.kind {
-        case .day: return spec.period.title
+        // A week or a month says which: "September 2026".
+        case .day: return ((try? spec.calendarSpan()) ?? nil)?.title ?? spec.period.title
         case .waiting: return "Waiting"
         case .search: return spec.query.isEmpty ? "Search" : "Search “\(spec.query)”"
         case .leftovers: return spec.period == .today ? "Leftovers" : "Leftovers \(spec.period.beforeTitle)"
@@ -184,6 +185,11 @@ final class CanvasViewNodeView: CanvasNodeView {
                                               session: SessionRef(date: sitting.session, ordinal: sitting.sessionOrdinal,
                                                                   digest: sitting.sessionDigest.isEmpty ? nil : sitting.sessionDigest),
                                               title: [sitting.projectName, sitting.name])
+                },
+                onSetPeriod: { [weak self] period in self?.setPeriod(period) },
+                onOpenDay: { [weak self] day in
+                    guard let self else { return }
+                    self.board.addDayCard(pinnedTo: day, beside: self.node.id)
                 }))
         case .tasks(let tasks):
             root = AnyView(CanvasTaskListCard(
@@ -223,6 +229,20 @@ final class CanvasViewNodeView: CanvasNodeView {
             guard let index = doc.nodes.firstIndex(where: { $0.id == id }),
                   var spec = CanvasViewSpec.of(doc.nodes[index]) else { return }
             spec.query = trimmed
+            CanvasViewSpec.set(spec, on: &doc.nodes[index])
+        }
+    }
+
+    /// A week or month paged back or on, or back to today: one undoable change to the node, named for
+    /// where it went.
+    private func setPeriod(_ period: CanvasViewSpec.Period) {
+        guard period != spec.period else { return }
+        let id = node.id
+        let name = period == .today ? "Show Today" : "Show \(spec.shownLayout.title)"
+        board.store.change(name) { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }),
+                  var spec = CanvasViewSpec.of(doc.nodes[index]) else { return }
+            spec.period = period
             CanvasViewSpec.set(spec, on: &doc.nodes[index])
         }
     }

@@ -732,8 +732,12 @@ extension CanvasBoardView {
         let cards = selectedViewCards
         guard !cards.isEmpty else { return }
         // Only some views have a *when*: Waiting and Projects are about now, and a search is about words.
-        if cards.allSatisfy({ $0.spec.kind.hasPeriod }) { addPeriodMenu(menu, cards) }
+        // Coming up laid out on the calendar looks as far as it draws, so its horizon isn't a setting there.
+        if cards.allSatisfy({ $0.spec.kind.hasPeriod && !($0.spec.kind == .comingUp && $0.spec.shownLayout != .list) }) {
+            addPeriodMenu(menu, cards)
+        }
         addProjectsMenu(menu, cards)
+        addLayoutMenu(menu, cards)
         // Every view reads as text (docs/views.md D10): the same answer as a document, for the standup or
         // the client's update. Several cards are one document, in the order they were chosen.
         add(menu, cards.count > 1 ? "Copy \(cards.count) Views as Text" : "Copy as Text", #selector(copyViewsAsText(_:)))
@@ -776,6 +780,41 @@ extension CanvasBoardView {
             item.state = cards.allSatisfy { $0.spec.projects == wanted } ? .on : .off
         }
         menu.addItem(withTitle: "Projects", action: nil, keyEquivalent: "").submenu = projects
+    }
+
+    /// How time is laid out (D9): the layouts every selected card offers, and the rail only where every
+    /// one is a single day. Not shown where the only answer is List.
+    private func addLayoutMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
+        var layouts = CanvasViewSpec.Layout.allCases.filter { layout in cards.allSatisfy { $0.spec.kind.layouts.contains(layout) } }
+        if cards.contains(where: { $0.spec.period.isSpan }) { layouts.removeAll { $0 == .rail } }
+        guard layouts.count > 1 else { return }
+        let submenu = NSMenu(title: "Layout")
+        for layout in layouts {
+            let item = add(submenu, layout.title, #selector(setViewLayout(_:)))
+            item.representedObject = layout.rawValue
+            item.state = cards.allSatisfy { $0.spec.shownLayout == layout } ? .on : .off
+        }
+        menu.addItem(withTitle: "Layout", action: nil, keyEquivalent: "").submenu = submenu
+    }
+
+    /// Lay the selected views out one way, growing each to what the layout needs — seven columns don't
+    /// fit a day's column — in the same step, so ⌘Z puts back the shape and the size together.
+    @objc func setViewLayout(_ sender: Any?) {
+        guard let value = (sender as? NSMenuItem)?.representedObject as? String,
+              let layout = CanvasViewSpec.Layout(rawValue: value) else { return }
+        let ids = Set(selectedViewCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.change("Show as \(layout.title)") { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                guard var spec = CanvasViewSpec.of(doc.nodes[index]) else { continue }
+                spec.layout = layout
+                CanvasViewSpec.set(spec, on: &doc.nodes[index])
+                if let least = layout.minimumSize {
+                    doc.nodes[index].frame.width = max(doc.nodes[index].frame.width, least.width)
+                    doc.nodes[index].frame.height = max(doc.nodes[index].frame.height, least.height)
+                }
+            }
+        }
     }
 
     @objc func setViewPeriod(_ sender: Any?) {
@@ -1386,6 +1425,20 @@ extension CanvasBoardView {
                               frame: CanvasRect(x: at.x - 180, y: at.y - 240, width: 360, height: 480))
         CanvasViewSpec.set(spec, on: &node)
         addCard(node, actionName: "Add View")
+    }
+
+    /// A day from a week or month opened as a Day card of its own (docs/views.md D9): pinned to that day,
+    /// across the same projects, beside the card it came from — the calendar stays where it was.
+    func addDayCard(pinnedTo day: String, beside id: String) {
+        guard let source = document.node(id: id) else { return }
+        var spec = CanvasViewSpec(kind: .day, period: .day(day))
+        spec.projects = CanvasViewSpec.of(source)?.projects ?? .everything
+        var node = CanvasNode(content: .text(spec.noteText),
+                              frame: freeFrame(from: CanvasRect(x: source.frame.maxX + 40, y: source.frame.minY,
+                                                                width: 360, height: 480)))
+        CanvasViewSpec.set(spec, on: &node)
+        let added = addCard(node, actionName: "Open Day")
+        if !isTiled { (scrollView as? CanvasScrollView)?.reveal(added) }
     }
 
     /// Ask for a web address, and hand back a usable one or nothing at all.

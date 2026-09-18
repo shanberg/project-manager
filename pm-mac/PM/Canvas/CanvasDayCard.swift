@@ -106,7 +106,8 @@ final class CanvasDayModel {
         }
         queue.async { [weak self] in
             let result = Result { () throws -> (DoneRange, SittingList) in
-                let range = try spec.period.range()
+                // A week or a month laid out asks about the whole of it, not only the period's days.
+                let range = try spec.calendarSpan()?.range ?? spec.period.range()
                 // An empty board asks about no projects, and the answer to that is nothing, not everything.
                 if projects?.isEmpty == true { return (range, SittingList()) }
                 return (range, try sessionList(in: range, projects: projects))
@@ -150,6 +151,10 @@ struct CanvasDayCard: View {
     var onAct: ((CanvasDayAction, [CanvasDayRow], SittingEntry) -> Void)?
     /// The card a sitting dragged off this one makes (D7). Nil: sittings don't drag.
     var sittingCard: ((SittingEntry) -> NSItemProvider?)?
+    /// Set the card's period — a week or a month paged back and on, and Today. Nil: no paging.
+    var onSetPeriod: ((CanvasViewSpec.Period) -> Void)?
+    /// Open a day of a week or month as a Day card of its own. Nil: days don't open.
+    var onOpenDay: ((String) -> Void)?
 
     /// The row being retyped, and what it says so far.
     @State private var editing: String?
@@ -188,9 +193,10 @@ struct CanvasDayCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(model.range.map { model.spec.caption(for: $0) } ?? model.spec.period.title)
+                Text(title)
                     .font(.system(size: 13 * zoom, weight: .semibold))
                     .lineLimit(1)
+                if span != nil, onSetPeriod != nil { pager }
                 Spacer(minLength: 4)
                 // Not on an empty day, where the card's body already says so in words.
                 Text(model.list.map { $0.sittings.isEmpty && $0.elsewhere.isEmpty } == true ? "" : model.summary)
@@ -210,20 +216,70 @@ struct CanvasDayCard: View {
         .padding(.vertical, 9)
     }
 
+    /// What a week or month layout covers, or nil for the list and the rail.
+    private var span: CanvasCalendarSpan? { try? model.spec.calendarSpan() }
+
+    private var title: String {
+        if let span { return span.title }
+        return model.range.map { model.spec.caption(for: $0) } ?? model.spec.period.title
+    }
+
+    /// Back a week or month, on one, and Today when it isn't the one today is in. Each is a change to
+    /// the node, as the Period menu's are: paging a journal is choosing which page it shows.
+    private var pager: some View {
+        HStack(spacing: 2) {
+            ForEach([-1, 1], id: \.self) { step in
+                Button {
+                    if let period = try? model.spec.stepped(by: step) { onSetPeriod?(period) }
+                } label: {
+                    Image(systemName: step < 0 ? "chevron.left" : "chevron.right")
+                        .font(.system(size: 10 * zoom, weight: .semibold))
+                        .frame(width: 16 * zoom, height: 16 * zoom)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(step < 0 ? "Previous \(model.spec.shownLayout.title)" : "Next \(model.spec.shownLayout.title)")
+            }
+            if !model.spec.showsToday() {
+                Button("Today") { onSetPeriod?(.today) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11 * zoom))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.leading, 2)
+            }
+        }
+    }
+
     @ViewBuilder private var content: some View {
         if let failure = model.failure, model.list == nil {
             quiet(failure)
+        } else if let list = model.list, let span {
+            // A week or a month is drawn even when it's empty: an empty week is still seven days.
+            if model.spec.shownLayout == .week {
+                CanvasDayWeek(span: span, list: list, zoom: zoom, onOpenProject: onOpenProject,
+                              onOpenDay: onOpenDay, sittingCard: sittingCard)
+            } else {
+                CanvasMonthGrid(span: span, zoom: zoom, isQuiet: { !$0.hasPrefix(span.month ?? $0) },
+                                onOpenDay: onOpenDay) { day, _ in
+                    CanvasDayMonthCell(sittings: CanvasTimeGrid.ordered(list.sittings.filter { $0.session == day }), zoom: zoom)
+                }
+            }
         } else if let list = model.list {
             if list.sittings.isEmpty && list.elsewhere.isEmpty {
                 quiet(emptyMessage)
             } else {
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(days(list), id: \.self) { day in
-                            dayBlock(day, in: list)
+                    if model.spec.shownLayout == .rail {
+                        rail(list)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(days(list), id: \.self) { day in
+                                dayBlock(day, in: list)
+                            }
                         }
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
                 }
             }
         } else {
@@ -280,6 +336,58 @@ struct CanvasDayCard: View {
             sittingBlock(sitting)
         }
         if !elsewhere.isEmpty { alsoFinished(elsewhere) }
+    }
+
+    // MARK: The rail
+
+    /// One day down its time gutter (D9): each sitting at least as far below the last as the time
+    /// between them, and each completion from no sitting at its own time, so a tick from the menubar at
+    /// 4:02 is on the rail at 4:02. A faint line runs down the gutter's edge, which is the rail.
+    private func rail(_ list: SittingList) -> some View {
+        let entries = CanvasTimeGrid.railEntries(list)
+        return CanvasRailLayout(perMinute: 0.8 * zoom, gap: 0) {
+            ForEach(entries) { entry in
+                Group {
+                    switch entry.kind {
+                    case .sitting(let sitting): sittingBlock(sitting)
+                    case .done(let item): railDone(item)
+                    }
+                }
+                .layoutValue(key: CanvasRailLayout.Minute.self, value: entry.minute)
+            }
+        }
+        .background(alignment: .leading) {
+            Rectangle().fill(.quaternary).frame(width: 1).padding(.leading, 4 + Self.gutter * zoom + 3.5)
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// A completion on the rail: its time in the gutter, then what it was and where.
+    private func railDone(_ item: DoneItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(Self.clock(item.at) ?? "")
+                .font(.system(size: 11 * zoom).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.gutter * zoom, alignment: .trailing)
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                TaskStatusIcon(state: item.dropped ? .dropped : .done, size: 12 * zoom)
+                Text(item.text)
+                    .font(.system(size: 12.5 * zoom))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
+                Text(item.projectName)
+                    .font(.system(size: 10 * zoom))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 12)
+        .padding(.vertical, 3)
     }
 
     // MARK: A sitting
@@ -543,9 +651,4 @@ struct CanvasDayCard: View {
         f.dateFormat = "EEE, MMM d"
         return f.string(from: date)
     }
-}
-
-extension SittingEntry {
-    /// Which sitting this is, across projects.
-    var id: String { "\(projectFolder)/\(session)/\(sessionOrdinal)/\(sessionDigest)" }
 }

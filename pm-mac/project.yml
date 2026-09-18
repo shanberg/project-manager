@@ -217,6 +217,7 @@ targets:
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift
       - path: PM/Canvas/CanvasViewSpec.swift
+      - path: PM/Canvas/CanvasViewCalendar.swift
       - path: PM/Canvas/CanvasDayActions.swift
       - path: PM/Canvas/CanvasTaskLists.swift
       - path: PM/Model/StoreRegistry.swift

@@ -459,4 +459,145 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(CanvasProjectRows.detail(project(daysAgo: 1)), "Nothing open")
         XCTAssertEqual(CanvasProjectRows.summary([busy, project(daysAgo: 40)], now: now), "1 moving · 1 quiet")
     }
+
+    // MARK: Layouts (step 8)
+
+    private var chicago: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Chicago")!
+        calendar.firstWeekday = 1
+        return calendar
+    }
+
+    /// Friday the 18th, mid-morning.
+    private var friday: Date { chicago.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 10))! }
+
+    /// `pmLayout` reads as written and is left off at List; a layout a view doesn't offer, or the rail on
+    /// more than one day, draws the list and keeps what was set.
+    func testALayoutIsOnTheNodeAndDrawnOnlyWhereItFits() {
+        var card = node(["pmView": .string("day"), "pmLayout": .string("Month")])
+        XCTAssertEqual(CanvasViewSpec.of(card)?.layout, .month)
+        XCTAssertEqual(CanvasViewSpec.of(node(["pmView": .string("day"), "pmLayout": .string("gantt")]))?.layout, .list)
+        CanvasViewSpec.set(CanvasViewSpec(kind: .day), on: &card)
+        XCTAssertNil(card.extra["pmLayout"], "List is the default, and isn't written")
+
+        var rail = CanvasViewSpec(kind: .day, layout: .rail)
+        XCTAssertEqual(rail.shownLayout, .rail)
+        rail.period = .week
+        XCTAssertEqual(rail.shownLayout, .list, "The rail is one day's")
+        XCTAssertEqual(rail.layout, .rail, "and is kept for when it's one day again")
+        XCTAssertEqual(CanvasViewSpec(kind: .comingUp, layout: .rail).shownLayout, .list)
+        XCTAssertEqual(CanvasViewSpec(kind: .comingUp, layout: .month).shownLayout, .month)
+        XCTAssertEqual(CanvasViewSpec(kind: .waiting, layout: .week).shownLayout, .list)
+        XCTAssertEqual(CanvasViewSpec.Kind.day.layouts, [.list, .rail, .week, .month])
+        XCTAssertEqual(CanvasViewSpec.Kind.leftovers.layouts, [.list])
+    }
+
+    /// A Day's week and month are the calendar's, around the period's first day: whole weeks, from the
+    /// reader's first weekday.
+    func testADaysWeekAndMonthAreTheCalendars() throws {
+        let week = try XCTUnwrap(CanvasViewSpec(kind: .day, layout: .week).calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(week.days.first, "2026-09-13")
+        XCTAssertEqual(week.days.last, "2026-09-19")
+        XCTAssertEqual(week.title, "This Week · Sep 13–19")
+        XCTAssertEqual(week.range.start, chicago.date(from: DateComponents(year: 2026, month: 9, day: 13)))
+        XCTAssertEqual(week.range.end, chicago.date(from: DateComponents(year: 2026, month: 9, day: 20)))
+
+        let month = try XCTUnwrap(CanvasViewSpec(kind: .day, layout: .month).calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(month.title, "September 2026")
+        XCTAssertEqual(month.month, "2026-09")
+        XCTAssertEqual(month.days.first, "2026-08-30", "The Sunday before the 1st")
+        XCTAssertEqual(month.days.last, "2026-10-03", "The Saturday after the 30th")
+        XCTAssertEqual(month.days.count, 35)
+
+        let june = try XCTUnwrap(CanvasViewSpec(kind: .day, period: .day("2026-06-03"), layout: .month)
+            .calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(june.title, "June 2026")
+        XCTAssertEqual(june.days.first, "2026-05-31")
+        XCTAssertNil(try CanvasViewSpec(kind: .day).calendarSpan(now: friday, calendar: chicago), "A list draws its period")
+    }
+
+    /// Coming up rolls: its week is the next seven days, and its month five weeks from this one's start.
+    func testComingUpsWeekAndMonthLookAhead() throws {
+        let week = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, period: .today, layout: .week)
+            .calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(week.days, ["2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22",
+                                   "2026-09-23", "2026-09-24"], "Whatever its period, today and on")
+        let month = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, layout: .month).calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(month.days.first, "2026-09-13")
+        XCTAssertEqual(month.days.last, "2026-10-17")
+        XCTAssertNil(month.month)
+    }
+
+    /// Paging a week or month pins the period to that span's first day, and paging back to the one
+    /// today is in follows the clock again.
+    func testPagingPinsAndComesBackToToday() throws {
+        let week = CanvasViewSpec(kind: .day, layout: .week)
+        XCTAssertEqual(try week.stepped(by: -1, now: friday, calendar: chicago), .day("2026-09-06"))
+        let back = CanvasViewSpec(kind: .day, period: .day("2026-09-06"), layout: .week)
+        XCTAssertEqual(try back.stepped(by: 1, now: friday, calendar: chicago), .today)
+        XCTAssertFalse(back.showsToday(now: friday, calendar: chicago))
+        XCTAssertTrue(week.showsToday(now: friday, calendar: chicago))
+        XCTAssertEqual(try back.calendarSpan(now: friday, calendar: chicago)?.title, "Week of Sep 6")
+
+        let month = CanvasViewSpec(kind: .day, layout: .month)
+        XCTAssertEqual(try month.stepped(by: -1, now: friday, calendar: chicago), .day("2026-08-01"))
+        XCTAssertEqual(try month.stepped(by: 1, now: friday, calendar: chicago), .day("2026-10-01"))
+        XCTAssertNil(try CanvasViewSpec(kind: .comingUp, layout: .week).stepped(by: 1, now: friday, calendar: chicago))
+        XCTAssertNil(try CanvasViewSpec(kind: .day).stepped(by: 1, now: friday, calendar: chicago))
+    }
+
+    /// A heading's time as minutes past midnight, noon and midnight included.
+    func testAHeadingsTimeIsMinutesPastMidnight() {
+        XCTAssertEqual(CanvasTimeGrid.minutes(of: "9:10 AM"), 550)
+        XCTAssertEqual(CanvasTimeGrid.minutes(of: "2:15 PM"), 855)
+        XCTAssertEqual(CanvasTimeGrid.minutes(of: "12:30 PM"), 750)
+        XCTAssertEqual(CanvasTimeGrid.minutes(of: "12:05 AM"), 5)
+        XCTAssertNil(CanvasTimeGrid.minutes(of: nil))
+        XCTAssertNil(CanvasTimeGrid.minutes(of: "Week in review"))
+    }
+
+    /// The rail: back to back when a block is longer than the time to the next, further apart when the
+    /// time between them is longer than the block — and an untimed one just follows.
+    func testTheRailSpacesBlocksByTheTimeBetweenThem() {
+        XCTAssertEqual(CanvasTimeGrid.railTops(heights: [40, 40, 40], minutes: [nil, 600, 610], perMinute: 1, gap: 0),
+                       [0, 40, 80])
+        XCTAssertEqual(CanvasTimeGrid.railTops(heights: [50, 20], minutes: [540, 840], perMinute: 1, gap: 0),
+                       [0, 300], "Five hours apart is 300 points of rail")
+        XCTAssertEqual(CanvasTimeGrid.railTops(heights: [120, 20, 20], minutes: [540, 600, 840], perMinute: 1, gap: 4),
+                       [0, 124, 364], "Measured from where the last timed block landed, not where it would have")
+    }
+
+    /// A week's grid is the working day, widened for an early or late sitting; a column pushes a block
+    /// down when two began too close together to fit.
+    func testAWeeksGridTakesInEverySitting() {
+        XCTAssertEqual(CanvasTimeGrid.hours(for: []), 9...17)
+        XCTAssertEqual(CanvasTimeGrid.hours(for: [7 * 60 + 30, 20 * 60 + 10]), 7...21)
+        XCTAssertEqual(CanvasTimeGrid.columnTops(minutes: [540, 550, 660], firstHour: 9, perHour: 46, blockHeight: 44),
+                       [0, 46, 92])
+        XCTAssertEqual(CanvasTimeGrid.columnTops(minutes: [600], firstHour: 9, perHour: 46, blockHeight: 44), [46])
+    }
+
+    /// The rail's order is the day's: an untimed sitting first, then sittings and stray completions by
+    /// their times.
+    func testTheRailIsInTheOrderTheDayWent() throws {
+        func sitting(_ time: String?, _ name: String) -> String {
+            """
+            {"projectFolder": "W-1 Redesign", "projectName": "Redesign", "isArchived": false,
+             "session": "2026-09-18", "sessionOrdinal": 0, "sessionDigest": "\(name)",
+             \(time.map { #""startTime": "\#($0)","# } ?? "") "name": "\(name)", "prose": "", "isCurrent": false,
+             "written": [], "picked": [], "finished": [], "dropped": []}
+            """
+        }
+        let tick = ISO8601DateFormatter().string(from: chicago.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 16, minute: 2))!)
+        let json = """
+        {"sittings": [\(sitting("2:15 PM", "c")), \(sitting("9:10 AM", "b")), \(sitting(nil, "a"))],
+         "elsewhere": [{"projectFolder": "H-1 Home", "projectName": "Home", "isArchived": false,
+                        "at": "\(tick)", "text": "Renew passport", "dropped": false}]}
+        """
+        let list = try JSONDecoder().decode(SittingList.self, from: Data(json.utf8))
+        let entries = CanvasTimeGrid.railEntries(list, calendar: chicago)
+        XCTAssertEqual(entries.map(\.minute), [nil, 550, 855, 16 * 60 + 2])
+        XCTAssertEqual(CanvasTimeGrid.ordered(list.sittings).map(\.name), ["a", "b", "c"])
+    }
 }

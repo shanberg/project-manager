@@ -49,6 +49,16 @@ struct CanvasViewSpec: Equatable {
         /// The periods its menu offers, in order: Coming up looks ahead, so it has no yesterday.
         var periods: [Period] { self == .comingUp ? [.today, .week] : Period.relative }
 
+        /// The layouts that answer its question (D9): a Day can be read down a rail, across a week or as a
+        /// month, and Coming up across a week or a month. A list of tasks from anywhere has no shape in time.
+        var layouts: [Layout] {
+            switch self {
+            case .day: return [.list, .rail, .week, .month]
+            case .comingUp: return [.list, .week, .month]
+            case .waiting, .search, .leftovers, .projects: return [.list]
+            }
+        }
+
         /// What its menu calls `period`: a Day's span, Leftovers' cut-off, Coming up's horizon.
         func title(of period: Period) -> String {
             switch self {
@@ -133,6 +143,37 @@ struct CanvasViewSpec: Equatable {
         static let relative: [Period] = [.today, .yesterday, .week]
     }
 
+    /// How time is laid out (D9). Only some fit a view, and the rail only one day — see `shownLayout`.
+    enum Layout: String, CaseIterable {
+        /// Grouped, in order: every view's.
+        case list
+        /// One day down a time gutter, each sitting placed at when it began.
+        case rail
+        /// Seven columns, a sitting a block at its start time, what's due at the top of its day.
+        case week
+        /// A grid of days, each marked with its sittings and what falls due.
+        case month
+
+        var title: String {
+            switch self {
+            case .list: return "List"
+            case .rail: return "Rail"
+            case .week: return "Week"
+            case .month: return "Month"
+            }
+        }
+
+        /// The least a card needs to draw it, grown to when the layout is chosen: seven columns don't
+        /// fit in a day's column.
+        var minimumSize: CGSize? {
+            switch self {
+            case .list, .rail: return nil
+            case .week: return CGSize(width: 780, height: 480)
+            case .month: return CGSize(width: 560, height: 500)
+            }
+        }
+    }
+
     /// Which projects (D2).
     enum Projects: Equatable {
         /// Every project and area — and the archive, for what was archived in the span.
@@ -159,6 +200,16 @@ struct CanvasViewSpec: Equatable {
     var projects: Projects = .everything
     /// What a Search view looks for. Empty until it's told.
     var query: String = ""
+    var layout: Layout = .list
+
+    /// The layout drawn: the one set, when this view offers it and it fits the period — the rail is one
+    /// day's, so a Day set to This Week draws its list — else the list. What's set is kept either way,
+    /// so a card set back to one day is back on its rail.
+    var shownLayout: Layout {
+        guard kind.layouts.contains(layout) else { return .list }
+        if layout == .rail && period.isSpan { return .list }
+        return layout
+    }
 
     // MARK: On the node
 
@@ -166,6 +217,7 @@ struct CanvasViewSpec: Equatable {
     static let periodKey = "pmPeriod"
     static let projectsKey = "pmProjects"
     static let queryKey = "pmQuery"
+    static let layoutKey = "pmLayout"
 
     /// The view this node is, or nil for a node that isn't one — anything but a text node, a text node
     /// without the key, or one naming a view this build doesn't have.
@@ -176,6 +228,8 @@ struct CanvasViewSpec: Equatable {
         var spec = CanvasViewSpec(kind: kind)
         if case .string(let period)? = node.extra[periodKey] { spec.period = Period(value: period) }
         if case .string(let query)? = node.extra[queryKey] { spec.query = query }
+        if case .string(let layout)? = node.extra[layoutKey],
+           let known = Layout(rawValue: layout.trimmingCharacters(in: .whitespaces).lowercased()) { spec.layout = known }
         switch node.extra[projectsKey] {
         case .string(let value)? where value.trimmingCharacters(in: .whitespaces).lowercased() == "board":
             spec.projects = .board
@@ -200,6 +254,7 @@ struct CanvasViewSpec: Equatable {
         node.extra[periodKey] = spec.period == .today ? nil : .string(spec.period.value)
         let query = spec.query.trimmingCharacters(in: .whitespaces)
         node.extra[queryKey] = query.isEmpty ? nil : .string(query)
+        node.extra[layoutKey] = spec.layout == .list ? nil : .string(spec.layout.rawValue)
         switch spec.projects {
         case .everything: node.extra[projectsKey] = nil
         case .board: node.extra[projectsKey] = .string("board")

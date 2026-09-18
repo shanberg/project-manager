@@ -104,7 +104,9 @@ final class CanvasTaskListModel {
         generation += 1
         let mine = generation
         let kind = spec.kind
-        let before = spec.period.value
+        // Coming up laid out as a week or a month looks as far ahead as it draws.
+        let span = spec.kind == .comingUp ? ((try? spec.calendarSpan()) ?? nil) : nil
+        let before = span?.days.last ?? spec.period.value
         let beforeTitle = spec.period.beforeTitle.lowercased()
         let query = self.query.trimmingCharacters(in: .whitespaces)
         let projects: [String]?
@@ -247,7 +249,8 @@ struct CanvasTaskListCard: View {
     /// Which projects, when it isn't all of them — and for Leftovers, how old a sitting has to be.
     private var caption: String? {
         var parts: [String] = []
-        if model.spec.kind.hasPeriod { parts.append(model.spec.kind.title(of: model.spec.period)) }
+        if let span { parts.append(span.title) }
+        else if model.spec.kind.hasPeriod { parts.append(model.spec.kind.title(of: model.spec.period)) }
         if model.spec.projects != .everything { parts.append(model.spec.projects.title) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -272,9 +275,16 @@ struct CanvasTaskListCard: View {
 
     // MARK: Content
 
+    /// What Coming up laid out as a week or a month covers, or nil for a list.
+    private var span: CanvasCalendarSpan? {
+        model.spec.kind == .comingUp ? ((try? model.spec.calendarSpan()) ?? nil) : nil
+    }
+
     @ViewBuilder private var content: some View {
         if let failure = model.failure, model.groups == nil {
             quiet(failure)
+        } else if let groups = model.groups, let span {
+            if model.spec.shownLayout == .week { dueWeek(span, groups) } else { dueMonth(span, groups) }
         } else if let groups = model.groups {
             if groups.isEmpty {
                 quiet(emptyMessage)
@@ -312,6 +322,114 @@ struct CanvasTaskListCard: View {
             .multilineTextAlignment(.center)
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Coming up, on the calendar
+
+    /// Coming up's rows by the day they're due — and what's overdue, which is drawn on today.
+    private func dueDays(_ groups: [CanvasTaskGroup]) -> (byDay: [String: [CanvasTaskItem]], overdue: [CanvasTaskItem]) {
+        var byDay: [String: [CanvasTaskItem]] = [:]
+        var overdue: [CanvasTaskItem] = []
+        for group in groups {
+            if group.state == "overdue" { overdue += group.items; continue }
+            for item in group.items { byDay[String((item.hit.due ?? "").prefix(10)), default: []].append(item) }
+        }
+        return (byDay, overdue)
+    }
+
+    /// The next seven days as columns (D9), what's due pinned to the top of its day and what's overdue
+    /// on today, in red. Rows are the list's rows — they tick, drop and open as they do there — with
+    /// only the project's mark after them, since a column is narrow.
+    private func dueWeek(_ span: CanvasCalendarSpan, _ groups: [CanvasTaskGroup]) -> some View {
+        let (byDay, overdue) = dueDays(groups)
+        let today = CanvasTaskLists.todayISO()
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(span.days, id: \.self) { day in
+                    VStack(spacing: 0) {
+                        Text(day == today ? "Today" : CanvasCalendarCells.weekday(day))
+                            .font(.system(size: 9.5 * zoom, weight: day == today ? .semibold : .regular))
+                            .foregroundStyle(day == today ? Color.accentColor : .secondary)
+                        Text(CanvasCalendarCells.dayNumber(day))
+                            .font(.system(size: 13 * zoom, weight: day == today ? .bold : .regular))
+                            .foregroundStyle(day == today ? Color.accentColor : .primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.vertical, 4)
+            Divider()
+            ScrollView(.vertical) {
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(span.days, id: \.self) { day in
+                        VStack(alignment: .leading, spacing: 2) {
+                            if day == today, !overdue.isEmpty {
+                                Text("Overdue")
+                                    .font(.system(size: 10 * zoom, weight: .semibold))
+                                    .foregroundStyle(Color.red)
+                                ForEach(overdue, id: \.key) { item in row(item, among: groups, compact: true) }
+                                if !(byDay[day] ?? []).isEmpty { Divider().padding(.vertical, 2) }
+                            }
+                            ForEach(byDay[day] ?? [], id: \.key) { item in row(item, among: groups, compact: true) }
+                        }
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                }
+            }
+            // The column rules run the card's height, however long each day's list is.
+            .background {
+                HStack(spacing: 0) {
+                    ForEach(span.days.indices, id: \.self) { index in
+                        Rectangle().fill(index == 0 ? Color.clear : Color.primary.opacity(0.08)).frame(width: 0.5)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Five weeks from the start of this one (D9): each day with what falls due on it, as many as fit,
+    /// and today with what's overdue in red above them. Days already past are drawn faint. A task's
+    /// line goes to its project; its words are in the help when they don't fit.
+    private func dueMonth(_ span: CanvasCalendarSpan, _ groups: [CanvasTaskGroup]) -> some View {
+        let (byDay, overdue) = dueDays(groups)
+        let today = CanvasTaskLists.todayISO()
+        return CanvasMonthGrid(span: span, zoom: zoom, today: today, isQuiet: { $0 < today }) { day, lines in
+            let items = byDay[day] ?? []
+            let late = day == today ? overdue : []
+            VStack(alignment: .leading, spacing: 1) {
+                if !late.isEmpty {
+                    Text("\(late.count) overdue")
+                        .font(.system(size: 9.5 * zoom, weight: .semibold))
+                        .foregroundStyle(Color.red)
+                        .help(late.map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+                }
+                let room = max(0, lines - (late.isEmpty ? 0 : 1))
+                // The last line says how many more, rather than one more task.
+                let shown = items.count > room ? max(0, room - 1) : items.count
+                ForEach(items.prefix(shown), id: \.key) { item in
+                    Button { onOpenProject(item.hit.projectFolder) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            CanvasProjectMark(color: item.hit.projectColor, icon: item.hit.projectIcon, zoom: zoom * 0.8)
+                            Text(item.hit.text)
+                                .font(.system(size: 9.5 * zoom))
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(item.hit.text) · \(item.hit.projectName)")
+                }
+                if items.count > shown {
+                    Text(shown == 0 ? "\(items.count) due" : "+\(items.count - shown) more")
+                        .font(.system(size: 9 * zoom))
+                        .foregroundStyle(.secondary)
+                        .help(items.dropFirst(shown).map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+                }
+            }
+        }
     }
 
     // MARK: A group
@@ -410,7 +528,7 @@ struct CanvasTaskListCard: View {
 
     // MARK: A row
 
-    private func row(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup]) -> some View {
+    private func row(_ item: CanvasTaskItem, among groups: [CanvasTaskGroup], compact: Bool = false) -> some View {
         let hit = item.hit
         let row = item.row()
         let folder = hit.projectFolder
@@ -419,7 +537,8 @@ struct CanvasTaskListCard: View {
         return CanvasViewRow(
             row: row, state: state,
             isSelected: model.selection.contains(row.id, in: folder),
-            isEngaged: model.isEngaged, zoom: zoom,
+            // A column is narrow, so its rows are a size down.
+            isEngaged: model.isEngaged, zoom: compact ? zoom * 0.88 : zoom,
             toggle: acts.contains(.complete) ? .complete : acts.contains(.reopen) ? .reopen : nil,
             onToggle: { perform(state == .open ? .complete : .reopen, [item]) },
             isEditing: editing == item.key, draft: $draft,
@@ -443,7 +562,7 @@ struct CanvasTaskListCard: View {
             drag: {
                 NSItemProvider(object: CanvasDayRows.markdown(targets(item, among: groups).map { $0.row() }) as NSString)
             },
-            trailing: { chip(item) },
+            trailing: { if compact { compactChip(item) } else { chip(item) } },
             menu: { menu(item, among: groups) })
     }
 
@@ -487,6 +606,16 @@ struct CanvasTaskListCard: View {
                 .help("Go to \(hit.projectName)")
             }
         }
+        .fixedSize()
+    }
+
+    /// A column's chip: only the project's mark, which goes there, and its name on hover.
+    private func compactChip(_ item: CanvasTaskItem) -> some View {
+        Button { onOpenProject(item.hit.projectFolder) } label: {
+            CanvasProjectMark(color: item.hit.projectColor, icon: item.hit.projectIcon, zoom: zoom).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Go to \(item.hit.projectName)")
         .fixedSize()
     }
 

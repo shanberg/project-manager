@@ -501,6 +501,46 @@ app, with Coming up as a fourth kind on the task-list card.
   Projects have no CLI command of their own yet.
 - **The contract (1.17.0)** adds `task.due`, and `activity` and `projects` on `project.list`.
 
+### As built (step 8)
+
+`CanvasViewCalendar.swift` (what each layout covers, and where things land, kept pure for the tests) and
+`CanvasViewLayouts.swift` (the rail, a Day's week, and the month grid Day and Coming up share). No new
+query and no contract change: every layout draws an answer the view already had, over a wider span.
+
+- **`pmLayout`** on the node: `list` (the default, not written), `rail`, `week`, `month`. The card's menu
+  has **Layout**, offering what every selected card offers. A layout a view doesn't have draws its list,
+  and so does the rail on more than one day, but what's set is kept, so a card set back to one day is
+  back on its rail. Choosing Week or Month grows a card to what it needs (780×480, 560×500) in the same
+  undoable step.
+- **The rail** places each sitting at least as far below the last as the time between their starts
+  (0.8 pt a minute), so a morning of sittings back to back reads as one, and a quiet afternoon is empty
+  rail. Blocks are measured, not sized by time: a heading says when a sitting began, never how long it
+  ran (D5). A completion in no sitting sits on the rail at its own time, where the list puts it under
+  Also finished.
+- **A Day's week and month are the calendar's**, found around the period's first day. So a Today card
+  as a month is this month, and a card pinned to a June date is June. The header pages back and on
+  with ‹ ›, which pins the period to that span's first day. Paging back to the span today is in returns
+  to Today, following the clock, and **Today** in the header does the same in one click.
+- **The week** is seven columns on an hour grid: the working day, 9 to 5, widened for an early or late
+  sitting. Each sitting is a block at its start, in its project's colour, showing its time, project and
+  lede. Two sittings too close together to both fit are stacked. A sitting with no time goes in a strip
+  above the grid. Clicking a block goes to the project, dragging it makes a card of the sitting (D7),
+  and clicking a day's heading opens that day as a Day card beside this one. Stray completions aren't
+  drawn on the week; the list and the rail have them.
+- **The month** is whole weeks, each day marked with a dot per sitting in its project's colour, and
+  the sittings listed in the help. The days either side of the month are faint. **Clicking a day opens
+  it as a Day card** pinned to that date, across the same projects, beside the calendar, so the month
+  stays where it was.
+- **Coming up rolls, as its period does.** Its week is the next seven days, today first, and its month
+  is five weeks from the start of this one. A deadline on the 2nd matters on the 30th, and a calendar
+  month would hide it. The horizon is the layout's there, so the Period menu is hidden on it. In the
+  week, what's due is pinned to its day as the list's own rows, which tick, drop and open as they do
+  there, and what's overdue heads today in red. In the month, each day lists what fits and then "+N
+  more", today leads with "N overdue", and days already past are faint.
+- **Day's month doesn't show what fell due.** That's Coming up's question, and a board wanting both
+  puts the two cards side by side. Calendar events (below) are still only room left in the design.
+- **Copy as Text** is the same document in every layout: the answer over the span drawn.
+
 ## Calendars, eventually
 
 Sketched only so that the views leave room for it. Nothing here is decided.
@@ -557,7 +597,7 @@ Each step ships on its own.
    card is general before another query is written.
 6. ✓ **Leftovers (`task.leftovers`).** The sitting card (D7) was built with step 4's dragging.
 7. ✓ **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
-8. **The week and month layouts (D9).** They're last because they are the most drawing and the least
+8. ✓ **The week and month layouts (D9).** They're last because they are the most drawing and the least
    new data, and because the calendar design should be settled before the week grid's shape is fixed.
 
 ## Open
