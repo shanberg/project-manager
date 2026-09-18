@@ -156,6 +156,7 @@ targets:
       - path: PM/Project/CompletionController.swift
       - path: PM/Project/TokenLayoutManager.swift
       - path: PM/Project/SessionBlocks.swift
+      - path: PM/Project/SessionPicks.swift
       - path: PM/Canvas/CanvasPageBudget.swift
       - path: PM/Canvas/CanvasPageHandover.swift
       - path: PM/Canvas/CanvasPageKeys.swift

@@ -1,6 +1,6 @@
 # Sessions and the work they leave open
 
-**Status:** decided 2026-09-17. D6, dropped, and the pick log with its contract (build order steps 1 and 2) built 2026-09-17; nothing draws picks yet. Follows [tile-sessions.md](tile-sessions.md), which fixed how a
+**Status:** decided 2026-09-17. D6, dropped, the pick log with its contract, and the drawing (build order steps 1–3) built 2026-09-17; the app draws picks but can't make one yet (that's step 4). Follows [tile-sessions.md](tile-sessions.md), which fixed how a
 card *enters* a session; this is about what a session *is*, and what happens to the work in the old ones.
 
 ## The problem
@@ -168,7 +168,12 @@ looking abandoned.
 
 That's one caption in place of a dozen, and every leftover still one glance away from its context.
 **Everything** is unchanged apart from the chips and the Picked up groups. **Tasks** draws the same
-Still open group, with nothing above it.
+Still open group, with nothing above it, and without its caption, since it's the only thing on the card.
+
+As built: a picked-up row and its own line are one task to the selection and the context menu, and two
+rows to hover and inline editors, so an editor opens where you asked for it. Only the task's own line
+can be dragged; dragging an old task onto today is D1, which comes with the drags. Clicking a chip whose
+task has no line drawn on the card (Current's picked-up rows) opens the origin sitting's note.
 
 ### D6 — Dropped
 

@@ -102,6 +102,23 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
         }
     }
 
+    /// How the sittings are laid out.
+    ///
+    /// `sittings` is each sitting under its own caption, the tasks it picked up drawn after its own.
+    /// `pile` is docs/sessions.md D5's *today and the pile*: the latest sitting drawn whole (when
+    /// `withLatest`), then every other open task in one **Still open** group, each carrying the chip
+    /// that says where it came from. One caption in place of a dozen, which is what a card that exists
+    /// to say "where is this now" was drowning in.
+    enum Layout: Equatable { case sittings, pile(withLatest: Bool) }
+
+    var layout: Layout {
+        switch self {
+        case .everything, .brief: return .sittings
+        case .current: return .pile(withLatest: true)
+        case .tasks: return .pile(withLatest: false)
+        }
+    }
+
     /// Whether this card draws the prose of the sitting at `index`, where 0 is the most recent —
     /// `addSession` inserts at the front, so the newest sitting is the first one.
     func showsProse(ofSessionAt index: Int) -> Bool {

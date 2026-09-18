@@ -76,6 +76,9 @@ final class PMStore {
     /// The colour chosen in Project Settings, from the same frontmatter — see `ProjectColor`.
     private(set) var color: ProjectColor?
     private(set) var todos: [Todo] = []
+    /// Every standing pick that still resolves in this read: which older task was picked up into which
+    /// sitting (docs/sessions.md D2). Each task also carries its latest one as `Todo.picked`.
+    private(set) var picks: [TaskPick] = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
     ///
@@ -358,6 +361,7 @@ final class PMStore {
             icon = nil
             color = nil
             todos = []
+            picks = []
             lastEditedAt = nil
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
@@ -391,7 +395,8 @@ final class PMStore {
                 // Read the bytes here rather than through `notesShow(handle:)`, because the icon lives
                 // in frontmatter the parsed notes don't carry — one read, handed to both.
                 let raw = try handle.io.readContent(path: handle.notesPath)
-                let output = try notesShow(rawText: raw)
+                // With the folder, so the read carries the picks that live beside the notes.
+                let output = try notesShow(rawText: raw, projectPath: handle.projectPath)
                 Log.write("notesShow ok: todos=\(output.todos.count)")
                 // Set here, on the IO queue, rather than beside the published state: a batch reads it
                 // from the same queue, so it always sees the newest read that has actually finished.
@@ -424,6 +429,7 @@ final class PMStore {
                     self.icon = icon
                     self.color = color
                     self.todos = output.todos
+                    self.picks = output.picks
                     self.resolveWaits()
                     self.lastEditedAt = lastEdited
                     self.focusedKey = output.focusedKey

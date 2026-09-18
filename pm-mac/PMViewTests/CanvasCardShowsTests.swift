@@ -65,6 +65,14 @@ final class CanvasCardShowsTests: XCTestCase {
         XCTAssertFalse(shows.brief)
     }
 
+    /// D5: Everything keeps a caption per sitting; Current is the latest sitting and the pile; Tasks is
+    /// the pile alone.
+    func testCurrentAndTasksDrawThePileInPlaceOfACaptionPerSitting() {
+        XCTAssertEqual(CanvasCardShows.everything.layout, .sittings)
+        XCTAssertEqual(CanvasCardShows.current.layout, .pile(withLatest: true))
+        XCTAssertEqual(CanvasCardShows.tasks.layout, .pile(withLatest: false))
+    }
+
     func testTasksDrawsOpenWorkAndNothingElse() {
         let shows = CanvasCardShows.tasks
         XCTAssertFalse(shows.brief)

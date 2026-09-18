@@ -118,6 +118,15 @@ public struct TaskPick: Codable, Equatable, Sendable {
     /// The sitting it was picked up into: its ISO date, and its index in this read.
     public var into: String
     public var intoIndex: Int
+
+    public init(id: String, at: String, sessionIndex: Int, lineIndex: Int, into: String, intoIndex: Int) {
+        self.id = id
+        self.at = at
+        self.sessionIndex = sessionIndex
+        self.lineIndex = lineIndex
+        self.into = into
+        self.intoIndex = intoIndex
+    }
 }
 
 /// The one fact every task read carries about its picks: the latest sitting it was picked up into.

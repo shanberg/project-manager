@@ -150,12 +150,49 @@ struct CanvasProjectNote: View {
 
     /// Every visible task row's key, in the order the card is drawing them — what a ⇧-click ranges
     /// over, and what the selection is checked against when the document changes underneath it.
+    ///
+    /// A task drawn twice — on its own line and again under the sitting that picked it up — is one row
+    /// to the selection, at the first place it is drawn: selecting it is selecting the task.
     private var visibleKeys: [String] {
-        shownSessions.flatMap { index, session in
+        var seen = Set<String>()
+        return drawnTodos.map(PMStore.key(for:)).filter { seen.insert($0).inserted }
+    }
+
+    /// Every task row the card draws, in the order it draws them, copies included.
+    private var drawnTodos: [Todo] {
+        func sitting(_ index: Int, _ session: Session) -> [Todo] {
             blocks(for: session, at: index).compactMap { block in
-                if case .task(let identified) = block { return PMStore.key(for: identified.todo) }
+                if case .task(let identified) = block { return identified.todo }
                 return nil
+            } + pickedRows(into: index).map(\.todo)
+        }
+        switch shows.layout {
+        case .sittings:
+            return shownSessions.flatMap { sitting($0.index, $0.session) }
+        case .pile(let withLatest):
+            let latest = withLatest ? shownSessions.first.map { sitting($0.index, $0.session) } ?? [] : []
+            return latest + pileRows(withLatest: withLatest).map(\.todo)
+        }
+    }
+
+    /// The tasks whose own line is drawn somewhere on the card — where an origin chip can scroll to.
+    private var originKeys: Set<String> {
+        switch shows.layout {
+        case .sittings:
+            return Set(shownSessions.flatMap { index, session in
+                blocks(for: session, at: index).compactMap { block -> String? in
+                    if case .task(let identified) = block { return PMStore.key(for: identified.todo) }
+                    return nil
+                }
+            })
+        case .pile(let withLatest):
+            var keys = Set(pileRows(withLatest: withLatest).map { PMStore.key(for: $0.todo) })
+            if withLatest, let first = shownSessions.first {
+                for case .task(let identified) in blocks(for: first.session, at: first.index) {
+                    keys.insert(PMStore.key(for: identified.todo))
+                }
             }
+            return keys
         }
     }
 
@@ -284,6 +321,8 @@ struct CanvasProjectNote: View {
             dropTarget = nil
         }
         .onChange(of: display.shows) { _, _ in selection.keep(within: visibleKeys) }
+        // A pick made from `pm` or Raycast changes which rows are drawn without touching a task.
+        .onChange(of: store.picks) { _, _ in selection.keep(within: visibleKeys) }
         // A find narrows the list without touching the document, so the same reconcile applies — and
         // the count goes back to the field that asked for it. In `onChange` rather than in the body:
         // publishing from inside a view update is a write to the thing being drawn.
@@ -391,8 +430,16 @@ struct CanvasProjectNote: View {
                                            showsPlaceholders: false)
                     }
                     if shows.brief { members }
-                    ForEach(shownSessions, id: \.index) { index, session in
-                        session_(session, at: index)
+                    switch shows.layout {
+                    case .sittings:
+                        ForEach(shownSessions, id: \.index) { index, session in
+                            session_(session, at: index)
+                        }
+                    case .pile(let withLatest):
+                        if withLatest, let first = shownSessions.first {
+                            session_(first.session, at: first.index)
+                        }
+                        pile(withLatest: withLatest)
                     }
                     footer
                 }
@@ -673,6 +720,7 @@ struct CanvasProjectNote: View {
 
     @ViewBuilder private func session_(_ session: Session, at index: Int) -> some View {
         let blocks = blocks(for: session, at: index)
+        let picked = pickedRows(into: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         // A sitting is captioned when it puts something on the card. Narrowed to tasks, a session whose
         // whole content was prose contributes nothing and would otherwise leave a date standing over
@@ -684,7 +732,7 @@ struct CanvasProjectNote: View {
         // it is the first thing an empty sitting is for, and not while a find is narrowing the card.
         let isEmpty = session.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let showsEmpty = isEmpty && shows.showsProse(ofSessionAt: index) && display.find.isEmpty
-        if (!blocks.isEmpty || showsEmpty), !caption.isEmpty {
+        if (!blocks.isEmpty || !picked.isEmpty || showsEmpty), !caption.isEmpty {
             Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -714,6 +762,67 @@ struct CanvasProjectNote: View {
             case .task(let identified):
                 row(identified.todo)
             }
+        }
+        // **Picked up**: the older tasks taken up in this sitting, after its own, each still carrying
+        // where it came from. Drawn here *and* on its own line — one task in two places, both showing
+        // its state — because moving it here would take it out of the sentence that explains it
+        // (docs/sessions.md D5).
+        if !picked.isEmpty {
+            groupCaption("Picked up")
+            ForEach(picked) { identified in
+                row(identified.todo, place: .picked(into: index), showsOrigin: true)
+            }
+        }
+    }
+
+    /// D5's pile: every open task not already on the card, in one group, newest origin first — in place
+    /// of a caption per sitting, each row carrying the chip that says which sitting it is from.
+    ///
+    /// Captioned **Still open** under the latest sitting, where it is the second of two groups; a Tasks
+    /// card is nothing but the pile, and a caption over the only thing on the card says nothing.
+    @ViewBuilder private func pile(withLatest: Bool) -> some View {
+        let rows = pileRows(withLatest: withLatest)
+        if !rows.isEmpty, withLatest {
+            groupCaption("Still open").padding(.top, shownSessions.isEmpty ? 0 : 8)
+        }
+        ForEach(rows) { entry in
+            row(entry.row.todo, showsOrigin: entry.row.showsOrigin)
+        }
+    }
+
+    /// A group's caption inside the card — a sitting's own, or Picked up and Still open — in the one
+    /// quiet style captions have here.
+    private func groupCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The tasks picked up into the sitting at `index` that this card draws: the finished ones only
+    /// where the card draws finished work, and only what the find leaves standing.
+    private func pickedRows(into index: Int) -> [IdentifiedTodo] {
+        SessionPicks.pickedUp(into: index, picks: store.picks, todos: store.todos)
+            .filter { shows.showsTask(checked: $0.checked) && matches($0) }
+            .map { IdentifiedTodo(id: "picked\(index)/\(PMStore.key(for: $0))", todo: $0) }
+    }
+
+    /// The pile's rows, identified the way a sitting's are — by raw line and occurrence within its
+    /// sitting — so a completion that reindexes the list slides the rows below rather than
+    /// cross-fading them.
+    private func pileRows(withLatest: Bool) -> [PileEntry] {
+        var seen: [String: Int] = [:]
+        let latest = withLatest ? shownSessions.first?.index : nil
+        return SessionPicks.pile(todos: store.todos, excluding: latest, picks: store.picks) {
+            shows.showsTask(checked: $0.checked) && matches($0)
+        }.map { row in
+            let occurrence = "\(row.todo.sessionIndex)/\(row.todo.rawLine)"
+            let n = seen[occurrence, default: 0]
+            seen[occurrence] = n + 1
+            return PileEntry(id: "\(occurrence)#\(n)", row: row)
         }
     }
 
@@ -750,8 +859,9 @@ struct CanvasProjectNote: View {
 
     // MARK: A task, and the editors that open on it
 
-    @ViewBuilder private func row(_ todo: Todo) -> some View {
-        let key = PMStore.key(for: todo)
+    @ViewBuilder private func row(_ todo: Todo, place: RowPlace = .origin,
+                                  showsOrigin: Bool = false) -> some View {
+        let key = rowID(todo, place)
         VStack(alignment: .leading, spacing: 0) {
             if activeEditor == EditorTarget(key: key, kind: .edit) {
                 InlineTextEditor(seed: todo.text, placeholder: "Task text", submitLabel: "Save",
@@ -762,7 +872,7 @@ struct CanvasProjectNote: View {
                 } onCancel: { activeEditor = nil }
                     .padding(.horizontal, 12)
             } else {
-                line(todo)
+                line(todo, place: place, showsOrigin: showsOrigin)
             }
             if activeEditor == EditorTarget(key: key, kind: .due) {
                 DueEditor(seed: todo.dueDate ?? "",
@@ -797,8 +907,14 @@ struct CanvasProjectNote: View {
 
     /// One task: its status, its words, and when it is due — the window's `taskLine`, minus the
     /// controls a board has no room for and minus the drag a board would fight.
-    private func line(_ todo: Todo) -> some View {
+    private func line(_ todo: Todo, place: RowPlace, showsOrigin: Bool) -> some View {
+        // Two keys, because a picked-up task is drawn twice. `key` is the task — what the selection,
+        // the context menu and the right-click reveal act on, so either row selects the same thing.
+        // `rowID` is this drawing of it — what hover and an open editor belong to, so pointing at one
+        // copy doesn't light up the other and an editor opens where you asked for it.
         let key = PMStore.key(for: todo)
+        let rowID = rowID(todo, place)
+        let isOrigin = place == .origin
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Button { store.toggle(todo) } label: {
                 TaskStatusIcon(state: todo.state, size: 12.5)
@@ -820,18 +936,29 @@ struct CanvasProjectNote: View {
 
             Spacer(minLength: 4)
 
+            // Said on the task's own line, and in the pile: the sitting it was written in has since
+            // picked it up. Not on the copy under Picked up, which is standing in that sitting.
+            if isOrigin, let mark = SessionPicks.pickedMark(todo) {
+                Text(mark)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            if showsOrigin { originChip(todo) }
+
             // Revealed on hover, exactly as in the window. Shown unconditionally it put a dashed
             // "＋date" on every dateless task on the card at once, which on a board of project cards is
             // a lot of empty controls competing with the tasks they are attached to. The card takes the
             // pointer once you have stepped into it, so it has a hover state to hang this off after all.
             DueChip(todo: todo,
-                    isEditing: activeEditor == EditorTarget(key: key, kind: .due),
-                    reveal: hovering == key,
+                    isEditing: activeEditor == EditorTarget(key: rowID, kind: .due),
+                    reveal: hovering == rowID,
                     onPick: { store.setDue(todo, due: $0) },
-                    onPickCustom: { open(.due, on: todo) })
+                    onPickCustom: { open(.due, on: todo, place: place) })
         }
         .onHover { inside in
-            hovering = inside ? key : (hovering == key ? nil : hovering)
+            hovering = inside ? rowID : (hovering == rowID ? nil : hovering)
             rowHover.set(key, inside: inside)
         }
         .padding(.leading, 12 + indent(todo.depth))
@@ -846,18 +973,21 @@ struct CanvasProjectNote: View {
         // control and the same selection in one beside it.
         .background(RowSelectionBand(isSelected: selection.contains(key),
                                      isEmphasized: engagement.isEngaged,
-                                     isHovering: hovering == key && activeEditor == nil))
+                                     isHovering: hovering == rowID && activeEditor == nil))
         // The row's breathing room is *inside* the published frame, so adjacent rows tile edge to edge
         // and the gaps the drop delegate computes abut with no dead bands between them.
-        .background(GeometryReader { geometry in
+        //
+        // Only a task's own line: a drop is resolved against where lines *are*, and a copy under
+        // Picked up is not where its line is.
+        .ifCondition(isOrigin) { view in view.background(GeometryReader { geometry in
             let frame = geometry.frame(in: .named(TaskDropResolver.coordinateSpace))
             Color.clear.preference(key: RowFramesKey.self, value: [RowFrame(
                 key: key, session: todo.sessionIndex, line: todo.lineIndex,
                 depth: todo.depth, minY: frame.minY, maxY: frame.maxY)])
-        })
+        }) }
         // In the background, so `ForEach`'s own identity for the row is left alone — an `.id` on the
         // row itself would replace it and undo the stable-across-reindex animations.
-        .background(Color.clear.frame(width: 0, height: 0).id(key))
+        .background(Color.clear.frame(width: 0, height: 0).id(rowID))
         .contentShape(Rectangle())
         // **Drag a task to move it**, which the card could not do before: reordering was the window's
         // and a board was where you read. It is the same drag, resolved by the same
@@ -867,7 +997,10 @@ struct CanvasProjectNote: View {
         // being stepped into, because until then the board owns this drag and it moves the card. That
         // is the same line `CanvasNodeView.takesItsOwnClicks` already draws; in a tiled view, where
         // there is nowhere to move a card to, the card has the drag from the first press.
-        .ifCondition(activeEditor == nil && engagement.actsImmediately) { view in
+        //
+        // Not the copy under Picked up, for the reason it publishes no frame. Dragging an old task onto
+        // today's sitting is how you will pick it up (D1), and that arrives with the drags.
+        .ifCondition(isOrigin && activeEditor == nil && engagement.actsImmediately) { view in
             view.onDrag {
                 let dragged = key
                 draggingKey = dragged
@@ -908,7 +1041,7 @@ struct CanvasProjectNote: View {
         .onTapGesture {
             if NSApp.currentEvent?.clickCount == 2 {
                 if NSEvent.modifierFlags.contains(.option) || todo.checked {
-                    open(.edit, on: todo)
+                    open(.edit, on: todo, place: place)
                 } else {
                     store.focus(todo)
                 }
@@ -918,10 +1051,10 @@ struct CanvasProjectNote: View {
         }
         .contextMenu {
             TaskMenu(todo: todo, targets: contextTargets(for: todo), store: store,
-                     openEditor: { open($0, on: todo) },
+                     openEditor: { open($0, on: todo, place: place) },
                      openAdd: { position in
                          addPosition = position
-                         open(.add, on: todo)
+                         open(.add, on: todo, place: place)
                      },
                      // Asked rather than done, exactly as the window asks — and now for the reason the
                      // window gives, since a card can delete a whole selection at once and the
@@ -1025,8 +1158,45 @@ struct CanvasProjectNote: View {
         if display.matches != count { display.matches = count }
     }
 
-    private func open(_ kind: EditorTarget.Kind, on todo: Todo) {
-        activeEditor = EditorTarget(key: PMStore.key(for: todo), kind: kind)
+    private func open(_ kind: EditorTarget.Kind, on todo: Todo, place: RowPlace = .origin) {
+        activeEditor = EditorTarget(key: rowID(todo, place), kind: kind)
+    }
+
+    /// This drawing of a task: its key on its own line, and the key under the sitting that picked it up
+    /// for the copy drawn there.
+    private func rowID(_ todo: Todo, _ place: RowPlace) -> String {
+        switch place {
+        case .origin: return PMStore.key(for: todo)
+        case .picked(let into): return "picked\(into)/\(PMStore.key(for: todo))"
+        }
+    }
+
+    /// Where an old task came from, quietly: its sitting's date. Hovering says the sentence it was
+    /// written beside; clicking goes there — to its own line when the card draws it, and otherwise into
+    /// that sitting's note, which is the one place its sentence is always drawn.
+    private func originChip(_ todo: Todo) -> some View {
+        Button {
+            let key = PMStore.key(for: todo)
+            if originKeys.contains(key) {
+                selection.select([key])
+                scrollTarget = key
+                scrollToken &+= 1
+            } else {
+                openNote = todo.sessionIndex
+            }
+        } label: {
+            Text(SessionPicks.day(iso: todo.sessionISODate) ?? "Earlier")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+                .fixedSize()
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(SessionPicks.originHelp(todo, sessions: notes?.sessions ?? [], tasks: store.todos))
     }
 
     /// The session's body, cut where its tasks are, and narrowed to what this card shows.
@@ -1055,6 +1225,13 @@ struct CanvasProjectNote: View {
         guard !shows.showsProse(ofSessionAt: index) else { return all }
         return all.filter { if case .prose = $0 { return false } else { return true } }
     }
+}
+
+/// A row of the pile with the identity it is diffed on.
+private struct PileEntry: Identifiable {
+    let id: String
+    let row: PileRow
+    var todo: Todo { row.todo }
 }
 
 /// What the board asks of the project card you are standing in.
