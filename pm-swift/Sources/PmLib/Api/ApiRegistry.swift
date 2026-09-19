@@ -20,7 +20,7 @@ public enum ApiTier: String, Codable, CaseIterable {
 
 public struct ApiField: Equatable {
     public enum Kind: String, Equatable {
-        case string, integer, boolean, taskRef, taskRefList, stringList, any
+        case string, integer, boolean, taskRef, taskRefList, taskTextList, stringList, any
     }
     public let name: String
     public let kind: Kind
@@ -144,9 +144,13 @@ public enum ApiRegistry {
                       // already there.
                       oneOf: [["task", "tasks"], ["waiting", "clearWaiting"]]),
         ApiActionSpec(name: "task.setText", tier: .mutation,
-                      summary: "Rename a task in place.",
-                      fields: [project, task,
-                               ApiField("text", .string, required: true, "The new text.")]),
+                      summary: "Rename a task in place, or several, each to its own new text.",
+                      fields: [project, optionalTask, revision,
+                               ApiField("text", .string, "The new text, with `task`."),
+                               ApiField("tasks", .taskTextList,
+                                        "Several tasks to rename in one write, each with its own `text`. "
+                                        + "Give this or `task` with `text`, not both.")],
+                      oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.wrap", tier: .mutation,
                       summary: "Wrap a task and its subtree in a new parent task.",
                       fields: [project, task,
@@ -361,6 +365,14 @@ extension ApiField {
         case .taskRefList:
             out["type"] = .string("array")
             out["items"] = ApiField("item", .taskRef, description).schema
+        case .taskTextList:
+            out["type"] = .string("array")
+            var item = ApiField("item", .taskRef, description).schema.objectValue ?? [:]
+            var properties = item["properties"]?.objectValue ?? [:]
+            properties["text"] = .object(["type": .string("string"), "description": .string("This task's new text.")])
+            item["properties"] = .object(properties)
+            item["required"] = .array([.string("line"), .string("text")])
+            out["items"] = .object(item)
         case .taskRef:
             out["type"] = .string("object")
             out["required"] = .array([.string("line")])

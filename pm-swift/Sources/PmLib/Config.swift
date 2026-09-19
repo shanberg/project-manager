@@ -389,6 +389,8 @@ public enum PmError: Error, CustomStringConvertible {
     case unknownConfigKey(String)
     case invalidConfigValue(key: String, expectedType: String)
     case projectNotFound(String)
+    /// `projectNotFound` for a caller that can act on the answer: the names it might have meant.
+    case projectNotFoundAmong(String, candidates: [String])
     case ambiguousProject(String)
     /// Project name or prefix argument was empty or only whitespace.
     case emptyProjectQuery
@@ -449,6 +451,9 @@ public enum PmError: Error, CustomStringConvertible {
         case .unknownConfigKey(let k): return "Unknown key: \(k)"
         case .invalidConfigValue(let k, let expected): return "Invalid value for \(k): expected \(expected)"
         case .projectNotFound(let q): return "No project found matching: \(q)"
+        case .projectNotFoundAmong(let q, let names):
+            let base = "No project found matching: \(q). Projects are matched by code (e.g. S-004) or by name"
+            return names.isEmpty ? base + "." : base + "; did you mean: \(names.joined(separator: ", "))?"
         case .ambiguousProject(let q): return "Ambiguous match. Multiple projects start with: \(q)"
         case .emptyProjectQuery: return "Project name or prefix cannot be empty."
         case .notesNotFound(let path): return "Notes file not found. Expected: \(path)"

@@ -133,6 +133,33 @@ final class RevisionTests: XCTestCase {
         XCTAssertEqual(open(), ["Send the invoice"])
     }
 
+    /// Retagging a list is one write, each task getting its own text — and the tasks after the first
+    /// still resolve, though the first one's digest changed under them.
+    func testSetTextRenamesSeveralTasksEachToItsOwnText() throws {
+        try XCTSkipUnless(haveBinary)
+        seed()
+        var venue = reference("Book the venue"); venue["text"] = "Book the hall"
+        var invoice = reference("Send the invoice"); invoice["text"] = "Send the final invoice"
+        let result = call("task.setText", ["project": "W-1", "tasks": [venue, invoice]])
+        XCTAssertNil(result["error"])
+        XCTAssertEqual(open(), ["Review the contract", "Book the hall", "Send the final invoice"])
+
+        // A batch item with no text is refused whole; nothing is half-renamed.
+        let refused = call("task.setText", ["project": "W-1",
+                                            "tasks": [reference("Review the contract")]])
+        XCTAssertEqual((refused["error"] as? [String: Any])?["code"] as? String, "emptyText")
+        XCTAssertEqual(open(), ["Review the contract", "Book the hall", "Send the final invoice"])
+    }
+
+    /// A read says which project it read, so a caller that left `project` out isn't left guessing.
+    func testListNamesItsProjectAndCallsALabelASession() throws {
+        try XCTSkipUnless(haveBinary)
+        seed()
+        let tasks = try XCTUnwrap(call("task.list", ["project": "W-1"])["data"] as? [[String: Any]])
+        XCTAssertFalse(tasks.isEmpty)
+        XCTAssertTrue(tasks.allSatisfy { ($0["project"] as? String)?.isEmpty == false })
+    }
+
     /// What the whole thing is for. A batch skips a reference it can't resolve — right when the batch
     /// itself removed it, wrong when Obsidian did — and this is the difference.
     func testABatchWontSilentlySkipATaskSomeoneElseEdited() throws {

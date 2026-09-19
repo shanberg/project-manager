@@ -196,16 +196,29 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
     case "task.setText":
         return try document(spec, input, options) { (context: DocumentContext) in
-            guard let text = input.text, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw PmError.emptyTodoText
+            // One task takes `text`; a batch gives each its own, since renaming several to one text is
+            // never what anyone meant.
+            let batch = input.tasks != nil
+            var text = context.rawText
+            var relocated = false
+            var sidecar: [PickEvent] = []
+            for reference in try references(input) {
+                guard let new = (batch ? reference.text : input.text),
+                      !new.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    throw PmError.emptyTodoText
+                }
+                guard let at = try resolve(reference, in: text, batch: batch) else { continue }
+                relocated = relocated || at.relocated
+                let renamed = try editTodosPreservingFormat(rawText: text) { notes in
+                    setTextOnTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
+                                    lineIndex: at.lineIndex, text: new)
+                } ?? text
+                sidecar += try retargeting(at, from: DocumentContext(rawText: text, lastEdited: context.lastEdited,
+                                                                     projectPath: context.projectPath),
+                                           to: renamed, source: options.source)
+                text = renamed
             }
-            let at = try resolveTaskRef(try taskRef(input), rawText: context.rawText)
-            let renamed = try editTodosPreservingFormat(rawText: context.rawText) { notes in
-                setTextOnTodoAt(notes: normalizeFocusMarker(notes: notes), sessionIndex: at.sessionIndex,
-                                lineIndex: at.lineIndex, text: text)
-            } ?? context.rawText
-            return Outcome(rawText: renamed, relocated: at.relocated,
-                           sidecar: try retargeting(at, from: context, to: renamed, source: options.source))
+            return Outcome(rawText: text, relocated: relocated, sidecar: sidecar)
         }
     case "task.setDue":
         return try editing(spec, input, options) { notes, at in
@@ -741,9 +754,10 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         var todos = read.todos
         if input.includeCompleted != true { todos = todos.filter { !$0.checked } }
         if let limit = input.limit { todos = Array(todos.prefix(limit)) }
+        let title = try projectTitleOf(input)
         return ApiResult(action: spec.name,
-                         summary: "\(todos.count) task\(todos.count == 1 ? "" : "s").",
-                         revision: read.revision, data: try JSONValue.encoding(todos))
+                         summary: "\(todos.count) task\(todos.count == 1 ? "" : "s") in \(title).",
+                         revision: read.revision, data: try labelled(todos, in: read, project: title))
     case "task.whatsDue":
         let read = try readProject(input)
         var due = read.todos.filter { !$0.checked && $0.effectiveDueDate != nil }
@@ -751,7 +765,8 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if let limit = input.limit { due = Array(due.prefix(limit)) }
         return ApiResult(action: spec.name,
                          summary: due.isEmpty ? "Nothing due." : "\(due.count) due.",
-                         revision: read.revision, data: try JSONValue.encoding(due))
+                         revision: read.revision,
+                         data: try labelled(due, in: read, project: try projectTitleOf(input)))
     case "task.progress":
         let read = try readProject(input)
         let (done, total) = read.todos.progress
@@ -1181,6 +1196,32 @@ private func resolvedProject(_ input: ApiInput) throws -> String {
 /// This used to parse the document here, alongside `notesShow` parsing it there — two implementations
 /// of one read, one of which knew about revisions. Now there is one, and the revision comes back from
 /// it whoever asked.
+/// The name of the project a read resolved to — the one thing a caller can't otherwise learn when it
+/// left `project` out and the focused one answered.
+private func projectTitleOf(_ input: ApiInput) throws -> String {
+    let path = try resolveProjectPath(nameOrPrefix: try resolvedProject(input))
+    return projectTitle(fromFolderName: (path as NSString).lastPathComponent)
+}
+
+/// Tasks as a caller reads them: each says which project it is in, and its `context` calls the
+/// sitting a session. `context` used to read "Fri, Sep 18 · General Work", and a label after a date
+/// reads as a place — a reader took "General Work" for a project. The Mac app keeps the plain form.
+private func labelled(_ todos: [Todo], in read: NotesShowOutput, project: String) throws -> JSONValue {
+    guard case .array(let entries) = try JSONValue.encoding(todos) else { return .null }
+    return .array(zip(todos, entries).map { todo, entry in
+        guard case .object(var fields) = entry else { return entry }
+        fields["project"] = .string(project)
+        if read.notes.sessions.indices.contains(todo.sessionIndex) {
+            let session = read.notes.sessions[todo.sessionIndex]
+            if !session.label.isEmpty {
+                fields["sessionLabel"] = .string(session.label)
+                fields["context"] = .string("\(session.date) · session: \(session.label)")
+            }
+        }
+        return .object(fields)
+    })
+}
+
 private func readProject(_ input: ApiInput) throws -> NotesShowOutput {
     try notesShow(handle: try resolveNotesHandle(project: try resolvedProject(input)))
 }

@@ -31,6 +31,23 @@ internal func resolveProjectPath(config: PmConfig, paths: ResolvedPaths, nameOrP
     case .ambiguous:
         throw PmError.ambiguousProject(nameOrPrefix)
     case .notFound:
-        throw PmError.projectNotFound(nameOrPrefix)
+        throw PmError.projectNotFoundAmong(nameOrPrefix,
+                                           candidates: closestProjectNames(to: nameOrPrefix, in: roots.flatMap(\.folders)))
     }
+}
+
+/// Names a caller might have meant by a query that matched nothing: projects sharing a word with it,
+/// else the first few, so the refusal always says what would have worked. Titles come with their
+/// codes because a code is the one spelling that can't be ambiguous.
+internal func closestProjectNames(to query: String, in folders: [String], limit: Int = 8) -> [String] {
+    let words = query.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count >= 3 }
+    func label(_ folder: String) -> String {
+        guard let code = projectCode(fromName: folder) else { return projectTitle(fromFolderName: folder) }
+        return "\(projectTitle(fromFolderName: folder)) (\(code))"
+    }
+    let related = folders.filter { folder in
+        let title = projectTitle(fromFolderName: folder).lowercased()
+        return words.contains { title.contains($0) }
+    }
+    return Array((related.isEmpty ? folders : related).prefix(limit)).map(label)
 }

@@ -62,8 +62,13 @@ public struct TaskRefInput: Codable, Equatable {
     public var sessionOrdinal: Int?
     public var line: Int
     public var digest: String?
+    /// What to do to this task, for the actions that do something different to each of a batch —
+    /// `task.setText`'s new text. Ignored everywhere else.
+    public var text: String?
 
-    public init(session: String? = nil, sessionOrdinal: Int? = nil, line: Int, digest: String? = nil) {
+    public init(session: String? = nil, sessionOrdinal: Int? = nil, line: Int, digest: String? = nil,
+                text: String? = nil) {
+        self.text = text
         self.session = session
         self.sessionOrdinal = sessionOrdinal
         self.line = line
@@ -85,6 +90,7 @@ public struct TaskRefInput: Codable, Equatable {
         sessionOrdinal = try c.decodeIfPresent(Int.self, forKey: .sessionOrdinal)
         line = try c.decode(Int.self, forKey: .line)
         digest = try c.decodeIfPresent(String.self, forKey: .digest)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
     }
 
     /// `session` is an ISO date or a session index, the same either-or the CLI accepts.
@@ -289,6 +295,7 @@ public struct ApiError: Error, Codable, Equatable {
         }
         switch pm {
         case .projectNotFound(let q): return ApiError(.projectNotFound, pm.description, detail: .string(q))
+        case .projectNotFoundAmong(let q, _): return ApiError(.projectNotFound, pm.description, detail: .string(q))
         case .ambiguousProject(let q): return ApiError(.ambiguousProject, pm.description, detail: .string(q))
         case .emptyProjectQuery: return ApiError(.missingField, pm.description, detail: .string("project"))
         case .notesNotFound: return ApiError(.notesNotFound, pm.description)

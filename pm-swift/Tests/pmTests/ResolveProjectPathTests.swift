@@ -75,8 +75,8 @@ final class ResolveProjectPathTests: XCTestCase {
     func testResolveProjectPathThrowsWhenNotFound() throws {
         let (config, paths) = try config()
         XCTAssertThrowsError(try resolveProjectPath(config: config, paths: paths, nameOrPrefix: "W-99")) { err in
-            guard case PmError.projectNotFound("W-99") = err else {
-                XCTFail("Expected projectNotFound, got \(err)")
+            guard case PmError.projectNotFoundAmong("W-99", _) = err else {
+                XCTFail("Expected projectNotFoundAmong, got \(err)")
                 return
             }
         }

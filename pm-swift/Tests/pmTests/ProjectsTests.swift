@@ -60,4 +60,16 @@ final class ProjectsTests: XCTestCase {
             return
         }
     }
+
+    /// A refusal names what would have worked: projects sharing a word with the query, with their codes,
+    /// else the first few — so a session label taken for a project name gets an answer, not a dead end.
+    func testClosestProjectNamesSuggestsRelatedThenAny() {
+        let folders = ["W-1 Design Editor", "W-2 Design Tokens", "W-3 Invoices"]
+        XCTAssertEqual(closestProjectNames(to: "General Work Design", in: folders),
+                       ["Design Editor (W-1)", "Design Tokens (W-2)"])
+        XCTAssertEqual(closestProjectNames(to: "General Work", in: folders, limit: 2),
+                       ["Design Editor (W-1)", "Design Tokens (W-2)"])
+        XCTAssertTrue(PmError.projectNotFoundAmong("x", candidates: ["Design Editor (W-1)"]).description
+            .contains("Design Editor (W-1)"))
+    }
 }
