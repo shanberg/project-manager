@@ -66,8 +66,17 @@ final class TokenLabelView: NSView {
     private let layoutManager = TokenLayoutManager()
     private let container = NSTextContainer(size: NSSize(width: 0, height: TokenLabelView.unbounded))
 
+    /// Measurements by container width. SwiftUI asks a row's size several times per layout pass, and
+    /// it re-runs a pass for every row in a card whenever anything in the card changes — a hover, a
+    /// selection — so without this a 250-row card lays its text out ~500 times to draw one hover.
+    /// Dropped whenever the text or the token display could have changed what a width comes to.
+    private var measured: [CGFloat: CGSize] = [:]
+    private var measuredMinimum: CGFloat?
+
     var attributed: NSAttributedString = NSAttributedString() {
         didSet {
+            measured.removeAll(keepingCapacity: true)
+            measuredMinimum = nil
             storage.setAttributedString(attributed)
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -95,6 +104,8 @@ final class TokenLabelView: NSView {
     /// Flipping the syntax preference changes how wide every token lays out, so the glyphs have to be
     /// regenerated rather than merely redrawn.
     private func reflowForDisplayChange() {
+        measured.removeAll(keepingCapacity: true)
+        measuredMinimum = nil
         layoutManager.invalidateGlyphs(forCharacterRange: NSRange(location: 0, length: storage.length),
                                 changeInLength: 0, actualCharacterRange: nil)
         layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: storage.length),
@@ -132,6 +143,13 @@ final class TokenLabelView: NSView {
     /// than the longest word reports the container's width and a column of single characters. The
     /// widest word is the real floor.
     private var minimumWidth: CGFloat {
+        if let measuredMinimum { return measuredMinimum }
+        let widest = computeMinimumWidth()
+        measuredMinimum = widest
+        return widest
+    }
+
+    private func computeMinimumWidth() -> CGFloat {
         let text = storage.string as NSString
         var widest: CGFloat = 0
         text.enumerateSubstrings(in: NSRange(location: 0, length: text.length),
@@ -148,6 +166,13 @@ final class TokenLabelView: NSView {
     /// than offered — is right for a view reporting its own frame and wrong for a measurement. Asked
     /// for the minimum at a 1pt container, the clamped version dutifully answered "1pt".
     private func layoutSize(fitting width: CGFloat) -> CGSize {
+        if let hit = measured[width] { return hit }
+        let size = uncachedLayoutSize(fitting: width)
+        measured[width] = size
+        return size
+    }
+
+    private func uncachedLayoutSize(fitting width: CGFloat) -> CGSize {
         container.size = NSSize(width: width, height: TokenLabelView.unbounded)
         layoutManager.ensureLayout(for: container)
         let used = layoutManager.usedRect(for: container)
@@ -165,12 +190,19 @@ final class TokenLabelView: NSView {
 
     override func layout() {
         super.layout()
+        fitContainerToBounds()
+    }
+
+    /// Measuring leaves the container at whatever width it last measured, and a cached measurement
+    /// doesn't touch it at all — so what is drawn and hit-tested is put at this view's own width first.
+    private func fitContainerToBounds() {
         if container.size.width != bounds.width {
             container.size = NSSize(width: bounds.width, height: TokenLabelView.unbounded)
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        fitContainerToBounds()
         let glyphs = layoutManager.glyphRange(for: container)
         layoutManager.drawBackground(forGlyphRange: glyphs, at: .zero)
         layoutManager.drawGlyphs(forGlyphRange: glyphs, at: .zero)
@@ -182,6 +214,7 @@ final class TokenLabelView: NSView {
     private func tokenName(at point: NSPoint) -> String? {
         guard onOpenProject != nil else { return nil }
         let text = storage.string
+        fitContainerToBounds()
         layoutManager.ensureLayout(for: container)
         // `glyphIndex(for:in:fractionOfDistanceThrough:)` returns the nearest glyph even when the point
         // is past the end of the line, so the hit is confirmed against the glyph's own rect before it

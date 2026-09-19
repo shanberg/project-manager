@@ -60,8 +60,10 @@ struct CanvasProjectNote: View {
     /// Which position a freshly opened add editor seeds to, set by the menu's Add commands before the
     /// editor opens.
     @State private var addPosition: TaskInsertPosition = .after
-    /// The task row under the pointer, which is what reveals its "＋date".
-    @State private var hovering: String?
+    /// The task row under the pointer, which is what reveals its "＋date". Held in an object the card's
+    /// own body never reads — only `RowHoverReader`s do — so moving the pointer from row to row redraws
+    /// those two rows' highlights and not the whole card. See `RowHoverState`.
+    @State private var hover = RowHoverState()
     /// The picked rows. The card is the project window's list on a board, so it selects the way that
     /// list selects — the rules are `RowSelection`'s, held here rather than restated.
     ///
@@ -85,9 +87,13 @@ struct CanvasProjectNote: View {
     @State private var draggedSubtree: Set<String> = []
     /// Every visible task row's extent and depth, collected by preference, in the card's own
     /// coordinate space. What the drop delegate resolves the pointer against.
-    @State private var rowFrames: [RowFrame] = []
+    ///
+    /// In a plain box rather than `@State`: only a drop reads them, and a `@State` write re-runs the
+    /// card's whole body whether or not the body reads it. Every layout that moved a row — a tile's
+    /// divider being dragged, a window resized, a line wrapping differently — published new frames and
+    /// so cost a second pass over every row on top of the layout itself.
+    @State private var frames = DropFrames()
     /// Every drawn sitting's whole block, so a drag can light the current one to pick up into it.
-    @State private var sessionFrames: [SessionFrame] = []
     /// The one resolved insertion slot for the drag in flight — where the indicator goes and where the
     /// drop will land.
     @State private var dropTarget: DropTarget?
@@ -455,8 +461,8 @@ struct CanvasProjectNote: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .coordinateSpace(name: TaskDropResolver.coordinateSpace)
-                .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
-                .onPreferenceChange(SessionFramesKey.self) { sessionFrames = $0 }
+                .onPreferenceChange(RowFramesKey.self) { frames.rows = $0 }
+                .onPreferenceChange(SessionFramesKey.self) { frames.sessions = $0 }
                 .overlay(alignment: .topLeading) { dropIndicator }
                 // **Only the app's own tasks.** The window's list also takes text and files dragged in
                 // from elsewhere; a card cannot, because the board underneath it is already the target
@@ -519,9 +525,9 @@ struct CanvasProjectNote: View {
         guard let key = draggingKey,
               let dragged = store.todos.first(where: { PMStore.key(for: $0) == key })
         else { return nil }
-        let current = pickTarget(for: dragged).flatMap { index in sessionFrames.first { $0.index == index } }
+        let current = pickTarget(for: dragged).flatMap { index in frames.sessions.first { $0.index == index } }
         return TaskDropResolver.resolve(pointer: point,
-                                        rows: rowFrames,
+                                        rows: frames.rows,
                                         sessionFrames: [],
                                         draggedSubtree: store.subtreeKeys(of: dragged),
                                         contentInset: Self.rowContentInset,
@@ -1003,12 +1009,15 @@ struct CanvasProjectNote: View {
         let rowID = rowID(todo, place)
         let isOrigin = place == .origin
         let size = TaskRowMetrics.textSize
-        let dueRevealed = hovering == rowID || activeEditor == EditorTarget(key: rowID, kind: .due)
-        let dueChip = DueChip(todo: todo,
-                              isEditing: activeEditor == EditorTarget(key: rowID, kind: .due),
-                              reveal: hovering == rowID,
-                              onPick: { store.setDue(todo, due: $0) },
-                              onPickCustom: { open(.due, on: todo, place: place) })
+        let editingDue = activeEditor == EditorTarget(key: rowID, kind: .due)
+        let editorClosed = activeEditor == nil
+        let dueChip = RowHoverReader(hover: hover, id: rowID) { hovering in
+            DueChip(todo: todo,
+                    isEditing: editingDue,
+                    reveal: hovering,
+                    onPick: { store.setDue(todo, due: $0) },
+                    onPickCustom: { open(.due, on: todo, place: place) })
+        }
         return HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap) {
             Button { store.toggle(todo) } label: {
                 TaskStatusIcon(state: todo.state, size: TaskRowMetrics.boxSize(depth: todo.depth))
@@ -1068,17 +1077,20 @@ struct CanvasProjectNote: View {
                 // the card at once; laid out invisibly it cost every one of them the chip's width.
                 if todo.dueDate == nil {
                     dueChip.background {
-                        if dueRevealed {
-                            DueGhostBacking(isSelected: selection.contains(key),
-                                            isEmphasized: engagement.isEngaged,
-                                            isHovering: hovering == rowID && activeEditor == nil)
+                        let selected = selection.contains(key)
+                        let emphasized = engagement.isEngaged
+                        RowHoverReader(hover: hover, id: rowID) { hovering in
+                            if hovering || editingDue {
+                                DueGhostBacking(isSelected: selected, isEmphasized: emphasized,
+                                                isHovering: hovering && editorClosed)
+                            }
                         }
                     }
                 }
             }
         }
         .onHover { inside in
-            hovering = inside ? rowID : (hovering == rowID ? nil : hovering)
+            hover.set(rowID, inside: inside)
             rowHover.set(key, inside: inside)
         }
         .padding(.leading, Self.margin + indent(todo.depth))
@@ -1093,9 +1105,7 @@ struct CanvasProjectNote: View {
         // "Emphasized" is the card being stepped into. That is what standing in this list means on a
         // board, and it is the same distinction AppKit draws between a selection in the focused
         // control and the same selection in one beside it.
-        .background(RowSelectionBand(isSelected: selection.contains(key),
-                                     isEmphasized: engagement.isEngaged,
-                                     isHovering: hovering == rowID && activeEditor == nil))
+        .background(bandView(key: key, rowID: rowID, editorClosed: editorClosed))
         // The row's breathing room is *inside* the published frame, so adjacent rows tile edge to edge
         // and the gaps the drop delegate computes abut with no dead bands between them.
         //
@@ -1171,7 +1181,7 @@ struct CanvasProjectNote: View {
                 selection.click(key, modifiers: NSEvent.modifierFlags, in: visibleKeys)
             }
         }
-        .contextMenu {
+        .contextMenu { LazyMenu {
             TaskMenu(todo: todo, targets: contextTargets(for: todo), store: store,
                      openEditor: { open($0, on: todo, place: place) },
                      openAdd: { position in
@@ -1190,6 +1200,16 @@ struct CanvasProjectNote: View {
                          guard let folder = PMFiles.projectName(fromKey: key) else { return }
                          onOpenProject(folder)
                      })
+        } }
+    }
+
+    /// The row's selection band, reading the hover itself so the row's body doesn't have to.
+    private func bandView(key: String, rowID: String, editorClosed: Bool) -> some View {
+        let selected = selection.contains(key)
+        let emphasized = engagement.isEngaged
+        return RowHoverReader(hover: hover, id: rowID) { hovering in
+            RowSelectionBand(isSelected: selected, isEmphasized: emphasized,
+                             isHovering: hovering && editorClosed)
         }
     }
 
@@ -1369,6 +1389,58 @@ struct CanvasProjectNote: View {
         guard !shows.showsProse(ofSessionAt: index) else { return all }
         return all.filter { if case .prose = $0 { return false } else { return true } }
     }
+}
+
+/// What the last layout published about where the rows are — read when a drop resolves, and by nothing
+/// that draws. See `CanvasProjectNote.frames`.
+@MainActor
+final class DropFrames {
+    var rows: [RowFrame] = []
+    var sessions: [SessionFrame] = []
+}
+
+/// A row's context menu, built only when the menu opens.
+///
+/// SwiftUI runs a `.contextMenu`'s content closure for every row on every pass — twice, in practice —
+/// and it is the closure that decides the menu's targets, which with a selection is a walk of the whole
+/// task list per selected row. A view's *body* is not run until the menu is shown, so the work is put
+/// there, and reads the selection as it is at that moment rather than as it was at the last pass.
+private struct LazyMenu<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View { content() }
+}
+
+/// Which row drawing the pointer is over.
+///
+/// Observed, and read **only** by `RowHoverReader`. The card used to hold this as `@State`, which made
+/// every hover change an invalidation of the card's whole body: every row rebuilt, re-attributed and
+/// re-measured to move a 5% tint from one row to the next. Read from a leaf view instead, the same
+/// change re-runs a handful of leaf bodies and nothing that lays text out.
+@MainActor
+@Observable
+final class RowHoverState {
+    private(set) var current: String?
+
+    /// `inside` false only clears the row that is still current — rows can report leaving after the
+    /// next one reports entering. Writes only on a change, since an observed write announces itself
+    /// whether or not the value moved.
+    func set(_ id: String, inside: Bool) {
+        if inside {
+            if current != id { current = id }
+        } else if current == id {
+            current = nil
+        }
+    }
+}
+
+/// A leaf that reads the hover for one row and hands the answer to `content`, so the row around it
+/// isn't the thing that depends on the pointer.
+private struct RowHoverReader<Content: View>: View {
+    let hover: RowHoverState
+    let id: String
+    @ViewBuilder let content: (Bool) -> Content
+
+    var body: some View { content(hover.current == id) }
 }
 
 /// A row of the pile with the identity it is diffed on.

@@ -48,6 +48,9 @@ enum SessionPicks {
     /// this holds the line anyway, because a duplicate row id is what makes `ForEach` animate the wrong
     /// row.
     static func pickedUp(into index: Int, picks: [TaskPick], todos: [Todo]) -> [PileRow] {
+        // Most sittings picked nothing up, and a card asks this of every one of them on every pass —
+        // so the position table below, a walk of the whole list, is not built to find that out.
+        guard picks.contains(where: { $0.intoIndex == index }) else { return [] }
         var byPosition: [TaskPosition: Todo] = [:]
         for todo in todos { byPosition[TaskPosition(todo)] = todo }
         let named = picks.filter { $0.intoIndex == index }
