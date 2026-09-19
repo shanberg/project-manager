@@ -26,6 +26,9 @@ enum CanvasExistingCards {
             case text
             /// A file from the vault, as the SF Symbol its card draws zoomed out.
             case file(symbol: String)
+            /// A view (docs/views.md), as the symbol of the question it asks — a Today card is a
+            /// calendar, not the text card it is stored as.
+            case view(symbol: String)
             /// A web page, which the site's icon stands for when the app has one.
             case page(host: String)
         }
@@ -104,6 +107,11 @@ enum CanvasExistingCards {
     /// **A folder is a file card** in the document (`CanvasFolderCard`), so the stored path can't say
     /// which it is; `isFolder` asks the disk, through the board's resolver.
     static func card(_ node: CanvasNode, isFolder: (String) -> Bool = { _ in false }) -> Card? {
+        // Before the text case: a view is stored as a text node, and its own name and symbol are what
+        // it is called everywhere else.
+        if let spec = CanvasViewSpec.of(node) {
+            return Card(id: node.id, name: clipped(spec.cardName), kind: .view(symbol: spec.symbol))
+        }
         switch node.content {
         case .text(let text):
             let summary = canvasCardSummary(text)

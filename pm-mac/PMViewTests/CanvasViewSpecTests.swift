@@ -46,9 +46,18 @@ final class CanvasViewSpecTests: XCTestCase {
         CanvasViewSpec.set(CanvasViewSpec(kind: .day, period: .yesterday, projects: .board), on: &card)
         XCTAssertEqual(card.extra["pmPeriod"], .string("yesterday"))
         XCTAssertEqual(card.extra["pmProjects"], .string("board"))
-        CanvasViewSpec.set(.newDay, on: &card)
+        CanvasViewSpec.set(CanvasViewSpec(kind: .day), on: &card)
         XCTAssertEqual(card.extra, ["pmView": .string("day")])
         XCTAssertEqual(card.content, .text("Today, across projects: a Folio view."), "The text is never rewritten")
+    }
+
+    /// A new Today card starts on the projects of the board it is put on; one stored without the key is
+    /// still everything, so cards already on a board don't change what they show.
+    func testANewDayCardStartsOnTheBoardsProjectsButAnOldOneStaysEverything() {
+        var fresh = node([:])
+        CanvasViewSpec.set(.newDay, on: &fresh)
+        XCTAssertEqual(CanvasViewSpec.of(fresh)?.projects, .board)
+        XCTAssertEqual(CanvasViewSpec.of(node(["pmView": .string("day")]))?.projects, .everything)
     }
 
     func testARelativePeriodFollowsTheClock() throws {
@@ -252,7 +261,8 @@ extension CanvasViewSpecTests {
         CanvasViewSpec.set(CanvasViewSpec(kind: .search, query: "  email dana "), on: &card)
         XCTAssertEqual(card.extra["pmQuery"], .string("email dana"))
         CanvasViewSpec.set(.newSearch, on: &card)
-        XCTAssertEqual(card.extra, ["pmView": .string("search")], "an empty search carries no query")
+        XCTAssertEqual(card.extra, ["pmView": .string("search"), "pmProjects": .string("board")],
+                       "an empty search carries no query")
     }
 
     /// The contract's buckets are the groups, in its order (released first), each heading a target.
@@ -339,9 +349,10 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(spec.period, .week)
         XCTAssertEqual(spec.period.beforeTitle, "Before This Week")
         XCTAssertEqual(CanvasViewSpec.Period.today.beforeTitle, "Before Today")
-        XCTAssertEqual(CanvasViewSpec.newLeftovers.noteText, "Tasks left open before today, across projects: a Folio view.")
+        XCTAssertEqual(CanvasViewSpec.newLeftovers.noteText,
+                       "Tasks left open before today, across this board's projects: a Folio view.")
         CanvasViewSpec.set(.newLeftovers, on: &card)
-        XCTAssertEqual(card.extra, ["pmView": .string("leftovers")])
+        XCTAssertEqual(card.extra, ["pmView": .string("leftovers"), "pmProjects": .string("board")])
     }
 
     private func leftovers() -> LeftoverList {
@@ -413,7 +424,8 @@ extension CanvasViewSpecTests {
         XCTAssertEqual(CanvasViewSpec.Kind.day.title(of: .week), "This Week")
         var card = node(["pmView": .string("coming-up")])
         CanvasViewSpec.set(.newComingUp, on: &card)
-        XCTAssertEqual(card.extra, ["pmView": .string("coming-up"), "pmPeriod": .string("week")])
+        XCTAssertEqual(card.extra, ["pmView": .string("coming-up"), "pmPeriod": .string("week"),
+                                    "pmProjects": .string("board")])
 
         XCTAssertEqual(CanvasViewSpec.of(node(["pmView": .string("projects")]))?.kind, .projects)
         XCTAssertFalse(CanvasViewSpec.Kind.projects.hasPeriod)

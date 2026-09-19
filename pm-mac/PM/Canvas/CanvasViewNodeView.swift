@@ -144,35 +144,10 @@ final class CanvasViewNodeView: CanvasNodeView {
         }
     }
 
-    /// What the card is called in one word or two: its period for a Day, else its kind — and for
-    /// Leftovers the cut-off, when it isn't today.
-    private var name: String {
-        switch spec.kind {
-        // A week or a month says which: "September 2026".
-        case .day: return ((try? spec.calendarSpan()) ?? nil)?.title ?? spec.period.title
-        case .waiting: return "Waiting"
-        case .search: return spec.query.isEmpty ? "Search" : "Search “\(spec.query)”"
-        case .leftovers: return spec.period == .today ? "Leftovers" : "Leftovers \(spec.period.beforeTitle)"
-        case .comingUp: return "Coming Up"
-        case .projects: return "Projects"
-        }
-    }
-
-    private var symbol: String {
-        switch spec.kind {
-        case .day: return "calendar"
-        case .waiting: return "clock"
-        case .search: return "magnifyingglass"
-        case .leftovers: return "tray.full"
-        case .comingUp: return "calendar.badge.clock"
-        case .projects: return "square.grid.2x2"
-        }
-    }
-
     override func contentChanged() {
         if isSimplified {
             let summary = self.summary
-            return setContent(summaryView(summary.isEmpty ? name : "\(name): \(summary)", symbol: symbol))
+            return setContent(summaryView(summary.isEmpty ? spec.cardName : "\(spec.cardName): \(summary)", symbol: spec.symbol))
         }
         let root: AnyView
         switch model {
@@ -284,7 +259,7 @@ final class CanvasViewNodeView: CanvasNodeView {
 
     override var accessibilityFallback: String {
         let summary = self.summary
-        return summary.isEmpty ? "\(name) view" : "\(name): \(summary)"
+        return summary.isEmpty ? "\(spec.cardName) view" : "\(spec.cardName): \(summary)"
     }
 
     override func prepareForRemoval() {

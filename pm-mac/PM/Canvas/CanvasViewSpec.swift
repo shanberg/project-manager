@@ -211,6 +211,37 @@ struct CanvasViewSpec: Equatable {
         return layout
     }
 
+    // MARK: How the card names itself
+
+    /// What the card is called in one word or two: its period for a Day, else its kind — and for
+    /// Leftovers the cut-off, when it isn't today.
+    ///
+    /// The one answer for every place the card is named: its zoomed-out face, and — through
+    /// `CanvasExistingCards.card` — a tile's tab, Add Card from Canvas and a dragged tile's proxy.
+    var cardName: String {
+        switch kind {
+        // A week or a month says which: "September 2026".
+        case .day: return ((try? calendarSpan()) ?? nil)?.title ?? period.title
+        case .waiting: return "Waiting"
+        case .search: return query.isEmpty ? "Search" : "Search “\(query)”"
+        case .leftovers: return period == .today ? "Leftovers" : "Leftovers \(period.beforeTitle)"
+        case .comingUp: return "Coming Up"
+        case .projects: return "Projects"
+        }
+    }
+
+    /// The SF Symbol that stands for the card wherever it is one line — see `cardName`.
+    var symbol: String {
+        switch kind {
+        case .day: return "calendar"
+        case .waiting: return "clock"
+        case .search: return "magnifyingglass"
+        case .leftovers: return "tray.full"
+        case .comingUp: return "calendar.badge.clock"
+        case .projects: return "square.grid.2x2"
+        }
+    }
+
     // MARK: On the node
 
     static let viewKey = "pmView"
@@ -264,24 +295,27 @@ struct CanvasViewSpec: Equatable {
 
     /// The one line the node's text holds, for Obsidian. Written once, when the card is made.
     var noteText: String {
+        let scope = projects == .board ? "across this board's projects" : "across projects"
         switch kind {
-        case .day: return "\(period.title), across projects: a Folio view."
-        case .waiting: return "What I'm waiting on, across projects: a Folio view."
-        case .search: return "A search of every project's tasks: a Folio view."
-        case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), across projects: a Folio view."
-        case .comingUp: return "What's due, across projects: a Folio view."
-        case .projects: return "Every project, and when it was last worked on: a Folio view."
+        case .day: return "\(period.title), \(scope): a Folio view."
+        case .waiting: return "What I'm waiting on, \(scope): a Folio view."
+        case .search: return "A search of \(projects == .board ? "this board's" : "every project's") tasks: a Folio view."
+        case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), \(scope): a Folio view."
+        case .comingUp: return "What's due, \(scope): a Folio view."
+        case .projects: return "\(projects == .board ? "This board's projects" : "Every project"), and when it was last worked on: a Folio view."
         }
     }
 
-    /// A new Day card: today, across everything.
-    static let newDay = CanvasViewSpec(kind: .day)
-    static let newWaiting = CanvasViewSpec(kind: .waiting)
-    static let newSearch = CanvasViewSpec(kind: .search)
-    static let newLeftovers = CanvasViewSpec(kind: .leftovers)
+    /// A new view card starts across the projects on the board it is put on (Day here, and each of the
+    /// others below). A card left on a board is about that board's work, so that is where it starts; "All Projects" is one menu item away, and
+    /// a card already stored without the key still reads as everything (`of`).
+    static let newDay = CanvasViewSpec(kind: .day, projects: .board)
+    static let newWaiting = CanvasViewSpec(kind: .waiting, projects: .board)
+    static let newSearch = CanvasViewSpec(kind: .search, projects: .board)
+    static let newLeftovers = CanvasViewSpec(kind: .leftovers, projects: .board)
     /// Coming up starts a week out: today alone is a to-do list, and the horizon is the point.
-    static let newComingUp = CanvasViewSpec(kind: .comingUp, period: .week)
-    static let newProjects = CanvasViewSpec(kind: .projects)
+    static let newComingUp = CanvasViewSpec(kind: .comingUp, period: .week, projects: .board)
+    static let newProjects = CanvasViewSpec(kind: .projects, projects: .board)
 
     /// The card's caption for a period: "Today · Fri, Sep 18", or the week it covers.
     func caption(for range: DoneRange, calendar: Calendar = .current) -> String {

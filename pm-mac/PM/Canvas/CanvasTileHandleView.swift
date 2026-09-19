@@ -435,7 +435,7 @@ final class CanvasTileHandleView: NSView {
                 }
             }
             symbol = "globe"
-        case .file(let name): symbol = name
+        case .file(let name), .view(let name): symbol = name
         case .text: symbol = "text.alignleft"
         }
         guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?

@@ -675,7 +675,7 @@ extension CanvasBoardView {
         case .page(let host):
             return FaviconLoader.shared.menuIcon(for: host)
                 ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
-        case .file(let symbol):
+        case .file(let symbol), .view(let symbol):
             return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         case .text:
             return NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)

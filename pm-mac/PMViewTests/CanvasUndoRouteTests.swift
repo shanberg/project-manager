@@ -14,6 +14,12 @@ final class CanvasUndoRouteTests: XCTestCase {
         XCTAssertEqual(CanvasUndoRoute.route(editorOpen: true, projectCanAct: false), .editor)
     }
 
+    /// A page's edits are on the window's stack, so ⌘Z in one must not reach the project edited last.
+    func testAFocusedPageComesBeforeTheProjectEditedLast() {
+        XCTAssertEqual(CanvasUndoRoute.route(editorOpen: false, pageFocused: true, projectCanAct: true), .page)
+        XCTAssertEqual(CanvasUndoRoute.route(editorOpen: true, pageFocused: true, projectCanAct: true), .editor)
+    }
+
     func testWithNoEditorTheProjectEditedLastComesBeforeTheBoard() {
         XCTAssertEqual(CanvasUndoRoute.route(editorOpen: false, projectCanAct: true), .project)
         XCTAssertEqual(CanvasUndoRoute.route(editorOpen: false, projectCanAct: false), .board)
@@ -294,6 +300,11 @@ final class CanvasDayRowUndoTests: XCTestCase {
     }
 }
 
+private final class UndoLoopTrap: NSObject, NSWindowDelegate {
+    var asked = 0
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { asked += 1; return nil }
+}
+
 /// ⌘Z while retyping a task is the typing's, not the board's or the project's.
 @MainActor
 final class CanvasTypingUndoTests: XCTestCase {
@@ -301,21 +312,27 @@ final class CanvasTypingUndoTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled],
                               backing: .buffered, defer: false)
         window.backgroundColor = .windowBackgroundColor
+        // The window's delegate is the board, which asks typingUndo — so it must never ask the window back.
+        let trap = UndoLoopTrap()
+        window.delegate = trap
         let card = NSView(frame: window.contentView!.bounds)
         window.contentView!.addSubview(card)
         let field = TokenClickField(string: "Email Dana")
         field.frame = NSRect(x: 10, y: 10, width: 200, height: 22)
         card.addSubview(field)
 
-        XCTAssertNil(CanvasUndoRoute.typingUndo(in: card), "Nothing is being typed yet")
+        let board = UndoManager()
+        XCTAssertNil(CanvasUndoRoute.typingUndo(in: card, boardUndo: board), "Nothing is being typed yet")
         XCTAssertTrue(window.makeFirstResponder(field))
         let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
         editor.insertText(" today", replacementRange: NSRange(location: 10, length: 0))
         editor.breakUndoCoalescing()
 
-        let typing = try XCTUnwrap(CanvasUndoRoute.typingUndo(in: card))
+        trap.asked = 0
+        let typing = try XCTUnwrap(CanvasUndoRoute.typingUndo(in: card, boardUndo: board))
+        XCTAssertEqual(trap.asked, 0, "Asking the window's stack is what looped forever")
         XCTAssertTrue(typing === field.typingUndo)
-        XCTAssertFalse(typing === window.undoManager, "Not the window's, which on a board is the canvas")
+        XCTAssertFalse(typing === board, "Not the board's")
         XCTAssertTrue(typing.canUndo)
         XCTAssertEqual(CanvasUndoRoute.route(editorOpen: true, projectCanAct: true), .editor)
         typing.undo()
@@ -323,6 +340,6 @@ final class CanvasTypingUndoTests: XCTestCase {
 
         let elsewhere = NSView()
         window.contentView!.addSubview(elsewhere)
-        XCTAssertNil(CanvasUndoRoute.typingUndo(in: elsewhere), "Only the card with the caret in it")
+        XCTAssertNil(CanvasUndoRoute.typingUndo(in: elsewhere, boardUndo: board), "Only the card with the caret in it")
     }
 }

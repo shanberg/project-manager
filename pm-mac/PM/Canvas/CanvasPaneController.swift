@@ -1207,6 +1207,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         case .editor:
             guard let editing else { return }
             redoing ? editing.redo() : editing.undo()
+        case .page:
+            guard let manager = scroll.window?.undoManager else { return }
+            redoing ? manager.redo() : manager.undo()
         case .project:
             guard let project else { return }
             redoing ? project.redo() : project.undo()
@@ -1217,6 +1220,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     private func route(editing: UndoManager?, project: PMStore?, redoing: Bool) -> CanvasUndoRoute {
         CanvasUndoRoute.route(editorOpen: editing != nil,
+                              pageFocused: CanvasPageKeys.keyboardIsInAPage(scroll.window),
                               projectCanAct: project.map { redoing ? $0.canRedo : $0.canUndo } ?? false)
     }
 
@@ -1233,6 +1237,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard let editing else { return false }
             item.title = redoing ? editing.redoMenuItemTitle : editing.undoMenuItemTitle
             return redoing ? editing.canRedo : editing.canUndo
+        case .page:
+            guard let manager = scroll.window?.undoManager else { return false }
+            item.title = redoing ? manager.redoMenuItemTitle : manager.undoMenuItemTitle
+            return redoing ? manager.canRedo : manager.canUndo
         case .project:
             guard let project else { return false }
             item.title = redoing ? project.redoMenuTitle : project.undoMenuTitle

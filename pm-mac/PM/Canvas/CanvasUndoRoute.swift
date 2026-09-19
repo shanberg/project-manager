@@ -12,19 +12,25 @@ import AppKit
 ///    ⌘Z past the start of your typing does nothing, rather than reaching out of the field and taking
 ///    back something else. Getting this wrong is what lost notes: a session note's ⌘Z went to the
 ///    project, which restored the whole file to before the note's last save.
-/// 2. **The project edited last**, when it has a step to take — you tick a task and ⌘Z brings the
+/// 2. **The web page you are typing in.** WebKit files a page's edits on the window's `UndoManager`, which
+///    on a board is the canvas document's — so this is the window's stack, not the project's. Without
+///    this step ⌘Z in a page went to the project edited last and restored its file to before a session
+///    note's last save, which is how a note you had written vanished when you undid a form field.
+/// 3. **The project edited last**, when it has a step to take — you tick a task and ⌘Z brings the
 ///    tick back, not the card you nudged before it.
-/// 3. **The board.**
+/// 4. **The board.**
 ///
 /// The Edit menu's title and the key's action both come from this, so the menu can't say one thing
 /// while the key does another.
 enum CanvasUndoRoute: Equatable {
     case editor
+    case page
     case project
     case board
 
-    static func route(editorOpen: Bool, projectCanAct: Bool) -> CanvasUndoRoute {
+    static func route(editorOpen: Bool, pageFocused: Bool = false, projectCanAct: Bool) -> CanvasUndoRoute {
         if editorOpen { return .editor }
+        if pageFocused { return .page }
         if projectCanAct { return .project }
         return .board
     }
@@ -34,14 +40,16 @@ extension CanvasUndoRoute {
     /// The typing history of a one-line field being edited inside `card`, when it keeps one of its own —
     /// a task retyped on a project card or a Day row. It is the editor case above, like a text card's.
     ///
-    /// Only a stack that isn't the window's: a field that never asked for its own registers on the
+    /// Only a stack that isn't the board's: a field that never asked for its own registers on the
     /// window's, which on a board is the canvas document — naming that as "the editor" would take the
-    /// project's turn away and then act as the board anyway.
+    /// project's turn away and then act as the board anyway. `boardUndo` is passed in rather than read
+    /// from `window.undoManager`: the window asks its delegate, which asks the board for the engaged
+    /// card's stack, which lands back here — an endless loop.
     @MainActor
-    static func typingUndo(in card: NSView) -> UndoManager? {
+    static func typingUndo(in card: NSView, boardUndo: UndoManager) -> UndoManager? {
         guard let window = card.window, let editor = window.firstResponder as? NSTextView,
               editor.isFieldEditor, editor.isDescendant(of: card),
-              let undo = editor.undoManager, undo !== window.undoManager else { return nil }
+              let undo = editor.undoManager, undo !== boardUndo else { return nil }
         return undo
     }
 }

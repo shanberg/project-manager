@@ -82,6 +82,9 @@ struct SessionNoteTakeover: View {
     /// Told the editor's undo stack when it opens (`true`) and closes (`false`), so the host can send
     /// ⌘Z to it while it is up. See `typing`.
     var onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil
+    /// Whether the host has the user's attention. The editor stays open when it doesn't; it saves on
+    /// the way to false, since nothing else fires when a tile merely loses focus.
+    var isActive = true
 
     @State private var text: String
     /// The prose this takeover opened with, and the identity of the session it opened *on*.
@@ -128,9 +131,10 @@ struct SessionNoteTakeover: View {
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
          onOpenProject: @escaping (String) -> Void,
-         onBack: @escaping () -> Void, startsAt: NSRange? = nil,
+         onBack: @escaping () -> Void, isActive: Bool = true, startsAt: NSRange? = nil,
          onSelectionChange: ((NSRange) -> Void)? = nil,
          onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil) {
+        self.isActive = isActive
         self.startsAt = startsAt
         self.onSelectionChange = onSelectionChange
         self.onTypingUndo = onTypingUndo
@@ -201,6 +205,7 @@ struct SessionNoteTakeover: View {
             onTypingUndo?(typing, false)
         }
         .onAppear { onTypingUndo?(typing, true) }
+        .onChange(of: isActive) { _, active in if !active { commit() } }
         // The note as the file has it, followed while nothing here is unsaved — see
         // `SessionNoteMerge.adopting`. An undo or an edit made anywhere else shows up here rather than
         // being hidden behind a copy that no longer matches, and then dropped by the next save.

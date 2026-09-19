@@ -143,6 +143,24 @@ final class CanvasExistingCardsTests: XCTestCase {
         XCTAssertEqual(CanvasExistingCards.card(node(.file(path: path, subpath: nil)))?.kind, .file(symbol: "doc"))
     }
 
+    /// A view is stored as a text node, so without asking it the tab, the menu and the proxy all called
+    /// a Today card by its stored line and drew the text-card icon. Every kind names itself once, on its
+    /// spec, and every surface reads that.
+    func testAViewIsNamedAndDrawnAsItselfNotAsItsStoredText() {
+        for kind in CanvasViewSpec.Kind.allCases {
+            var view = node(.text("stored line"))
+            CanvasViewSpec.set(CanvasViewSpec(kind: kind), on: &view)
+            let spec = CanvasViewSpec.of(view)!
+            let card = CanvasExistingCards.card(view)
+            XCTAssertEqual(card?.kind, .view(symbol: spec.symbol), "\(kind)")
+            XCTAssertEqual(card?.name, spec.cardName, "\(kind)")
+            XCTAssertNotEqual(card?.name, "stored line", "\(kind)")
+        }
+        var today = node(.text("Today"))
+        CanvasViewSpec.set(CanvasViewSpec(kind: .day), on: &today)
+        XCTAssertEqual(CanvasExistingCards.card(today)?.kind, .view(symbol: "calendar"))
+    }
+
     // MARK: What can be added
 
     /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers.

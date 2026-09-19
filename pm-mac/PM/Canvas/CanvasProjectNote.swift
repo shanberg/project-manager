@@ -129,18 +129,6 @@ struct CanvasProjectNote: View {
 
     private var notes: ProjectNotes? { store.notes }
 
-    /// Reopen the note this card was left in, at the caret it was left at — see `returnTo`.
-    ///
-    /// Once: a return that has happened is spent, so stepping out of the list and back in again is the
-    /// list. A session that can no longer be found — deleted, or edited out of recognition while you were
-    /// in another tile — is a return with nowhere to go, and the card shows the project instead.
-    private func returnToNote() {
-        guard let returning = display.returnTo else { return }
-        display.returnTo = nil
-        guard let notes, let resolved = try? resolveSessionRef(returning.ref, notes: notes) else { return }
-        display.returnCaret = returning.caret
-        openNote = resolved.index
-    }
     /// What the card draws: its lens, except a `sitting` card whose sitting can't be found, which draws
     /// the project — the fallback a typo in `pmShows` gets (docs/views.md D7).
     private var shows: CanvasCardShows {
@@ -266,7 +254,7 @@ struct CanvasProjectNote: View {
                                     projectName: displayName, store: store,
                                     onOpenProject: onOpenProject,
                                     onBack: { openNote = nil },
-                                    startsAt: display.returnCaret,
+                                    isActive: engagement.isEngaged,
                                     onSelectionChange: { display.noteCaret = $0 },
                                     onTypingUndo: { stack, open in
                                         // Closing one note and opening another can report in either
@@ -278,10 +266,9 @@ struct CanvasProjectNote: View {
                 list
             }
         }
-        // Stepping out closes whatever was open. An editor left standing on a card you have walked away
-        // from is a text field with the keyboard nowhere near it, holding an edit that will never be
-        // committed. The note takeover is the exception that proves it: it saves on the way out, so
-        // closing it here is a commit rather than a discard.
+        // Stepping out closes the small editors but not the session note: that one stays open where you
+        // left it, and saves as focus leaves (`SessionNoteTakeover.isActive`), so an edit is never held
+        // back by a card nobody is in.
         .onAppear {
             rightClick.onRightMouseDown = {
                 // Only the card you are standing in. A global monitor is global, and moving the
@@ -303,25 +290,14 @@ struct CanvasProjectNote: View {
         // One place to let the dim go, whichever way the drag ended — dropped, cancelled outside, or
         // released without ever moving.
         .onChange(of: draggingKey) { _, key in if key == nil { draggedSubtree = [] } }
-        // A note closed any way at all takes its caret with it, so the next one opened — by a
-        // double-click, not a return — starts where a note starts.
+        // A note closed any way at all takes its caret with it, so the next one opened starts where a
+        // note starts.
         .onChange(of: openNote) { _, index in
-            if index == nil { display.returnCaret = nil; display.noteCaret = nil }
+            if index == nil { display.noteCaret = nil }
         }
         .onChange(of: engagement.isEngaged) { _, engaged in
-            if engaged {
-                returnToNote()
-            } else {
-                // **Held for coming back**, before the note closes. Stepping out still closes it — one
-                // card is engaged at a time, and the header, undo routing and New Session all lean on
-                // that — but stepping back in reopens it where the caret was (backlog 24). By
-                // reference, since the note is saved on the way out and the sessions can move before
-                // you are back.
-                display.returnTo = openNote.flatMap { index in
-                    store.sessionRef(at: index).map { (ref: $0, caret: display.noteCaret) }
-                }
+            if !engaged {
                 activeEditor = nil
-                openNote = nil
                 // A selection is a thing you are about to act on, and stepping out of the card is
                 // saying you are not. Left standing it would also be a highlight on a card nobody is
                 // in, which on a board of them reads as "this one is somehow current".
@@ -1480,17 +1456,9 @@ final class CanvasProjectCardDisplay {
     /// whatever you have stepped into.
     var find = ""
 
-    /// The session note that was open when the card was stepped out of, and where its caret was — so
-    /// switching tiles and coming back is a return to the note rather than to the list (backlog 24).
-    /// Held here because the node outlives the view, and nobody draws it.
-    @ObservationIgnored
-    var returnTo: (ref: SessionRef, caret: NSRange?)?
     /// The open note's caret, as it moves. Not observed: it is read only on the way out.
     @ObservationIgnored
     var noteCaret: NSRange?
-    /// Where a note reopened by a return starts its caret; nil for a note opened any other way.
-    @ObservationIgnored
-    var returnCaret: NSRange?
     /// The open note's own undo stack, while a note is open — what ⌘Z means on this card until it
     /// closes. See `CanvasBoardView.engagedCardUndoManager` and `SessionNoteTakeover.typing`.
     @ObservationIgnored

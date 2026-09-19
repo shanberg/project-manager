@@ -503,7 +503,7 @@ final class CanvasBoardView: NSView {
         for card in nodeViews.values where card.isEngaged {
             if let text = card as? CanvasTextNodeView, let undo = text.editingUndo { return undo }
             if let file = card as? CanvasFileNodeView, let undo = file.projectDisplay.noteUndo { return undo }
-            if let undo = CanvasUndoRoute.typingUndo(in: card) { return undo }
+            if let undo = CanvasUndoRoute.typingUndo(in: card, boardUndo: store.undoManager) { return undo }
         }
         return nil
     }
