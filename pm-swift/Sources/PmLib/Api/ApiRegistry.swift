@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.18.0"
+public let apiContractVersion = "1.19.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")

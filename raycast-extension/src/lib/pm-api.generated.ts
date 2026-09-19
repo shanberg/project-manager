@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.18.0";
+export const API_CONTRACT_VERSION = "1.19.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -422,14 +422,18 @@ export interface TaskSetDueInput {
   tasks?: TaskRef[];
 }
 
-/** Rename a task in place. */
+/** Rename a task in place, or several, each to its own new text. */
 export interface TaskSetTextInput {
   /** Project name or unambiguous prefix. */
   project: string;
-  /** The task to act on. */
-  task: TaskRef;
-  /** The new text. */
-  text: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks to rename in one write, each with its own `text`. Give this or `task` with `text`, not both. */
+  tasks?: (TaskRef & { text: string })[];
+  /** The new text, with `task`. */
+  text?: string;
 }
 
 /** Set or clear what a task is waiting on, or do it to several. */

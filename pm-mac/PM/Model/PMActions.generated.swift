@@ -11,7 +11,7 @@ import PmLib
 /// Named distinctly from PmLib's own `apiContractVersion`, which is in scope here — a file-scope
 /// `let` of the same name would shadow it silently, and a check comparing the two would then be
 /// comparing a thing with itself.
-let generatedFromContractVersion = "1.18.0"
+let generatedFromContractVersion = "1.19.0"
 
 /// Every action the contract publishes.
 ///
@@ -113,7 +113,7 @@ enum PMAction: String, CaseIterable, Sendable {
     case taskSearch = "task.search"
     /// Set or clear the due date on a task, or on several.
     case taskSetDue = "task.setDue"
-    /// Rename a task in place.
+    /// Rename a task in place, or several, each to its own new text.
     case taskSetText = "task.setText"
     /// Set or clear what a task is waiting on, or do it to several.
     case taskSetWaiting = "task.setWaiting"
@@ -154,7 +154,7 @@ enum PMAction: String, CaseIterable, Sendable {
             return ["key", "value"]
         case .notesAddLink, .taskAdd:
             return ["project", "text"]
-        case .notesGet, .projectArchive, .projectFocus, .projectGet, .projectSetPartOf, .projectUnarchive, .sessionBackfillTimes, .sessionStart, .taskComplete, .taskDelete, .taskDiveIn, .taskDrop, .taskPick, .taskRelease, .taskReopen, .taskSetDue, .taskSetWaiting:
+        case .notesGet, .projectArchive, .projectFocus, .projectGet, .projectSetPartOf, .projectUnarchive, .sessionBackfillTimes, .sessionStart, .taskComplete, .taskDelete, .taskDiveIn, .taskDrop, .taskPick, .taskRelease, .taskReopen, .taskSetDue, .taskSetText, .taskSetWaiting:
             return ["project"]
         case .notesSetDetail:
             return ["key", "project", "value"]
@@ -174,7 +174,7 @@ enum PMAction: String, CaseIterable, Sendable {
             return ["project", "task"]
         case .taskSearch:
             return ["query"]
-        case .taskSetText, .taskWrap:
+        case .taskWrap:
             return ["project", "task", "text"]
         }
     }
@@ -183,9 +183,9 @@ enum PMAction: String, CaseIterable, Sendable {
     /// that take either, `due` or `clearDue` for the one that both sets and clears.
     var exclusiveGroups: [[String]] {
         switch self {
-        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionBackfillTimes, .sessionDelete, .sessionList, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskDue, .taskFocus, .taskLeftovers, .taskList, .taskProgress, .taskSearch, .taskSetText, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
+        case .appOpenInFinder, .appOpenInObsidian, .appOpenPageAsNewCard, .appOpenWindow, .appSettings, .appShowPanel, .captureParse, .configGet, .configSet, .focusGet, .journalList, .journalUndo, .notesAddLink, .notesGet, .notesSetDetail, .projectAdopt, .projectAdoptable, .projectArchive, .projectCreate, .projectFocus, .projectGet, .projectList, .projectRename, .projectSetPartOf, .projectUnarchive, .sessionBackfillTimes, .sessionDelete, .sessionList, .sessionNote, .sessionRename, .sessionStart, .taskAdd, .taskDiveIn, .taskDone, .taskDue, .taskFocus, .taskLeftovers, .taskList, .taskProgress, .taskSearch, .taskUnwrap, .taskWaiting, .taskWhatsDue, .taskWrap:
             return []
-        case .taskComplete, .taskDelete, .taskDrop, .taskPick, .taskRelease, .taskReopen:
+        case .taskComplete, .taskDelete, .taskDrop, .taskPick, .taskRelease, .taskReopen, .taskSetText:
             return [["task", "tasks"]]
         case .taskSetDue:
             return [["task", "tasks"], ["due", "clearDue"]]
