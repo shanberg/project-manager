@@ -582,13 +582,9 @@ struct CanvasProjectNote: View {
     /// place.
     @ViewBuilder private var footer: some View {
         if activeEditor == Self.quickAdd {
-            AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
-                      onOpenProject: onOpenProject) { text, due in
-                store.addTodo(text: text, due: due)
-                activeEditor = nil
-            } onCancel: { activeEditor = nil }
-                .padding(.horizontal, Self.margin)
-                .padding(.top, 4)
+            // Drawn under the sitting it writes to when the card draws one (`quickAddEditor`); here only
+            // for a card with no sitting to put it in, such as a Tasks card.
+            if quickAddHost == nil { quickAddEditor }
         } else if engagement.actsImmediately, activeEditor == nil, store.hasLoaded {
             // `hasLoaded`, because a store that has not read the file yet has no sessions and no tasks
             // — which is indistinguishable from a project that has neither, and would put "Start a
@@ -599,6 +595,23 @@ struct CanvasProjectNote: View {
                 startRow("Add a task", symbol: "plus") { activeEditor = Self.quickAdd }
             }
         }
+    }
+
+    /// The sitting the quick add is drawn under: the latest, which is the one an unanchored add joins
+    /// (`PMStore.addTodo`). Nil when this card draws no sitting, and the editor falls to the footer.
+    private var quickAddHost: Int? {
+        if case .pile(false) = shows.layout { return nil }
+        return shownSessions.first?.index
+    }
+
+    private var quickAddEditor: some View {
+        AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
+                  onOpenProject: onOpenProject) { text, due in
+            store.addTodo(text: text, due: due)
+            activeEditor = nil
+        } onCancel: { activeEditor = nil }
+            .padding(.horizontal, Self.margin)
+            .padding(.top, 4)
     }
 
     /// A dead end's way out: a plain row, in the task rows' own metrics, saying the one thing there is
@@ -836,6 +849,8 @@ struct CanvasProjectNote: View {
                 row(identified.todo)
             }
         }
+        // The new-task field at the end of the sitting's own tasks — where the task it makes will be.
+        if activeEditor == Self.quickAdd, quickAddHost == index { quickAddEditor }
         // **Picked up**: the older tasks taken up in this sitting, after its own, each still carrying
         // where it came from. Drawn here *and* on its own line — one task in two places, both showing
         // its state — because moving it here would take it out of the sentence that explains it
