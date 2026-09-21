@@ -86,15 +86,20 @@ struct CanvasAddressField: View {
         ZStack(alignment: .trailing) {
             Button(action: openForEditing) {
                 HStack(spacing: 4) {
+                    sessionPill
                     mark
                     addressText
                 }
-                .padding(.horizontal, Self.buttonRoom)
+                // The leading room exists to centre the host against Reload's width at the other end.
+                // A pill has already taken that space and is doing the same job for the eye, so it
+                // stands in for the padding rather than being added to it.
+                .padding(.leading, page.session == nil ? Self.buttonRoom : 6)
+                .padding(.trailing, Self.buttonRoom)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text("Address, " + page.host))
+            .accessibilityLabel(Text(accessibleAddress))
             .accessibilityHint(Text(page.isSecure ? "Edit the address this page is on"
                                                   : "Not encrypted. Edit the address this page is on"))
 
@@ -128,6 +133,20 @@ struct CanvasAddressField: View {
         .buttonStyle(.plain)
         .help(page.isLoading ? "Stop loading" : "Reload")
         .accessibilityLabel(Text(page.isLoading ? "Stop loading" : "Reload"))
+    }
+
+    /// Which jar this card drinks from, ahead of the address — and nothing at all for the shared
+    /// session, which is nearly every card.
+    ///
+    /// **In the address bar, in both of its states.** This row is where the page says whose it is, and
+    /// the session is the other half of that sentence: the same host signed in as somebody else is a
+    /// different page in every sense that matters, and a private card is one whose sign-in nothing is
+    /// keeping. The pill is drawn while you are typing too, because that is the moment the answer is
+    /// worth most — see the crossfade above, which exists for the same argument about passwords.
+    @ViewBuilder private var sessionPill: some View {
+        if let session = page.session {
+            CanvasSessionPill(name: session.name, isPrivate: session.isPrivate)
+        }
     }
 
     /// One slot at the head of the host, and two things that want it.
@@ -169,6 +188,7 @@ struct CanvasAddressField: View {
 
     private var field: some View {
         HStack(spacing: 4) {
+            sessionPill
             Image(systemName: engine == .none ? "globe" : "magnifyingglass")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -205,7 +225,17 @@ struct CanvasAddressField: View {
             lines.append(page.liveAddress)
         }
         if let age = page.age { lines.append("Loaded " + age) }
+        if let session = page.session {
+            lines.append(CanvasSessionPill.explanation(name: session.name, isPrivate: session.isPrivate))
+        }
         return lines.joined(separator: "\n")
+    }
+
+    /// The host, and whose sign-in it is being read with — the pill is inside the button, so this is
+    /// the only place VoiceOver can be told about it.
+    private var accessibleAddress: String {
+        guard let session = page.session else { return "Address, " + page.host }
+        return "Address, \(page.host), \(session.isPrivate ? "private session" : "\(session.name) session")"
     }
 }
 

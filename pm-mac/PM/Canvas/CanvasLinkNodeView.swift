@@ -1655,6 +1655,25 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         loadingSince = nil
         revealPage()
         board.pageStateChanged()
+        adoptDeclaredIcon(from: webView)
+    }
+
+    /// If the site has no `/favicon.ico`, use the icon the page itself declares. Asked once per
+    /// finished load and only while the host has no icon, so a card with one pays nothing.
+    private func adoptDeclaredIcon(from webView: WKWebView) {
+        guard FaviconLoader.isEnabled, let host = webView.url?.host,
+              FaviconLoader.shared.cached(for: host) == nil else { return }
+        let js = """
+        (() => { const l = [...document.querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]')]
+          .filter(e => e.href); return l.length ? l[l.length - 1].href : null; })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self, let s = result as? String, let url = URL(string: s) else { return }
+            Task { @MainActor in
+                guard await FaviconLoader.shared.adopt(declared: url, for: host) != nil else { return }
+                self.board.pageStateChanged()
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

@@ -192,11 +192,29 @@ final class CanvasHeaderModel {
         /// Where Back would take you, nearest first. Empty disables the menu behind the button and
         /// leaves an ordinary Back.
         var back: [Step] = []
+        /// The jar this card drinks from, when it is not the shared one — the pill in the address bar.
+        /// Nil for the session nearly every card is on, which draws nothing.
+        var session: Session?
 
         /// One page in the back list.
         struct Step: Equatable {
             var title: String
             var address: String
+        }
+
+        /// A card's browser session, as the address bar says it.
+        ///
+        /// **Two claims, not one.** A named profile is *who you are signed in as* — the second account
+        /// this whole area exists for (`CanvasCardSession`). Private is that nothing is being kept: the
+        /// ephemeral store, never written to disk, gone at quit. The pill says the name either way and
+        /// colours the second one, because only the second one is a promise that can be broken by
+        /// forgetting which card you are looking at.
+        ///
+        /// Resolved by the controller rather than by comparing names in the view, so which name is the
+        /// reserved one stays a question `CanvasWebSession` answers.
+        struct Session: Equatable {
+            var name: String
+            var isPrivate: Bool
         }
     }
 

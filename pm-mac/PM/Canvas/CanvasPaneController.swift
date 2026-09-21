@@ -935,7 +935,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             progress: card.loadProgress,
             isSecure: card.isSecure,
             icon: icon(for: card.liveHost),
-            back: card.backSteps.map { .init(title: $0.title, address: $0.address) })
+            back: card.backSteps.map { .init(title: $0.title, address: $0.address) },
+            // Nil for the shared jar, which is most cards and wants no pill. Which name means the
+            // ephemeral store is `CanvasWebSession`'s to say, and it says it here rather than in the
+            // view that draws the answer.
+            session: card.profile.map {
+                .init(name: $0, isPrivate: $0 == CanvasWebSession.ephemeralName)
+            })
         if header.page != page { header.page = page }
     }
 

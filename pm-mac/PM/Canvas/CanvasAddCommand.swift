@@ -1,6 +1,7 @@
 import Foundation
 
-/// The things you can put on a canvas — the one list of them, and what each is called.
+/// The things you can put on a canvas — the one list of them, what each is called, and which heading
+/// it sits under.
 ///
 /// They were declared twice: "New Card / New Frame / New Link… / New File…" in the board's right-click
 /// menu, and "Card / Frame / Link… / File…" in the header's `+`. That is the drift `PMCommand` exists
@@ -21,11 +22,32 @@ import Foundation
 /// where you right-clicked, the header's `+` in the middle of what you can see, a strip's menu into
 /// that tile as a tab. What makes each one is `CanvasBoardView.add(_:at:)`.
 enum CanvasAddCommand: CaseIterable {
-    case card, frame, link, file
+    // MARK: Cards
+
+    case card
+    /// A web card: a live page clipped onto the board, on the shared browser session every card has
+    /// always used. See `CanvasLinkNodeView` and docs/web-cards.md.
+    case web
+    /// The same card, on the ephemeral session — signed in as nobody, never written to disk, gone when
+    /// Folio quits (`CanvasWebSession.ephemeralName`).
+    ///
+    /// **Offered at the point the card is made, because that is when it matters.** A card could always
+    /// be put on the private session afterwards, from its own Session submenu — but by then the page
+    /// has loaded once in the shared jar, which for the case this is *for* (a link you would rather
+    /// your signed-in self didn't follow, a second look at a site as a stranger sees it) is exactly
+    /// the thing you were avoiding.
+    case privateWeb
+    case file
     /// A folder from disk, which the card lists the top level of. Stored as an ordinary file card —
     /// see `CanvasFolderCard` — and asked for on its own because an open panel that takes files and
     /// folders both makes opening a folder mean choosing it.
     case folder
+    /// The project's own note — offered only by a board that is a project's and hasn't got it. See
+    /// `CanvasProjectNoteCard`, which owns the question of when.
+    case projectNote
+
+    // MARK: Views
+
     /// A Day view: the sittings of today across every project (docs/views.md). A text node carrying
     /// `pmView`, set to another day or narrowed to some projects from its own menu.
     case dayView
@@ -40,18 +62,58 @@ enum CanvasAddCommand: CaseIterable {
     case waitingView
     /// A Search view: tasks across projects matching the words in its field.
     case searchView
-    /// The project's own note — offered only by a board that is a project's and hasn't got it. See
-    /// `CanvasProjectNoteCard`, which owns the question of when.
-    case projectNote
+
+    // MARK: Frames
+
+    /// Last, and alone under its heading, because it is the one thing here that is not a card: a frame
+    /// is what you draw *around* cards. It is also the one thing a tile cannot be, so in a tab strip
+    /// the heading and the item go together (`CanvasBoardView.addCommandItems`).
+    case frame
+
+    /// The heading a menu files this under.
+    ///
+    /// **Because twelve items in a flat run is a list you read rather than a menu you aim at.** The
+    /// run grew a kind at a time — a folder, then six views — and each arrival was one more row
+    /// between New Card and everything below it. Headings cost three rows and give the eye somewhere
+    /// to stop: the views are a block you skip when you want a card, and a block you land in when you
+    /// don't.
+    enum Group: CaseIterable {
+        case cards, views, frames
+
+        /// Plural, unlike the "Card" and "Tile" headers elsewhere in a canvas menu. Those label the
+        /// commands for *one* object you right-clicked; these label a class of thing you can make, and
+        /// "Cards" is what that class is called.
+        var title: String {
+            switch self {
+            case .cards: return "Cards"
+            case .views: return "Views"
+            case .frames: return "Frames"
+            }
+        }
+    }
+
+    var group: Group {
+        switch self {
+        case .card, .web, .privateWeb, .file, .folder, .projectNote: return .cards
+        case .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView: return .views
+        case .frame: return .frames
+        }
+    }
 
     /// Ellipses follow the app's convention — a command that opens something further to finish the job
-    /// takes one. A card and a frame appear ready to type in; a link, a file and a folder have to ask
-    /// which.
+    /// takes one. A card and a frame appear ready to type in; a web card, a file and a folder have to
+    /// ask which.
+    ///
+    /// **"Web", not "Link".** A link is the address; this makes a *card*, and what the card is is a
+    /// live page — which is what the docs, the settings pane and everyone who uses one have called it
+    /// for as long as it has embedded the page. "New Link…" read as adding an address to a list, which
+    /// is a different command in this app and lives on a project.
     var title: String {
         switch self {
         case .card: return "New Card"
         case .frame: return "New Frame"
-        case .link: return "New Link\u{2026}"
+        case .web: return "New Web Card\u{2026}"
+        case .privateWeb: return "New Private Web Card\u{2026}"
         case .file: return "New File\u{2026}"
         case .folder: return "New Folder\u{2026}"
         // No ellipsis: there is nothing to ask. The board already knows which document this is — that
@@ -78,10 +140,40 @@ enum CanvasAddCommand: CaseIterable {
     /// behind it. Dimmed while tiled, and left out of a tile's strip, where every item is a tab.
     var makesTile: Bool { self != .frame }
 
-    /// What to offer, in order. `projectNote` is whether this board is a project's and is missing its
-    /// note (`CanvasBoardView.offersProjectNoteCard`) — the item is the board saying something is
-    /// missing, so it has nothing to say once it is back.
+    /// What to offer, in order — which is the order they are declared in, grouped. `projectNote` is
+    /// whether this board is a project's and is missing its note
+    /// (`CanvasBoardView.offersProjectNoteCard`) — the item is the board saying something is missing,
+    /// so it has nothing to say once it is back.
     static func offered(projectNote: Bool) -> [CanvasAddCommand] {
         allCases.filter { $0 != .projectNote || projectNote }
+    }
+
+    /// A line of the menu: a heading, or an item under it.
+    enum Row: Equatable {
+        case heading(Group)
+        case item(CanvasAddCommand)
+    }
+
+    /// Everything a menu writes for this list, headings included — the whole of what the four surfaces
+    /// draw, decided here.
+    ///
+    /// **Here rather than in the loop that builds the `NSMenu`**, because it is the same kind of
+    /// decision the list and the titles are, and because nothing in the test bundle can build a board
+    /// to ask one of those menus what it says. Assembling the rows first means the thing being checked
+    /// is the menu's contents rather than a second copy of the rule.
+    ///
+    /// A heading is written when the group changes, so a group with nothing left in it after `tabs`
+    /// has taken out what cannot be a tab gets no heading either — which is Frames, in every strip.
+    static func rows(projectNote: Bool, tabs: Bool) -> [Row] {
+        var rows: [Row] = []
+        var written: Group?
+        for command in offered(projectNote: projectNote) where !tabs || command.makesTile {
+            if command.group != written {
+                written = command.group
+                rows.append(.heading(command.group))
+            }
+            rows.append(.item(command))
+        }
+        return rows
     }
 }

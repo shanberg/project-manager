@@ -163,17 +163,59 @@ final class CanvasExistingCardsTests: XCTestCase {
 
     // MARK: What can be added
 
-    /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers.
+    /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers —
+    /// in the order it offers them, which is the order the headings group them in.
     func testEveryKindOfCardIsOfferedAndTheProjectNoteOnlyWhenMissing() {
-        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .frame, .link, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView])
-        XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).last, .projectNote)
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .web, .privateWeb, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView, .frame])
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: true)[5], .projectNote)
         XCTAssertEqual(CanvasAddCommand.folder.title, "New Folder\u{2026}")
         XCTAssertEqual(CanvasAddCommand.dayView.title, "New Day View")
     }
 
-    /// A tile's strip offers what can be a tab: everything but a frame.
-    func testATabCanBeAnythingButAFrame() {
-        XCTAssertEqual(CanvasAddCommand.offered(projectNote: true).filter(\.makesTile),
-                       [.card, .link, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView, .projectNote])
+    /// A web card and its private twin, which is the same card on the session that is never written to
+    /// disk — and they sit together, since choosing between them is one decision.
+    func testAPrivateWebCardIsOfferedBesideTheOrdinaryOne() {
+        XCTAssertEqual(CanvasAddCommand.web.title, "New Web Card\u{2026}")
+        XCTAssertEqual(CanvasAddCommand.privateWeb.title, "New Private Web Card\u{2026}")
+        let offered = CanvasAddCommand.offered(projectNote: false)
+        XCTAssertEqual(offered.firstIndex(of: .privateWeb), offered.firstIndex(of: .web).map { $0 + 1 })
+    }
+
+    /// Every line the board's menu and the header's + draw for this list, in order: what makes a card,
+    /// then the views, then the frame — which is alone under its own heading, being the one thing here
+    /// that is not a card. This is the menu's contents rather than a copy of the rule, since nothing in
+    /// this bundle can build a board to ask one.
+    func testTheMenuIsGroupedByWhatEachCommandMakes() {
+        XCTAssertEqual(CanvasAddCommand.rows(projectNote: true, tabs: false), [
+            .heading(.cards),
+            .item(.card), .item(.web), .item(.privateWeb), .item(.file), .item(.folder), .item(.projectNote),
+            .heading(.views),
+            .item(.dayView), .item(.leftoversView), .item(.comingUpView), .item(.projectsView),
+            .item(.waitingView), .item(.searchView),
+            .heading(.frames),
+            .item(.frame),
+        ])
+        XCTAssertEqual(CanvasAddCommand.Group.cards.title, "Cards")
+    }
+
+    /// A board that already has its project note doesn't offer one, and nothing else about the list
+    /// moves — the heading above it least of all.
+    func testTheCardsHeadingSurvivesTheProjectNoteGoingAway() {
+        XCTAssertEqual(CanvasAddCommand.rows(projectNote: false, tabs: false).prefix(6), [
+            .heading(.cards),
+            .item(.card), .item(.web), .item(.privateWeb), .item(.file), .item(.folder),
+        ])
+        XCTAssertFalse(CanvasAddCommand.rows(projectNote: false, tabs: false).contains(.item(.projectNote)))
+    }
+
+    /// A tile's strip offers what can be a tab: everything but a frame — and the Frames heading goes
+    /// with it, since a heading is only written when something follows it.
+    func testATabCanBeAnythingButAFrameAndTakesItsHeadingWithIt() {
+        let rows = CanvasAddCommand.rows(projectNote: true, tabs: true)
+        XCTAssertFalse(rows.contains(.item(.frame)))
+        XCTAssertFalse(rows.contains(.heading(.frames)))
+        XCTAssertEqual(rows.last, .item(.searchView))
+        XCTAssertEqual(rows.filter { if case .heading = $0 { return true } else { return false } },
+                       [.heading(.cards), .heading(.views)])
     }
 }

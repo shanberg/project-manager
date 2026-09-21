@@ -309,7 +309,7 @@ struct PreviewOutcome: Equatable {
 /// The session, with the line being typed already in it.
 ///
 /// The rows name a position in prose; this shows it. The two are not equivalent — `insertTaskRelative`
-/// puts a child immediately after its anchor, so "Narrow under it" lands the new task *above* that
+/// puts a child after its anchor's whole subtree, so "Narrow under it" lands the new task *below* that
 /// task's existing children, which is a fact a sentence can state and only a picture can make obvious.
 struct SessionPreview: Equatable {
     var heading: String
@@ -1447,7 +1447,12 @@ final class QuickBarModel {
         var lines = projectTodos.filter { $0.sessionIndex == anchor.sessionIndex }.map { line($0) }
         guard let at = lines.firstIndex(where: { $0.isAnchor }) else { return nil }
         let before = placement == .after && optionDown
-        let index = before ? at : at + 1
+        // After and Narrow land past the anchor's whole subtree; Add Before takes the anchor's slot.
+        var index = at
+        if !before {
+            index += 1
+            while index < lines.count, lines[index].kind == .task, lines[index].depth > anchor.depth { index += 1 }
+        }
         let depth = placement == .narrow ? anchor.depth + 1 : anchor.depth
         lines.insert(ghostLine(depth: depth), at: index)
         return windowed(lines, around: index, session: anchor.sessionIndex, depth: depth)

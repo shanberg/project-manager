@@ -120,7 +120,7 @@ struct BoardsSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Show live pages in link cards", isOn: $loadsPages)
+                Toggle("Show live pages in web cards", isOn: $loadsPages)
                 Stepper("Pages kept live: \(livePages)", value: $livePages,
                         in: CanvasPageBudget.allowed)
                     .disabled(!loadsPages)

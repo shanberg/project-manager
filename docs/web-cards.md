@@ -10,6 +10,42 @@ The mechanics — when a page runs, who holds the renderer, what it costs to cro
 [header-chrome.md](header-chrome.md). This page is about the *page*: where it is allowed to go, what
 comes back with it, and what a board does with a link.
 
+## Making one, and making one as nobody
+
+A web card is added from the same list everything else on a board is added from
+([CanvasAddCommand](../pm-mac/PM/Canvas/CanvasAddCommand.swift)), which the board's right-click, the
+header's `+`, a tile's strip and its `+` all draw. Two things about that list are this page's business.
+
+**It says Web, not Link.** "New Link…" described the address you type rather than the thing you get,
+and in an app where a project keeps a `## Links` list it described a different command that already
+exists. What you get is a card showing a live page, which is what the settings pane, this document and
+anyone who has used one has called a web card for as long as it has embedded the page.
+
+**New Private Web Card is the same card on the ephemeral session.** A card could always be moved onto
+the private session afterwards — that is the Session submenu, and `CanvasWebSession.ephemeralName` is
+the jar with a hole in the bottom, never written to disk and gone when Folio quits. But *afterwards* is
+too late for the case it is for: by then the page has loaded once as your signed-in self, which is the
+thing you opened a private card to avoid. So the session is set on the node before the card exists, and
+choosing it is one decision made at the point the card is made, beside the ordinary one.
+
+Everything else about it is an ordinary web card, including that it shares the one ephemeral store with
+every other private card — two private cards are nearly always two views of one signed-out session, and
+one jar each would mean signing in twice to look at a site twice.
+
+**And the address bar says which jar you are in.** A card on anything but the shared session wears a
+pill at the head of the address ([CanvasSessionPill](../pm-mac/PM/Canvas/CanvasSessionPill.swift)) — the
+profile's name, or Private in the browsers' purple. It is in that row because that row is already where
+the page says whose it is, and for the same reason the host is stated at full size there: the same host
+signed in as somebody else is a different page, and both halves of that sentence should be readable
+before you type a password into one. It is drawn while you are typing an address too.
+
+The shared session wears nothing. A badge on every card is furniture, and furniture is what the lock
+was before it became a warning that only appears when a page is unencrypted.
+
+Note what this does *not* cover: a card you have not stepped into. The pill is in the window's chrome,
+which only ever describes the one card whose page is live under your hands, so a board of private cards
+looks like a board of ordinary ones until you step into one.
+
 ## The card has two addresses, and only one of them is the document's
 
 `CanvasContent.link(url:)` is the address written on the board — what the card is **for**, and the only
@@ -95,6 +131,13 @@ one.
 **It rides the favicon switch rather than growing one of its own.** Same host, same moment, same claim
 — ask the site you linked to about itself — and the Settings row already carries the sentence. A second
 toggle would be a second decision about one thing.
+
+**A card falls back to the icon its page declares.** The loader asks for `/favicon.ico`; plenty of
+sites serve theirs only through `<link rel="icon">`. When a card finishes loading and its host still
+has no icon, it reads that URL out of the page and hands it to `FaviconLoader.adopt(declared:for:)`,
+which fetches it (https only, same cookie-less session) and caches it under the host, so the tab strip,
+the card menus and the address bar all pick it up. The URL is one the page you are viewing chose, so
+it reveals nothing the visit didn't, and the same switch turns it off.
 
 ## Open
 

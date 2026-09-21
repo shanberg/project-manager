@@ -187,6 +187,9 @@ targets:
       - path: PM/Canvas/CanvasPageSnapshots.swift
       - path: PM/Canvas/CanvasFrozenPageView.swift
       - path: PM/Canvas/CanvasCardSession.swift
+      # The address bar's session pill, which is a file of its own so it can be drawn and measured
+      # here — see CanvasSessionPillTests.
+      - path: PM/Canvas/CanvasSessionPill.swift
       - path: PM/Canvas/CanvasCardEditing.swift
       - path: PM/Canvas/CanvasDocumentStore.swift
       - path: PM/Canvas/CanvasCardShows.swift

@@ -442,7 +442,7 @@ struct QuickBarView: View {
     /// The session with the line being typed already in it.
     ///
     /// The rows say where a line goes; this shows it. They are not the same answer — "Narrow under it"
-    /// puts the new task *above* that task's existing children, which the rows can only state and this
+    /// puts the new task *below* that task's existing children, which the rows can only state and this
     /// makes obvious at a glance.
     private func previewBox(_ preview: SessionPreview) -> some View {
         VStack(alignment: .leading, spacing: 1) {

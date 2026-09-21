@@ -1122,8 +1122,11 @@ extension CanvasBoardView {
     /// Right-clicking a strip anywhere but on a tab: the tile's menu. What can go into it first — a new
     /// card, or one already on the board, as a tab — which is the same list the strip's + opens; then
     /// the tile's commands, as a right-click on its card gives them.
+    ///
+    /// No "Tabs" header of its own any more: the add list brings its own headings now
+    /// (`CanvasAddCommand.Group`), and a heading over a run of headings labels nothing. What these
+    /// make is a tab because of where the menu was opened, which the "Tile" section below says again.
     private func buildTabStripMenu(_ menu: NSMenu, tile: String) {
-        menu.addItem(.sectionHeader(title: "Tabs"))
         fillNewTabMenu(menu)
         addTileSection(menu, id: tile, wholeTile: true)
     }
@@ -1406,7 +1409,8 @@ extension CanvasBoardView {
         switch command {
         case .card: addTextCard(at: where_)
         case .frame: addFrame(at: where_)
-        case .link: addLinkCard(at: where_)
+        case .web: addLinkCard(at: where_)
+        case .privateWeb: addLinkCard(at: where_, profile: CanvasWebSession.ephemeralName)
         case .file: addFileCard(at: where_)
         case .folder: addFolderCard(at: where_)
         case .projectNote: addProjectNoteCard(at: where_)
@@ -1419,14 +1423,19 @@ extension CanvasBoardView {
         }
     }
 
-    /// The items for `CanvasAddCommand.offered`, each carrying its command. `tabs` is a strip's list,
-    /// which leaves out what can't be a tab and adds into `menuTile`.
+    /// `CanvasAddCommand.rows` as menu items — each command carrying itself, each heading a section
+    /// header. `tabs` is a strip's list, which leaves out what can't be a tab and adds into `menuTile`.
+    /// What is offered and how it is grouped are decided there; this only draws it.
     private func addCommandItems(_ menu: NSMenu, tabs: Bool) {
-        for command in CanvasAddCommand.offered(projectNote: offersProjectNoteCard)
-        where !tabs || command.makesTile {
-            let item = add(menu, command.title(knowsFolder: knowsFolder),
-                           tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
-            item.representedObject = command
+        for row in CanvasAddCommand.rows(projectNote: offersProjectNoteCard, tabs: tabs) {
+            switch row {
+            case .heading(let group):
+                menu.addItem(.sectionHeader(title: group.title))
+            case .item(let command):
+                let item = add(menu, command.title(knowsFolder: knowsFolder),
+                               tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
+                item.representedObject = command
+            }
         }
     }
 
@@ -1435,23 +1444,34 @@ extension CanvasBoardView {
         add(command, at: menuPoint)
     }
 
-    /// Adding a link or a file card, wherever the request came from.
+    /// Adding a web card or a file card, wherever the request came from.
     ///
     /// On the board rather than on the window, because the board is what owns cards and what knows
     /// where a click landed. The toolbar's Add calls the same two with no point and gets the middle of
     /// the window; the contextual menu passes where you right-clicked, which is the whole reason to
     /// offer them there.
-    func addLinkCard(at where_: CanvasPoint?) {
-        promptForAddress(title: "Add a link card",
-                         message: "The page is embedded on the board.",
+    ///
+    /// `profile` is the browser session the card is born on — nil for the shared jar every card has
+    /// always used, `CanvasWebSession.ephemeralName` for New Private Web Card. Set on the node before
+    /// it goes up, because a card's view reads its session as it is built: putting it on the private
+    /// jar afterwards would mean the page had already loaded once as your signed-in self, which is the
+    /// one thing the private card exists to prevent.
+    func addLinkCard(at where_: CanvasPoint?, profile: String? = nil) {
+        let isPrivate = profile == CanvasWebSession.ephemeralName
+        promptForAddress(title: isPrivate ? "Add a private web card" : "Add a web card",
+                         message: isPrivate
+                             ? "The page is embedded on the board, signed in as nobody. Nothing it"
+                                 + " stores is written to disk, and it is gone when Folio quits."
+                             : "The page is embedded on the board.",
                          initial: "",
                          suggestions: projectLinkSuggestions()) { [weak self] text in
             guard let self else { return }
             let at = where_ ?? centreOfVisibleBoard
-            addCard(CanvasNode(content: .link(url: text),
-                               frame: CanvasRect(x: at.x - 200, y: at.y - 200,
-                                                 width: 400, height: 400)),
-                    actionName: "Add Link")
+            var node = CanvasNode(content: .link(url: text),
+                                  frame: CanvasRect(x: at.x - 200, y: at.y - 200,
+                                                    width: 400, height: 400))
+            CanvasCardSession.set(profile, on: &node)
+            addCard(node, actionName: isPrivate ? "Add Private Web Card" : "Add Web Card")
         }
     }
 
