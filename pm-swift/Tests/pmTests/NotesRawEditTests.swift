@@ -399,6 +399,20 @@ final class NotesRawEditTests: XCTestCase {
                       "Two nested as One's first child, above the existing child")
     }
 
+    /// Add After on a parent lands past its whole subtree; Add Subtask lands as its last child.
+    func testInsertAfterSkipsSubtreeAndChildGoesLast() throws {
+        let after = try XCTUnwrap(insertTaskRelative(
+            rawText: Self.moveFixture, anchorSessionIndex: 0, anchorLineIndex: 0,   // "One" (has a child)
+            text: "New", due: nil, position: .after))
+        XCTAssertTrue(after.rawText.contains("- [ ] One\n  - [ ] One child\n- [ ] New\n- [ ] Two"))
+        XCTAssertEqual(after.lineIndex, 2)
+        let child = try XCTUnwrap(insertTaskRelative(
+            rawText: Self.moveFixture, anchorSessionIndex: 0, anchorLineIndex: 0,
+            text: "New", due: nil, position: .child))
+        XCTAssertTrue(child.rawText.contains("- [ ] One\n  - [ ] One child\n  - [ ] New\n- [ ] Two"))
+        XCTAssertEqual(child.lineIndex, 2)
+    }
+
     /// Insert after the last row of a parent's subtree at that child's depth lands as the parent's
     /// last child — the depth is chosen independently of the slot.
     func testMoveSubtreeAsLastChild() throws {

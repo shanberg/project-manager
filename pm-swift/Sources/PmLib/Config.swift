@@ -454,7 +454,7 @@ public enum PmError: Error, CustomStringConvertible {
         case .projectNotFoundAmong(let q, let names):
             let base = "No project found matching: \(q). Projects are matched by code (e.g. S-004) or by name"
             return names.isEmpty ? base + "." : base + "; did you mean: \(names.joined(separator: ", "))?"
-        case .ambiguousProject(let q): return "Ambiguous match. Multiple projects start with: \(q)"
+        case .ambiguousProject(let q): return "Ambiguous match: more than one project matches \(q). Use the project's code (e.g. S-004) instead."
         case .emptyProjectQuery: return "Project name or prefix cannot be empty."
         case .notesNotFound(let path): return "Notes file not found. Expected: \(path)"
         case .notesAlreadyExists(let path): return "Notes file already exists: \(path)"

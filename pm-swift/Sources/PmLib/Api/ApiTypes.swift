@@ -137,6 +137,8 @@ public struct ApiInput: Codable, Equatable {
     public var partOf: String?
     public var clearPartOf: Bool?
     public var advanceFocus: Bool?
+    /// `task.add`: make the new task the focused one. Default true; the MCP adapter defaults it off.
+    public var focus: Bool?
     /// `task.focus`: pick the task up into the current session when it's from an older one. Default
     /// true — see docs/sessions.md D3.
     public var pick: Bool?

@@ -227,6 +227,66 @@ final class McpTests: XCTestCase {
                 "digest": todo["digest"] as Any]
     }
 
+    /// The focused task is the person's cursor, not the model's. An add over MCP leaves it where it
+    /// was, and asking for focus moves it.
+    func testAddingOverMcpLeavesFocusAlone() throws {
+        try XCTSkipUnless(haveBinary)
+        _ = try seedProject()
+        let before = call("task_list", ["project": "W-1"]).text
+        let focusedBefore = before.components(separatedBy: "\"focused\":true").count
+
+        let added = call("task_add", ["project": "Redesign", "text": "Second thing"])
+        XCTAssertFalse(added.isError, added.text)
+        XCTAssertFalse(added.text.contains("\"kind\":\"focused\""), added.text)
+        XCTAssertFalse(added.text.contains("\"kind\":\"unfocused\""), added.text)
+        XCTAssertEqual(call("task_list", ["project": "W-1"]).text.components(separatedBy: "\"focused\":true").count,
+                       focusedBefore)
+
+        let focused = call("task_add", ["project": "W-1", "text": "Third thing", "focus": true, "dryRun": true])
+        XCTAssertTrue(focused.text.contains("\"kind\":\"focused\""), focused.text)
+    }
+
+    /// Reinstalling `pm` shouldn't need the client restarted. The server swaps itself for the new
+    /// binary in place, on the same pipes, and the request that arrived after the swap is answered.
+    func testServerRelaunchesWhenItsBinaryIsReplaced() throws {
+        try XCTSkipUnless(haveBinary)
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let installed = dir.appendingPathComponent("pm")
+        try fm.copyItem(atPath: Self.pmBinaryPath, toPath: installed.path)
+
+        let process = Process()
+        process.executableURL = installed
+        process.arguments = ["mcp"]
+        process.environment = ProcessInfo.processInfo.environment.merging(env) { _, e in e }
+        let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
+        process.standardInput = inPipe
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        try process.run()
+
+        let write = { (line: String) in try? inPipe.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8)) }
+        write(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
+        Thread.sleep(forTimeInterval: 1)
+
+        // An install: a new file moved over the old one.
+        let staged = dir.appendingPathComponent("pm.new")
+        try fm.copyItem(atPath: Self.pmBinaryPath, toPath: staged.path)
+        _ = try fm.replaceItemAt(installed, withItemAt: staged)
+
+        write(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
+        try? inPipe.fileHandleForWriting.close()
+
+        let out = String(data: (try? outPipe.fileHandleForReading.readToEnd()) ?? Data(), encoding: .utf8) ?? ""
+        let err = String(data: (try? errPipe.fileHandleForReading.readToEnd()) ?? Data(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
+        XCTAssertTrue(out.contains(#""id":1"#), out)
+        XCTAssertTrue(out.contains(#""id":2"#), "the request after the swap was dropped: \(out)")
+        XCTAssertTrue(err.contains("binary changed"), err)
+    }
+
     func testDryRunReportsWithoutWriting() throws {
         try XCTSkipUnless(haveBinary)
         let reference = try seedProject()

@@ -103,6 +103,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "sessionOrdinal": input.sessionOrdinal.map { JSONValue.number(Double($0)) },
         "sessionDigest": input.sessionDigest.map(JSONValue.string),
         "advanceFocus": input.advanceFocus.map(JSONValue.bool),
+        "focus": input.focus.map(JSONValue.bool),
         "pick": input.pick.map(JSONValue.bool),
         "clearDue": input.clearDue.map(JSONValue.bool),
         "waiting": input.waiting.map(JSONValue.string),
@@ -147,7 +148,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                                                    due: input.due, position: kind) else {
                     throw ApiError(.writeFailed, "Couldn't insert beside that task.")
                 }
-                let focused = kind == .child
+                let focused = kind == .child && (input.focus ?? true)
                     ? try focusing(out.rawText, sessionIndex: out.sessionIndex, lineIndex: out.lineIndex)
                     : out.rawText
                 return Outcome(rawText: focused, relocated: at.relocated)
@@ -157,6 +158,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                                                 text: text, due: input.due) else {
                 throw ApiError(.writeFailed, "Couldn't add to the current session.")
             }
+            guard input.focus ?? true else { return Outcome(rawText: out.rawText) }
             return Outcome(rawText: try focusing(out.rawText, sessionIndex: out.sessionIndex,
                                                  lineIndex: out.lineIndex))
         }
@@ -710,6 +712,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                 entries.append(.object([
                     "folder": .string(folder),
                     "name": .string(projectTitle(fromFolderName: folder)),
+                    "code": projectCode(fromName: folder).map(JSONValue.string) ?? .null,
                     "kind": .string(kind.rawValue),
                     "scope": .string(scopeCase.rawValue),
                     "path": .string((base as NSString).appendingPathComponent(folder)),

@@ -38,6 +38,24 @@ final class ProjectsTests: XCTestCase {
         XCTAssertNil(matchProject(folders: folders, query: ""))
     }
 
+    /// A query that is no code reads as a name: exact title first, then a title prefix, either
+    /// case. A name two projects share is ambiguous, and the code still picks one out.
+    func testMatchProjectResultByName() {
+        let folders = ["S-004 Project Manager Tool", "W-1 Alpha", "W-2 Alpha", "W-3 Beta Site"]
+        guard case .matched("S-004 Project Manager Tool") = matchProjectResult(folders: folders, query: "Project Manager Tool") else {
+            return XCTFail("Expected the exact title to match")
+        }
+        guard case .matched("S-004 Project Manager Tool") = matchProjectResult(folders: folders, query: "project manager") else {
+            return XCTFail("Expected a title prefix to match, in any case")
+        }
+        guard case .ambiguous = matchProjectResult(folders: folders, query: "Alpha") else {
+            return XCTFail("Expected a shared name to be ambiguous")
+        }
+        guard case .matched("W-2 Alpha") = matchProjectResult(folders: folders, query: "W-2") else {
+            return XCTFail("Expected the code to disambiguate")
+        }
+    }
+
     /// matchProjectResult is the single source of truth; resolve logic uses it.
     func testMatchProjectResult() {
         let folders = ["W-1 Alpha", "W-2 Beta", "W-10 Gamma"]

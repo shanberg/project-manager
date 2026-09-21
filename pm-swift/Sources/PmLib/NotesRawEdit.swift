@@ -165,8 +165,11 @@ public func insertTaskRelative(
                 lines.insert(inserted, at: n)
                 return (lines.joined(separator: "\n"), sessionIndex, taskIndex)
             case .after, .child:
-                lines.insert(inserted, at: n + 1)
-                return (lines.joined(separator: "\n"), sessionIndex, taskIndex + 1)
+                // Both land past the anchor's whole subtree: After as its next sibling, Child as its
+                // last child.
+                let range = rawSubtreeRange(lines, start: n)
+                lines.insert(inserted, at: range.upperBound)
+                return (lines.joined(separator: "\n"), sessionIndex, taskIndex + range.count)
             }
         }
         taskIndex += 1

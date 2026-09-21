@@ -69,10 +69,10 @@ final class TaskAddDueTests: XCTestCase {
         let r = try XCTUnwrap(insertTaskRelative(
             rawText: Self.nested, anchorSessionIndex: 0, anchorLineIndex: 0,
             text: "New child", due: nil, position: .child))
-        XCTAssertEqual(r.lineIndex, 1)
+        XCTAssertEqual(r.lineIndex, 2, "Lands in the last position, after the existing child")
         let parsed = try todos(r.rawText)
-        XCTAssertEqual(parsed.map(\.text), ["Parent", "New child", "Child A"])
-        XCTAssertEqual(parsed[1].depth, 1, "Child sits one level deeper than its parent")
+        XCTAssertEqual(parsed.map(\.text), ["Parent", "Child A", "New child"])
+        XCTAssertEqual(parsed[2].depth, 1, "Child sits one level deeper than its parent")
     }
 
     func testInsertWithDueRoundTrips() throws {

@@ -65,6 +65,12 @@ private func toolSchema(for spec: ApiActionSpec) -> JSONValue {
             properties[name] = .object(field)
         }
     }
+    for name in ["focus", "advanceFocus"] {
+        guard var field = properties[name]?.objectValue else { continue }
+        field["description"] = .string((field["description"]?.stringValue ?? "")
+            .replacingOccurrences(of: "Default true.", with: "Default false here: this server leaves the person's focus where it is."))
+        properties[name] = .object(field)
+    }
     if spec.tier == .mutation {
         properties["dryRun"] = .object([
             "type": .string("boolean"),
@@ -167,7 +173,7 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
 
     let arguments = object["arguments"] ?? .object([:])
     let dryRun = arguments.objectValue?["dryRun"]?.boolValue ?? false
-    let input: ApiInput
+    var input: ApiInput
     do {
         // Decode through the contract's own type, so a field the action doesn't have is ignored the
         // same way it is for every other adapter.
@@ -187,6 +193,11 @@ private func handleToolCall(id: JSONValue, params: JSONValue?, allowed: [ApiActi
         return toolFailure(id, "missingField: every task needs its digest. "
                            + "Call task_list or notes_get and pass each task's session, line and digest back.")
     }
+
+    // A model working through a list shouldn't be moving the person's cursor: the focused task is what
+    // Folio's panel shows and what they will pick up next. Asked for explicitly, focus moves as usual.
+    input.focus = input.focus ?? false
+    input.advanceFocus = input.advanceFocus ?? false
 
     do {
         let outcome = try performApi(action, input, options: ApiOptions(dryRun: dryRun, source: "mcp"))
@@ -243,6 +254,60 @@ private func handle(_ message: JSONValue, allowed: [ApiActionSpec]) {
     }
 }
 
+// MARK: - Staying current
+//
+// A stdio server is started once and keeps the binary it started with, so reinstalling `pm` changed
+// nothing until the client was restarted. The server holds no state between requests — what it may do
+// is fixed by its arguments — so it can replace itself: before acting on a request it checks whether
+// its executable has been swapped, and if so runs the new one in the same process. The client's pipes
+// carry over, so from its side nothing happened.
+//
+// It cannot re-announce its tools. A client reads the list once when it connects, so a changed
+// schema shows up on the next connect; behaviour changes apply on the next call.
+
+/// A request the old process read but did not answer, handed to the new one so it isn't dropped.
+private let pendingRequestKey = "PM_MCP_PENDING_REQUEST"
+
+/// Identifies one installed copy of the binary. An install that replaces the file changes the inode;
+/// one that overwrites it changes the date or size. Any of the three says it is a different build.
+private struct BinaryStamp: Equatable {
+    let inode: UInt64
+    let modified: timespec
+    let size: Int64
+
+    static func == (a: BinaryStamp, b: BinaryStamp) -> Bool {
+        a.inode == b.inode && a.modified.tv_sec == b.modified.tv_sec
+            && a.modified.tv_nsec == b.modified.tv_nsec && a.size == b.size
+    }
+
+    init?(path: String) {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        inode = UInt64(info.st_ino)
+        modified = info.st_mtimespec
+        size = Int64(info.st_size)
+    }
+}
+
+private let executablePath: String? = Bundle.main.executablePath
+
+/// Run the current binary in place of this process, if it is no longer the one that started. Returns
+/// only when there is nothing to do or the swap failed, in which case carrying on with what is
+/// running is the right thing.
+private func relaunchIfReplaced(since started: BinaryStamp?, pending line: String?) {
+    guard let started, let path = executablePath,
+          let now = BinaryStamp(path: path), now != started,
+          FileManager.default.isExecutableFile(atPath: path), now.size > 0 else { return }
+    if let line { setenv(pendingRequestKey, line, 1) }
+    stderr("pm mcp: binary changed, restarting")
+    let argv = CommandLine.arguments
+    var cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
+    execv(path, &cArgs)
+    // Still here: exec failed. Leave the request to be answered by this process.
+    if line != nil { unsetenv(pendingRequestKey) }
+    cArgs.compactMap { $0 }.forEach { free($0) }
+}
+
 // MARK: - Entry
 
 func runMcp(args: [String]) {
@@ -266,7 +331,18 @@ func runMcp(args: [String]) {
     stderr("pm mcp: \(allowed.count) tools"
            + (allowWrite ? "" : " (queries only — pass --allow-write to change anything)"))
 
-    while let line = readLine(strippingNewline: true) {
+    // Unbuffered, so that when this process is replaced no request is sitting in its buffer, gone with
+    // it. Messages are one small line each; reading them a byte at a time costs nothing that matters.
+    setvbuf(stdin, nil, _IONBF, 0)
+    let started = executablePath.flatMap { BinaryStamp(path: $0) }
+
+    var carried = ProcessInfo.processInfo.environment[pendingRequestKey]
+    unsetenv(pendingRequestKey)
+
+    while let line = carried ?? readLine(strippingNewline: true) {
+        let wasCarried = carried != nil
+        carried = nil
+        if !wasCarried { relaunchIfReplaced(since: started, pending: line) }
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { continue }
         guard let message = try? JSONDecoder().decode(JSONValue.self, from: Data(trimmed.utf8)) else {

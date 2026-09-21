@@ -100,6 +100,17 @@ public func matchProjectResult(folders: [String], query: String) -> ProjectMatch
     let prefixMatches = folders.filter { $0.hasPrefix(q) }
     if prefixMatches.count == 1 { return .matched(prefixMatches[0]) }
     if prefixMatches.count > 1 { return .ambiguous }
+    // Not a code, so a name: the title after the `CODE-NNN `, which is what `project.list` calls a
+    // project and what a person or a model reads off it. Only reached when the code and folder-prefix
+    // reading found nothing, so a query that is a code is never taken for a name. A name two projects
+    // share is ambiguous, and the error asks for the code, which nothing else shares.
+    let byTitle = folders.filter { projectTitle(fromFolderName: $0).caseInsensitiveCompare(q) == .orderedSame }
+    if byTitle.count == 1 { return .matched(byTitle[0]) }
+    if byTitle.count > 1 { return .ambiguous }
+    let lowered = q.lowercased()
+    let byTitlePrefix = folders.filter { projectTitle(fromFolderName: $0).lowercased().hasPrefix(lowered) }
+    if byTitlePrefix.count == 1 { return .matched(byTitlePrefix[0]) }
+    if byTitlePrefix.count > 1 { return .ambiguous }
     return .notFound
 }
 
