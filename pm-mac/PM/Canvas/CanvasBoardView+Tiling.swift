@@ -122,7 +122,11 @@ extension CanvasBoardView {
     }
 
     /// Tile these cards, whatever asked for it.
-    func tile(_ ids: Set<String>, arrangement: CanvasTiling.Arrangement? = nil) {
+    ///
+    /// `animated` is false only where the crossing would be noise rather than news: the list lens's
+    /// detail half re-tiles on every arrow key (docs/items.md D11), and a card flying across the pane
+    /// each time you step down a row is a journey nobody is following.
+    func tile(_ ids: Set<String>, arrangement: CanvasTiling.Arrangement? = nil, animated: Bool = true) {
         let cards = document.nodes.filter { ids.contains($0.id) && !$0.isGroup }
             .map { (id: $0.id, frame: $0.frame) }
         guard !cards.isEmpty else { return NSSound.beep() }
@@ -181,7 +185,7 @@ extension CanvasBoardView {
         // ones, where every card is invalidated at once — are inside the measurement. See `FrameMeter`.
         FrameMeter.measure("canvas → tiles (\(nodeViews.count) views, \(session.ids.count) tiles, "
                               + "\(pagesLive.count) live)", on: self)
-        cross(to: 1, centre: tilesCentre(of: session), layout: session.layout, animated: true)
+        cross(to: 1, centre: tilesCentre(of: session), layout: session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
     }
@@ -653,14 +657,14 @@ extension CanvasBoardView {
         if menu.delegate == nil { menu.delegate = cardPreview }
         // Asked for now so the next opening has them: a menu is built synchronously and draws only the
         // icons that have already arrived. See `FaviconLoader.cached`.
-        FaviconLoader.shared.warm(hosts: sections.flatMap(\.cards).compactMap { card -> String? in
+        FaviconLoader.shared.warm(hosts: sections.flatMap(\.items).compactMap { card -> String? in
             if case .page(let host) = card.kind { return host }
             return nil
         })
         for section in sections {
-            if let frame = section.frame { menu.addItem(.sectionHeader(title: frame)) }
-            for card in section.cards {
-                let item = menu.addItem(withTitle: card.name, action: action, keyEquivalent: "")
+            if let label = section.label { menu.addItem(.sectionHeader(title: label)) }
+            for card in section.items {
+                let item = menu.addItem(withTitle: card.title, action: action, keyEquivalent: "")
                 item.target = self
                 item.representedObject = card.id
                 item.image = Self.menuIcon(for: card.kind)

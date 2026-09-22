@@ -157,6 +157,8 @@ public struct ApiInput: Codable, Equatable {
     public var includeCompleted: Bool?
     /// `task.done`: list what was dropped in the period too.
     public var includeDropped: Bool?
+    /// `session.list`: fill each sitting's duration from the attention log (docs/time-tracking.md D6).
+    public var time: Bool?
     public var limit: Int?
     public var now: String?
     /// A journal entry's id.
@@ -176,6 +178,10 @@ public struct ApiInput: Codable, Equatable {
     public var before: String?
     /// `session.list`: the projects to look in, by name, prefix or `[[link]]`.
     public var projects: [String]?
+    /// `card.add`, `card.list`: a frame on the project's board, by label (docs/items.md D9).
+    public var frame: String?
+    /// `card.list`: which order the items come in — a `CanvasItemSort`.
+    public var sort: String?
 
     public init() {}
 }

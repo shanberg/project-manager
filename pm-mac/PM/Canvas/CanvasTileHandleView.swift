@@ -393,7 +393,7 @@ final class CanvasTileHandleView: NSView {
         let height = font.boundingRectForFont.height
         let text = NSRect(x: textLeft, y: rect.midY - height / 2,
                           width: max(0, close.minX - 6 / scale - textLeft), height: height)
-        (described.name as NSString).draw(with: text, options: [.usesLineFragmentOrigin,
+        (described.title as NSString).draw(with: text, options: [.usesLineFragmentOrigin,
                                                                  .truncatesLastVisibleLine],
                                           attributes: attributes)
 

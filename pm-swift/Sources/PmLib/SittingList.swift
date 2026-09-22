@@ -63,6 +63,11 @@ public struct SittingEntry: Codable, Equatable {
     public let dropped: [SittingTask]
     /// The project's newest sitting, written into within the idle window: still going.
     public let isCurrent: Bool
+    /// How long it ran, in seconds — the attention that was on this project while it was the current
+    /// sitting (docs/time-tracking.md D6). Filled only when a read asked for it, and nil rather than
+    /// zero when there's nothing on record: a sitting PM wasn't watching has no duration, which is a
+    /// different thing from one that took no time.
+    public var seconds: Double? = nil
 }
 
 /// A span's sittings, newest day first and in time order within a day, and the completions that fell
@@ -309,7 +314,11 @@ public func projectFolders(named projects: [String]) throws -> Set<String> {
 /// the span began can't have anything dated in it, so a Today view stats every project and parses only
 /// the handful touched today. Each project that is read is looked at first (`DoneLog.observe`), so a
 /// tick made in Obsidian an hour ago is in the answer.
-public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Date = Date()) throws -> SittingList {
+/// `time` fills each sitting's duration from the attention log (docs/time-tracking.md D6). Asked for
+/// rather than always paid: it's a second pass over a second log, and only a view that draws durations
+/// wants it.
+public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Date = Date(),
+                        time: Bool = false) throws -> SittingList {
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
 
@@ -348,5 +357,9 @@ public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Dat
             answer = answer.merged(with: part)
         }
     }
-    return answer.sorted()
+    let sorted = answer.sorted()
+    guard time, let spans = try? attentionSpans(in: range, projects: projects, now: now) else {
+        return sorted
+    }
+    return withDurations(sorted, spans: spans)
 }

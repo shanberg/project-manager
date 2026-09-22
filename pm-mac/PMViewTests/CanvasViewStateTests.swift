@@ -106,6 +106,28 @@ final class CanvasViewStateTests: XCTestCase {
         XCTAssertNil(state.workspaceName)
     }
 
+    /// The order a lens reads in is remembered with the lens (docs/items.md D4) — and the default one
+    /// is still nothing at all, so sorting a board and putting it back leaves no row behind.
+    func testTheLensOrderComesBack() {
+        CanvasViewMemory.remember(CanvasViewState(presentation: .list, sort: .name), for: url)
+        let back = CanvasViewMemory.of(url)
+        XCTAssertEqual(back.presentation, .list)
+        XCTAssertEqual(back.sort, .name)
+
+        CanvasViewMemory.remember(CanvasViewState(), for: url)
+        XCTAssertNil(CanvasViewMemory.of(url).sort)
+        XCTAssertNil(stored())
+    }
+
+    func testAStateWrittenBeforeTheLensesDecodesAsABoardInReadingOrder() throws {
+        let old = Data(#"""
+        {"mode":"view"}
+        """#.utf8)
+        let state = try JSONDecoder().decode(CanvasViewState.self, from: old)
+        XCTAssertNil(state.presentation)
+        XCTAssertNil(state.sort, "which the pane reads as reading order")
+    }
+
     private func stored() -> Any? {
         (UserDefaults.standard.dictionary(forKey: "PMCanvasViewState"))?[url.path]
     }

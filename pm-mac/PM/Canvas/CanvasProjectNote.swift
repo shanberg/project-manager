@@ -829,7 +829,9 @@ struct CanvasProjectNote: View {
         if (!blocks.isEmpty || !picked.isEmpty || showsEmpty), !caption.isEmpty {
             SessionHeading(session: session)
                 .padding(.horizontal, Self.margin)
-                .padding(.top, 10)
+                // Twice the gap between sittings, which run into one another at 10. The first one drawn
+                // keeps its 10: the card's own top padding is already the space above it.
+                .padding(.top, index == shownSessions.first?.index ? 10 : 20)
                 .padding(.bottom, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

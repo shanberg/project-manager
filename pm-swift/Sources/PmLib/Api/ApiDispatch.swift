@@ -83,6 +83,8 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
     [
         "project": input.project.map(JSONValue.string),
         "folder": input.folder.map(JSONValue.string),
+        "frame": input.frame.map(JSONValue.string),
+        "sort": input.sort.map(JSONValue.string),
         "kind": input.kind.map(JSONValue.string),
         "task": input.task.map { _ in JSONValue.bool(true) },
         "tasks": input.tasks.map { _ in JSONValue.bool(true) },
@@ -112,6 +114,7 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "clearPartOf": input.clearPartOf.map(JSONValue.bool),
         "includeCompleted": input.includeCompleted.map(JSONValue.bool),
         "includeDropped": input.includeDropped.map(JSONValue.bool),
+        "time": input.time.map(JSONValue.bool),
         "query": input.query.map(JSONValue.string),
         "entry": input.entry.map(JSONValue.string),
         "now": input.now.map(JSONValue.string),
@@ -495,7 +498,21 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let path = try resolveProjectPath(nameOrPrefix: input.project ?? "")
         let folder = (path as NSString).lastPathComponent
         if !options.dryRun {
-            try setFocusedProject(key: "\((path as NSString).deletingLastPathComponent):\(folder)")
+            let key = "\((path as NSString).deletingLastPathComponent):\(folder)"
+            try setFocusedProject(key: key)
+            // Attention arrived here, and a `began` implicitly ends whatever it was on before
+            // (docs/time-tracking.md D4). Folio writes these too, with a real clock behind them; this
+            // is what keeps the record honest when the focus came from Raycast, `pm` or a model, and
+            // when Folio isn't running at all.
+            //
+            // The focused task is colour on the span, never a total (D1), so failing to read it is a
+            // reason to log without it rather than to fail the focus.
+            let task = (try? resolveNotesPath(projectPath: path))
+                .flatMap { $0 }
+                .flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+                .flatMap { try? notesShow(rawText: $0) }?
+                .todos.first(where: \.isFocused)?.text
+            AttentionLog.began(project: folder, key: key, task: task, source: options.source)
         }
         return ApiResult(action: spec.name,
                          summary: Phrase(past: "Focused \(folder)",
@@ -554,7 +571,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
 
     case "session.list":
         let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
-        let list = try sessionList(in: range, projects: input.projects)
+        let list = try sessionList(in: range, projects: input.projects, time: input.time == true)
         let done = list.sittings.reduce(0) { $0 + $1.finished.count }
             + list.elsewhere.filter { !$0.dropped }.count
         let projects = Set(list.sittings.map(\.projectFolder)).count
@@ -564,6 +581,19 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if projects > 1 { summary += " in \(projects) projects" }
         if done > 0 { summary += ", \(done) done" }
         return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
+
+    case "time.spent":
+        let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
+        let report = try timeSpent(in: range, projects: input.projects)
+        let tracked = report.projects.filter { $0.seconds > 0 }
+        let inferred = tracked.filter(\.inferred).count
+        var summary = tracked.isEmpty
+            ? "No time on record"
+            : "\(durationLabel(report.seconds)) across \(tracked.count) project\(tracked.count == 1 ? "" : "s")"
+        // Said in the sentence, not only in the data: a total that is partly guessed should say so
+        // wherever it is read aloud (D4).
+        if inferred > 0 { summary += ", \(inferred) inferred" }
+        return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(report))
 
     case "task.due":
         let due = try dueTasks(until: input.until, projects: input.projects)
@@ -748,6 +778,87 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             "partOf": memberships.first { $0.member == folder }?.master.map(JSONValue.string) ?? .null,
             "members": .array(memberships.filter { $0.master == folder }.map { .string($0.member) }),
         ]))
+    // MARK: Cards (docs/items.md D9)
+
+    case "card.list":
+        let path = try projectPath(of: try resolvedProject(input))
+        let title = try projectTitleOf(input)
+        let document = try readProjectCanvas(at: path)
+        let sort = input.sort.flatMap(CanvasItemSort.init(rawValue:)) ?? .reading
+        var sections = CanvasItems.sections(of: document, sort: sort)
+        if let wanted = input.frame {
+            sections = sections.filter {
+                $0.label?.compare(wanted, options: .caseInsensitive) == .orderedSame
+            }
+        }
+        let count = sections.reduce(0) { $0 + $1.items.count }
+        return ApiResult(action: spec.name,
+                         summary: "\(count) item\(count == 1 ? "" : "s") in \(title).",
+                         data: .object([
+                            "project": .string(title),
+                            "sort": .string(sort.rawValue),
+                            "sections": .array(sections.map { section -> JSONValue in
+                                .object([
+                                    // Null rather than a name for the cards loose on the board: they
+                                    // are in no frame, which is a different thing from being in one
+                                    // called nothing.
+                                    "frame": section.label.map(JSONValue.string) ?? .null,
+                                    "items": .array(section.items.map(described)),
+                                ])
+                            }),
+                         ]))
+
+    case "card.add":
+        let path = try projectPath(of: try resolvedProject(input))
+        let title = try projectTitleOf(input)
+        let text = (input.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw ApiError(.invalidField, "card.add needs something to put on the board.",
+                           detail: .string("text"))
+        }
+        // A project has a canvas, or wants one — the same declaration `resolveProjectCanvasPath` makes.
+        // **A preview makes nothing, the board included.** Creating it here would leave a project that
+        // had no board with one, which is a write, and "what would this do" must not do it.
+        let existing = try resolveProjectCanvasPath(projectPath: path)
+        let canvasPath: String
+        if let existing {
+            canvasPath = existing
+        } else if options.dryRun {
+            canvasPath = getProjectCanvasPath(projectPath: path)
+        } else {
+            canvasPath = try createProjectCanvas(projectPath: path,
+                                                 notesPath: try resolveNotesPath(projectPath: path))
+        }
+        let before = (try? String(contentsOfFile: canvasPath, encoding: .utf8))
+            ?? CanvasDocument().serialized()
+        var document = try CanvasDocument.parse(Data(before.utf8))
+        let address = canvasTypedAddress(text)
+        let frame = input.frame.map { CanvasItemPlacement.frame(labelled: $0, in: &document) }
+        let node = CanvasItemPlacement.add(address.map { CanvasContent.link(url: $0) } ?? .text(text),
+                                           to: &document, frame: frame)
+        let after = try document.serialized()
+        // Named after the placement rather than looked up by label: the card went into the frame that
+        // was named, or into the Inbox, which is a marked node and need not still be called one.
+        let where_ = frame.flatMap { document.node(id: $0) } ?? CanvasItemPlacement.inbox(of: document)
+        let phrase = "\(address == nil ? "a card" : "a web card") to "
+            + "\(where_.map(canvasFrameLabel) ?? CanvasItemPlacement.inboxLabel) in \(title)."
+        if !options.dryRun {
+            try document.write(to: URL(fileURLWithPath: canvasPath))
+            // Journaled as the document write it is. The board is not the notes, so the entry names
+            // the canvas — and `journal.undo` restores a file's content under a revision guard, which
+            // is as true of a `.canvas` as of a `.md`. What it cannot report is a diff of tasks,
+            // because a board has none.
+            ApiJournal.record(action: spec.name, project: path, notesPath: canvasPath,
+                              summary: "Added " + phrase, before: before, after: after, changed: [],
+                              source: options.source)
+        }
+        return ApiResult(action: spec.name,
+                         summary: (options.dryRun ? "Would add " : "Added ") + phrase,
+                         revision: revision(of: after),
+                         dryRun: options.dryRun,
+                         data: .object(["card": described(CanvasItem.of(node) ?? CanvasItem(
+                            id: node.id, title: text, kind: .text, rect: node.frame))]))
+
     case "notes.get":
         let read = try readProject(input)
         return ApiResult(action: spec.name, summary: read.notes.title,
@@ -1372,4 +1483,35 @@ public func setFocusedProject(key: String) throws {
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     let data = try JSONSerialization.data(withJSONObject: ["projectKey": key])
     try data.write(to: URL(fileURLWithPath: (dir as NSString).appendingPathComponent("focused.json")))
+}
+
+// MARK: - Cards
+
+/// A project's board as a document, or an empty one when it hasn't got a board yet.
+///
+/// Empty rather than an error: "what does this project hold?" has an honest answer for a project with
+/// no canvas, and it is "nothing". Only adding makes one.
+private func readProjectCanvas(at projectPath: String) throws -> CanvasDocument {
+    guard let path = try resolveProjectCanvasPath(projectPath: projectPath) else { return CanvasDocument() }
+    return try CanvasDocument.parse(Data(contentsOf: URL(fileURLWithPath: path)))
+}
+
+/// One item on the wire (docs/items.md D2). The same fields every lens draws, named the same way.
+private func described(_ item: CanvasItem) -> JSONValue {
+    var kind = "text"
+    var detail = item.detail
+    switch item.kind {
+    case .text: kind = "text"
+    case .file: kind = "file"
+    case .view: kind = "view"
+    case .page(let host):
+        kind = "page"
+        detail = detail ?? host
+    }
+    return .object([
+        "id": .string(item.id),
+        "title": .string(item.title),
+        "kind": .string(kind),
+        "detail": detail.map(JSONValue.string) ?? .null,
+    ])
 }

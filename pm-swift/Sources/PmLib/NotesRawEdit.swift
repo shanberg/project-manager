@@ -823,9 +823,32 @@ private func demotedHeading(_ line: String) -> String? {
 /// was at the bottom of the session with the paragraph pointing at nothing. A checkbox in a note is a
 /// task *there*; the parser reads it as one wherever it sits, so there was never anything to move it
 /// for. Structure is the only thing this still defends, because a `##` genuinely does break the file.
+///
+/// **A checkbox with nothing after it is dropped**, because it is what typing leaves behind: `- [ ]`
+/// started, then abandoned, and a task with no words is a row nobody can read. Not when something is
+/// nested under it — that line is a parent in the middle of being written, and dropping it would hand
+/// its subtasks to whatever is above.
 public func sanitizeSessionNoteBody(_ body: String) -> String {
     let lines = body.components(separatedBy: "\n").map { demotedHeading($0) ?? $0 }
-    return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    var kept: [String] = []
+    for (index, line) in lines.enumerated() {
+        if isEmptyTaskLine(line) {
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.count
+            let next = lines.dropFirst(index + 1).first
+            let hasChild = next.map { candidate in
+                !candidate.trimmingCharacters(in: .whitespaces).isEmpty
+                    && candidate.prefix { $0 == " " || $0 == "\t" }.count > indent
+            } ?? false
+            if !hasChild { continue }
+        }
+        kept.append(line)
+    }
+    return kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// A task line with a checkbox and no text: `- [ ]`, `  - [x]`, with only whitespace after it.
+private func isEmptyTaskLine(_ line: String) -> Bool {
+    line.range(of: #"^\s*[-*+]\s*\[[ xX]?\]\s*$"#, options: .regularExpression) != nil
 }
 
 /// Commit a session note the way the panel editor does: sanitize the freeform text

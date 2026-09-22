@@ -23,6 +23,10 @@ final class CanvasHeaderModel {
     /// The board's name — the canvas file, without its extension.
     var title = ""
     var mode: CanvasMode = .view
+    /// Whether there is a board in front of you at all — false in a list or a grid (docs/items.md D5).
+    /// What it hides is the chrome that answers for a board and nothing else; adding a card and a
+    /// card's own commands mean the same thing in every lens, so they stay.
+    var showsBoardControls = true
     /// The web card you have stepped into, if any.
     var page: Page?
     var find = Find()
@@ -418,7 +422,7 @@ struct CanvasControlCapsule: View {
             // Gone while the field is up: the field is find, and a button beside it that opens find is
             // a second control for the thing you are already doing. ⌘F still pulls the keyboard back.
             // Back only once the field has gone, so the two are never in the capsule together.
-            if find.shown == nil {
+            if find.shown == nil, model.showsBoardControls {
                 HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
                     model.find.isShowing = true
                     model.find.focusToken &+= 1

@@ -65,6 +65,7 @@ pm adopt [<folder>]
 pm list [-a|--archive] [--areas] [--all]
 pm archive <name>
 pm done [today|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--dropped]   # What got done, across every project
+pm time [today|yesterday|week] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--all]   # Where the time went, per project
 pm backfill-times [--write] [<project>]   # Give sessions from before headings kept a time a best guess
 pm part-of <project> [<master> | --clear]   # Put a project under a master project, or show both sides
 pm notes session add <project> [label] [-d|--date YYYY-MM-DD]
@@ -98,6 +99,8 @@ pm unarchive W-1                   # Move from archive back to active
 **Waiting on:** A task can say what it’s waiting on — a project, an area, or a person — with an inline `waiting: [[target]]`. A waiting task recedes in the list and is skipped by focus advancement, so what you’re offered next is always something you can actually start. When the project it names is archived, the wait reads as released — and Folio says so once, out loud, because the tasks that were freed are usually in a project you weren't looking at. Renaming the project it names changes nothing you can see: the token resolves by the code it carries, and the current title is what gets drawn. See [docs/links.md](docs/links.md).
 
 **The Waiting list:** One window, across every project, of everything you're waiting on, grouped by what it's waiting on — ⌃⌘W, or Waiting… from the menubar. Anything that has landed sits at the top with a button that clears the wait on the whole group. `pm api call task.waiting` answers the same question on the command line.
+
+**Where the time went:** `pm time` says how long each project had your attention today — or `pm time week` — and what came of it. Attention follows the focused project, so time spent in Obsidian, a browser or a terminal counts toward whatever you're focused on; time while the machine is idle, asleep or locked never does. Folio keeps the record (`~/.config/pm/attention.ndjson`), and a span it didn't get to close is worked out from the other logs and marked *inferred* rather than guessed at silently. A sitting can show how long it ran too — Settings ▸ Notes ▸ Display, off by default. See [docs/time-tracking.md](docs/time-tracking.md).
 
 **What got done:** `pm done` lists the tasks you finished today — or `pm done week` — across every project, including ones ticked in Obsidian. Completion times live in a small log in each project folder (`.pm-done.ndjson`), never on the task line, so the notes stay prose. See [docs/done-report.md](docs/done-report.md).
 

@@ -15,59 +15,11 @@ import PmLib
 /// value falls back to the default rather than to nothing.
 struct CanvasViewSpec: Equatable {
     /// Which question. The set is closed (D1).
-    enum Kind: String, CaseIterable {
-        /// What did I sit down to? `session.list`.
-        case day
-        /// What am I blocked on? `task.waiting` — the Waiting window's answer, on a board.
-        case waiting
-        /// Where did I say *that*? `task.search`, for the words in `query`.
-        case search
-        /// What have I left open, and where did I write it? `task.leftovers`, from sittings before the
-        /// period (D2: Leftovers reads *when* as "older than").
-        case leftovers
-        /// What's due, and when? `task.due`: overdue, then the days up to the period's end.
-        case comingUp = "coming-up"
-        /// Which projects are moving, and which have gone quiet? `project.list` with its activity.
-        case projects
-
-        /// What the card is called where it has to be one word: zoomed out, and to VoiceOver.
-        var title: String {
-            switch self {
-            case .day: return "Day"
-            case .waiting: return "Waiting"
-            case .search: return "Search"
-            case .leftovers: return "Leftovers"
-            case .comingUp: return "Coming Up"
-            case .projects: return "Projects"
-            }
-        }
-
-        /// Whether *when* means anything to it. Waiting and Projects are about now, and a search is about
-        /// words.
-        var hasPeriod: Bool { self == .day || self == .leftovers || self == .comingUp }
-
-        /// The periods its menu offers, in order: Coming up looks ahead, so it has no yesterday.
-        var periods: [Period] { self == .comingUp ? [.today, .week] : Period.relative }
-
-        /// The layouts that answer its question (D9): a Day can be read down a rail, across a week or as a
-        /// month, and Coming up across a week or a month. A list of tasks from anywhere has no shape in time.
-        var layouts: [Layout] {
-            switch self {
-            case .day: return [.list, .rail, .week, .month]
-            case .comingUp: return [.list, .week, .month]
-            case .waiting, .search, .leftovers, .projects: return [.list]
-            }
-        }
-
-        /// What its menu calls `period`: a Day's span, Leftovers' cut-off, Coming up's horizon.
-        func title(of period: Period) -> String {
-            switch self {
-            case .leftovers: return period.beforeTitle
-            case .comingUp: return period.dueTitle
-            default: return period.title
-            }
-        }
-    }
+    ///
+    /// **The kind itself lives in PmLib** as `CanvasViewKind`, with its name and its symbol, because a
+    /// board is read by things that are not this app (docs/items.md D2). What stays here is what only a
+    /// card has an opinion about: which periods its menu offers, and which layouts answer it.
+    typealias Kind = CanvasViewKind
 
     /// When (D2). A relative period follows the clock, so a Today card left on a board is tomorrow's
     /// today; a date pins it, and it becomes a page of the journal.
@@ -227,24 +179,18 @@ struct CanvasViewSpec: Equatable {
         case .leftovers: return period == .today ? "Leftovers" : "Leftovers \(period.beforeTitle)"
         case .comingUp: return "Coming Up"
         case .projects: return "Projects"
+        // Which span, the way Day says it: a Time card pinned to a date is that day's.
+        case .time: return period == .today ? "Time" : "Time · \(period.title)"
         }
     }
 
-    /// The SF Symbol that stands for the card wherever it is one line — see `cardName`.
-    var symbol: String {
-        switch kind {
-        case .day: return "calendar"
-        case .waiting: return "clock"
-        case .search: return "magnifyingglass"
-        case .leftovers: return "tray.full"
-        case .comingUp: return "calendar.badge.clock"
-        case .projects: return "square.grid.2x2"
-        }
-    }
+    /// The SF Symbol that stands for the card wherever it is one line — see `cardName`. The kind's
+    /// own, since nothing a card is set to changes what question it asks.
+    var symbol: String { kind.symbol }
 
     // MARK: On the node
 
-    static let viewKey = "pmView"
+    static let viewKey = CanvasViewKind.nodeKey
     static let periodKey = "pmPeriod"
     static let projectsKey = "pmProjects"
     static let queryKey = "pmQuery"
@@ -253,9 +199,7 @@ struct CanvasViewSpec: Equatable {
     /// The view this node is, or nil for a node that isn't one — anything but a text node, a text node
     /// without the key, or one naming a view this build doesn't have.
     static func of(_ node: CanvasNode) -> CanvasViewSpec? {
-        guard case .text = node.content,
-              case .string(let raw)? = node.extra[viewKey],
-              let kind = Kind(rawValue: raw.trimmingCharacters(in: .whitespaces).lowercased()) else { return nil }
+        guard let kind = CanvasViewKind.of(node) else { return nil }
         var spec = CanvasViewSpec(kind: kind)
         if case .string(let period)? = node.extra[periodKey] { spec.period = Period(value: period) }
         if case .string(let query)? = node.extra[queryKey] { spec.query = query }
@@ -303,6 +247,7 @@ struct CanvasViewSpec: Equatable {
         case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), \(scope): a Folio view."
         case .comingUp: return "What's due, \(scope): a Folio view."
         case .projects: return "\(projects == .board ? "This board's projects" : "Every project"), and when it was last worked on: a Folio view."
+        case .time: return "Where the time went \(period.title.lowercased()), \(scope): a Folio view."
         }
     }
 
@@ -316,6 +261,7 @@ struct CanvasViewSpec: Equatable {
     /// Coming up starts a week out: today alone is a to-do list, and the horizon is the point.
     static let newComingUp = CanvasViewSpec(kind: .comingUp, period: .week, projects: .board)
     static let newProjects = CanvasViewSpec(kind: .projects, projects: .board)
+    static let newTime = CanvasViewSpec(kind: .time, projects: .board)
 
     /// The card's caption for a period: "Today · Fri, Sep 18", or the week it covers.
     func caption(for range: DoneRange, calendar: Calendar = .current) -> String {
@@ -513,5 +459,41 @@ struct CanvasDaySelection: Equatable {
         guard let order = drawn[sitting] else { return clear() }
         rows.keep(within: order)
         if rows.isEmpty { self.sitting = nil }
+    }
+}
+
+/// What only a card has an opinion about: which periods its menu offers, and which layouts answer its
+/// question. The kind itself, its name and its symbol are `CanvasViewKind` in PmLib — see the
+/// typealias above.
+extension CanvasViewKind {
+    /// Whether *when* means anything to it. Waiting and Projects are about now, and a search is about
+    /// words.
+    var hasPeriod: Bool { self == .day || self == .leftovers || self == .comingUp || self == .time }
+
+    /// The periods its menu offers, in order: Coming up looks ahead, so it has no yesterday.
+    var periods: [CanvasViewSpec.Period] {
+        self == .comingUp ? [.today, .week] : CanvasViewSpec.Period.relative
+    }
+
+    /// The layouts that answer its question (D9): a Day can be read down a rail, across a week or as a
+    /// month, and Coming up across a week or a month. A list of tasks from anywhere has no shape in time.
+    var layouts: [CanvasViewSpec.Layout] {
+        switch self {
+        case .day: return [.list, .rail, .week, .month]
+        case .comingUp: return [.list, .week, .month]
+        // Time is a list and only a list. Its answer is one row per project, and a rail, a week or a
+        // month would be laying out *sittings* — which is the Day card's question, already answered
+        // beside it (docs/time-tracking.md D7).
+        case .waiting, .search, .leftovers, .projects, .time: return [.list]
+        }
+    }
+
+    /// What its menu calls `period`: a Day's span, Leftovers' cut-off, Coming up's horizon.
+    func title(of period: CanvasViewSpec.Period) -> String {
+        switch self {
+        case .leftovers: return period.beforeTitle
+        case .comingUp: return period.dueTitle
+        default: return period.title
+        }
     }
 }

@@ -170,6 +170,9 @@ final class DryRunTests: XCTestCase {
             "session.backfillTimes": ["project": "W-1"],
             "notes.setDetail": ["project": "W-1", "key": "summary", "value": "A new summary."],
             "notes.addLink": ["project": "W-1", "text": "https://example.org"],
+            // The project has no board in the fixture, so this also covers "a project has a canvas, or
+            // wants one": the preview must not leave one behind either (docs/items.md D9).
+            "card.add": ["project": "W-1", "text": "https://jsoncanvas.org"],
             "project.create": ["title": "Something New", "domain": "W"],
             "project.adopt": ["folder": "Hiring"],
             "project.rename": ["project": "W-1", "title": "Rebuild"],

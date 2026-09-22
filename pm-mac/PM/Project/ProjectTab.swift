@@ -85,6 +85,13 @@ enum CanvasFocus: Codable, Equatable, Hashable {
     /// whose whole content is a list of card ids and some widths.
     case workspace(String)
 
+    /// The frame this is pinned to, or nil for the three focuses that are not one. What a lens narrows
+    /// itself to, so a frame tab read as a list is that frame's items (docs/items.md D5).
+    var frameID: String? {
+        if case .frame(let id) = self { return id }
+        return nil
+    }
+
     /// **`workspace` goes on the wire as `arrangement`, and must keep doing so.**
     ///
     /// Swift synthesizes an enum's `Codable` from its *case names*, so this case has been encoding the

@@ -205,7 +205,7 @@ final class CanvasOverlayView: NSView {
                          yRadius: CanvasTiling.innerRadius).fill()
         }
         guard let described = board.describeCard(id) else { return }
-        let title = NSAttributedString(string: described.name, attributes: [
+        let title = NSAttributedString(string: described.title, attributes: [
             .font: NSFont.systemFont(ofSize: 13 / scale, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
         ])

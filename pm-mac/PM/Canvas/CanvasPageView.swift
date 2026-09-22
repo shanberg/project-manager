@@ -58,6 +58,13 @@ protocol CanvasPageLinkHost: AnyObject {
     /// file dropped on Figma goes into Figma rather than becoming a card beside it. Everywhere else a
     /// dropped file is the board's, as it always was, unless there is a field under it.
     var pageTakesFiles: Bool { get }
+    /// A file dropped with ⌥ held, to be shown in the page in place of what it is showing. The card
+    /// navigates like a followed link would, so Back returns to the page it was on.
+    func loadDroppedFile(_ url: URL)
+}
+
+extension CanvasPageLinkHost {
+    func loadDroppedFile(_ url: URL) {}
 }
 
 @MainActor
@@ -70,7 +77,7 @@ final class CanvasPageView: WKWebView {
     weak var linkHost: CanvasPageLinkHost?
 
     /// Which side is holding the drag right now.
-    private enum Holder { case page, fallback }
+    private enum Holder { case page, fallback, load }
     private var holder: Holder?
 
     /// Whether WebKit has been told this drag arrived.
@@ -110,6 +117,9 @@ final class CanvasPageView: WKWebView {
             // left mid-drag with an indicator up for a drop that will never arrive.
             leavePage(sender)
             return dropFallback?.prepareForDragOperation(sender) ?? false
+        case .load:
+            leavePage(sender)
+            return true
         case nil: return false
         }
     }
@@ -118,6 +128,10 @@ final class CanvasPageView: WKWebView {
         switch holder {
         case .page: return super.performDragOperation(sender)
         case .fallback: return dropFallback?.performDragOperation(sender) ?? false
+        case .load:
+            guard let file = Self.loadableFile(in: sender) else { return false }
+            linkHost?.loadDroppedFile(file)
+            return true
         case nil: return false
         }
     }
@@ -126,7 +140,7 @@ final class CanvasPageView: WKWebView {
         switch holder {
         case .page: super.concludeDragOperation(sender)
         case .fallback: dropFallback?.concludeDragOperation(sender)
-        case nil: break
+        case .load, nil: break
         }
         holder = nil
         pageEntered = false
@@ -161,6 +175,14 @@ final class CanvasPageView: WKWebView {
     /// is also why the board can be given a drag, lose it and be given it back within a few frames —
     /// each of those is a real crossing, and it is told about all of them.
     private func route(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // ⌥ with a file the page can show: the file becomes the page. Decided before the page is asked
+        // anything, since the answer is ours whatever the page would have said.
+        if linkHost != nil, NSEvent.modifierFlags.contains(.option), Self.loadableFile(in: sender) != nil {
+            if holder == .fallback { dropFallback?.draggingExited(sender) }
+            leavePage(sender)
+            holder = .load
+            return .link
+        }
         let answer = pageEntered ? super.draggingUpdated(sender) : enterPage(sender)
         pageAsks += 1
         // The first reply is `.copy` whatever is under the pointer and whatever the drag carries, since
@@ -181,6 +203,18 @@ final class CanvasPageView: WKWebView {
         holder = .fallback
         return (crossing ? dropFallback?.draggingEntered(sender)
                          : dropFallback?.draggingUpdated(sender)) ?? []
+    }
+
+    /// The one file a drag carries, when it is something a page can show. Several files, or one of a
+    /// kind WebKit would only offer to download, are not — those stay the board's.
+    private static func loadableFile(in sender: NSDraggingInfo) -> URL? {
+        let files = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        guard let files, files.count == 1, let file = files.first,
+              ["html", "htm", "xhtml", "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "txt"]
+                  .contains(file.pathExtension.lowercased())
+        else { return nil }
+        return file
     }
 
     /// Tell WebKit the drag has arrived, once per drag.

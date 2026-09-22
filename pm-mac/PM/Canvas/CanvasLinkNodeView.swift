@@ -56,6 +56,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// card started is still the card's own navigation and keeps the flag; see `decidePolicyFor`,
     /// which exists to tell those two apart.
     private var capturingTitle = false
+    /// The file a ⌥-drop is sending the page to, so `decidePolicyFor` lets that one navigation through
+    /// while still refusing the file URLs a page reaches on its own.
+    private var droppedFile: URL?
     /// Whether this card would run a page if the board let it. The board answers — see
     /// `CanvasPageBudget`.
     private var wanted = false
@@ -1462,6 +1465,14 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
     /// A tile, or a card you have stepped into: somewhere you are working in the page, not arranging it.
     var pageTakesFiles: Bool { isEngaged || board.isTiled }
 
+    func loadDroppedFile(_ url: URL) {
+        guard let web else { return }
+        // A page you were sent to by hand is not what the card is for — the card's name stays.
+        capturingTitle = false
+        droppedFile = url
+        web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+
     private func item(_ title: String, _ action: Selector, _ link: PageLink) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
@@ -1519,6 +1530,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         if navigationAction.shouldPerformDownload { return decisionHandler(.download) }
 
         guard let target = navigationAction.request.url, !isWeb(target) else {
+            return decisionHandler(.allow)
+        }
+        // The file a ⌥-drop just sent here — and a fragment link within it.
+        if target.isFileURL, let dropped = droppedFile, target.path == dropped.path {
             return decisionHandler(.allow)
         }
         decisionHandler(.cancel)

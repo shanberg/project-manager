@@ -1,4 +1,5 @@
 import AppKit
+import PmLib
 
 /// The app's menu bar.
 ///
@@ -498,6 +499,36 @@ enum MainMenu {
     ///
     /// ⇧⌘E kept, though the name has changed: it is in people's hands, and the two commands are the
     /// same switch.
+    /// View ▸ as Board / as List / as Grid: how the canvas is drawn (docs/items.md D5).
+    ///
+    /// **⌥⌘1…3, and the Finder's words.** It is the Finder's question — the same three shapes for the
+    /// same contents — and the Finder spends ⌘1…4 on it. Here ⌘1…9 is Go to Tab, a reservation that is
+    /// kept by somebody now, so the nod is the modifier the tabs left.
+    ///
+    /// Routed to the first responder like the zoom items, which means the pane showing the board:
+    /// dim in a project window's task list, dim in a workspace, and its checkmark says which lens the
+    /// board in front of you is being read through rather than a global setting.
+    private static func canvasPresentationItems(_ menu: NSMenu) {
+        for lens in CanvasPresentation.allCases {
+            let item = menu.addItem(withTitle: lens.title,
+                                    action: #selector(CanvasPaneController.showCanvasAs(_:)),
+                                    keyEquivalent: lens.keyEquivalent)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.representedObject = lens
+        }
+        // The order the lenses read in (docs/items.md D4), in a submenu because it is four answers to
+        // one question and because it is dimmed whole while a board is up.
+        let sorts = NSMenu(title: "Sort Items By")
+        menu.addItem(withTitle: "Sort Items By", action: nil, keyEquivalent: "").submenu = sorts
+        for order in CanvasItemSort.allCases {
+            let item = sorts.addItem(withTitle: order.title,
+                                     action: #selector(CanvasPaneController.sortCanvasBy(_:)),
+                                     keyEquivalent: "")
+            item.representedObject = order
+        }
+        menu.addItem(.separator())
+    }
+
     private static func canvasModeItem(_ menu: NSMenu) {
         let item = menu.addItem(withTitle: "Connect Cards",
                                 action: #selector(CanvasBoardView.toggleConnectMode(_:)),
@@ -588,6 +619,7 @@ enum MainMenu {
         //
         // Zoom is answered only by a board. ⌘= as well as ⌘+ because the plus is a shifted equals on
         // most layouts and AppKit matches the literal character.
+        canvasPresentationItems(menu)
         canvasZoomItems(menu)
         canvasTilingItems(menu)
         canvasPageItems(menu)

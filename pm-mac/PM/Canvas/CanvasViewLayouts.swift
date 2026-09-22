@@ -15,8 +15,9 @@ import SwiftUI
 
 /// One day down a time gutter (docs/views.md D9): each block placed at least as far below the one before
 /// as the time between them says, so the shape of the day shows — a morning of sittings back to back, an
-/// afternoon of empty rail. Blocks are measured, not sized by time, since a sitting's heading says when
-/// it began and never how long it ran. See `CanvasTimeGrid.railTops`.
+/// afternoon of empty rail. Blocks are measured, not sized by time: a block's height says what it holds.
+/// (How long a sitting ran is knowable — docs/time-tracking.md — and still doesn't size anything here.)
+/// See `CanvasTimeGrid.railTops`.
 struct CanvasRailLayout: Layout {
     /// How far a minute between two starts carries the second one down.
     var perMinute: CGFloat
@@ -208,9 +209,12 @@ struct CanvasDayWeek: View {
             VStack(alignment: .leading, spacing: 0) {
                 // In the strip above the grid, the gutter already says "Earlier".
                 if says.time, let time = sitting.startTime {
-                    Text(time)
+                    // How long it ran after when it began, on one line — the week has no gutter to put
+                    // it under the way the list does (docs/time-tracking.md D6).
+                    Text(says.duration ? sitting.seconds.map { "\(time) · \(durationLabel($0))" } ?? time : time)
                         .font(.system(size: 9 * zoom).monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Text(sitting.projectName)
                     .font(.system(size: 10.5 * zoom, weight: .semibold))

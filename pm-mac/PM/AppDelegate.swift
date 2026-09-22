@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusController = StatusItemController(store: store)
         wireStatusController()
 
+        // Watch the machine for signs of life, so a span of attention is measured rather than
+        // guessed. After `syncFocusedStore`, which has already told it where attention is.
+        AttentionKeeper.shared.start()
+
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).
         notifier = NotificationManager(store: store)
         notifier.requestAuthorization()
@@ -243,6 +247,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusController?.store = store
         notifier?.store = store
+        // Where the time goes follows the focus, and this is the one place the app learns it moved —
+        // whoever moved it, including the CLI writing `focused.json` under us (docs/time-tracking.md D4).
+        AttentionKeeper.shared.focusMoved(to: key)
         // The focus panel reads the focused project too — same store, so the two can't disagree about
         // what's current or diverge on undo history.
         FocusPanelController.shared.syncToFocusedProject()
@@ -302,6 +309,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// PM keeps its menubar item (and its notifications, and its Shortcuts actions) whether or not a
     /// window is open, so closing the last window is "put the work away", not "quit".
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// The last chance to close the open span with a real clock behind it. Without this the span is
+    /// inferred, and a quit at the end of a long afternoon would be worth an hour of it.
+    func applicationWillTerminate(_ notification: Notification) {
+        AttentionKeeper.shared.stop()
+    }
 
     /// Coming forward is the moment a stale view is most obvious — you have just been editing the notes
     /// somewhere else — so check the watched files immediately instead of waiting out the poll.

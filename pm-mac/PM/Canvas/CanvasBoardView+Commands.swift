@@ -2,6 +2,18 @@ import AppKit
 import UniformTypeIdentifiers
 import PmLib
 
+/// Where something the board is about to make goes: where it says, or into a frame.
+///
+/// One value rather than an extra optional on four methods, because the two answers are different in
+/// kind. `.point` is a board's own answer — these rectangles, on the lattice, where the pointer was.
+/// `.frame` is a lens's (docs/items.md D6, D7): there is no board in front of you, so the card joins a
+/// named set of cards and `CanvasItemPlacement` decides the rectangle. `nil` inside it is the Inbox,
+/// spelled the way every other placement call spells it.
+enum CanvasCardDestination: Equatable {
+    case point
+    case frame(String?)
+}
+
 /// The commands a board answers: select all, duplicate, the clipboard, and the menu you get on a
 /// right-click.
 ///
@@ -77,6 +89,40 @@ extension CanvasBoardView {
         return commit(drop, frames: drop.frames(centredOn: at))
     }
 
+    /// A drop that named a **section** rather than a point (docs/items.md D7) — the list and the grid.
+    ///
+    /// **Rows of this board move; everything else is made.** A row dragged between two sections is the
+    /// card itself changing frames, so it is moved rather than copied: a drag that made a second card
+    /// out of the one you were rearranging would be a duplicate you then had to find and delete. What
+    /// makes it a move is that the ids on the pasteboard are cards *here* — a row from another
+    /// project's list carries ids this document has never heard of, so it falls through and becomes
+    /// the link or the file it also is.
+    ///
+    /// Everything else is `CanvasDrop`'s business exactly as it is over the board, so a file dropped
+    /// on a list is the same card, asks the same question about the vault, and takes the same undo as
+    /// a file dropped on the board. Only where it lands is different.
+    @discardableResult
+    func accept(_ pasteboard: NSPasteboard, into frame: String?) -> Bool {
+        let rows = CanvasItemRows.read(pasteboard).filter { document.node(id: $0) != nil }
+        if !rows.isEmpty { return move(rows, into: frame) }
+        guard let drop = CanvasDrop.read(pasteboard, cardsType: Self.pasteboardType) else { return false }
+        return commit(drop, frames: drop.frames(centredOn: centreOfVisibleBoard), into: .frame(frame))
+    }
+
+    /// Cards already on this board, into `frame` — one change, one undo, and selected afterwards the
+    /// way everything that puts cards somewhere leaves them selected.
+    @discardableResult
+    func move(_ ids: [String], into frame: String?) -> Bool {
+        store.change("Move to Frame") { document in
+            CanvasItemPlacement.move(ids, to: frame, in: &document)
+        }
+        // True even when nothing moved — every dropped card was already in that section, which is a
+        // drop that landed and did nothing, not one that missed. Reporting failure would have AppKit
+        // slide the rows back to say so. `store.change` registers no undo step for a no-op.
+        select(Set(ids))
+        return true
+    }
+
     /// Write a pasted picture into the vault's attachments folder, beside where a note's would go.
     ///
     /// The same `saveNoteAttachment` the note editor uses, given the canvas as the document it belongs
@@ -121,7 +167,8 @@ extension CanvasBoardView {
     /// called from inside `performDragOperation`, where AppKit's own drag loop is still unwinding; a
     /// modal session started there is a nested event loop inside that one. The drop is reported
     /// accepted straight away — it *was* — and the cards go up when there is an answer.
-    private func askWhereOutsidersGo(_ files: [URL], frames: [CanvasRect]) -> Bool {
+    private func askWhereOutsidersGo(_ files: [URL], frames: [CanvasRect],
+                                     into destination: CanvasCardDestination) -> Bool {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let outsiders = Self.outside(files, of: store.resolver)
@@ -139,9 +186,9 @@ extension CanvasBoardView {
             case .alertFirstButtonReturn:
                 let moved = Set(outsiders)
                 commit(.files(files.map { moved.contains($0) ? self.copyIn($0) ?? $0 : $0 }),
-                       frames: frames, asking: false)
+                       frames: frames, asking: false, into: destination)
             case .alertSecondButtonReturn:
-                commit(.files(files), frames: frames, asking: false)
+                commit(.files(files), frames: frames, asking: false, into: destination)
             default:
                 break
             }
@@ -165,7 +212,12 @@ extension CanvasBoardView {
     /// them. False when there turned out to be nothing to make, which for a picture with no file means
     /// the vault would not take it.
     @discardableResult
-    func commit(_ drop: CanvasDrop, frames: [CanvasRect], asking: Bool = true) -> Bool {
+    func commit(_ drop: CanvasDrop, frames: [CanvasRect], asking: Bool = true,
+                into destination: CanvasCardDestination = .point) -> Bool {
+        // Resolved once, here: the tiling below and the placement in `insert` have to agree about
+        // whether these cards are going onto a board at all, and asking twice is how they would come
+        // to differ.
+        let landing = resolvedDestination(destination)
         // **In a tiled view the drop goes up as tiles**, which is what `addCard` does for every other
         // way of adding a card — a link carried out of one tile and let go in the window is a request
         // to read it beside the others. Until this, it went onto the board behind the tiles, where
@@ -173,7 +225,7 @@ extension CanvasBoardView {
         // are drawn over, so the cards are stepped clear of what lives there first — as one set, so
         // several keep their arrangement.
         var frames = frames
-        if isTiled, let box = Self.bounds(of: frames) {
+        if case .point = landing, isTiled, let box = Self.bounds(of: frames) {
             frames = Self.shifted(frames, onto: freeFrame(from: box), from: box)
         }
         func cards(_ contents: [CanvasContent]) -> CanvasDocument {
@@ -187,17 +239,18 @@ extension CanvasBoardView {
             for index in copied.nodes.indices where index < frames.count {
                 copied.nodes[index].frame = frames[index]
             }
-            insert(copied, at: nil, actionName: "Paste")
+            insert(copied, at: nil, actionName: "Paste", into: landing)
         case .files(let files):
             // **A file from outside the vault is a question, and it is asked here.** See
             // `askWhereOutsidersGo`; `asking` is false on the way back through it with the answer.
             if asking, !Self.outside(files, of: store.resolver).isEmpty {
-                return askWhereOutsidersGo(files, frames: frames)
+                return askWhereOutsidersGo(files, frames: frames, into: landing)
             }
-            insert(cards(files.map(file)), at: nil, actionName: files.count > 1 ? "Add Files" : "Add File")
+            insert(cards(files.map(file)), at: nil,
+                   actionName: files.count > 1 ? "Add Files" : "Add File", into: landing)
         case .image(let data, let ext):
             guard let saved = save((data: data, ext: ext)) else { return false }
-            insert(cards([file(saved)]), at: nil, actionName: "Add File")
+            insert(cards([file(saved)]), at: nil, actionName: "Add File", into: landing)
         case .links(let links):
             // The name the browser dropped beside the address, before the cards are built — so a card
             // is named on the way up rather than after its page has loaded. Remembered where every
@@ -206,13 +259,14 @@ extension CanvasBoardView {
                 if let name = link.name { CanvasPageTitles.remember(name, for: link.address) }
             }
             insert(cards(links.map { .link(url: $0.address) }), at: nil,
-                   actionName: links.count > 1 ? "Add Links" : "Add Link")
+                   actionName: links.count > 1 ? "Add Links" : "Add Link", into: landing)
         case .text(let text):
-            insert(cards([.text(text)]), at: nil, actionName: "Paste")
+            insert(cards([.text(text)]), at: nil, actionName: "Paste", into: landing)
         }
         // `insert` selects what it made. In document order, so several go up in the order they were
-        // dropped.
-        if isTiled {
+        // dropped. Not while a lens is up: there is no tiled view in front of you to put them in, and
+        // the cards have been placed in a frame instead.
+        if case .point = landing, isTiled {
             addToTiling(document.nodes.filter { selection.contains($0.id) }.map(\.id))
         }
         return true
@@ -332,6 +386,17 @@ extension CanvasBoardView {
         insert(CanvasClipping.clipping(of: selection, from: document), at: nil, actionName: "Duplicate")
     }
 
+    /// Where cards being made right now actually go.
+    ///
+    /// **No board in front of you: what arrives goes into a frame** (docs/items.md D6). A drop onto a
+    /// section says which; anything else made while a lens is up asks the lens, the way `addCard`
+    /// does — so a paste into a list lands in the section you are standing in rather than in the
+    /// middle of a board nobody is looking at.
+    func resolvedDestination(_ destination: CanvasCardDestination) -> CanvasCardDestination {
+        if case .point = destination, let addsIntoFrame { return .frame(addsIntoFrame()) }
+        return destination
+    }
+
     /// Put a small canvas into this one: new identities, moved to where it's going, and selected.
     ///
     /// Every id is minted fresh and the copied lines are rewritten to the new ids. Reusing the
@@ -340,7 +405,8 @@ extension CanvasBoardView {
     private func insert(_ incoming: CanvasDocument,
                         at where_: CanvasPoint?,
                         actionName: String,
-                        offsetBy offset: Double = 0) {
+                        offsetBy offset: Double = 0,
+                        into destination: CanvasCardDestination = .point) {
         guard !incoming.nodes.isEmpty else { return }
 
         var identities: [String: String] = [:]
@@ -367,8 +433,19 @@ extension CanvasBoardView {
             edges[index].toNode = to
         }
 
+        // **A copied frame is not an item, and a frame has no slot.** Placing one would nest a
+        // 900-point group inside a card's cell in the grid of the frame it was dropped on. A clipping
+        // that carries one keeps the arrangement it was copied in and lands on the board — where the
+        // list shows it as the section it is, which is the answer a list can read.
+        let into = incoming.nodes.contains(where: \.isGroup) ? .point : resolvedDestination(destination)
         store.change(actionName) { doc in
-            doc.nodes.append(contentsOf: nodes)
+            if case .frame(let frame) = into {
+                // Placed one at a time, so several dropped files take successive slots of the frame
+                // and it grows once for all of them — inside the one change, so it is one undo.
+                nodes = nodes.map { CanvasItemPlacement.place($0, to: &doc, frame: frame) }
+            } else {
+                doc.nodes.append(contentsOf: nodes)
+            }
             doc.edges.append(contentsOf: edges.filter {
                 identities.values.contains($0.fromNode) && identities.values.contains($0.toNode)
             })
@@ -467,6 +544,25 @@ extension CanvasBoardView {
         buildCardMenu(menu, id: id, includingTiling: false)
         menu.insertItem(.sectionHeader(title: "Card"), at: 0)
         addTileSection(menu, id: id)
+    }
+
+    /// The menu for cards named from somewhere that is not the board: a row in a lens (docs/items.md
+    /// D7), where there is no point to have right-clicked at.
+    ///
+    /// **The card's own menu, whole.** A list is a different way of looking at the same cards, so what
+    /// a card can be told has to be the same sentence in both places — everything a kind of card adds
+    /// to its contextual menu is here because it is the same builder. What is left out is the tiling
+    /// block, and only that: those commands act on the arrangement in front of you, and in a list
+    /// there isn't one.
+    func cardMenu(forItems ids: [String]) -> NSMenu? {
+        guard !ids.isEmpty else { return nil }
+        selection = Set(ids)
+        menuPoint = nil
+        menuDivider = nil
+        menuTile = nil
+        let menu = NSMenu()
+        buildCardMenu(menu, id: ids.count == 1 ? ids[0] : nil, includingTiling: false)
+        return menu
     }
 
     /// What the cards you are standing in can be told — the focused tile, else the card you have
@@ -1418,6 +1514,7 @@ extension CanvasBoardView {
         case .leftoversView: addViewCard(.newLeftovers, at: where_)
         case .comingUpView: addViewCard(.newComingUp, at: where_)
         case .projectsView: addViewCard(.newProjects, at: where_)
+        case .timeView: addViewCard(.newTime, at: where_)
         case .waitingView: addViewCard(.newWaiting, at: where_)
         case .searchView: addViewCard(.newSearch, at: where_)
         }
@@ -1490,6 +1587,20 @@ extension CanvasBoardView {
     @discardableResult
     func addCard(_ node: CanvasNode, actionName: String) -> String {
         var node = node
+        // **No board in front of you: the card goes in a frame** (docs/items.md D6). Asked of the pane
+        // rather than told by it, because the answer is which section of the list you are adding under
+        // and that changes with the selection. Here rather than in the lens so that every add command
+        // obeys it — the `+` menu's file, folder and view items included, which a lens offers and which
+        // would otherwise land in the middle of a board nobody is looking at.
+        if let addsIntoFrame {
+            let frame = addsIntoFrame()
+            var placed = node
+            store.change(actionName) { document in
+                placed = CanvasItemPlacement.place(node, to: &document, frame: frame)
+            }
+            select([placed.id])
+            return placed.id
+        }
         if isTiled { node.frame = freeFrame(from: node.frame) }
         store.change(actionName) { $0.nodes.append(node) }
         addToTiling(node.id)

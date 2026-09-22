@@ -15,12 +15,14 @@ final class CanvasViewNodeView: CanvasNodeView {
         case day(CanvasDayModel)
         case tasks(CanvasTaskListModel)
         case projects(CanvasProjectsModel)
+        case time(CanvasTimeModel)
 
         @MainActor init(_ spec: CanvasViewSpec) {
             switch spec.kind {
             case .day: self = .day(CanvasDayModel(spec: spec))
             case .waiting, .search, .leftovers, .comingUp: self = .tasks(CanvasTaskListModel(spec: spec))
             case .projects: self = .projects(CanvasProjectsModel(spec: spec))
+            case .time: self = .time(CanvasTimeModel(spec: spec))
             }
         }
 
@@ -29,6 +31,7 @@ final class CanvasViewNodeView: CanvasNodeView {
             case .day(let model): return model.spec
             case .tasks(let model): return model.spec
             case .projects(let model): return model.spec
+            case .time(let model): return model.spec
             }
         }
 
@@ -38,6 +41,7 @@ final class CanvasViewNodeView: CanvasNodeView {
             case .day: return 0
             case .waiting, .search, .leftovers, .comingUp: return 1
             case .projects: return 2
+            case .time: return 3
             }
         }
     }
@@ -84,6 +88,10 @@ final class CanvasViewNodeView: CanvasNodeView {
             projects.boardProjects = boardProjectFolders()
             projects.onChange = changed
             projects.start()
+        case .time(let time):
+            time.boardProjects = boardProjectFolders()
+            time.onChange = changed
+            time.start()
         }
     }
 
@@ -92,6 +100,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .day(let day): day.stop()
         case .tasks(let tasks): tasks.stop()
         case .projects(let projects): projects.stop()
+        case .time(let time): time.stop()
         }
     }
 
@@ -110,6 +119,7 @@ final class CanvasViewNodeView: CanvasNodeView {
             case .day(let day) where spec.kind == .day: day.spec = spec
             case .tasks(let tasks) where Model.family(spec.kind) == 1: tasks.spec = spec
             case .projects(let projects) where spec.kind == .projects: projects.spec = spec
+            case .time(let time) where spec.kind == .time: time.spec = spec
             default:
                 stopModel()
                 model = Model(spec)
@@ -123,6 +133,7 @@ final class CanvasViewNodeView: CanvasNodeView {
             case .day(let day): if folders != day.boardProjects { day.boardProjects = folders }
             case .tasks(let tasks): if folders != tasks.boardProjects { tasks.boardProjects = folders }
             case .projects(let projects): if folders != projects.boardProjects { projects.boardProjects = folders }
+            case .time(let time): if folders != time.boardProjects { time.boardProjects = folders }
             }
         }
     }
@@ -132,6 +143,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .day(let day): return day.summary
         case .tasks(let tasks): return tasks.summary
         case .projects(let projects): return projects.summary
+        case .time(let time): return time.summary
         }
     }
 
@@ -141,6 +153,7 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .day(let day): return day.list.map { ViewMarkdown.day($0) }
         case .tasks(let tasks): return tasks.text
         case .projects(let projects): return projects.text
+        case .time(let time): return time.text
         }
     }
 
@@ -196,6 +209,14 @@ final class CanvasViewNodeView: CanvasNodeView {
                 projectCard: { [weak self] project in
                     self?.sittingCardProvider(project: project.folder, session: nil, title: [project.name])
                 }))
+        case .time(let time):
+            root = AnyView(CanvasTimeCard(
+                model: time, zoom: contentZoom,
+                onOpenProject: { folder in WindowManager.shared.open(named: folder) },
+                projectCard: { [weak self] project in
+                    self?.sittingCardProvider(project: project.projectFolder, session: nil,
+                                              title: [project.projectName])
+                }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         view.setAccessibilityLabel(accessibilityFallback)
@@ -246,7 +267,8 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .tasks(let tasks):
             tasks.isEngaged = isEngaged
             if !isEngaged { tasks.selection.clear() }
-        case .projects:
+        // Neither has rows that can be selected: both list projects, and a project row is a link.
+        case .projects, .time:
             break
         }
         guard let content = subviews.first else { return }

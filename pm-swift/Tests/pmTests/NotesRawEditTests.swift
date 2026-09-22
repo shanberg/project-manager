@@ -944,6 +944,18 @@ final class NotesRawEditTests: XCTestCase {
                        "note\n  - [ ] a\n    - [x] b\nmore")
     }
 
+    /// A checkbox with nothing after it is what an abandoned `- [ ]` leaves behind, and goes.
+    func testSanitizeDropsEmptyCheckboxes() {
+        XCTAssertEqual(sanitizeSessionNoteBody("note\n- [ ]\n- [x]\nmore\n  - [ ]   \n- [ ] real"),
+                       "note\nmore\n- [ ] real")
+    }
+
+    /// Unless something is nested under it: a parent still being written keeps its line, so its
+    /// subtasks are not handed to whatever is above.
+    func testSanitizeKeepsAnEmptyParentOfSubtasks() {
+        XCTAssertEqual(sanitizeSessionNoteBody("- [ ]\n  - [ ] child"), "- [ ]\n  - [ ] child")
+    }
+
     /// A checkbox typed between two paragraphs is a task *there*. It parses as one, and it stays
     /// between them rather than being relocated to the end of the session.
     func testCommitKeepsATypedCheckboxWhereItWasTyped() throws {

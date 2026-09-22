@@ -133,7 +133,7 @@ final class CanvasTaskListModel {
                 case .comingUp:
                     let due = none ? [] : try dueTasks(until: before, projects: projects)
                     return (CanvasTaskLists.groups(due: due), ViewMarkdown.due(due))
-                case .day, .projects:
+                case .day, .projects, .time:
                     return ([], "")
                 }
             }
@@ -244,7 +244,7 @@ struct CanvasTaskListCard: View {
         case .search: return "Search"
         case .leftovers: return "Left Open"
         case .comingUp: return "Coming Up"
-        case .waiting, .day, .projects: return "Waiting On"
+        case .waiting, .day, .projects, .time: return "Waiting On"
         }
     }
 
@@ -313,7 +313,7 @@ struct CanvasTaskListCard: View {
         case .leftovers: return "Nothing left open \(model.spec.period.beforeTitle.lowercased())."
         case .comingUp:
             return model.spec.period == .today ? "Nothing due today." : "Nothing due \(model.spec.period.dueTitle.lowercased())."
-        case .day, .projects: return ""
+        case .day, .projects, .time: return ""
         }
     }
 

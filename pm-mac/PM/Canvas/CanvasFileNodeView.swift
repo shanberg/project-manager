@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 import PDFKit
 import PmLib
+import WebKit
 
 /// A card showing a file from the vault: a note, a picture, a PDF.
 ///
@@ -210,6 +211,10 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .canvasLinkZones(linkZones))
+
+        case "html", "htm", "xhtml":
+            // A page, drawn as one. See `CanvasHTMLFileView`.
+            return CanvasHTMLFileView(url: url)
 
         default:
             let label = NSTextField(labelWithString: url.lastPathComponent)
@@ -426,5 +431,45 @@ final class CanvasFileNodeView: CanvasNodeView {
                   case .file(_, let subpath) = doc.nodes[index].content else { return }
             doc.nodes[index].content = .file(path: corrected, subpath: subpath)
         }
+    }
+}
+
+/// An HTML file from the vault, rendered as the web page it is.
+///
+/// Read access is the file's own folder, so a page finds the stylesheets, scripts and pictures beside
+/// it and nothing above them. The store is not persistent: a page opened from disk has no business
+/// sharing cookies or storage with the web cards' sessions (`CanvasWebSession`). A link to another
+/// place leaves for the default browser rather than replacing the file the card is for.
+final class CanvasHTMLFileView: WKWebView, WKNavigationDelegate {
+    init(url: URL) {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        super.init(frame: .zero, configuration: configuration)
+        navigationDelegate = self
+        setAccessibilityLabel(url.lastPathComponent)
+        loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard action.navigationType == .linkActivated, let target = action.request.url else {
+            return decisionHandler(.allow)
+        }
+        // Same file, different fragment: an in-page anchor, which is still this card's page.
+        if target.isFileURL, target.deletingFragment == webView.url?.deletingFragment {
+            return decisionHandler(.allow)
+        }
+        NSWorkspace.shared.open(target)
+        decisionHandler(.cancel)
+    }
+}
+
+private extension URL {
+    var deletingFragment: URL {
+        var parts = URLComponents(url: self, resolvingAgainstBaseURL: false)
+        parts?.fragment = nil
+        return parts?.url ?? self
     }
 }

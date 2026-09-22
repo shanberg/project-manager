@@ -14,7 +14,7 @@ final class SettingsWindowController: NSWindowController {
     static let shared = SettingsWindowController()
 
     private init() {
-        let tabs = NSTabViewController()
+        let tabs = SettingsTabViewController()
         tabs.tabStyle = .toolbar
 
         tabs.addTabViewItem(Self.tab(GeneralSettingsView(), title: "General",
@@ -34,6 +34,7 @@ final class SettingsWindowController: NSWindowController {
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
+        window.title = tabs.tabViewItems.first?.label ?? "Settings"
         window.setFrameAutosaveName("PMSettings")
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -68,5 +69,15 @@ final class SettingsWindowController: NSWindowController {
         item.identifier = identifier
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         return item
+    }
+}
+
+/// Keeps the window's title on the selected pane. `.toolbar` style is meant to do this itself, but the
+/// window reads "Untitled" until the first time a tab is clicked, so the title is set here on every
+/// selection and once at creation.
+private final class SettingsTabViewController: NSTabViewController {
+    override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        super.tabView(tabView, didSelect: tabViewItem)
+        if let label = tabViewItem?.label { view.window?.title = label }
     }
 }

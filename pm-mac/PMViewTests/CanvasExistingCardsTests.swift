@@ -37,7 +37,7 @@ final class CanvasExistingCardsTests: XCTestCase {
             text("b", "B", 300, 0),
             frame("f", "Empty Frame", 2000, 2000, 600, 400),
         ])
-        let offered = CanvasExistingCards.sections(of: document, showing: ["a"]).flatMap(\.cards).map(\.id)
+        let offered = CanvasExistingCards.sections(of: document, showing: ["a"]).flatMap(\.items).map(\.id)
         XCTAssertEqual(offered, ["b"])
     }
 
@@ -65,8 +65,8 @@ final class CanvasExistingCardsTests: XCTestCase {
             text("loose", "Loose", 0, 0),
         ])
         let sections = CanvasExistingCards.sections(of: document, showing: [])
-        XCTAssertEqual(sections.map(\.frame), [nil, "Left", "Right"])
-        XCTAssertEqual(sections.map { $0.cards.map(\.id) }, [["loose"], ["p"], ["r", "q"]])
+        XCTAssertEqual(sections.map(\.label), [nil, "Left", "Right"])
+        XCTAssertEqual(sections.map { $0.items.map(\.id) }, [["loose"], ["p"], ["r", "q"]])
     }
 
     func testACardInANestedFrameIsListedUnderTheInnerOne() {
@@ -79,7 +79,7 @@ final class CanvasExistingCardsTests: XCTestCase {
         // Which frame each card is under, not the order of the frames: two nested frames are one row of
         // the board, and which comes first is `CanvasTiling.order`'s call about their centres.
         let sections = CanvasExistingCards.sections(of: document, showing: [])
-        let under = Dictionary(uniqueKeysWithValues: sections.map { ($0.frame, $0.cards.map(\.id)) })
+        let under = Dictionary(uniqueKeysWithValues: sections.map { ($0.label, $0.items.map(\.id)) })
         XCTAssertEqual(under, ["Inner": ["a"], "Outer": ["b"]])
     }
 
@@ -88,20 +88,20 @@ final class CanvasExistingCardsTests: XCTestCase {
             frame("f", "   ", 0, 0, 600, 400),
             text("a", "A", 50, 50),
         ])
-        XCTAssertEqual(CanvasExistingCards.sections(of: document, showing: []).map(\.frame), ["Frame"])
+        XCTAssertEqual(CanvasExistingCards.sections(of: document, showing: []).map(\.label), ["Frame"])
     }
 
     // MARK: What they are called
 
     func testATextCardIsNamedByItsFirstLineWithoutMarkdown() {
-        XCTAssertEqual(CanvasExistingCards.card(node(.text("# Launch plan\nThe rest")))?.name, "Launch plan")
-        XCTAssertEqual(CanvasExistingCards.card(node(.text("")))?.name, "Empty Card")
+        XCTAssertEqual(CanvasExistingCards.card(node(.text("# Launch plan\nThe rest")))?.title, "Launch plan")
+        XCTAssertEqual(CanvasExistingCards.card(node(.text("")))?.title, "Empty Card")
         XCTAssertEqual(CanvasExistingCards.card(node(.text("x")))?.kind, .text)
     }
 
     func testALongFirstLineIsCut() {
-        let name = CanvasExistingCards.card(node(.text(String(repeating: "word ", count: 40))))?.name ?? ""
-        XCTAssertLessThanOrEqual(name.count, CanvasExistingCards.longestName)
+        let name = CanvasExistingCards.card(node(.text(String(repeating: "word ", count: 40))))?.title ?? ""
+        XCTAssertLessThanOrEqual(name.count, CanvasItem.longestTitle)
         XCTAssertTrue(name.hasSuffix("\u{2026}"))
     }
 
@@ -109,27 +109,27 @@ final class CanvasExistingCardsTests: XCTestCase {
     func testAProjectsNotesAreNamedForTheProject() {
         let path = "01 Projects/Acme/docs/Notes - Acme Launch.md"
         let card = CanvasExistingCards.card(node(.file(path: path, subpath: nil)))
-        XCTAssertEqual(card?.name, "Acme Launch")
+        XCTAssertEqual(card?.title, "Acme Launch")
         XCTAssertEqual(card?.kind, .file(symbol: "doc.text"))
-        XCTAssertEqual(CanvasExistingCards.card(node(.file(path: path, subpath: "#Tasks")))?.name,
+        XCTAssertEqual(CanvasExistingCards.card(node(.file(path: path, subpath: "#Tasks")))?.title,
                        "Acme Launch \u{00B7} Tasks")
     }
 
     /// Only a project's notes lose the prefix — any other file keeps the name it has.
     func testAnyOtherFileKeepsItsName() {
         let card = CanvasExistingCards.card(node(.file(path: "Reference/Notes - Misc.pdf", subpath: nil)))
-        XCTAssertEqual(card?.name, "Notes - Misc")
+        XCTAssertEqual(card?.title, "Notes - Misc")
         XCTAssertEqual(card?.kind, .file(symbol: "doc.richtext"))
     }
 
     func testAPageIsNamedByItsRememberedTitleElseItsHost() {
         let address = "https://tracker.example.com/browse/PM-1"
         let before = CanvasExistingCards.card(node(.link(url: address)))
-        XCTAssertEqual(before?.name, "tracker.example.com")
+        XCTAssertEqual(before?.title, "tracker.example.com")
         XCTAssertEqual(before?.kind, .page(host: "tracker.example.com"))
 
         CanvasPageTitles.remember("Billing rollover fails on renewal", for: address)
-        XCTAssertEqual(CanvasExistingCards.card(node(.link(url: address)))?.name,
+        XCTAssertEqual(CanvasExistingCards.card(node(.link(url: address)))?.title,
                        "Billing rollover fails on renewal")
     }
 
@@ -138,7 +138,7 @@ final class CanvasExistingCardsTests: XCTestCase {
     func testAFolderIsNamedWholeAndDrawnAsAFolder() {
         let path = "Reference/Q3.drafts"
         let card = CanvasExistingCards.card(node(.file(path: path, subpath: nil)), isFolder: { $0 == path })
-        XCTAssertEqual(card?.name, "Q3.drafts")
+        XCTAssertEqual(card?.title, "Q3.drafts")
         XCTAssertEqual(card?.kind, .file(symbol: "folder"))
         XCTAssertEqual(CanvasExistingCards.card(node(.file(path: path, subpath: nil)))?.kind, .file(symbol: "doc"))
     }
@@ -153,8 +153,8 @@ final class CanvasExistingCardsTests: XCTestCase {
             let spec = CanvasViewSpec.of(view)!
             let card = CanvasExistingCards.card(view)
             XCTAssertEqual(card?.kind, .view(symbol: spec.symbol), "\(kind)")
-            XCTAssertEqual(card?.name, spec.cardName, "\(kind)")
-            XCTAssertNotEqual(card?.name, "stored line", "\(kind)")
+            XCTAssertEqual(card?.title, spec.cardName, "\(kind)")
+            XCTAssertNotEqual(card?.title, "stored line", "\(kind)")
         }
         var today = node(.text("Today"))
         CanvasViewSpec.set(CanvasViewSpec(kind: .day), on: &today)
@@ -166,7 +166,7 @@ final class CanvasExistingCardsTests: XCTestCase {
     /// Every surface builds its add items from `CanvasAddCommand.offered`, so this is what each offers —
     /// in the order it offers them, which is the order the headings group them in.
     func testEveryKindOfCardIsOfferedAndTheProjectNoteOnlyWhenMissing() {
-        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .web, .privateWeb, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView, .frame])
+        XCTAssertEqual(CanvasAddCommand.offered(projectNote: false), [.card, .web, .privateWeb, .file, .folder, .dayView, .leftoversView, .comingUpView, .projectsView, .timeView, .waitingView, .searchView, .frame])
         XCTAssertEqual(CanvasAddCommand.offered(projectNote: true)[5], .projectNote)
         XCTAssertEqual(CanvasAddCommand.folder.title, "New Folder\u{2026}")
         XCTAssertEqual(CanvasAddCommand.dayView.title, "New Day View")
@@ -191,7 +191,7 @@ final class CanvasExistingCardsTests: XCTestCase {
             .item(.card), .item(.web), .item(.privateWeb), .item(.file), .item(.folder), .item(.projectNote),
             .heading(.views),
             .item(.dayView), .item(.leftoversView), .item(.comingUpView), .item(.projectsView),
-            .item(.waitingView), .item(.searchView),
+            .item(.timeView), .item(.waitingView), .item(.searchView),
             .heading(.frames),
             .item(.frame),
         ])

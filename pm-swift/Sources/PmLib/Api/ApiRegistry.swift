@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.19.0"
+public let apiContractVersion = "1.21.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -247,6 +247,25 @@ public enum ApiRegistry {
                       fields: []),
         ApiActionSpec(name: "project.get", tier: .query,
                       summary: "One project's paths and domain, its master and its members.", fields: [project]),
+        // MARK: Cards
+        //
+        // The board enters the contract at 1.20.0 (docs/items.md D9). Two actions, not a surface: what
+        // a project *holds* and how to put something in it, which is the half of a board that means
+        // anything away from a window. Where a card sits, how big it is and what is tiled stay the
+        // app's — they are answers to questions only a board can ask.
+        ApiActionSpec(name: "card.add", tier: .mutation,
+                      summary: "Put an item on a project's board: a web card for an address, a text card for anything else. It goes in the named frame, or in the project's Inbox.",
+                      fields: [optionalProject,
+                               ApiField("text", .string, required: true,
+                                        "An address, which makes a web card, or a line of text, which makes a text card."),
+                               ApiField("frame", .string,
+                                        "The frame to add it to, by label. Made if the board hasn't got one. Defaults to Inbox.")]),
+        ApiActionSpec(name: "card.list", tier: .query,
+                      summary: "What a project's board holds: every item, grouped by the frame it sits in.",
+                      fields: [optionalProject,
+                               ApiField("sort", .string, "How the items are ordered within each frame.",
+                                        allowed: CanvasItemSort.allCases.map(\.rawValue)),
+                               ApiField("frame", .string, "One frame's items, by label, rather than the whole board.")]),
         ApiActionSpec(name: "notes.get", tier: .query,
                       summary: "A project's notes, tasks, and focused task.", fields: [project]),
         ApiActionSpec(name: "task.list", tier: .query,
@@ -291,6 +310,14 @@ public enum ApiRegistry {
                                ApiField("scope", .string, "Which projects to look in. Default all.",
                                         allowed: ["active", "archive", "all"]),
                                ApiField("includeDropped", .boolean, "Also list tasks dropped in the period, marked. Default false.")]),
+        ApiActionSpec(name: "time.spent", tier: .query,
+                      summary: "Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span's end is measured when Folio recorded it and inferred otherwise, and the report says which.",
+                      fields: [ApiField("period", .string, "Which span. Default today.",
+                                        allowed: ["today", "yesterday", "week"]),
+                               ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
+                               ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
+                               ApiField("projects", .stringList,
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
         ApiActionSpec(name: "session.list", tier: .query,
                       summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere.",
                       fields: [ApiField("period", .string, "Which span. Default today.",
@@ -298,7 +325,8 @@ public enum ApiRegistry {
                                ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
                                ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
                                ApiField("projects", .stringList,
-                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
+                                        "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project."),
+                               ApiField("time", .boolean, "Also say how long each sitting ran, from the attention log. Default false.")]),
         ApiActionSpec(name: "task.due", tier: .query,
                       summary: "Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one.",
                       fields: [ApiField("until", .string,

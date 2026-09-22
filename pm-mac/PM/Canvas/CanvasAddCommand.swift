@@ -58,6 +58,8 @@ enum CanvasAddCommand: CaseIterable {
     case comingUpView
     /// A Projects view: every project, moving or gone quiet — the portfolio.
     case projectsView
+    /// A Time view: where the time went, per project — what a day or a week cost.
+    case timeView
     /// A Waiting view: what's being waited on, across projects — the Waiting window's answer, on a board.
     case waitingView
     /// A Search view: tasks across projects matching the words in its field.
@@ -95,7 +97,8 @@ enum CanvasAddCommand: CaseIterable {
     var group: Group {
         switch self {
         case .card, .web, .privateWeb, .file, .folder, .projectNote: return .cards
-        case .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView: return .views
+        case .dayView, .leftoversView, .comingUpView, .projectsView, .waitingView, .searchView,
+             .timeView: return .views
         case .frame: return .frames
         }
     }
@@ -123,6 +126,7 @@ enum CanvasAddCommand: CaseIterable {
         case .leftoversView: return "New Leftovers View"
         case .comingUpView: return "New Coming Up View"
         case .projectsView: return "New Projects View"
+        case .timeView: return "New Time View"
         case .waitingView: return "New Waiting View"
         case .searchView: return "New Search View"
         }

@@ -51,7 +51,7 @@ final class CanvasTileReplaceTests: XCTestCase {
                        frame: CanvasRect(x: 1100, y: 100, width: 200, height: 150)),
         ])
         let sections = CanvasExistingCards.sections(of: doc, showing: [], first: "note")
-        XCTAssertEqual(sections.map { $0.cards.map(\.id) }, [["note", "loose"]])
+        XCTAssertEqual(sections.map { $0.items.map(\.id) }, [["note", "loose"]])
         XCTAssertEqual(sections.map(\.frame), [nil], "the frame it left is empty, so it has no header")
     }
 }

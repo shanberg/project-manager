@@ -187,6 +187,44 @@ public enum ViewMarkdown {
         return out.joined(separator: "\n") + "\n"
     }
 
+    // MARK: Time
+
+    /// Where the time went: each project, longest first, with what came of it.
+    ///
+    /// Projects with no time against them come last, under their own heading rather than mixed in with
+    /// a dash: pasted into a note, a list where half the rows have no number reads as a broken table.
+    public static func time(_ report: TimeSpentReport) -> String {
+        var out = ["## Where the time went"]
+        let tracked = report.projects.filter { $0.seconds > 0 }
+        guard !tracked.isEmpty else { return out.joined() + "\n\nNo time on record.\n" }
+        out += ["", "**\(durationLabel(report.seconds))** in total.", ""]
+        out += tracked.map { project in
+            var line = "- \(link(project.projectFolder)) — **\(durationLabel(project.seconds))**"
+            let came = changes(project)
+            if !came.isEmpty { line += " · \(came)" }
+            // The mark travels with the number wherever it goes: a total partly worked out rather than
+            // recorded should say so in a pasted note too (docs/time-tracking.md D4).
+            if project.inferred { line += " *(inferred)*" }
+            return line
+        }
+        let untracked = report.projects.filter { $0.seconds == 0 && !changes($0).isEmpty }
+        if !untracked.isEmpty {
+            out += ["", "### No time on record", ""]
+            out += untracked.map { "- \(link($0.projectFolder)) — \(changes($0))" }
+        }
+        return out.joined(separator: "\n") + "\n"
+    }
+
+    /// What came of a project's share of a period, as every surface says it.
+    public static func changes(_ project: TimeSpentItem) -> String {
+        var parts: [String] = []
+        if project.sittings > 0 { parts.append("\(project.sittings) sitting\(project.sittings == 1 ? "" : "s")") }
+        if project.done > 0 { parts.append("\(project.done) done") }
+        if project.dropped > 0 { parts.append("\(project.dropped) dropped") }
+        if project.picked > 0 { parts.append("\(project.picked) picked up") }
+        return parts.joined(separator: " · ")
+    }
+
     /// Projects touched within `projectQuietAfter`, and the rest, each in the order given.
     public static func split(_ summaries: [ProjectSummary], now: Date = Date())
         -> (moving: [ProjectSummary], quiet: [ProjectSummary]) {

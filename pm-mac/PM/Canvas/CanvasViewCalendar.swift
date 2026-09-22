@@ -124,8 +124,9 @@ enum CanvasTimeGrid {
     /// Where each of a rail's blocks begins, from the top: at least `gap` below the one before, and
     /// further by the time between their starts at `perMinute` — so a quiet afternoon is empty rail,
     /// and a busy morning is blocks one after another. A block with no time follows its neighbour.
-    /// Nothing is scaled by how long a sitting ran: the heading doesn't say, and the rail isn't a
-    /// timesheet (D5).
+    /// Nothing is scaled by how long a sitting ran. The attention log can say (docs/time-tracking.md),
+    /// and the rail still doesn't ask: a block's height is what it holds, and a rail of bars sized by
+    /// duration is a timesheet (D5).
     static func railTops(heights: [CGFloat], minutes: [Int?], perMinute: CGFloat, gap: CGFloat) -> [CGFloat] {
         var tops: [CGFloat] = []
         var last: (top: CGFloat, minute: Int)?
@@ -245,6 +246,10 @@ enum CanvasCalendarDetail {
     /// the sitting ("3 done · 1 dropped"), and how many of the tasks it finished are listed.
     struct Block: Equatable {
         var time = true
+        /// Whether the duration fits beside the time it began (docs/time-tracking.md D6). The narrow
+        /// columns say only when: the time is what places the block on the grid, and the duration is
+        /// the first thing to go when there's no room for both.
+        var duration = false
         var lede = 0
         var counts = false
         var tasks = 0
@@ -257,6 +262,8 @@ enum CanvasCalendarDetail {
     static func weekBlock(lines: Int, width: CGFloat, finished: Int, readable: Bool) -> Block {
         guard readable, width >= 64 else { return Block(time: false) }
         var block = Block()
+        // "9:10 AM · 2h 10m" needs about twice the room "9:10 AM" does.
+        block.duration = width >= 120
         var left = max(0, lines)
         guard left > 0 else { return block }
         block.lede = 1

@@ -68,6 +68,7 @@ session.start     session.note     session.rename   session.delete   session.pru
 session.backfillTimes
 notes.setDetails  notes.addLink
 project.create    project.rename   project.archive  project.unarchive  project.focus
+card.add
 config.set
 ```
 
@@ -77,6 +78,7 @@ config.set
 project.list   project.get     notes.get      task.list
 task.search    task.waiting    task.whatsDue  task.progress
 task.done      session.list    focus.get      capture.parse
+card.list      time.spent
 config.get
 ```
 
@@ -87,6 +89,14 @@ config.get
 In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries `sessionOrdinal` (which of its day's sittings it's in) and its project's `projectColor` and `projectIcon`. They're the Waiting and Search views' queries. See [views.md](views.md) step 5.
 
 `session.backfillTimes` (1.18.0) gives every sitting whose heading has no start time a best guess, as a one-off migration: the earliest moment the journal, the done log or the pick log recorded in that sitting on its own day, rounded down to five minutes, else a 9:00 AM placeholder — kept between any timed sittings either side of it that day. One write per project, so one journal entry and one undo. `pm backfill-times` runs it across every project, previewing unless given `--write`. In the same version a `SessionRef` whose digest was taken before its heading gained a time still resolves: only the time is forgiven, so a renamed sitting still fails the check.
+
+`card.list` and `card.add` (1.20.0) are the board's first two actions, and the contract had none — the board was app-only ([items.md](items.md) D9). `card.list` answers what a project *holds*: every item, grouped by the frame it sits in, each with its kind and the one line that stands for it, ordered by `sort` (`reading`, `file`, `name`, `kind`). `card.add` puts one there — a web card for an address, a text card for anything else, in the frame `frame` names (made if the board hasn't got one) or in the project's **Inbox**. That is the ask at its cheapest: `pm card add <url> --project Acme` needs no window, no empty space on a board and no decision about how big the card is.
+
+Three things are settled rather than left to be discovered. **The revision is the canvas's**, not the notes': the envelope's `revision` is documented as the content hash of the notes file, and a card write touches neither the notes nor a task, so it reports the hash of the `.canvas` it wrote. **A board edit is journaled as the document write it is**, so `journal.undo` reverses a `card.add` under the same revision guard as any other write — what it cannot report is a diff of tasks, because a board has none. And **a running window needs no telling**: `CanvasDocumentStore` already watches the file on a two-second poll because Obsidian edits it, so a write from `pm`, Raycast or MCP arrives as an ordinary outside change and reloads.
+
+Where a card *sits*, how big it is and what is tiled stay the app's — they are answers to questions only a board can ask. `card.delete` is deliberately not in this pass: deleting a card from a board a window may be holding, from a surface that cannot see it, wants its own argument.
+
+`time.spent` (1.21.0) is where the time went: how long each project had your attention in a period, longest first, and what came of it. It rests on a fourth log — `~/.config/pm/attention.ndjson`, global where the done and pick logs are per project, because a span ends when attention goes *somewhere else* and only a shared file knows where. `project.focus` appends a `began` from whichever surface moved the focus; Folio watches the machine and writes the `ended`, back-dated to the last input. A span nothing closed is worked out from the other three logs and reported as `inferred` rather than totalled as if it were measured. In the same version `session.list` takes `time`, which fills each sitting's duration from the same log. See [time-tracking.md](time-tracking.md).
 
 `task.setText` (1.19.0) renames several tasks in one write: `tasks` is a list of task references, each with its own `text`, where a single rename still takes `task` and `text`. A batch item with no text refuses the whole call, so nothing is half-renamed. In the same version `task.list` and `task.whatsDue` say which project they read — a `project` on every task and in the summary — and call a session's label a session (`context` reads "Fri, Sep 18 · session: General Work"), because a label after a date was being taken for a project name. A project that matches nothing now answers `projectNotFound` with the names it might have meant.
 

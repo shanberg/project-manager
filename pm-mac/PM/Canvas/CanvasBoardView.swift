@@ -66,8 +66,17 @@ final class CanvasBoardView: NSView {
         let covered = scrollView?.safeAreaInsets ?? NSEdgeInsets()
         return CanvasTiling.Margins(leading: Double(covered.left) / scale,
                                     trailing: Double(covered.right) / scale,
-                                    top: Self.headerClearance / scale)
+                                    top: topClearance / scale)
     }
+
+    /// The band at the top of this board's own view that a tiling must stay clear of.
+    ///
+    /// The static below is what a board in a window needs, and every board had exactly that until one
+    /// of them stopped being in a window: the list lens's detail half is a board under the *lens's*
+    /// floating header (docs/items.md D11), which reaches further down than a board's own does. An
+    /// instance property rather than a second constant read at the call site, because the number is a
+    /// fact about where this board is mounted and nothing else here knows that.
+    var topClearance: Double = CanvasBoardView.headerClearance
 
     /// Room at the top for the floating header, and nothing else.
     ///
@@ -139,6 +148,11 @@ final class CanvasBoardView: NSView {
 
     /// Open part of this board as a tab of the window it is in — see `CanvasPaneController.tabModel`,
     /// which says why these are no longer optional.
+    /// Where a new card goes while a lens is up and there is no board to put one on (docs/items.md D6):
+    /// the frame the list is adding under, or nil for the Inbox. Nil itself while the board is showing,
+    /// which is what keeps the board's own answer — where you right-clicked — untouched.
+    var addsIntoFrame: (() -> String?)?
+
     var onOpenInTab: (CanvasFocus) -> Void = { _ in }
     /// Keep the tiling that is up under a name.
     var onSaveWorkspace: (String) -> Void = { _ in }
@@ -247,9 +261,20 @@ final class CanvasBoardView: NSView {
     /// the tile handlebars — nothing is drawn or said by hovering alone.
     var hovered: String?
 
-    /// A card's answer about itself changed — a page navigated, a page got older.
+    /// A card's answer about itself changed — a page navigated, a page got older, a page renamed
+    /// itself.
+    ///
+    /// A renamed page is the one case that matters for a card sitting quietly in a tab strip, unread
+    /// and unengaged — an inbox counting unread messages in its title, "(3) Inbox", says so with no
+    /// clicking required, and the tab naming it is the only thing on screen still showing "Inbox" until
+    /// something else happens to redraw it. So this also asks the tab strip to redraw, for every card
+    /// that is one of its tabs, not only the tab showing — a background tab's count is exactly the one
+    /// you're watching for.
     func descriptionChanged(for id: String) {
         if nodeViews[id]?.isEngaged == true { pageStateChanged() }
+        if tiling?.tabStrips.contains(where: { $0.cards.contains(id) }) == true {
+            tileHandleView.needsDisplay = true
+        }
     }
 
     /// What the pointer is currently doing. Nil between gestures.

@@ -1,4 +1,5 @@
 import XCTest
+import PmLib
 @testable import PMViewTests
 
 /// The line a card is reduced to when the board is zoomed out past reading.

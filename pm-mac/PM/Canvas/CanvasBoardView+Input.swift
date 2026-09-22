@@ -1311,6 +1311,7 @@ extension CanvasBoardView {
     func deleteSelection() {
         guard !selection.isEmpty else { return }
         let going = selection
+        guard confirmDeleting(going) else { return }
         store.change(going.count > 1 ? "Delete Cards" : "Delete Card") { doc in
             doc.nodes.removeAll { going.contains($0.id) }
             // A line whose card has gone goes with it. Leaving it would be a dangling edge — which the
@@ -1321,6 +1322,24 @@ extension CanvasBoardView {
             }
         }
         selection = []
+    }
+
+    /// Asks before a delete takes away something written. Only a text card has content of its own —
+    /// a file or link card is a pointer to something that stays where it is, and a frame holds no text —
+    /// so those go without a question, and so does a text card that was never typed in. Undo still
+    /// brings all of it back; the question is for the delete key under a stray finger.
+    private func confirmDeleting(_ ids: Set<String>) -> Bool {
+        let written = document.nodes.filter { node in
+            guard ids.contains(node.id), case .text(let text) = node.content else { return false }
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        guard written > 0 else { return true }
+        let alert = NSAlert()
+        alert.messageText = written == 1 ? "Delete this card?" : "Delete \(written) cards with text on them?"
+        alert.informativeText = "You can bring it back with Undo."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: Editing a card

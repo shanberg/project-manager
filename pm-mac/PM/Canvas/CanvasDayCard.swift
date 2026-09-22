@@ -98,6 +98,9 @@ final class CanvasDayModel {
         generation += 1
         let mine = generation
         let spec = self.spec
+        // Read on the main actor, before the work goes off it — and only asked for when it would be
+        // drawn, since it's a second pass over a second log (docs/time-tracking.md D6).
+        let wantsTime = AttentionKeeper.showsDurations
         let projects: [String]?
         switch spec.projects {
         case .everything: projects = nil
@@ -110,7 +113,7 @@ final class CanvasDayModel {
                 let range = try spec.calendarSpan()?.range ?? spec.period.range()
                 // An empty board asks about no projects, and the answer to that is nothing, not everything.
                 if projects?.isEmpty == true { return (range, SittingList()) }
-                return (range, try sessionList(in: range, projects: projects))
+                return (range, try sessionList(in: range, projects: projects, time: wantsTime))
             }
             Task { @MainActor in
                 guard let self, mine == self.generation else { return }
@@ -139,9 +142,13 @@ final class CanvasDayModel {
 
 /// A Day card: the sittings of a day across projects, in the order the day went (docs/views.md D5).
 ///
-/// A sitting is the time it began, the project chip, its prose in full and its tasks. The rail shows
-/// only when a sitting began, never how long it ran: a column of durations reads as a timesheet. Over a
-/// week, each sitting is drawn as its lede and what came of it, under a caption per day.
+/// A sitting is the time it began, the project chip, its prose in full and its tasks. Over a week, each
+/// sitting is drawn as its lede and what came of it, under a caption per day.
+///
+/// **How long it ran is optional, and off by default** (`AttentionKeeper.showsDurations`,
+/// docs/time-tracking.md D6). The objection that kept durations out stands — a column of them beside
+/// every sitting reads as a timesheet nobody asked for — so this is a setting for the weeks when you
+/// need to know, and the rail is still never *scaled* by it.
 struct CanvasDayCard: View {
     let model: CanvasDayModel
     /// The card's zoom, applied to the type, as a text card's is.
@@ -297,10 +304,10 @@ struct CanvasDayCard: View {
         case .board where model.boardProjects.isEmpty: return "No project cards on this board."
         default:
             switch model.spec.period {
-            case .today: return "Nothing written today."
-            case .yesterday: return "Nothing written yesterday."
-            case .week: return "Nothing written this week."
-            case .day: return "Nothing written that day."
+            case .today: return "No work today."
+            case .yesterday: return "No work yesterday."
+            case .week: return "No work this week."
+            case .day: return "No work that day."
             }
         }
     }
@@ -398,14 +405,25 @@ struct CanvasDayCard: View {
     private func sittingBlock(_ sitting: SittingEntry) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             // The time is the sitting's handle: dragged off, it makes a card of this one sitting (D7).
-            Text(sitting.startTime ?? "Earlier")
-                .font(.system(size: 11 * zoom).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: Self.gutter * zoom, alignment: .trailing)
-                .lineLimit(1)
-                .contentShape(Rectangle())
-                .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
-                .help(sittingCard == nil ? "" : "Drag to make a card of this sitting")
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(sitting.startTime ?? "Earlier")
+                    .font(.system(size: 11 * zoom).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                // How long it ran, under when it began, and only when asked for
+                // (docs/time-tracking.md D6). The rail is still not scaled by it: this says what the
+                // sitting cost, and the block's height still says what it holds.
+                if let seconds = sitting.seconds {
+                    Text(durationLabel(seconds))
+                        .font(.system(size: 9.5 * zoom).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: Self.gutter * zoom, alignment: .trailing)
+            .contentShape(Rectangle())
+            .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
+            .help(sittingCard == nil ? "" : "Drag to make a card of this sitting")
             VStack(alignment: .leading, spacing: 3) {
                 chip(sitting)
                     .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }

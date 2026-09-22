@@ -179,6 +179,7 @@ targets:
       - path: PM/Canvas/CanvasTiling.swift
       - path: PM/Canvas/CanvasTileSession.swift
       - path: PM/Canvas/CanvasViewState.swift
+      - path: PM/Canvas/CanvasPresentation.swift
       - path: PM/Canvas/CanvasWorkspaces.swift
       - path: PM/Canvas/WorkspaceNamePrompt.swift
       - path: PM/Canvas/CanvasCardZoom.swift
@@ -217,6 +218,9 @@ targets:
       - path: PM/Canvas/CanvasLayout.swift
       - path: PM/Canvas/CanvasSummary.swift
       - path: PM/Canvas/CanvasExistingCards.swift
+      # The list lens, driven with real events — see CanvasItemListTests (docs/items.md D5).
+      - path: PM/Canvas/CanvasItemListView.swift
+      - path: PM/Canvas/CanvasItemGridView.swift
       - path: PM/Canvas/CanvasAddCommand.swift
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift

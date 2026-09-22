@@ -210,7 +210,8 @@ enum CanvasTaskLists {
                          "\(groups.count) sitting\(groups.count == 1 ? "" : "s")"]
             if projects > 1 { parts.append("\(projects) projects") }
             return parts.joined(separator: " · ")
-        case .day, .projects:
+        // Each draws its own summary: a Day counts sittings, and Projects and Time count projects.
+        case .day, .projects, .time:
             return ""
         }
     }
@@ -262,5 +263,40 @@ enum CanvasProjectRows {
         if !moving.isEmpty { parts.append("\(moving.count) moving") }
         if !quiet.isEmpty { parts.append("\(quiet.count) quiet") }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - What the Time view draws
+
+/// The pure half of the Time view, so what the card says is testable without a vault.
+enum CanvasTimeRows {
+    /// The card's one line: the total, and how much of it was worked out rather than recorded. Also
+    /// what it says zoomed out, and to VoiceOver.
+    static func summary(_ report: TimeSpentReport) -> String {
+        let tracked = report.projects.filter { $0.seconds > 0 }
+        guard !tracked.isEmpty else { return "No time" }
+        var parts = [durationLabel(report.seconds)]
+        if tracked.count > 1 { parts.append("\(tracked.count) projects") }
+        let inferred = tracked.filter(\.inferred).count
+        if inferred > 0 { parts.append("\(inferred) inferred") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The projects with time against them, and the ones that only have something to show for the
+    /// period. Kept apart rather than sorted together: a list where half the rows have no number reads
+    /// as a broken table, and "you worked here without telling PM" is a different fact from "40m".
+    static func split(_ report: TimeSpentReport) -> (tracked: [TimeSpentItem], untracked: [TimeSpentItem]) {
+        (report.projects.filter { $0.seconds > 0 },
+         report.projects.filter { $0.seconds == 0 && !ViewMarkdown.changes($0).isEmpty })
+    }
+
+    /// How wide a project's bar is, as a fraction of the longest one — never of the total.
+    ///
+    /// **Against the longest, so the top row is always full.** Against the total, a day split evenly
+    /// across five projects would draw five stubs and look like a day where nothing happened. The bar
+    /// is there to be compared with the row above it, which is the only comparison a reader makes.
+    static func share(_ project: TimeSpentItem, of projects: [TimeSpentItem]) -> Double {
+        guard let longest = projects.map(\.seconds).max(), longest > 0 else { return 0 }
+        return project.seconds / longest
     }
 }

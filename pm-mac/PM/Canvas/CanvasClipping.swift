@@ -50,3 +50,55 @@ enum CanvasClipping {
         pasteboard.setString(plainText(of: ids, from: document), forType: .string)
     }
 }
+
+/// The rows of a lens, dragged (docs/items.md D7): which cards they stand for, on a flavour only this
+/// app reads.
+///
+/// **A dragged row is two things at once, and both are needed.** Carried out of the window it is the
+/// link, the file or the prose `CanvasItemListView.dragged` writes — that is what a row is worth to
+/// Mail, to the Finder, to a text field. Carried to another section of the same board it is not worth
+/// anything of the sort: making a second card out of it would be duplicating the card you were trying
+/// to move. So the ids ride along beside the public flavours, are read first, and are meaningful only
+/// to the document they came out of — see `CanvasBoardView.accept(_:into:)`, which checks that the ids
+/// are cards of *this* board before treating a drop as a move. A drag from one project's list onto
+/// another's is then a copy, which is what it looks like and what it should be.
+enum CanvasItemRows {
+    static let pasteboardType = NSPasteboard.PasteboardType("com.stuarthanberg.pm.canvas-item-rows")
+
+    /// Put a row's card on the item it is dragged as. One id per item, because AppKit drags a row as
+    /// an item and a multi-row drag is several — no encoding of a list of anything is needed.
+    static func write(_ id: String, to item: NSPasteboardItem) {
+        item.setString(id, forType: pasteboardType)
+    }
+
+    /// The ids on a drag, in the order the rows were dragged, or empty for a drag that carries none.
+    static func read(_ pasteboard: NSPasteboard) -> [String] {
+        pasteboard.pasteboardItems?.compactMap { $0.string(forType: pasteboardType) } ?? []
+    }
+
+    /// What one row or tile is, dragged: its id for this app, and the link, the file or the prose it
+    /// is worth to every other one — what the board writes for the same card dragged off a page
+    /// (`CanvasBoardView.dragLink`), so an item lands the same wherever it is carried from.
+    ///
+    /// Nil for a card that has nothing to hand over: a frame, and a file card whose file the vault
+    /// cannot find. A drag of nothing is better refused than begun and then dropped as an empty item.
+    @MainActor
+    static func item(for id: String, in store: CanvasDocumentStore) -> NSPasteboardItem? {
+        guard let node = store.document.node(id: id) else { return nil }
+        let item = NSPasteboardItem()
+        write(id, to: item)
+        switch node.content {
+        case .link(let url):
+            item.setString(url, forType: .URL)
+            item.setString(url, forType: .string)
+        case .file(let path, _):
+            guard let url = store.resolver.resolve(path).url else { return nil }
+            item.setString(url.absoluteString, forType: .fileURL)
+        case .text(let text):
+            item.setString(text, forType: .string)
+        case .group:
+            return nil
+        }
+        return item
+    }
+}

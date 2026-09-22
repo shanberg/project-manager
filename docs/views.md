@@ -1,6 +1,6 @@
 # Views: cards that answer a question
 
-**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers) and 7 (Coming up, Projects, Copy as Text) are built. Follows [sessions.md](sessions.md), whose "Not in this
+**Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers), 7 (Coming up, Projects, Copy as Text) and 9 (Time) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
 goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below) but not built. An inbox was considered and decided against.
@@ -74,6 +74,7 @@ So the set, each view named by the question it answers:
 | **Projects** | Which projects are moving, and which have gone quiet? | `project.list`, plus last activity | mostly |
 | **Waiting** | What am I blocked on? | `task.waiting` | yes: the Waiting window's answer |
 | **Search** | Where did I say *that*? | `task.search` | yes |
+| **Time** | Where did the time go? | `time.spent` | new ([time-tracking.md](time-tracking.md)) |
 
 **Day** and **Leftovers** are the pair that matters, for the same reason `current` and `tasks` were the
 pair that mattered on a project card: one is *time*-scoped and one is *state*-scoped. Day is the
@@ -225,6 +226,14 @@ Today · Fri, Sep 18                          4 sittings · 7 done · 1 dropped
   sitting.
 - **The rail shows only when a sitting began**, which is what the heading records. There are no
   durations. A column of them would read as a timesheet, and PM isn't for time-tracking.
+
+  *Amended 2026-09-22 by [time-tracking.md](time-tracking.md) D6.* Half of this was right and half of
+  it was an overreach. The right half: nothing on the rail is ever **sized** by duration, and durations
+  are **off by default**, because a column nobody asked for is exactly the timesheet this was refusing.
+  The overreach: "PM isn't for time-tracking" ruled out answering *where did Tuesday go* when you go
+  looking, which is a different thing from putting a number beside every sitting whether you want one
+  or not. A sitting may now say how long it ran, under a setting, and `pm time` answers the question
+  properly.
 - **A sitting that is still going** says *now* (D4).
 - **Also finished**: completions from the done log that fall in no sitting that day, such as a tick
   from the menubar, Raycast or Obsidian in a project you never sat down to. Each carries its project
@@ -513,9 +522,10 @@ query and no contract change: every layout draws an answer the view already had,
   undoable step.
 - **The rail** places each sitting at least as far below the last as the time between their starts
   (0.8 pt a minute), so a morning of sittings back to back reads as one, and a quiet afternoon is empty
-  rail. Blocks are measured, not sized by time: a heading says when a sitting began, never how long it
-  ran (D5). A completion in no sitting sits on the rail at its own time, where the list puts it under
-  Also finished.
+  rail. Blocks are measured, not sized by time: a block's height says what it holds, never how long the
+  sitting ran (D5, as amended by [time-tracking.md](time-tracking.md) D6 — a sitting may *say* how long
+  it ran, under a setting; nothing is ever *sized* by it). A completion in no sitting sits on the rail
+  at its own time, where the list puts it under Also finished.
 - **A Day's week and month are the calendar's**, found around the period's first day. So a Today card
   as a month is this month, and a card pinned to a June date is June. The header pages back and on
   with ‹ ›, which pins the period to that span's first day. Paging back to the span today is in returns
@@ -656,6 +666,10 @@ Each step ships on its own.
 7. ✓ **Coming up and Projects**, and **Copy as Text** (D10) for every view that exists by then.
 8. ✓ **The week and month layouts (D9).** They're last because they are the most drawing and the least
    new data, and because the calendar design should be settled before the week grid's shape is fixed.
+9. ✓ **Time (`time.spent`).** The seventh kind, added 2026-09-22 by
+   [time-tracking.md](time-tracking.md) D7 — a list and only a list, since its rows are projects. It
+   is the first view whose query needed a *new record* behind it rather than a new question of the
+   records PM already kept.
 
 ## Open
 
@@ -664,9 +678,16 @@ Each step ships on its own.
 
 ## Not in this pass
 
-- **An activity log** (`.pm-activity.ndjson`): a sidecar stamping every write, throttled to one line
+- ~~**An activity log** (`.pm-activity.ndjson`): a sidecar stamping every write, throttled to one line
   per five minutes, that would give each sitting a span and an end. It was designed as D4 and set
-  aside when start times went into headings. Worth reviving only if spans turn out to be wanted.
+  aside when start times went into headings. Worth reviving only if spans turn out to be wanted.~~
+
+  **Wanted, and built differently** (2026-09-22, [time-tracking.md](time-tracking.md)). Spans were
+  wanted. But a throttled log of *writes* would only ever have seen the minutes you spent typing into
+  PM, and most of the time a project costs is spent in Obsidian, a browser or a terminal. So the
+  record is of **attention** — where the focus is, and when the machine goes quiet — which is one
+  global file rather than a per-project sidecar, and the thing it measures is the work rather than the
+  app. A sitting's span and end fall out of it (D6 there), which is what this entry was after.
 - **People.** Out of scope by decision (2026-09-18). PM doesn't manage people, so a view can't be
   scoped to one. Searching for a name is what Search is for.
 - **Counts over time** (done per week as a chart). Views are lists of real things you can act on. A

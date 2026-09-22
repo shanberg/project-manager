@@ -1,4 +1,5 @@
 import Foundation
+import PmLib
 
 /// How a board was last being looked at: the mode it was in, and the tiling that was up.
 ///
@@ -8,6 +9,21 @@ import Foundation
 /// untiled is the same class of annoyance as coming back to a window that has moved itself.
 struct CanvasViewState: Codable, Equatable {
     var mode: CanvasMode = .view
+    /// Which lens the canvas was last drawn through: the board, a list or a grid (docs/items.md D5).
+    ///
+    /// Optional so a state written before the lenses existed still decodes — as a board, which is what
+    /// it was. Written only when it is not the board, so a canvas nobody has switched stays a row that
+    /// says nothing (`isUntouched`).
+    var presentation: CanvasPresentation?
+    /// Which order the lenses put the items in (docs/items.md D4).
+    ///
+    /// Beside the lens rather than in the canvas for the same reason the lens itself is: an order is
+    /// how you are reading a board, not a fact about it, and the file has an order of its own that
+    /// this does not touch. One per board rather than one per lens — the list and the grid are the
+    /// same read, and being told two different orders for the same items would be the surprise.
+    /// Optional, and written only when it is not the default, so a board nobody has sorted stays a row
+    /// that says nothing.
+    var sort: CanvasItemSort?
     /// The tiling that was up, if one was.
     var tiling: Tiling?
     /// Which named workspace `tiling` *is*, or nil for an unnamed one.

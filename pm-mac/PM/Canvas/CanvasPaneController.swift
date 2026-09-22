@@ -32,6 +32,46 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// one; the other two are a tab that was opened *at* something.
     var focus: CanvasFocus = .whole
 
+    /// Which lens the canvas is drawn through: the board, a list or a grid (docs/items.md D5).
+    ///
+    /// **The canvas tab's, and nothing else's.** A workspace is a tiling of cards and has no lens; a
+    /// frame tab gets the list over its own frame's items. Setting it on a tiled pane is refused rather
+    /// than obeyed — leaving a workspace is `goToCanvas`, and a lens that silently untiled one would be
+    /// a second way out of a workspace with no way back.
+    var presentation: CanvasPresentation = .board {
+        didSet {
+            guard presentation != oldValue else { return }
+            applyPresentation()
+            rememberViewState()
+        }
+    }
+
+    /// The order the lenses put the items in (docs/items.md D4), remembered per board with the lens.
+    ///
+    /// **One order for both lenses**, because they are one read: a list sorted by name and a grid of
+    /// the same cards sorted by reading order would be two answers to "what is on this board".
+    var sort: CanvasItemSort = .reading {
+        didSet {
+            guard sort != oldValue else { return }
+            list?.sort = sort
+            grid?.sort = sort
+            rememberViewState()
+            Log.write("canvas lens sort: \(sort.rawValue)")
+        }
+    }
+
+    /// The lenses, each built the first time it is asked for. A board never looked at as a list costs
+    /// nothing for the lens existing.
+    private var list: CanvasItemListView?
+    private var grid: CanvasItemGridView?
+
+    /// The section a lens is adding under, while an add is in flight — see `addsIntoFrame`.
+    private var lensAddTarget: String?
+
+    /// Whether the board is up because the list sent us here to open something — so Escape, which flies
+    /// a maximized card back to the board, carries on back to the list it came from.
+    private var returnsToLens: CanvasPresentation?
+
     /// The tabs of the window this board is in.
     ///
     /// **Not optional, and that is the whole of what retiring the separate canvas window bought.** A
@@ -110,6 +150,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             // true when you tile the project's own card by hand on the whole board, which is the same
             // view arrived at from the other end.
             scroll.board.isProjectNoteView = isShowingProjectNoteAlone
+            // **Back to the lens the card was opened from** (docs/items.md D7). Escape flies a
+            // maximized card back to the board; when the list sent it there, the board is a place it
+            // passed through rather than a place to be left in.
+            if let lens = returnsToLens, !scroll.board.isTiled {
+                returnsToLens = nil
+                presentation = lens
+            }
             // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
             onTilingChanged?()
         }
@@ -191,6 +238,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.pauseAllPages()
         scroll.board.releaseCards()
         store.removeWatcher(self)
+        // The lenses watch the same store. Given back here rather than in their own `deinit`, so the
+        // moment a pane is finished with is the moment nothing is watching the file any more — a view
+        // released a runloop turn later is a view that was still being told about writes.
+        list?.stopWatching()
+        grid?.stopWatching()
         CanvasStoreRegistry.release(store)
     }
 
@@ -281,6 +333,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// and the widths you left them in rather than starting over.
     private var viewState: CanvasViewState {
         CanvasViewState(mode: scroll.board.mode,
+                        presentation: presentation == .board ? nil : presentation,
+                        sort: sort == .reading ? nil : sort,
                         refreshInterval: scroll.board.refreshInterval,
                         lastTiling: scroll.board.tilingMemory)
     }
@@ -311,6 +365,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         let remembered = CanvasViewMemory.of(store.url)
         scroll.board.mode = remembered.mode
         scroll.board.refreshInterval = remembered.refreshInterval
+        // Before the lens, so a list that is about to be built is built in the order it will be read
+        // in rather than sorted a moment after it is on screen.
+        sort = remembered.sort ?? .reading
+        // The lens the board was last read through. After the fit like everything else here: a list
+        // shown over a board that has not been framed yet would leave the board unfitted underneath it,
+        // and going back to it would land in the corner (see `fitWhenThereIsAWindowToFitTo`).
+        presentation = remembered.presentation ?? .board
         // The arrangement comes back even when the board was left untiled, so the next ⌘Return on the
         // same cards picks up where you left off rather than starting over.
         scroll.board.lastTiling = remembered.lastTiling
@@ -666,6 +727,161 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// there is one, the live page's. That pairing is `CanvasHeaderTrailingChrome`'s business rather
     /// than this method's, so the page capsule appearing cannot shift the control capsule off the
     /// window's edge.
+    // MARK: The lenses
+
+    /// Show the canvas the way `presentation` says (docs/items.md D5).
+    ///
+    /// **Hidden, not torn down.** A board taken apart loses its scroll position, its zoom and every
+    /// page it had running, so flicking to the list and back would cost what getting the board
+    /// arranged cost — the same argument the tabs settled (`ProjectContentPaneController`). And a
+    /// hidden board is the page budget's own answer to nobody looking: an empty `visibleRect` reads as
+    /// off screen, so its renderers are given up while the list is up and come back when it is.
+    private func applyPresentation() {
+        switch presentation {
+        case .board: break
+        case .list: _ = lensList()
+        case .grid: _ = lensGrid()
+        }
+        scroll.isHidden = !presentation.showsBoard
+        list?.isHidden = presentation != .list
+        grid?.isHidden = presentation != .grid
+        switch presentation {
+        case .board: view.window?.makeFirstResponder(scroll.board)
+        case .list: list?.reload(); list?.takeFocus()
+        case .grid: grid?.reload(); grid?.takeFocus()
+        }
+        // The header's board controls — zoom, tiling, the page capsule — answer for a board that is in
+        // front of you, and in a lens there isn't one.
+        header.showsBoardControls = presentation.showsBoard
+        // Every add command is the board's, wherever it was reached from, so this is what tells it
+        // there is no board to put a card on (docs/items.md D6). The `+` in the header and the View
+        // menu's add items go through it as much as the list's own row does.
+        scroll.board.addsIntoFrame = presentation == .board ? nil : { [weak self] in
+            guard let self else { return nil }
+            return lensAddTarget ?? (presentation == .grid ? grid?.selectedFrame : list?.selectedFrame)
+        }
+        // **Told, not inferred.** A hidden board reads as off screen to the page budget, which is the
+        // whole reason hiding is safe — but the budget runs when the board scrolls or is resized, and
+        // being hidden is neither. Without this a lens left up kept every page it had running behind
+        // it, which is exactly the cost the lens is supposed to save.
+        scroll.board.applyPageBudget()
+        Log.write("canvas lens: \(presentation.rawValue)")
+    }
+
+    /// The list lens, built the first time it is needed and kept after.
+    private func lensList() -> CanvasItemListView {
+        if let list { return list }
+        let list = CanvasItemListView(store: store)
+        list.translatesAutoresizingMaskIntoConstraints = false
+        list.lookups = CanvasExistingCards.lookups(isFolder: scroll.board.isFolderPath)
+        list.icon = { CanvasBoardView.menuIcon(for: $0) }
+        list.sort = sort
+        list.frame_ = focus.frameID
+        // **The half the rows navigate is a board** (docs/items.md D11), so it is made here, where
+        // boards are made, rather than inside a table. See `CanvasItemDetailPane`.
+        list.detail = CanvasItemDetailView(store: store)
+        wire(list)
+        mount(list)
+        self.list = list
+        return list
+    }
+
+    /// The grid lens (docs/items.md D8), on the same read as the list.
+    private func lensGrid() -> CanvasItemGridView {
+        if let grid { return grid }
+        let grid = CanvasItemGridView(store: store)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.lookups = CanvasExistingCards.lookups(isFolder: scroll.board.isFolderPath)
+        grid.icon = { CanvasBoardView.menuIcon(for: $0) }
+        grid.sort = sort
+        grid.frame_ = focus.frameID
+        grid.onOpen = { [weak self] id in self?.openFromLens(id) }
+        grid.onDelete = { [weak self] ids in self?.deleteFromLens(ids) }
+        grid.menuForSelection = { [weak self] ids in self?.scroll.board.cardMenu(forItems: ids) }
+        grid.onDrop = { [weak self] frame, pasteboard in self?.dropped(pasteboard, on: frame) ?? false }
+        grid.onSort = { [weak self] order in self?.sort = order }
+        grid.onSelectionChanged = { [weak self] ids in self?.selectedInLens(ids) }
+        mount(grid)
+        self.grid = grid
+        return grid
+    }
+
+    /// Over the ground and under the chrome: the project's colour wash is behind a lens exactly as it
+    /// is behind the board (`CanvasColorWash`), and the floating header stays on top of both.
+    private func mount(_ lens: NSView) {
+        container.addSubview(lens, positioned: .above, relativeTo: scroll)
+        NSLayoutConstraint.activate([
+            lens.topAnchor.constraint(equalTo: container.topAnchor),
+            lens.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            lens.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            lens.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+    }
+
+    /// What a row does — the list reports, and the pane, which has the board, acts (items.md D7).
+    private func wire(_ list: CanvasItemListView) {
+        // **Opening an item is maximizing its card**: the board tiled to that one card, which is the
+        // one way of looking at a single card the app already has (canvas-backlog 41). Escape flies it
+        // back — and, because the lens is remembered here, carries on back to the list it came from.
+        list.onOpen = { [weak self] id in self?.openFromLens(id) }
+        list.onDelete = { [weak self] ids in self?.deleteFromLens(ids) }
+        list.menuForSelection = { [weak self] ids in self?.scroll.board.cardMenu(forItems: ids) }
+        list.onAdd = { [weak self] frame, text in self?.addItem(text, to: frame) }
+        list.onDrop = { [weak self] frame, pasteboard in self?.dropped(pasteboard, on: frame) ?? false }
+        list.onSort = { [weak self] order in self?.sort = order }
+        list.onSelectionChanged = { [weak self] ids in self?.selectedInLens(ids) }
+    }
+
+    /// **Opening an item is maximizing its card**: the board tiled to that one card, which is the one
+    /// way of looking at a single card the app already has (canvas-backlog 41). Escape flies it back —
+    /// and, because the lens is remembered here, carries on back to the lens it came from.
+    private func openFromLens(_ id: String) {
+        returnsToLens = presentation
+        presentation = .board
+        scroll.board.select([id])
+        scroll.board.maximizeCard(id)
+        // It can refuse — a card that has gone, a board that is somehow tiled. Then there is no flight
+        // to come back from, and an armed way back would bounce you into a lens later for no reason.
+        if !scroll.board.isTiled { returnsToLens = nil }
+    }
+
+    /// **One selection, whichever lens you are in.** A list is a different way of looking at the same
+    /// cards, so picking three rows is picking those three cards — the header's `…` is about them, and
+    /// going back to the board finds them selected rather than finding whatever was selected before.
+    private func selectedInLens(_ ids: [String]) {
+        scroll.board.select(Set(ids))
+    }
+
+    private func deleteFromLens(_ ids: [String]) {
+        scroll.board.select(Set(ids))
+        scroll.board.deleteSelection()
+    }
+
+    /// A line typed into a section's add row becomes a card (items.md D6).
+    ///
+    /// **What you typed decides what it is** — `canvasTypedAddress`, which `card.add` reads too, so a
+    /// line means the same thing whichever surface it was typed into. The other kinds — a file, a
+    /// folder, a view — are on the `+`, because they need a panel or a question rather than a line.
+    ///
+    /// Through `addCard`, which is where every add command in the app ends, so a card made here is made
+    /// the way a card is made — one undo, selected afterwards, and placed by the rule above.
+    private func addItem(_ text: String, to frame: String?) {
+        let address = canvasTypedAddress(text)
+        let node = CanvasNode(content: address.map { CanvasContent.link(url: $0) } ?? .text(text),
+                              frame: CanvasRect(x: 0, y: 0, width: 400, height: 400))
+        lensAddTarget = frame
+        defer { lensAddTarget = nil }
+        let id = scroll.board.addCard(node, actionName: address == nil ? "Add Card" : "Add Web Card")
+        list?.select([id])
+    }
+
+    /// Something was let go of over a section (items.md D7). The board does it, as it does everything
+    /// a lens reports: rows of this board move into that frame, and anything else becomes the cards it
+    /// would have become on the board, in that frame rather than at a point.
+    private func dropped(_ pasteboard: NSPasteboard, on frame: String?) -> Bool {
+        scroll.board.accept(pasteboard, into: frame)
+    }
+
     private func buildContent() {
         pill = NSHostingView(rootView: CanvasTitlePill(model: header))
         capsule = NSHostingView(rootView: CanvasHeaderTrailingChrome(model: header))
@@ -1144,6 +1360,21 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     var undoManagerForContent: UndoManager { scroll.board.engagedCardUndoManager ?? store.undoManager }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(showCanvasAs(_:)) {
+            guard let lens = item.representedObject as? CanvasPresentation else { return false }
+            item.state = presentation == lens ? .on : .off
+            // **Dim in a workspace, and in the note view**, which are tilings: a lens is the canvas
+            // tab's (docs/items.md D5), and switching one on from inside a workspace would be a second
+            // way out of it with nothing to say how you get back.
+            return focus.frameID != nil || (focus == .whole && !scroll.board.isTiled)
+        }
+        if item.action == #selector(sortCanvasBy(_:)) {
+            guard let order = item.representedObject as? CanvasItemSort else { return false }
+            item.state = sort == order ? .on : .off
+            // **Only in a lens.** A board has an order of its own — where the cards are — and offering
+            // to sort one would promise a rearrangement of the board that this does not do.
+            return presentation != .board
+        }
         if item.action == Selector(("undo:")) { return validateUndo(item, redoing: false) }
         if item.action == Selector(("redo:")) { return validateUndo(item, redoing: true) }
         guard item.action == #selector(performFindPanelAction(_:)) else { return true }
@@ -1152,6 +1383,21 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         case .nextMatch, .previousMatch: return !lastQuery.isEmpty
         default: return false
         }
+    }
+
+    /// View ▸ Sort Items By (docs/items.md D4).
+    @objc func sortCanvasBy(_ sender: Any?) {
+        guard let order = (sender as? NSMenuItem)?.representedObject as? CanvasItemSort else { return }
+        sort = order
+    }
+
+    /// View ▸ as Board / as List / as Grid (docs/items.md D5).
+    @objc func showCanvasAs(_ sender: Any?) {
+        guard let lens = (sender as? NSMenuItem)?.representedObject as? CanvasPresentation else { return }
+        // Leaving a maximized card by choosing a lens is leaving it, not returning to one.
+        returnsToLens = nil
+        scroll.board.restoreMaximizedCard(animated: false)
+        presentation = lens
     }
 
     // MARK: Reacting

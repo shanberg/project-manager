@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.19.0";
+export const API_CONTRACT_VERSION = "1.21.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -41,6 +41,26 @@ export interface CaptureParseInput {
   now?: string;
   /** A line as somebody would type it, e.g. "Email Dana due:friday @redesign". */
   text: string;
+}
+
+/** Put an item on a project's board: a web card for an address, a text card for anything else. It goes in the named frame, or in the project's Inbox. */
+export interface CardAddInput {
+  /** The frame to add it to, by label. Made if the board hasn't got one. Defaults to Inbox. */
+  frame?: string;
+  /** Project name or prefix. Defaults to the focused project. */
+  project?: string;
+  /** An address, which makes a web card, or a line of text, which makes a text card. */
+  text: string;
+}
+
+/** What a project's board holds: every item, grouped by the frame it sits in. */
+export interface CardListInput {
+  /** One frame's items, by label, rather than the whole board. */
+  frame?: string;
+  /** Project name or prefix. Defaults to the focused project. */
+  project?: string;
+  /** How the items are ordered within each frame. */
+  sort?: "reading" | "file" | "name" | "kind";
 }
 
 /** The pm configuration. */
@@ -198,6 +218,8 @@ export interface SessionListInput {
   projects?: string[];
   /** First day to include, YYYY-MM-DD. Overrides the period's start. */
   since?: string;
+  /** Also say how long each sitting ran, from the attention log. Default false. */
+  time?: boolean;
   /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
   until?: string;
 }
@@ -240,6 +262,8 @@ export interface TaskAddInput {
   anchor?: TaskRef;
   /** Due date, YYYY-MM-DD. */
   due?: string;
+  /** Make the new task the focused one. Default true. */
+  focus?: boolean;
   /** Where the new task goes relative to the anchor. */
   position?: "before" | "after" | "child";
   /** Project name or unambiguous prefix. */
@@ -486,6 +510,18 @@ export interface TaskWrapInput {
   text: string;
 }
 
+/** Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span's end is measured when Folio recorded it and inferred otherwise, and the report says which. */
+export interface TimeSpentInput {
+  /** Which span. Default today. */
+  period?: "today" | "yesterday" | "week";
+  /** Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
+  /** First day to include, YYYY-MM-DD. Overrides the period's start. */
+  since?: string;
+  /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
+  until?: string;
+}
+
 /** Every action, mapped to the input it takes. */
 export interface ApiInputs {
   "app.openInFinder": AppOpenInFinderInput;
@@ -495,6 +531,8 @@ export interface ApiInputs {
   "app.settings": AppSettingsInput;
   "app.showPanel": AppShowPanelInput;
   "capture.parse": CaptureParseInput;
+  "card.add": CardAddInput;
+  "card.list": CardListInput;
   "config.get": ConfigGetInput;
   "config.set": ConfigSetInput;
   "focus.get": FocusGetInput;
@@ -541,6 +579,7 @@ export interface ApiInputs {
   "task.waiting": TaskWaitingInput;
   "task.whatsDue": TaskWhatsDueInput;
   "task.wrap": TaskWrapInput;
+  "time.spent": TimeSpentInput;
 }
 
 export type ApiActionName = keyof ApiInputs;
@@ -557,6 +596,8 @@ export const API_TIERS: Record<
   "app.settings": "affordance",
   "app.showPanel": "affordance",
   "capture.parse": "query",
+  "card.add": "mutation",
+  "card.list": "query",
   "config.get": "query",
   "config.set": "mutation",
   "focus.get": "query",
@@ -603,4 +644,5 @@ export const API_TIERS: Record<
   "task.waiting": "query",
   "task.whatsDue": "query",
   "task.wrap": "mutation",
+  "time.spent": "query",
 };

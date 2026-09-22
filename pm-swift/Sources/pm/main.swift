@@ -23,12 +23,16 @@ private func dispatch(cmd: String, args: [String]) {
         runRename(args: args)
     case "part-of":
         runPartOf(args: args)
+    case "card":
+        runCard(args: args)
     case "config":
         runConfig(args: args)
     case "notes":
         runNotes(args: args)
     case "done":
         runDone(args: args)
+    case "time":
+        runTime(args: args)
     case "day":
         runDay(args: args)
     case "leftovers":
