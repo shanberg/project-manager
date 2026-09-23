@@ -4,6 +4,8 @@
 and [done-report.md](done-report.md), whose log this one is modelled on. Amends [views.md](views.md) D5
 on durations — see D6.
 
+**Amended 2026-09-23 by [away-time.md](away-time.md):** D3 — quiet ≤ 15 min on the same project counts; display sleep isn't a leave.
+
 PM can say what you finished and when you sat down. It can't say where the day went.
 
 ```bash

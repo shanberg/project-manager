@@ -375,7 +375,7 @@ final class AttentionLogTests: XCTestCase {
 
     func testTheBoundsAreInclusive() {
         let aways = AttentionLog.aways(from: [began("W-1", at(8)),
-                                              paused("W-1", at(9)), resumed("W-1", at(9, 10)),
+                                              paused("W-1", at(9), why: "locked"), resumed("W-1", at(9, 10)),
                                               paused("W-1", at(10)), resumed("W-1", at(14))])
         XCTAssertEqual(aways.map(awayMinutes), [10, 240])
     }
@@ -465,24 +465,27 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(aways.first?.toDate, at(16, 54))
     }
 
-    func testAReturnOfTwoMinutesIsARealReturn() {
+    /// Typing a prompt is a return, however short: thirty seconds of it is enough.
+    func testAReturnOfThirtySecondsIsARealReturn() {
+        let back = at(11, 20)
         let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
-                                              resumed("W-1", at(11, 20)), paused("W-1", at(11, 22)),
+                                              resumed("W-1", back), paused("W-1", back.addingTimeInterval(30)),
                                               resumed("W-1", at(11, 40))])
-        XCTAssertEqual(aways.map(awayMinutes), [20, 18])
+        XCTAssertEqual(aways.count, 2)
     }
 
     /// Two short gaps joined by a blip are one away long enough to ask about.
     func testShortGapsCanJoinIntoOneWorthAsking() {
         let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11), why: "slept"),
-                                              resumed("W-1", at(11, 6)), paused("W-1", at(11, 7), why: "slept"),
+                                              resumed("W-1", at(11, 6)),
+                                              paused("W-1", at(11, 6).addingTimeInterval(20), why: "slept"),
                                               resumed("W-1", at(11, 13))])
         XCTAssertEqual(aways.map(awayMinutes), [13])
     }
 
     func testJoiningCanMakeANight() {
         let aways = AttentionLog.aways(from: [began("W-1", at(18)), paused("W-1", at(18, 30)),
-                                              resumed("W-1", at(21)), paused("W-1", at(21, 1)),
+                                              resumed("W-1", at(21)), paused("W-1", at(21).addingTimeInterval(20)),
                                               resumed("W-1", at(23))])
         XCTAssertEqual(aways, [])
     }
@@ -507,8 +510,100 @@ final class AttentionLogTests: XCTestCase {
     func testAwaysAreOldestFirst() {
         let aways = AttentionLog.aways(from: [began("W-1", at(9)),
                                               paused("W-1", at(13)), resumed("W-1", at(13, 30)),
-                                              paused("W-1", at(10)), resumed("W-1", at(10, 15))])
+                                              paused("W-1", at(10)), resumed("W-1", at(10, 20))])
         XCTAssertEqual(aways.map(\.fromDate), [at(10), at(13)])
+    }
+
+    // MARK: Quiet focus (docs/away-time.md)
+
+    /// Ten minutes reading an agent's output, then back at the keys on the same project: one span.
+    func testQuietOnTheSameProjectIsFocus() {
+        let log = [began("W-1", at(9), task: "Draft"), paused("W-1", at(10)), resumed("W-1", at(10, 12)),
+                   ended("W-1", at(11))]
+        let spans = AttentionLog.spans(from: log, now: at(12))
+        XCTAssertEqual(spans.map(minutes), [120])
+        XCTAssertEqual(spans.map(\.basis), [.measured])
+        XCTAssertEqual(spans.first?.task, "Draft", "the joined span keeps what it began on")
+        XCTAssertEqual(AttentionLog.aways(from: log), [], "and there's nothing to ask")
+    }
+
+    func testFifteenMinutesIsTheLongestQuiet() {
+        let quiet = AttentionLog.spans(from: [began("W-1", at(9)), paused("W-1", at(10)),
+                                              resumed("W-1", at(10, 15)), ended("W-1", at(11))], now: at(12))
+        XCTAssertEqual(quiet.map(minutes), [120])
+        let longer = [began("W-1", at(9)), paused("W-1", at(10)), resumed("W-1", at(10, 16)),
+                      ended("W-1", at(11))]
+        XCTAssertEqual(AttentionLog.spans(from: longer, now: at(12)).map(minutes), [60, 44])
+        XCTAssertEqual(AttentionLog.aways(from: longer).map(awayMinutes), [16], "the whole stretch is asked about")
+    }
+
+    /// The lid, a lock or a sleep says you left, however short the gap.
+    func testLeavingIsNeverQuiet() {
+        for why in ["locked", "slept"] {
+            let log = [began("W-1", at(9)), paused("W-1", at(10), why: why), resumed("W-1", at(10, 12)),
+                       ended("W-1", at(11))]
+            XCTAssertEqual(AttentionLog.spans(from: log, now: at(12)).map(minutes), [60, 48], why)
+            XCTAssertEqual(AttentionLog.aways(from: log).count, 1, why)
+        }
+    }
+
+    /// Quiet first, then the lock: the pause was written before anyone noticed you'd gone.
+    func testALeaveDuringTheQuietEndsIt() {
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), paused("W-1", at(10, 4), why: "locked"),
+                   resumed("W-1", at(10, 12)), ended("W-1", at(11))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(12)).map(minutes), [60, 48])
+        XCTAssertEqual(AttentionLog.aways(from: log).map(\.why), ["paused"])
+    }
+
+    /// Opening an app you've said isn't work answers the question: neither focus nor asked.
+    func testANotWorkAppDuringTheQuietEndsIt() {
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), paused("W-1", at(10, 5), why: "elsewhere"),
+                   resumed("W-1", at(10, 12)), ended("W-1", at(11))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(12)).map(minutes), [60, 48])
+        XCTAssertEqual(AttentionLog.aways(from: log), [])
+    }
+
+    /// Coming back to another project is a switch after a pause; the quiet wasn't this project's.
+    func testQuietEndingOnAnotherProjectIsNotFocus() {
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), began("W-2", at(10, 12)),
+                   ended("W-2", at(11))]
+        let spans = AttentionLog.spans(from: log, now: at(12))
+        XCTAssertEqual(spans.map(\.project), ["W-1", "W-2"])
+        XCTAssertEqual(spans.map(minutes), [60, 48])
+        XCTAssertEqual(AttentionLog.aways(from: log).map(\.project), ["W-1"])
+    }
+
+    /// The jiggler at lunch: each piece is quiet-sized, the whole isn't. Judged whole.
+    func testJoinedTouchesAreJudgedWhole() {
+        var log = [began("W-1", at(12)), paused("W-1", at(12, 30))]
+        for quarter in [45, 60, 75] {
+            let touch = at(12).addingTimeInterval(Double(quarter) * 60)
+            log += [resumed("W-1", touch), paused("W-1", touch.addingTimeInterval(1))]
+        }
+        log += [resumed("W-1", at(13, 25)), ended("W-1", at(14))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(15)).map(minutes), [30, 35])
+        XCTAssertEqual(AttentionLog.aways(from: log).map(awayMinutes), [55])
+    }
+
+    /// Quiet that joins across a touch is filled whole, touch and all.
+    func testQuietAcrossATouchIsOneSpan() {
+        let touch = at(10, 6)
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), resumed("W-1", touch),
+                   paused("W-1", touch.addingTimeInterval(1)), resumed("W-1", at(10, 14)), ended("W-1", at(11))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(12)).map(minutes), [120])
+    }
+
+    /// An answer still beats what the log implies: "not work" over quiet takes it back out.
+    func testAnAnswerBeatsQuiet() {
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), resumed("W-1", at(10, 12)),
+                   ended("W-1", at(11)), counted(nil, at(10), at(10, 12), answeredAt: at(12))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(13)).map(minutes), [60, 48])
+    }
+
+    /// A report on a past day doesn't take quiet past its end.
+    func testQuietIsCutAtNow() {
+        let log = [began("W-1", at(9)), paused("W-1", at(10)), resumed("W-1", at(10, 12))]
+        XCTAssertEqual(AttentionLog.spans(from: log, now: at(10, 5)).map(minutes), [65])
     }
 
     // MARK: A report on some projects

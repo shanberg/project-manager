@@ -1,40 +1,72 @@
 # Away time
 
-**Status:** designed 2026-09-23. Steps 1–2 built. Extends [time-tracking.md](time-tracking.md).
+**Status:** designed 2026-09-23. Steps 1–2 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
 Covers tasks: idle-time handling; "no focus" apps.
 
-## Already true (time-tracking.md D3, `AttentionKeeper.swift`)
+## Timekeeper (`AttentionKeeper.swift`)
 
 - Counts time on the focused project while there's input anywhere on the Mac, in any app.
 - Frontmost app doesn't matter; Folio need not be in front.
 - 10 min with no input → span ends, back-dated to last input. `why: "paused"`.
-- Lid, sleep, screen sleep, lock → span ends at last input. `why: "slept"`.
-- Input after a pause → new span. `why: "resumed"`.
+- Lock, user switch → span ends at last input. `why: "locked"`.
+- System sleep, lid → span ends at last input. `why: "slept"`.
+- Display sleep → nothing. Not a leave.
+- Lock or sleep while already paused → extra `ended` written at that moment, as a marker inside the gap.
+- Input after the pause moment → new span. `why: "resumed"`.
+- Checks every 60 s; every 5 s while paused, so a resumption is stamped within ~5 s of the first input.
 - No start/stop control exists or is planned.
+
+### Fixed 2026-09-23
+
+- Phantom resumes: a span ended by display sleep resumed on the next check with no new input
+  (last input < 10 min old), then paused again at the same moment. Source of the log's 0-min
+  `slept`→`resumed` pairs. Resuming now requires input after the pause.
+- Logs before 2026-09-23: `slept` also covers display sleep and lock. Read as a leave (never overcounts).
 
 ## Evidence (attention.ndjson, 2026-09-22 → 23)
 
 - 17 `paused` gaps in one afternoon, 11–84 min each.
 - At ≥ 20 min: 8 gaps in one afternoon → a prompt per gap is too many.
-- 11 `slept`→`resumed` pairs of ~0 min (lock/screen-sleep then immediate return). Not aways.
+- 11 `slept`→`resumed` pairs of ~0 min: phantom resumes (above).
+- Typical agent work: ~1 min typing, then a wait of 10–80 min with no input.
+- Display sleep on this Mac: 2 min on battery, 15 on power.
 
 ## Behaviour
 
+### Gaps
+
+- Gap = from an `ended` (`paused` | `slept` | `locked`) to the next `began` on any project.
+- Gaps less than 30 s apart join into one (`awayBlip`).
+  Cause: single inputs (keep-awake jiggle, nudged mouse) resume a span for seconds; the next pause back-dates to them.
+  Seen 2026-09-22: 5 gaps at 15-min intervals = one 80-min gap.
+  30 s, not longer: a typed prompt is a real return.
+- A joined gap is judged whole. Spans inside it are removed.
+- Derived on read (`AttentionLog.gaps`). Nothing new stored.
+
+### Quiet focus
+
+- Amends time-tracking.md D3 ("idle time is never counted").
+- A gap is focus when all hold:
+  - opened by `paused`, with no `slept` / `locked` marker in it;
+  - no `elsewhere` in it;
+  - ended by a `began` on the same project;
+  - ≤ 15 min (`longestQuiet`).
+- Focus gap → filled as a `measured` span, joined to the spans either side.
+- Reason: reading or thinking about agent work, or testing it with a dark screen, is still work.
+- Past 15 min the whole gap is an away, not the first 15 min of it.
+  An unlocked lunch and a long agent run look identical; only you know which.
+- A `counted` still beats quiet: "not work" over a quiet gap removes it.
+
 ### Aways
 
-- Away = gap between an `ended` (`paused` | `slept`) and the next `began` on any project.
-- Labelled with the project the pause interrupted.
-- Derived on read (`AttentionLog.aways`). Nothing new stored for an away itself.
-- Gaps less than 2 min apart join into one away (`awayBlip`).
-  Cause: single inputs (keep-awake jiggle, nudged mouse) resume a span for seconds; the next pause back-dates to them.
-  Seen 2026-09-22: 5 aways at 15-min intervals = one 80-min away.
-- Bounds and answers apply to the joined away, not its parts.
+- Away = a gap that isn't quiet focus and has no `elsewhere` in it.
+- Labelled with the project the gap interrupted.
 - Listed only when 10 min ≤ away ≤ 4 h. Shorter: breaks. Longer: nights.
 - Still going (no `began` yet) → not listed.
 - Any standing `counted` overlapping an away → answered, not listed. Touching at an edge doesn't count.
 - A range keeps aways that began in it.
-- Unanswered away = not counted. Same as today. No cost to ignoring.
-- Real log, 2026-09-22 → 23: 19 raw gaps → 9 aways.
+- Unanswered away = not counted. No cost to ignoring.
+- Real log, 2026-09-22 → 23: 9 aways, 1 quiet gap. Old logs mostly read as leaves (see Fixed).
 - Answers: **Count for <focused project>**, **Other project…**, **Not work**.
 - "Not work" only hides the away from lists; totals unchanged.
 

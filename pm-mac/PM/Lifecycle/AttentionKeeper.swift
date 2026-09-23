@@ -28,11 +28,19 @@ final class AttentionKeeper {
     /// closes an unwritten span itself.
     private static let tick: TimeInterval = 60
 
+    /// How often it asks while paused. A resumption is stamped at the latest input a check sees, so
+    /// this decides how early in a return the new span begins — and a short return (a prompt typed
+    /// to an agent) has to read as a return rather than a touch (`AttentionLog.awayBlip`). Nobody is
+    /// typing while this runs, so it costs a timer and nothing else.
+    private static let pausedTick: TimeInterval = 5
+
     /// The project a `began` is on record for, or nil when nothing is.
     private var open: (key: String, project: String)?
     /// Whether that span has already been ended by a pause. A paused span is still `open` — coming
     /// back to the same project resumes it — but it must not be ended twice.
     private var paused = false
+    /// When the paused span ended — its back-dated last input. A resumption needs input after it.
+    private var pausedAt: Date?
     private var timer: Timer?
 
     /// Whether a sitting says how long it ran (docs/time-tracking.md D6).
@@ -53,30 +61,41 @@ final class AttentionKeeper {
 
     /// Start watching. Called once, from `applicationDidFinishLaunching`.
     func start() {
-        let timer = Timer(timeInterval: Self.tick, repeats: true) { _ in
-            Task { @MainActor in self.check() }
-        }
-        // Generous tolerance: nothing here is time-critical, and a timer that lets the system coalesce
-        // it is a timer that doesn't wake the CPU on its own account.
-        timer.tolerance = Self.tick / 2
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        schedule(every: Self.tick)
 
+        // Leaving the machine, as against not touching it (docs/away-time.md). The display sleeping on
+        // its own timer is deliberately *not* here: reading an agent's output with a dark screen a
+        // tap away is still being at the computer, and the idle check covers it either way.
         let workspace = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification,
-                     NSWorkspace.sessionDidResignActiveNotification] {
-            workspace.addObserver(forName: name, object: nil, queue: .main) { _ in
-                Task { @MainActor in self.pause(why: "slept") }
-            }
+        workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil,
+                              queue: .main) { _ in
+            Task { @MainActor in self.leave(why: "slept") }
+        }
+        workspace.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil,
+                              queue: .main) { _ in
+            Task { @MainActor in self.leave(why: "locked") }
         }
         // The screen lock isn't a workspace notification. Waking is deliberately not observed: the
-        // next tick sees input and resumes on its own, and an unlock with nobody typing afterwards
+        // next check sees input and resumes on its own, and an unlock with nobody typing afterwards
         // isn't work.
         DistributedNotificationCenter.default().addObserver(
             forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main
         ) { _ in
-            Task { @MainActor in self.pause(why: "slept") }
+            Task { @MainActor in self.leave(why: "locked") }
         }
+    }
+
+    private func schedule(every interval: TimeInterval) {
+        guard timer?.timeInterval != interval else { return }
+        timer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+            Task { @MainActor in self.check() }
+        }
+        // Generous tolerance: nothing here is time-critical, and a timer that lets the system coalesce
+        // it is a timer that doesn't wake the CPU on its own account.
+        timer.tolerance = interval / 2
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     /// `focused.json` now names `key` — the one chokepoint the app learns that through
@@ -90,6 +109,8 @@ final class AttentionKeeper {
         guard let key, let project = PMFiles.projectName(fromKey: key) else { return }
         open = (key, project)
         paused = false
+        pausedAt = nil
+        schedule(every: Self.tick)
         // `project.focus` writes its own `began` when the focus came through the contract. Two in a
         // row would be a stray span of a few seconds against this project — small, and wrong for no
         // reason.
@@ -113,7 +134,10 @@ final class AttentionKeeper {
         let idle = idleSeconds()
         if idle > AttentionLog.attentionPause {
             pause(why: "paused", at: now.addingTimeInterval(-idle))
-        } else if paused, let open {
+        } else if paused, let open, let pausedAt, now.addingTimeInterval(-idle) > pausedAt {
+            // Input *since* the pause, not merely a recent last input: a span ended by a lock seconds
+            // after the last keystroke still has that keystroke under ten minutes old, and resuming on
+            // it wrote a return nobody made — the log's 0-minute sleep/resume pairs.
             // Back at it. A fresh span rather than an extension of the last one, so the gap is simply
             // absent from the day's total instead of being counted as work (D3).
             //
@@ -121,6 +145,8 @@ final class AttentionKeeper {
             // that's been going a while. That's the right direction to be wrong in: this feature
             // never claims time it can't show its working for.
             paused = false
+            self.pausedAt = nil
+            schedule(every: Self.tick)
             AttentionLog.began(project: open.project, key: open.key, task: focusedTaskText(),
                                why: "resumed", source: "app", at: now.addingTimeInterval(-idle))
         }
@@ -128,8 +154,23 @@ final class AttentionKeeper {
 
     private func pause(why: String, at when: Date? = nil) {
         guard !paused, open != nil else { return }
-        end(why: why, at: when ?? lastAlive(), keepingOpen: true)
+        let when = when ?? lastAlive()
+        end(why: why, at: when, keepingOpen: true)
         paused = true
+        pausedAt = when
+        schedule(every: Self.pausedTick)
+    }
+
+    /// A lock, a lid or a sleep. Ends the span like a pause; if a pause already has, it's still
+    /// written, as a marker inside the gap — quiet with a lock in it isn't quiet (docs/away-time.md),
+    /// and the ten-minute pause is usually on record before the lock that explains it.
+    private func leave(why: String) {
+        guard let span = open else { return }
+        if paused {
+            AttentionLog.ended(project: span.project, key: span.key, why: why, source: "app")
+        } else {
+            pause(why: why)
+        }
     }
 
     /// Write the `ended` for the open span. `keepingOpen` is a pause, which can still be resumed;

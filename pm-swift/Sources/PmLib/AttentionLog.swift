@@ -155,10 +155,9 @@ public struct AttentionSpan: Codable, Equatable, Sendable {
 }
 
 public enum AttentionLog {
-    /// The longest pause that still counts as working — the *only* thing this threshold decides, since
-    /// an `ended` is back-dated to the last sign of life either way (D3). Ten minutes is long enough to
-    /// read a document, watch something or think at the screen, and short enough that a coffee isn't
-    /// work.
+    /// How long with no input before Folio writes a pause, back-dated to the last sign of life (D3).
+    /// Whether that quiet counts is decided on read, not here: back on the same project within
+    /// `longestQuiet`, it was focus all along (docs/away-time.md).
     ///
     /// Hardcoded, with the same note `sessionIdleWindow` carries: the obvious thing to lift into
     /// Settings when it earns a control.
@@ -173,11 +172,24 @@ public enum AttentionLog {
     /// lock or a lid as much as for a pause: under it is a break, and it isn't asked about either.
     public static let longestAway: TimeInterval = 4 * 60 * 60
 
-    /// The longest return that doesn't break an away in two. Something that touches the machine once —
+    /// The longest return that doesn't break a gap in two. Something that touches the machine once —
     /// a keep-awake jiggle, a nudged mouse — resumes a span for a moment, and ten minutes later the
     /// pause is back-dated to that one touch. The log from 2026-09-22 has five of these in a row, one
-    /// every fifteen minutes: one eighty-minute away, which should be asked about once.
-    public static let awayBlip: TimeInterval = 2 * 60
+    /// every fifteen minutes: one eighty-minute absence, which must neither pass for five short quiet
+    /// stretches (`longestQuiet`) nor be asked about five times.
+    ///
+    /// Short, because a real return can be short — typing a prompt, scrolling an agent's output. It
+    /// can be, because Folio stamps a resumption within seconds of the first input (`AttentionKeeper`).
+    public static let awayBlip: TimeInterval = 30
+
+    /// The longest quiet stretch that's still focus (docs/away-time.md): no input, but nothing that
+    /// says you left — no lock, no lid, no sleep, no app you've said isn't work — and you came back to
+    /// the same project. Reading an agent's work, thinking about it. The display going dark on its own
+    /// timer doesn't count as leaving.
+    ///
+    /// Past it, the whole stretch is an away, to be counted or not; an unlocked lunch and a long
+    /// agent run look the same from here, and only you know which it was.
+    public static let longestQuiet: TimeInterval = 15 * 60
 
     /// Beside the journal in the config dir, not in a project folder — see the note at the top.
     public static var logPath: String {
@@ -344,7 +356,9 @@ public enum AttentionLog {
             }
         }
         if let span = open { closeSpan(span, by: nil) }
-        let counted = applyingCounts(to: out, from: edges, now: now)
+        // Quiet first, answers over it: an answer about a range beats what the log implies about it.
+        let quiet = resolvingGaps(out, gaps: gaps(edges), now: now)
+        let counted = applyingCounts(to: quiet, from: edges, now: now)
         guard let only else { return counted }
         return counted.filter { only.contains($0.project) }
     }
@@ -372,22 +386,130 @@ public enum AttentionLog {
         return spans.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
     }
 
+    // MARK: Gaps
+
+    /// A stretch with nobody at the keys: from a pause, a lock or a sleep to the next `began` on any
+    /// project, with touch-short returns inside it joined up (`awayBlip`). What both quiet focus and
+    /// aways are cut from (docs/away-time.md).
+    struct Gap {
+        var from: Date
+        var to: Date
+        /// The project it interrupted.
+        var project: String
+        var key: String
+        /// What opened it: `paused`, `slept`, `locked`.
+        var why: String
+        var during: String?
+        /// A lock, a lid or a sleep anywhere in it: you left the machine.
+        var left: Bool
+        /// An app you've said isn't work came to the front during it.
+        var elsewhere: Bool
+        /// Where attention landed when it ended.
+        var returnKey: String?
+
+        var seconds: TimeInterval { to.timeIntervalSince(from) }
+
+        /// Still focus: nothing says you left, you came back to the same project, and not after so
+        /// long that it could as easily have been lunch (`longestQuiet`).
+        var isQuiet: Bool { !left && !elsewhere && returnKey == key && seconds <= longestQuiet }
+    }
+
+    /// The reasons an `ended` gives that mean you left the machine rather than stopped touching it.
+    /// `slept` in logs written before 2026-09-23 also covers the display sleeping on its own timer;
+    /// those gaps are read as leaving, which is the direction that never overcounts.
+    static let leaves: Set<String> = ["slept", "locked"]
+
+    /// Every gap in the log, oldest first, of any length. Nothing is filtered here: a short gap can be
+    /// part of a long one once blips are joined, and what each reader wants of them differs.
+    static func gaps(_ edges: [Edge]) -> [Gap] {
+        var gaps: [Gap] = []
+        // The gap still waiting for attention to land somewhere again.
+        var pending: Gap?
+        for edge in edges {
+            let event = edge.event
+            switch event.event {
+            case .ended:
+                if var gap = pending {
+                    // Already quiet: a later `ended` doesn't move when the hands left, but it says what
+                    // happened while they were gone.
+                    if leaves.contains(event.why ?? "") { gap.left = true }
+                    if event.why == "elsewhere" { gap.elsewhere = true }
+                    pending = gap
+                    continue
+                }
+                guard let why = event.why, why == "paused" || leaves.contains(why),
+                      let project = event.project, let key = event.key else { continue }
+                pending = Gap(from: edge.at, to: edge.at, project: project, key: key, why: why,
+                              during: nil, left: leaves.contains(why), elsewhere: false, returnKey: nil)
+            case .began:
+                guard var gap = pending else { continue }
+                pending = nil
+                gap.to = edge.at
+                gap.during = event.during
+                gap.returnKey = event.key
+                if var last = gaps.last, gap.from.timeIntervalSince(last.to) < awayBlip {
+                    // The first part says what was interrupted and why; what any part saw holds for
+                    // the whole, and the last part says where attention landed.
+                    last.to = gap.to
+                    last.during = last.during ?? gap.during
+                    last.left = last.left || gap.left
+                    last.elsewhere = last.elsewhere || gap.elsewhere
+                    last.returnKey = gap.returnKey
+                    gaps[gaps.count - 1] = last
+                } else {
+                    gaps.append(gap)
+                }
+            case .counted, .withdrawn:
+                continue
+            }
+        }
+        return gaps
+    }
+
+    /// The spans with every gap made whole. A quiet gap is given back to the project it interrupted,
+    /// joined to the spans either side of it — measured, not counted: nobody answered anything, and
+    /// the log says exactly where the quiet began and ended. Any other gap is emptied of the
+    /// touch-short spans its joining swallowed: it's one away, not an away with seconds of work in it.
+    static func resolvingGaps(_ spans: [AttentionSpan], gaps: [Gap], now: Date) -> [AttentionSpan] {
+        var spans = spans
+        for gap in gaps {
+            let to = min(gap.to, now)
+            guard to > gap.from else { continue }
+            spans = spans.flatMap { removing(gap.from, to, from: $0) }
+            if gap.isQuiet {
+                spans.append(AttentionSpan(project: gap.project, key: gap.key, task: nil,
+                                           start: gap.from, end: to, basis: .measured))
+            }
+        }
+        return coalescing(spans)
+    }
+
+    /// Adjacent spans of one project on one basis, as one span. Keeps the first one's task.
+    static func coalescing(_ spans: [AttentionSpan]) -> [AttentionSpan] {
+        var out: [AttentionSpan] = []
+        for span in spans.sorted(by: { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }) {
+            if let last = out.last, last.key == span.key, last.basis == span.basis, last.end == span.start,
+               let start = last.startDate, let end = span.endDate {
+                out[out.count - 1] = AttentionSpan(project: last.project, key: last.key,
+                                                   task: last.task ?? span.task, start: start, end: end,
+                                                   basis: last.basis)
+            } else {
+                out.append(span)
+            }
+        }
+        return out
+    }
+
     // MARK: Aways
 
-    /// The gaps still worth asking about, oldest first (docs/away-time.md).
+    /// The gaps still worth asking about, oldest first (docs/away-time.md). Every gap is one, except:
     ///
-    /// An away runs from an `ended` for a pause or a sleep to the next `began` on **any** project:
-    /// coming back to a different one leaves the gap just as open, and it's still the interrupted
-    /// project's to offer first. Not listed:
-    ///
+    /// - quiet — it's focus already, and there's nothing to ask (`Gap.isQuiet`);
+    /// - one with an app you've said isn't work in it — you answered by opening it;
     /// - under `attentionPause` or over `longestAway` — a break, or a night;
-    /// - an `ended` for any other reason — `switched` and `quit` leave no gap, and `elsewhere` is a
-    ///   gap you already answered by opening an app you said isn't work;
-    /// - one still going — nobody's back to be asked;
     /// - one a standing `counted` overlaps, whatever it said — "not work" is an answer too.
     ///
-    /// Two aways with less than `awayBlip` between them are one: the return between was a touch, not
-    /// somebody back. The bounds and the answers are checked against the joined away, never its parts.
+    /// A gap still going isn't one yet: nobody's back to be asked.
     ///
     /// `range`, when given, keeps the aways that *began* in it, as a span belongs to the day it began.
     public static func aways(from events: [AttentionEvent], in range: DoneRange? = nil)
@@ -403,43 +525,13 @@ public enum AttentionLog {
             return (from, to)
         }
 
-        // Every gap first, of any length: a short one can still be part of a long away once blips
-        // are joined, so nothing is filtered until the gaps are whole.
-        var gaps: [AttentionAway] = []
-        // The pause waiting for attention to land somewhere again.
-        var pending: (at: Date, event: AttentionEvent)?
-        for edge in edges {
-            switch edge.event.event {
-            case .ended:
-                // A later `ended` before anything began again is a stale edge; the first one is when
-                // the hands left.
-                guard pending == nil else { continue }
-                if edge.event.why == "paused" || edge.event.why == "slept" { pending = (edge.at, edge.event) }
-            case .began:
-                defer { pending = nil }
-                guard let (from, ended) = pending, let project = ended.project, let key = ended.key
-                else { continue }
-                let gap = AttentionAway(project: project, key: key, from: from, to: edge.at,
-                                        why: ended.why ?? "paused", during: edge.event.during)
-                if let last = gaps.last, let lastEnd = last.toDate,
-                   from.timeIntervalSince(lastEnd) < awayBlip, let start = last.fromDate {
-                    // The first part says what was interrupted; a call in any part is a call.
-                    gaps[gaps.count - 1] = AttentionAway(project: last.project, key: last.key,
-                                                         from: start, to: edge.at, why: last.why,
-                                                         during: last.during ?? gap.during)
-                } else {
-                    gaps.append(gap)
-                }
-            case .counted, .withdrawn:
-                continue
-            }
-        }
-
-        return gaps.filter { away in
-            guard let from = away.fromDate, let to = away.toDate else { return false }
-            guard away.seconds >= attentionPause, away.seconds <= longestAway else { return false }
-            if let range, !(from >= range.start && from < range.end) { return false }
-            return !answers.contains { $0.from < to && $0.to > from }
+        return gaps(edges).compactMap { gap in
+            guard !gap.isQuiet, !gap.elsewhere,
+                  gap.seconds >= attentionPause, gap.seconds <= longestAway else { return nil }
+            if let range, !(gap.from >= range.start && gap.from < range.end) { return nil }
+            guard !answers.contains(where: { $0.from < gap.to && $0.to > gap.from }) else { return nil }
+            return AttentionAway(project: gap.project, key: gap.key, from: gap.from, to: gap.to,
+                                 why: gap.why, during: gap.during)
         }
     }
 
