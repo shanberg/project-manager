@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Watch the machine for signs of life, so a span of attention is measured rather than
         // guessed. After `syncFocusedStore`, which has already told it where attention is.
+        // The store is the app's, so the keeper is handed a way to read it rather than reaching for it.
+        AttentionKeeper.shared.focusedTask = { [weak self] in self?.store.focusedTodo?.text }
         AttentionKeeper.shared.start()
 
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).

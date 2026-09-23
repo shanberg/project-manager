@@ -42,6 +42,25 @@ final class AttentionKeeper {
     /// When the paused span ended — its back-dated last input. A resumption needs input after it.
     private var pausedAt: Date?
     private var timer: Timer?
+    /// When an app on the not-work list came to the front, while one still is.
+    private var elsewhereSince: Date?
+    /// Whether the log already says so for this stretch in the app — as the pause itself, or as a
+    /// marker inside a pause that was already going.
+    private var markedElsewhere = false
+
+    /// Apps that mean you've stopped working, by bundle identifier (docs/away-time.md). This Mac's
+    /// habit rather than a fact about any project, so `UserDefaults`, like `showsDurationsKey`.
+    static let notWorkAppsKey = "PMNotWorkApps"
+
+    static var notWorkApps: [String] {
+        get { UserDefaults.standard.stringArray(forKey: notWorkAppsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: notWorkAppsKey) }
+    }
+
+    /// How long a not-work app has to stay in front before it ends the span. A glance — checking a
+    /// message, closing a window — is shorter, and splitting a span for it would put a gap in the
+    /// day for nothing; the glance counts as the work it interrupted.
+    private static let elsewhereGrace: TimeInterval = 60
 
     /// Whether a sitting says how long it ran (docs/time-tracking.md D6).
     ///
@@ -55,7 +74,21 @@ final class AttentionKeeper {
         UserDefaults.standard.bool(forKey: showsDurationsKey)
     }
 
-    private init() {}
+    // MARK: What it reads — replaceable, so the rules can run on a test's clock
+
+    /// Now. `Date()` in the app.
+    var clock: () -> Date = { Date() }
+    /// Seconds since anyone touched the machine. The HID idle timer in the app.
+    var idle: () -> TimeInterval = { AttentionKeeper.systemIdleSeconds() }
+    /// The not-work list, as `notWorkApps` has it.
+    var notWork: () -> [String] = { AttentionKeeper.notWorkApps }
+    /// The focused task's text, as colour on a span (D1). Set by the app, which has the store; nil is
+    /// fine and costs nothing.
+    var focusedTask: () -> String? = { nil }
+    /// Whether it runs its own timer. Off in tests, which call `check()` themselves.
+    var schedulesTimers = true
+
+    init() {}
 
     // MARK: Being told things
 
@@ -83,10 +116,30 @@ final class AttentionKeeper {
         ) { _ in
             Task { @MainActor in self.leave(why: "locked") }
         }
+
+        workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil,
+                              queue: .main) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let bundle = app?.bundleIdentifier
+            Task { @MainActor in self.frontmostChanged(to: bundle) }
+        }
+        frontmostChanged(to: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+    }
+
+    /// Whether the app in front is one you've said isn't work. Only the answer is kept — never which
+    /// app it was, here or in the log.
+    func frontmostChanged(to bundle: String?) {
+        if let bundle, notWork().contains(bundle) {
+            // One not-work app to another is the same stretch, so the first one's moment stands.
+            if elsewhereSince == nil { elsewhereSince = clock() }
+        } else {
+            elsewhereSince = nil
+            markedElsewhere = false
+        }
     }
 
     private func schedule(every interval: TimeInterval) {
-        guard timer?.timeInterval != interval else { return }
+        guard schedulesTimers, timer?.timeInterval != interval else { return }
         timer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { _ in
             Task { @MainActor in self.check() }
@@ -102,7 +155,7 @@ final class AttentionKeeper {
     /// (`AppDelegate.syncFocusedStore`), whoever moved it.
     func focusMoved(to key: String?) {
         guard key != open?.key else { return }
-        let now = Date()
+        let now = clock()
         // End the outgoing span at the last input rather than at this moment: switching projects after
         // twenty minutes away is twenty minutes that weren't spent on either of them.
         end(why: "switched", at: lastAlive(now))
@@ -111,6 +164,12 @@ final class AttentionKeeper {
         paused = false
         pausedAt = nil
         schedule(every: Self.tick)
+        // Focusing a project from inside a not-work app starts its time there, not before: the
+        // pause that follows mustn't be back-dated past this span's own `began`.
+        if elsewhereSince != nil {
+            elsewhereSince = now
+            markedElsewhere = false
+        }
         // `project.focus` writes its own `began` when the focus came through the contract. Two in a
         // row would be a stray span of a few seconds against this project — small, and wrong for no
         // reason.
@@ -128,10 +187,26 @@ final class AttentionKeeper {
     // MARK: Watching
 
     /// Has anybody touched this machine lately, and does the open span still stand?
-    private func check() {
-        guard open != nil else { return }
-        let now = Date()
-        let idle = idleSeconds()
+    func check() {
+        guard let span = open else { return }
+        let now = clock()
+        if let since = elsewhereSince {
+            // In an app that isn't work. Never a resumption, whatever the input says: typing in a news
+            // reader is still reading the news.
+            guard !markedElsewhere, now.timeIntervalSince(since) >= Self.elsewhereGrace else { return }
+            if paused {
+                // Already quiet when the app came up. Say so inside the gap, so it reads as neither
+                // quiet focus nor an away to ask about.
+                AttentionLog.ended(project: span.project, key: span.key, why: "elsewhere", source: "app",
+                                   at: since)
+            } else {
+                // Ended at the moment the app came to the front, which the notification gave exactly.
+                pause(why: "elsewhere", at: since)
+            }
+            markedElsewhere = true
+            return
+        }
+        let idle = self.idle()
         if idle > AttentionLog.attentionPause {
             pause(why: "paused", at: now.addingTimeInterval(-idle))
         } else if paused, let open, let pausedAt, now.addingTimeInterval(-idle) > pausedAt {
@@ -164,10 +239,10 @@ final class AttentionKeeper {
     /// A lock, a lid or a sleep. Ends the span like a pause; if a pause already has, it's still
     /// written, as a marker inside the gap — quiet with a lock in it isn't quiet (docs/away-time.md),
     /// and the ten-minute pause is usually on record before the lock that explains it.
-    private func leave(why: String) {
+    func leave(why: String) {
         guard let span = open else { return }
         if paused {
-            AttentionLog.ended(project: span.project, key: span.key, why: why, source: "app")
+            AttentionLog.ended(project: span.project, key: span.key, why: why, source: "app", at: clock())
         } else {
             pause(why: why)
         }
@@ -189,22 +264,18 @@ final class AttentionKeeper {
     }
 
     /// Seconds since anyone last touched the machine — any input, in any app.
-    private func idleSeconds() -> TimeInterval {
+    nonisolated static func systemIdleSeconds() -> TimeInterval {
         // `~0` is `kCGAnyInputEventType`: the keyboard, the mouse and the trackpad together, rather
         // than one of them.
         guard let any = CGEventType(rawValue: ~0) else { return 0 }
         return CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: any)
     }
 
-    private func lastAlive(_ now: Date = Date()) -> Date {
-        now.addingTimeInterval(-idleSeconds())
+    private func lastAlive(_ now: Date? = nil) -> Date {
+        (now ?? clock()).addingTimeInterval(-idle())
     }
 
-    /// The focused task, as colour on the span (D1). Read from the store the app already has rather
-    /// than off disk; nil is fine and costs nothing.
-    private func focusedTaskText() -> String? {
-        (NSApp.delegate as? AppDelegate)?.store.focusedTodo?.text
-    }
+    private func focusedTaskText() -> String? { focusedTask() }
 
     /// Whether the log's last line is already a `began` for this project, written just now — which
     /// means the focus came through `project.focus` and the dispatcher has recorded it.

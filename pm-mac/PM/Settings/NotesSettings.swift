@@ -7,7 +7,6 @@ import PmLib
 /// what they're called, this one about the file inside each of them.
 struct NotesSettingsView: View {
     private let store = ConfigStore.shared
-    @AppStorage(AttentionKeeper.showsDurationsKey) private var showsSittingDuration = false
 
     var body: some View {
         Form {
@@ -67,17 +66,11 @@ struct NotesSettingsView: View {
         Section {
             Toggle("Show link syntax", isOn: Binding(get: { TokenDisplay.showsSyntax },
                                                      set: { TokenDisplay.showsSyntax = $0 }))
-            Toggle("Show how long each sitting ran", isOn: $showsSittingDuration)
         } header: {
             Text("Display")
         } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Off, a reference reads as a pill — “Vendor Contract”. On, it reads as it's written "
-                     + "in the file — “[[W-3 Vendor Contract]]”. Either way the file is the same.")
-                Text("A sitting's time is the attention that was on the project while it was the "
-                     + "current sitting, not the gap to the next heading. A sitting PM wasn't watching "
-                     + "says nothing rather than zero.")
-            }
+            Text("Off, a reference reads as a pill — “Vendor Contract”. On, it reads as it's written "
+                 + "in the file — “[[W-3 Vendor Contract]]”. Either way the file is the same.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }

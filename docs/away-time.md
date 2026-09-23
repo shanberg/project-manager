@@ -1,7 +1,7 @@
 # Away time
 
-**Status:** designed 2026-09-23. Steps 1–3 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
-Covers tasks: idle-time handling; "no focus" apps.
+**Status:** designed 2026-09-23. Steps 1–4 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
+Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 
 ## Timekeeper (`AttentionKeeper.swift`)
 
@@ -85,13 +85,19 @@ Covers tasks: idle-time handling; "no focus" apps.
 - Mic in use at any tick → the `resumed` edge carries `during: "call"`.
 - UI label: **On a call**. Still asks; never counts automatically (call may be another project's).
 
-### No-focus apps
+### Not-work apps
 
-- User-chosen list of apps, by bundle ID. Settings › Time.
-- One of them frontmost → span ends at activation time. `why: "elsewhere"`.
+- User-chosen list of apps, by bundle ID. Settings › Time. `UserDefaults` key `PMNotWorkApps`.
+- Folio itself can't be added.
+- One of them frontmost ≥ 60 s → span ends at the moment it came to the front. `why: "elsewhere"`.
 - Activation time from `NSWorkspace.didActivateApplicationNotification`; exact, no back-dating needed.
-- Grace: 60 s. Frontmost < 60 s → span not split. Those seconds still not counted.
-- Leaving the app (with input) → new span, `why: "resumed"`.
+- Frontmost < 60 s → a glance: nothing written, the time counts as the work it interrupted.
+- One not-work app to another → one stretch; the first activation's time stands.
+- Input while a not-work app is frontmost → no resumption.
+- Leaving the app, with input → new span, `why: "resumed"`.
+- Already paused when the app comes up (≥ 60 s) → `ended` `elsewhere` marker inside the gap.
+  The gap is then neither quiet focus nor an away.
+- Focusing a project from inside the app → the 60 s restarts from the focus; the stop never predates the `began`.
 - Project focus unchanged.
 - App name/bundle ID never written to the log.
 - An `elsewhere` gap is not an away: never listed, never asked about.
@@ -148,9 +154,17 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 
 ## Settings › Time (new pane)
 
-- No-focus apps list.
-- Sitting durations switch (`PMShowsSittingDuration`, moved from Notes).
+- Not-work apps: a list with selection; + (open panel, /Applications, multiple), − and Delete remove the selection, context menu Remove, drop apps from Finder.
+- A removed-from-disk app still lists, by bundle ID, so it can be removed.
+- Sitting durations switch (`PMShowsSittingDuration`), moved from Notes with its footer.
+- Not-work list has no footer copy yet (human-written).
 - Pause threshold stays hardcoded at 10 min.
+
+## Tests
+
+- `pm-swift/Tests/pmTests/AttentionLogTests.swift`: derivation — spans, counts, gaps, quiet, aways.
+- `pm-swift/Tests/pmTests/TimeCountTests.swift`: `time.count`, `time.aways`, `parseMoment`.
+- `pm-mac/PMViewTests/AttentionKeeperTests.swift`: the timekeeper on an injected clock, idle and list.
 
 ## Privacy facts
 
@@ -163,7 +177,7 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 1. `counted` event + derivation in `AttentionLog` (pure, tested): override, overlap, not-work, midnight split.
 2. `time.aways` derivation (pure, tested): bounds, 0-min `slept` pairs excluded, `elsewhere` excluded.
 3. Contract + CLI: `time.aways`, `time.count`, `pm time aways|count`.
-4. No-focus apps: `AttentionKeeper` + Settings › Time pane.
+4. Not-work apps: `AttentionKeeper` + Settings › Time pane.
 5. Call hint in `AttentionKeeper`.
 6. Menubar away row.
 7. Time card: Away section, then span corrections.

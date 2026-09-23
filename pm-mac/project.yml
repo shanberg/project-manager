@@ -213,6 +213,8 @@ targets:
       - path: PM/Model/PMActions.generated.swift
       - path: PM/Model/PMContract.swift
       - path: PM/Model/PMFiles.swift
+      # The timekeeper's rules, run on a test's clock — see AttentionKeeperTests.
+      - path: PM/Lifecycle/AttentionKeeper.swift
       - path: PM/Model/PMStore.swift
       - path: PM/Windows/ProjectContentPane.swift
       - path: PM/Canvas/CanvasLayout.swift
