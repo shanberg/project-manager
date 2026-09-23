@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import PmLib
 
 /// A note as it reads rather than as it's typed: its markdown rendered with the markers gone, and its
@@ -12,9 +13,12 @@ import PmLib
 /// stacked, with each prose run still rendered by `renderedMarkdown` — the images are the only thing
 /// this adds, and a note without any lays out exactly as it did before.
 ///
-/// No gestures of its own. This is a read view inside a selectable row, and the row owns the click:
-/// one selects the session, two open the note. The editor is where an image is replaced or removed,
-/// which is the same place its markdown was written.
+/// No gestures of its own beyond what any Mac image view offers on the side: right-click for Copy,
+/// Save As…, Reveal, and Open, and a drag-out to another app. The plain click is still the row's — one
+/// selects the session, two open the note — since that's the one gesture the row and the picture both
+/// want, and dragging or right-clicking a picture is never how you meant to click the row under it.
+/// The editor is where an image is replaced or removed, which is the same place its markdown was
+/// written.
 ///
 /// Pictures are clipped to a rounded rectangle and given no border, which is what Messages does with
 /// an image in the chat stream: the shape and the space around it do the separating, and a line drawn
@@ -90,6 +94,11 @@ private struct NoteImage: View {
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
                 .accessibilityLabel(alt.isEmpty ? "Image" : alt)
                 .help(url.lastPathComponent)
+                // A drag onto Finder, Mail, or another app's drop zone — the same thing dragging a
+                // thumbnail out of Preview or Photos does. `contentsOf:` hands over the file itself
+                // rather than a re-encoded copy, so a screenshot dropped elsewhere is byte-identical.
+                .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider(object: image) }
+                .contextMenu { NoteImageMenu(url: url, image: image) }
         } else {
             missing
         }
@@ -117,6 +126,48 @@ private struct NoteImage: View {
         .font(Font(font).italic())
         .foregroundStyle(.tertiary)
         .help("Missing image: \(destination)")
+    }
+}
+
+/// The right-click menu on an embedded picture: the four things every other Mac app offers on an
+/// image it didn't put a richer menu on top of. `url` is the file on disk the embed named, so each
+/// action acts on the same picture the note points at rather than a re-encoded copy of what's on
+/// screen.
+private struct NoteImageMenu: View {
+    let url: URL
+    let image: NSImage
+
+    var body: some View {
+        Button { copyImage() } label: {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        Button { saveImageAs() } label: {
+            Label("Save Image As…", systemImage: "square.and.arrow.down")
+        }
+        Divider()
+        Button { NSWorkspace.shared.open(url) } label: {
+            Label("Open", systemImage: "arrow.up.forward.app")
+        }
+        Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
+            Label("Reveal in Finder", systemImage: "folder")
+        }
+    }
+
+    private func copyImage() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+    }
+
+    /// A copy of the file itself, not a re-encode of the decoded `NSImage` — so a save keeps whatever
+    /// format, color profile, and metadata the original had.
+    private func saveImageAs() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = url.lastPathComponent
+        if let type = UTType(filenameExtension: url.pathExtension) { panel.allowedContentTypes = [type] }
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        try? FileManager.default.removeItem(at: destination)
+        try? FileManager.default.copyItem(at: url, to: destination)
     }
 }
 
