@@ -206,4 +206,140 @@ final class AttentionLogTests: XCTestCase {
         let line = try encoder.encode(event)
         XCTAssertEqual(try JSONDecoder().decode(AttentionEvent.self, from: line), event)
     }
+
+    /// "Not work" is a `counted` with no project, and the line says so by leaving the fields out.
+    func testANotWorkAnswerHasNoProjectOnTheLine() throws {
+        let event = counted(nil, at(11), at(12), answeredAt: at(13))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let line = try encoder.encode(event)
+        let text = String(decoding: line, as: UTF8.self)
+        XCTAssertFalse(text.contains("\"project\""), text)
+        XCTAssertFalse(text.contains("\"key\""), text)
+        XCTAssertEqual(try JSONDecoder().decode(AttentionEvent.self, from: line), event)
+    }
+
+    // MARK: Counting (docs/away-time.md)
+
+    private func counted(_ project: String?, _ from: Date, _ to: Date, answeredAt: Date,
+                         id: String = AttentionLog.newID()) -> AttentionEvent {
+        AttentionEvent(id: id, at: DoneLog.timestamp(answeredAt), event: .counted, project: project,
+                       key: project.map { "/PARA/active:\($0)" },
+                       from: DoneLog.timestamp(from), to: DoneLog.timestamp(to))
+    }
+
+    private func withdrawn(_ ref: String, _ when: Date) -> AttentionEvent {
+        AttentionEvent(at: DoneLog.timestamp(when), event: .withdrawn, project: nil, key: nil, ref: ref)
+    }
+
+    /// Pause at 11:00, back at 11:30, away counted for the same project: three spans, 2h in all.
+    func testCountingAnAwayFillsTheGap() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(10)), ended("W-1", at(11)),
+                                              began("W-1", at(11, 30)), ended("W-1", at(12)),
+                                              counted("W-1", at(11), at(11, 30), answeredAt: at(12))],
+                                       now: at(13))
+        XCTAssertEqual(spans.map(\.basis), [.measured, .counted, .measured])
+        XCTAssertEqual(spans.map(minutes), [60, 30, 30])
+        XCTAssertEqual(spans.reduce(0) { $0 + $1.seconds } / 60, 120)
+    }
+
+    func testCountingForAnotherProjectMovesTheTime() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(9)), ended("W-1", at(12)),
+                                              counted("W-2", at(10), at(11), answeredAt: at(13))],
+                                       now: at(14))
+        XCTAssertEqual(spans.map(\.project), ["W-1", "W-2", "W-1"])
+        XCTAssertEqual(spans.map(minutes), [60, 60, 60])
+        XCTAssertEqual(spans.map(\.basis), [.measured, .counted, .measured])
+    }
+
+    func testNotWorkTakesTimeAwayAndGivesItToNobody() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(9)), ended("W-1", at(12)),
+                                              counted(nil, at(11), at(12), answeredAt: at(13))],
+                                       now: at(14))
+        XCTAssertEqual(spans.map(minutes), [120])
+        XCTAssertEqual(spans.first?.basis, .measured)
+    }
+
+    /// Not work over an away that was never counted changes nothing — it only answers the question.
+    func testNotWorkOverAGapChangesNothing() {
+        let events = [began("W-1", at(10)), ended("W-1", at(11)), began("W-1", at(11, 30)),
+                      ended("W-1", at(12))]
+        let before = AttentionLog.spans(from: events, now: at(13))
+        let after = AttentionLog.spans(from: events + [counted(nil, at(11), at(11, 30), answeredAt: at(12))],
+                                       now: at(13))
+        XCTAssertEqual(after, before)
+    }
+
+    /// The answer given later wins, whatever order the lines are in.
+    func testTheLaterAnswerWins() {
+        let first = counted("W-1", at(11), at(12), answeredAt: at(13))
+        let second = counted("W-2", at(11), at(12), answeredAt: at(14))
+        for order in [[first, second], [second, first]] {
+            let spans = AttentionLog.spans(from: order, now: at(15))
+            XCTAssertEqual(spans.map(\.project), ["W-2"])
+            XCTAssertEqual(spans.map(minutes), [60])
+        }
+    }
+
+    /// A later answer over part of an earlier one cuts it like any other span.
+    func testALaterAnswerCutsAnEarlierOne() {
+        let spans = AttentionLog.spans(from: [counted("W-1", at(11), at(13), answeredAt: at(14)),
+                                              counted(nil, at(12), at(12, 30), answeredAt: at(15))],
+                                       now: at(16))
+        XCTAssertEqual(spans.map(minutes), [60, 30])
+        XCTAssertEqual(spans.map(\.project), ["W-1", "W-1"])
+    }
+
+    func testWithdrawingPutsBackExactlyWhatWasThere() {
+        let events = [began("W-1", at(9)), ended("W-1", at(12))]
+        let answer = counted("W-2", at(10), at(11), answeredAt: at(13), id: "answer")
+        let spans = AttentionLog.spans(from: events + [answer, withdrawn("answer", at(13, 5))],
+                                       now: at(14))
+        XCTAssertEqual(spans, AttentionLog.spans(from: events, now: at(14)))
+    }
+
+    /// Nothing is known past `now` — a report for a past day passes that day's end.
+    func testAnAnswerIsCutAtNow() {
+        let spans = AttentionLog.spans(from: [counted("W-1", at(11), at(13), answeredAt: at(11))],
+                                       now: at(12))
+        XCTAssertEqual(spans.map(minutes), [60])
+        XCTAssertEqual(AttentionLog.spans(from: [counted("W-1", at(13), at(14), answeredAt: at(11))],
+                                          now: at(12)), [])
+    }
+
+    /// Answers don't move attention: an answer between two edges doesn't end the open span.
+    func testAnAnswerDoesntEndTheOpenSpan() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(9)),
+                                              counted(nil, at(7), at(8), answeredAt: at(9, 30)),
+                                              ended("W-1", at(10))],
+                                       now: at(11))
+        XCTAssertEqual(spans.map(\.basis), [.measured])
+        XCTAssertEqual(spans.map(minutes), [60])
+    }
+
+    func testACountedSpanIsSplitAtMidnight() {
+        let spans = AttentionLog.splittingAtMidnight(
+            AttentionLog.spans(from: [counted("W-1", at(23, 30), at(23, 30).addingTimeInterval(3600),
+                                              answeredAt: at(23, 59).addingTimeInterval(3600))],
+                               now: at(23).addingTimeInterval(4 * 3600)))
+        XCTAssertEqual(spans.map(minutes), [30, 30])
+        XCTAssertEqual(spans.map(\.basis), [.counted, .counted])
+    }
+
+    // MARK: A report on some projects
+
+    /// Reading one project still reads the whole log: W-2's `began` is what ends W-1's span.
+    func testOnlyIsAppliedAfterTheWholeLogIsRead() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(9)), began("W-2", at(9, 40))],
+                                       now: at(12), only: ["W-1"])
+        XCTAssertEqual(spans.map(\.project), ["W-1"])
+        XCTAssertEqual(spans.map(minutes), [40])
+    }
+
+    func testAnotherProjectsAnswerStillTakesTimeFromThisOne() {
+        let spans = AttentionLog.spans(from: [began("W-1", at(9)), ended("W-1", at(12)),
+                                              counted("W-2", at(10), at(11), answeredAt: at(13))],
+                                       now: at(14), only: ["W-1"])
+        XCTAssertEqual(spans.map(minutes), [60, 60])
+    }
 }

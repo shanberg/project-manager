@@ -123,16 +123,20 @@ func tallying(spans: [AttentionSpan], sittings: SittingList,
 public func attentionSpans(in range: DoneRange, projects: [String]? = nil, now: Date = Date(),
                            calendar: Calendar = .current) throws -> [AttentionSpan] {
     let only = try projects.map(projectFolders(named:))
-    let events = AttentionLog.events().filter { only == nil || only!.contains($0.project) }
+    // The whole log, even for a report on one project: another project's `began` is what ends this
+    // one's span, and another project's `counted` is what takes time from it. `only` is applied to the
+    // spans once they're worked out.
+    let events = AttentionLog.events()
 
     // Only the projects the log actually mentions are looked up — never every project in the vault.
     // Every mentioned one, though, and not only those with a span in the range: a span that began
     // yesterday evening runs into this morning, so the events outside the range are what place the
-    // ones inside it.
+    // ones inside it. Evidence only closes a project's own spans, so projects the report leaves out
+    // don't need any.
     let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
     let codes = Array(config.domains.keys)
     var projectPaths: [String: String] = [:]
-    let mentioned = Set(events.map(\.project))
+    let mentioned = Set(events.compactMap(\.project)).filter { only?.contains($0) ?? true }
     for scope in ProjectScope.allCases {
         let base = scope.path(in: paths)
         for folder in (try? getFolders(basePath: base, scope: scope, domainCodes: codes)) ?? [] {
@@ -151,7 +155,8 @@ public func attentionSpans(in range: DoneRange, projects: [String]? = nil, now: 
 
     let horizon = min(now, range.end)
     let spans = AttentionLog.splittingAtMidnight(
-        AttentionLog.spans(from: events, evidence: evidence, now: horizon), calendar: calendar)
+        AttentionLog.spans(from: events, evidence: evidence, now: horizon, only: only),
+        calendar: calendar)
     return AttentionLog.clipped(spans, to: range)
 }
 

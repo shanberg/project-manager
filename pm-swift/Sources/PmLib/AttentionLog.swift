@@ -36,17 +36,24 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
         /// Attention left it. Always back-dated to the last sign of life (D3), never stamped at the
         /// moment the pause was noticed.
         case ended
+        /// An answer about `from`..`to`: it was this project's, or (no project) it wasn't work.
+        /// Overrides whatever the edges say about that range. See docs/away-time.md.
+        case counted
+        /// Takes back the `counted` named by `ref` — what undo appends, since the log is never rewritten.
+        case withdrawn
     }
 
     public var id: String
-    /// When it happened, ISO 8601 in UTC.
+    /// When it happened, ISO 8601 in UTC. For `counted`, when the answer was given — which is what
+    /// decides between two answers about the same range — not the range it's about.
     public var at: String
     public var event: Kind
-    /// The project's folder name — what a report groups and prints by.
-    public var project: String
+    /// The project's folder name — what a report groups and prints by. Nil only on a `counted` that
+    /// says "not work", and on a `withdrawn`.
+    public var project: String?
     /// Its `<basePath>:<folder>` key, the spelling `focused.json` uses. Kept beside the folder name so
     /// two projects of the same name in different scopes are two projects here too.
-    public var key: String
+    public var key: String?
     /// `began`: the focused task when it did, as colour. Never totalled — see D1.
     public var task: String?
     /// Why the edge happened. `began`: `switched` (the default, not written), `resumed` after a pause.
@@ -54,9 +61,15 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
     public var why: String?
     /// Which surface did it — "app", "cli", "raycast", a model.
     public var source: String?
+    /// `counted`: the range the answer covers, ISO 8601 in UTC, end exclusive.
+    public var from: String?
+    public var to: String?
+    /// `withdrawn`: the `id` of the `counted` it takes back.
+    public var ref: String?
 
-    public init(id: String = AttentionLog.newID(), at: String, event: Kind, project: String,
-                key: String, task: String? = nil, why: String? = nil, source: String? = nil) {
+    public init(id: String = AttentionLog.newID(), at: String, event: Kind, project: String?,
+                key: String?, task: String? = nil, why: String? = nil, source: String? = nil,
+                from: String? = nil, to: String? = nil, ref: String? = nil) {
         self.id = id
         self.at = at
         self.event = event
@@ -65,6 +78,9 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
         self.task = task
         self.why = why
         self.source = source
+        self.from = from
+        self.to = to
+        self.ref = ref
     }
 }
 
@@ -76,6 +92,8 @@ public struct AttentionSpan: Codable, Equatable, Sendable {
         case measured
         /// No `ended`. Closed by the evidence in the other logs, or by the cap — `endOfUnclosed`.
         case inferred
+        /// Neither edge was seen: you said this range was this project's (docs/away-time.md).
+        case counted
     }
 
     public var project: String
@@ -166,6 +184,24 @@ public enum AttentionLog {
                                why: why, source: source)])
     }
 
+    /// Record an answer about `from`..`to`: it was `project`'s, or, with no project, it wasn't work.
+    /// Returns the event so undo can name it in a `withdraw`.
+    @discardableResult
+    public static func counted(from: Date, to: Date, project: String? = nil, key: String? = nil,
+                               source: String? = nil, at: Date = Date()) -> AttentionEvent {
+        let event = AttentionEvent(at: DoneLog.timestamp(at), event: .counted, project: project,
+                                   key: key, source: source, from: DoneLog.timestamp(from),
+                                   to: DoneLog.timestamp(to))
+        append([event])
+        return event
+    }
+
+    /// Take back a `counted`, by its id. The range reads as if the answer had never been given.
+    public static func withdraw(_ id: String, source: String? = nil, at: Date = Date()) {
+        append([AttentionEvent(at: DoneLog.timestamp(at), event: .withdrawn, project: nil, key: nil,
+                               source: source, ref: id)])
+    }
+
     // MARK: Reading
 
     /// The last edge written, without reading the whole log.
@@ -211,51 +247,102 @@ public enum AttentionLog {
     ///
     /// `now` bounds the span still running. A report for a past day passes the end of that day, so
     /// yesterday's last span doesn't grow every time it's read.
+    ///
+    /// `only` keeps the spans of those project folders and drops the rest — *after* the whole log has
+    /// been read, never before: another project's `began` is what ends this one's span, and a
+    /// `counted` for another project is what takes time away from it.
     public static func spans(from events: [AttentionEvent], evidence: [String: [Date]] = [:],
-                             now: Date = Date()) -> [AttentionSpan] {
+                             now: Date = Date(), only: Set<String>? = nil) -> [AttentionSpan] {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
         var out: [AttentionSpan] = []
         // The span still open, if any: where it began, and on what.
-        var open: (start: Date, event: AttentionEvent)?
+        var open: (start: Date, project: String, key: String, task: String?)?
 
-        func closeSpan(_ span: (start: Date, event: AttentionEvent), by edge: Edge?) {
+        func closeSpan(_ span: (start: Date, project: String, key: String, task: String?),
+                       by edge: Edge?) {
             // Never past the next edge: that's where attention demonstrably went somewhere else.
             let limit = min(edge?.at ?? now, now)
             guard limit > span.start else { open = nil; return }
             let end: Date
             let basis: AttentionSpan.Basis
-            if let edge, edge.event.event == .ended, edge.event.key == span.event.key {
+            if let edge, edge.event.event == .ended, edge.event.key == span.key {
                 end = limit
                 basis = .measured
             } else {
-                end = endOfUnclosed(span.start, limit: limit,
-                                    evidence: evidence[span.event.project] ?? [])
+                end = endOfUnclosed(span.start, limit: limit, evidence: evidence[span.project] ?? [])
                 basis = .inferred
             }
             guard end > span.start else { open = nil; return }
-            out.append(AttentionSpan(project: span.event.project, key: span.event.key,
-                                     task: span.event.task, start: span.start, end: end, basis: basis))
+            out.append(AttentionSpan(project: span.project, key: span.key, task: span.task,
+                                     start: span.start, end: end, basis: basis))
             open = nil
         }
 
         for edge in edges {
             switch edge.event.event {
             case .began:
+                guard let project = edge.event.project, let key = edge.event.key else { continue }
                 // A `began` implicitly ends whatever attention was on: one project at a time.
                 if let span = open { closeSpan(span, by: edge) }
-                open = (edge.at, edge.event)
+                open = (edge.at, project, key, edge.event.task)
             case .ended:
                 guard let span = open else { continue }
                 // An `ended` for a project that isn't the open one is a stale edge — Folio closing a
                 // span a later `began` from another surface already superseded. It still bounds this
                 // one, but it doesn't measure it.
                 closeSpan(span, by: edge)
+            case .counted, .withdrawn:
+                // Answers, not movements of attention: they neither open nor close a span, and are
+                // laid over the finished spans below.
+                continue
             }
         }
         if let span = open { closeSpan(span, by: nil) }
-        return out
+        let counted = applyingCounts(to: out, from: edges, now: now)
+        guard let only else { return counted }
+        return counted.filter { only.contains($0.project) }
+    }
+
+    /// The spans with every standing `counted` laid over them (docs/away-time.md).
+    ///
+    /// Applied in the order the answers were *given*, so a later answer about a range beats an earlier
+    /// one — including an earlier `counted` span, which the later one cuts like any other. A `counted`
+    /// that a `withdrawn` names is skipped entirely, which puts back exactly what it covered.
+    static func applyingCounts(to spans: [AttentionSpan], from edges: [Edge], now: Date)
+        -> [AttentionSpan] {
+        let withdrawn = Set(edges.compactMap { $0.event.event == .withdrawn ? $0.event.ref : nil })
+        var spans = spans
+        for edge in edges where edge.event.event == .counted && !withdrawn.contains(edge.event.id) {
+            // Nothing is known past `now`, so no answer can claim it.
+            guard let from = edge.event.from.flatMap(DoneLog.date),
+                  let to = edge.event.to.flatMap(DoneLog.date).map({ min($0, now) }),
+                  to > from else { continue }
+            spans = spans.flatMap { removing(from, to, from: $0) }
+            if let project = edge.event.project, let key = edge.event.key {
+                spans.append(AttentionSpan(project: project, key: key, task: nil,
+                                           start: from, end: to, basis: .counted))
+            }
+        }
+        return spans.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
+    }
+
+    /// What's left of `span` once `from`..`to` is taken out of it: itself, one piece or two.
+    static func removing(_ from: Date, _ to: Date, from span: AttentionSpan) -> [AttentionSpan] {
+        guard let start = span.startDate, let end = span.endDate, from < end, to > start else {
+            return [span]
+        }
+        var pieces: [AttentionSpan] = []
+        if start < from {
+            pieces.append(AttentionSpan(project: span.project, key: span.key, task: span.task,
+                                        start: start, end: from, basis: span.basis))
+        }
+        if to < end {
+            pieces.append(AttentionSpan(project: span.project, key: span.key, task: span.task,
+                                        start: to, end: end, basis: span.basis))
+        }
+        return pieces
     }
 
     /// Where an unclosed span ends (D4).
