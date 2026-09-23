@@ -9,8 +9,6 @@ import { getConfigDir } from "./pm";
 export interface PanelSettings {
   /** Keep the panel visible when it loses focus instead of auto-hiding. */
   pinned: boolean;
-  /** Float the panel above all other windows (always-on-top). */
-  floating: boolean;
 }
 
 const PANEL_SETTINGS_FILE = "panel-settings.json";
@@ -28,10 +26,9 @@ export async function readPanelSettings(
     const parsed = JSON.parse(raw) as Partial<PanelSettings>;
     return {
       pinned: parsed.pinned === true,
-      floating: parsed.floating === true,
     };
   } catch {
-    return { pinned: false, floating: false };
+    return { pinned: false };
   }
 }
 

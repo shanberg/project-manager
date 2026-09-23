@@ -61,6 +61,8 @@ final class FocusPanelChrome {
         // which reads as a click that didn't take.
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
+        // Always above other windows — the focus panel exists to stay visible while you work elsewhere.
+        panel.level = .floating
         applySettings(settings)
         applyWindowSettings()
         anchor = UserDefaults.standard.data(forKey: positionKey)
@@ -71,7 +73,6 @@ final class FocusPanelChrome {
 
     func applySettings(_ new: PanelSettings) {
         settings = new
-        panel.level = new.floating ? .floating : .normal
     }
 
     /// "Show on all Spaces", applied here rather than on the project window because this is the window

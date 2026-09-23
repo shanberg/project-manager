@@ -22,7 +22,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var onTogglePanel: () -> Void = {}
     var settings: () -> PanelSettings = { .default }
     var onSetPinned: (Bool) -> Void = { _ in }
-    var onSetFloating: (Bool) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
 
     init(store: PMStore) {
@@ -394,18 +393,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parts.joined(separator: "\n")
     }
 
-    /// "Settings…" — the app's real Settings window. The two window-behavior toggles stay here as
-    /// well, because they're the ones Raycast can flip too and it's useful to see their state without
-    /// opening a window.
+    /// "Settings…" — the app's real Settings window. The pin toggle stays here as well, because it's
+    /// one Raycast can flip too and it's useful to see its state without opening a window.
     private func settingsMenuItem() -> NSMenuItem {
         let (item, sub) = submenu("Settings", symbol: "gearshape")
         let s = settings()
         let pin = actionItem("Keep Open When Unfocused", #selector(togglePin))
         pin.state = s.pinned ? .on : .off
         sub.addItem(pin)
-        let float = actionItem("Float Above Other Windows", #selector(toggleFloat))
-        float.state = s.floating ? .on : .off
-        sub.addItem(float)
         sub.addItem(.separator())
         sub.addItem(actionItem("All Settings…", #selector(openSettings), symbol: "gearshape", key: ","))
         return item
@@ -595,7 +590,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// supply and nothing to route.
     @objc private func showWaiting() { WaitingWindowController.shared.show() }
     @objc private func togglePin() { onSetPinned(!settings().pinned) }
-    @objc private func toggleFloat() { onSetFloating(!settings().floating) }
     @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: Launch at Login (SMAppService, macOS 13+)

@@ -45,13 +45,13 @@ struct GeneralSettingsView: View {
 /// Windows: how the focus panel and the quick bar behave.
 ///
 /// Project windows aren't here, because there is nothing to decide about them: they're ordinary Mac
-/// windows. Floating belongs to the two surfaces that exist to sit over your work while you use
-/// another app — the focus panel and the quick bar — and a full editor window doing the same thing
+/// windows. The focus panel and the quick bar always float above your work — the two surfaces that
+/// exist to sit over whatever else you're doing — so a full editor window doing the same thing
 /// was a nuisance rather than a feature.
 struct WindowsSettingsView: View {
     @Bindable private var settings = WindowSettings.shared
-    /// Pinned/floating live in the Raycast-shared settings file rather than `UserDefaults`, because
-    /// Raycast toggles them too.
+    /// Pinned lives in the Raycast-shared settings file rather than `UserDefaults`, because
+    /// Raycast toggles it too.
     @State private var panelSettings = PanelSettings.load()
     @AppStorage(ScreenDimSettings.quickBarDimsKey) private var quickBarDims = false
     @AppStorage(ScreenDimSettings.strengthKey) private var dimStrength = ScreenDimSettings.defaultStrength
@@ -63,8 +63,6 @@ struct WindowsSettingsView: View {
                     .onChange(of: settings.showOnAllSpaces) { _ in
                         FocusPanelController.shared.applyWindowSettings()
                     }
-                Toggle("Float above other windows", isOn: $panelSettings.floating)
-                    .onChange(of: panelSettings.floating) { _ in savePanelSettings() }
                 Toggle("Keep open when it loses focus", isOn: $panelSettings.pinned)
                     .onChange(of: panelSettings.pinned) { _ in savePanelSettings() }
             } header: {

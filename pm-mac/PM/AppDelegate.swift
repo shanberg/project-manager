@@ -209,7 +209,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusController.onShowPanel = { [weak self] in self?.windows.openFocusedProject() }
         statusController.onTogglePanel = { FocusPanelController.shared.toggle() }
         statusController.onSetPinned = { [weak self] on in self?.updateSettings { $0.pinned = on } }
-        statusController.onSetFloating = { [weak self] on in self?.updateSettings { $0.floating = on } }
         statusController.onOpenSettings = { SettingsWindowController.shared.show() }
     }
 
@@ -449,7 +448,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   tiles: intParam(url, "tiles") ?? 8)
             }
         case "pin": updateSettings { $0.pinned = boolParam(url) ?? !$0.pinned }
-        case "float": updateSettings { $0.floating = boolParam(url) ?? !$0.floating }
         default: break
         }
     }
