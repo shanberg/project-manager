@@ -326,6 +326,191 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(spans.map(\.basis), [.counted, .counted])
     }
 
+    // MARK: Aways (docs/away-time.md)
+
+    private func paused(_ project: String, _ when: Date, why: String = "paused") -> AttentionEvent {
+        AttentionEvent(at: DoneLog.timestamp(when), event: .ended, project: project,
+                       key: "/PARA/active:\(project)", why: why)
+    }
+
+    private func resumed(_ project: String, _ when: Date, during: String? = nil) -> AttentionEvent {
+        AttentionEvent(at: DoneLog.timestamp(when), event: .began, project: project,
+                       key: "/PARA/active:\(project)", why: "resumed", during: during)
+    }
+
+    private func awayMinutes(_ away: AttentionAway) -> Int { Int((away.seconds / 60).rounded()) }
+
+    func testAPauseAndAResumeIsAnAway() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 20))])
+        XCTAssertEqual(aways.count, 1)
+        XCTAssertEqual(aways.first?.project, "W-1")
+        XCTAssertEqual(aways.first?.fromDate, at(11))
+        XCTAssertEqual(aways.first?.toDate, at(11, 20))
+        XCTAssertEqual(aways.first?.why, "paused")
+        XCTAssertEqual(aways.map(awayMinutes), [20])
+    }
+
+    func testASleepIsAnAwayToo() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11), why: "slept"),
+                                              resumed("W-1", at(12))])
+        XCTAssertEqual(aways.map(\.why), ["slept"])
+    }
+
+    /// Coming back to a different project leaves the gap just as open; it's still W-1's to offer.
+    func testComingBackToAnotherProjectIsStillAnAway() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              began("W-2", at(11, 13))])
+        XCTAssertEqual(aways.map(\.project), ["W-1"])
+        XCTAssertEqual(aways.map(awayMinutes), [13])
+    }
+
+    /// The log's 0-minute lock-and-back pairs, and a lid closed for a few minutes: breaks.
+    func testAShortGapIsNotAsked() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)),
+                                              paused("W-1", at(11), why: "slept"), resumed("W-1", at(11)),
+                                              paused("W-1", at(12), why: "slept"), resumed("W-1", at(12, 9))])
+        XCTAssertEqual(aways, [])
+    }
+
+    func testTheBoundsAreInclusive() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(8)),
+                                              paused("W-1", at(9)), resumed("W-1", at(9, 10)),
+                                              paused("W-1", at(10)), resumed("W-1", at(14))])
+        XCTAssertEqual(aways.map(awayMinutes), [10, 240])
+    }
+
+    func testANightIsNotAsked() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(18)), paused("W-1", at(19)),
+                                              resumed("W-1", at(23, 1))])
+        XCTAssertEqual(aways, [])
+    }
+
+    /// Switching and quitting leave no gap; `elsewhere` was answered by opening the app.
+    func testOnlyAPauseOrASleepOpensAnAway() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(9)), paused("W-1", at(9, 30), why: "switched"),
+                                              began("W-2", at(10)), paused("W-2", at(10, 30), why: "quit"),
+                                              began("W-2", at(11)), paused("W-2", at(11, 30), why: "elsewhere"),
+                                              resumed("W-2", at(12))])
+        XCTAssertEqual(aways, [])
+    }
+
+    func testAnAwayStillGoingIsNotAsked() {
+        XCTAssertEqual(AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11))]), [])
+    }
+
+    /// Only the first `ended` of a run marks when the hands left.
+    func testAStaleEndedDoesntMoveTheStart() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              paused("W-1", at(11, 5), why: "slept"),
+                                              resumed("W-1", at(11, 30))])
+        XCTAssertEqual(aways.map(awayMinutes), [30])
+        XCTAssertEqual(aways.map(\.why), ["paused"])
+    }
+
+    func testTheCallHintIsCarried() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 40), during: "call")])
+        XCTAssertEqual(aways.map(\.during), ["call"])
+    }
+
+    /// Any standing answer settles it — "not work" and a partial correction included.
+    func testAnAnsweredAwayIsNotAskedAgain() {
+        let log = [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(11, 30))]
+        for answer in [counted("W-1", at(11), at(11, 30), answeredAt: at(12)),
+                       counted(nil, at(11), at(11, 30), answeredAt: at(12)),
+                       counted("W-2", at(11, 10), at(11, 20), answeredAt: at(12))] {
+            XCTAssertEqual(AttentionLog.aways(from: log + [answer]), [], "\(answer.project ?? "not work")")
+        }
+    }
+
+    func testAnAnswerThatOnlyTouchesTheAwayDoesntSettleIt() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 30)),
+                                              counted("W-1", at(10), at(11), answeredAt: at(12))])
+        XCTAssertEqual(aways.count, 1)
+    }
+
+    func testAWithdrawnAnswerAsksAgain() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 30)),
+                                              counted(nil, at(11), at(11, 30), answeredAt: at(12), id: "a"),
+                                              withdrawn("a", at(12, 1))])
+        XCTAssertEqual(aways.count, 1)
+    }
+
+    /// An away belongs to the day it began in, like a span.
+    func testTheRangeKeepsAwaysThatBeganInIt() throws {
+        let range = try DoneRange.resolve(period: "today", since: nil, until: nil, now: at(12))
+        let lateLastNight = at(0).addingTimeInterval(-20 * 60)
+        let aways = AttentionLog.aways(from: [began("W-1", at(0).addingTimeInterval(-3600)),
+                                              paused("W-1", lateLastNight),
+                                              resumed("W-1", at(0, 30)),
+                                              paused("W-1", at(11)), resumed("W-1", at(11, 30))],
+                                       in: range)
+        XCTAssertEqual(aways.map(\.fromDate), [at(11)])
+    }
+
+    /// The 2026-09-22 afternoon: one touch every fifteen minutes, each pause back-dated to it.
+    func testBlipsJoinIntoOneAway() {
+        var log = [began("W-1", at(14)), paused("W-1", at(14, 43))]
+        for quarter in [58, 73, 88] {
+            let touch = at(14, 0).addingTimeInterval(Double(quarter) * 60)
+            log += [resumed("W-1", touch), paused("W-1", touch.addingTimeInterval(1))]
+        }
+        log.append(resumed("W-1", at(16, 54)))
+        let aways = AttentionLog.aways(from: log)
+        XCTAssertEqual(aways.count, 1)
+        XCTAssertEqual(aways.first?.fromDate, at(14, 43))
+        XCTAssertEqual(aways.first?.toDate, at(16, 54))
+    }
+
+    func testAReturnOfTwoMinutesIsARealReturn() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 20)), paused("W-1", at(11, 22)),
+                                              resumed("W-1", at(11, 40))])
+        XCTAssertEqual(aways.map(awayMinutes), [20, 18])
+    }
+
+    /// Two short gaps joined by a blip are one away long enough to ask about.
+    func testShortGapsCanJoinIntoOneWorthAsking() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11), why: "slept"),
+                                              resumed("W-1", at(11, 6)), paused("W-1", at(11, 7), why: "slept"),
+                                              resumed("W-1", at(11, 13))])
+        XCTAssertEqual(aways.map(awayMinutes), [13])
+    }
+
+    func testJoiningCanMakeANight() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(18)), paused("W-1", at(18, 30)),
+                                              resumed("W-1", at(21)), paused("W-1", at(21, 1)),
+                                              resumed("W-1", at(23))])
+        XCTAssertEqual(aways, [])
+    }
+
+    func testACallInAnyPartIsACall() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 20)), paused("W-1", at(11, 20)),
+                                              resumed("W-1", at(11, 40), during: "call")])
+        XCTAssertEqual(aways.map(\.during), ["call"])
+        XCTAssertEqual(aways.map(\.why), ["paused"])
+    }
+
+    /// An answer about any part settles the whole — it's one away to the person answering.
+    func testAnAnswerAboutOnePartSettlesTheWhole() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
+                                              resumed("W-1", at(11, 20)), paused("W-1", at(11, 20)),
+                                              resumed("W-1", at(11, 40)),
+                                              counted(nil, at(11, 25), at(11, 30), answeredAt: at(12))])
+        XCTAssertEqual(aways, [])
+    }
+
+    func testAwaysAreOldestFirst() {
+        let aways = AttentionLog.aways(from: [began("W-1", at(9)),
+                                              paused("W-1", at(13)), resumed("W-1", at(13, 30)),
+                                              paused("W-1", at(10)), resumed("W-1", at(10, 15))])
+        XCTAssertEqual(aways.map(\.fromDate), [at(10), at(13)])
+    }
+
     // MARK: A report on some projects
 
     /// Reading one project still reads the whole log: W-2's `began` is what ends W-1's span.

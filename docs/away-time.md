@@ -1,6 +1,6 @@
 # Away time
 
-**Status:** designed 2026-09-23. Step 1 built. Extends [time-tracking.md](time-tracking.md).
+**Status:** designed 2026-09-23. Steps 1–2 built. Extends [time-tracking.md](time-tracking.md).
 Covers tasks: idle-time handling; "no focus" apps.
 
 ## Already true (time-tracking.md D3, `AttentionKeeper.swift`)
@@ -22,10 +22,19 @@ Covers tasks: idle-time handling; "no focus" apps.
 
 ### Aways
 
-- Away = gap between an `ended` (`paused` | `slept`) and the next `resumed` on the same project.
-- Derived on read. Nothing new stored for an away itself.
-- Listed only when 10 min ≤ gap ≤ 4 h. Shorter: breaks. Longer: nights.
+- Away = gap between an `ended` (`paused` | `slept`) and the next `began` on any project.
+- Labelled with the project the pause interrupted.
+- Derived on read (`AttentionLog.aways`). Nothing new stored for an away itself.
+- Gaps less than 2 min apart join into one away (`awayBlip`).
+  Cause: single inputs (keep-awake jiggle, nudged mouse) resume a span for seconds; the next pause back-dates to them.
+  Seen 2026-09-22: 5 aways at 15-min intervals = one 80-min away.
+- Bounds and answers apply to the joined away, not its parts.
+- Listed only when 10 min ≤ away ≤ 4 h. Shorter: breaks. Longer: nights.
+- Still going (no `began` yet) → not listed.
+- Any standing `counted` overlapping an away → answered, not listed. Touching at an edge doesn't count.
+- A range keeps aways that began in it.
 - Unanswered away = not counted. Same as today. No cost to ignoring.
+- Real log, 2026-09-22 → 23: 19 raw gaps → 9 aways.
 - Answers: **Count for <focused project>**, **Other project…**, **Not work**.
 - "Not work" only hides the away from lists; totals unchanged.
 

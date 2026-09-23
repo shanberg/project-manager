@@ -66,10 +66,13 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
     public var to: String?
     /// `withdrawn`: the `id` of the `counted` it takes back.
     public var ref: String?
+    /// `began` after a pause: what the machine showed while nobody was typing — `call` when the
+    /// microphone was in use. A hint for the question about the away, never an answer to it.
+    public var during: String?
 
     public init(id: String = AttentionLog.newID(), at: String, event: Kind, project: String?,
                 key: String?, task: String? = nil, why: String? = nil, source: String? = nil,
-                from: String? = nil, to: String? = nil, ref: String? = nil) {
+                from: String? = nil, to: String? = nil, ref: String? = nil, during: String? = nil) {
         self.id = id
         self.at = at
         self.event = event
@@ -81,7 +84,37 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
         self.from = from
         self.to = to
         self.ref = ref
+        self.during = during
     }
+}
+
+/// A stretch nobody touched the machine, between a pause and the next time attention landed
+/// anywhere — the question docs/away-time.md asks. Derived on read, never stored.
+public struct AttentionAway: Codable, Equatable, Sendable {
+    /// The project the pause interrupted: what "Count for …" offers first.
+    public var project: String
+    public var key: String
+    /// ISO 8601 in UTC, both. `from` is the last input before the pause, `to` the first `began` after.
+    public var from: String
+    public var to: String
+    public var seconds: Double
+    /// What ended the span before it: `paused` or `slept`.
+    public var why: String
+    /// What the machine showed meanwhile, from the `began` that ended it — `call`, or nil.
+    public var during: String?
+
+    public init(project: String, key: String, from: Date, to: Date, why: String, during: String?) {
+        self.project = project
+        self.key = key
+        self.from = DoneLog.timestamp(from)
+        self.to = DoneLog.timestamp(to)
+        self.seconds = max(0, to.timeIntervalSince(from))
+        self.why = why
+        self.during = during
+    }
+
+    public var fromDate: Date? { DoneLog.date(from) }
+    public var toDate: Date? { DoneLog.date(to) }
 }
 
 /// A stretch of attention on one project, as a read works it out.
@@ -134,6 +167,17 @@ public enum AttentionLog {
     /// What an unwitnessed span is worth. A `began` with no `ended` and nothing in any other log to
     /// show for it gets an hour of the benefit of the doubt and no more.
     public static let attentionCap: TimeInterval = 60 * 60
+
+    /// The longest gap that's still a question. Past it, a gap is a night or a day off, and asking
+    /// whether it was work would be noise (docs/away-time.md). The shortest is `attentionPause`, for a
+    /// lock or a lid as much as for a pause: under it is a break, and it isn't asked about either.
+    public static let longestAway: TimeInterval = 4 * 60 * 60
+
+    /// The longest return that doesn't break an away in two. Something that touches the machine once —
+    /// a keep-awake jiggle, a nudged mouse — resumes a span for a moment, and ten minutes later the
+    /// pause is back-dated to that one touch. The log from 2026-09-22 has five of these in a row, one
+    /// every fifteen minutes: one eighty-minute away, which should be asked about once.
+    public static let awayBlip: TimeInterval = 2 * 60
 
     /// Beside the journal in the config dir, not in a project folder — see the note at the top.
     public static var logPath: String {
@@ -326,6 +370,77 @@ public enum AttentionLog {
             }
         }
         return spans.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
+    }
+
+    // MARK: Aways
+
+    /// The gaps still worth asking about, oldest first (docs/away-time.md).
+    ///
+    /// An away runs from an `ended` for a pause or a sleep to the next `began` on **any** project:
+    /// coming back to a different one leaves the gap just as open, and it's still the interrupted
+    /// project's to offer first. Not listed:
+    ///
+    /// - under `attentionPause` or over `longestAway` — a break, or a night;
+    /// - an `ended` for any other reason — `switched` and `quit` leave no gap, and `elsewhere` is a
+    ///   gap you already answered by opening an app you said isn't work;
+    /// - one still going — nobody's back to be asked;
+    /// - one a standing `counted` overlaps, whatever it said — "not work" is an answer too.
+    ///
+    /// Two aways with less than `awayBlip` between them are one: the return between was a touch, not
+    /// somebody back. The bounds and the answers are checked against the joined away, never its parts.
+    ///
+    /// `range`, when given, keeps the aways that *began* in it, as a span belongs to the day it began.
+    public static func aways(from events: [AttentionEvent], in range: DoneRange? = nil)
+        -> [AttentionAway] {
+        let edges = events
+            .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
+            .sorted { $0.at < $1.at }
+        let withdrawn = Set(edges.compactMap { $0.event.event == .withdrawn ? $0.event.ref : nil })
+        let answers: [(from: Date, to: Date)] = edges.compactMap { edge in
+            guard edge.event.event == .counted, !withdrawn.contains(edge.event.id),
+                  let from = edge.event.from.flatMap(DoneLog.date),
+                  let to = edge.event.to.flatMap(DoneLog.date) else { return nil }
+            return (from, to)
+        }
+
+        // Every gap first, of any length: a short one can still be part of a long away once blips
+        // are joined, so nothing is filtered until the gaps are whole.
+        var gaps: [AttentionAway] = []
+        // The pause waiting for attention to land somewhere again.
+        var pending: (at: Date, event: AttentionEvent)?
+        for edge in edges {
+            switch edge.event.event {
+            case .ended:
+                // A later `ended` before anything began again is a stale edge; the first one is when
+                // the hands left.
+                guard pending == nil else { continue }
+                if edge.event.why == "paused" || edge.event.why == "slept" { pending = (edge.at, edge.event) }
+            case .began:
+                defer { pending = nil }
+                guard let (from, ended) = pending, let project = ended.project, let key = ended.key
+                else { continue }
+                let gap = AttentionAway(project: project, key: key, from: from, to: edge.at,
+                                        why: ended.why ?? "paused", during: edge.event.during)
+                if let last = gaps.last, let lastEnd = last.toDate,
+                   from.timeIntervalSince(lastEnd) < awayBlip, let start = last.fromDate {
+                    // The first part says what was interrupted; a call in any part is a call.
+                    gaps[gaps.count - 1] = AttentionAway(project: last.project, key: last.key,
+                                                         from: start, to: edge.at, why: last.why,
+                                                         during: last.during ?? gap.during)
+                } else {
+                    gaps.append(gap)
+                }
+            case .counted, .withdrawn:
+                continue
+            }
+        }
+
+        return gaps.filter { away in
+            guard let from = away.fromDate, let to = away.toDate else { return false }
+            guard away.seconds >= attentionPause, away.seconds <= longestAway else { return false }
+            if let range, !(from >= range.start && from < range.end) { return false }
+            return !answers.contains { $0.from < to && $0.to > from }
+        }
     }
 
     /// What's left of `span` once `from`..`to` is taken out of it: itself, one piece or two.
