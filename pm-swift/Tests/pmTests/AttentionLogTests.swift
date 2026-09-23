@@ -333,9 +333,9 @@ final class AttentionLogTests: XCTestCase {
                        key: "/PARA/active:\(project)", why: why)
     }
 
-    private func resumed(_ project: String, _ when: Date, during: String? = nil) -> AttentionEvent {
+    private func resumed(_ project: String, _ when: Date) -> AttentionEvent {
         AttentionEvent(at: DoneLog.timestamp(when), event: .began, project: project,
-                       key: "/PARA/active:\(project)", why: "resumed", during: during)
+                       key: "/PARA/active:\(project)", why: "resumed")
     }
 
     private func awayMinutes(_ away: AttentionAway) -> Int { Int((away.seconds / 60).rounded()) }
@@ -408,11 +408,6 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(aways.map(\.why), ["paused"])
     }
 
-    func testTheCallHintIsCarried() {
-        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
-                                              resumed("W-1", at(11, 40), during: "call")])
-        XCTAssertEqual(aways.map(\.during), ["call"])
-    }
 
     /// Any standing answer settles it — "not work" and a partial correction included.
     func testAnAnsweredAwayIsNotAskedAgain() {
@@ -490,13 +485,6 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(aways, [])
     }
 
-    func testACallInAnyPartIsACall() {
-        let aways = AttentionLog.aways(from: [began("W-1", at(10)), paused("W-1", at(11)),
-                                              resumed("W-1", at(11, 20)), paused("W-1", at(11, 20)),
-                                              resumed("W-1", at(11, 40), during: "call")])
-        XCTAssertEqual(aways.map(\.during), ["call"])
-        XCTAssertEqual(aways.map(\.why), ["paused"])
-    }
 
     /// An answer about any part settles the whole — it's one away to the person answering.
     func testAnAnswerAboutOnePartSettlesTheWhole() {

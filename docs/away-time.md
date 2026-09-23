@@ -78,13 +78,6 @@ Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 - No notification. Revisit only if long aways routinely go unanswered.
 - Focus panel: not used (it opens on summon only).
 
-### Calls
-
-- During an away, each tick checks whether any process holds the default input device
-  (CoreAudio `kAudioDevicePropertyDeviceIsRunningSomewhere`). No permission prompt.
-- Mic in use at any tick → the `resumed` edge carries `during: "call"`.
-- UI label: **On a call**. Still asks; never counts automatically (call may be another project's).
-
 ### Not-work apps
 
 - User-chosen list of apps, by bundle ID. Settings › Time. `UserDefaults` key `PMNotWorkApps`.
@@ -129,7 +122,6 @@ New event kind in `~/.config/pm/attention.ndjson`:
 - New `AttentionSpan.Basis`: `counted`, alongside `measured` and `inferred`.
 - Filtered reads (`projects:`) derive over the whole log, then filter spans.
   Another project's `began` ends this one's span; another project's `counted` takes time from it.
-- New field on `began`: `during` (`"call"`).
 - New `ended.why`: `elsewhere`.
 
 ## Contract / CLI
@@ -150,7 +142,6 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 - Away (not "unaccounted", "idle").
 - Count (not "claim").
 - Estimated (UI for `inferred`; wire value unchanged).
-- On a call.
 
 ## Settings › Time (new pane)
 
@@ -178,14 +169,14 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 2. `time.aways` derivation (pure, tested): bounds, 0-min `slept` pairs excluded, `elsewhere` excluded.
 3. Contract + CLI: `time.aways`, `time.count`, `pm time aways|count`.
 4. Not-work apps: `AttentionKeeper` + Settings › Time pane.
-5. Call hint in `AttentionKeeper`.
+5. ~~Call hint~~ — dropped 2026-09-23.
 6. Menubar away row.
 7. Time card: Away section, then span corrections.
 
 ## Not in this pass
 
 - Notifications for aways.
-- Auto-counting calls.
+- Call detection (microphone in use). Dropped 2026-09-23: during a meeting you're likely taking notes in Folio, which is input.
 - Calendar events as evidence (waits on calendars, views.md).
 - A configurable pause threshold.
 - Fragmentation / switching stats (separate task).

@@ -102,9 +102,7 @@ private func runTimeAways(args: [String]) {
             let sameDay = Calendar.current.isDate(from, inSameDayAs: to)
             let when = "\(clock.string(from: from))–\(sameDay ? clockOnly.string(from: to) : clock.string(from: to))"
             let length = durationLabel(away.seconds).padding(toLength: 7, withPad: " ", startingAt: 0)
-            var line = "  \(when)  \(length)  \(away.project)"
-            if away.during == "call" { line += "  (on a call)" }
-            print(line)
+            print("  \(when)  \(length)  \(away.project)")
         }
     } catch {
         stderr(String(describing: error))

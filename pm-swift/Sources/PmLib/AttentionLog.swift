@@ -57,7 +57,7 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
     /// `began`: the focused task when it did, as colour. Never totalled — see D1.
     public var task: String?
     /// Why the edge happened. `began`: `switched` (the default, not written), `resumed` after a pause.
-    /// `ended`: `switched`, `paused`, `slept`, `quit`.
+    /// `ended`: `switched`, `paused`, `slept`, `locked`, `elsewhere`, `quit`.
     public var why: String?
     /// Which surface did it — "app", "cli", "raycast", a model.
     public var source: String?
@@ -66,13 +66,10 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
     public var to: String?
     /// `withdrawn`: the `id` of the `counted` it takes back.
     public var ref: String?
-    /// `began` after a pause: what the machine showed while nobody was typing — `call` when the
-    /// microphone was in use. A hint for the question about the away, never an answer to it.
-    public var during: String?
 
     public init(id: String = AttentionLog.newID(), at: String, event: Kind, project: String?,
                 key: String?, task: String? = nil, why: String? = nil, source: String? = nil,
-                from: String? = nil, to: String? = nil, ref: String? = nil, during: String? = nil) {
+                from: String? = nil, to: String? = nil, ref: String? = nil) {
         self.id = id
         self.at = at
         self.event = event
@@ -84,7 +81,6 @@ public struct AttentionEvent: Codable, Equatable, Sendable {
         self.from = from
         self.to = to
         self.ref = ref
-        self.during = during
     }
 }
 
@@ -98,19 +94,16 @@ public struct AttentionAway: Codable, Equatable, Sendable {
     public var from: String
     public var to: String
     public var seconds: Double
-    /// What ended the span before it: `paused` or `slept`.
+    /// What ended the span before it: `paused`, `slept` or `locked`.
     public var why: String
-    /// What the machine showed meanwhile, from the `began` that ended it — `call`, or nil.
-    public var during: String?
 
-    public init(project: String, key: String, from: Date, to: Date, why: String, during: String?) {
+    public init(project: String, key: String, from: Date, to: Date, why: String) {
         self.project = project
         self.key = key
         self.from = DoneLog.timestamp(from)
         self.to = DoneLog.timestamp(to)
         self.seconds = max(0, to.timeIntervalSince(from))
         self.why = why
-        self.during = during
     }
 
     public var fromDate: Date? { DoneLog.date(from) }
@@ -399,7 +392,6 @@ public enum AttentionLog {
         var key: String
         /// What opened it: `paused`, `slept`, `locked`.
         var why: String
-        var during: String?
         /// A lock, a lid or a sleep anywhere in it: you left the machine.
         var left: Bool
         /// An app you've said isn't work came to the front during it.
@@ -440,18 +432,16 @@ public enum AttentionLog {
                 guard let why = event.why, why == "paused" || leaves.contains(why),
                       let project = event.project, let key = event.key else { continue }
                 pending = Gap(from: edge.at, to: edge.at, project: project, key: key, why: why,
-                              during: nil, left: leaves.contains(why), elsewhere: false, returnKey: nil)
+                              left: leaves.contains(why), elsewhere: false, returnKey: nil)
             case .began:
                 guard var gap = pending else { continue }
                 pending = nil
                 gap.to = edge.at
-                gap.during = event.during
                 gap.returnKey = event.key
                 if var last = gaps.last, gap.from.timeIntervalSince(last.to) < awayBlip {
                     // The first part says what was interrupted and why; what any part saw holds for
                     // the whole, and the last part says where attention landed.
                     last.to = gap.to
-                    last.during = last.during ?? gap.during
                     last.left = last.left || gap.left
                     last.elsewhere = last.elsewhere || gap.elsewhere
                     last.returnKey = gap.returnKey
@@ -531,7 +521,7 @@ public enum AttentionLog {
             if let range, !(gap.from >= range.start && gap.from < range.end) { return nil }
             guard !answers.contains(where: { $0.from < gap.to && $0.to > gap.from }) else { return nil }
             return AttentionAway(project: gap.project, key: gap.key, from: gap.from, to: gap.to,
-                                 why: gap.why, during: gap.during)
+                                 why: gap.why)
         }
     }
 
