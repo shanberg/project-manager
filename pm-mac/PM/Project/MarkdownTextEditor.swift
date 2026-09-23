@@ -183,6 +183,19 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// view exactly, which is what stops a note resizing at the moment you open it to edit.
     static let baseFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    /// Whether prose is spell-checked as you type. On unless turned off — the red underline is advice
+    /// and never touches a character — and app-wide, like `TokenDisplay`: a note should not check its
+    /// spelling in one window and not in another.
+    static var checksSpelling: Bool {
+        get { UserDefaults.standard.object(forKey: checksSpellingKey) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: checksSpellingKey)
+            NotificationCenter.default.post(name: checksSpellingDidChange, object: nil)
+        }
+    }
+    static let checksSpellingKey = "PMNoteChecksSpelling"
+    static let checksSpellingDidChange = Notification.Name("PMNoteChecksSpellingDidChange")
+
     /// How much taller than its natural leading a line of note prose is set. Mono at its default
     /// leading is a wall; this is the single number that makes it a page.
     ///
@@ -257,6 +270,17 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// `SessionNoteTakeover.typing`.
     var undoManager: UndoManager?
 
+    /// The widest the column of prose gets, in points; past it the extra width becomes equal margin at
+    /// both sides, so the text sits centred in whatever it is standing in. Zero — the default — lets the
+    /// text run to the host's edges, which is right for a host that caps and places the editor itself
+    /// (the takeover's `ReadableWidth`).
+    ///
+    /// Done with the container inset rather than a narrower frame, so the scroll view still spans the
+    /// host: a wheel in the margin scrolls the note, and the scroller sits at the edge rather than
+    /// beside the prose. A canvas card asks for it because a card is whatever size you dragged it to,
+    /// and a tile is as wide as its column — neither was ever a claim about how long a line should be.
+    var maxColumnWidth: CGFloat = 0
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -309,7 +333,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         // Prose still deserves a spell-check, though: the red underline is advice, and unlike
         // autocorrect it never touches a character of the markup.
-        textView.isContinuousSpellCheckingEnabled = true
+        textView.isContinuousSpellCheckingEnabled = MarkdownTextEditor.checksSpelling
+        NotificationCenter.default.addObserver(forName: MarkdownTextEditor.checksSpellingDidChange,
+                                               object: nil, queue: .main) { [weak textView] _ in
+            MainActor.assumeIsolated {
+                textView?.isContinuousSpellCheckingEnabled = MarkdownTextEditor.checksSpelling
+            }
+        }
         textView.isGrammarCheckingEnabled = false
         // Dropped files become markdown links rather than nothing at all, and a picture dragged out of
         // a web page — which has no file to link — is written into the note's attachments folder.
@@ -337,8 +367,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
                                      .paragraphStyle: empty]
         textView.extraTopSpace = extraTopSpace
         textView.placeholder = placeholder
-        textView.textContainerInset = NSSize(width: textInset.width,
-                                             height: textInset.height + extraTopSpace / 2)
+        textView.maxColumnWidth = maxColumnWidth
+        textView.baseInset = NSSize(width: textInset.width, height: textInset.height + extraTopSpace / 2)
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onCancel = onCancel
@@ -382,6 +412,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             shortcuts.growthCeiling = growthCeiling
             shortcuts.extraTopSpace = extraTopSpace
             shortcuts.placeholder = placeholder
+            shortcuts.maxColumnWidth = maxColumnWidth
         }
         guard let textView = context.coordinator.textView else { return }
 
@@ -399,8 +430,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // that lets you scroll the line you're typing up off the bottom edge.
         let wantedInset = NSSize(width: textInset.width,
                                  height: textInset.height + topInset + extraTopSpace / 2)
-        if textView.textContainerInset != wantedInset {
+        let insetChanged: Bool
+        if let shortcuts = textView as? ShortcutTextView {
+            insetChanged = shortcuts.baseInset != wantedInset
+            shortcuts.baseInset = wantedInset
+        } else {
+            insetChanged = textView.textContainerInset != wantedInset
             textView.textContainerInset = wantedInset
+        }
+        if insetChanged {
             // The bar's measured height arriving is the last thing that moves the note before you see
             // it, and it moves it by the height of the bar. Pin, or the first lines open underneath.
             (scrollView as? TopPinningScrollView)?.pinsNextLayout = true
@@ -723,13 +761,15 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
         // and without size an H1 and an H3 are the same bold line. Nothing is typed into a rendered
         // view, so the rule the editor is keeping doesn't apply to it; the body text, which is what
         // actually resized under you before, is now identical across the two.
+        //
+        // Heavier than `**bold**`, in both: a heading and a line that happens to be bold used to be the
+        // same weight, and in the editor weight is the only thing a heading has.
         guard scaleHeadings else {
-            return [.font: trait(.boldFontMask), .foregroundColor: NSColor.labelColor]
+            return [.font: markdownHeadingFont(base), .foregroundColor: NSColor.labelColor]
         }
         let bump: CGFloat = level == 1 ? 5 : level == 2 ? 3 : level == 3 ? 1 : 0
         let sized = NSFont(descriptor: base.fontDescriptor, size: base.pointSize + bump) ?? base
-        return [.font: NSFontManager.shared.convert(sized, toHaveTrait: .boldFontMask),
-                .foregroundColor: NSColor.labelColor]
+        return [.font: markdownHeadingFont(sized), .foregroundColor: NSColor.labelColor]
     case .bold:
         return [.font: trait(.boldFontMask)]
     case .italic:
@@ -762,8 +802,27 @@ func markdownAttributes(for kind: MarkdownSpanKind, base: NSFont,
         return [.strikethroughStyle: NSUnderlineStyle.single.rawValue,
                 .foregroundColor: NSColor.secondaryLabelColor]
     case .syntax:
-        return [.foregroundColor: NSColor.tertiaryLabelColor]
+        return [.foregroundColor: markdownSyntaxColor]
     }
+}
+
+/// The colour of a literal marker — `**`, `#`, a link's brackets and address. Between tertiary and
+/// quaternary label: still findable when you go looking for the `*` to delete, but no longer read as
+/// part of the sentence.
+let markdownSyntaxColor = NSColor.labelColor.withAlphaComponent(0.17)
+
+/// `base` at heading weight: heavy, a step past the bold that `**` and ⌘B give. The system faces are
+/// asked by name — trait conversion tops out at bold — and SF Mono keeps one advance at every weight,
+/// so the grid is untouched.
+func markdownHeadingFont(_ base: NSFont) -> NSFont {
+    if base.isFixedPitch { return .monospacedSystemFont(ofSize: base.pointSize, weight: .heavy) }
+    if base.familyName == NSFont.systemFont(ofSize: base.pointSize).familyName {
+        return .systemFont(ofSize: base.pointSize, weight: .heavy)
+    }
+    let descriptor = base.fontDescriptor.addingAttributes(
+        [.traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.heavy]])
+    return NSFont(descriptor: descriptor, size: base.pointSize)
+        ?? NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
 }
 
 /// Lays every line of a note on one column, with its marker hanging in the margin beside it.
@@ -921,8 +980,44 @@ final class ShortcutTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = newSize.width != frame.width
+        // Before `super`, which is where a container tracking this view's width takes its new size —
+        // from the inset as it stands at that moment.
+        if widthChanged { textContainerInset = insets(forWidth: newSize.width) }
         super.setFrameSize(newSize)
         if widthChanged { onResize?() }
+    }
+
+    /// The inset the host asked for. What is applied can be wider — see `maxColumnWidth`.
+    var baseInset: NSSize = .zero {
+        didSet { if baseInset != oldValue { applyInsets() } }
+    }
+
+    /// See `MarkdownTextEditor.maxColumnWidth`.
+    var maxColumnWidth: CGFloat = 0 {
+        didSet { if maxColumnWidth != oldValue { applyInsets() } }
+    }
+
+    /// The host's inset, widened at both sides by whatever this width has past the column's cap. Whole
+    /// points, so the column doesn't sit on a half pixel.
+    func insets(forWidth width: CGFloat) -> NSSize {
+        var inset = baseInset
+        if maxColumnWidth > 0 {
+            inset.width = max(inset.width, ((width - maxColumnWidth) / 2).rounded(.down))
+        }
+        return inset
+    }
+
+    /// Apply the inset for the current width, outside a resize. A container that tracks the view's
+    /// width only re-measures when the *frame* changes, so its width is set here by hand to match.
+    private func applyInsets() {
+        let inset = insets(forWidth: frame.width)
+        guard inset != textContainerInset else { return }
+        textContainerInset = inset
+        if let container = textContainer, container.widthTracksTextView, frame.width > 0 {
+            container.size = NSSize(width: max(0, frame.width - inset.width * 2),
+                                    height: container.size.height)
+        }
+        onResize?()
     }
     /// The note's own location on disk, for resolving dropped files and relative links.
     var noteURL: URL?
@@ -1225,6 +1320,13 @@ final class ShortcutTextView: NSTextView {
             apply { duplicateLines($0, selection: $1) }
             return true
         }
+        // The line commands. Here, and not only in the Format menu that lists them, for the reason ⌘B is:
+        // this runs for the view holding the caret before the menu bar is asked — and the menu declines
+        // them outright (see `EditorMenuKeys`), because a menu item claims its key even while disabled.
+        if holdsCaret, let command = EditorLineCommand(event) {
+            perform(command)
+            return true
+        }
         // ⌃⌘F — the system's own Enter Full Screen, borrowed only where there's no window full screen
         // for it to mean. Claimed here rather than as a menu item because a window's
         // `performKeyEquivalent` runs before the main menu gets the event, so a host that wants this
@@ -1270,11 +1372,12 @@ final class ShortcutTextView: NSTextView {
         // ⌥↑ / ⌥↓ move the line, the binding every editor that has the feature uses. It costs the
         // system's option-arrow paragraph navigation, which in a note this size is the cheaper of the
         // two: the lines being reordered are bullets, and there are no paragraphs to jump between.
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .option,
-           event.keyCode == 126 || event.keyCode == 125 {
-            let up = event.keyCode == 126
-            // Nothing to swap with at the ends of the note — stay put rather than beep.
-            applyIfPossible { moveLines($0, selection: $1, up: up) }
+        // ⌥↑/⌥↓ and the rest of the plain-key line commands (⇧⌥↑/↓, ⌥↩, ⇧⌥↩) — see `EditorLineCommand`.
+        // They cost the system's option-arrow paragraph navigation, which in a note this size is the
+        // cheaper of the two: the lines being reordered are bullets, and there are no paragraphs to jump
+        // between.
+        if let command = EditorLineCommand(event) {
+            perform(command)
             return
         }
         super.keyDown(with: event)
@@ -1551,6 +1654,62 @@ final class ShortcutTextView: NSTextView {
         return nil
     }
 
+    // MARK: line commands
+
+    /// Run one of the editor's line commands. Every one is a PmLib transform, applied as one undoable
+    /// edit; the two that only sometimes apply stay put rather than beep at the ends of the note.
+    func perform(_ command: EditorLineCommand) {
+        if command != .shrinkSelection, command != .expandSelection { expansions.removeAll() }
+        switch command {
+        case .moveUp, .moveDown:
+            applyIfPossible { moveLines($0, selection: $1, up: command == .moveUp) }
+        case .copyUp, .copyDown:
+            apply { copyLines($0, selection: $1, up: command == .copyUp) }
+        case .delete:
+            apply { PmLib.deleteLines($0, selection: $1) }
+        case .insertBelow, .insertAbove:
+            apply { insertLine($0, selection: $1, above: command == .insertAbove) }
+        case .join:
+            applyIfPossible { PmLib.joinLines($0, selection: $1) }
+        case .toggleTask:
+            apply { PmLib.toggleTask($0, selection: $1) }
+        case .heading(let level):
+            apply { setHeading($0, selection: $1, level: level) }
+        case .expandSelection:
+            let text = string
+            guard let current = Range(selectedRange(), in: text),
+                  let next = expandedSelection(in: text, from: current) else { return }
+            expansions.append(selectedRange())
+            setSelectedRange(NSRange(next, in: text))
+            expanded = selectedRange()
+        case .shrinkSelection:
+            // Back down the way expansion came, and only that way: a selection made some other way has
+            // no smaller structure this remembers.
+            guard selectedRange() == expanded, let previous = expansions.popLast() else { return }
+            setSelectedRange(previous)
+            expanded = expansions.isEmpty ? nil : previous
+        }
+    }
+
+    /// The selections expansion grew from, so shrinking can retrace them — and the one it grew to, so a
+    /// selection changed some other way in between isn't shrunk to something unrelated.
+    private var expansions: [NSRange] = []
+    private var expanded: NSRange?
+
+    @objc func moveLinesUp(_ sender: Any?) { perform(.moveUp) }
+    @objc func moveLinesDown(_ sender: Any?) { perform(.moveDown) }
+    @objc func copyLinesUp(_ sender: Any?) { perform(.copyUp) }
+    @objc func copyLinesDown(_ sender: Any?) { perform(.copyDown) }
+    @objc func deleteLines(_ sender: Any?) { perform(.delete) }
+    @objc func insertLineBelow(_ sender: Any?) { perform(.insertBelow) }
+    @objc func insertLineAbove(_ sender: Any?) { perform(.insertAbove) }
+    @objc func joinLines(_ sender: Any?) { perform(.join) }
+    @objc func toggleTask(_ sender: Any?) { perform(.toggleTask) }
+    /// The menu item's tag is the level; 0 is a plain paragraph.
+    @objc func setHeadingLevel(_ sender: NSMenuItem) { perform(.heading(sender.tag)) }
+    @objc func expandSelection(_ sender: Any?) { perform(.expandSelection) }
+    @objc func shrinkSelection(_ sender: Any?) { perform(.shrinkSelection) }
+
     // MARK: applying transforms
 
     /// Run a pure markdown transform over the current text + selection and splice the result back in as
@@ -1578,5 +1737,127 @@ final class ShortcutTextView: NSTextView {
         scrollRangeToVisible(selectedRange())
         breakUndoCoalescing()
         return true
+    }
+}
+
+/// The editor's line commands and the keys they answer to — one table, read by the text view's key
+/// handling and by the Format menu that lists them, so the two can't name different keys.
+///
+/// The keys stay clear of what the rest of the app already means: ⌘[ ⌘] are Back and Forward, ⌘1–9 go
+/// to a tab and ⌃1–9 to a frame, ⌘D duplicates a card, ⌘↩ leaves one. Where an IDE has a key for the
+/// same thing this takes it — VS Code's, mostly — and ⌃⌘ digits for headings because the bare ⌘ ones
+/// are taken.
+enum EditorLineCommand: Equatable {
+    case moveUp, moveDown, copyUp, copyDown, delete, insertBelow, insertAbove, join, toggleTask
+    case heading(Int)
+    case expandSelection, shrinkSelection
+
+    static let upArrow = String(Character(UnicodeScalar(NSUpArrowFunctionKey)!))
+    static let downArrow = String(Character(UnicodeScalar(NSDownArrowFunctionKey)!))
+    static let leftArrow = String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
+    static let rightArrow = String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+
+    /// The key as a menu item draws it.
+    var key: (equivalent: String, modifiers: NSEvent.ModifierFlags) {
+        switch self {
+        case .moveUp: return (Self.upArrow, [.option])
+        case .moveDown: return (Self.downArrow, [.option])
+        case .copyUp: return (Self.upArrow, [.option, .shift])
+        case .copyDown: return (Self.downArrow, [.option, .shift])
+        case .delete: return ("k", [.command, .shift])
+        case .insertBelow: return ("\r", [.option])
+        case .insertAbove: return ("\r", [.option, .shift])
+        case .join: return ("j", [.command])
+        case .toggleTask: return ("x", [.command, .shift])
+        case .heading(let level): return ("\(level)", [.control, .command])
+        case .expandSelection: return (Self.rightArrow, [.control, .shift, .command])
+        case .shrinkSelection: return (Self.leftArrow, [.control, .shift, .command])
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .moveUp: return "Move Line Up"
+        case .moveDown: return "Move Line Down"
+        case .copyUp: return "Copy Line Up"
+        case .copyDown: return "Copy Line Down"
+        case .delete: return "Delete Line"
+        case .insertBelow: return "Insert Line Below"
+        case .insertAbove: return "Insert Line Above"
+        case .join: return "Join Lines"
+        case .toggleTask: return "Toggle Task"
+        case .heading(0): return "Paragraph"
+        case .heading(let level): return "Heading \(level)"
+        case .expandSelection: return "Expand Selection"
+        case .shrinkSelection: return "Shrink Selection"
+        }
+    }
+
+    var action: Selector {
+        switch self {
+        case .moveUp: return #selector(ShortcutTextView.moveLinesUp(_:))
+        case .moveDown: return #selector(ShortcutTextView.moveLinesDown(_:))
+        case .copyUp: return #selector(ShortcutTextView.copyLinesUp(_:))
+        case .copyDown: return #selector(ShortcutTextView.copyLinesDown(_:))
+        case .delete: return #selector(ShortcutTextView.deleteLines(_:))
+        case .insertBelow: return #selector(ShortcutTextView.insertLineBelow(_:))
+        case .insertAbove: return #selector(ShortcutTextView.insertLineAbove(_:))
+        case .join: return #selector(ShortcutTextView.joinLines(_:))
+        case .toggleTask: return #selector(ShortcutTextView.toggleTask(_:))
+        case .heading: return #selector(ShortcutTextView.setHeadingLevel(_:))
+        case .expandSelection: return #selector(ShortcutTextView.expandSelection(_:))
+        case .shrinkSelection: return #selector(ShortcutTextView.shrinkSelection(_:))
+        }
+    }
+
+    static let all: [EditorLineCommand] = [.moveUp, .moveDown, .copyUp, .copyDown, .delete,
+                                           .insertBelow, .insertAbove, .join, .toggleTask,
+                                           .expandSelection, .shrinkSelection] + (0...6).map { .heading($0) }
+
+    /// The command a key event is, if it is one. Compared on the four modifiers a person holds, not on
+    /// every flag: an arrow key's event also carries `.function` and `.numericPad`, and Return on the
+    /// keypad is a different key code with the same meaning.
+    init?(_ event: NSEvent) {
+        let held = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let typed: String
+        switch event.keyCode {
+        case 126: typed = Self.upArrow
+        case 125: typed = Self.downArrow
+        case 123: typed = Self.leftArrow
+        case 124: typed = Self.rightArrow
+        case 36, 76: typed = "\r"
+        default: typed = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        }
+        guard let match = Self.all.first(where: { $0.key.equivalent == typed && $0.key.modifiers == held })
+        else { return nil }
+        self = match
+    }
+}
+
+/// Keeps the Format menu's keys from being claimed. See `MainMenu.formatMenuItem`.
+///
+/// **The keys are on the items only while the menu is open.** A main-menu item takes its key
+/// equivalent even while disabled, and `menuHasKeyEquivalent` returning false did not stop
+/// `performKeyEquivalent` from taking it (tested). An item with no key equivalent can't be matched, so
+/// the keys are written in as the menu opens — which is the only time anyone reads them — and taken off
+/// as it closes, and every keystroke in between goes to whoever holds the caret.
+final class EditorMenuKeys: NSObject, NSMenuDelegate {
+    static let shared = EditorMenuKeys()
+
+    func menuWillOpen(_ menu: NSMenu) {
+        for item in menu.items {
+            guard let command = EditorLineCommand.all.first(where: {
+                $0.action == item.action && (item.action != #selector(ShortcutTextView.setHeadingLevel(_:))
+                                             || $0 == .heading(item.tag))
+            }) else { continue }
+            item.keyEquivalent = command.key.equivalent
+            item.keyEquivalentModifierMask = command.key.modifiers
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        for item in menu.items where item.submenu == nil {
+            item.keyEquivalent = ""
+        }
     }
 }

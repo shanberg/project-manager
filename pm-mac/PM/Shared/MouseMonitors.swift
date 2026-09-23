@@ -145,3 +145,53 @@ final class ModifierMonitor {
         optionDown = false
     }
 }
+/// Logs where every click in the app lands, for chasing a region that stops taking them.
+///
+/// Only while the log is on (`Log.isEnabled`). Per press: the window the event was routed to, the
+/// window on top at that point on screen (ours or another app's), the view chain `hitTest` answers
+/// with, and the window's child windows. A dead region with no line at all never reached this process.
+@MainActor
+enum ClickTrace {
+    private static var monitor: Any?
+
+    static func install() {
+        guard Log.isEnabled, monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            trace(event)
+            return event
+        }
+    }
+
+    private static func trace(_ event: NSEvent) {
+        let screen = NSEvent.mouseLocation
+        let top = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
+        let topWindow = NSApp.window(withWindowNumber: top)
+        var lines = ["CLICK at screen \(point(screen)) routed to \(describe(event.window)); on top: #\(top) \(topWindow.map(describe) ?? "another app's window")"]
+        if let window = event.window, let content = window.contentView {
+            let local = event.locationInWindow
+            // From the theme frame, so titlebar views count too.
+            var view = content.superview?.hitTest(local) ?? content.hitTest(local)
+            var depth = 0
+            while let current = view, depth < 14 {
+                let frame = current.convert(current.bounds, to: nil)
+                lines.append("  \(type(of: current)) \(rect(frame))\(current.alphaValue < 1 ? " alpha=\(current.alphaValue)" : "")")
+                view = current.superview
+                depth += 1
+            }
+            for child in window.childWindows ?? [] {
+                lines.append("  child \(describe(child)) \(rect(child.frame)) visible=\(child.isVisible) alpha=\(child.alphaValue) ignoresMouse=\(child.ignoresMouseEvents)")
+            }
+        }
+        Log.write(lines.joined(separator: "\n"))
+    }
+
+    private static func describe(_ window: NSWindow?) -> String {
+        guard let window else { return "nil" }
+        return "\(type(of: window)) #\(window.windowNumber) '\(window.title)'"
+    }
+
+    private static func point(_ p: NSPoint) -> String { "(\(Int(p.x)), \(Int(p.y)))" }
+    private static func rect(_ r: NSRect) -> String {
+        "(\(Int(r.minX)), \(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
+    }
+}

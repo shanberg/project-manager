@@ -584,8 +584,7 @@ extension CanvasBoardView {
                                             toSide: side.opposite))
             }
         case .edge, .board:
-            let size = CanvasRect(x: where_.x, y: where_.y - 30, width: 250, height: 60)
-            let new = CanvasNode(content: .text(""), frame: size)
+            let new = newCardNode(frame: CanvasRect(x: where_.x, y: where_.y - 30, width: 250, height: 60))
             store.change("Add Connected Card") { doc in
                 doc.nodes.append(new)
                 doc.edges.append(CanvasEdge(fromNode: id, fromSide: side, toNode: new.id,
@@ -1311,7 +1310,19 @@ extension CanvasBoardView {
     func deleteSelection() {
         guard !selection.isEmpty else { return }
         let going = selection
-        guard confirmDeleting(going) else { return }
+        let documents = CanvasDocCards.ownDocuments(
+            deleting: going, from: document, docs: CanvasDocCards.folder(forCanvasAt: store.url),
+            locate: { self.store.resolver.resolve($0).url })
+        // An empty document is a card that was never written in: it goes with its card, unasked.
+        let empty = documents.filter { (try? Data(contentsOf: $0))?.isEmpty == true }
+        let trashing: [URL]
+        switch askDeleting(going, documents: documents.filter { !empty.contains($0) }) {
+        case .cancel: return
+        case .cards: trashing = empty
+        case .cardsAndDocuments: trashing = documents
+        }
+        // One step: ⌘Z puts the cards back and takes their documents out of the Trash together.
+        store.undoManager.beginUndoGrouping()
         store.change(going.count > 1 ? "Delete Cards" : "Delete Card") { doc in
             doc.nodes.removeAll { going.contains($0.id) }
             // A line whose card has gone goes with it. Leaving it would be a dangling edge — which the
@@ -1321,25 +1332,83 @@ extension CanvasBoardView {
                 going.contains($0.id) || going.contains($0.fromNode) || going.contains($0.toNode)
             }
         }
+        trash(trashing)
+        store.undoManager.endUndoGrouping()
         selection = []
     }
 
-    /// Asks before a delete takes away something written. Only a text card has content of its own —
-    /// a file or link card is a pointer to something that stays where it is, and a frame holds no text —
-    /// so those go without a question, and so does a text card that was never typed in. Undo still
-    /// brings all of it back; the question is for the delete key under a stray finger.
-    private func confirmDeleting(_ ids: Set<String>) -> Bool {
+    /// Move documents to the Trash, and register putting them back — which registers trashing them
+    /// again, so redo works too. Registered after the card change it belongs with, so an undo runs it
+    /// first: the file is back before the card that shows it is.
+    private func trash(_ files: [URL]) {
+        var moved: [(from: URL, to: URL)] = []
+        for file in files {
+            var landed: NSURL?
+            do {
+                try FileManager.default.trashItem(at: file, resultingItemURL: &landed)
+                if let landed { moved.append((file, landed as URL)) }
+            } catch {
+                Log.write("couldn't move \(file.lastPathComponent) to the Trash: \(error)")
+            }
+        }
+        guard !moved.isEmpty else { return }
+        store.undoManager.registerUndo(withTarget: self) { board in
+            MainActor.assumeIsolated {
+                for file in moved { try? FileManager.default.moveItem(at: file.to, to: file.from) }
+                board.trashAgain(moved.map(\.from))
+            }
+        }
+    }
+
+    /// Redo's half of `trash`: the same move, registered the same way.
+    private func trashAgain(_ files: [URL]) {
+        store.undoManager.registerUndo(withTarget: self) { board in
+            MainActor.assumeIsolated { board.trash(files) }
+        }
+    }
+
+    enum DeleteAnswer { case cancel, cards, cardsAndDocuments }
+
+    /// Asks before a delete takes away something written. A text card has its words in the canvas; a
+    /// card made as a document has them in a file of its own in `docs` — see `CanvasDocCards` — and for
+    /// those the question is whether the file goes too, defaulting to no. A file or link card pointing
+    /// somewhere else, a frame, and a card never typed in go without a question. Undo brings all of it
+    /// back; the question is for the delete key under a stray finger.
+    ///
+    /// `documentsAnswer` stands in for the alert in a test, which can't click one.
+    private func askDeleting(_ ids: Set<String>, documents: [URL]) -> DeleteAnswer {
         let written = document.nodes.filter { node in
             guard ids.contains(node.id), case .text(let text) = node.content else { return false }
             return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.count
-        guard written > 0 else { return true }
+        if documents.isEmpty {
+            guard written > 0 else { return .cards }
+            let alert = NSAlert()
+            alert.messageText = written == 1 ? "Delete this card?" : "Delete \(written) cards with text on them?"
+            alert.informativeText = "You can bring it back with Undo."
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn ? .cards : .cancel
+        }
+        if let answer = documentsAnswer { return answer }
+        let many = ids.count > 1
         let alert = NSAlert()
-        alert.messageText = written == 1 ? "Delete this card?" : "Delete \(written) cards with text on them?"
-        alert.informativeText = "You can bring it back with Undo."
-        alert.addButton(withTitle: "Delete")
+        let name = documents.count == 1 ? documents[0].deletingPathExtension().lastPathComponent : nil
+        alert.messageText = !many && name != nil ? "Delete \u{201C}\(name!)\u{201D}?" : "Delete \(ids.count) cards?"
+        let folder = documents[0].deletingLastPathComponent().lastPathComponent
+        alert.informativeText = (documents.count == 1
+            ? "\(documents[0].lastPathComponent) is in \(folder)."
+            : "\(documents.count) documents are in \(folder), shown by no other card here.")
+            + " Undo brings back cards and documents."
+        alert.addButton(withTitle: many ? "Delete Cards" : "Delete Card")
+        alert.addButton(withTitle: documents.count == 1 && !many ? "Delete Card and Document"
+                                                                 : "Delete Cards and Documents")
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .cards
+        case .alertSecondButtonReturn: return .cardsAndDocuments
+        default: return .cancel
+        }
     }
 
     // MARK: Editing a card
@@ -1350,9 +1419,8 @@ extension CanvasBoardView {
             selection = [id]
             beginEditing(id)
         case .edge, .board:
-            let new = CanvasNode(content: .text(""),
-                                 frame: CanvasRect(x: where_.x - 125, y: where_.y - 30,
-                                                   width: 250, height: 60))
+            let new = newCardNode(frame: CanvasRect(x: where_.x - 125, y: where_.y - 30,
+                                                    width: 250, height: 60))
             store.change("Add Card") { $0.nodes.append(new) }
             selection = [new.id]
             beginEditing(new.id)

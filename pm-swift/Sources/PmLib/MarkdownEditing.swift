@@ -402,3 +402,226 @@ public func markdownFileLink(for file: URL, relativeTo note: URL?) -> String {
 public func markdownImageEmbed(for file: URL, relativeTo note: URL?, alt: String) -> String {
     "![\(alt)](\(markdownPathEscaped(markdownRelativePath(for: file, relativeTo: note))))"
 }
+
+// MARK: - Line commands
+//
+// The editor's IDE-style keys — copy a line up or down, delete it, open a line above or below, join,
+// set a heading, toggle a task, grow the selection by structure. Pure over (text, selection) like
+// everything above, so the view only routes keys at them.
+
+/// The lines a selection covers. A selection that ends exactly where a line starts — a triple-click, a
+/// drag to the left margin — doesn't cover that line, which is what you see: nothing on it is selected.
+private func coveredLines(_ starts: [Int], _ lo: Int, _ hi: Int) -> (first: Int, last: Int) {
+    let first = lineIndex(starts, lo)
+    var last = lineIndex(starts, hi)
+    if hi > lo, last > first, starts[last] == hi { last -= 1 }
+    return (first, last)
+}
+
+/// Rewrite each covered line and carry the selection with the text: each end moves by what changed
+/// before it, and never back past the start of its own line.
+private func rewriteLines(_ text: String, _ selection: Range<String.Index>,
+                          _ rewrite: (_ index: Int, _ line: String) -> String) -> (text: String, selection: Range<String.Index>) {
+    var lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    var deltas = Array(repeating: 0, count: lines.count)
+    for i in first...last {
+        let new = rewrite(i, lines[i])
+        deltas[i] = new.count - lines[i].count
+        lines[i] = new
+    }
+    func moved(_ offset: Int) -> Int {
+        let line = lineIndex(starts, offset)
+        let before = deltas[..<line].reduce(0, +)
+        // Within its own line an edit is at the head (a marker added or removed), so the offset moves
+        // with it — but not back past where the line starts.
+        return max(starts[line] + before, offset + before + deltas[line])
+    }
+    // A selection that starts a line still starts it: it was covering whole lines, and still is.
+    let start = hi > lo && starts[first] == lo ? lo + deltas[..<first].reduce(0, +) : moved(lo)
+    return rebuilt(lines, start, moved(hi))
+}
+
+/// Copy the covered lines above (`up`) or below themselves. The selection goes with the copy, so a
+/// second press copies again in the same direction.
+public func copyLines(_ text: String, selection: Range<String.Index>, up: Bool) -> (text: String, selection: Range<String.Index>) {
+    var lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let block = Array(lines[first...last])
+    lines.insert(contentsOf: block, at: last + 1)
+    // Up: the copy is the upper of the two, which is where the selection already is.
+    let shift = up ? 0 : block.reduce(0) { $0 + $1.count + 1 }
+    return rebuilt(lines, lo + shift, hi + shift)
+}
+
+/// Delete the covered lines, newline and all. The caret lands on the line that took their place, at
+/// the column it was at, or on the last line when they were the last.
+public func deleteLines(_ text: String, selection: Range<String.Index>) -> (text: String, selection: Range<String.Index>) {
+    var lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let column = lo - starts[first]
+    lines.removeSubrange(first...last)
+    if lines.isEmpty { lines = [""] }
+    let landing = min(first, lines.count - 1)
+    let caret = lineStarts(lines)[landing] + min(column, lines[landing].count)
+    return rebuilt(lines, caret, caret)
+}
+
+/// Open an empty line below the covered lines, or above them, without splitting the one you're on. In
+/// a list the new line is the list's next item (above: an item like this one); in a quote, more quote;
+/// otherwise it keeps the line's indent.
+public func insertLine(_ text: String, selection: Range<String.Index>, above: Bool) -> (text: String, selection: Range<String.Index>) {
+    var lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let line = lines[above ? first : last]
+    let prefix: String
+    if let list = markdownListPrefix(of: line) {
+        prefix = above ? list.indent + list.marker + list.spacing + (list.checkbox != nil ? "[ ] " : "")
+                       : list.next
+    } else if let quote = markdownQuotePrefix(of: line) {
+        prefix = quote
+    } else {
+        prefix = String(line.prefix { isSpace($0) })
+    }
+    let at = above ? first : last + 1
+    lines.insert(prefix, at: at)
+    let caret = lineStarts(lines)[at] + prefix.count
+    return rebuilt(lines, caret, caret)
+}
+
+/// Make the covered lines headings at `level`, or plain paragraphs at 0. Asking for the level they
+/// already all have takes it away again, so the key toggles.
+public func setHeading(_ text: String, selection: Range<String.Index>, level: Int) -> (text: String, selection: Range<String.Index>) {
+    let level = max(0, min(6, level))
+    func split(_ line: String) -> (hashes: Int, content: Substring) {
+        let hashes = line.prefix { $0 == "#" }.count
+        let after = line.dropFirst(hashes)
+        guard (1...6).contains(hashes), after.isEmpty || isSpace(after.first!) else { return (0, Substring(line)) }
+        return (hashes, after.drop { isSpace($0) })
+    }
+    let lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let many = last > first
+    let covered = lines[first...last].filter { !many || !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    let target = level > 0 && !covered.isEmpty && covered.allSatisfy({ split($0).hashes == level }) ? 0 : level
+    return rewriteLines(text, selection) { _, line in
+        if many, line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
+        let content = split(line).content
+        return target == 0 ? String(content) : String(repeating: "#", count: target) + " " + content
+    }
+}
+
+/// Toggle the covered lines as tasks: a task is ticked or unticked — all of them one way, decided by
+/// the first, so a mixed run comes out uniform — a list item gains a box, and a plain line becomes a
+/// task item.
+public func toggleTask(_ text: String, selection: Range<String.Index>) -> (text: String, selection: Range<String.Index>) {
+    let lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let many = last > first
+    let firstBox = lines[first...last].lazy.compactMap { markdownListPrefix(of: $0)?.checkbox }.first
+    let ticking = firstBox == "[ ]"
+    return rewriteLines(text, selection) { _, line in
+        if many, line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
+        if let list = markdownListPrefix(of: line) {
+            let head = list.indent + list.marker + list.spacing
+            let rest = line.dropFirst(list.text.count)
+            if list.checkbox != nil { return head + (ticking ? "[x] " : "[ ] ") + rest }
+            return head + "[ ] " + line.dropFirst(head.count)
+        }
+        let indent = line.prefix { isSpace($0) }
+        return indent + "- [ ] " + line.dropFirst(indent.count)
+    }
+}
+
+/// Join the covered lines into one — or, with only one covered, join it with the next. The next line's
+/// indent goes; one space goes between, unless either side is empty. Nil when there is no next line.
+public func joinLines(_ text: String, selection: Range<String.Index>) -> (text: String, selection: Range<String.Index>)? {
+    var lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    var (first, last) = coveredLines(starts, lo, hi)
+    if first == last { last += 1 }
+    guard last < lines.count else { return nil }
+    var joined = lines[first]
+    var caret = 0
+    for line in lines[(first + 1)...last] {
+        let next = line.drop { isSpace($0) }
+        joined = joined.replacingOccurrences(of: #"[ \t]+$"#, with: "", options: .regularExpression)
+        caret = joined.count
+        if !joined.isEmpty, !next.isEmpty { joined += " "; caret += 1 }
+        joined += next
+    }
+    lines.replaceSubrange(first...last, with: [joined])
+    let at = starts[first] + caret
+    // A caret lands at the last join, where you'd type next; a selection keeps covering what it did.
+    return hi > lo ? rebuilt(lines, starts[first], starts[first] + joined.count) : rebuilt(lines, at, at)
+}
+
+/// The next larger structure around the selection: the word, the line, the block of lines between blank
+/// ones, the section under the nearest heading, the whole note. Nil when it is already the whole note.
+public func expandedSelection(in text: String, from selection: Range<String.Index>) -> Range<String.Index>? {
+    let lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, hi) = charOffsets(text, selection)
+    let (first, last) = coveredLines(starts, lo, hi)
+    let chars = Array(text)
+    func isWord(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "'" }
+    func blank(_ i: Int) -> Bool { lines[i].trimmingCharacters(in: .whitespaces).isEmpty }
+    func headingLevel(_ i: Int) -> Int? {
+        let hashes = lines[i].prefix { $0 == "#" }.count
+        let after = lines[i].dropFirst(hashes)
+        return (1...6).contains(hashes) && (after.isEmpty || isSpace(after.first!)) ? hashes : nil
+    }
+    func end(of i: Int) -> Int { starts[i] + lines[i].count }
+
+    var candidates: [(Int, Int)] = []
+    // Word.
+    var a = lo, b = hi
+    while a > 0, isWord(chars[a - 1]) { a -= 1 }
+    while b < chars.count, isWord(chars[b]) { b += 1 }
+    if a < b { candidates.append((a, b)) }
+    // Line, without its indent or marker first, then whole.
+    let content = starts[first] + (markdownListPrefix(of: lines[first])?.text.count
+                                   ?? markdownQuotePrefix(of: lines[first])?.count
+                                   ?? lines[first].prefix { isSpace($0) }.count)
+    candidates.append((content, end(of: last)))
+    candidates.append((starts[first], end(of: last)))
+    // Block.
+    if !blank(first) {
+        var top = first, bottom = last
+        while top > 0, !blank(top - 1), headingLevel(top - 1) == nil, headingLevel(top) == nil { top -= 1 }
+        while bottom < lines.count - 1, !blank(bottom + 1), headingLevel(bottom + 1) == nil { bottom += 1 }
+        candidates.append((starts[top], end(of: bottom)))
+    }
+    // Section: from the nearest heading at or above, to before the next heading as high or higher.
+    var h = first
+    while h >= 0, headingLevel(h) == nil { h -= 1 }
+    var level = h >= 0 ? headingLevel(h)! : 7
+    while h >= 0 {
+        var stop = max(h + 1, last + 1)
+        while stop < lines.count, (headingLevel(stop) ?? 7) > level { stop += 1 }
+        candidates.append((starts[h], end(of: stop - 1)))
+        // Then the section this one sits in.
+        var up = h - 1
+        while up >= 0, (headingLevel(up) ?? 7) >= level { up -= 1 }
+        h = up
+        level = h >= 0 ? headingLevel(h)! : 0
+    }
+    candidates.append((0, chars.count))
+
+    guard let next = candidates.filter({ $0.0 <= lo && $0.1 >= hi && ($0.0 < lo || $0.1 > hi) })
+        .min(by: { ($0.1 - $0.0) < ($1.1 - $1.0) }) else { return nil }
+    return result(text, next.0, next.1).selection
+}

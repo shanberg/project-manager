@@ -28,9 +28,13 @@ enum CanvasExistingCards {
     ///
     /// **A folder is a file card** in the document (`CanvasFolderCard`), so the stored path can't say
     /// which it is; `isFolder` asks the disk, through the board's resolver.
-    static func lookups(isFolder: @escaping (String) -> Bool = { _ in false }) -> CanvasItemLookups {
+    ///
+    /// `liveTitle` is what a running card's page calls itself right now, which beats the remembered
+    /// name for the one card it belongs to. See `CanvasBoardView.describeCard`.
+    static func lookups(isFolder: @escaping (String) -> Bool = { _ in false },
+                        liveTitle: String? = nil) -> CanvasItemLookups {
         CanvasItemLookups(isFolder: isFolder,
-                          pageTitle: { CanvasPageTitles.of($0) },
+                          pageTitle: { liveTitle ?? CanvasPageTitles.of($0) },
                           viewTitle: { CanvasViewSpec.of($0)?.cardName })
     }
 
@@ -43,7 +47,8 @@ enum CanvasExistingCards {
 
     /// What one card is called in the list, and what stands beside it — which is also how a tile's tab
     /// and a dragged tile's proxy name it. Use `CanvasBoardView.describeCard`, which knows the folders.
-    static func card(_ node: CanvasNode, isFolder: @escaping (String) -> Bool = { _ in false }) -> Card? {
-        CanvasItem.of(node, lookups: lookups(isFolder: isFolder))
+    static func card(_ node: CanvasNode, isFolder: @escaping (String) -> Bool = { _ in false },
+                     liveTitle: String? = nil) -> Card? {
+        CanvasItem.of(node, lookups: lookups(isFolder: isFolder, liveTitle: liveTitle))
     }
 }

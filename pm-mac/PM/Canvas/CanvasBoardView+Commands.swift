@@ -729,6 +729,11 @@ extension CanvasBoardView {
                 addFolderViewMenu(menu)
                 menu.addItem(.separator())
             }
+            if nodeViews[id]?.setsProse == true {
+                add(menu, "Edit Text\u{2026}", #selector(editSelected))
+                addTextMenu(menu)
+                menu.addItem(.separator())
+            }
             add(menu, "Open in Obsidian", #selector(openSelected))
             if case .moved = store.resolver.resolve(path) {
                 add(menu, "Repair Stored Path", #selector(repairSelectedPaths))
@@ -818,6 +823,10 @@ extension CanvasBoardView {
             // out its object from where you had clicked, and it sat two lines above "Edit Address…",
             // which does not.
             add(menu, "Edit Text\u{2026}", #selector(editSelected))
+            addTextMenu(menu)
+            add(menu, selectedTypedCards.count > 1 ? "Convert \(selectedTypedCards.count) Cards to Documents"
+                                                   : "Convert to Document",
+                #selector(convertToDocuments(_:)))
         case .group:
             add(menu, "Rename Frame…", #selector(renameSelectedFrame))
             // **The second way to get a second tab**, and it had no menu item: this command has existed
@@ -887,6 +896,139 @@ extension CanvasBoardView {
 
         let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
         item.submenu = shows
+    }
+
+    /// The cards of prose in the selection — typed text and markdown files — what Text ▸ acts on.
+    private var selectedProseCards: [CanvasNodeView] {
+        selection.compactMap { nodeViews[$0] }.filter(\.setsProse)
+    }
+
+    /// How a card of prose is set: its size, its measure, its face — and, below them, the two editing
+    /// preferences that are the app's rather than the card's, which are here because this is where you
+    /// are when you want them. See `CanvasTextStyle`.
+    ///
+    /// Radio lists ticked only where every selected card agrees, as Shows is.
+    private func addTextMenu(_ menu: NSMenu) {
+        let cards = selectedProseCards
+        guard !cards.isEmpty else { return }
+        let text = NSMenu(title: "Text")
+
+        text.addItem(.sectionHeader(title: "Size"))
+        add(text, "Bigger", #selector(makeProseBigger(_:)))
+        add(text, "Smaller", #selector(makeProseSmaller(_:)))
+        let actual = add(text, "Actual Size", #selector(makeProseActualSize(_:)))
+        actual.state = cards.allSatisfy { CanvasCardZoom.isNormal($0.contentZoom) } ? .on : .off
+
+        text.addItem(.separator())
+        text.addItem(.sectionHeader(title: "Line Width"))
+        for width in CanvasTextStyle.LineWidth.allCases {
+            let item = add(text, width.title, #selector(setProseLineWidth(_:)))
+            item.representedObject = width.rawValue
+            item.state = cards.allSatisfy { $0.textStyle.lineWidth == width } ? .on : .off
+        }
+
+        text.addItem(.separator())
+        text.addItem(.sectionHeader(title: "Font"))
+        for face in CanvasTextStyle.Face.allCases {
+            let item = add(text, face.title, #selector(setProseFace(_:)))
+            item.representedObject = face.rawValue
+            item.state = cards.allSatisfy { $0.textStyle.face == face } ? .on : .off
+        }
+
+        text.addItem(.separator())
+        text.addItem(.sectionHeader(title: "Every Note"))
+        add(text, "Show Link Syntax", #selector(toggleLinkSyntax(_:))).state = TokenDisplay.showsSyntax ? .on : .off
+        add(text, "Check Spelling While Typing", #selector(toggleNoteSpelling(_:))).state =
+            MarkdownTextEditor.checksSpelling ? .on : .off
+
+        menu.addItem(withTitle: "Text", action: nil, keyEquivalent: "").submenu = text
+    }
+
+    /// The selected cards whose text is stored in the canvas — not views, which are text only for
+    /// Obsidian's sake.
+    private var selectedTypedCards: [String] {
+        selection.filter { id in
+            guard let node = document.node(id: id), case .text = node.content else { return false }
+            return CanvasViewSpec.of(node) == nil
+        }
+    }
+
+    /// Move each selected card's text out of the canvas into a document of its own in `docs/`, named
+    /// after its first line, and point the card at it — what a card made today already is. See
+    /// `CanvasDocCards`.
+    ///
+    /// One step to undo, which puts the text back on the board. The files stay: undo is about the
+    /// board, and a note somebody may already have linked to is not the board's to delete.
+    @objc func convertToDocuments(_ sender: Any?) {
+        let folder = CanvasDocCards.folder(forCanvasAt: store.url)
+        var paths: [String: String] = [:]
+        for id in selectedTypedCards {
+            guard let node = document.node(id: id), case .text(let text) = node.content else { continue }
+            let name = CanvasDocCards.title(from: text) ?? CanvasDocCards.placeholder
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = CanvasDocCards.available(name, in: folder)
+                try Data(text.utf8).write(to: url, options: .withoutOverwriting)
+                paths[id] = store.resolver.storablePath(for: url) ?? url.path
+            } catch {
+                Log.write("converting a card to a document failed: \(error)")
+            }
+        }
+        guard !paths.isEmpty else { return NSSound.beep() }
+        store.change(paths.count > 1 ? "Convert to Documents" : "Convert to Document") { doc in
+            for index in doc.nodes.indices {
+                guard let path = paths[doc.nodes[index].id] else { continue }
+                doc.nodes[index].content = .file(path: path, subpath: nil)
+            }
+        }
+    }
+
+    @objc func makeProseBigger(_ sender: Any?) { stepProseZoom(by: 1) }
+    @objc func makeProseSmaller(_ sender: Any?) { stepProseZoom(by: -1) }
+    @objc func makeProseActualSize(_ sender: Any?) {
+        changeProseCards { CanvasCardZoom.set(CanvasCardZoom.normal, on: &$0) }
+    }
+
+    /// Each card a stop along its own ladder, so a selection at mixed sizes stays mixed.
+    private func stepProseZoom(by direction: Int) {
+        changeProseCards { node in
+            CanvasCardZoom.set(CanvasCardZoom.stepped(CanvasCardZoom.of(node), by: direction), on: &node)
+        }
+    }
+
+    @objc func setProseLineWidth(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let width = CanvasTextStyle.LineWidth(rawValue: raw) else { return }
+        changeProseCards { node in
+            var style = CanvasTextStyle.of(node)
+            style.lineWidth = width
+            CanvasTextStyle.set(style, on: &node)
+        }
+    }
+
+    @objc func setProseFace(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let face = CanvasTextStyle.Face(rawValue: raw) else { return }
+        changeProseCards { node in
+            var style = CanvasTextStyle.of(node)
+            style.face = face
+            CanvasTextStyle.set(style, on: &node)
+        }
+    }
+
+    @objc func toggleLinkSyntax(_ sender: Any?) { TokenDisplay.showsSyntax.toggle() }
+    @objc func toggleNoteSpelling(_ sender: Any?) { MarkdownTextEditor.checksSpelling.toggle() }
+
+    /// Quietly, as a zoom is: how a card is set is how you are looking at it, not an edit to it. See
+    /// `setContentZoom`.
+    private func changeProseCards(_ change: (inout CanvasNode) -> Void) {
+        let ids = Set(selectedProseCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.changeQuietly { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                change(&doc.nodes[index])
+            }
+        }
     }
 
     /// The view cards in the selection — what the Period and Projects menus act on.
@@ -1622,11 +1764,30 @@ extension CanvasBoardView {
     /// centred the card at.
     func addTextCard(at where_: CanvasPoint?) {
         let at = where_ ?? centreOfVisibleBoard
-        let id = addCard(CanvasNode(content: .text(""),
-                                    frame: CanvasRect(x: at.x - 125, y: at.y - 30,
-                                                      width: 250, height: 60)),
+        let id = addCard(newCardNode(frame: CanvasRect(x: at.x - 125, y: at.y - 30, width: 250, height: 60)),
                          actionName: "Add Card")
         beginEditing(id)
+    }
+
+    /// What a new card is: a document in the board's `docs` folder, ready to be written in — see
+    /// `CanvasDocCards`. Every way of making a card from nothing asks here, so they cannot disagree
+    /// about it.
+    ///
+    /// A board whose `docs` can't be written — a read-only folder, a vault that has gone away — still
+    /// gets a card, the text card a canvas can always hold. Failing to make a card because a folder is
+    /// locked would be a worse answer than making the other kind.
+    func newCardNode(frame: CanvasRect) -> CanvasNode {
+        do {
+            let url = try CanvasDocCards.makeUntitled(in: CanvasDocCards.folder(forCanvasAt: store.url))
+            var node = CanvasNode(content: .file(path: store.resolver.storablePath(for: url) ?? url.path,
+                                                 subpath: nil),
+                                  frame: frame)
+            node.extra[CanvasDocCards.untitledKey] = .bool(true)
+            return node
+        } catch {
+            Log.write("new card's file couldn't be made, so it is text on the board: \(error)")
+            return CanvasNode(content: .text(""), frame: frame)
+        }
     }
 
     /// A view card (docs/views.md): a text node whose text says what it is, for Obsidian, and whose

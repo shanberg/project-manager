@@ -660,8 +660,14 @@ extension CanvasBoardView {
 
     /// A card's one-line name and icon, as a menu, a tab and a dragged tile show it. See
     /// `CanvasExistingCards.card`.
+    ///
+    /// A web card is named by the page it is showing (`CanvasLinkNodeView.liveTitle`), not by the name
+    /// remembered for its address: a tab is the title bar of a running page, and the page's title is
+    /// the live part — an unread marker that clears as you read, a ticket renamed under you.
     func describeCard(_ id: String) -> CanvasExistingCards.Card? {
-        document.node(id: id).flatMap { CanvasExistingCards.card($0, isFolder: isFolderPath) }
+        guard let node = document.node(id: id) else { return nil }
+        let live = (nodeViews[id] as? CanvasLinkNodeView)?.liveTitle
+        return CanvasExistingCards.card(node, isFolder: isFolderPath, liveTitle: live)
     }
 
     /// Whether a file card's stored path resolves to a folder, which it draws as a list.

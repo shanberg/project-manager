@@ -157,10 +157,14 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// The running page's own title first, and deliberately: a card you have followed a link out of is
     /// showing something else, and what a name owes you is the thing in front of you rather than the
     /// thing the board meant to put there. The remembered one is the
-    /// answer for every card that isn't running, which is most of them.
+    /// answer for every card that isn't running, which is most of them — and for a paused card, the
+    /// name of the page it paused on, which is the page its picture shows.
     var liveTitle: String? {
         if let title = web?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
            let live = liveURL?.absoluteString, CanvasPageTitles.adds(title, to: live) {
+            return title
+        }
+        if web == nil, let paused = resumeURL?.absoluteString, let title = CanvasPageTitles.of(paused) {
             return title
         }
         return savedTitle
@@ -678,9 +682,19 @@ final class CanvasLinkNodeView: CanvasNodeView {
     }
 
     /// The page named itself. Keep it if it is this card's own page, and say it wherever it shows.
+    ///
+    /// **Kept under wherever the page is, every time**, as well as under the card's address while it is
+    /// capturing. Capturing stops the moment you step in, which is the moment a page like Slack starts
+    /// being used — so a card's remembered name used to be whatever it was called when you last stepped
+    /// into it: "* Someone (DM)" long after the message had been read. The page's own address is the
+    /// one key a title can't be wrong about, and when that address is the card's, this is the card's
+    /// name kept current; when it isn't, it is the name a paused card's picture shows (`liveTitle`).
     private func titleChanged(_ title: String?) {
         guard let title, !title.isEmpty else { return }
         if capturingTitle { CanvasPageTitles.remember(title, for: address) }
+        if let live = web?.url?.absoluteString, !capturingTitle || live != address {
+            CanvasPageTitles.remember(title, for: live)
+        }
         refreshName()
         describeYourself()
     }

@@ -66,6 +66,9 @@ struct NotesSettingsView: View {
         Section {
             Toggle("Show link syntax", isOn: Binding(get: { TokenDisplay.showsSyntax },
                                                      set: { TokenDisplay.showsSyntax = $0 }))
+            Toggle("Check spelling while typing",
+                   isOn: Binding(get: { MarkdownTextEditor.checksSpelling },
+                                 set: { MarkdownTextEditor.checksSpelling = $0 }))
         } header: {
             Text("Display")
         } footer: {

@@ -101,12 +101,51 @@ final class CanvasFileNodeView: CanvasNodeView {
         let isFolder = location.url.map(CanvasFolderListing.isFolder) ?? false
         if folder != nil, !isFolder || folder?.url != location.url { releaseFolder() }
         if isSimplified, !isPicture(path) {
+            CanvasFileWatch.shared.stop(self)
             setContent(summaryView(canvasFileCardName(path, isFolder: isFolder),
                                    symbol: canvasFileSymbol(path, isFolder: isFolder)))
             return
         }
 
         setContent(preview(for: location, path: path, subpath: subpath))
+        watchFile(isFolder: isFolder)
+    }
+
+    // MARK: Noticing the file change
+
+    /// Follow the file this card draws, so an edit made in Obsidian — or anywhere — shows here without
+    /// the card having to be scrolled away and back. See `CanvasFileWatch`.
+    ///
+    /// Not a project, whose store watches its own notes; not a folder, which `CanvasFolderCard`
+    /// watches; not a web page from disk, where a reload would throw away where you'd scrolled to for a
+    /// change you are probably making in the page's own editor.
+    private func watchFile(isFolder: Bool) {
+        guard let url = location.url, !isFolder, !isProjectCard,
+              isProse(url.path) || isPicture(url.path) || url.pathExtension.lowercased() == "pdf"
+        else { return CanvasFileWatch.shared.stop(self) }
+        CanvasFileWatch.shared.watch(self, url) { [weak self] in self?.fileChanged() }
+    }
+
+    /// The file changed on disk. Drawn again when you are only looking at it. While you are writing in
+    /// it, the file's version is taken only if you have nothing unsaved — otherwise yours stands, and is
+    /// written over it half a second later, because the alternative is throwing away what you just typed.
+    private func fileChanged() {
+        guard let session = document else {
+            // Gone, or moved: ask afresh where it is rather than trusting the answer from before.
+            if location.url.map({ !FileManager.default.fileExists(atPath: $0.path) }) == true {
+                board.store.resolver.refresh()
+            }
+            return contentChanged()
+        }
+        guard let disk = try? String(contentsOf: session.url, encoding: .utf8),
+              disk != session.synced else { return }
+        guard !session.hasUnsavedEdits else {
+            Log.write("\(session.url.lastPathComponent) changed on disk while it had unsaved typing; keeping the typing")
+            return
+        }
+        session.adopt(disk)
+        // Into the editor as an edit it knows about, so ⌘Z still lines up — see `replaceFromOutside`.
+        (firstTextView as? ShortcutTextView)?.replaceFromOutside(disk)
     }
 
     /// What the card says about itself when asked: which file, which heading, and whether PM had to go
@@ -142,6 +181,26 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// scrolling by design (see `preview`), so there is nothing under the pointer to travel through.
     override var scrollsItsContent: Bool {
         isProse(stored.path) || location.url.map(CanvasFolderListing.isFolder) == true
+    }
+
+    /// A note shown as prose — not a project, not a folder — which is set like a typed card and
+    /// written in place like one. See `CanvasDocCards`.
+    override var setsProse: Bool {
+        isProse(stored.path) && !isProjectCard && location.url.map(CanvasFolderListing.isFolder) != true
+    }
+
+    /// Its text answers ⌘+ and ⌘− the way a typed card's does.
+    override var zoomsItsContent: Bool { setsProse }
+
+    override func contentZoomChanged() {
+        if setsProse { contentChanged() }
+    }
+
+    /// Whether a double-click writes in this card rather than sending you to Obsidian: a note that is
+    /// there, shown whole. A card showing one `#Heading` of a note still opens the note — editing a
+    /// slice of a file in place would mean writing back around text you can't see.
+    private var writesInPlace: Bool {
+        setsProse && stored.subpath == nil && location.url != nil
     }
 
     private func isProse(_ path: String) -> Bool {
@@ -198,18 +257,12 @@ final class CanvasFileNodeView: CanvasNodeView {
                                       commands: projectCommands, display: projectDisplay)
                         .canvasLinkZones(linkZones))
             }
+            if let document { return documentEditor(document, url: url) }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
             return NSHostingView(rootView:
-                ScrollView(.vertical) {
-                    RenderedNote(prose: shown,
-                                 font: .systemFont(ofSize: 12.5),
-                                 noteURL: url,
-                                 maxImageHeight: 320)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                CanvasRenderedProse(prose: shown, style: textStyle, zoom: contentZoom,
+                                    noteURL: url, maxImageHeight: 320)
                 .canvasLinkZones(linkZones))
 
         case "html", "htm", "xhtml":
@@ -284,6 +337,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     }
 
     override func engagementChanged() {
+        if document != nil || (isEngaged && writesInPlace) { return documentEngagementChanged() }
         engagement.isEngaged = isEngaged
         if isEngaged {
             // The keyboard has to reach the text fields inside. A hosting view takes it on behalf of
@@ -299,6 +353,8 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// holder does, and a board of forty project cards would otherwise hold forty projects open for as
     /// long as the window lived.
     override func prepareForRemoval() {
+        CanvasFileWatch.shared.stop(self)
+        document?.flush()
         releaseProject()
         releaseFolder()
     }
@@ -376,6 +432,105 @@ final class CanvasFileNodeView: CanvasNodeView {
         return lines[start..<end].joined(separator: "\n")
     }
 
+    // MARK: Writing in place
+
+    /// The document you are writing in, while you are. See `CanvasDocSession`.
+    private var document: CanvasDocSession?
+
+    /// ⌘Z while you are writing here: the editor's own stack, as a typed card's is. File edits are the
+    /// file's, not the board's, so there is no step for the board to take back afterwards either.
+    private(set) var documentUndo: UndoManager?
+
+    /// Where the caret was, for an editor rebuilt under you by a change of face or width.
+    private var resumeAt: NSRange?
+
+    /// Whether this card has an editor open on its file.
+    var isWritingDocument: Bool { document != nil }
+
+    private func documentEngagementChanged() {
+        if isEngaged {
+            guard let url = location.url else { return }
+            let session = CanvasDocSession(url: url)
+            session.onWrite = { [weak self] in
+                guard let self else { return }
+                CanvasFileWatch.shared.acknowledge(self)
+            }
+            document = session
+            contentChanged()
+            return
+        }
+        guard let session = document else { return }
+        // What the editor says now, not what it last reported: SwiftUI hands a change on a turn later,
+        // so the keystroke just before a click elsewhere hasn't reached the session yet — and the
+        // session is about to stop listening.
+        if let live = firstTextView?.string, live != session.text { session.changed(live) }
+        document = nil
+        documentUndo = nil
+        resumeAt = nil
+        session.flush()
+        finish(session)
+        contentChanged()
+    }
+
+    private func documentEditor(_ session: CanvasDocSession, url: URL) -> NSView {
+        let undo = UndoManager()
+        documentUndo = undo
+        let view = NSHostingView(rootView:
+            CanvasTextEditing(text: session.text, zoom: contentZoom, style: textStyle, startsAt: resumeAt,
+                              noteURL: url, undoManager: undo) { [weak session] edited in
+                session?.changed(edited)
+            } onDone: { [weak self] in
+                self?.engage(false)
+            } onOpenProject: { folder in
+                WindowManager.shared.open(named: folder)
+            } onSelectionChange: { [weak self] range in
+                self?.resumeAt = range
+            })
+        DispatchQueue.main.async { [weak self, weak view] in
+            guard let view, self?.document != nil else { return }
+            self?.window?.makeFirstResponder(view)
+        }
+        return view
+    }
+
+    /// What stepping out means for a card that was made before it had words: taken away with its file
+    /// if it still has none, named after its first line if it does. See `CanvasDocCards`.
+    private func finish(_ session: CanvasDocSession) {
+        guard node.extra[CanvasDocCards.untitledKey] != nil else { return }
+        let id = node.id
+        func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if blank(session.text), blank(session.opening) {
+            board.store.changeQuietly { doc in
+                doc.nodes.removeAll { $0.id == id }
+                doc.edges.removeAll { $0.fromNode == id || $0.toNode == id }
+            }
+            // Only a file that is still nothing — one this card made, with nothing in it to keep, which
+            // is also why it isn't sent to the Trash: a Trash full of empty Untitleds is its own litter.
+            if (try? Data(contentsOf: session.url))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: session.url)
+            }
+            return
+        }
+        guard session.url.pathExtension.lowercased() == "md",
+              let title = CanvasDocCards.title(from: session.text) else { return }
+        let folder = session.url.deletingLastPathComponent()
+        let named = CanvasDocCards.available(title, in: folder, except: session.url)
+        do {
+            if named.standardizedFileURL != session.url.standardizedFileURL {
+                try FileManager.default.moveItem(at: session.url, to: named)
+            }
+        } catch {
+            Log.write("naming a card's file failed: \(error)")
+            return
+        }
+        let path = board.store.resolver.storablePath(for: named) ?? named.path
+        board.store.changeQuietly { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            doc.nodes[index].content = .file(path: path, subpath: nil)
+            doc.nodes[index].extra[CanvasDocCards.untitledKey] = nil
+        }
+    }
+
     // MARK: Opening
 
     /// What "work on this card" means, which is not the same thing for every file.
@@ -389,6 +544,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// wrong meant a click on a project launching Obsidian, which is the one place a click on it should
     /// never go.
     override func beginEditing() {
+        if writesInPlace, !isSimplified { return engage(true) }
         guard isProjectCard else { return open() }
         // Too far out to read, let alone edit. "Open this" then means the project window, which is
         // where a project you cannot see on the board is actually usable — still the project, still
@@ -471,5 +627,71 @@ private extension URL {
         var parts = URLComponents(url: self, resolvingAgainstBaseURL: false)
         parts?.fragment = nil
         return parts?.url ?? self
+    }
+}
+
+/// One sitting of writing in a file card: what the file said when you started, what it says now, and
+/// the write that puts the second on disk.
+///
+/// **Written shortly after you stop, and always on the way out.** Every keystroke to disk would be a
+/// file event per character for Obsidian, iCloud and anything else watching the vault; a write only on
+/// stepping out would lose a sitting to a crash. Half a second after the last change is neither.
+@MainActor
+final class CanvasDocSession {
+    let url: URL
+    /// What the file held when you stepped in — the half of "was this ever a card?" that
+    /// `CanvasDocCards` needs besides what it holds now.
+    let opening: String
+    private(set) var text: String
+    /// What the file holds as far as this session knows — what it read, or last wrote. The difference
+    /// between this and `text` is typing not yet on disk.
+    private(set) var synced: String
+    private var pending: DispatchWorkItem?
+    /// Called after each write, so the card's watch can take the write as its own. See
+    /// `CanvasFileWatch.acknowledge`.
+    var onWrite: (() -> Void)?
+
+    init(url: URL) {
+        self.url = url
+        let read = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        opening = read
+        text = read
+        synced = read
+    }
+
+    var hasUnsavedEdits: Bool { text != synced }
+
+    /// Take the file's version as this session's — something else changed it, and nothing here was
+    /// waiting to be written.
+    func adopt(_ disk: String) {
+        pending?.cancel()
+        pending = nil
+        text = disk
+        synced = disk
+    }
+
+    func changed(_ edited: String) {
+        text = edited
+        pending?.cancel()
+        // The editor reporting back text that is already the file — an adopted change arriving through
+        // the binding — is nothing to write.
+        guard edited != synced else { pending = nil; return }
+        let write = DispatchWorkItem { [weak self] in self?.flush() }
+        pending = write
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: write)
+    }
+
+    /// Write now, if anything is waiting.
+    func flush() {
+        guard let write = pending else { return }
+        write.cancel()
+        pending = nil
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            synced = text
+            onWrite?()
+        } catch {
+            Log.write("writing a card's file failed: \(error)")
+        }
     }
 }

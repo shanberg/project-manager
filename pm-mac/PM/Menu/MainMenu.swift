@@ -31,6 +31,7 @@ enum MainMenu {
         mainMenu.addItem(appMenuItem(target: target))
         mainMenu.addItem(fileMenuItem(target: target))
         mainMenu.addItem(editMenuItem())
+        mainMenu.addItem(formatMenuItem())
         mainMenu.addItem(viewMenuItem(target: target))
         mainMenu.addItem(domainMenuItem(.task, title: "Task", target: target))
         mainMenu.addItem(domainMenuItem(.project, title: "Project", target: target))
@@ -207,6 +208,38 @@ enum MainMenu {
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(findMenuItem())
+        item.submenu = menu
+        return item
+    }
+
+    /// Format: the note editor's line commands, where a Mac user looks for them. See `EditorLineCommand`.
+    ///
+    /// **It shows keys it doesn't claim.** A main-menu item takes its key equivalent even while it is
+    /// disabled, so a menu here holding ⌥↑ would swallow ⌥↑ everywhere no editor has the caret — on the
+    /// board, in a list. The editor handles these keys itself; this menu is where they are written down
+    /// (see `EditorMenuKeys`), and a click on an item still reaches the editor through the responder chain.
+    private static func formatMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Format")
+        menu.delegate = EditorMenuKeys.shared
+        func add(_ command: EditorLineCommand, to menu: NSMenu) {
+            // No key here — `EditorMenuKeys` writes it in while the menu is open.
+            let entry = menu.addItem(withTitle: command.title, action: command.action, keyEquivalent: "")
+            if case .heading(let level) = command { entry.tag = level }
+        }
+        let headings = NSMenu(title: "Heading")
+        headings.delegate = EditorMenuKeys.shared
+        for level in 0...6 { add(.heading(level), to: headings) }
+        menu.addItem(withTitle: "Heading", action: nil, keyEquivalent: "").submenu = headings
+        add(.toggleTask, to: menu)
+        menu.addItem(.separator())
+        for command: EditorLineCommand in [.moveUp, .moveDown, .copyUp, .copyDown, .delete,
+                                           .insertBelow, .insertAbove, .join] {
+            add(command, to: menu)
+        }
+        menu.addItem(.separator())
+        add(.expandSelection, to: menu)
+        add(.shrinkSelection, to: menu)
         item.submenu = menu
         return item
     }

@@ -200,6 +200,39 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         return NSRect(x: glyphPosition.x, y: 0, width: width, height: proposedRect.height)
     }
 
+    // MARK: repainting what an edit vacates
+
+    /// The bottom of the text as last laid out, to tell a note that got shorter from one that didn't.
+    private var laidOutBottom: CGFloat?
+
+    /// A note that got shorter repaints all of itself that is showing.
+    ///
+    /// **AppKit leaves a band of the old text on screen otherwise.** Deleting a line repaints the
+    /// lines that moved up — down to the new *used* bottom, which stops short of the last line's
+    /// `lineSpacing` — and the old last line from its own top. The gap between the two is one line's
+    /// spacing high and is never redrawn, so whatever was painted there stays: the foot of a
+    /// full-line selection, most visibly, since selecting a line and deleting it is how a line is
+    /// deleted. The text view draws no background (it sits on a card), so there is nothing underneath
+    /// to cover it either.
+    ///
+    /// Only on a shrink, which is a keystroke in a hundred; typing within a line doesn't change the
+    /// height and pays nothing. The whole visible rect rather than the gap, because the gap is a
+    /// consequence of how AppKit happens to split its invalidation today, and the next release is
+    /// entitled to split it differently.
+    func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?,
+                       atEnd layoutFinishedFlag: Bool) {
+        guard layoutFinishedFlag, let textContainer else { return }
+        let bottom = usedRect(for: textContainer).maxY
+        defer { laidOutBottom = bottom }
+        guard let before = laidOutBottom, bottom < before, let view = textContainer.textView else { return }
+        repaintsAfterShrinking += 1
+        view.setNeedsDisplay(view.visibleRect, avoidAdditionalLayout: true)
+    }
+
+    /// How many times a shrink has repainted the view. For a test to see the repaint was asked for,
+    /// since the pixels it is about are only visible to the window server.
+    private(set) var repaintsAfterShrinking = 0
+
     // MARK: drawing
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {

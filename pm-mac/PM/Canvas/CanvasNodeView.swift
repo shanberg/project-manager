@@ -45,8 +45,15 @@ class CanvasNodeView: NSView {
     /// keys doing what they have always done. See `CanvasCardZoom`.
     var zoomsItsContent: Bool { false }
 
+    /// Whether this card is prose you can set — a typed card, or a markdown file shown as one — and so
+    /// answers to the menu's Text ▸. See `CanvasTextStyle`.
+    var setsProse: Bool { false }
+
     /// How large this card's content is set, from the document.
     var contentZoom: Double { CanvasCardZoom.of(node) }
+
+    /// How this card's prose is set — line width and face — from the document. See `CanvasTextStyle`.
+    var textStyle: CanvasTextStyle { CanvasTextStyle.of(node) }
 
     /// The zoom changed — re-render at it. Called for a change from anywhere, including an undo and
     /// another window on the same file.
@@ -543,7 +550,9 @@ class CanvasNodeView: NSView {
         let sameNode = node == self.node
         self.scale = scale
         let changed = node.content != self.node.content && !isOwnEdit(node.content)
-        let rezoomed = CanvasCardZoom.of(node) != contentZoom
+        // A change of line width or face is the same kind of change as a zoom — how the content is set,
+        // not what it is — and is answered the same way.
+        let rezoomed = CanvasCardZoom.of(node) != contentZoom || CanvasTextStyle.of(node) != textStyle
         self.node = node
         if changed {
             // A rebuild sets the zoom on the way through, so there is nothing further to do for it.
@@ -858,6 +867,8 @@ final class CanvasTextNodeView: CanvasNodeView {
     /// `CanvasCardZoom`.
     override var zoomsItsContent: Bool { true }
 
+    override var setsProse: Bool { true }
+
     /// Rebuilt rather than adjusted: the face is handed to SwiftUI when the view is made, and the whole
     /// card is one hosting view whose only input is the text and the font.
     override func contentZoomChanged() { contentChanged() }
@@ -899,6 +910,7 @@ final class CanvasTextNodeView: CanvasNodeView {
         let session = editing
         editing = nil
         editingUndo = nil
+        resumeAt = nil
 
         if session?.stepOut(showing: text) == .discardTheCard {
             let id = node.id
@@ -913,21 +925,18 @@ final class CanvasTextNodeView: CanvasNodeView {
 
     private func showRendered() {
         let view = NSHostingView(rootView:
-            ScrollView(.vertical) {
-                RenderedNote(prose: text,
-                             font: .systemFont(ofSize: 13 * contentZoom),
-                             noteURL: board.store.url,
-                             maxImageHeight: 400)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            CanvasRenderedProse(prose: text, style: textStyle, zoom: contentZoom,
+                                noteURL: board.store.url, maxImageHeight: 400)
             .canvasLinkZones(linkZones)
         )
         view.setAccessibilityLabel(text.isEmpty ? "Empty card" : text)
         hosting = view
         setContent(view)
     }
+
+    /// Where the caret was, so an editor rebuilt under you — a change of face or width from the menu —
+    /// puts it back rather than at the end of the note. Cleared on stepping out.
+    private var resumeAt: NSRange?
 
     private func showEditor() {
         let id = node.id
@@ -937,7 +946,8 @@ final class CanvasTextNodeView: CanvasNodeView {
         // outstanding for the document to be echoing back. See `CanvasCardEditing.editorBuilt`.
         editing?.editorBuilt()
         let view = NSHostingView(rootView:
-            CanvasTextEditing(text: text, zoom: contentZoom, undoManager: undo) { [weak self] edited in
+            CanvasTextEditing(text: text, zoom: contentZoom, style: textStyle, startsAt: resumeAt,
+                              undoManager: undo) { [weak self] edited in
                 guard let self else { return }
                 let write = { (doc: inout CanvasDocument) in
                     guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
@@ -958,6 +968,8 @@ final class CanvasTextNodeView: CanvasNodeView {
                 self?.engage(false)
             } onOpenProject: { folder in
                 WindowManager.shared.open(named: folder)
+            } onSelectionChange: { [weak self] range in
+                self?.resumeAt = range
             })
         hosting = view
         setContent(view, insets: NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6))
@@ -973,26 +985,38 @@ final class CanvasTextNodeView: CanvasNodeView {
 /// than give it a second, AppKit-shaped initialiser, this holds the state and reports every change
 /// outward — so the editor keeps exactly one interface and the card keeps the document as the single
 /// source of truth.
-private struct CanvasTextEditing: View {
+struct CanvasTextEditing: View {
     @State private var text: String
     let zoom: Double
+    let style: CanvasTextStyle
+    let startsAt: NSRange?
+    let noteURL: URL?
     let undoManager: UndoManager
     let onChange: (String) -> Void
     let onDone: () -> Void
     let onOpenProject: (String) -> Void
+    let onSelectionChange: (NSRange) -> Void
 
     init(text: String,
          zoom: Double,
+         style: CanvasTextStyle,
+         startsAt: NSRange? = nil,
+         noteURL: URL? = nil,
          undoManager: UndoManager,
          onChange: @escaping (String) -> Void,
          onDone: @escaping () -> Void,
-         onOpenProject: @escaping (String) -> Void) {
+         onOpenProject: @escaping (String) -> Void,
+         onSelectionChange: @escaping (NSRange) -> Void = { _ in }) {
         _text = State(initialValue: text)
         self.zoom = zoom
+        self.style = style
+        self.startsAt = startsAt
+        self.noteURL = noteURL
         self.undoManager = undoManager
         self.onChange = onChange
         self.onDone = onDone
         self.onOpenProject = onOpenProject
+        self.onSelectionChange = onSelectionChange
     }
 
     var body: some View {
@@ -1003,10 +1027,39 @@ private struct CanvasTextEditing: View {
         // The same zoom the rendered card is showing. A card whose prose grew when you zoomed it and
         // shrank back the moment you stepped in to edit it would be zooming the picture of the text
         // rather than the text.
-        editor.baseFont = NSFont.monospacedSystemFont(ofSize: 13 * zoom, weight: .regular)
+        let font = style.editingFont(ofSize: 13 * zoom)
+        editor.baseFont = font
+        // A card is whatever size it was dragged to, which says nothing about how long a line should
+        // be: past the style's measure the width is margin, either side, and the prose sits centred.
+        editor.maxColumnWidth = style.maxColumnWidth(in: font) ?? 0
+        editor.startsAt = startsAt
+        editor.onSelectionChange = onSelectionChange
+        editor.noteURL = noteURL
         // The card's stack, not the window's — see `CanvasTextNodeView.editingUndo`.
         editor.undoManager = undoManager
         return editor.onChange(of: text) { _, edited in onChange(edited) }
+    }
+}
+
+/// A card's prose as it reads when you are not in it: the same face and centred measure the editor
+/// takes, so stepping in moves the column as little as the two faces allow.
+struct CanvasRenderedProse: View {
+    let prose: String
+    let style: CanvasTextStyle
+    let zoom: Double
+    let noteURL: URL?
+    let maxImageHeight: CGFloat
+
+    var body: some View {
+        let font = style.readingFont(ofSize: 13 * zoom)
+        ScrollView(.vertical) {
+            RenderedNote(prose: prose, font: font, noteURL: noteURL, maxImageHeight: maxImageHeight)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .frame(maxWidth: style.maxColumnWidth(in: font).map { $0 + 22 } ?? .infinity,
+                       alignment: .leading)
+                .frame(maxWidth: .infinity)
+        }
     }
 }
 

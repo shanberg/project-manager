@@ -381,6 +381,10 @@ final class CanvasBoardView: NSView {
     /// Where the right-click that opened the context menu landed. Held because the menu is long
     /// dismissed by the time an item fires, and "Paste" from that menu means *there*.
     var menuPoint: CanvasPoint?
+
+    /// The answer the delete question gives without asking, for a test — which can't click an alert.
+    /// Nil in the app. See `askDeleting`.
+    var documentsAnswer: DeleteAnswer?
     /// The boundary a right-click landed on, if it landed on one. Held for the same reason as
     /// `menuPoint`: the menu is long dismissed by the time an item fires.
     var menuDivider: CanvasTileDivider?
@@ -510,8 +514,9 @@ final class CanvasBoardView: NSView {
     /// and a lost character. Nil once the editor holds focus, because then the board never sees the
     /// key at all. See `keyDown`.
     var strandedCardEditor: NSTextView? {
-        guard let card = nodeViews.values.first(where: { $0.isEngaged && $0 is CanvasTextNodeView })
-        else { return nil }
+        guard let card = nodeViews.values.first(where: {
+            $0.isEngaged && ($0 is CanvasTextNodeView || ($0 as? CanvasFileNodeView)?.isWritingDocument == true)
+        }) else { return nil }
         return card.firstTextView
     }
 
@@ -527,6 +532,7 @@ final class CanvasBoardView: NSView {
     var engagedCardUndoManager: UndoManager? {
         for card in nodeViews.values where card.isEngaged {
             if let text = card as? CanvasTextNodeView, let undo = text.editingUndo { return undo }
+            if let file = card as? CanvasFileNodeView, let undo = file.documentUndo { return undo }
             if let file = card as? CanvasFileNodeView, let undo = file.projectDisplay.noteUndo { return undo }
             if let undo = CanvasUndoRoute.typingUndo(in: card, boardUndo: store.undoManager) { return undo }
         }
@@ -1216,7 +1222,7 @@ final class CanvasBoardView: NSView {
     }
 }
 
-private extension NSView {
+extension NSView {
     /// The first text view in this view's subtree, in drawing order.
     ///
     /// A card's editor is built by SwiftUI inside a hosting view, so the board has no reference to it

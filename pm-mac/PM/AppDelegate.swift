@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // takes about ten seconds. Cards built inside that window catch up on their own.
         Task { @MainActor in await CanvasContentBlocker.prepare() }
         MainMenu.install(target: self)
+        ClickTrace.install()
 
         // Point the menubar at the focused project before anything reads `store`.
         syncFocusedStore()

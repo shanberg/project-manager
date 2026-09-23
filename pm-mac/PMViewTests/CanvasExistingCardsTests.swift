@@ -133,6 +133,14 @@ final class CanvasExistingCardsTests: XCTestCase {
                        "Billing rollover fails on renewal")
     }
 
+    /// A tab names the page that is running, not the name remembered when the card last loaded it.
+    func testARunningPagesOwnTitleBeatsTheRememberedOne() {
+        let address = "https://app.slack.com/client/T1/D1"
+        CanvasPageTitles.remember("* Sam (DM) - Acme - Slack", for: address)
+        let card = CanvasExistingCards.card(node(.link(url: address)), liveTitle: "Sam (DM) - Acme - Slack")
+        XCTAssertEqual(card?.title, "Sam (DM) - Acme - Slack")
+    }
+
     /// A folder is stored as a file card, so only the disk can say it is one — and when it is, it is
     /// named whole (a dot is not an extension) and drawn with a folder, in a menu, a tab and a proxy.
     func testAFolderIsNamedWholeAndDrawnAsAFolder() {
