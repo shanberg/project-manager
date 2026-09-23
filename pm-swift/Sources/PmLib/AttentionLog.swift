@@ -271,6 +271,45 @@ public enum AttentionLog {
         return try? JSONDecoder().decode(AttentionEvent.self, from: Data(last.utf8))
     }
 
+    /// The events on or after `cutoff`, read backwards from the end of the file until the lines are
+    /// older than that — so what it costs follows the period asked about, not the age of a log that's
+    /// never pruned. What the menu bar reads every time it opens.
+    ///
+    /// The log is appended in the order things were noticed, not quite the order they happened: a pause
+    /// is back-dated to the last input by up to a check's length. Stopping at the first line older than
+    /// `cutoff` is safe as long as the caller's cutoff has more slack than that, which a day boundary
+    /// minus a day does.
+    public static func events(since cutoff: Date, chunk: Int = 64 * 1024) -> [AttentionEvent] {
+        guard let handle = FileHandle(forReadingAtPath: logPath) else { return [] }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return [] }
+        let decoder = JSONDecoder()
+        var offset = size
+        var tail = Data()
+        var reachedCutoff = false
+        while offset > 0, !reachedCutoff {
+            let start = offset > UInt64(chunk) ? offset - UInt64(chunk) : 0
+            try? handle.seek(toOffset: start)
+            tail = ((try? handle.read(upToCount: Int(offset - start))) ?? Data()) + tail
+            offset = start
+            // The first line in what's been read may be cut off by the chunk; the one after the first
+            // newline is whole, and if it's already older than the cutoff there's no need to go on.
+            guard offset > 0, let newline = tail.firstIndex(of: 0x0A) else { continue }
+            let rest = tail[tail.index(after: newline)...]
+            if let end = rest.firstIndex(of: 0x0A),
+               let first = try? decoder.decode(AttentionEvent.self, from: Data(rest[..<end])),
+               let at = DoneLog.date(first.at), at < cutoff {
+                reachedCutoff = true
+            }
+        }
+        var lines = tail.split(separator: 0x0A, omittingEmptySubsequences: true)
+        // Stopped partway into the file: the first line is a fragment of one before it.
+        if offset > 0, !lines.isEmpty { lines.removeFirst() }
+        return lines
+            .compactMap { try? decoder.decode(AttentionEvent.self, from: Data($0)) }
+            .filter { DoneLog.date($0.at).map { $0 >= cutoff } ?? false }
+    }
+
     public static func events() -> [AttentionEvent] {
         guard let text = try? String(contentsOfFile: logPath, encoding: .utf8) else { return [] }
         let decoder = JSONDecoder()

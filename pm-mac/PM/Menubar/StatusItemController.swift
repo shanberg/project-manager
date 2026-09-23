@@ -23,6 +23,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var settings: () -> PanelSettings = { .default }
     var onSetPinned: (Bool) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
+    /// A write from the menu that didn't happen, in words — the menu has closed by then, so it can't
+    /// say so itself.
+    var onFailure: (String) -> Void = { _ in }
 
     init(store: PMStore) {
         self.store = store
@@ -195,6 +198,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         Log.write("MENU needsUpdate \(menu === self.menu ? "top" : "OTHER:\(menu.title)")")
         menu.removeAllItems()
+
+        // Above everything, when there is one: the newest away today that nobody's answered. One row,
+        // no count — older ones wait on a Time card, and a number here would read as a debt.
+        if let away = latestAway() {
+            menu.addItem(awayMenuItem(away))
+            menu.addItem(.separator())
+        }
 
         guard let name = store.projectName else {
             menu.addItem(disabledItem("No focused project"))
@@ -407,6 +417,76 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openSettings() { onOpenSettings() }
+
+    // MARK: Away (docs/away-time.md)
+
+    /// "Away 12:05 – 12:35 PM", and the answers to it. The interrupted project first, then the focused
+    /// one if that's different; anything else from the recents; or not work.
+    ///
+    /// Projects by title, never by code, whatever `ProjectCodes.areShown` says: the question is which
+    /// piece of work the time was, and the title is what names it.
+    private func awayMenuItem(_ away: AttentionAway) -> NSMenuItem {
+        let (item, sub) = submenu(Self.awayTitle(away), symbol: "clock.badge.questionmark")
+        if #available(macOS 14.4, *) {
+            item.subtitle = "\(durationLabel(away.seconds)) · \(PmLib.projectTitle(fromFolderName: away.project))"
+        }
+
+        var offered = [away.project]
+        if let focused = store.projectName, focused != away.project { offered.append(focused) }
+        for folder in offered {
+            let count = actionItem("Count for \(truncate(PmLib.projectTitle(fromFolderName: folder), 40))",
+                                   #selector(answerAway(_:)))
+            count.representedObject = AwayAnswer(away: away, project: folder)
+            sub.addItem(count)
+        }
+
+        let others = store.recents.filter { !offered.contains($0.name) }
+        if !others.isEmpty {
+            let (otherItem, other) = submenu("Other Project", symbol: nil)
+            for recent in others {
+                let row = actionItem(truncate(PmLib.projectTitle(fromFolderName: recent.name), 40),
+                                     #selector(answerAway(_:)))
+                row.representedObject = AwayAnswer(away: away, project: recent.name)
+                other.addItem(row)
+            }
+            sub.addItem(otherItem)
+        }
+
+        sub.addItem(.separator())
+        let notWork = actionItem("Not Work", #selector(answerAway(_:)))
+        notWork.representedObject = AwayAnswer(away: away, project: nil)
+        sub.addItem(notWork)
+        return item
+    }
+
+    private static func awayTitle(_ away: AttentionAway) -> String {
+        guard let from = away.fromDate, let to = away.toDate else { return "Away" }
+        let formatter = DateIntervalFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return "Away \(formatter.string(from: from, to: to))"
+    }
+
+    /// What a click on one of the away's answers carries. A nil project is "not work".
+    private struct AwayAnswer {
+        let away: AttentionAway
+        let project: String?
+    }
+
+    @objc private func answerAway(_ sender: NSMenuItem) {
+        guard let answer = sender.representedObject as? AwayAnswer else { return }
+        var input = ApiInput()
+        input.from = answer.away.from
+        input.to = answer.away.to
+        if let project = answer.project { input.project = project } else { input.notWork = true }
+        do {
+            _ = try PMContract.perform(.timeCount, input)
+        } catch {
+            let message = ApiError.from(error).message
+            Log.write("away answer refused: \(message)")
+            onFailure(message)
+        }
+    }
 
     // MARK: Custom row / header items
 

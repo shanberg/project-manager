@@ -1,6 +1,6 @@
 # Away time
 
-**Status:** designed 2026-09-23. Steps 1–4 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
+**Status:** designed 2026-09-23. Steps 1–4, 6 and quiet focus built; 5 dropped. Extends [time-tracking.md](time-tracking.md).
 Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 
 ## Timekeeper (`AttentionKeeper.swift`)
@@ -72,7 +72,14 @@ Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 
 ### Where aways appear
 
-- Menubar menu: top row, most recent unanswered away only.
+- Menubar menu: top item, today's newest unanswered away only (`latestAway`). Absent when there's none.
+  - Title: "Away 12:05 – 12:35 PM"; subtitle: duration · interrupted project.
+  - Projects named by title, not code, regardless of the show-codes setting. Same in `pm time aways` and `time.count` summaries.
+  - Submenu: Count for <interrupted project>; Count for <focused project> if different;
+    Other Project ▸ (recents); Not Work.
+  - Answers go through `time.count`, source `app`. A refusal becomes a failure notification.
+  - Reads only the log's tail from the start of yesterday (`AttentionLog.events(since:)`). ~30 ms on the 2026-09-23 log.
+  - No undo from the menu yet (step 7).
 - Menubar: no badge, no count, no tint.
 - Time card: **Away** section below the project rows, all unanswered aways in the card's period.
 - No notification. Revisit only if long aways routinely go unanswered.

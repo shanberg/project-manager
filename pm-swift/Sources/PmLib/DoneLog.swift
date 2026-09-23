@@ -256,16 +256,21 @@ public enum DoneLog {
         return kept.compactMap { $0 }
     }
 
-    public static func timestamp(_ date: Date) -> String {
+    /// One formatter, shared. Building one per call was most of what reading a log cost — every line
+    /// of the attention log goes through here, several times — and `ISO8601DateFormatter` is
+    /// documented as thread-safe, so sharing it needs no lock.
+    nonisolated(unsafe) private static let iso: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    public static func timestamp(_ date: Date) -> String {
+        iso.string(from: date)
     }
 
     public static func date(_ timestamp: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: timestamp)
+        iso.date(from: timestamp)
     }
 }
 

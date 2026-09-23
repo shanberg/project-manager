@@ -562,8 +562,9 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             data = try JSONValue.encoding(event)
         }
         return ApiResult(action: spec.name,
-                         summary: Phrase(past: "Counted \(stretch) for \(folder)",
-                                         future: "count \(stretch) for \(folder)").sentence(dryRun: options.dryRun),
+                         summary: Phrase(past: "Counted \(stretch) for \(projectTitle(fromFolderName: folder))",
+                                         future: "count \(stretch) for \(projectTitle(fromFolderName: folder))")
+                             .sentence(dryRun: options.dryRun),
                          dryRun: options.dryRun, data: data)
 
     case "task.search":
