@@ -1,6 +1,6 @@
 # Away time
 
-**Status:** designed 2026-09-23. Steps 1–2 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
+**Status:** designed 2026-09-23. Steps 1–3 and quiet focus built. Extends [time-tracking.md](time-tracking.md).
 Covers tasks: idle-time handling; "no focus" apps.
 
 ## Timekeeper (`AttentionKeeper.swift`)
@@ -128,10 +128,16 @@ New event kind in `~/.config/pm/attention.ndjson`:
 
 ## Contract / CLI
 
-- `time.aways` — query. Period fields as `time.spent`. Returns unanswered aways: `from`, `to`, `project`, `during`.
-- `time.count` — command. `from`, `to`, optional `project`. Appends one `counted`.
-- `pm time aways`, `pm time count <from> <to> [project]`.
-- `time.spent` spans gain basis `counted`; report marks them as it marks `inferred`.
+Contract 1.22.0. Details in [api-contract.md](api-contract.md).
+
+- `time.aways` — query. Period fields and `projects` as `time.spent`. Returns unanswered aways.
+- `time.count` — mutation. `from`, `to` (ISO 8601 with a zone), exactly one of `project` / `notWork`.
+  - `notWork` is explicit because every other action reads a missing `project` as the focused one.
+  - Returns the `counted` event, for undo.
+- `pm time aways [today|yesterday|week]` — clock times for today; day + time for other ranges.
+- `pm time count <from> <to> (<project> | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]`
+  - `from` / `to`: `11:07`, `14:05`, `2:05pm`, or ISO 8601 with a zone.
+- `time.spent`, `pm time`, Copy as Text mark counted time `(counted)`, as they mark `(inferred)`.
 
 ## UI vocabulary
 

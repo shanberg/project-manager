@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.21.0";
+export const API_CONTRACT_VERSION = "1.22.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -510,7 +510,31 @@ export interface TaskWrapInput {
   text: string;
 }
 
-/** Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span's end is measured when Folio recorded it and inferred otherwise, and the report says which. */
+/** The stretches nobody touched the machine that are still open questions: from a pause, lock or sleep to the next time attention landed, 10 min to 4 h, not quiet focus and not yet answered with time.count. Oldest first, each with the project it interrupted. */
+export interface TimeAwaysInput {
+  /** Which span. Default today. */
+  period?: "today" | "yesterday" | "week";
+  /** Only aways that interrupted these projects, by name, prefix or [[link]]. A master brings its members. Default every project. */
+  projects?: string[];
+  /** First day to include, YYYY-MM-DD. Overrides the period's start. */
+  since?: string;
+  /** Last day to include, YYYY-MM-DD. Overrides the period's end. */
+  until?: string;
+}
+
+/** Answer for a stretch of time: it was this project's, or it wasn't work. Overrides whatever the attention log says about it — fills an away, moves time to another project, or takes it out. A later answer about the same time wins. */
+export interface TimeCountInput {
+  /** Where the stretch starts, ISO 8601 with a zone — an away's `from` as `time.aways` gives it. */
+  from: string;
+  /** The time wasn't work. Give this or `project`, not both. */
+  notWork?: boolean;
+  /** The project the time was. Give this or `notWork`, not both. */
+  project?: string;
+  /** Where it ends, exclusive, ISO 8601 with a zone. Not in the future. */
+  to: string;
+}
+
+/** Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span is measured when Folio recorded it, inferred when it didn't, and counted when someone answered for it with time.count; the report marks inferred and counted time. */
 export interface TimeSpentInput {
   /** Which span. Default today. */
   period?: "today" | "yesterday" | "week";
@@ -579,6 +603,8 @@ export interface ApiInputs {
   "task.waiting": TaskWaitingInput;
   "task.whatsDue": TaskWhatsDueInput;
   "task.wrap": TaskWrapInput;
+  "time.aways": TimeAwaysInput;
+  "time.count": TimeCountInput;
   "time.spent": TimeSpentInput;
 }
 
@@ -644,5 +670,7 @@ export const API_TIERS: Record<
   "task.waiting": "query",
   "task.whatsDue": "query",
   "task.wrap": "mutation",
+  "time.aways": "query",
+  "time.count": "mutation",
   "time.spent": "query",
 };

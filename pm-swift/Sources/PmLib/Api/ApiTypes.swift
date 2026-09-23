@@ -182,6 +182,11 @@ public struct ApiInput: Codable, Equatable {
     public var frame: String?
     /// `card.list`: which order the items come in — a `CanvasItemSort`.
     public var sort: String?
+    /// `time.count`: the stretch the answer is about, ISO 8601 with a zone, end exclusive.
+    public var from: String?
+    public var to: String?
+    /// `time.count`: the stretch wasn't work. Given instead of `project`, never beside it.
+    public var notWork: Bool?
 
     public init() {}
 }

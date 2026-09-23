@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.21.0"
+public let apiContractVersion = "1.22.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -230,6 +230,17 @@ public enum ApiRegistry {
                                ApiField("clearPartOf", .boolean, "Take the project out of its master instead.")]),
         ApiActionSpec(name: "project.focus", tier: .mutation,
                       summary: "Make this the focused project.", fields: [project]),
+        ApiActionSpec(name: "time.count", tier: .mutation,
+                      summary: "Answer for a stretch of time: it was this project's, or it wasn't work. Overrides whatever the attention log says about it — fills an away, moves time to another project, or takes it out. A later answer about the same time wins.",
+                      fields: [ApiField("from", .string, required: true,
+                                        "Where the stretch starts, ISO 8601 with a zone — an away's `from` as `time.aways` gives it."),
+                               ApiField("to", .string, required: true,
+                                        "Where it ends, exclusive, ISO 8601 with a zone. Not in the future."),
+                               ApiField("project", .string,
+                                        "The project the time was. Give this or `notWork`, not both."),
+                               ApiField("notWork", .boolean,
+                                        "The time wasn't work. Give this or `project`, not both.")],
+                      oneOf: [["project", "notWork"]]),
 
         // MARK: Queries
         ApiActionSpec(name: "project.list", tier: .query,
@@ -311,13 +322,21 @@ public enum ApiRegistry {
                                         allowed: ["active", "archive", "all"]),
                                ApiField("includeDropped", .boolean, "Also list tasks dropped in the period, marked. Default false.")]),
         ApiActionSpec(name: "time.spent", tier: .query,
-                      summary: "Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span's end is measured when Folio recorded it and inferred otherwise, and the report says which.",
+                      summary: "Where the time went: how long each project had your attention in a period, longest first, and what came of it. A span is measured when Folio recorded it, inferred when it didn't, and counted when someone answered for it with time.count; the report marks inferred and counted time.",
                       fields: [ApiField("period", .string, "Which span. Default today.",
                                         allowed: ["today", "yesterday", "week"]),
                                ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
                                ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
                                ApiField("projects", .stringList,
                                         "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
+        ApiActionSpec(name: "time.aways", tier: .query,
+                      summary: "The stretches nobody touched the machine that are still open questions: from a pause, lock or sleep to the next time attention landed, 10 min to 4 h, not quiet focus and not yet answered with time.count. Oldest first, each with the project it interrupted.",
+                      fields: [ApiField("period", .string, "Which span. Default today.",
+                                        allowed: ["today", "yesterday", "week"]),
+                               ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
+                               ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
+                               ApiField("projects", .stringList,
+                                        "Only aways that interrupted these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
         ApiActionSpec(name: "session.list", tier: .query,
                       summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere.",
                       fields: [ApiField("period", .string, "Which span. Default today.",

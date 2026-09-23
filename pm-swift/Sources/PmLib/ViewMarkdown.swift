@@ -205,6 +205,7 @@ public enum ViewMarkdown {
             // The mark travels with the number wherever it goes: a total partly worked out rather than
             // recorded should say so in a pasted note too (docs/time-tracking.md D4).
             if project.inferred { line += " *(inferred)*" }
+            if project.counted { line += " *(counted)*" }
             return line
         }
         let untracked = report.projects.filter { $0.seconds == 0 && !changes($0).isEmpty }

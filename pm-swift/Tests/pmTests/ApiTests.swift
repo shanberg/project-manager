@@ -338,6 +338,8 @@ final class ApiTests: XCTestCase {
         input.task = TaskRefInput(session: "0", line: 0, digest: "abc")
         input.folder = "f"
         input.kind = "project"
+        input.from = "2026-08-22T09:00:00Z"
+        input.to = "2026-08-22T09:30:00Z"
 
         // Note what this can and can't catch. A *required* field the validator can't see shows up
         // here immediately, because nothing supplies it and the action reports it missing. An
@@ -439,6 +441,8 @@ final class ApiTests: XCTestCase {
         case "clearWaiting": input.clearWaiting = true
         case "limit": input.limit = 1
         case "sessionOrdinal": input.sessionOrdinal = 0
+        case "project": input.project = "anything"
+        case "notWork": input.notWork = true
         default: XCTFail("no test value for \(field)", file: file, line: line)
         }
     }
@@ -452,11 +456,19 @@ final class ApiTests: XCTestCase {
         for spec in ApiRegistry.actions where !spec.oneOf.isEmpty {
             for group in spec.oneOf {
                 var neither = ApiInput()
-                neither.project = "anything"
+                // `project` is usually just a field every action takes, but for `time.count` it's
+                // one side of a choice — and giving it would make "neither" one.
+                if !group.contains("project") { neither.project = "anything" }
+                // The required fields, so the refusal has to be the group's and can't be a missing
+                // `from` passing for it.
+                neither.from = "2026-08-22T09:00:00Z"
+                neither.to = "2026-08-22T09:30:00Z"
                 for other in spec.oneOf where other != group { give(other[0], to: &neither) }
+                let named = JSONValue.array(group.map(JSONValue.string))
                 XCTAssertThrowsError(try performApi(spec.name, neither),
                                      "\(spec.name) accepted none of \(group)") { error in
                     XCTAssertEqual((error as? ApiError)?.code, .missingField, spec.name)
+                    XCTAssertEqual((error as? ApiError)?.detail, named, "\(spec.name): refused for something else")
                 }
 
                 var all = neither
@@ -464,6 +476,7 @@ final class ApiTests: XCTestCase {
                 XCTAssertThrowsError(try performApi(spec.name, all),
                                      "\(spec.name) accepted all of \(group)") { error in
                     XCTAssertEqual((error as? ApiError)?.code, .missingField, spec.name)
+                    XCTAssertEqual((error as? ApiError)?.detail, named, "\(spec.name): refused for something else")
                 }
             }
         }

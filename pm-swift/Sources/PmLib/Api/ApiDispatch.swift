@@ -125,6 +125,9 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "before": input.before.map(JSONValue.string),
         "activity": input.activity.map(JSONValue.bool),
         "projects": input.projects.map { .array($0.map(JSONValue.string)) },
+        "from": input.from.map(JSONValue.string),
+        "to": input.to.map(JSONValue.string),
+        "notWork": input.notWork.map(JSONValue.bool),
     ]
 }
 
@@ -519,6 +522,50 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                                          future: "focus \(folder)").sentence(dryRun: options.dryRun),
                          dryRun: options.dryRun)
 
+    case "time.count":
+        guard let from = input.from.flatMap(DoneLog.date), let to = input.to.flatMap(DoneLog.date) else {
+            throw ApiError(.invalidField,
+                           "from and to need to be ISO 8601 with a zone, like 2026-09-23T11:07:00Z.",
+                           detail: .string(input.from.flatMap(DoneLog.date) == nil ? "from" : "to"))
+        }
+        guard to > from else {
+            throw ApiError(.invalidField, "to has to come after from.", detail: .string("to"))
+        }
+        // A minute's grace for clocks and for "until now" typed at the end of a minute; past that, it's
+        // time that hasn't happened, and there's nothing on record yet to answer for.
+        guard to <= Date().addingTimeInterval(60) else {
+            throw ApiError(.invalidField, "to is in the future — only time that's happened can be counted.",
+                           detail: .string("to"))
+        }
+        let stretch = "\(SessionTimes.clockLabel(from, calendar: .current))–\(SessionTimes.clockLabel(to, calendar: .current)) (\(durationLabel(to.timeIntervalSince(from))))"
+        if input.notWork == true {
+            if !options.dryRun { AttentionLog.counted(from: from, to: to, source: options.source) }
+            return ApiResult(action: spec.name,
+                             summary: Phrase(past: "Marked \(stretch) as not work",
+                                             future: "mark \(stretch) as not work").sentence(dryRun: options.dryRun),
+                             dryRun: options.dryRun)
+        }
+        guard let name = input.project else {
+            // `notWork: false` and no project passes the one-of check, and says nothing.
+            throw ApiError(.missingField, "time.count needs a project, or notWork: true.",
+                           detail: .string("project"))
+        }
+        let path = try resolveProjectPath(nameOrPrefix: name)
+        let folder = (path as NSString).lastPathComponent
+        // The key is spelled the way `project.focus` and `focused.json` spell it, so the answer and the
+        // spans either side of it are one project, not two that happen to share a name.
+        let key = "\((path as NSString).deletingLastPathComponent):\(folder)"
+        var data: JSONValue?
+        if !options.dryRun {
+            let event = AttentionLog.counted(from: from, to: to, project: folder, key: key,
+                                             source: options.source)
+            data = try JSONValue.encoding(event)
+        }
+        return ApiResult(action: spec.name,
+                         summary: Phrase(past: "Counted \(stretch) for \(folder)",
+                                         future: "count \(stretch) for \(folder)").sentence(dryRun: options.dryRun),
+                         dryRun: options.dryRun, data: data)
+
     case "task.search":
         let scope = input.scope ?? "all"
         let hits = try searchableTasks(includeArchived: scope != "active",
@@ -582,6 +629,15 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         if done > 0 { summary += ", \(done) done" }
         return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(list))
 
+    case "time.aways":
+        let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
+        let aways = try attentionAways(in: range, projects: input.projects)
+        let total = aways.reduce(0) { $0 + $1.seconds }
+        let summary = aways.isEmpty
+            ? "No aways."
+            : "\(aways.count) away\(aways.count == 1 ? "" : "s"), \(durationLabel(total))."
+        return ApiResult(action: spec.name, summary: summary, data: try JSONValue.encoding(aways))
+
     case "time.spent":
         let range = try DoneRange.resolve(period: input.period, since: input.since, until: input.until)
         let report = try timeSpent(in: range, projects: input.projects)
@@ -593,6 +649,8 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         // Said in the sentence, not only in the data: a total that is partly guessed should say so
         // wherever it is read aloud (D4).
         if inferred > 0 { summary += ", \(inferred) inferred" }
+        let counted = tracked.filter(\.counted).count
+        if counted > 0 { summary += ", \(counted) with counted time" }
         return ApiResult(action: spec.name, summary: summary + ".", data: try JSONValue.encoding(report))
 
     case "task.due":

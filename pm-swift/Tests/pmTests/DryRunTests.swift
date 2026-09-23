@@ -179,6 +179,8 @@ final class DryRunTests: XCTestCase {
             "project.archive": ["project": "W-1"],
             "project.unarchive": ["project": "W-2"],
             "project.focus": ["project": "W-2"],
+            // Writes the attention log in the config dir, not the project — `world()` covers both.
+            "time.count": ["project": "W-1", "from": "2026-09-01T09:00:00Z", "to": "2026-09-01T09:30:00Z"],
             "project.setPartOf": ["project": "W-2", "partOf": "W-1"],
             "config.set": ["key": "activePath", "value": "/tmp/somewhere-else"],
             "journal.undo": ["project": "W-1"],

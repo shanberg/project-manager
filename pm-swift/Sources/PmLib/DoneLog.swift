@@ -256,7 +256,7 @@ public enum DoneLog {
         return kept.compactMap { $0 }
     }
 
-    static func timestamp(_ date: Date) -> String {
+    public static func timestamp(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)

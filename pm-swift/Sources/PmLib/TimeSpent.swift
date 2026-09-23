@@ -29,6 +29,9 @@ public struct TimeSpentItem: Codable, Equatable, Sendable {
     /// Any span whose end was worked out rather than recorded (D4). A report marks these; it doesn't
     /// leave them out, and it doesn't quietly total them as if they were measured.
     public var inferred: Bool = false
+    /// Any span somebody answered for with `time.count` (docs/away-time.md). Marked like `inferred`,
+    /// for the same reason: a total should say how it was arrived at.
+    public var counted: Bool = false
     /// What came of the period, from the same read `session.list` does.
     public var sittings: Int = 0
     public var done: Int = 0
@@ -87,6 +90,7 @@ func tallying(spans: [AttentionSpan], sittings: SittingList,
         out.seconds += span.seconds
         out.spans.append(span)
         out.inferred = out.inferred || span.basis == .inferred
+        out.counted = out.counted || span.basis == .counted
         items[span.project] = out
     }
     for sitting in sittings.sittings {
@@ -158,6 +162,38 @@ public func attentionSpans(in range: DoneRange, projects: [String]? = nil, now: 
         AttentionLog.spans(from: events, evidence: evidence, now: horizon, only: only),
         calendar: calendar)
     return AttentionLog.clipped(spans, to: range)
+}
+
+/// The aways in `range` still worth asking about (docs/away-time.md), oldest first — each one that
+/// began in the range and interrupted one of `projects`, when given.
+public func attentionAways(in range: DoneRange, projects: [String]? = nil) throws -> [AttentionAway] {
+    let only = try projects.map(projectFolders(named:))
+    // The whole log, like `attentionSpans`: an answer given about another project still settles an
+    // away, and a return to another project is still what ends one.
+    return AttentionLog.aways(from: AttentionLog.events(), in: range)
+        .filter { only?.contains($0.project) ?? true }
+}
+
+/// A moment as a person types it at a prompt: ISO 8601 with a zone, or a clock time today —
+/// `11:07`, `14:05`, `2:05pm`, `2:05 PM`. Nil for anything else, rather than a guess.
+public func parseMoment(_ text: String, now: Date = Date(), calendar: Calendar = .current) -> Date? {
+    if let date = DoneLog.date(text) { return date }
+    let clock = text.lowercased().replacingOccurrences(of: " ", with: "")
+    let pattern = #"^(\d{1,2}):(\d{2})(am|pm)?$"#
+    guard let match = clock.range(of: pattern, options: .regularExpression), match == clock.startIndex..<clock.endIndex
+    else { return nil }
+    let meridiem = clock.hasSuffix("am") ? "am" : clock.hasSuffix("pm") ? "pm" : nil
+    let digits = meridiem.map { String(clock.dropLast($0.count)) } ?? clock
+    let parts = digits.split(separator: ":").compactMap { Int($0) }
+    guard parts.count == 2, parts[1] < 60 else { return nil }
+    var hour = parts[0]
+    if let meridiem {
+        guard (1...12).contains(hour) else { return nil }
+        hour = hour % 12 + (meridiem == "pm" ? 12 : 0)
+    } else {
+        guard hour < 24 else { return nil }
+    }
+    return calendar.date(bySettingHour: hour, minute: parts[1], second: 0, of: now)
 }
 
 /// Where the time went in `range`, across every project.

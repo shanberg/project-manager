@@ -69,6 +69,7 @@ session.backfillTimes
 notes.setDetails  notes.addLink
 project.create    project.rename   project.archive  project.unarchive  project.focus
 card.add
+time.count
 config.set
 ```
 
@@ -78,7 +79,7 @@ config.set
 project.list   project.get     notes.get      task.list
 task.search    task.waiting    task.whatsDue  task.progress
 task.done      session.list    focus.get      capture.parse
-card.list      time.spent
+card.list      time.spent     time.aways
 config.get
 ```
 
@@ -95,6 +96,15 @@ In 1.15.0 both take `projects`, the list `session.list` takes, and a hit carries
 Three things are settled rather than left to be discovered. **The revision is the canvas's**, not the notes': the envelope's `revision` is documented as the content hash of the notes file, and a card write touches neither the notes nor a task, so it reports the hash of the `.canvas` it wrote. **A board edit is journaled as the document write it is**, so `journal.undo` reverses a `card.add` under the same revision guard as any other write — what it cannot report is a diff of tasks, because a board has none. And **a running window needs no telling**: `CanvasDocumentStore` already watches the file on a two-second poll because Obsidian edits it, so a write from `pm`, Raycast or MCP arrives as an ordinary outside change and reloads.
 
 Where a card *sits*, how big it is and what is tiled stay the app's — they are answers to questions only a board can ask. `card.delete` is deliberately not in this pass: deleting a card from a board a window may be holding, from a surface that cannot see it, wants its own argument.
+
+`time.aways`, `time.count` (1.22.0) — see [away-time.md](away-time.md):
+
+- `time.aways`: query. Period fields as `time.spent`, plus `projects`. Returns `AttentionAway[]`: `project`, `key`, `from`, `to`, `seconds`, `why`, `during`.
+- `time.count`: mutation. `from`, `to` required, ISO 8601 with a zone. Exactly one of `project`, `notWork`.
+- `time.count` writes a `counted` event to `attention.ndjson`, not the notes: no `revision`, no journal entry, no `journal.undo`.
+- `time.count` returns the event in `data`; undo is `AttentionLog.withdraw(id)` (app-side).
+- `time.count` refuses `to` ≤ `from`, and `to` more than 60 s in the future.
+- `time.spent`: spans gain basis `counted`; items gain `counted: Bool`; summary says "N with counted time".
 
 `time.spent` (1.21.0) is where the time went: how long each project had your attention in a period, longest first, and what came of it. It rests on a fourth log — `~/.config/pm/attention.ndjson`, global where the done and pick logs are per project, because a span ends when attention goes *somewhere else* and only a shared file knows where. `project.focus` appends a `began` from whichever surface moved the focus; Folio watches the machine and writes the `ended`, back-dated to the last input. A span nothing closed is worked out from the other three logs and reported as `inferred` rather than totalled as if it were measured. In the same version `session.list` takes `time`, which fills each sitting's duration from the same log. See [time-tracking.md](time-tracking.md).
 
