@@ -78,6 +78,7 @@
 		3554D2A82176CB0108E09D9A /* CanvasBoardView+Dropping.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5717A4502ADB9CE2F367863 /* CanvasBoardView+Dropping.swift */; };
 		3789DB20348C055258ECD61A /* CanvasBoardKeysTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DCC2D8DA411AD495118A4FD /* CanvasBoardKeysTests.swift */; };
 		37A9DC26DBE13BD4401EA2A4 /* ProjectSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF58C252062677FA46208D2B /* ProjectSettings.swift */; };
+		37C118534EFECAC0185D1097 /* NoteEditorFocusClaimTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B646B11E96C8023DC8EF44 /* NoteEditorFocusClaimTests.swift */; };
 		387069AF75F6B831208CBB15 /* CanvasBlockPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16874666CE86567B918D811D /* CanvasBlockPolicyTests.swift */; };
 		38A04362D8281844E649F1BA /* CanvasCardEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 255D306E8C06804C6D670431 /* CanvasCardEditing.swift */; };
 		38D50873E609E8B9641DFADF /* CanvasSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01DF3405ADA2611E2DE1123 /* CanvasSummary.swift */; };
@@ -663,6 +664,7 @@
 		C0C8253F2276A9484CE883B2 /* CanvasSoftEdge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSoftEdge.swift; sourceTree = "<group>"; };
 		C23801938E500AE2503482A2 /* CanvasCardActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardActionsTests.swift; sourceTree = "<group>"; };
 		C29406BC8E1DFA39C06DF737 /* ProjectTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTabBar.swift; sourceTree = "<group>"; };
+		C2B646B11E96C8023DC8EF44 /* NoteEditorFocusClaimTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorFocusClaimTests.swift; sourceTree = "<group>"; };
 		C30BC0AE688FEC42E1605AD5 /* KeyablePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyablePanel.swift; sourceTree = "<group>"; };
 		C326CEE15C996F9C269D6B19 /* CanvasPageKeysTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageKeysTests.swift; sourceTree = "<group>"; };
 		C3C2CFE40B2026943B5E8059 /* CanvasLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLayout.swift; sourceTree = "<group>"; };
@@ -1197,6 +1199,7 @@
 				969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */,
 				52F033A07EBB7B9C5F100737 /* NoteEditorCompletionTests.swift */,
 				E5E2F0CD9B44DB1DA7405667 /* NoteEditorEditingTests.swift */,
+				C2B646B11E96C8023DC8EF44 /* NoteEditorFocusClaimTests.swift */,
 				2CC4A8B2058C9F8B4E7472A7 /* NoteEditorGutterTests.swift */,
 				D2147A52B01C61E2E82C337A /* NoteEditorReturnTests.swift */,
 				F40B6AE99DDF2D75714BC2C5 /* NoteEditorUndoTests.swift */,
@@ -1720,6 +1723,7 @@
 				1B75C6BDD6DC19D5A5ED48D9 /* NoteEditorClipboardTests.swift in Sources */,
 				0E4E96518BF11F94F19E41A9 /* NoteEditorCompletionTests.swift in Sources */,
 				63F68372CD16730FFA1DD48C /* NoteEditorEditingTests.swift in Sources */,
+				37C118534EFECAC0185D1097 /* NoteEditorFocusClaimTests.swift in Sources */,
 				85C311BD5154CD5D0F15E2CB /* NoteEditorGutterTests.swift in Sources */,
 				61DFF2CC132077EA17389BE6 /* NoteEditorReturnTests.swift in Sources */,
 				4C22E9E8234C534314053412 /* NoteEditorUndoTests.swift in Sources */,
@@ -1832,7 +1836,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.46.0;
+				MARKETING_VERSION = 0.47.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1979,7 +1983,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.46.0;
+				MARKETING_VERSION = 0.47.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

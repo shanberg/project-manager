@@ -502,12 +502,19 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// `@FocusState` is torn down on SwiftUI's own schedule — which can land *after* the responder
         /// change here and put the window back to having no first responder at all. One retry, so a
         /// genuine refusal isn't turned into a loop.
+        ///
+        /// **Only when nothing claimed it.** A retry landing after you have already stepped out — onto
+        /// another tile, say — used to find the caret gone from here and take it back, because "gone"
+        /// was all it checked. It has to also ask *where* first responder went: the window falling back
+        /// to itself is the SwiftUI teardown this exists for, but a specific view holding it is somebody
+        /// else's deliberate handoff, and a retry has no business undoing that.
         func claimFocus(_ textView: NSTextView) {
             for delay in Self.focusAttempts {
                 // `DispatchQueue.main` rather than `afterCurrentUpdate`, which is the same hop with a
                 // `@MainActor` annotation this coordinator isn't in a position to satisfy.
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak textView] in
-                    guard let textView, let window = textView.window, !Self.holdsFocus(window, textView)
+                    guard let textView, let window = textView.window,
+                          Self.shouldClaimFocus(window, textView)
                     else { return }
                     window.makeFirstResponder(textView)
                 }
@@ -520,12 +527,25 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// a summon and a ⇧⏎ promotion produced opposite answers from a single attempt.
         private static let focusAttempts: [TimeInterval] = [0, 0.06, 0.16]
 
+        /// A retry's whole decision, pulled out of `claimFocus` so it can be asked without waiting on
+        /// one — the delays above are wall-clock, and a test racing them is a test of the scheduler.
+        static func shouldClaimFocus(_ window: NSWindow, _ textView: NSTextView) -> Bool {
+            !holdsFocus(window, textView) && hasNoResponder(window)
+        }
+
         /// Whether the caret is already in this text view. A focused `NSTextView` may be answered for
         /// by the window's field editor, which is a *different* object delegating to the same place.
         private static func holdsFocus(_ window: NSWindow, _ textView: NSTextView) -> Bool {
             if window.firstResponder === textView { return true }
             guard let editor = window.firstResponder as? NSTextView else { return false }
             return editor.delegate === textView.delegate
+        }
+
+        /// Whether the window's first responder is the window itself — AppKit's answer to "nothing in
+        /// particular", and the one state a torn-down `@FocusState` can leave behind. Anything else is
+        /// a view that asked for the caret on purpose, which a retry should not override.
+        private static func hasNoResponder(_ window: NSWindow) -> Bool {
+            window.firstResponder === window
         }
 
         /// Lay the whole document out now, rather than as it comes into view.
@@ -1188,7 +1208,11 @@ final class ShortcutTextView: NSTextView {
         guard let ch = event.charactersIgnoringModifiers?.lowercased() else {
             return super.performKeyEquivalent(with: event)
         }
-        if flags == .command {
+        // `performKeyEquivalent` is a tree walk over every view in the window, not just the first
+        // responder — so a note editor that stays mounted while inactive (a canvas tile's session
+        // note, say, when you've since moved focus to another tile) would otherwise keep winning
+        // these editing keys over whatever the actually-focused tile wants them to mean.
+        if flags == .command, holdsCaret {
             switch ch {
             case "b": apply { toggleWrap($0, selection: $1, marker: "**") }; return true
             case "i": apply { toggleWrap($0, selection: $1, marker: "*") }; return true
@@ -1197,7 +1221,7 @@ final class ShortcutTextView: NSTextView {
             default: break
             }
         }
-        if flags == [.command, .shift], ch == "d" {
+        if flags == [.command, .shift], ch == "d", holdsCaret {
             apply { duplicateLines($0, selection: $1) }
             return true
         }
@@ -1211,6 +1235,18 @@ final class ShortcutTextView: NSTextView {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// Whether this view currently holds the caret, for `performKeyEquivalent` to ask before claiming
+    /// an editing shortcut. Mirrors `MarkdownTextEditor.Coordinator.holdsFocus`'s field-editor
+    /// indirection (a focused `NSTextView` may be answered for by the window's field editor, a
+    /// different object delegating to the same place) — this view can be asked the same question
+    /// without a coordinator on hand, since the check only needs the window and `self`.
+    private var holdsCaret: Bool {
+        guard let window else { return false }
+        if window.firstResponder === self { return true }
+        guard let editor = window.firstResponder as? NSTextView else { return false }
+        return editor.delegate === delegate
     }
 
     /// Escape. Handed to the host when it wants it, and otherwise left to the text view — where it
