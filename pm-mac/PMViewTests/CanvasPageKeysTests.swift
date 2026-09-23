@@ -39,6 +39,12 @@ final class CanvasPageKeysTests: XCTestCase {
         XCTAssertTrue(offers("z", [.command, .shift]), "redo is the page's as well")
     }
 
+    /// ⌘↩ stopped moving to and from the canvas, so a page gets it — a chat box's "send", say.
+    func testCommandReturnIsThePages() {
+        XCTAssertTrue(offers("\r", [.command]))
+        XCTAssertFalse(offers("\r", [.command, .option]), "Maximize Tile")
+    }
+
     /// The way out is never on offer — a page that could eat these could trap you in itself.
     func testTheWayOutIsAlwaysPMs() {
         XCTAssertFalse(offers("q", [.command]), "Quit")
@@ -47,7 +53,6 @@ final class CanvasPageKeysTests: XCTestCase {
         XCTAssertFalse(offers(",", [.command]), "Settings")
         XCTAssertFalse(offers("h", [.command]), "Hide")
         XCTAssertFalse(offers("l", [.command]), "the address bar, which is a browser's own way out")
-        XCTAssertFalse(offers("\r", [.command]), "in and out of a workspace")
         XCTAssertFalse(offers("t", [.command]), "New Tab")
         XCTAssertFalse(offers("n", [.command, .shift]), "New Project")
     }

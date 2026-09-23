@@ -1420,26 +1420,20 @@ extension CanvasBoardView {
         add(menu, "Select All", #selector(selectAll(_:)))
     }
 
-    /// ⌘Return, in the menu you get to by right-clicking.
+    /// Create Workspace, in the menu you get to by right-clicking.
     ///
     /// The command was reachable from the View menu and from a key you had to already know, and from
     /// nowhere a pointer could find it — which for the board's largest gesture is the wrong way round.
     /// Right-clicking a selection is where a Mac says "what can I do with these", and until now this
     /// board's answer was cut, copy, duplicate, delete: four things you can do to a card's *contents*
     /// and nothing about how you are looking at it.
-    ///
-    /// Carrying the key equivalent so the menu teaches it. A contextual menu draws one exactly as the
-    /// menu bar does, which makes this the cheapest possible way to hand somebody a shortcut they were
-    /// never going to find in the View menu.
     private func addTiling(_ menu: NSMenu, separated: Bool = true) {
         // Its own separator rather than one from each caller, so that bailing out on an empty board
         // leaves the menu with one divider rather than two stacked on each other. `separated` is for
         // the one caller that has already drawn a line of its own — a section header.
         guard isTiled || document.nodes.contains(where: { !$0.isGroup }) else { return }
         if separated { menu.addItem(.separator()) }
-        let item = add(menu, tileCommandTitle, #selector(tileSelection(_:)))
-        item.keyEquivalent = "\r"
-        item.keyEquivalentModifierMask = [.command]
+        add(menu, tileCommandTitle, #selector(tileSelection(_:)))
         // The card's Maximize, beside the workspace it is the temporary version of. A tile's is in its
         // own section, so this is only the board's card and the one filling the window alone.
         if maximizableCard != nil || (maximizedCard != nil && tiling?.ids.count == 1) {
@@ -1452,9 +1446,8 @@ extension CanvasBoardView {
         // one, or a layout would stop responding to its window one adjustment at a time without
         // anybody having asked for that. See `togglePinTile`.
         if pinnableTile != nil { add(menu, pinTileTitle, #selector(togglePinTileSize(_:))) }
-        // **A separate "Show Canvas" item used to live here**, because ⌘↩ was only the way out when
-        // there was nothing left to drill into, and the menu needed one item that always left. ⌘↩ is
-        // always the way out now, so a second item saying so would be the menu saying it twice.
+        // **A separate "Show Canvas" item used to live here.** Inside a workspace the item above is
+        // the way out, so a second item saying so would be the menu saying it twice.
     }
 
     /// The workspaces the selected cards are already in, as a submenu beside the command that makes

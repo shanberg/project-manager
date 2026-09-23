@@ -41,8 +41,8 @@ enum CanvasPageKeys {
     ///
     /// Quit, close, hide, minimise, full screen and settings are the app's. New Task/Session/Project/
     /// Window, New Tab and the open commands make things, and a page has no business making them.
-    /// ⌘1…9 and ⌃⇥ move between this window's tabs, ⌃1…9 between the board's frames, ⌘↩ and its
-    /// variants in and out of a workspace: all of them are "take me somewhere else", which is exactly
+    /// ⌘1…9 and ⌃⇥ move between this window's tabs, ⌃1…9 between the board's frames, ⌥⌘↩
+    /// maximizes a tile and puts it back: all of them are "take me somewhere else", which is exactly
     /// what you need when a page has gone strange. ⌘L is the address bar, which is a browser's own
     /// escape hatch and stays one here.
     ///
@@ -61,7 +61,7 @@ enum CanvasPageKeys {
         ("o", [.command]), ("o", [.command, .shift]),                          // the Open family
         ("c", [.command, .option]),                                            // Show Canvas
         ("l", [.command]),                                                     // Open Address
-        ("\r", [.command]), ("\r", [.command, .option]), ("\r", [.command, .shift]),
+        ("\r", [.command, .option]), ("\r", [.command, .shift]),         // Maximize, Master Tile
         ("\t", [.control]), ("\t", [.control, .shift]),                        // Next/Previous Tab
     ]
 

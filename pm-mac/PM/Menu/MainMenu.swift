@@ -297,23 +297,19 @@ enum MainMenu {
 
     /// Filling the window with a card, or with a handful of them.
     ///
-    /// One command at both ends: with one card selected ⌘Return is "show me this properly", which
-    /// otherwise means zooming in and hunting for it, and with six it is a tiled view of the six.
-    /// Fullscreen and tile are the same idea at different counts, and one key for both is what makes it
-    /// worth learning. Escape backs out.
-    ///
-    /// ⌘Return rather than a letter because it is the "open this, big" gesture the Finder, Mail and
-    /// Photos all use, and because it reads as an intensifier of Return, which on this board steps into
-    /// a card.
+    /// One command at both ends: with one card selected Create Workspace is "show me this properly",
+    /// which otherwise means zooming in and hunting for it, and with six it is a tiled view of the six.
+    /// Escape backs out.
     private static func canvasTilingItems(_ menu: NSMenu) {
-        let tile = menu.addItem(withTitle: "Create Workspace",
-                                action: #selector(CanvasBoardView.tileSelection(_:)),
-                                keyEquivalent: "\r")
-        tile.keyEquivalentModifierMask = [.command]
-        // **The temporary one.** ⌘↩ makes a workspace or leaves one; this fills the room with a single
+        // **No key equivalent, and it had ⌘↩.** Removed 2026-09-23: moving to and from the canvas is the
+        // tab bar's, ⌘− and ⌥⌘C, and ⌘↩ goes back to the page in a web card.
+        menu.addItem(withTitle: "Create Workspace",
+                     action: #selector(CanvasBoardView.tileSelection(_:)),
+                     keyEquivalent: "")
+        // **The temporary one.** Create Workspace makes a workspace or leaves one; this fills the room with a single
         // tile for as long as you want it and puts the workspace back afterwards — maximizing a window
-        // rather than narrowing the view. ⌥⌘↩ reads as the tile's ⌘↩, and the ⌥ layer is one of the
-        // few web pages do not claim, which matters on a board whose tiles are web apps.
+        // rather than narrowing the view. The ⌥ layer is one of the few web pages do not claim, which
+        // matters on a board whose tiles are web apps.
         let maximize = menu.addItem(withTitle: "Maximize Tile",
                                     action: #selector(CanvasBoardView.maximizeTile(_:)),
                                     keyEquivalent: "\r")

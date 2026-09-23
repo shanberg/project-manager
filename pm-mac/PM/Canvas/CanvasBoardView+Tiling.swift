@@ -4,7 +4,7 @@ import PmLib
 /// The board as a window manager: filling the window with a handful of cards, and the small grammar
 /// that applies while it is doing so.
 ///
-/// **⌘Return is one command at both ends.** With one card selected it fills the window with that card,
+/// **Create Workspace is one command at both ends.** With one card selected it fills the window with that card,
 /// which is today's most tedious manoeuvre on a board — zoom in, pan, find it. With six selected it is a
 /// grid. Fullscreen and tile are the same idea at different counts, and making them one key is what
 /// makes it worth learning.
@@ -28,7 +28,9 @@ extension CanvasBoardView {
 
     // MARK: Entering and leaving
 
-    /// ⌘Return. Make a workspace out of the selection — or, inside one, go back to the canvas.
+    /// Create Workspace. Make a workspace out of the selection — or, inside one, go back to the canvas.
+    ///
+    /// No key equivalent since 2026-09-23; it was ⌘↩.
     ///
     /// **One meaning in each place, which it did not have.** Pressed inside a tiling this used to drill
     /// in: with one tile picked out of six, the six went away and that one filled the window, and only
@@ -155,7 +157,10 @@ extension CanvasBoardView {
         // **Measured for 100%, then travelled to.** This used to set the zoom outright and measure
         // afterwards, which is the same arithmetic with the journey missing — see
         // `tileableRect(atZoom:)` and `CanvasScrollView.fly(to:centre:animated:)`.
-        let area = FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) }
+        //
+        // **With the scrollers already gone**, which the tiling is about to do anyway. See
+        // `measureForNewTiling`.
+        let area = measureForNewTiling()
         let restoreVisible = tiling?.restoreVisible ?? visible
         let session: CanvasTileSession
         if arrangement == nil, let remembered,
@@ -203,6 +208,22 @@ extension CanvasBoardView {
     /// the whole point of the pose.
     func flyToTiles(of session: CanvasTileSession, animated: Bool) {
         scrollView?.canvasScroll?.fly(to: 1, centre: tilesCentre(of: session), animated: animated)
+    }
+
+    /// The region a tiling about to go up will fill, at 100% — measured with the scrollers hidden.
+    ///
+    /// **A tiling has no scrollers, and the board it is measured from can.** With legacy scrollers
+    /// (a mouse attached, or Show scroll bars: Always) the clip is 17pt short on the right and the
+    /// bottom while the board is up, so an area measured from it came out 17pt short both ways. Setting
+    /// `tiling` then hid them, the window was 17pt larger than the tiles were laid out for, and the
+    /// tiles sat 8.5pt further in on every side until a resize measured again. Worse, the clip growing
+    /// under the new tiling ran `retileForWindowSize` at the zoom the board was leaving. Hiding them
+    /// first is what `endPicking` has always done; with overlay scrollers it changes nothing.
+    ///
+    /// The caller that ends up not tiling puts them back.
+    func measureForNewTiling() -> CanvasRect {
+        scrollView?.canvasScroll?.showsScrollers(false)
+        return FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) }
     }
 
     /// The point the window looks at to frame a session's tiles.
@@ -327,11 +348,16 @@ extension CanvasBoardView {
         guard let session = CanvasTileSession(
             restoring: remembered,
             keeping: { document.node(id: $0).map { !$0.isGroup } ?? false },
-            area: FrameMeter.span("tileableRect") { tileableRect(atZoom: 1) },
+            area: measureForNewTiling(),
             // Where leaving puts you back. Not remembered: it is the region the board would be showing
             // anyway, which on one just opened is the whole of it — the right place to be returned to.
             restoreVisible: canvasRect(visibleRect),
-            restoreZoom: restoreZoom) else { return }
+            restoreZoom: restoreZoom) else {
+            // Nothing left of it to tile, so the board stays a board — and gets back what the
+            // measurement took away.
+            scrollView?.canvasScroll?.showsScrollers(!isTiled)
+            return
+        }
         workspaceName = name
         tiling = session
         lastTiling = memory(of: session)
