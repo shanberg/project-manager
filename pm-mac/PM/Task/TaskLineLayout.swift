@@ -22,7 +22,7 @@ struct TaskLineLayout: Layout {
     /// The least of a line the words keep before its badges move under them.
     var minTextShare: CGFloat = 0.7
 
-    private struct Placement {
+    struct Placement {
         var text: CGRect
         var badges: CGRect
         var ghost: CGRect?
@@ -30,12 +30,30 @@ struct TaskLineLayout: Layout {
         var size: CGSize
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        place(width: proposal.width, subviews).size
+    /// Placements already worked out, by the width they were worked out for.
+    ///
+    /// SwiftUI asks a layout the same question three ways in one pass — its size, where its subviews
+    /// go, and where its baseline is — and each answer measures every subview again, the text by laying
+    /// it out. A card of a long project runs that for every row on every change, so the answer is kept
+    /// for the pass. SwiftUI replaces the cache whenever the subviews change (`updateCache` defaults to
+    /// `makeCache`), which is exactly when a remembered placement would stop being true.
+    typealias Cache = [CGFloat?: Placement]
+
+    func makeCache(subviews: Subviews) -> Cache { [:] }
+
+    private func place(width: CGFloat?, _ subviews: Subviews, cache: inout Cache) -> Placement {
+        if let known = cache[width] { return known }
+        let placement = place(width: width, subviews)
+        cache[width] = placement
+        return placement
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let placement = place(width: bounds.width, subviews)
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        place(width: proposal.width, subviews, cache: &cache).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let placement = place(width: bounds.width, subviews, cache: &cache)
         func put(_ index: Int, _ rect: CGRect) {
             guard subviews.indices.contains(index) else { return }
             subviews[index].place(at: CGPoint(x: bounds.minX + rect.minX, y: bounds.minY + rect.minY),
@@ -48,9 +66,9 @@ struct TaskLineLayout: Layout {
 
     /// The text's first baseline, so the row can line the box up with the words.
     func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
-                           subviews: Subviews, cache: inout ()) -> CGFloat? {
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? {
         guard guide == .firstTextBaseline else { return nil }
-        let placement = place(width: bounds.width, subviews)
+        let placement = place(width: bounds.width, subviews, cache: &cache)
         return placement.text.minY + placement.textBaseline
     }
 

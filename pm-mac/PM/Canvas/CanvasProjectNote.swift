@@ -71,7 +71,25 @@ struct CanvasProjectNote: View {
     /// in the window's compact list, and stopping on one every few presses would only lengthen the
     /// walk from one task to the next. The window makes captions selectable only in the mode where a
     /// session is a first-class heading with its own note and commands.
-    @State private var selection = RowSelection()
+    ///
+    /// **Read by the rows' own leaves, not by this body** — held in `RowSelectionHolder` for the reason
+    /// `hover` is held in `RowHoverState`. As `@State` read here, every click and every arrow key re-ran
+    /// the whole card to move a highlight, which on a long project was a tenth of a second a press.
+    /// Everything this body does with the selection is in a handler, which reads it without depending
+    /// on it; only `bandView` and the due ghost's backing draw it, and they read it inside a
+    /// `RowHoverReader`.
+    @State private var selectionHolder = RowSelectionHolder()
+    private var selection: RowSelection {
+        get { selectionHolder.value }
+        nonmutating set {
+            guard selectionHolder.value != newValue else { return }
+            selectionHolder.value = newValue
+            // The board asks this before it decides whether ⌫ was about the rows, and it has to be
+            // true *before* the key arrives — so it is published on every change to the selection
+            // rather than read across the seam on demand.
+            if commands.selectedRows != newValue.count { commands.selectedRows = newValue.count }
+        }
+    }
     /// The row under the pointer, again — as a reference, so the right-click monitor's closure reads
     /// the live value rather than the copy it captured. See `RowHoverTracker`.
     @State private var rowHover = RowHoverTracker()
@@ -232,10 +250,6 @@ struct CanvasProjectNote: View {
                 selection.selectAll(in: visibleKeys)
             }
             .onChange(of: commands.deleteRowsRequest) { _, _ in requestDelete(selectedTodos) }
-            // The board asks this before it decides whether ⌫ was about the rows, and it has to be
-            // true *before* the key arrives — so it is published on every change to the selection
-            // rather than read across the seam on demand.
-            .onChange(of: selection.count) { _, count in commands.selectedRows = count }
             .onChange(of: commands.copyRowsRequest) { _, _ in
                 TaskPasteboard.copy(markdown: store.markdown(for: selectedTodos))
             }
@@ -836,7 +850,7 @@ struct CanvasProjectNote: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { openNote = index }
-                .contextMenu { sessionMenu(at: index) }
+                .contextMenu { LazyMenu { sessionMenu(at: index) } }
         }
         if showsEmpty { emptySession(at: index) }
         ForEach(blocks) { block in
@@ -852,7 +866,7 @@ struct CanvasProjectNote: View {
                     // opens its note. Same act, same surface, whichever one you are looking at it
                     // through — which is the rule the task row's double-click already follows.
                     .onTapGesture(count: 2) { openNote = index }
-                    .contextMenu { sessionMenu(at: index) }
+                    .contextMenu { LazyMenu { sessionMenu(at: index) } }
             case .task(let identified):
                 row(identified.todo)
             }
@@ -938,7 +952,7 @@ struct CanvasProjectNote: View {
         }
         .padding(.horizontal, Self.margin)
         .padding(.vertical, 2)
-        .contextMenu { sessionMenu(at: index) }
+        .contextMenu { LazyMenu { sessionMenu(at: index) } }
     }
 
     private func quietAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -1079,11 +1093,10 @@ struct CanvasProjectNote: View {
                 // the card at once; laid out invisibly it cost every one of them the chip's width.
                 if todo.dueDate == nil {
                     dueChip.background {
-                        let selected = selection.contains(key)
-                        let emphasized = engagement.isEngaged
                         RowHoverReader(hover: hover, id: rowID) { hovering in
                             if hovering || editingDue {
-                                DueGhostBacking(isSelected: selected, isEmphasized: emphasized,
+                                DueGhostBacking(isSelected: selection.contains(key),
+                                                isEmphasized: engagement.isEngaged,
                                                 isHovering: hovering && editorClosed)
                             }
                         }
@@ -1127,15 +1140,24 @@ struct CanvasProjectNote: View {
         // and a board was where you read. It is the same drag, resolved by the same
         // `TaskDropResolver`, and rightward still means "make this a child of the row above".
         //
-        // Off while an editor is open, so the list stays still in edit mode — and gated on the card
-        // being stepped into, because until then the board owns this drag and it moves the card. That
-        // is the same line `CanvasNodeView.takesItsOwnClicks` already draws; in a tiled view, where
-        // there is nowhere to move a card to, the card has the drag from the first press.
+        // Off while an editor is open, so the list stays still in edit mode: the drag still lifts, but
+        // carries nothing — no task keys for this list's drop to move, no text for anywhere else to
+        // take. Until the card is stepped into the board owns this drag and it moves the card, and that
+        // needs no gate here: `CanvasNodeView.takesItsOwnClicks` refuses the card every mouse event
+        // until then, and in a tiled view, where there is nowhere to move a card to, grants it the drag
+        // from the first press.
+        //
+        // **Both rules are asked inside the drag, not in this condition.** `ifCondition` is an `if`, so
+        // flipping it replaces the row — its text view, its measurements, everything — and a condition
+        // every row shares flips every row at once. Gated here on the editor and the engagement, opening
+        // an editor, closing it, and stepping into the card each rebuilt every row on it, which on a
+        // long project was half a second a time. `isOrigin` never changes for a row, so it can stay.
         //
         // Not the copy under Picked up, for the reason it publishes no frame. Dragging an old task onto
         // today's sitting picks it up (D1); ⌥ makes it a move.
-        .ifCondition(isOrigin && activeEditor == nil && engagement.actsImmediately) { view in
+        .ifCondition(isOrigin) { view in
             view.onDrag {
+                guard activeEditor == nil else { return NSItemProvider() }
                 let dragged = key
                 draggingKey = dragged
                 draggedSubtree = store.subtreeKeys(of: todo)
@@ -1205,12 +1227,12 @@ struct CanvasProjectNote: View {
         } }
     }
 
-    /// The row's selection band, reading the hover itself so the row's body doesn't have to.
+    /// The row's selection band, reading the hover and the selection itself so the row's body doesn't
+    /// have to. The reads are inside the reader's closure, which runs in the reader's body — so a click
+    /// re-runs the bands and not the card.
     private func bandView(key: String, rowID: String, editorClosed: Bool) -> some View {
-        let selected = selection.contains(key)
-        let emphasized = engagement.isEngaged
-        return RowHoverReader(hover: hover, id: rowID) { hovering in
-            RowSelectionBand(isSelected: selected, isEmphasized: emphasized,
+        RowHoverReader(hover: hover, id: rowID) { hovering in
+            RowSelectionBand(isSelected: selection.contains(key), isEmphasized: engagement.isEngaged,
                              isHovering: hovering && editorClosed)
         }
     }
@@ -1401,7 +1423,7 @@ final class DropFrames {
     var sessions: [SessionFrame] = []
 }
 
-/// A row's context menu, built only when the menu opens.
+/// A row's or a session's context menu, built only when the menu opens.
 ///
 /// SwiftUI runs a `.contextMenu`'s content closure for every row on every pass — twice, in practice —
 /// and it is the closure that decides the menu's targets, which with a selection is a walk of the whole
@@ -1433,6 +1455,13 @@ final class RowHoverState {
             current = nil
         }
     }
+}
+
+/// The card's row selection, observed, and read **only** from leaves — see `CanvasProjectNote.selection`.
+@MainActor
+@Observable
+final class RowSelectionHolder {
+    var value = RowSelection()
 }
 
 /// A leaf that reads the hover for one row and hands the answer to `content`, so the row around it

@@ -125,11 +125,17 @@ public struct MentionCandidate: Equatable, Sendable, Identifiable {
 /// Every `[[…]]` span in `text`, in document order. Ranges cover the brackets too, because the
 /// brackets are part of the token: deleting the name and leaving `[[]]` behind is the failure this
 /// exists to prevent.
+///
+/// The pattern is compiled once. This is asked for every task row a list draws, and a layout manager
+/// drawing pills asks it again as it lays the text out — compiling it on each call was most of what it
+/// cost a long project's card to redraw.
 public func wikilinkSpans(in text: String) -> [Range<String.Index>] {
-    guard let pattern = try? NSRegularExpression(pattern: #"!?\[\[[^\]\n]*\]\]"#) else { return [] }
+    guard let pattern = wikilinkPattern else { return [] }
     let full = NSRange(text.startIndex..., in: text)
     return pattern.matches(in: text, range: full).compactMap { Range($0.range, in: text) }
 }
+
+private let wikilinkPattern = try? NSRegularExpression(pattern: #"!?\[\[[^\]\n]*\]\]"#)
 
 /// The span strictly containing `index` — inside the token, not at either edge.
 ///

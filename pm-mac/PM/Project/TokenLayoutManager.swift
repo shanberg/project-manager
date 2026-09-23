@@ -61,6 +61,10 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
 
     /// The token spans of the current text, and the bracket runs inside each.
     private func tokens(in text: String) -> [(span: NSRange, opening: NSRange, closing: NSRange)] {
+        scan(text).tokens
+    }
+
+    private func findTokens(in text: String) -> [(span: NSRange, opening: NSRange, closing: NSRange)] {
         wikilinkSpans(in: text).compactMap { span in
             guard !text[span].hasPrefix("!") else { return nil }
             let range = NSRange(span, in: text)
@@ -95,19 +99,61 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
 
     /// How wide a hidden character draws, or nil when it isn't one of them.
     ///
-    /// One lookup for both kinds because this is asked per glyph and each call re-scans the line: a
-    /// bracket carries a quarter of the padding, a code character carries nothing at all.
-    private func hiddenWidth(at character: Int, in text: String) -> CGFloat? {
-        for token in tokens(in: text) {
-            if NSLocationInRange(character, token.opening) || NSLocationInRange(character, token.closing) {
-                return padding / 4
-            }
-            if let code = codeRange(inTokenAt: token.span, in: text),
-               NSLocationInRange(character, code) {
-                return 0
-            }
+    /// One lookup for both kinds: a bracket carries a quarter of the padding, a code character carries
+    /// nothing at all.
+    private func hiddenWidth(at character: Int, in text: String, of layoutManager: NSLayoutManager) -> CGFloat? {
+        for run in scan(text, of: layoutManager).hidden where NSLocationInRange(character, run.range) {
+            return run.width
         }
         return nil
+    }
+
+    /// What the text's tokens come to — their spans, and every run of characters that draws as
+    /// padding or as nothing — worked out once per text rather than once per glyph.
+    ///
+    /// **This is asked per glyph**, by three delegate methods, during every layout. Scanning the text
+    /// for tokens on each ask made a line's layout cost a regex pass per character, and a card of a
+    /// long project lays out every row whenever anything on it changes. Dropped whenever the text is
+    /// edited or swapped (`processEditing`, `replaceTextStorage`); the codes setting is part of the
+    /// key, because flipping it changes which runs hide without touching the text.
+    ///
+    /// **Only for its own text.** Lent to another layout manager as its delegate — the fallback
+    /// `CompletingTextField` uses — this never hears that manager's text change, so a scan of that
+    /// text is made fresh each time rather than remembered.
+    private struct Scan {
+        let codesShown: Bool
+        let tokens: [(span: NSRange, opening: NSRange, closing: NSRange)]
+        let hidden: [(range: NSRange, width: CGFloat)]
+    }
+    private var scanned: Scan?
+
+    private func scan(_ text: String, of layoutManager: NSLayoutManager? = nil) -> Scan {
+        let codesShown = ProjectCodes.areShown
+        let isOwn = layoutManager.map { $0 === self } ?? true
+        if isOwn, let scanned, scanned.codesShown == codesShown { return scanned }
+        let tokens = findTokens(in: text)
+        var hidden: [(range: NSRange, width: CGFloat)] = []
+        for token in tokens {
+            hidden.append((token.opening, padding / 4))
+            hidden.append((token.closing, padding / 4))
+            if let code = codeRange(inTokenAt: token.span, in: text) { hidden.append((code, 0)) }
+        }
+        let result = Scan(codesShown: codesShown, tokens: tokens, hidden: hidden)
+        if isOwn { scanned = result }
+        return result
+    }
+
+    override func processEditing(for textStorage: NSTextStorage, edited editMask: NSTextStorageEditActions,
+                                 range newCharRange: NSRange, changeInLength delta: Int,
+                                 invalidatedRange invalidatedCharRange: NSRange) {
+        if editMask.contains(.editedCharacters) { scanned = nil }
+        super.processEditing(for: textStorage, edited: editMask, range: newCharRange,
+                             changeInLength: delta, invalidatedRange: invalidatedCharRange)
+    }
+
+    override func replaceTextStorage(_ newTextStorage: NSTextStorage) {
+        scanned = nil
+        super.replaceTextStorage(newTextStorage)
     }
 
     // MARK: glyph generation
@@ -120,7 +166,8 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string else { return 0 }
         var properties = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
         var changed = false
-        for i in 0..<glyphRange.length where hiddenWidth(at: charIndexes[i], in: text) != nil {
+        for i in 0..<glyphRange.length
+        where hiddenWidth(at: charIndexes[i], in: text, of: layoutManager) != nil {
             properties[i] = .controlCharacter
             changed = true
         }
@@ -134,7 +181,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                        shouldUse action: NSLayoutManager.ControlCharacterAction,
                        forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string,
-              hiddenWidth(at: charIndex, in: text) != nil else { return action }
+              hiddenWidth(at: charIndex, in: text, of: layoutManager) != nil else { return action }
         // Whitespace, so each run occupies a width this decides and paints nothing.
         return .whitespace
     }
@@ -145,7 +192,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                        proposedLineFragment proposedRect: NSRect,
                        glyphPosition: NSPoint, characterIndex charIndex: Int) -> NSRect {
         guard !TokenDisplay.showsSyntax, let text = layoutManager.textStorage?.string,
-              let width = hiddenWidth(at: charIndex, in: text) else { return .zero }
+              let width = hiddenWidth(at: charIndex, in: text, of: layoutManager) else { return .zero }
         // A **quarter** for a bracket. This is asked per glyph, and there are two bracket characters
         // on each side — so a half here gave each side a full `padding` and the token twice what was
         // set. A hidden code character asks for nothing: it is meant to leave no trace, not to leave

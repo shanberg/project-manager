@@ -41,10 +41,21 @@ struct TokenTextLabel: NSViewRepresentable {
     /// The row is an `HStack(alignment: .firstTextBaseline)`, and a representable reports no baseline
     /// of its own — so SwiftUI falls back to the view's bottom edge and aligns the checkbox to *that*,
     /// which is the gap that appeared above every task. Given as an alignment guide by the caller.
+    ///
+    /// Remembered per size and weight. SwiftUI asks every row for its alignment on every layout pass,
+    /// and making and throwing away a layout manager to answer was a third of what it cost a long
+    /// project's card to lay itself out again.
     static func firstBaseline(size: CGFloat, focused: Bool) -> CGFloat {
+        let key = BaselineKey(size: size, focused: focused)
+        if let known = baselines[key] { return known }
         let font = NSFont.systemFont(ofSize: size, weight: focused ? .semibold : .regular)
-        return NSLayoutManager().defaultBaselineOffset(for: font)
+        let offset = NSLayoutManager().defaultBaselineOffset(for: font)
+        baselines[key] = offset
+        return offset
     }
+
+    private struct BaselineKey: Hashable { let size: CGFloat; let focused: Bool }
+    @MainActor private static var baselines: [BaselineKey: CGFloat] = [:]
 }
 
 /// The view behind `TokenTextLabel`. Its own TextKit stack rather than an `NSTextView`, because it
