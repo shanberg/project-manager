@@ -502,6 +502,20 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     // MARK: The card, and the page over it
 
+    /// The placeholder's view: it takes no clicks while a page is under it.
+    ///
+    /// It stays over a running page until the reveal — through the load, and through the fade out — and
+    /// it is transparent apart from the globe and the name, so the page shows through while every click
+    /// on it landed here. Right after a tab switch that was up to eight seconds of a page you could see
+    /// and not use. With no page under it (a card that is off, or whose load failed) it takes the
+    /// pointer as any view does, which is what keeps the "Couldn't load" tooltip.
+    private final class Placeholder: NSView {
+        var coversAPage: () -> Bool = { false }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            coversAPage() ? nil : super.hitTest(point)
+        }
+    }
+
     private func showPlaceholder() {
         placeholder?.removeFromSuperview()
 
@@ -567,7 +581,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // between the first two so they read as a pair rather than as three evenly spaced things.
         stack.setCustomSpacing(2, after: name)
 
-        let container = NSView()
+        let container = Placeholder()
+        container.coversAPage = { [weak self] in self?.web != nil }
         stack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -1716,6 +1731,13 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         stopProbingForPaint()
         guard !revealed else { return }
         tearDownPage()
+        // The picture from the last time the page ran is what the card showed while it tried. Once the
+        // answer is that it couldn't, a page drawn under "Couldn't load" contradicts it. Marked as
+        // settled for this shape, so a crossing between the board and tiles doesn't put one back; the
+        // stored picture is kept, and stands in again the next time the card tries.
+        frozen?.removeFromSuperview()
+        frozen = nil
+        pictureIsTiled = board.isTiled
         placeholder?.isHidden = false
         say("Couldn't load", tooltip: ns.localizedDescription)
     }
