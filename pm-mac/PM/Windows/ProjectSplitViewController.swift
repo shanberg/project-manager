@@ -542,7 +542,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.openingNotice = replacementNotice
         replacementNotice = nil
         pane.title_ = source.name ?? url.deletingPathExtension().lastPathComponent
-        pane.projectColor = self.store.color
+        let appearance = self.appearance
+        pane.projectColor = appearance.color
+        pane.projectTexture = appearance.texture
         pane.trafficLightsAreElsewhere = { [weak self] in self?.sidebarItem.isCollapsed == false }
         pane.focus = focus
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
@@ -802,9 +804,32 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// The project's board has appeared (or moved) since a tab was built. Rebuild the tab that is
     /// waiting on it, so a canvas that has just been made lands on screen rather than leaving the
     /// window on the pane that was holding still for it.
-    /// The project's colour changed, or arrived with its first read: every mounted board takes it.
+    /// The project's colour or texture changed, arrived with its first read, or is being tried in Project
+    /// Settings: every mounted board takes it.
     func projectColorChanged() {
-        for case let pane as CanvasPaneController in contentPane.allContent { pane.projectColor = store.color }
+        let appearance = self.appearance
+        for case let pane as CanvasPaneController in contentPane.allContent {
+            pane.projectColor = appearance.color
+            pane.projectTexture = appearance.texture
+        }
+    }
+
+    /// What the boards draw: Project Settings' unsaved choice while there is one (see
+    /// `ProjectAppearancePreview`), and otherwise what the store read. A saved choice is let go here,
+    /// once the store says the same thing.
+    private var appearance: ProjectAppearancePreview.Appearance {
+        let saved = ProjectAppearancePreview.Appearance(
+            color: store.color,
+            texture: CanvasTexture.spec(for: store.texture, style: store.textureStyle, notesPath: store.notesPath))
+        guard let name = store.projectName, let preview = ProjectAppearancePreview.shared.byProject[name] else {
+            return saved
+        }
+        if preview.isCommitted, preview.color == saved.color, preview.texture == saved.texture {
+            // After this pass rather than inside it: letting go changes what's being observed.
+            DispatchQueue.main.async { ProjectAppearancePreview.shared.settled(for: name) }
+            return saved
+        }
+        return preview
     }
 
     func canvasPathChanged() {

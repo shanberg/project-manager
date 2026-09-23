@@ -75,6 +75,10 @@ final class PMStore {
     private(set) var icon: ProjectIcon?
     /// The colour chosen in Project Settings, from the same frontmatter — see `ProjectColor`.
     private(set) var color: ProjectColor?
+    /// The texture chosen in Project Settings, from the same frontmatter — see `ProjectTexture`.
+    private(set) var texture: ProjectTexture?
+    /// How that texture is laid on — its reach, strength and pixel size.
+    private(set) var textureStyle: ProjectTextureStyle = .standard
     private(set) var todos: [Todo] = []
     /// Every standing pick that still resolves in this read: which older task was picked up into which
     /// sitting (docs/sessions.md D2). Each task also carries its latest one as `Todo.picked`.
@@ -258,6 +262,8 @@ final class PMStore {
         ("notes", { $0.notes as Any }),
         ("icon", { $0.icon as Any }),
         ("color", { $0.color as Any }),
+        ("texture", { $0.texture as Any }),
+        ("textureStyle", { $0.textureStyle }),
         ("todos", { $0.todos }),
         ("picks", { $0.picks }),
         ("waitTargets", { $0.waitTargets }),
@@ -377,6 +383,8 @@ final class PMStore {
             notes = nil
             icon = nil
             color = nil
+            texture = nil
+            textureStyle = .standard
             todos = []
             picks = []
             lastEditedAt = nil
@@ -398,7 +406,7 @@ final class PMStore {
             // Resolve the project directory once (this is the protected-folder access), then reuse
             // the handle for both the notes read and the cached notes path.
             Log.write("reload start: name=\(name)")
-            let result = Result { () -> (NotesShowOutput, String, String, Date?, ProjectIcon?, ProjectColor?) in
+            let result = Result { () -> (NotesShowOutput, String, String, Date?, ProjectIcon?, ProjectColor?, ProjectTexture?, ProjectTextureStyle) in
                 let cfg = try? loadConfig()
                 Log.write("config: useObsidianCLI=\(cfg?.useObsidianCLI ?? false)")
                 let handle = try resolveNotesHandle(project: name)
@@ -421,7 +429,8 @@ final class PMStore {
                 // After the prune above, which is a write of our own — read before it, the file's
                 // date would be the moment *this* load touched it rather than the last real edit.
                 return (output, handle.notesPath, handle.projectPath, notesLastEdited(path: handle.notesPath),
-                        projectIcon(rawText: raw), projectColor(rawText: raw))
+                        projectIcon(rawText: raw, notesPath: handle.notesPath), projectColor(rawText: raw), projectTexture(rawText: raw),
+                        projectTextureStyle(rawText: raw))
             }
             if case .failure(let error) = result {
                 let ns = error as NSError
@@ -430,7 +439,7 @@ final class PMStore {
             Task { @MainActor in
                 guard let self else { return }
                 switch result {
-                case .success(let (output, path, projectPath, lastEdited, icon, color)):
+                case .success(let (output, path, projectPath, lastEdited, icon, color, texture, textureStyle)):
                     // Classify how the hero task moved since the last load, but never animate across a
                     // project switch (the two heroes are unrelated) — just reseat the snapshot.
                     let projectChanged = self.projectKey != key
@@ -445,6 +454,8 @@ final class PMStore {
                     self.notes = output.notes
                     self.icon = icon
                     self.color = color
+                    self.texture = texture
+                    self.textureStyle = textureStyle
                     self.todos = output.todos
                     self.picks = output.picks
                     self.resolveWaits()

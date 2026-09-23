@@ -28,12 +28,25 @@ enum ProjectSettings {
             // controller whose button is calling this shouldn't be torn down from inside the call.
             DispatchQueue.main.async {
                 window.contentViewController = nil
-                if saving { apply(model, projectNamed: name, isArchived: isArchived) }
+                if saving {
+                    apply(model, projectNamed: name, isArchived: isArchived)
+                    ProjectAppearancePreview.shared.commit(for: name)
+                } else {
+                    ProjectAppearancePreview.shared.cancel(for: name)
+                }
             }
         }
 
+        // The first touch of colour or texture lifts the dimming off the window behind, and from then
+        // on the window shows each choice as it's made — see `ProjectAppearancePreview`.
+        let onAppearanceChange: (ProjectAppearancePreview.Appearance) -> Void = { appearance in
+            if let parent { SheetDimming.reveal(parent) }
+            ProjectAppearancePreview.shared.show(appearance, for: name)
+        }
+
         let host = NSHostingController(rootView: ProjectSettingsView(
-            model: model, onCancel: { finish(saving: false) }, onSave: { finish(saving: true) }))
+            model: model, onCancel: { finish(saving: false) }, onSave: { finish(saving: true) },
+            onAppearanceChange: onAppearanceChange))
         host.sizingOptions = [.preferredContentSize]
         window.contentViewController = host
 
@@ -58,10 +71,10 @@ enum ProjectSettings {
     /// The icon first, while the folder still has the name it was read under; then the title, which
     /// moves the folder and repairs everything holding its key.
     private static func apply(_ model: ProjectSettingsModel, projectNamed name: String, isArchived: Bool) {
-        let icon = model.chosenIcon
         let title = model.trimmedTitle
         do {
-            if icon != model.originalIcon {
+            if model.iconChanged {
+                let icon = try savedIcon(model, projectNamed: name)
                 try setProjectIcon(project: name, to: icon)
                 Log.write("project icon: \(name) -> \(icon?.value ?? "none")")
                 if case .emoji(let emoji) = icon { EmojiCatalog.noteUsed(emoji) }
@@ -69,6 +82,11 @@ enum ProjectSettings {
             if model.color != model.originalColor {
                 try setProjectColor(project: name, to: model.color)
                 Log.write("project color: \(name) -> \(model.color?.value ?? "none")")
+            }
+            if model.textureChanged {
+                try setProjectTexture(project: name, to: savedTexture(model, projectNamed: name),
+                                      style: model.textureStyle)
+                Log.write("project texture: \(name) -> \(model.chosenTexture?.value ?? "none")")
             }
             if !title.isEmpty, title != model.originalTitle {
                 try ProjectLifecycle.rename(projectNamed: name, to: title, isArchived: isArchived)
@@ -81,6 +99,25 @@ enum ProjectSettings {
             ProjectLifecycle.present(error, doing: "Couldn't save “\(name)”")
         }
     }
+
+    /// The icon to write, copying an image picked in the sheet into the attachments folder first — the
+    /// same as `savedTexture`, below.
+    private static func savedIcon(_ model: ProjectSettingsModel, projectNamed name: String) throws -> ProjectIcon? {
+        guard let source = model.pendingIconImage, model.mode == .image else { return model.chosenIcon }
+        let notes = URL(fileURLWithPath: try resolveNotesHandle(project: name).notesPath)
+        let landing = try copyNoteAttachment(source, forNoteAt: notes)
+        return .image(path: "\(markdownAttachmentsFolder)/\(landing.lastPathComponent)", recolor: model.iconRecolor)
+    }
+
+    /// The texture to write. An image picked in the sheet is copied into the attachments folder beside
+    /// the notes first — under whatever name it lands as, since `copyNoteAttachment` steps past a file
+    /// already there — and the texture names that copy.
+    private static func savedTexture(_ model: ProjectSettingsModel, projectNamed name: String) throws -> ProjectTexture? {
+        guard let source = model.pendingTextureImage, model.textureMode == .image else { return model.chosenTexture }
+        let notes = URL(fileURLWithPath: try resolveNotesHandle(project: name).notesPath)
+        let landing = try copyNoteAttachment(source, forNoteAt: notes)
+        return .image("\(markdownAttachmentsFolder)/\(landing.lastPathComponent)")
+    }
 }
 
 // MARK: - Model
@@ -88,7 +125,8 @@ enum ProjectSettings {
 @MainActor
 @Observable
 final class ProjectSettingsModel {
-    enum Mode: Hashable { case progress, symbol, emoji }
+    enum Mode: Hashable { case progress, symbol, emoji, image }
+    enum TextureMode: Hashable { case none, pattern, image }
 
     let kind: ProjectKind
     let folderName: String
@@ -97,6 +135,10 @@ final class ProjectSettingsModel {
     let originalTitle: String
     let originalIcon: ProjectIcon?
     let originalColor: ProjectColor?
+    let originalTexture: ProjectTexture?
+    let originalTextureStyle: ProjectTextureStyle
+    /// Where the notes file is, for finding an image texture already set. Nil when it can't be resolved.
+    let notesPath: String?
     let done: Int
     let total: Int
 
@@ -105,6 +147,26 @@ final class ProjectSettingsModel {
     var symbol: String
     var emoji: String
     var color: ProjectColor?
+    /// The image icon, relative to the notes — the saved one, or where a picked one will land. Kept while
+    /// another mode is chosen, so switching back finds it.
+    private(set) var iconImagePath: String?
+    /// An image picked for the icon and not saved yet — copied into the attachments folder on Save.
+    private(set) var pendingIconImage: URL?
+    /// Whether the image icon is drawn in the project's colour rather than its own.
+    var iconRecolor = false
+    var textureMode: TextureMode
+    /// Kept while the mode is Image or None, so switching back finds the pattern you had.
+    var texturePattern: ProjectTexture.Name
+    /// The image texture, relative to the notes — the saved one, or where a picked one will land. Kept
+    /// while the mode is Pattern or None, for the same reason.
+    private(set) var textureImagePath: String?
+    /// An image picked for the texture and not saved yet — copied into the attachments folder on Save.
+    private(set) var pendingTextureImage: URL?
+    /// The image texture's pixels, loaded once — the tile is dithered from them at whatever tile size
+    /// is chosen.
+    private(set) var textureImageSource: CGImage?
+    @ObservationIgnored private var ditheredImage: (cells: Int, tile: CanvasTexture.Tile)?
+    var textureStyle: ProjectTextureStyle
     var symbolQuery = ""
     /// The category menu's choice. Nil is All.
     var symbolCategory: String?
@@ -128,16 +190,34 @@ final class ProjectSettingsModel {
         title = originalTitle
 
         // One read for both the icon and the preview ring's progress.
-        let raw = (try? resolveNotesHandle(project: name)).flatMap { try? $0.io.readContent(path: $0.notesPath) }
+        let handle = try? resolveNotesHandle(project: name)
+        notesPath = handle?.notesPath
+        let raw = handle.flatMap { try? $0.io.readContent(path: $0.notesPath) }
         let todos = raw.flatMap { try? notesShow(rawText: $0) }?.todos ?? []
         (done, total) = todos.progress
         originalIcon = raw.flatMap(projectIcon(rawText:))
         originalColor = raw.flatMap(projectColor(rawText:))
         color = originalColor
+        originalTexture = raw.flatMap(projectTexture(rawText:))
+        originalTextureStyle = raw.map(projectTextureStyle(rawText:)) ?? .standard
+        textureStyle = originalTextureStyle
+        switch originalTexture {
+        case .named(let name):
+            textureMode = .pattern; texturePattern = name
+        case .image(let path):
+            textureMode = .image; texturePattern = Self.defaultPattern; textureImagePath = path
+            let url = handle.flatMap { ProjectTexture.image(path).imageURL(notesPath: $0.notesPath) }
+            textureImageSource = url.flatMap { NSImage(contentsOf: $0)?.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+        case nil:
+            textureMode = .none; texturePattern = Self.defaultPattern
+        }
 
         switch originalIcon {
         case .symbol(let name): mode = .symbol; symbol = name; emoji = Self.defaultEmoji
         case .emoji(let e): mode = .emoji; symbol = Self.defaultSymbol; emoji = e
+        case .image(let path, let recolor):
+            mode = .image; symbol = Self.defaultSymbol; emoji = Self.defaultEmoji
+            iconImagePath = path; iconRecolor = recolor
         case nil: mode = .progress; symbol = Self.defaultSymbol; emoji = Self.defaultEmoji
         }
 
@@ -155,11 +235,91 @@ final class ProjectSettingsModel {
         case .progress: return nil
         case .symbol: return .symbol(symbol)
         case .emoji: return .emoji(emoji)
+        case .image: return iconImagePath.map { .image(path: $0, recolor: iconRecolor) }
         }
     }
 
+    /// The chosen icon as it can be drawn: an image's path made absolute — the picked file itself until
+    /// Save copies it.
+    var drawableIcon: ProjectIcon? {
+        if mode == .image, let pendingIconImage {
+            return .image(path: pendingIconImage.path, recolor: iconRecolor)
+        }
+        return chosenIcon?.resolved(notesPath: notesPath)
+    }
+
+    var iconImageName: String? {
+        pendingIconImage?.lastPathComponent ?? iconImagePath.map { ($0 as NSString).lastPathComponent }
+    }
+
+    /// An image counts as chosen at once, so the sheet shows it; the copy waits for Save.
+    func chooseIconImage(_ url: URL) {
+        guard ProjectIconImages.image(atPath: url.path) != nil else { NSSound.beep(); return }
+        pendingIconImage = url
+        iconImagePath = "\(markdownAttachmentsFolder)/\(url.lastPathComponent)"
+        mode = .image
+    }
+
+    var iconChanged: Bool { chosenIcon != originalIcon || (mode == .image && pendingIconImage != nil) }
+
     var canSave: Bool {
-        !trimmedTitle.isEmpty && (trimmedTitle != originalTitle || chosenIcon != originalIcon || color != originalColor)
+        !trimmedTitle.isEmpty && (trimmedTitle != originalTitle || iconChanged || color != originalColor
+            || textureChanged)
+    }
+
+    var chosenTexture: ProjectTexture? {
+        switch textureMode {
+        case .none: return nil
+        case .pattern: return .named(texturePattern)
+        case .image: return textureImagePath.map(ProjectTexture.image)
+        }
+    }
+
+    /// The style only counts while there's a texture for it to style: clearing one drops the other.
+    var textureChanged: Bool {
+        chosenTexture != originalTexture
+            || (chosenTexture != nil && textureStyle != originalTextureStyle)
+            || (textureMode == .image && pendingTextureImage != nil)
+    }
+
+    /// What the preview draws: the choice as it stands, not as it was saved.
+    var previewTexture: CanvasTexture.Spec? {
+        switch textureMode {
+        case .none: return nil
+        case .pattern: return CanvasTexture.Spec(tile: CanvasTexture.tile(rows: CanvasTexture.rows(texturePattern)),
+                                                 style: textureStyle)
+        case .image: return textureImageTile.map { CanvasTexture.Spec(tile: $0, style: textureStyle) }
+        }
+    }
+
+    /// The image as it will be drawn, dithered once per tile size rather than on every redraw.
+    var textureImageTile: CanvasTexture.Tile? {
+        guard let source = textureImageSource else { return nil }
+        let cells = textureStyle.tile
+        if let ditheredImage, ditheredImage.cells == cells { return ditheredImage.tile }
+        guard let tile = CanvasTexture.dithered(source, cells: cells) else { return nil }
+        ditheredImage = (cells, tile)
+        return tile
+    }
+
+    var textureImageName: String? {
+        pendingTextureImage?.lastPathComponent ?? textureImagePath.map { ($0 as NSString).lastPathComponent }
+    }
+
+    /// An image counts as chosen at once, so the panel and preview show it; the copy waits for Save.
+    func chooseTextureImage(_ url: URL) {
+        guard let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { NSSound.beep(); return }
+        pendingTextureImage = url
+        textureImagePath = "\(markdownAttachmentsFolder)/\(url.lastPathComponent)"
+        textureImageSource = image
+        ditheredImage = nil
+        textureMode = .image
+    }
+
+    /// The colour and texture as they stand in the sheet, for the window behind it.
+    var previewAppearance: ProjectAppearancePreview.Appearance {
+        ProjectAppearancePreview.Appearance(color: color, texture: previewTexture)
     }
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
@@ -177,6 +337,7 @@ final class ProjectSettingsModel {
         return results
     }
 
+    static let defaultPattern: ProjectTexture.Name = .checker
     static let defaultSymbol = "star.fill"
     static let defaultEmoji = "🌿"
 }
@@ -189,18 +350,34 @@ final class ProjectSettingsModel {
 /// A symbol is drawn without a color of its own, so it takes the foreground it's placed in — white on
 /// the sidebar's selection, the label color in the menu bar — exactly as the template ring does. An
 /// emoji keeps its own colors, which is what an emoji is for.
+///
+/// An image does whichever it was set to: recoloured, it's drawn as a template — its shape, in the
+/// colour a symbol would take there — and otherwise in its own colours, like an emoji. Its path must be
+/// absolute by the time it gets here; see `ProjectIcon.resolved(notesPath:)`.
 struct ProjectIconMark: View {
     let icon: ProjectIcon
     var size: CGFloat = 13
-    /// The menu bar's stale-task yellow or red. Only a symbol can take it.
+    /// The project's colour, or the menu bar's stale-task yellow or red. A symbol and a recoloured image
+    /// take it; an emoji and an image in its own colours don't.
     var tint: Color? = nil
 
     /// Whether this can be drawn at all. A symbol name typed into the file by hand, or one from a newer
-    /// macOS, may not exist here — and then the caller draws the ring rather than a blank.
+    /// macOS, may not exist here; an image may have been moved or deleted — and then the caller draws the
+    /// ring rather than a blank.
     nonisolated static func canDraw(_ icon: ProjectIcon) -> Bool {
         switch icon {
         case .emoji: return true
         case .symbol(let name): return NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+        case .image(let path, _): return ProjectIconImages.image(atPath: path) != nil
+        }
+    }
+
+    /// Whether it's drawn in colours of its own, so the project's colour has to ride beside it.
+    static func keepsOwnColors(_ icon: ProjectIcon) -> Bool {
+        switch icon {
+        case .emoji: return true
+        case .symbol: return false
+        case .image(_, let recolor): return !recolor
         }
     }
 
@@ -214,7 +391,37 @@ struct ProjectIconMark: View {
             }
         case .emoji(let emoji):
             Text(emoji).font(.system(size: size))
+        case .image(let path, let recolor):
+            if let image = ProjectIconImages.image(atPath: path) {
+                // A shade larger than the point size, which is what a symbol at that size fills.
+                let side = (size * 1.2).rounded()
+                let picture = Image(nsImage: image).resizable().interpolation(.high)
+                if recolor {
+                    picture.renderingMode(.template).aspectRatio(contentMode: .fit)
+                        .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.foreground))
+                        .frame(width: side, height: side)
+                } else {
+                    picture.renderingMode(.original).aspectRatio(contentMode: .fit).frame(width: side, height: side)
+                }
+            }
         }
+    }
+}
+
+/// Image icons, loaded once per file version. Thread-safe, since `canDraw` is asked off the main actor.
+enum ProjectIconImages {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    /// The image at `path`, SVG or bitmap. Keyed on the modification date too, so editing the file in
+    /// place shows on the next draw that asks.
+    static func image(atPath path: String) -> NSImage? {
+        let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        guard let date else { return nil }
+        let key = "\(path)|\(date.timeIntervalSinceReferenceDate)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let image = NSImage(contentsOfFile: path), image.size.width > 0, image.size.height > 0 else { return nil }
+        cache.setObject(image, forKey: key)
+        return image
     }
 }
 
@@ -224,6 +431,7 @@ struct ProjectSettingsView: View {
     @Bindable var model: ProjectSettingsModel
     let onCancel: () -> Void
     let onSave: () -> Void
+    var onAppearanceChange: (ProjectAppearancePreview.Appearance) -> Void = { _ in }
     private let symbolColumns = [GridItem(.adaptive(minimum: 36), spacing: 4)]
     private let emojiColumns = [GridItem(.adaptive(minimum: 34), spacing: 2)]
     /// Fixed, so switching category or typing a search doesn't resize the sheet under the pointer.
@@ -246,14 +454,20 @@ struct ProjectSettingsView: View {
                     }
                 }
                 Divider()
+                row("Color") { ProjectColorPicker(color: $model.color) }
+                Divider()
                 row("Icon") {
                     Picker("Icon", selection: $model.mode) {
                         Text(model.kind.showsProgress ? "Progress" : "Dotted").tag(ProjectSettingsModel.Mode.progress)
                         Text("Symbol").tag(ProjectSettingsModel.Mode.symbol)
                         Text("Emoji").tag(ProjectSettingsModel.Mode.emoji)
+                        Text("Image").tag(ProjectSettingsModel.Mode.image)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                }
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    ProjectIconImagePanel.acceptDrop(providers) { model.chooseIconImage($0) }
                 }
                 if model.mode == .symbol {
                     Divider()
@@ -261,9 +475,27 @@ struct ProjectSettingsView: View {
                 } else if model.mode == .emoji {
                     Divider()
                     emojiPicker.padding(12)
+                } else if model.mode == .image {
+                    Divider()
+                    ProjectIconImagePanel(model: model).padding(12)
                 }
                 Divider()
-                row("Color") { ProjectColorPicker(color: $model.color) }
+                row("Texture") {
+                    Picker("Texture", selection: $model.textureMode) {
+                        Text("None").tag(ProjectSettingsModel.TextureMode.none)
+                        Text("Pattern").tag(ProjectSettingsModel.TextureMode.pattern)
+                        Text("Image").tag(ProjectSettingsModel.TextureMode.image)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    ProjectTexturePanel.acceptDrop(providers) { model.chooseTextureImage($0) }
+                }
+                if model.textureMode != .none {
+                    Divider()
+                    ProjectTexturePanel(model: model).padding(12)
+                }
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
@@ -277,7 +509,8 @@ struct ProjectSettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 440)
+        .frame(width: 488)
+        .onChange(of: model.previewAppearance) { _, appearance in onAppearanceChange(appearance) }
     }
 
     private var header: some View {
@@ -299,8 +532,8 @@ struct ProjectSettingsView: View {
 
     @ViewBuilder
     private var preview: some View {
-        if let icon = model.chosenIcon, ProjectIconMark.canDraw(icon) {
-            ProjectIconMark(icon: icon, size: 22)
+        if let icon = model.drawableIcon, ProjectIconMark.canDraw(icon) {
+            ProjectIconMark(icon: icon, size: 22, tint: model.color?.swiftUIColor)
         } else {
             Image(nsImage: MenubarRing.image(fraction: model.fraction, hasProject: model.total > 0,
                                              showsProgress: model.kind.showsProgress, tint: nil))
@@ -312,7 +545,7 @@ struct ProjectSettingsView: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 12) {
-            Text(label).frame(width: 40, alignment: .leading)
+            Text(label).frame(width: 52, alignment: .leading)
             content()
         }
         // Leading, not centered: a control that doesn't stretch (the segmented picker) would otherwise

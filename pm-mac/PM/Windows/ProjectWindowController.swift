@@ -453,10 +453,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         setRenderer(renderer == .canvas ? .tasks : .canvas)
     }
 
-    /// The project's colour into every board in the window — on the first read, which is when a new
-    /// store learns it, and whenever Project Settings changes it.
+    /// The project's colour and texture into every board in the window — on the first read, which is
+    /// when a new store learns them, and whenever Project Settings changes either.
     private func watchColor() {
-        colorWatch = ObservationRelay(tracking: { [weak self] in _ = self?.store.color }) { [weak self] in
+        colorWatch = ObservationRelay(tracking: { [weak self] in
+            _ = self?.store.color
+            _ = self?.store.texture
+            _ = self?.store.textureStyle
+            // And Project Settings' unsaved choice for this project, which the window shows while it's made.
+            if let name = self?.store.projectName { _ = ProjectAppearancePreview.shared.byProject[name] }
+        }) { [weak self] in
             afterCurrentUpdate { [weak self] in self?.split.projectColorChanged() }
         }
     }

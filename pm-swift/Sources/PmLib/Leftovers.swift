@@ -198,7 +198,7 @@ public func leftoverTasks(before: String? = nil, projects: [String]? = nil, now:
                   var part = leftovers(projectFolder: folder, isArchived: scope.isArchived, notes: read.notes,
                                        todos: read.todos, before: cutoff, calendar: calendar) else { continue }
             part.projectColor = projectColor(rawText: rawText)?.value
-            part.projectIcon = projectIcon(rawText: rawText)?.value
+            part.projectIcon = projectIcon(rawText: rawText, notesPath: notesPath)?.value
             answer.projects.append(part)
         }
     }

@@ -101,4 +101,30 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertEqual(projectIcon(rawText: written), .emoji("🌿"))
         XCTAssertEqual(try readNotesFile(notesPath: path).summary, "Rewritten from the model.")
     }
+
+    // MARK: Images
+
+    func testImagePathsAreImagesEvenWhenTheyLookLikeSymbols() {
+        XCTAssertEqual(ProjectIcon(value: "attachments/Logo.svg"), .image(path: "attachments/Logo.svg", recolor: false))
+        XCTAssertEqual(ProjectIcon(value: "logo.png"), .image(path: "logo.png", recolor: false))
+        XCTAssertEqual(ProjectIcon(value: "recolor:/p/docs/logo.svg"), .image(path: "/p/docs/logo.svg", recolor: true))
+        XCTAssertNil(ProjectIcon(value: "~/logo.png"))
+    }
+
+    func testImageWithRecolorRoundTripsThroughFrontmatter() {
+        let icon = ProjectIcon.image(path: "attachments/My Logo #2.svg", recolor: true)
+        let raw = settingProjectIcon(icon, in: "# T\n")
+        XCTAssertEqual(raw, "---\npm-icon: \"attachments/My Logo #2.svg\"\npm-icon-recolor: true\n---\n# T\n")
+        XCTAssertEqual(projectIcon(rawText: raw), icon)
+        // Choosing a symbol afterwards leaves no stray recolor line.
+        XCTAssertEqual(settingProjectIcon(.symbol("leaf"), in: raw), "---\npm-icon: leaf\n---\n# T\n")
+    }
+
+    func testResolvesAgainstTheNotesAndTravelsAsOneString() {
+        let raw = "---\npm-icon: attachments/logo.svg\npm-icon-recolor: true\n---\n"
+        let icon = projectIcon(rawText: raw, notesPath: "/p/W-001 X/docs/Notes - X.md")
+        XCTAssertEqual(icon, .image(path: "/p/W-001 X/docs/attachments/logo.svg", recolor: true))
+        XCTAssertEqual(icon.flatMap { ProjectIcon(value: $0.value) }, icon)
+        XCTAssertEqual(ProjectIcon.symbol("leaf").resolved(notesPath: "/p/n.md"), .symbol("leaf"))
+    }
 }

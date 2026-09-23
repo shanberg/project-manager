@@ -32,12 +32,48 @@ final class CanvasColorWash: NSView {
         }
     }
 
+    /// The project's texture, feathered into the top-left above the wash and inked in its colour — see
+    /// `CanvasTexture`. Nil for none.
+    var texture: CanvasTexture.Spec? {
+        didSet {
+            guard texture != oldValue else { return }
+            cachedTexture = nil
+            needsDisplay = true
+        }
+    }
+
+    /// How far down this view the colour reaches. `height` on a board; the settings sheet's preview,
+    /// a window in miniature, scales it to its own size so the two keep their proportions.
+    var washHeight: CGFloat = CanvasColorWash.height {
+        didSet {
+            guard washHeight != oldValue else { return }
+            cached = nil
+            needsDisplay = true
+        }
+    }
+
     /// What the wash lies on — `CanvasPalette.board`, or a tiling's ground mid-crossing.
     var ground: NSColor = CanvasPalette.board {
         didSet { needsDisplay = true }
     }
 
     private var cached: (key: String, image: CGImage)?
+    private var cachedTexture: (key: String, image: CGImage)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        // The texture stands down under Increase Contrast and Reduce Transparency, and comes back
+        // without a relaunch when they're turned off.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(displayOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    @objc private func displayOptionsChanged() { needsDisplay = true }
 
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -45,7 +81,13 @@ final class CanvasColorWash: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         cached = nil
+        cachedTexture = nil
         needsDisplay = true
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        if texture != nil { needsDisplay = true }
     }
 
     override func viewDidChangeBackingProperties() {
@@ -57,18 +99,53 @@ final class CanvasColorWash: NSView {
     override func draw(_ dirty: NSRect) {
         ground.setFill()
         dirty.fill()
-        guard let color, dirty.minY < Self.height, let context = NSGraphicsContext.current?.cgContext else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        var rgb: (Double, Double, Double) = (0, 0, 0)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        var rgb: (Double, Double, Double)?
         var dark = false
         // Resolved in this view's appearance, since a named colour is a different colour in dark.
         effectiveAppearance.performAsCurrentDrawingAppearance {
             dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            if let resolved = color.nsColor.usingColorSpace(.sRGB) {
+            if let resolved = color?.nsColor.usingColorSpace(.sRGB) {
                 rgb = (resolved.redComponent, resolved.greenComponent, resolved.blueComponent)
             }
         }
-        let rows = Int((Self.height * scale).rounded())
+        if let rgb, dirty.minY < washHeight { drawWash(rgb: rgb, dark: dark, in: dirty, context: context) }
+        drawTexture(rgb: rgb, dark: dark, in: dirty, context: context)
+    }
+
+    /// The texture over the wash, from the corner — in the wash's colour, so the two are one ground.
+    ///
+    /// Its reach is a share of this view, so a resize redraws it — except mid-drag, where the last one
+    /// is kept and redrawn once the drag ends. Only the reach lags; the pixels stay whole either way.
+    private func drawTexture(rgb: (Double, Double, Double)?, dark: Bool, in dirty: NSRect, context: CGContext) {
+        guard let texture, !CanvasTexture.isSuppressed else { return }
+        let reach = CanvasTexture.reach(texture.style, in: bounds.size)
+        guard dirty.intersects(CGRect(origin: .zero, size: reach)) || inLiveResize else { return }
+        let ink = CanvasTexture.ink(for: rgb, dark: dark)
+        let key = "\(ink)|\(dark)|\(reach)"
+        if cachedTexture?.key != key, !(inLiveResize && cachedTexture != nil) {
+            let pixel = CGFloat(texture.style.pixel)
+            guard let image = CanvasTexture.image(tile: texture.tile, ink: ink,
+                                                  alpha: CanvasTexture.alpha(texture.style, dark: dark),
+                                                  pixel: pixel, reach: reach)
+            else { return }
+            cachedTexture = (key, image)
+        }
+        guard let image = cachedTexture?.image else { return }
+        let pixel = CGFloat(texture.style.pixel)
+        let size = CGSize(width: CGFloat(image.width) * pixel, height: CGFloat(image.height) * pixel)
+        context.saveGState()
+        // Each cell a hard-edged square of whole points: no smoothing between them.
+        context.interpolationQuality = .none
+        context.translateBy(x: 0, y: size.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: CGRect(origin: .zero, size: size))
+        context.restoreGState()
+    }
+
+    private func drawWash(rgb: (Double, Double, Double), dark: Bool, in dirty: NSRect, context: CGContext) {
+        let scale = window?.backingScaleFactor ?? 2
+        let rows = Int((washHeight * scale).rounded())
         guard rows > 0 else { return }
         let key = "\(rgb)|\(dark)|\(rows)"
         if cached?.key != key {
@@ -81,11 +158,11 @@ final class CanvasColorWash: NSView {
         let tile = CGFloat(Self.tileWidth) / scale
         context.saveGState()
         // The bitmap's first row is its top; this view is flipped, so undo the flip for the draw.
-        context.translateBy(x: 0, y: Self.height)
+        context.translateBy(x: 0, y: washHeight)
         context.scaleBy(x: 1, y: -1)
         var x = (dirty.minX / tile).rounded(.down) * tile
         while x < dirty.maxX {
-            context.draw(image, in: CGRect(x: x, y: 0, width: tile, height: Self.height))
+            context.draw(image, in: CGRect(x: x, y: 0, width: tile, height: washHeight))
             x += tile
         }
         context.restoreGState()

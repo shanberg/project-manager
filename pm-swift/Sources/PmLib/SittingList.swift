@@ -349,7 +349,7 @@ public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Dat
                 picks: picks, doneEvents: DoneLog.standing(DoneLog.events(projectPath: projectPath)),
                 in: range, notesModified: modified, now: now)
             let color = projectColor(rawText: rawText)?.value
-            let icon = projectIcon(rawText: rawText)?.value
+            let icon = projectIcon(rawText: rawText, notesPath: notesPath)?.value
             for i in part.sittings.indices {
                 part.sittings[i].projectColor = color
                 part.sittings[i].projectIcon = icon

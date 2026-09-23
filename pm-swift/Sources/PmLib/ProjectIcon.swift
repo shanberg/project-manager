@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a project shows in place of its progress ring: an SF Symbol or an emoji.
+/// What a project shows in place of its progress ring: an SF Symbol, an emoji, or an image of your own.
 ///
 /// Kept in the notes file's frontmatter under `pm-icon` rather than in config, because it has to
 /// survive everything that happens to a folder — a rename, archiving, a move in Finder, a restore from
@@ -10,17 +10,38 @@ import Foundation
 /// One key serves both cases: a single emoji is drawn as itself, and anything else is taken as a
 /// symbol name. Whether that symbol exists is the app's question, not this one's — PmLib has no
 /// symbol catalogue, so an unknown name reads back fine here and falls back to the ring where it's drawn.
+///
+/// **An image** is named by a path relative to the notes file — the app copies a chosen SVG or PNG into
+/// the `attachments/` folder beside it — with a second key, `pm-icon-recolor: true`, when it should be
+/// drawn in the project's colour the way a symbol is, rather than in its own colours. Two keys rather
+/// than one value, because both are things someone might edit by hand.
+///
+/// **Away from the file**, an icon travels as `value`: the task search, the day's sittings and the rest
+/// carry it as a string beside the project's colour. There an image's path is absolute — `projectIcon
+/// (rawText:notesPath:)` resolves it where the notes are read, since nothing downstream knows where they
+/// were — and a recoloured one is marked with a `recolor:` prefix, which no path starts with.
 public enum ProjectIcon: Equatable, Hashable, Sendable {
     case symbol(String)
     case emoji(String)
+    /// Relative to the notes file's folder as read from the file; absolute once resolved.
+    case image(path: String, recolor: Bool)
 
     public static let frontmatterKey = "pm-icon"
+    public static let recolorKey = "pm-icon-recolor"
+    static let recolorPrefix = "recolor:"
 
     /// Nil for an empty value, or for anything that is neither one emoji nor shaped like a symbol name
     /// (`leaf.fill`, `person.2`). Surrounding quotes are dropped, since YAML allows them.
     public init?(value: String) {
         let text = unquoted(value.trimmingCharacters(in: .whitespaces))
         guard !text.isEmpty else { return nil }
+        // Ahead of the symbol test, which `logo.png` would otherwise pass.
+        let recolor = text.hasPrefix(Self.recolorPrefix)
+        let path = recolor ? String(text.dropFirst(Self.recolorPrefix.count)) : text
+        if isMarkdownImagePath(path), !path.hasPrefix("~"), !path.contains("\"") {
+            self = .image(path: path, recolor: recolor)
+            return
+        }
         if text.count == 1, let character = text.first, character.isEmojiGrapheme {
             self = .emoji(text)
         } else if text.range(of: #"^[a-z0-9]+(\.[a-z0-9]+)*$"#, options: .regularExpression) != nil {
@@ -30,12 +51,21 @@ public enum ProjectIcon: Equatable, Hashable, Sendable {
         }
     }
 
-    /// What's written after `pm-icon:`.
+    /// The icon as one string: what's written after `pm-icon:` for a symbol or an emoji, and what an
+    /// icon travels as away from the file. See the type's note for an image.
     public var value: String {
         switch self {
         case .symbol(let name): return name
         case .emoji(let emoji): return emoji
+        case .image(let path, let recolor): return recolor ? Self.recolorPrefix + path : path
         }
+    }
+
+    /// This icon with an image's path made absolute against the folder the notes file is in.
+    public func resolved(notesPath: String?) -> ProjectIcon {
+        guard case .image(let path, let recolor) = self, !path.hasPrefix("/"), let notesPath else { return self }
+        let url = URL(fileURLWithPath: notesPath).deletingLastPathComponent().appendingPathComponent(path)
+        return .image(path: url.standardizedFileURL.path, recolor: recolor)
     }
 }
 
@@ -50,16 +80,40 @@ extension Character {
     }
 }
 
-/// The project's icon, read from a notes file's text.
+/// The project's icon, read from a notes file's text. An image's path is as written — relative to the
+/// notes — so this is for writing back; to draw it, use `projectIcon(rawText:notesPath:)`.
 public func projectIcon(rawText: String) -> ProjectIcon? {
-    frontmatterValue(ProjectIcon.frontmatterKey, in: rawText).flatMap(ProjectIcon.init(value:))
+    guard let icon = frontmatterValue(ProjectIcon.frontmatterKey, in: rawText).flatMap(ProjectIcon.init(value:))
+    else { return nil }
+    guard case .image(let path, _) = icon else { return icon }
+    let recolor = frontmatterValue(ProjectIcon.recolorKey, in: rawText)?.lowercased() == "true"
+    return .image(path: path, recolor: recolor)
 }
 
-/// Set or clear a project's icon, touching nothing in the file but the one frontmatter line.
+/// The project's icon, ready to draw anywhere: an image's path made absolute against `notesPath`.
+public func projectIcon(rawText: String, notesPath: String?) -> ProjectIcon? {
+    projectIcon(rawText: rawText)?.resolved(notesPath: notesPath)
+}
+
+/// A notes file's text with its icon set or cleared: `pm-icon`, and `pm-icon-recolor` beside an image
+/// that asks for it — removed for anything else, so a symbol chosen after an image leaves no stray line.
+public func settingProjectIcon(_ icon: ProjectIcon?, in rawText: String) -> String {
+    var value = icon?.value
+    var recolor: String? = nil
+    if case .image(let path, let wantsRecolor) = icon {
+        // Quoted, since a file name can hold anything YAML would read as something else.
+        value = "\"\(path)\""
+        recolor = wantsRecolor ? "true" : nil
+    }
+    let text = settingFrontmatterValue(ProjectIcon.frontmatterKey, to: value, in: rawText)
+    return settingFrontmatterValue(ProjectIcon.recolorKey, to: recolor, in: text)
+}
+
+/// Set or clear a project's icon, touching nothing in the file but its frontmatter lines.
 public func setProjectIcon(project: String, to icon: ProjectIcon?) throws {
     let handle = try resolveNotesHandle(project: project)
     let raw = try handle.io.readContent(path: handle.notesPath)
-    let updated = settingFrontmatterValue(ProjectIcon.frontmatterKey, to: icon?.value, in: raw)
+    let updated = settingProjectIcon(icon, in: raw)
     guard updated != raw else { return }
     try handle.io.writeContent(path: handle.notesPath, content: updated)
 }

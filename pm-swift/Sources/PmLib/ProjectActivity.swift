@@ -93,7 +93,7 @@ public func projectSummaries(scopes: [ProjectScope] = [.active, .areas], kind: S
                 summary = summarize(summary, notes: read.notes, todos: read.todos,
                                     notesModified: notesLastEdited(path: notesPath))
                 summary.projectColor = projectColor(rawText: rawText)?.value
-                summary.projectIcon = projectIcon(rawText: rawText)?.value
+                summary.projectIcon = projectIcon(rawText: rawText, notesPath: notesPath)?.value
             }
             out.append(summary)
         }

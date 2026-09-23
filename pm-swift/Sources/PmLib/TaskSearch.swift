@@ -199,7 +199,7 @@ func openTasks(includeArchived: Bool = true, includeActive: Bool = true,
             let notes = normalizeFocusMarker(notes: parsed)
             guard let todos = try? parseTodos(notes: notes) else { continue }
             let color = projectColor(rawText: rawText)?.value
-            let icon = projectIcon(rawText: rawText)?.value
+            let icon = projectIcon(rawText: rawText, notesPath: notesPath)?.value
             for todo in todosWithEffectiveWaiting(todosWithEffectiveDueDates(todos)) where !todo.checked {
                 hits.append((TaskSearchHit(
                     projectFolder: folder,

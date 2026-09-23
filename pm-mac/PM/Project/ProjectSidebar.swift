@@ -1150,8 +1150,8 @@ private struct KindMark: View {
             ProjectIconMark(icon: icon, size: 13, tint: tint)
                 .frame(width: 16, height: 16)
                 .overlay(alignment: .bottomTrailing) {
-                    // An emoji keeps its own colours, so the project's rides beside it as a dot.
-                    if case .emoji = icon, let color = entry.color {
+                    // An emoji, or an image in its own colours, keeps them, so the project's rides beside it as a dot.
+                    if ProjectIconMark.keepsOwnColors(icon), let color = entry.color {
                         Circle().fill(color.swiftUIColor)
                             .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1))
                             .frame(width: 7, height: 7)

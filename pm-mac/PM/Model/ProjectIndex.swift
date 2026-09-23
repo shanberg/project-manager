@@ -423,7 +423,7 @@ final class ProjectIndex {
         guard let handle = try? resolveNotesHandle(project: name),
               let raw = try? handle.io.readContent(path: handle.notesPath),
               let output = try? notesShow(rawText: raw) else { return nil }
-        return (output, projectIcon(rawText: raw), projectColor(rawText: raw), projectPartOf(rawText: raw))
+        return (output, projectIcon(rawText: raw, notesPath: handle.notesPath), projectColor(rawText: raw), projectPartOf(rawText: raw))
     }
 
     /// Masters with their members' numbers added in: progress across the whole, and the earliest due

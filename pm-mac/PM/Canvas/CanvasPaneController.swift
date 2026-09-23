@@ -219,6 +219,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         set { scroll.washColor = newValue }
     }
 
+    /// The project's texture, feathered into the top-left under the wash's colour — see `CanvasTexture`.
+    var projectTexture: CanvasTexture.Spec? {
+        get { scroll.groundView.texture }
+        set { scroll.groundView.texture = newValue }
+    }
+
     override func loadView() {
         buildContent()
         container.onCoveredRegionChange = { [weak self] in self?.coveredRegionChanged() }
