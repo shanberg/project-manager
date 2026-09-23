@@ -139,6 +139,14 @@ final class DoneLogTests: XCTestCase {
                                                    calendar: calendar))
     }
 
+    func testMonthIsTheCalendarMonth() throws {
+        let now = DoneLog.date("2026-09-16T18:00:00Z")!
+        let month = try DoneRange.resolve(period: "month", since: nil, until: nil, now: now, calendar: calendar)
+        XCTAssertTrue(month.contains(DoneLog.date("2026-09-01T08:00:00Z")!))
+        XCTAssertFalse(month.contains(DoneLog.date("2026-08-31T20:00:00Z")!))
+        XCTAssertFalse(month.contains(DoneLog.date("2026-10-01T08:00:00Z")!))
+    }
+
     // MARK: Looking at a folder
 
     private var folder = ""

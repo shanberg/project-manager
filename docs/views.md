@@ -541,11 +541,13 @@ query and no contract change: every layout draws an answer the view already had,
   it as a Day card** pinned to that date, across the same projects, beside the calendar, so the month
   stays where it was.
 - **Coming up rolls, as its period does.** Its week is the next seven days, today first, and its month
-  is five weeks from the start of this one. A deadline on the 2nd matters on the 30th, and a calendar
-  month would hide it. The horizon is the layout's there, so the Period menu is hidden on it. In the
-  week, what's due is pinned to its day as the list's own rows, which tick, drop and open as they do
-  there, and what's overdue heads today in red. In the month, each day lists what fits and then "+N
-  more", today leads with "N overdue", and days already past are faint.
+  is five weeks from the start of this one — the same `Period` a list draws from (`dueCutoff`), not a
+  second calculation the grid makes on its own. Choosing Layout: Week or Month sets Period to match, in
+  the same undoable step, so switching back to List shows what the grid was actually showing rather than
+  whatever Period happened to say before. The Period menu is hidden there because a grid is one horizon,
+  not a choice among several. In the week, what's due is pinned to its day as the list's own rows, which
+  tick, drop and open as they do there, and what's overdue heads today in red. In the month, each day
+  lists what fits and then "+N more", today leads with "N overdue", and days already past are faint.
 - **Day's month doesn't show what fell due.** That's Coming up's question, and a board wanting both
   puts the two cards side by side. Calendar events (below) are decided but not yet drawn.
 - **Copy as Text** is the same document in every layout: the answer over the span drawn.
@@ -563,6 +565,13 @@ query and no contract change: every layout draws an answer the view already had,
   - **Zoomed out.** When the board is too far out for the 9.5pt type to be 7pt on screen, a month's
     day becomes large dots and a week's blocks drop to a name. The node view only tells the card
     (`CanvasOnScreen`) when the board's zoom crosses that line, so zooming redraws it once.
+
+**Amended** (2026-09-23). `Period` gained a `month` case (the calendar month, for Day/Leftovers/Time;
+five rolling weeks for Coming up, the same split `week` already had) so it, not Layout, is the one place
+a view's query window is decided — closing a bug where Coming up's grid silently ignored whatever Period
+was set to, and a stored Period or Layout could go stale-but-hidden and reassert later with no visible
+cause. Choosing a Rail layout while Period is a span (now Week or Month) resets it to List the same way;
+choosing Period: Week/Month while Layout is Rail resets Layout to List.
 
 ## Calendars
 

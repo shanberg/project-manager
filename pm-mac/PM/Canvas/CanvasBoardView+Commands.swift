@@ -975,6 +975,17 @@ extension CanvasBoardView {
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
                 guard var spec = CanvasViewSpec.of(doc.nodes[index]) else { continue }
                 spec.layout = layout
+                // Coming up's grids roll a fixed horizon (D9): entering one sets the period that horizon
+                // actually is, so nothing chosen before is silently ignored, and it stays a real,
+                // undoable choice instead of a stale one that reasserts when Layout goes back to List.
+                if spec.kind == .comingUp {
+                    switch layout {
+                    case .week: spec.period = .week
+                    case .month: spec.period = .month
+                    case .list where spec.period == .month: spec.period = .week
+                    default: break
+                    }
+                }
                 CanvasViewSpec.set(spec, on: &doc.nodes[index])
                 if let least = layout.minimumSize {
                     doc.nodes[index].frame.width = max(doc.nodes[index].frame.width, least.width)
@@ -989,7 +1000,12 @@ extension CanvasBoardView {
         let period = CanvasViewSpec.Period(value: value)
         let kinds = Set(selectedViewCards.map(\.spec.kind))
         let title = kinds.count == 1 ? kinds.first!.title(of: period) : period.title
-        changeViews("Show \(title)") { $0.period = period }
+        changeViews("Show \(title)") { spec in
+            spec.period = period
+            // The rail is one day's (D9): a period that's a span makes a stored Rail choice inert. Reset
+            // it here too, not only when Layout is chosen, so it never reasserts later either.
+            if spec.layout == .rail, spec.period.isSpan { spec.layout = .list }
+        }
     }
 
     @objc func setViewProjects(_ sender: Any?) {

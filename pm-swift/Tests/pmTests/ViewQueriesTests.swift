@@ -70,6 +70,12 @@ final class ViewQueriesTests: XCTestCase {
         XCTAssertThrowsError(try dueCutoff(until: "soon", now: now, calendar: calendar))
     }
 
+    /// `month` rolls too: five weeks from the start of this one, not the calendar's month.
+    func testMonthIsFiveRollingWeeks() throws {
+        XCTAssertEqual(try dueCutoff(until: "month", now: now, calendar: calendar),
+                       calendar.date(from: DateComponents(year: 2026, month: 10, day: 18)))
+    }
+
     // MARK: Projects
 
     /// Last activity is the later of the newest sitting's start and the notes' last write; with it, the

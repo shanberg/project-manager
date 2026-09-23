@@ -32,11 +32,16 @@ extension CanvasViewSpec {
         guard layout == .week || layout == .month else { return nil }
         let today = calendar.startOfDay(for: now)
         if kind == .comingUp {
-            if layout == .week {
-                return try Self.span(from: today, days: 7, month: nil, title: "Next 7 Days", calendar: calendar)
-            }
-            let start = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
-            return try Self.span(from: start, days: 35, month: nil, title: "Next 5 Weeks", calendar: calendar)
+            // The horizon is the period's (D9): the grid asks for exactly what the list would
+            // (`dueCutoff`), so switching Layout never changes what Period already decided — only how
+            // it's drawn. `need` is a floor, not the answer: a grid never draws shorter than its own
+            // shape even if a stored period and layout disagree (an old or hand-edited file).
+            let cutoff = try dueCutoff(until: period.value, now: now, calendar: calendar)
+            let start = layout == .week ? today : calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+            let need = layout == .week ? 7 : 35
+            let days = max(need, calendar.dateComponents([.day], from: start, to: cutoff).day ?? need)
+            let title = layout == .week ? "Next 7 Days" : "Next 5 Weeks"
+            return try Self.span(from: start, days: days, month: nil, title: title, calendar: calendar)
         }
         let anchor = try period.range(now: now, calendar: calendar).start
         if layout == .week {

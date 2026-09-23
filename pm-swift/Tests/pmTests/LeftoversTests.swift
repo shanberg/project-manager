@@ -97,6 +97,8 @@ final class LeftoversTests: XCTestCase {
                        ["2026-09-14", "2026-09-16"])
         XCTAssertEqual(try leftoversCutoff(before: "week", now: now, calendar: calendar),
                        calendar.date(from: DateComponents(year: 2026, month: 9, day: 13)))
+        XCTAssertEqual(try leftoversCutoff(before: "month", now: now, calendar: calendar),
+                       calendar.date(from: DateComponents(year: 2026, month: 9, day: 1)), "This calendar month")
         XCTAssertThrowsError(try leftoversCutoff(before: "someday", now: now, calendar: calendar))
     }
 

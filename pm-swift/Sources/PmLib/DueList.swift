@@ -15,9 +15,9 @@ import Foundation
 
 /// The end of the horizon `until` names, exclusive: a task due before this is in.
 ///
-/// `today` is the end of today. `week` is the next seven days, today included — a horizon rolls, where a
-/// report's week is the calendar's, because what's due on Monday matters on Friday. A date is the end
-/// of that day. Absent is `week`.
+/// `today` is the end of today. `week` is the next seven days, today included, and `month` five rolling
+/// weeks from the start of this one — a horizon rolls, where a report's week or month is the calendar's,
+/// because what's due on the 2nd matters on the 30th. A date is the end of that day. Absent is `week`.
 public func dueCutoff(until: String?, now: Date = Date(), calendar: Calendar = .current) throws -> Date {
     let today = calendar.startOfDay(for: now)
     switch until?.trimmingCharacters(in: .whitespaces).lowercased() {
@@ -25,6 +25,9 @@ public func dueCutoff(until: String?, now: Date = Date(), calendar: Calendar = .
         return calendar.date(byAdding: .day, value: 1, to: today) ?? today
     case nil, "", "week":
         return calendar.date(byAdding: .day, value: 7, to: today) ?? today
+    case "month":
+        let start = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        return calendar.date(byAdding: .day, value: 35, to: start) ?? start
     case let date?:
         let day = try DoneRange.localDay(date, calendar: calendar)
         return calendar.date(byAdding: .day, value: 1, to: day) ?? day

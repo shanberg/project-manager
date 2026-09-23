@@ -307,6 +307,7 @@ struct CanvasDayCard: View {
             case .today: return "No work today."
             case .yesterday: return "No work yesterday."
             case .week: return "No work this week."
+            case .month: return "No work this month."
             case .day: return "No work that day."
             }
         }

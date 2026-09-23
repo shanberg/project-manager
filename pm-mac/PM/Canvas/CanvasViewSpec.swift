@@ -24,7 +24,7 @@ struct CanvasViewSpec: Equatable {
     /// When (D2). A relative period follows the clock, so a Today card left on a board is tomorrow's
     /// today; a date pins it, and it becomes a page of the journal.
     enum Period: Equatable {
-        case today, yesterday, week
+        case today, yesterday, week, month
         /// A local day, `YYYY-MM-DD`.
         case day(String)
 
@@ -33,6 +33,7 @@ struct CanvasViewSpec: Equatable {
             case .today: return "today"
             case .yesterday: return "yesterday"
             case .week: return "week"
+            case .month: return "month"
             case .day(let iso): return iso
             }
         }
@@ -41,6 +42,7 @@ struct CanvasViewSpec: Equatable {
             switch value.trimmingCharacters(in: .whitespaces).lowercased() {
             case "yesterday": self = .yesterday
             case "week": self = .week
+            case "month": self = .month
             case let iso where iso.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil:
                 self = .day(iso)
             default: self = .today
@@ -50,7 +52,7 @@ struct CanvasViewSpec: Equatable {
         /// The span the query is asked for.
         func range(now: Date = Date(), calendar: Calendar = .current) throws -> DoneRange {
             switch self {
-            case .today, .yesterday, .week:
+            case .today, .yesterday, .week, .month:
                 return try DoneRange.resolve(period: value, since: nil, until: nil, now: now, calendar: calendar)
             case .day(let iso):
                 return try DoneRange.resolve(period: nil, since: iso, until: iso, now: now, calendar: calendar)
@@ -59,7 +61,7 @@ struct CanvasViewSpec: Equatable {
 
         /// Whether this is more than one day, which is what decides between the day's full prose and a
         /// week's ledes (D5).
-        var isSpan: Bool { self == .week }
+        var isSpan: Bool { self == .week || self == .month }
 
         /// What the menu calls it.
         var title: String {
@@ -67,6 +69,7 @@ struct CanvasViewSpec: Equatable {
             case .today: return "Today"
             case .yesterday: return "Yesterday"
             case .week: return "This Week"
+            case .month: return "This Month"
             case .day(let iso): return SessionPicks.day(iso: iso) ?? iso
             }
         }
@@ -77,22 +80,25 @@ struct CanvasViewSpec: Equatable {
             case .today: return "Before Today"
             case .yesterday: return "Before Yesterday"
             case .week: return "Before This Week"
+            case .month: return "Before This Month"
             case .day: return "Before \(title)"
             }
         }
 
         /// What the menu calls it on a Coming up card, which reads it as a horizon: `week` is the next
-        /// seven days (`dueCutoff`), where a Day's week is the calendar's.
+        /// seven days and `month` five rolling weeks (`dueCutoff`), where a Day's week or month is the
+        /// calendar's.
         var dueTitle: String {
             switch self {
             case .today, .yesterday: return "Due Today"
             case .week: return "Next 7 Days"
+            case .month: return "Next 5 Weeks"
             case .day: return "Through \(title)"
             }
         }
 
         /// The relative periods, in the order the menu lists them.
-        static let relative: [Period] = [.today, .yesterday, .week]
+        static let relative: [Period] = [.today, .yesterday, .week, .month]
     }
 
     /// How time is laid out (D9). Only some fit a view, and the rail only one day — see `shownLayout`.
@@ -275,6 +281,10 @@ struct CanvasViewSpec: Equatable {
             let short = DateFormatter()
             short.dateFormat = "MMM d"
             return "This Week · \(short.string(from: range.start))–\(short.string(from: last))"
+        case .month:
+            let long = DateFormatter()
+            long.dateFormat = "LLLL yyyy"
+            return "This Month · \(long.string(from: range.start))"
         case .day:
             return day.string(from: range.start)
         }

@@ -103,13 +103,14 @@ public struct LeftoverList: Codable, Equatable {
 /// The start of the day `before` names: sittings dated earlier than it are old enough to leave things in.
 ///
 /// `today` (the default) is midnight, so everything before today; `yesterday` is the day before that;
-/// `week` is the start of this week, the reader's first weekday — so a Leftovers card set to it and a
-/// Day card set to This Week split the time between them, which is the weekly review. A date is that day.
+/// `week` is the start of this week and `month` the start of this month, the reader's own calendar — so
+/// a Leftovers card set to This Week and a Day card set to This Week split the time between them, which
+/// is the weekly review. A date is that day.
 public func leftoversCutoff(before: String?, now: Date = Date(), calendar: Calendar = .current) throws -> Date {
     switch before?.trimmingCharacters(in: .whitespaces).lowercased() {
     case nil, "", "today":
         return try DoneRange.resolve(period: "today", since: nil, until: nil, now: now, calendar: calendar).start
-    case let relative? where relative == "yesterday" || relative == "week":
+    case let relative? where relative == "yesterday" || relative == "week" || relative == "month":
         return try DoneRange.resolve(period: relative, since: nil, until: nil, now: now, calendar: calendar).start
     case let date?:
         return try DoneRange.localDay(date, calendar: calendar)

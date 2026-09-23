@@ -529,16 +529,31 @@ extension CanvasViewSpecTests {
         XCTAssertNil(try CanvasViewSpec(kind: .day).calendarSpan(now: friday, calendar: chicago), "A list draws its period")
     }
 
-    /// Coming up rolls: its week is the next seven days, and its month five weeks from this one's start.
+    /// Coming up rolls: its week is the next seven days, and its month five weeks from this one's start —
+    /// both starting today, whatever the period. The grid asks `dueCutoff` for that span, the same
+    /// function the list draws from, so the two can never disagree.
     func testComingUpsWeekAndMonthLookAhead() throws {
         let week = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, period: .today, layout: .week)
             .calendarSpan(now: friday, calendar: chicago))
         XCTAssertEqual(week.days, ["2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22",
                                    "2026-09-23", "2026-09-24"], "Whatever its period, today and on")
-        let month = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, layout: .month).calendarSpan(now: friday, calendar: chicago))
+        let weekOfWeek = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, period: .week, layout: .week)
+            .calendarSpan(now: friday, calendar: chicago))
+        XCTAssertEqual(weekOfWeek.days, week.days, "Period: Week is the week grid's own horizon")
+        let month = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, period: .month, layout: .month)
+            .calendarSpan(now: friday, calendar: chicago))
         XCTAssertEqual(month.days.first, "2026-09-13")
         XCTAssertEqual(month.days.last, "2026-10-17")
         XCTAssertNil(month.month)
+    }
+
+    /// The grid's span is the period's, not a second calculation: a period reaching further than the
+    /// grid's own shape widens it, rather than being silently discarded.
+    func testComingUpsGridFollowsAFartherPeriod() throws {
+        let pinned = try XCTUnwrap(CanvasViewSpec(kind: .comingUp, period: .day("2026-10-30"), layout: .week)
+            .calendarSpan(now: friday, calendar: chicago))
+        XCTAssertGreaterThan(pinned.days.count, 7, "Through Oct 30 is farther out than the week grid's own 7 days")
+        XCTAssertEqual(pinned.days.last, "2026-10-30")
     }
 
     /// Paging a week or month pins the period to that span's first day, and paging back to the one
