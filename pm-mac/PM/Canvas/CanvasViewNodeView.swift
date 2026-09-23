@@ -216,11 +216,65 @@ final class CanvasViewNodeView: CanvasNodeView {
                 projectCard: { [weak self] project in
                     self?.sittingCardProvider(project: project.projectFolder, session: nil,
                                               title: [project.projectName])
+                },
+                onAnswer: { [weak self] stretches, project in
+                    self?.count(stretches.map { ($0.from, $0.to) }, for: project)
                 }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         view.setAccessibilityLabel(accessibilityFallback)
         setContent(view)
+    }
+
+    // MARK: Answering for time (docs/away-time.md)
+
+    /// Write one answer per stretch through `time.count`, and make the lot one step of the board's
+    /// history — ⌘Z takes them back together, ⇧⌘Z writes them again.
+    ///
+    /// **On the board's history, and it becomes the last thing edited.** The answers belong to no
+    /// project's file, so a project's stack is the wrong place; and clearing `lastEditedProject` is
+    /// what makes ⌘Z, pressed right after, take back the answer rather than an earlier tick — the
+    /// same thing a canvas edit does (`CanvasPaneController.documentChanged`).
+    private func count(_ ranges: [(from: String, to: String)], for project: String?) {
+        var ids: [String] = []
+        for range in ranges {
+            var input = ApiInput()
+            input.from = range.from
+            input.to = range.to
+            if let project { input.project = project } else { input.notWork = true }
+            do {
+                let result = try PMContract.perform(.timeCount, input)
+                if let data = result.data,
+                   let event = try? JSONDecoder().decode(AttentionEvent.self, from: JSONEncoder().encode(data)) {
+                    ids.append(event.id)
+                }
+            } catch {
+                Log.write("time answer refused: \(ApiError.from(error).message)")
+                NSSound.beep()
+            }
+        }
+        reloadTime()
+        guard !ids.isEmpty else { return }
+        let undo = board.store.undoManager
+        undo.registerUndo(withTarget: self) { target in target.withdraw(ids, ranges: ranges, for: project) }
+        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil))
+        board.lastEditedProject = nil
+    }
+
+    /// Take the answers back. The log is never rewritten: a `withdrawn` for each, and the ranges read
+    /// as they did before (AttentionLog.applyingCounts).
+    private func withdraw(_ ids: [String], ranges: [(from: String, to: String)], for project: String?) {
+        for id in ids { AttentionLog.withdraw(id, source: "app") }
+        reloadTime()
+        let undo = board.store.undoManager
+        undo.registerUndo(withTarget: self) { target in target.count(ranges, for: project) }
+        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil))
+        board.lastEditedProject = nil
+    }
+
+    private func reloadTime() {
+        guard case .time(let time) = model else { return }
+        time.reload()
     }
 
     /// What a Search card's field says, kept on the node as one undoable change — when it's different.

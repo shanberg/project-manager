@@ -14,6 +14,8 @@ import SwiftUI
 @Observable
 final class CanvasTimeModel {
     private(set) var report: TimeSpentReport?
+    /// The period's aways nobody has answered (docs/away-time.md), oldest first.
+    private(set) var aways: [AttentionAway] = []
     private(set) var range: DoneRange?
     private(set) var failure: String?
     /// The same answer as markdown, for Copy as Text (views.md D10).
@@ -38,9 +40,11 @@ final class CanvasTimeModel {
     }
 
     /// A model holding an answer already in hand, which never looks: for drawing the card in a test.
-    init(spec: CanvasViewSpec, showing report: TimeSpentReport, for range: DoneRange) {
+    init(spec: CanvasViewSpec, showing report: TimeSpentReport, aways: [AttentionAway] = [],
+         for range: DoneRange) {
         self.spec = spec
         self.report = report
+        self.aways = aways
         self.range = range
     }
 
@@ -73,19 +77,21 @@ final class CanvasTimeModel {
         case .named(let names): projects = names
         }
         queue.async { [weak self] in
-            let result = Result { () throws -> (DoneRange, TimeSpentReport) in
+            let result = Result { () throws -> (DoneRange, TimeSpentReport, [AttentionAway]) in
                 let range = try spec.period.range()
                 // An empty board asks about no projects, and the answer to that is nothing.
-                if projects?.isEmpty == true { return (range, TimeSpentReport()) }
-                return (range, try timeSpent(in: range, projects: projects))
+                if projects?.isEmpty == true { return (range, TimeSpentReport(), []) }
+                return (range, try timeSpent(in: range, projects: projects),
+                        try attentionAways(in: range, projects: projects))
             }
             Task { @MainActor in
                 guard let self, mine == self.generation else { return }
                 switch result {
-                case .success(let (range, report)):
+                case .success(let (range, report, aways)):
                     self.failure = nil
                     if range != self.range { self.range = range }
                     if report != self.report { self.report = report }
+                    if aways != self.aways { self.aways = aways }
                     self.text = ViewMarkdown.time(report)
                 case .failure(let error):
                     self.failure = String(describing: error)
@@ -113,6 +119,14 @@ struct CanvasTimeCard: View {
     var onOpenProject: (String) -> Void = { _ in }
     /// The card a row dragged off this one makes. Nil: rows don't drag.
     var projectCard: ((TimeSpentItem) -> NSItemProvider?)?
+    /// Answer for some stretches: they were this project's (a folder), or weren't work (nil).
+    var onAnswer: ([CanvasTimeStretch], String?) -> Void = { _, _ in }
+
+    /// The stretches picked, by `CanvasTimeStretch.key` — the aways, and the spans of any project
+    /// that's open. Answers act on all of them at once (docs/away-time.md).
+    @State private var selection = RowSelection()
+    /// The projects showing the spans their time is made of.
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -151,13 +165,21 @@ struct CanvasTimeCard: View {
             quiet(failure)
         } else if let report = model.report {
             let (tracked, untracked) = CanvasTimeRows.split(report)
-            if tracked.isEmpty, untracked.isEmpty {
+            if tracked.isEmpty, untracked.isEmpty, model.aways.isEmpty {
                 quiet(model.spec.projects == .board && model.boardProjects.isEmpty
                       ? "No project cards on this board." : "No time on record.")
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(tracked, id: \.projectFolder) { row($0, among: tracked) }
+                        ForEach(tracked, id: \.projectFolder) { project in
+                            row(project, among: tracked)
+                            if expanded.contains(project.projectFolder) {
+                                ForEach(project.spans.map(CanvasTimeStretch.span), id: \.key) { span in
+                                    stretchRow(span).padding(.leading, 18 * zoom)
+                                }
+                            }
+                        }
+                        if !model.aways.isEmpty { awaySection }
                         if !untracked.isEmpty { section(untracked) }
                     }
                     .padding(.horizontal, 12)
@@ -190,6 +212,34 @@ struct CanvasTimeCard: View {
     }
 
     private func row(_ project: TimeSpentItem, among all: [TimeSpentItem]) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            disclosure(project)
+            projectButton(project, among: all)
+        }
+    }
+
+    /// Opens a project row onto the spans its time is made of, which are what can be moved.
+    @ViewBuilder private func disclosure(_ project: TimeSpentItem) -> some View {
+        let open = expanded.contains(project.projectFolder)
+        if project.spans.isEmpty {
+            Color.clear.frame(width: 12 * zoom, height: 1)
+        } else {
+            Button {
+                if open { expanded.remove(project.projectFolder) } else { expanded.insert(project.projectFolder) }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9 * zoom, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12 * zoom)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(open ? "Hide spans" : "Show spans")
+        }
+    }
+
+    private func projectButton(_ project: TimeSpentItem, among all: [TimeSpentItem]) -> some View {
         let share = CanvasTimeRows.share(project, of: all)
         return Button { onOpenProject(project.projectFolder) } label: {
             VStack(alignment: .leading, spacing: 2) {
@@ -217,7 +267,7 @@ struct CanvasTimeCard: View {
                     .frame(height: 3 * zoom)
                 }
                 let came = ViewMarkdown.changes(project)
-                if !came.isEmpty || project.inferred {
+                if !came.isEmpty || project.inferred || project.counted {
                     HStack(spacing: 5) {
                         if !came.isEmpty {
                             Text(came)
@@ -227,14 +277,8 @@ struct CanvasTimeCard: View {
                         }
                         // Beside the number it qualifies, never in a legend at the foot of the card
                         // (docs/time-tracking.md D4).
-                        if project.inferred {
-                            Text("inferred")
-                                .font(.system(size: 9.5 * zoom))
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 0.5)
-                                .background(Capsule().fill(.quaternary))
-                        }
+                        if project.inferred { mark("estimated") }
+                        if project.counted { mark("counted") }
                     }
                 }
             }
@@ -252,6 +296,117 @@ struct CanvasTimeCard: View {
                 Label("Copy Link", systemImage: "link")
             }
         }
+    }
+
+    /// How a number was arrived at, beside the number (docs/time-tracking.md D4).
+    private func mark(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.5 * zoom))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 0.5)
+            .background(Capsule().fill(.quaternary))
+    }
+
+    // MARK: Stretches — aways and spans, answered for (docs/away-time.md)
+
+    private var awaySection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Away")
+                .font(.system(size: 11 * zoom, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+            ForEach(model.aways.map(CanvasTimeStretch.away), id: \.key) { stretchRow($0) }
+        }
+    }
+
+    /// Every stretch row in the order the card draws them — what a ⇧-click ranges over.
+    private var stretches: [CanvasTimeStretch] {
+        guard let report = model.report else { return [] }
+        let spans = CanvasTimeRows.split(report).tracked
+            .filter { expanded.contains($0.projectFolder) }
+            .flatMap { $0.spans.map(CanvasTimeStretch.span) }
+        return spans + model.aways.map(CanvasTimeStretch.away)
+    }
+
+    /// One stretch: when, and how long. An away also says what it interrupted; a span, how sure it is.
+    private func stretchRow(_ stretch: CanvasTimeStretch) -> some View {
+        let picked = selection.contains(stretch.key)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(timeLabel(stretch))
+                .font(.system(size: 11.5 * zoom).monospacedDigit())
+                .lineLimit(1)
+            if case .away(let away) = stretch {
+                Text(title(of: away.project))
+                    .font(.system(size: 11 * zoom))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if case .span(let span) = stretch {
+                if span.basis == .inferred { mark("estimated") }
+                if span.basis == .counted { mark("counted") }
+            }
+            Text(durationLabel(stretch.seconds))
+                .font(.system(size: 11 * zoom).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize()
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 5).fill(picked ? Color.accentColor.opacity(0.18) : .clear))
+        // The whole padded row takes the click, so it lands where the highlight is drawn.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selection.click(stretch.key, modifiers: NSEvent.modifierFlags, in: stretches.map(\.key))
+        }
+        .contextMenu { answers(for: targets(of: stretch)) }
+    }
+
+    /// What a right-click acts on: the selection when the row is in it, the row alone when it isn't —
+    /// the Finder's rule.
+    private func targets(of stretch: CanvasTimeStretch) -> [CanvasTimeStretch] {
+        guard selection.contains(stretch.key) else { return [stretch] }
+        return stretches.filter { selection.contains($0.key) }
+    }
+
+    @ViewBuilder private func answers(for picked: [CanvasTimeStretch]) -> some View {
+        let offered = CanvasTimeAnswers.offered(for: picked,
+                                                candidates: model.report?.projects.map(\.projectFolder) ?? [])
+        if let suggested = offered.suggested {
+            Button(offered.countTitle(for: title(of: suggested))) { answer(picked, suggested) }
+        }
+        if !offered.projects.isEmpty {
+            Menu(offered.countSubmenuTitle) {
+                ForEach(offered.projects, id: \.self) { folder in
+                    Button(title(of: folder)) { answer(picked, folder) }
+                }
+            }
+        }
+        Divider()
+        Button(offered.notWorkTitle) { answer(picked, nil) }
+    }
+
+    private func answer(_ picked: [CanvasTimeStretch], _ project: String?) {
+        selection = RowSelection()
+        onAnswer(picked, project)
+    }
+
+    /// A project by title, never code — the one the report prints when it has it.
+    private func title(of folder: String) -> String {
+        model.report?.projects.first { $0.projectFolder == folder }?.projectName
+            ?? projectTitle(fromFolderName: folder)
+    }
+
+    /// "12:05 – 12:35 PM", with the day as well on a card covering more than one.
+    private func timeLabel(_ stretch: CanvasTimeStretch) -> String {
+        guard let from = DoneLog.date(stretch.from), let to = DoneLog.date(stretch.to) else { return "" }
+        let formatter = DateIntervalFormatter()
+        formatter.timeStyle = .short
+        let oneDay = model.range.map { $0.end.timeIntervalSince($0.start) <= 86_400 } ?? true
+        formatter.dateStyle = oneDay ? .none : .short
+        return formatter.string(from: from, to: to)
     }
 
     /// What the row can say that it hasn't room for: how the time was made up, and how sure it is.

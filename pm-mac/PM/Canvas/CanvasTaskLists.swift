@@ -277,8 +277,9 @@ enum CanvasTimeRows {
         guard !tracked.isEmpty else { return "No time" }
         var parts = [durationLabel(report.seconds)]
         if tracked.count > 1 { parts.append("\(tracked.count) projects") }
-        let inferred = tracked.filter(\.inferred).count
-        if inferred > 0 { parts.append("\(inferred) inferred") }
+        // "Estimated" on screen for what the contract calls `inferred` (docs/away-time.md).
+        let estimated = tracked.filter(\.inferred).count
+        if estimated > 0 { parts.append("\(estimated) estimated") }
         return parts.joined(separator: " · ")
     }
 
@@ -299,4 +300,96 @@ enum CanvasTimeRows {
         guard let longest = projects.map(\.seconds).max(), longest > 0 else { return 0 }
         return project.seconds / longest
     }
+}
+
+// MARK: - Answering for time on a Time card (docs/away-time.md)
+
+/// A stretch of a period someone can answer for: an away nobody's answered, or one span of a
+/// project's time. What a Time card's rows select, and what an answer is written against.
+enum CanvasTimeStretch: Equatable {
+    case away(AttentionAway)
+    case span(AttentionSpan)
+
+    /// The row's key for `RowSelection` — stable across the card's polls, since both halves are
+    /// written into the log rather than worked out fresh.
+    var key: String {
+        switch self {
+        case .away(let away): return "away|\(away.from)"
+        case .span(let span): return "span|\(span.key)|\(span.start)"
+        }
+    }
+
+    var from: String {
+        switch self {
+        case .away(let away): return away.from
+        case .span(let span): return span.start
+        }
+    }
+
+    var to: String {
+        switch self {
+        case .away(let away): return away.to
+        case .span(let span): return span.end
+        }
+    }
+
+    var seconds: Double {
+        switch self {
+        case .away(let away): return away.seconds
+        case .span(let span): return span.seconds
+        }
+    }
+
+    /// The project it belongs to as things stand: the one an away interrupted, a span's own.
+    var project: String {
+        switch self {
+        case .away(let away): return away.project
+        case .span(let span): return span.project
+        }
+    }
+
+    var isAway: Bool { if case .away = self { return true } else { return false } }
+}
+
+/// What the answers menu offers for a selection of stretches.
+///
+/// **One menu for aways and spans alike**, because both answers are the same event: "this stretch was
+/// that project's, or wasn't work". Counting an away fills a gap; counting a span moves it.
+struct CanvasTimeAnswers: Equatable {
+    /// The project offered first, at the top of the menu: the one every away in the selection
+    /// interrupted, when the selection is only aways and they agree. Nil otherwise.
+    let suggested: String?
+    /// Every project it could be counted for, in the order given, less any it would be a no-op for.
+    let projects: [String]
+    /// How many stretches the answer is for — what the titles say when it's more than one.
+    let count: Int
+
+    /// `candidates` is the card's own projects, in its order; the aways' projects are added to them.
+    static func offered(for stretches: [CanvasTimeStretch], candidates: [String]) -> CanvasTimeAnswers {
+        var projects: [String] = []
+        for folder in candidates + stretches.filter(\.isAway).map(\.project) where !projects.contains(folder) {
+            projects.append(folder)
+        }
+        // A project every selected stretch already is — spans of it, nothing else — has nothing to gain.
+        projects.removeAll { folder in
+            !stretches.isEmpty && stretches.allSatisfy { !$0.isAway && $0.project == folder }
+        }
+        let interrupted = Set(stretches.map(\.project))
+        let suggested = stretches.allSatisfy(\.isAway) && interrupted.count == 1 ? interrupted.first : nil
+        return CanvasTimeAnswers(suggested: suggested.flatMap { projects.contains($0) ? $0 : nil },
+                                 projects: projects, count: stretches.count)
+    }
+
+    /// "Count for Website", or "Count 3 for Website".
+    func countTitle(for title: String) -> String {
+        count > 1 ? "Count \(count) for \(title)" : "Count for \(title)"
+    }
+
+    /// The submenu of every project.
+    var countSubmenuTitle: String { count > 1 ? "Count \(count) For" : "Count For" }
+
+    var notWorkTitle: String { count > 1 ? "Mark \(count) as Not Work" : "Not Work" }
+
+    /// The Edit menu's name for the answer, for ⌘Z.
+    static func undoName(notWork: Bool) -> String { notWork ? "Mark Not Work" : "Count Time" }
 }

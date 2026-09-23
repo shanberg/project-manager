@@ -1,6 +1,6 @@
 # Away time
 
-**Status:** designed 2026-09-23. Steps 1–4, 6 and quiet focus built; 5 dropped. Extends [time-tracking.md](time-tracking.md).
+**Status:** designed 2026-09-23. Steps 1–4, 6, 7 and quiet focus built; 5 dropped. Extends [time-tracking.md](time-tracking.md).
 Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 
 ## Timekeeper (`AttentionKeeper.swift`)
@@ -81,7 +81,9 @@ Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
   - Reads only the log's tail from the start of yesterday (`AttentionLog.events(since:)`). ~30 ms on the 2026-09-23 log.
   - No undo from the menu yet (step 7).
 - Menubar: no badge, no count, no tint.
-- Time card: **Away** section below the project rows, all unanswered aways in the card's period.
+- Time card: **Away** section below the project rows, all unanswered aways in the card's period and projects.
+  - Row: time range · interrupted project (title) · duration.
+  - Multi-day periods show the date in the range.
 - No notification. Revisit only if long aways routinely go unanswered.
 - Focus panel: not used (it opens on summon only).
 
@@ -102,12 +104,25 @@ Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 - App name/bundle ID never written to the log.
 - An `elsewhere` gap is not an away: never listed, never asked about.
 
-### Corrections
+### Corrections (Time card)
 
-- Click a span on a Time card → **Give to…** another project, or **Not work**.
-- Same event as counting an away (below).
+- A project row's disclosure chevron shows its spans, indented under it.
+- Span rows and away rows are one selectable list: click, ⇧-click range, ⌘-click toggle (`RowSelection`).
+- Right-click acts on the selection if the row is in it, else on the row alone.
+- One menu for spans and aways (`CanvasTimeAnswers`):
+  - **Count for <P>** at the top when the selection is only aways that all interrupted P.
+  - **Count For ▸** every project on the card plus the aways' projects,
+    less any project every selected stretch is already a span of.
+  - **Not Work**.
+  - With several selected: "Count 3 for …", "Count 3 For ▸", "Mark 3 as Not Work".
+- One verb, Count, for filling an away and for moving a span (the doc's earlier "Give to" is dropped).
+- One `counted` event per stretch, through `time.count` (source `app`).
 - Later correction beats earlier over the same range.
-- Undoable (⌘Z appends the inverse; the log is never rewritten).
+- ⌘Z: one step on the board's history per answer, however many stretches; appends a `withdrawn` per event.
+  ⇧⌘Z counts them again (new events). Edit menu: "Undo Count Time" / "Undo Mark Not Work".
+- Answering clears `lastEditedProject`, so ⌘Z right after takes back the answer, not an earlier tick.
+- A refused answer beeps and logs; no notification (the board is in front).
+- Span marks: "estimated" (inferred), "counted".
 
 ## Log format
 
@@ -148,7 +163,7 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 
 - Away (not "unaccounted", "idle").
 - Count (not "claim").
-- Estimated (UI for `inferred`; wire value unchanged).
+- Estimated (UI for `inferred` on the Time card and its summary; wire value, CLI and Copy as Text still say inferred).
 
 ## Settings › Time (new pane)
 

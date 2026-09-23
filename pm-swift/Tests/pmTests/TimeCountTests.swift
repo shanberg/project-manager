@@ -66,8 +66,10 @@ final class TimeCountTests: XCTestCase {
     }
 
     func testNotWorkWritesAnAnswerWithNoProject() throws {
-        _ = try count(at(11), at(11, 30), notWork: true)
+        let result = try count(at(11), at(11, 30), notWork: true)
         let event = try XCTUnwrap(AttentionLog.events().first)
+        XCTAssertEqual(result.data.flatMap { try? decode(AttentionEvent.self, $0) }?.id, event.id,
+                       "returned for undo, like a project answer")
         XCTAssertEqual(event.event, .counted)
         XCTAssertNil(event.project)
         XCTAssertNil(event.key)

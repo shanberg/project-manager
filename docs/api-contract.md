@@ -102,7 +102,7 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 - `time.aways`: query. Period fields as `time.spent`, plus `projects`. Returns `AttentionAway[]`: `project`, `key`, `from`, `to`, `seconds`, `why`.
 - `time.count`: mutation. `from`, `to` required, ISO 8601 with a zone. Exactly one of `project`, `notWork`.
 - `time.count` writes a `counted` event to `attention.ndjson`, not the notes: no `revision`, no journal entry, no `journal.undo`.
-- `time.count` returns the event in `data`; undo is `AttentionLog.withdraw(id)` (app-side).
+- `time.count` returns the event in `data`, for a project or not-work answer; undo is `AttentionLog.withdraw(id)` (app-side).
 - `time.count` refuses `to` ≤ `from`, and `to` more than 60 s in the future.
 - `time.spent`: spans gain basis `counted`; items gain `counted: Bool`; summary says "N with counted time".
 

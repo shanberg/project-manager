@@ -539,11 +539,14 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
         let stretch = "\(SessionTimes.clockLabel(from, calendar: .current))–\(SessionTimes.clockLabel(to, calendar: .current)) (\(durationLabel(to.timeIntervalSince(from))))"
         if input.notWork == true {
-            if !options.dryRun { AttentionLog.counted(from: from, to: to, source: options.source) }
+            var data: JSONValue?
+            if !options.dryRun {
+                data = try JSONValue.encoding(AttentionLog.counted(from: from, to: to, source: options.source))
+            }
             return ApiResult(action: spec.name,
                              summary: Phrase(past: "Marked \(stretch) as not work",
                                              future: "mark \(stretch) as not work").sentence(dryRun: options.dryRun),
-                             dryRun: options.dryRun)
+                             dryRun: options.dryRun, data: data)
         }
         guard let name = input.project else {
             // `notWork: false` and no project passes the one-of check, and says nothing.
