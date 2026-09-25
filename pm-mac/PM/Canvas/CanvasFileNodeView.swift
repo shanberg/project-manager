@@ -55,6 +55,8 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// The listing this card shows when its path is a folder, watched while the card is up. See
     /// `CanvasFolderCard`.
     private var folder: CanvasFolderModel?
+    /// The folder this card lists, when it is a folder card — what a file drop is filed into.
+    var folderModel: CanvasFolderModel? { folder }
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)

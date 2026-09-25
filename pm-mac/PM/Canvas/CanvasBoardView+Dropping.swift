@@ -28,6 +28,9 @@ struct CanvasDropSession {
     var original: [Int: (components: [NSDraggingImageComponent], offset: NSPoint, size: NSSize)]?
     /// The picture the board gave the drag, drawn once and handed over again when AppKit asks.
     var picture: NSImage?
+    /// The folder card, and the folder in it, that files are over — where they'd be filed rather than
+    /// made into cards. See `CanvasFolderDrop`.
+    var folder: (card: String, url: URL)?
 }
 
 /// Dropping onto a board.
@@ -62,6 +65,7 @@ extension CanvasBoardView {
         let drop = CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType)
         dropSession = CanvasDropSession(sequence: sender.draggingSequenceNumber, drop: drop,
                                         pasteboardChange: sender.draggingPasteboard.changeCount)
+        if let filing = fileIntoFolder(sender) { return filing }
         guard let drop else { return [] }
         if !isTiled {
             place(sender)
@@ -77,9 +81,89 @@ extension CanvasBoardView {
         if session.pasteboardChange != sender.draggingPasteboard.changeCount {
             return rereadDrop(sender)
         }
-        guard session.drop != nil else { return [] }
-        if !isTiled { place(sender) }
+        if let filing = fileIntoFolder(sender) { return filing }
+        guard let drop = session.drop else { return [] }
+        if !isTiled {
+            place(sender)
+            // Back off a folder card: the files turn into the cards they would make again.
+            if dropSession?.original == nil { carry(sender, as: drop) }
+        }
         return .copy
+    }
+
+    // MARK: Filing into a folder card
+
+    /// Files over a folder card go into its folder, the Finder's drop — or into the folder row under
+    /// the pointer. Answers the operation while that is where they'd go, having put the source's own
+    /// picture back and lit the target; nil when they aren't over one, having put the target out.
+    ///
+    /// Only files from outside the board: the board's own cards, dragged, carry their own pasteboard
+    /// type and stay cards.
+    private func fileIntoFolder(_ sender: NSDraggingInfo) -> NSDragOperation? {
+        let target = folderTarget(sender)
+        let files = target == nil ? [] : Self.files(on: sender.draggingPasteboard)
+        let operation = target.map {
+            CanvasFolderDrop.operation(for: files, into: $0.url, allowed: sender.draggingSourceOperationMask)
+        } ?? []
+        let aimed = operation.isEmpty ? nil : target
+        if dropSession?.folder?.card != aimed?.card || dropSession?.folder?.url != aimed?.url {
+            if let was = dropSession?.folder { folderModel(was.card)?.dropTarget = nil }
+            if let aimed { folderModel(aimed.card)?.dropTarget = aimed.url }
+            dropSession?.folder = aimed
+        }
+        guard aimed != nil else { return nil }
+        giveBack(sender)
+        dropSession?.original = nil
+        overlay.ghost = nil
+        showGrid(false)
+        return operation
+    }
+
+    private func folderTarget(_ sender: NSDraggingInfo) -> (card: String, url: URL)? {
+        let pasteboard = sender.draggingPasteboard
+        guard pasteboard.types?.contains(Self.pasteboardType) != true,
+              pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        else { return nil }
+        let point = convert(sender.draggingLocation, from: nil)
+        guard case .node(let id) = hitTester.hit(canvasPoint(point)), let model = folderModel(id) else { return nil }
+        // Over one of its folders: that folder. Anywhere else on the card: the folder it is showing.
+        if let row = nodeViews[id]?.link(at: point), row.hasDirectoryPath || CanvasFolderListing.isFolder(row),
+           CanvasFolderModel.contains(model.url, row) {
+            return (id, row)
+        }
+        return (id, model.location)
+    }
+
+    private func folderModel(_ id: String) -> CanvasFolderModel? {
+        (nodeViews[id] as? CanvasFileNodeView)?.folderModel
+    }
+
+    private static func files(on pasteboard: NSPasteboard) -> [URL] {
+        (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    /// Let go over a folder card: file them, and make it undoable.
+    private func performFiling(_ sender: NSDraggingInfo, into folder: URL) -> Bool {
+        let files = Self.files(on: sender.draggingPasteboard)
+        let operation = CanvasFolderDrop.operation(for: files, into: folder, allowed: sender.draggingSourceOperationMask)
+        guard !operation.isEmpty else { return false }
+        let copying = operation == .copy
+        do {
+            let done = try CanvasFolderDrop.perform(files, into: folder, copying: copying)
+            registerFilingUndo(done, copied: copying)
+            return true
+        } catch {
+            NSSound.beep()
+            Log.write("folder drop failed: \(folder.path): \(error)")
+            return false
+        }
+    }
+
+    private func registerFilingUndo(_ done: [(from: URL, to: URL)], copied: Bool) {
+        guard !done.isEmpty, let undo = window?.undoManager else { return }
+        undo.registerUndo(withTarget: self) { _ in CanvasFolderDrop.undo(done, copied: copied) }
+        let what = done.count == 1 ? "“\(done[0].to.lastPathComponent)”" : "\(done.count) Items"
+        undo.setActionName(copied ? "Copy of \(what)" : "Move of \(what)")
     }
 
     /// The pasteboard changed under a drag already here: read it again, and redraw what is carried.
@@ -127,12 +211,15 @@ extension CanvasBoardView {
     /// see `CanvasPageView` — and a drop the board has already shown you a card for should not then be
     /// refused by a default nobody chose.
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        dropSession?.drop != nil
+        dropSession?.folder != nil || dropSession?.drop != nil
             || CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType) != nil
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { endDropPreview() }
+        if dropSession?.sequence == sender.draggingSequenceNumber, let folder = dropSession?.folder {
+            return performFiling(sender, into: folder.url)
+        }
         // Read again if the pasteboard moved since the last ask: letting go is the one moment it has to be
         // right, and the drop is made from what it holds now rather than from what it held on the way in.
         if dropSession?.sequence == sender.draggingSequenceNumber,
@@ -193,6 +280,7 @@ extension CanvasBoardView {
     }
 
     private func endDropPreview() {
+        if let folder = dropSession?.folder { folderModel(folder.card)?.dropTarget = nil }
         dropSession = nil
         overlay.ghost = nil
         showGrid(false)

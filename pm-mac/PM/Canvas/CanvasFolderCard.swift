@@ -46,6 +46,25 @@ struct CanvasFolderCard: View {
                 }
             }
         }
+        // Files over the card and not over one of its folders: the whole card takes them, as a Finder
+        // window's list does, and says so the way the Finder does — an accent ring inside its edge.
+        .overlay {
+            if folder.dropTarget.map(isShowing) == true {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(3)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func isShowing(_ url: URL) -> Bool {
+        url.standardizedFileURL.path == folder.location.standardizedFileURL.path
+    }
+
+    /// A folder row with files over it, which is where they would go.
+    private func isDropTarget(_ entry: CanvasFolderEntry) -> Bool {
+        folder.dropTarget?.standardizedFileURL.path == entry.url.standardizedFileURL.path
     }
 
     private var list: some View {
@@ -144,6 +163,7 @@ struct CanvasFolderCard: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 24)
+        .background { if isDropTarget(entry) { Color.accentColor.opacity(0.25) } }
         .contentShape(Rectangle())
         .reportsLinkZone(entry.url)
         .accessibilityElement(children: .combine)
@@ -161,6 +181,9 @@ struct CanvasFolderCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
+        .background {
+            if isDropTarget(entry) { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.25)) }
+        }
         .contentShape(Rectangle())
         .reportsLinkZone(entry.url)
         .accessibilityElement(children: .combine)
@@ -388,6 +411,9 @@ final class CanvasFolderModel: ObservableObject {
     /// tomorrow should show the folder the card is of rather than wherever it was left.
     @Published private(set) var location: URL
     @Published private(set) var listing: CanvasFolderListing
+    /// Where files being dragged over the card would go if let go now — the folder showing, or one of
+    /// its folder rows — so the card can say so. Nil with nothing over it. See `CanvasFolderDrop`.
+    @Published var dropTarget: URL?
     /// How the card lays the folder out, as its node says — kept in step by `CanvasFileNodeView.update`.
     /// A new sort is a new read, since the cap is applied after sorting.
     @Published var options: CanvasFolderOptions {
@@ -479,5 +505,87 @@ final class CanvasFolderModel: ObservableObject {
         }
         pending = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+}
+
+/// Files dragged in from outside, filed into a folder card's folder — the Finder's drop, on a board.
+///
+/// **The Finder's rules, because they are the ones already in your hands.** On the same volume a drop
+/// moves and on another it copies; ⌥ makes it a copy and ⌘ a move, which AppKit has already folded
+/// into the source's operation mask by the time it reaches here. A file never overwrites another: a
+/// name already taken gets the Finder's " 2", as its Keep Both does, since a drop is not the moment to
+/// stop and ask. And it undoes, as a Finder move does.
+@MainActor
+enum CanvasFolderDrop {
+    /// What letting go would do, or `[]` for a drop this folder can't take — a folder into itself or
+    /// one of its own, or files already here, which the Finder also refuses.
+    static func operation(for files: [URL], into folder: URL, allowed: NSDragOperation) -> NSDragOperation {
+        guard !files.isEmpty, !isRefused(files, into: folder) else { return [] }
+        let canMove = allowed.contains(.move) || allowed.contains(.generic)
+        if canMove, files.allSatisfy({ sameVolume($0, folder) }) { return .move }
+        if allowed.contains(.copy) { return .copy }
+        return canMove ? .move : []
+    }
+
+    static func isRefused(_ files: [URL], into folder: URL) -> Bool {
+        let into = folder.standardizedFileURL.resolvingSymlinksInPath()
+        if files.contains(where: { CanvasFolderModel.contains($0, into) }) { return true }
+        return files.allSatisfy {
+            $0.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent().path == into.path
+        }
+    }
+
+    /// Move or copy each file in. Answers what went where, for the undo; stops at the first failure,
+    /// having done what it did.
+    @discardableResult
+    static func perform(_ files: [URL], into folder: URL, copying: Bool,
+                        fileManager: FileManager = .default) throws -> [(from: URL, to: URL)] {
+        var done: [(from: URL, to: URL)] = []
+        for file in files {
+            // Already there is left alone — one of several dragged out of this folder and back.
+            guard file.standardizedFileURL.deletingLastPathComponent().path
+                    != folder.standardizedFileURL.path else { continue }
+            let target = freeName(for: file.lastPathComponent, in: folder, fileManager: fileManager)
+            if copying {
+                try fileManager.copyItem(at: file, to: target)
+            } else {
+                try fileManager.moveItem(at: file, to: target)
+            }
+            done.append((file, target))
+        }
+        return done
+    }
+
+    /// `name` in `folder`, or the Finder's next free "name 2.ext", "name 3.ext" when it is taken.
+    static func freeName(for name: String, in folder: URL, fileManager: FileManager = .default) -> URL {
+        let first = folder.appendingPathComponent(name)
+        guard fileManager.fileExists(atPath: first.path) else { return first }
+        let ext = (name as NSString).pathExtension
+        let stem = (name as NSString).deletingPathExtension
+        var n = 2
+        while true {
+            let candidate = folder.appendingPathComponent(ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)")
+            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+            n += 1
+        }
+    }
+
+    /// Put a drop back: moved files go home, copies go to the Trash (not deleted — an undo that
+    /// destroys is not an undo you can undo).
+    static func undo(_ done: [(from: URL, to: URL)], copied: Bool, fileManager: FileManager = .default) {
+        for (from, to) in done.reversed() {
+            if copied {
+                try? fileManager.trashItem(at: to, resultingItemURL: nil)
+            } else if !fileManager.fileExists(atPath: from.path) {
+                try? fileManager.moveItem(at: to, to: from)
+            }
+        }
+    }
+
+    private static func sameVolume(_ a: URL, _ b: URL) -> Bool {
+        let key = URLResourceKey.volumeIdentifierKey
+        guard let x = try? a.resourceValues(forKeys: [key]).volumeIdentifier as? NSObject,
+              let y = try? b.resourceValues(forKeys: [key]).volumeIdentifier as? NSObject else { return false }
+        return x.isEqual(y)
     }
 }
