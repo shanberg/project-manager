@@ -150,21 +150,96 @@ public func markdownQuotePrefix(of line: String) -> String? {
 
 // MARK: - Return: continue the list
 
-/// Renumber the ordered items that follow `after` at the same indent, starting from `number`, so an
-/// item inserted in the middle of a numbered list doesn't leave two 3s behind it. Deeper-indented lines
-/// belong to a sublist and are stepped over; anything else ends the run.
-private func renumber(_ lines: inout [String], after: Int, indent: String, from number: Int) {
-    var n = number
-    var i = after + 1
-    while i < lines.count {
-        guard let p = markdownListPrefix(of: lines[i]) else { return }
-        if p.indent.count > indent.count { i += 1; continue }   // a nested sublist of this item
-        guard p.indent == indent, p.isOrdered else { return }
-        n += 1
-        lines[i] = p.indent + "\(n)\(p.delimiter)" + p.spacing + (p.checkbox.map { $0 + " " } ?? "")
-            + String(lines[i].dropFirst(p.text.count))
-        i += 1
+/// How far in a list item sits, for comparing nesting: a tab is as deep as two spaces, the app's
+/// own indent unit (`markdownIndentUnit`), so a note indented with either nests the same way.
+private func nestingWidth(_ indent: String) -> Int {
+    indent.reduce(0) { $0 + ($1 == "\t" ? markdownIndentUnit.count : 1) }
+}
+
+/// Whether a line belongs to the list around it: an item, or an item's indented continuation. A blank
+/// line or a line of unindented prose ends the list.
+private func isInList(_ line: String) -> Bool {
+    if markdownListPrefix(of: line) != nil { return true }
+    guard let first = line.first, isSpace(first) else { return false }
+    return !line.allSatisfy(isSpace)
+}
+
+/// Number every ordered list in `lines[range]` by its structure, returning how much each line grew.
+///
+/// **Each nesting level counts on its own.** An item continues the count of the item above it at the
+/// same depth when both are numbered; anything else starts a new list — a numbered item under a bullet,
+/// a bullet under a numbered item, a numbered run after a bulleted one at the same depth. So bullets and
+/// numbers mix freely, and indenting `3.` makes it the `1.` of a list inside the item above it rather
+/// than a second 3.
+///
+/// A list nested inside another counts from 1. One at the top counts from its lowest number, so a
+/// list written to begin at 5 still does, and moving its 3 to the top doesn't make it begin at 3.
+private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>) -> [Int: Int] {
+    // First which list each numbered item is in, then the numbers: a top-level list's start depends on
+    // all of its items, so it isn't known until the last of them has been seen.
+    var levels: [(width: Int, ordered: Bool, list: Int)] = []
+    var lists: [(nested: Bool, items: [(line: Int, prefix: MarkdownListPrefix)])] = []
+    for i in range {
+        guard let p = markdownListPrefix(of: lines[i]) else { continue }   // a continuation line
+        let width = nestingWidth(p.indent)
+        while let top = levels.last, top.width > width { levels.removeLast() }
+        if let top = levels.last, top.width == width, top.ordered == p.isOrdered {
+            if p.isOrdered { lists[top.list].items.append((i, p)) }
+            continue
+        }
+        if let top = levels.last, top.width == width { levels.removeLast() }
+        levels.append((width, p.isOrdered, lists.count))
+        lists.append((nested: levels.count > 1, items: p.isOrdered ? [(i, p)] : []))
     }
+    var deltas: [Int: Int] = [:]
+    for list in lists where !list.items.isEmpty {
+        var number = list.nested ? 1 : list.items.compactMap(\.prefix.number).min() ?? 1
+        for (i, p) in list.items {
+            defer { number += 1 }
+            guard p.number != number else { continue }
+            let marker = "\(number)\(p.delimiter)"
+            lines[i] = p.indent + marker + String(lines[i].dropFirst(p.indent.count + p.marker.count))
+            deltas[i] = marker.count - p.marker.count
+        }
+    }
+    return deltas
+}
+
+/// Renumber the lists that any of `touched` lines is in, keeping the selection over the same text.
+///
+/// Every edit that can change a list's shape ends here — Return, Tab, moving, copying, deleting and
+/// opening lines — rather than each fixing up its own neighbours, because what the numbers should be is
+/// a fact about the whole list and not about the line that moved. Only the lists the edit touched are
+/// renumbered: a note is the user's file, and a list elsewhere in it that they numbered by hand is
+/// theirs.
+private func renumbered(_ r: (text: String, selection: Range<String.Index>),
+                        touching touched: [Int]) -> (text: String, selection: Range<String.Index>) {
+    var lines = splitLines(r.text)
+    let starts = lineStarts(lines)
+    var deltas: [Int: Int] = [:]
+    var done = IndexSet()
+    for t in touched where lines.indices.contains(t) && isInList(lines[t]) && !done.contains(t) {
+        var a = t, b = t
+        while a > 0, isInList(lines[a - 1]) { a -= 1 }
+        while b < lines.count - 1, isInList(lines[b + 1]) { b += 1 }
+        done.insert(integersIn: a...b)
+        deltas.merge(numberLists(&lines, in: a...b)) { $1 }
+    }
+    guard !deltas.isEmpty else { return r }
+    let (lo, hi) = charOffsets(r.text, r.selection)
+    func moved(_ offset: Int) -> Int {
+        let line = lineIndex(starts, offset)
+        let before = deltas.filter { $0.key < line }.values.reduce(0, +)
+        guard let delta = deltas[line], let p = markdownListPrefix(of: splitLines(r.text)[line]) else {
+            return offset + before
+        }
+        // The number is the only thing that changed, so a position past it moves with the text and one
+        // inside it stays at the start of the marker.
+        let markerStart = starts[line] + p.indent.count
+        let markerEnd = markerStart + p.marker.count
+        return offset >= markerEnd ? offset + before + delta : min(offset, markerStart) + before
+    }
+    return rebuilt(lines, moved(lo), moved(hi))
 }
 
 /// Return inside a list item or blockquote: carry the marker onto the next line, advancing the number
@@ -181,16 +256,11 @@ public func continueList(_ text: String, selection: Range<String.Index>) -> (tex
     let column = lo - starts[li]
 
     /// Split the line at the selection, carrying `prefix` onto the new line below.
-    func carry(_ prefix: String, ordered: (indent: String, number: Int)?) ->
-        (text: String, selection: Range<String.Index>) {
+    func carry(_ prefix: String) -> (text: String, selection: Range<String.Index>) {
         var chars = Array(text)
         chars.replaceSubrange(lo..<hi, with: Array("\n" + prefix))
         let caret = lo + 1 + prefix.count
-        var out = splitLines(String(chars))
-        if let ordered {
-            renumber(&out, after: li + 1, indent: ordered.indent, from: ordered.number)
-        }
-        return rebuilt(out, caret, caret)
+        return renumbered(result(String(chars), caret, caret), touching: [li + 1])
     }
 
     /// Return on an item with no content: drop the marker, leave the (now blank) line.
@@ -205,14 +275,13 @@ public func continueList(_ text: String, selection: Range<String.Index>) -> (tex
         guard column >= prefixLength else { return nil }
         let content = String(line.dropFirst(prefixLength))
         if lo == hi, content.trimmingCharacters(in: .whitespaces).isEmpty { return endList() }
-        let ordered = p.isOrdered ? (p.indent, (p.number ?? 0) + 1) : nil
-        return carry(p.next, ordered: ordered)
+        return carry(p.next)
     }
     if let q = markdownQuotePrefix(of: line) {
         guard column >= q.count else { return nil }
         let content = String(line.dropFirst(q.count))
         if lo == hi, content.trimmingCharacters(in: .whitespaces).isEmpty { return endList() }
-        return carry(q, ordered: nil)
+        return carry(q)
     }
     return nil
 }
@@ -232,7 +301,7 @@ public func indentLines(_ text: String, selection: Range<String.Index>,
     let last = lineIndex(starts, hi)
     for i in first...last { lines[i] = unit + lines[i] }
     let touched = last - first + 1
-    return rebuilt(lines, lo + unit.count, hi + unit.count * touched)
+    return renumbered(rebuilt(lines, lo + unit.count, hi + unit.count * touched), touching: Array(first...last))
 }
 
 /// Outdent every line the selection touches by one level, taking a tab or up to `unit.count` spaces off
@@ -260,7 +329,7 @@ public func outdentLines(_ text: String, selection: Range<String.Index>,
     }
     // Keep the caret over the same character, but never before its line's new start.
     let newLo = max(starts[first], lo - removedFromFirst)
-    return rebuilt(lines, newLo, hi - removedTotal)
+    return renumbered(rebuilt(lines, newLo, hi - removedTotal), touching: Array(first...last))
 }
 
 /// Whether Tab should indent rather than do its usual thing: the caret is in a list item, or the
@@ -298,7 +367,8 @@ public func moveLines(_ text: String, selection: Range<String.Index>, up: Bool) 
         lines.replaceSubrange(first...(last + 1), with: [below] + block)
         shift = below.count + 1
     }
-    return rebuilt(lines, lo + shift, hi + shift)
+    // The item keeps its place in the count, not its number: a 3 moved above the 2 is the 2 now.
+    return renumbered(rebuilt(lines, lo + shift, hi + shift), touching: Array((up ? first - 1 : first)...(last + 1)))
 }
 
 /// Duplicate the lines the selection touches, inserting the copy below and selecting it — so a repeated
@@ -312,7 +382,7 @@ public func duplicateLines(_ text: String, selection: Range<String.Index>) -> (t
     let block = Array(lines[first...last])
     lines.insert(contentsOf: block, at: last + 1)
     let shift = block.reduce(0) { $0 + $1.count + 1 }
-    return rebuilt(lines, lo + shift, hi + shift)
+    return renumbered(rebuilt(lines, lo + shift, hi + shift), touching: [last + 1])
 }
 
 // MARK: - Typing and pasting
@@ -455,7 +525,7 @@ public func copyLines(_ text: String, selection: Range<String.Index>, up: Bool) 
     lines.insert(contentsOf: block, at: last + 1)
     // Up: the copy is the upper of the two, which is where the selection already is.
     let shift = up ? 0 : block.reduce(0) { $0 + $1.count + 1 }
-    return rebuilt(lines, lo + shift, hi + shift)
+    return renumbered(rebuilt(lines, lo + shift, hi + shift), touching: [last + 1])
 }
 
 /// Delete the covered lines, newline and all. The caret lands on the line that took their place, at
@@ -466,11 +536,20 @@ public func deleteLines(_ text: String, selection: Range<String.Index>) -> (text
     let (lo, hi) = charOffsets(text, selection)
     let (first, last) = coveredLines(starts, lo, hi)
     let column = lo - starts[first]
+    // A list whose first item is deleted still starts where it did: the item that takes its place
+    // takes its number, where counting from the lowest one left would begin a 1-2-3 at 2.
+    let head = markdownListPrefix(of: lines[first]).flatMap { $0.isOrdered ? $0 : nil }
+    let headStartsList = first == 0 || !isInList(lines[first - 1])
     lines.removeSubrange(first...last)
     if lines.isEmpty { lines = [""] }
+    if let head, headStartsList, first < lines.count,
+       let next = markdownListPrefix(of: lines[first]), next.isOrdered, next.indent == head.indent {
+        lines[first] = next.indent + "\(head.number ?? 1)\(next.delimiter)"
+            + String(lines[first].dropFirst(next.indent.count + next.marker.count))
+    }
     let landing = min(first, lines.count - 1)
     let caret = lineStarts(lines)[landing] + min(column, lines[landing].count)
-    return rebuilt(lines, caret, caret)
+    return renumbered(rebuilt(lines, caret, caret), touching: [landing])
 }
 
 /// Open an empty line below the covered lines, or above them, without splitting the one you're on. In
@@ -494,7 +573,7 @@ public func insertLine(_ text: String, selection: Range<String.Index>, above: Bo
     let at = above ? first : last + 1
     lines.insert(prefix, at: at)
     let caret = lineStarts(lines)[at] + prefix.count
-    return rebuilt(lines, caret, caret)
+    return renumbered(rebuilt(lines, caret, caret), touching: [at])
 }
 
 /// Make the covered lines headings at `level`, or plain paragraphs at 0. Asking for the level they
