@@ -409,7 +409,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// waking up through the placeholder instead of through a picture. The session capture is not: it
     /// is a synchronous property read that cannot fail or be refused.
     private func freeze() {
-        guard let web, !freezing else { return }
+        // Not while it is full screen: the view is in WebKit's window, not this card, and a paused video
+        // there is still what you are looking at.
+        guard let web, !freezing, web.fullscreenState == .notInFullscreen else { return }
         freezing = true
         giveUp?.cancel()
         giveUp = nil
@@ -733,6 +735,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // A link you click is a different matter — see `createWebViewWith` below, which is what makes
         // a `target="_blank"` link navigate instead of silently doing nothing.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // A video's full-screen button. Off by default in a `WKWebView`, which left the button there and
+        // doing nothing. WebKit lifts the view into a full-screen window of its own and puts it back in
+        // the card afterwards; a playing page is never frozen (`CanvasPageBudget`), and `freeze` waits
+        // out a paused one.
+        configuration.preferences.isElementFullscreenEnabled = true
         // The rules interpreter, and the mute switch. Both are user scripts, and both go in through the
         // one call that knows the whole set — because changing the mute setting later means replacing
         // the lot. See `reinstallScripts`.
