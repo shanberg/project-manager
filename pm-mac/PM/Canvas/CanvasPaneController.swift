@@ -216,13 +216,20 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// project's, or a project with no colour.
     var projectColor: ProjectColor? {
         get { scroll.washColor }
-        set { scroll.washColor = newValue }
+        set {
+            scroll.washColor = newValue
+            // Its satellites are dressed as the project too. See `CanvasSatelliteWindow`.
+            for satellite in scroll.board.satellites { satellite.refreshAppearance() }
+        }
     }
 
     /// The project's texture, feathered into the top-left under the wash's colour — see `CanvasTexture`.
     var projectTexture: CanvasTexture.Spec? {
         get { scroll.groundView.texture }
-        set { scroll.groundView.texture = newValue }
+        set {
+            scroll.groundView.texture = newValue
+            for satellite in scroll.board.satellites { satellite.refreshAppearance() }
+        }
     }
 
     override func loadView() {

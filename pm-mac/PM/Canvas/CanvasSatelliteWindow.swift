@@ -1,4 +1,6 @@
 import AppKit
+import PmLib
+import SwiftUI
 import WebKit
 
 /// A web tile moved out into a window of its own — a satellite of the workspace it came from.
@@ -15,6 +17,11 @@ import WebKit
 /// **A lean header** rather than a browser's: whose page it is, Back and Reload, and the way home.
 /// AppKit controls rather than SwiftUI ones, since the header sits in the title bar's drag band and
 /// only controls carve their clicks out of it.
+///
+/// **Dressed as its project**, so a window on another screen still says where it belongs: the header
+/// lies on the project's colour and texture — the wash its board lies on, `CanvasColorWash` — and the
+/// title leads with the project's icon, whose tooltip is the project's name. One line, not two: the
+/// page's title, then its host in grey.
 @MainActor
 final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// Every satellite up, in every window.
@@ -32,6 +39,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private var puttingAway = false
     private let titleLabel = NSTextField(labelWithString: "")
     private let hostLabel = NSTextField(labelWithString: "")
+    private let wash = CanvasColorWash()
+    /// The project's icon, drawn once into a picture: a hosted SwiftUI view in an AppKit row sizes and
+    /// places itself by rules of its own, and this only ever needs to be a picture.
+    private let mark = NSImageView()
+    private var markWidth: NSLayoutConstraint?
     private let back = NSButton()
     private var watches: [NSKeyValueObservation] = []
 
@@ -60,6 +72,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             page.observe(\.canGoBack) { [weak self] _, _ in MainActor.assumeIsolated { self?.describe() } },
         ]
         describe()
+        refreshAppearance()
         if frame == nil { window.center() }
         Self.open.append(self)
     }
@@ -70,9 +83,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     private func content() -> NSView {
         let root = NSView()
-        let bar = NSVisualEffectView()
-        bar.material = .titlebar
-        bar.blendingMode = .withinWindow
+        // The header's ground: the project's wash, as under its board. The page covers the rest of it.
+        let bar = wash
         let line = NSBox()
         line.boxType = .separator
 
@@ -81,20 +93,28 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         back.action = #selector(goBack)
         back.toolTip = "Back"
         let reload = Self.glyph("arrow.clockwise", "Reload", #selector(reloadPage), self)
-        let home = Self.glyph("rectangle.inset.filled.and.arrow.down", "Return to Workspace",
+        let home = Self.glyph("arrow.down.right.and.arrow.up.left", "Return to Workspace",
                               #selector(returnToWorkspace), self)
         home.toolTip = "Put this back in its workspace"
         for button in [back, reload, home] { Self.style(button) }
 
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
-        hostLabel.font = .systemFont(ofSize: 11)
+        // The title gives way first: the host is the half that says whose page this is.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        hostLabel.font = .systemFont(ofSize: 12)
         hostLabel.textColor = .secondaryLabelColor
         hostLabel.lineBreakMode = .byTruncatingMiddle
-        let words = NSStackView(views: [titleLabel, hostLabel])
-        words.orientation = .vertical
-        words.alignment = .centerX
-        words.spacing = 0
+        hostLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        let markWidth = mark.widthAnchor.constraint(equalToConstant: 16)
+        self.markWidth = markWidth
+        NSLayoutConstraint.activate([markWidth, mark.heightAnchor.constraint(equalToConstant: 16)])
+        let words = NSStackView(views: [mark, titleLabel, hostLabel])
+        words.orientation = .horizontal
+        words.alignment = .centerY
+        words.spacing = 6
+        words.setCustomSpacing(8, after: mark)
 
         for view in [bar, line, back, reload, home, words, page] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -155,9 +175,46 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         titleLabel.stringValue = title.isEmpty ? host : title
         hostLabel.stringValue = host
         hostLabel.isHidden = title.isEmpty
-        window?.title = title.isEmpty ? host : title
+        // The Window menu and Mission Control have only this to go on, so it names the project too.
+        let named = title.isEmpty ? host : title
+        window?.title = projectTitle.map { "\(named) — \($0)" } ?? named
         back.isEnabled = page.canGoBack
     }
+
+    /// The project's colour, texture and icon, from the board the card is on. Asked again whenever the
+    /// board's change — see `CanvasPaneController.projectColor`.
+    func refreshAppearance() {
+        guard let board = card?.board else { return }
+        let ground = board.enclosingScrollView as? CanvasScrollView
+        wash.color = ground?.washColor
+        wash.texture = ground?.groundView.texture
+        let project = board.boardProject
+        let icon = CanvasProjectNoteCard.notes(forCanvasAt: board.store.url).flatMap { notes in
+            (try? String(contentsOf: notes, encoding: .utf8)).flatMap { projectIcon(rawText: $0, notesPath: notes.path) }
+        }
+        let tint = wash.color?.swiftUIColor
+        let drawn: AnyView? = if let icon, ProjectIconMark.canDraw(icon) {
+            AnyView(ProjectIconMark(icon: icon, size: 14, tint: tint))
+        } else if let tint {
+            // No icon of its own: the project's colour says as much, as a dot.
+            AnyView(Circle().fill(tint).frame(width: 9, height: 9))
+        } else {
+            nil
+        }
+        mark.image = drawn.flatMap { view in
+            let renderer = ImageRenderer(content: view.frame(width: 16, height: 16))
+            renderer.scale = window?.backingScaleFactor ?? 2
+            return renderer.nsImage
+        }
+        let shows = (icon.map(ProjectIconMark.canDraw) ?? false) || tint != nil
+        mark.isHidden = !shows
+        markWidth?.constant = shows ? 16 : 0
+        mark.toolTip = project?.title
+        projectTitle = project?.title
+        describe()
+    }
+
+    private var projectTitle: String?
 
     @objc private func goBack() { page.goBack() }
     @objc private func reloadPage() { page.reload() }
