@@ -543,6 +543,11 @@ extension CanvasBoardView {
     /// remembers that it did, so running the one that made them is how you put back an arrangement you
     /// have moved things around in. The tiles go in the order you read them off the screen, so the card
     /// you read first is the one that becomes the master.
+    /// Whether the tiles are still exactly as `setArrangement` would deal them — Arrange's tick.
+    func isArranged(as arrangement: CanvasTiling.Arrangement) -> Bool {
+        tiling?.isArranged(as: arrangement, masterFraction: CanvasTiling.savedMasterFraction) == true
+    }
+
     func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
         guard var session = tiling else { return }
         CanvasTiling.savedArrangement = arrangement

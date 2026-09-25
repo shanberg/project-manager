@@ -1007,7 +1007,7 @@ whether there is a bar at all. Four things moved, in the header, for one press o
 
 Now nothing moves. A workspace tab is its workspace for as long as the workspace exists, so leaving one
 is not an edit to anything — it is a change of *tab*, and the canvas is a tab. `goToCanvas` is the whole
-of it, and it is what the pill's ✕, ⌘−, ⌘↩-with-nothing-left-to-narrow and the menus' "Show Canvas" all
+of it, and it is what the pill's ✕, ⌘−, ⌘↩-with-nothing-left-to-narrow and View ▸ Show Canvas all
 now do. **The pane you were in keeps its tiles**, so coming back to its chip is instant and exact —
 which is also why none of this needs an animation: nothing is being undone.
 
@@ -1058,9 +1058,9 @@ Three answers, one rule read at three depths, and it falls out of the row having
 it. A tab with a Close — the notes, a frame — closes. A workspace has no Close, and what you mean by
 shutting one is "I am done looking at this", which is the canvas: ⌘W steps out to it, and the workspace
 is exactly where you left it when you come back. On the canvas there is nothing left inside the window,
-so ⌘W means what it means everywhere else on this Mac. File ▸ Close Tab retitles itself to "Show
-Canvas" on a workspace rather than being dimmed, on `tileCommandTitle`'s pattern — a menu item that
-says "Close Tab" while stepping out to the canvas is the menu promising something else.
+so ⌘W means what it means everywhere else on this Mac. There is no Close Tab item: File ▸ Close is it.
+The menus' one way to the canvas is View ▸ Show Canvas (⌥⌘C), which leaves a workspace too
+(2026-09-24).
 
 ### Close is not a verb on a workspace
 

@@ -449,8 +449,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// second window; this is the window you are in, looking another way. Both can be up at once, on
     /// one document: the store is shared per file (see `CanvasStoreRegistry`), so two windows on a
     /// board are two views of it with one undo stack rather than two copies racing each other to save.
+    ///
+    /// Ticked only on the canvas tab itself. From a workspace or a frame it goes to the canvas, which is
+    /// the one way out of a workspace the menus offer.
     @objc func toggleCanvasRenderer(_ sender: Any?) {
-        setRenderer(renderer == .canvas ? .tasks : .canvas)
+        setRenderer(split.tabs.selected.view.isCanvas ? .tasks : .canvas)
     }
 
     /// The project's colour and texture into every board in the window — on the first read, which is
@@ -521,10 +524,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// the one you can change with the switch if it wasn't.
     @objc func newProjectTab(_ sender: Any?) {
         split.openTab(renderer == .canvas ? .notes : .board(.whole))
-    }
-
-    @objc func closeProjectTab(_ sender: Any?) {
-        _ = closeSelectedProjectTab()
     }
 
     @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
@@ -681,17 +680,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(newTask(_:)), #selector(newSession(_:)), #selector(startNewSession(_:)):
             return store.projectName != nil
         case #selector(toggleCanvasRenderer(_:)):
-            item.state = renderer == .canvas ? .on : .off
+            item.state = split.tabs.selected.view.isCanvas ? .on : .off
             return store.projectName != nil
         case #selector(newProjectTab(_:)):
             return store.projectName != nil
-        case #selector(closeProjectTab(_:)):
-            // Retitled rather than dimmed, on `tileCommandTitle`'s pattern: on a workspace this key
-            // steps out to the canvas, and a menu item that says "Close Tab" while doing that is the
-            // menu promising something else. Dim only on the canvas, where there is nothing to leave.
-            let selected = split.tabs.selected
-            (item as? NSMenuItem)?.title = split.tabs.closable(selected) ? "Close Tab" : "Show Canvas"
-            return !selected.view.isCanvas
         case #selector(selectNextProjectTab(_:)), #selector(selectPreviousProjectTab(_:)):
             // Dim at one tab, where there is nothing to cycle between.
             return split.tabs.tabs.count > 1

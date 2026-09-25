@@ -72,6 +72,25 @@ final class NoteEditorLineCommandTests: XCTestCase {
         XCTAssertEqual(editor.view.selectedRange(), NSRange(location: 2, length: 0))
     }
 
+    /// Format ▸ Bold, Italic and Link: the item's action reaches the editor, and the menu writes ⌘B,
+    /// ⌘I and ⌘K on them while open, like the line commands.
+    func testFormatBoldItalicAndLinkReachTheEditor() {
+        let editor = NoteEditor()
+        editor.put("word", caretAt: 0)
+        editor.view.setSelectedRange(NSRange(location: 0, length: 4))
+        XCTAssertTrue(editor.view.tryToPerform(EditorLineCommand.bold.action, with: nil))
+        XCTAssertEqual(editor.text, "**word**")
+
+        let menu = NSMenu()
+        let items = [EditorLineCommand.bold, .italic, .link].map {
+            menu.addItem(withTitle: $0.title, action: $0.action, keyEquivalent: "")
+        }
+        EditorMenuKeys.shared.menuWillOpen(menu)
+        XCTAssertEqual(items.map(\.keyEquivalent), ["b", "i", "k"])
+        XCTAssertEqual(items.map(\.title), ["Bold", "Italic", "Link"])
+        EditorMenuKeys.shared.menuDidClose(menu)
+    }
+
     /// The Format menu shows keys it must not claim: a disabled main-menu item swallows its key, which
     /// would take ⌥↑ away from the board. See `EditorMenuKeys`.
     func testTheFormatMenuShowsItsKeysOnlyWhileOpen() {

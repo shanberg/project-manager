@@ -15,7 +15,7 @@ import PmLib
 ///
 /// On top of that it does what a markdown editor is expected to do and a bare text view doesn't:
 /// Return continues the list or quote you're in (and ends it on an empty item), Tab indents a list item
-/// and Shift-Tab outdents it, ⌥↑/⌥↓ move the line, ⌘⇧D duplicates it, typing `*`/`` ` ``/`(` over a
+/// and Shift-Tab outdents it, ⌥↑/⌥↓ move the line, ⇧⌥↓ copies it, typing `*`/`` ` ``/`(` over a
 /// selection wraps it instead of replacing it, pasting a URL over a selection makes it a link, dropping
 /// or pasting a file writes the link to it, pasting a picture embeds it — saving it beside the note
 /// when it has no file of its own — ⌘B / ⌘I / ⌘K format, and ⌘-click follows a link. Prose is
@@ -957,7 +957,7 @@ func renderedMarkdown(_ text: String, base: NSFont, baseColor: NSColor, note: UR
 }
 
 /// An `NSTextView` that adds the editing behaviours a markdown editor is expected to have, with no
-/// visible toolbar: Return continues a list, Tab indents one, ⌥↑/⌥↓ move a line, ⌘⇧D duplicates it,
+/// visible toolbar: Return continues a list, Tab indents one, ⌥↑/⌥↓ move a line, ⇧⌥↓ copies it,
 /// ⌘B / ⌘I / ⌘K format the selection, typing a marker over a selection wraps it, a pasted URL becomes a
 /// link, a dropped or pasted file becomes a link to itself, a pasted picture becomes an embed, and
 /// ⌘-click follows a link.
@@ -1313,17 +1313,13 @@ final class ShortcutTextView: NSTextView {
         // these editing keys over whatever the actually-focused tile wants them to mean.
         if flags == .command, holdsCaret {
             switch ch {
-            case "b": apply { toggleWrap($0, selection: $1, marker: "**") }; return true
-            case "i": apply { toggleWrap($0, selection: $1, marker: "*") }; return true
-            case "k": apply { wrapLink($0, selection: $1) }; return true
+            // ⌘B / ⌘I / ⌘K are `EditorLineCommand`s, below, so Format lists them.
             case "\r": onSubmit?(); return true   // ⌘↩ saves and closes
             default: break
             }
         }
-        if flags == [.command, .shift], ch == "d", holdsCaret {
-            apply { duplicateLines($0, selection: $1) }
-            return true
-        }
+        // No ⇧⌘D here: it is Task ▸ Dive In, and a note that held it hid Dive In whenever the caret was
+        // in one. Copy Line Down (⇧⌥↓) is the same edit.
         // The line commands. Here, and not only in the Format menu that lists them, for the reason ⌘B is:
         // this runs for the view holding the caret before the menu bar is asked — and the menu declines
         // them outright (see `EditorMenuKeys`), because a menu item claims its key even while disabled.
@@ -1665,6 +1661,12 @@ final class ShortcutTextView: NSTextView {
     func perform(_ command: EditorLineCommand) {
         if command != .shrinkSelection, command != .expandSelection { expansions.removeAll() }
         switch command {
+        case .bold:
+            apply { toggleWrap($0, selection: $1, marker: "**") }
+        case .italic:
+            apply { toggleWrap($0, selection: $1, marker: "*") }
+        case .link:
+            apply { wrapLink($0, selection: $1) }
         case .moveUp, .moveDown:
             applyIfPossible { moveLines($0, selection: $1, up: command == .moveUp) }
         case .copyUp, .copyDown:
@@ -1700,6 +1702,9 @@ final class ShortcutTextView: NSTextView {
     private var expansions: [NSRange] = []
     private var expanded: NSRange?
 
+    @objc func markBold(_ sender: Any?) { perform(.bold) }
+    @objc func markItalic(_ sender: Any?) { perform(.italic) }
+    @objc func markLink(_ sender: Any?) { perform(.link) }
     @objc func moveLinesUp(_ sender: Any?) { perform(.moveUp) }
     @objc func moveLinesDown(_ sender: Any?) { perform(.moveDown) }
     @objc func copyLinesUp(_ sender: Any?) { perform(.copyUp) }
@@ -1752,6 +1757,7 @@ final class ShortcutTextView: NSTextView {
 /// same thing this takes it — VS Code's, mostly — and ⌃⌘ digits for headings because the bare ⌘ ones
 /// are taken.
 enum EditorLineCommand: Equatable {
+    case bold, italic, link
     case moveUp, moveDown, copyUp, copyDown, delete, insertBelow, insertAbove, join, toggleTask
     case heading(Int)
     case expandSelection, shrinkSelection
@@ -1764,6 +1770,9 @@ enum EditorLineCommand: Equatable {
     /// The key as a menu item draws it.
     var key: (equivalent: String, modifiers: NSEvent.ModifierFlags) {
         switch self {
+        case .bold: return ("b", [.command])
+        case .italic: return ("i", [.command])
+        case .link: return ("k", [.command])
         case .moveUp: return (Self.upArrow, [.option])
         case .moveDown: return (Self.downArrow, [.option])
         case .copyUp: return (Self.upArrow, [.option, .shift])
@@ -1781,6 +1790,9 @@ enum EditorLineCommand: Equatable {
 
     var title: String {
         switch self {
+        case .bold: return "Bold"
+        case .italic: return "Italic"
+        case .link: return "Link"
         case .moveUp: return "Move Line Up"
         case .moveDown: return "Move Line Down"
         case .copyUp: return "Copy Line Up"
@@ -1799,6 +1811,9 @@ enum EditorLineCommand: Equatable {
 
     var action: Selector {
         switch self {
+        case .bold: return #selector(ShortcutTextView.markBold(_:))
+        case .italic: return #selector(ShortcutTextView.markItalic(_:))
+        case .link: return #selector(ShortcutTextView.markLink(_:))
         case .moveUp: return #selector(ShortcutTextView.moveLinesUp(_:))
         case .moveDown: return #selector(ShortcutTextView.moveLinesDown(_:))
         case .copyUp: return #selector(ShortcutTextView.copyLinesUp(_:))
@@ -1814,7 +1829,7 @@ enum EditorLineCommand: Equatable {
         }
     }
 
-    static let all: [EditorLineCommand] = [.moveUp, .moveDown, .copyUp, .copyDown, .delete,
+    static let all: [EditorLineCommand] = [.bold, .italic, .link, .moveUp, .moveDown, .copyUp, .copyDown, .delete,
                                            .insertBelow, .insertAbove, .join, .toggleTask,
                                            .expandSelection, .shrinkSelection] + (0...6).map { .heading($0) }
 

@@ -177,8 +177,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .complete: return ("\r", [.command, .shift])
         case .diveIn: return ("d", [.command, .shift])
         case .openInFinder: return ("r", [.command, .shift])
-        // Finder's Get Info, which is the same question asked of a file.
-        case .projectSettings: return ("i", [.command])
+        // Finder's Get Info letter, under ⌃ because ⌘I is Format ▸ Italic in a note.
+        case .projectSettings: return ("i", [.command, .control])
         default: return nil
         }
     }

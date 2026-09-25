@@ -81,6 +81,13 @@ struct CanvasTileSession: Equatable {
         return nil
     }
 
+    /// Whether dealing these tiles out as `arrangement` again would change nothing. Dealing an
+    /// untouched arrangement again is a no-op, so this is true right after one and false once a tile
+    /// has been dragged or resized.
+    func isArranged(as arrangement: CanvasTiling.Arrangement, masterFraction: Double) -> Bool {
+        columns == CanvasTiling.columns(arrangement, of: readingOrder, in: area, masterFraction: masterFraction)
+    }
+
     /// The tiles in the order you would read them off the screen — rows top to bottom, each left to
     /// right — which across a grid is not the columns' order.
     ///

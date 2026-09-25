@@ -1358,6 +1358,16 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             } else {
                 scroll.board.findNext(lastQuery)
             }
+        case .setSearchString:
+            // ⌘E in a page that didn't want it: its selected text becomes the query. A text field
+            // answers this itself; the board has no selected text, so the item is dim there.
+            searchTarget?.selectedText { [weak self] text in
+                let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let self, !query.isEmpty else { return NSSound.beep() }
+                header.find.query = query
+                header.find.isShowing = true
+                search(query)
+            }
         default:
             break
         }
@@ -1389,6 +1399,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         switch NSTextFinder.Action(rawValue: item.tag) {
         case .showFindInterface: return true
         case .nextMatch, .previousMatch: return !lastQuery.isEmpty
+        case .setSearchString: return searchTarget != nil
         default: return false
         }
     }

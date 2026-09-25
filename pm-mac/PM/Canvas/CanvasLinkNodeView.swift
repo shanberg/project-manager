@@ -1370,6 +1370,15 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// board. WebKit's own find is used rather than a script injected into the page: it highlights, it
     /// scrolls the match into view, and it works on a page whose content security policy would refuse
     /// anything PM injected.
+    /// The page's selected text, for Edit ▸ Find ▸ Use Selection for Find. Empty when nothing is
+    /// selected or the page can't say.
+    func selectedText(then give: @escaping (String) -> Void) {
+        guard let web else { return give("") }
+        web.evaluateJavaScript("String(window.getSelection())") { result, _ in
+            MainActor.assumeIsolated { give((result as? String) ?? "") }
+        }
+    }
+
     func find(_ query: String, forward: Bool = true, then say: @escaping (Bool) -> Void) {
         guard let web, !query.isEmpty else { return say(false) }
         let configuration = WKFindConfiguration()

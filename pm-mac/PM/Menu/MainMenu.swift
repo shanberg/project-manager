@@ -227,6 +227,8 @@ enum MainMenu {
             let entry = menu.addItem(withTitle: command.title, action: command.action, keyEquivalent: "")
             if case .heading(let level) = command { entry.tag = level }
         }
+        for command: EditorLineCommand in [.bold, .italic, .link] { add(command, to: menu) }
+        menu.addItem(.separator())
         let headings = NSMenu(title: "Heading")
         headings.delegate = EditorMenuKeys.shared
         for level in 0...6 { add(.heading(level), to: headings) }
@@ -273,7 +275,7 @@ enum MainMenu {
         add("Find Previous", .previousMatch, key: "g", modifiers: [.command, .shift])
         menu.addItem(.separator())
         // ⌘E. In a text field the field editor answers this and searches for what's selected there; in
-        // the task list the window answers and searches for the selected task's text.
+        // a web card the board's pane answers with the page's selected text.
         add("Use Selection for Find", .setSearchString, key: "e")
 
         item.submenu = menu
@@ -306,7 +308,6 @@ enum MainMenu {
     /// The five zoom commands a board answers, routed through the responder chain so they are live when
     /// one is in front and dim when it isn't.
     private static func canvasZoomItems(_ menu: NSMenu) {
-        menu.addItem(.separator())
         let inn = menu.addItem(withTitle: "Zoom In", action: #selector(CanvasBoardView.zoomIn(_:)),
                                keyEquivalent: "+")
         inn.keyEquivalentModifierMask = [.command]
@@ -367,10 +368,10 @@ enum MainMenu {
         // was a menu. The handlebar drags and does nothing else; the commands live here, where a menu
         // bar can be read through, and on the tile's own contextual menu. Each acts on the focused
         // tile, so each is dim unless exactly one is focused — see `CanvasBoardView.focusedTile`.
-        let promote = menu.addItem(withTitle: "Make This the Master Tile",
-                                   action: #selector(CanvasBoardView.promoteTile(_:)),
-                                   keyEquivalent: "\r")
-        promote.keyEquivalentModifierMask = [.command, .shift]
+        // No key: ⇧⌘↩ is Task ▸ Complete, and View comes first in the bar, so this item held it.
+        menu.addItem(withTitle: "Make This the Master Tile",
+                     action: #selector(CanvasBoardView.promoteTile(_:)),
+                     keyEquivalent: "")
         menu.addItem(withTitle: "Pin Tile Width",
                      action: #selector(CanvasBoardView.togglePinTileSize(_:)),
                      keyEquivalent: "")
@@ -387,9 +388,7 @@ enum MainMenu {
         menu.addItem(withTitle: "Pick Cards on Board",
                      action: #selector(CanvasBoardView.pickCardsOnBoard(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Show Canvas",
-                     action: #selector(CanvasBoardView.goToCanvasCommand(_:)),
-                     keyEquivalent: "")
+        // No "Show Canvas" here: View ▸ Show Canvas (⌥⌘C) is the one, and it leaves a workspace too.
 
         // **The workspace's home that a menu bar can be read through.**
         //
@@ -614,10 +613,7 @@ enum MainMenu {
         // are here because they are about the window in front of you rather than about making
         // something. ⌃⇥ and ⌃⇧⇥ are the standard pair and are free now that project windows have
         // turned native tabbing off — see `ProjectWindowController`.
-        // No key on Close Tab: ⌘W is already it, claimed by File ▸ Close and narrowed to the tab by
-        // the window itself. Printing ⌘W here as well would be two items promising one keystroke.
-        add(menu, "Close Tab", #selector(ProjectWindowController.closeProjectTab(_:)),
-            target: nil, key: "")
+        // No Close Tab: File ▸ Close (⌘W) closes the tab — see `TextFocusWindow.performClose`.
         add(menu, "Next Tab", #selector(ProjectWindowController.selectNextProjectTab(_:)),
             target: nil, key: "\t", modifiers: [.control])
         add(menu, "Previous Tab", #selector(ProjectWindowController.selectPreviousProjectTab(_:)),
@@ -645,12 +641,13 @@ enum MainMenu {
         // With the other two "show me this" checkmarks rather than in the sidebar's arrange menu: it's
         // how the whole app writes a project's name, not how one list is arranged. See `ProjectCodes`.
         add(menu, "Show Project Codes", #selector(AppDelegate.toggleProjectCodes), target: target, key: "")
+        menu.addItem(.separator())
 
         // Everything a canvas answers and a project window doesn't, in one block at the foot of the
         // menu. It sits below the "Show" toggles rather than among them because in a project window
         // the whole block is dim, and a run of grey items reads as the end of a menu rather than as a
-        // hole punched through the middle of it. Each of the three draws its own separators, so the
-        // block delimits itself — do not add another before Appearance.
+        // hole punched through the middle of it. Each group ends with its own separator, so the block
+        // delimits itself — do not add another before Appearance or at the start of a group.
         //
         // Zoom is answered only by a board. ⌘= as well as ⌘+ because the plus is a shifted equals on
         // most layouts and AppKit matches the literal character.

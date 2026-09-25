@@ -212,11 +212,12 @@ final class NoteEditorEditingTests: XCTestCase {
         XCTAssertEqual(editor.text, "[Apple](url)")
     }
 
-    func testShiftCommandDDuplicatesTheLine() {
+    /// ⇧⌘D is Task ▸ Dive In. The note declines it so the menu bar gets it; ⇧⌥↓ copies a line.
+    func testShiftCommandDIsLeftForDiveIn() {
         let editor = NoteEditor()
         editor.reset("one")
-        XCTAssertTrue(command("d", editor, shift: true))
-        XCTAssertEqual(editor.text, "one\none")
+        XCTAssertFalse(command("d", editor, shift: true))
+        XCTAssertEqual(editor.text, "one")
     }
 
     func testOptionDownMovesTheLine() {

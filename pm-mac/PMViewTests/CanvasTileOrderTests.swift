@@ -147,6 +147,22 @@ final class CanvasTileOrderTests: XCTestCase {
         XCTAssertEqual(again.first?.tiles.first?.shown, "t0")
     }
 
+    /// **Arrange's tick.** On for the arrangement just dealt, off for the other, and off for both once
+    /// a column has been resized.
+    func testTheTickFollowsTheArrangementUntilATileIsResized() {
+        for arrangement in CanvasTiling.Arrangement.allCases {
+            let other: CanvasTiling.Arrangement = arrangement == .grid ? .masterStack : .grid
+            var session = CanvasTileSession(columns: CanvasTiling.columns(arrangement,
+                                                                          of: (0..<4).map { CanvasTiling.Tile("t\($0)") },
+                                                                          in: wide, masterFraction: 0.6),
+                                            area: wide, restoreVisible: wide)
+            XCTAssertTrue(session.isArranged(as: arrangement, masterFraction: 0.6), "\(arrangement)")
+            XCTAssertFalse(session.isArranged(as: other, masterFraction: 0.6), "\(arrangement) as \(other)")
+            session.columns[0].width = .pinned(123)
+            XCTAssertFalse(session.isArranged(as: arrangement, masterFraction: 0.6), "\(arrangement), resized")
+        }
+    }
+
     /// The same, for a grid: dealing an untouched grid again is a no-op.
     func testDealingAGridAgainLeavesItAlone() {
         for n in 2...7 {

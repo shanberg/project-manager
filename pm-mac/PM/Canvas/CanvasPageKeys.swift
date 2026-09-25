@@ -49,7 +49,7 @@ enum CanvasPageKeys {
     /// Everything else — ⌘R, ⌘Z, ⌘E, ⌘D, ⌘[, ⌘], the zoom keys — is the page's for the asking.
     private static let kept: [(key: String, modifiers: NSEvent.ModifierFlags)] = [
         ("q", [.command]),                                                     // Quit
-        ("w", [.command]), ("w", [.command, .option]),                         // Close, Close All
+        ("w", [.command]), ("w", [.command, .shift]), ("w", [.command, .option]), // Close, Close Window, Close All
         ("w", [.command, .control]),                                           // Show Waiting
         (",", [.command]),                                                     // Settings
         ("h", [.command]), ("h", [.command, .option]),                         // Hide, Hide Others
@@ -58,10 +58,10 @@ enum CanvasPageKeys {
         ("n", [.command]), ("n", [.command, .shift]), ("n", [.command, .option]),
         ("n", [.command, .control]),                                           // the New family
         ("t", [.command]),                                                     // New Tab
-        ("o", [.command]), ("o", [.command, .shift]),                          // the Open family
+        ("o", [.command]), ("o", [.command, .shift]), ("c", [.command, .shift]), // the Open family
         ("c", [.command, .option]),                                            // Show Canvas
         ("l", [.command]),                                                     // Open Address
-        ("\r", [.command, .option]), ("\r", [.command, .shift]),         // Maximize, Master Tile
+        ("\r", [.command, .option]), ("\r", [.command, .shift]),         // Maximize, Complete Task
         ("\t", [.control]), ("\t", [.control, .shift]),                        // Next/Previous Tab
     ]
 

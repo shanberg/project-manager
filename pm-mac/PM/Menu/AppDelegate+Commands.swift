@@ -159,6 +159,9 @@ extension AppDelegate: NSMenuItemValidation {
             // away from it, and a title that only updates when the menu opens would read as stale.
             item.state = FocusPanelController.shared.isVisible ? .on : .off
             return true
+        case #selector(toggleWaiting):
+            item.state = WaitingWindowController.shared.isVisible ? .on : .off
+            return true
         case #selector(toggleProjectCodes):
             item.state = ProjectCodes.areShown ? .on : .off
             return true
@@ -198,6 +201,12 @@ extension AppDelegate: NSMenuDelegate {
             guard let raw = item.representedObject as? String,
                   let command = PMCommand(rawValue: raw) else { continue }
             item.title = command.title(in: context)
+            // One of Archive and Unarchive, never one dim beside the other.
+            switch command {
+            case .archiveProject: item.isHidden = context.hasProject && context.isArchived
+            case .unarchiveProject: item.isHidden = !(context.hasProject && context.isArchived)
+            default: break
+            }
         }
     }
 }

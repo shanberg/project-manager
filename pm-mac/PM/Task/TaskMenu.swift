@@ -146,11 +146,6 @@ struct TaskMenu: View {
             Label(isMulti ? "Delete \(scope.count) Tasks…" : "Delete…", systemImage: "trash")
         }
         .keyboardShortcut(.delete, modifiers: .command)
-        Divider()
-        // Global document undo/redo — discoverable here; the ⌘Z / ⇧⌘Z shortcuts live on the surface.
-        Button { store.undo() } label: { Label(store.undoMenuTitle, systemImage: "arrow.uturn.backward") }
-            .disabled(!store.canUndo)
-        Button { store.redo() } label: { Label(store.redoMenuTitle, systemImage: "arrow.uturn.forward") }
-            .disabled(!store.canRedo)
+        // Delete is last. Undo and Redo are Edit's, not this task's, so they aren't here.
     }
 }

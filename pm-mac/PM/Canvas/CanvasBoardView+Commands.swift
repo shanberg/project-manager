@@ -485,7 +485,7 @@ extension CanvasBoardView {
             if let chip = tabChip(at: where_) {
                 showTab(chip.card)
                 menuTile = chip.card
-                buildCardMenu(menu, id: chip.card, includingTiling: false)
+                buildCardMenu(menu, id: chip.card, includingTiling: false, includingDelete: false)
                 menu.insertItem(.sectionHeader(title: "Card"), at: 0)
                 addTabSection(menu, id: chip.card)
                 return menu
@@ -526,7 +526,7 @@ extension CanvasBoardView {
         switch hitTester.hit(where_) {
         case .node(let id), .handle(let id, _), .anchor(let id, _):
             if !selection.contains(id) { selection = [id] }
-            buildCardMenu(menu, id: id)
+            buildCardMenu(menu, id: menuLead(id))
         case .edge(let id):
             if !selection.contains(id) { selection = [id] }
             buildLineMenu(menu, id: id)
@@ -541,7 +541,7 @@ extension CanvasBoardView {
     /// untiled board, where there is only one kind of object and a header would be labelling the whole
     /// menu.
     private func buildTileMenu(_ menu: NSMenu, id: String) {
-        buildCardMenu(menu, id: id, includingTiling: false)
+        buildCardMenu(menu, id: menuLead(id), includingTiling: false, includingDelete: false)
         menu.insertItem(.sectionHeader(title: "Card"), at: 0)
         addTileSection(menu, id: id)
     }
@@ -669,13 +669,35 @@ extension CanvasBoardView {
     ///
     /// `id` nil is several cards of different kinds, from the header's `…`: no card's own block leads,
     /// only what every card answers to — see `CanvasCardActions.target`.
-    private func buildCardMenu(_ menu: NSMenu, id: String?, includingTiling: Bool = true) {
+    ///
+    /// `includingDelete` is false where a tile or tab section follows, which ends with Delete itself so
+    /// that removing is always the last thing in the menu.
+    private func buildCardMenu(_ menu: NSMenu, id: String?, includingTiling: Bool = true,
+                               includingDelete: Bool = true) {
         if let id, let node = document.node(id: id) {
             addOwnCommands(menu, id: id, node: node)
         } else if id != nil {
             return
         }
         addCommonCommands(menu, includingTiling: includingTiling)
+        if includingDelete {
+            menu.addItem(.separator())
+            addDeleteCard(menu)
+        }
+    }
+
+    /// The card whose own commands lead a right-click on `id`: `id` itself, or nothing when it is one
+    /// of a selection of mixed kinds — the rule the header's `…` follows (`CanvasCardActions.target`).
+    private func menuLead(_ id: String) -> String? {
+        guard selection.count > 1, selection.contains(id),
+              let target = CanvasCardActions.target(focused: nil, selection: selection, kind: cardKind)
+        else { return id }
+        return target.anchor == nil ? nil : id
+    }
+
+    private func addDeleteCard(_ menu: NSMenu) {
+        key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
+            "\u{8}", modifiers: [])
     }
 
     /// The block a kind of card brings to its menu — a project's, a folder's, a page's.
@@ -840,6 +862,9 @@ extension CanvasBoardView {
     /// What every card answers to, whatever it is.
     private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool) {
         if includingTiling { addTiling(menu) }
+        // Every one of these is out while tiled (Tidy Up and Size included), and a separator with
+        // nothing under it would stack on the next one.
+        guard !isTiled else { return }
         menu.addItem(.separator())
         // All four carry their keys, for the reason Fill Window does — see `addTiling`. A contextual
         // menu draws a key equivalent exactly as the menu bar does, and it is the one place a person
@@ -858,9 +883,6 @@ extension CanvasBoardView {
             size.items.forEach { $0.target = self }
             menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
         }
-        menu.addItem(.separator())
-        key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
-            "\u{8}", modifiers: [])
     }
 
     /// The project cards in the selection — what every project command acts on.
@@ -1274,9 +1296,9 @@ extension CanvasBoardView {
         add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
     }
 
-    /// Arrange's commands. None is ticked: an arrangement deals the tiles out into columns and is then
-    /// forgotten, and sizing to content sets the widths once, so there is no state for a tick to report
-    /// (docs/canvas-workspaces.md §7k).
+    /// Arrange's commands. An arrangement deals the tiles out into columns and is then forgotten
+    /// (docs/canvas-workspaces.md §7k), so the tick is read off the tiles: it is on while they are still
+    /// as that arrangement deals them. See `isArranged(as:)`.
     private func addArrange(_ menu: NSMenu) {
         let arrange = NSMenu()
         for option in CanvasTiling.Arrangement.allCases {
@@ -1335,11 +1357,7 @@ extension CanvasBoardView {
             add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
         }
         if tiling.hasTabs(id) { add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
-        if tiling.canPromote(id) {
-            let promote = add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:)))
-            promote.keyEquivalent = "\r"
-            promote.keyEquivalentModifierMask = [.command, .shift]
-        }
+        if tiling.canPromote(id) { add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:))) }
         // Here as well as on the board's own menu, because the board's is reached by right-clicking a
         // gap between tiles, and the gaps are four points wide.
         if !wholeTile { addExistingCards(menu); addReplaceWith(menu) }
@@ -1353,6 +1371,8 @@ extension CanvasBoardView {
         if wholeTile {
             add(menu, "Remove Tile from Tiled View", #selector(removeMenuTileWithTabs(_:)))
         } else {
+            // The card's Delete, held back by `buildTileMenu` so that both removals end the menu.
+            addDeleteCard(menu)
             add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
         }
     }
@@ -1370,6 +1390,7 @@ extension CanvasBoardView {
             add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
         }
         menu.addItem(.separator())
+        addDeleteCard(menu)
         add(menu, "Close Tab", #selector(removeMenuTile(_:)))
     }
 
@@ -1508,12 +1529,6 @@ extension CanvasBoardView {
         restoringMaximized { removeFromTiling(id) }
     }
 
-    /// **Show the canvas** — the way out of a tiled view, wherever a menu offers one.
-    ///
-    /// It untiled the board and it does not any more. A workspace is a place the window can be in
-    /// (docs/canvas-workspaces.md §7i), so leaving it is going to the other place — the canvas tab —
-    /// and the tiles stay exactly as they are behind you.
-    @objc func goToCanvasCommand(_ sender: Any?) { onGoToCanvas() }
 
     private func pinTitle(_ divider: CanvasTileDivider, _ index: Int, side: String) -> String {
         "\(tiling?.isPinned(divider.run, at: index) == true ? "Unpin" : "Pin") \(side)"
@@ -1575,7 +1590,9 @@ extension CanvasBoardView {
         // the one caller that has already drawn a line of its own — a section header.
         guard isTiled || document.nodes.contains(where: { !$0.isGroup }) else { return }
         if separated { menu.addItem(.separator()) }
-        add(menu, tileCommandTitle, #selector(tileSelection(_:)))
+        // Only on the canvas. Inside a workspace this was "Show Canvas", a second name for View ▸ Show
+        // Canvas; the way out is that item, the tab bar and Escape.
+        if !isTiled { add(menu, tileCommandTitle, #selector(tileSelection(_:))) }
         // The card's Maximize, beside the workspace it is the temporary version of. A tile's is in its
         // own section, so this is only the board's card and the one filling the window alone.
         if maximizableCard != nil || (maximizedCard != nil && tiling?.ids.count == 1) {
@@ -2710,9 +2727,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func setTileArrangement(_ sender: Any?) {
         guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
               let arrangement = CanvasTiling.Arrangement(rawValue: raw) else { return }
-        // Choosing an arrangement with nothing tiled is a request to tile — otherwise the item is a
-        // setting for a state you have to already be in to reach it.
-        if isTiled { setArrangement(arrangement) } else { tileSelection(nil) }
+        setArrangement(arrangement)
     }
 
     func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
@@ -2723,10 +2738,14 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             (item as? NSMenuItem)?.state = mode == .connect ? .on : .off
             return true
         case #selector(tileSelection(_:)):
-            // Retitled rather than fixed, because it is two commands in two places: on the canvas it
-            // says what it would make and how many cards would be in it, and inside a workspace it is
-            // the way out. Dim on a canvas with nothing selected — a workspace is made out of a
-            // selection or not at all. See `CanvasTiling.commandTitle`.
+            // Retitled to say what it would make and how many cards would be in it. Dim on a canvas
+            // with nothing selected — a workspace is made out of a selection or not at all — and dim
+            // inside a workspace, where the way out is View ▸ Show Canvas rather than a second item by
+            // that name. The header's button keeps both meanings. See `CanvasTiling.commandTitle`.
+            guard !isTiled else {
+                (item as? NSMenuItem)?.title = CanvasTiling.commandTitle(tiled: false, targets: 0)
+                return false
+            }
             (item as? NSMenuItem)?.title = tileCommandTitle
             return canRunTileCommand
         case #selector(showCardActions(_:)):
@@ -2770,10 +2789,19 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return true
         case #selector(goToListedWorkspace(_:)):
             return (item as? NSMenuItem)?.representedObject is String
-        case #selector(setTileArrangement(_:)):
-            // Commands, not a setting, so nothing is ticked — see `addArrange`.
-            (item as? NSMenuItem)?.state = .off
-            return true
+        case #selector(setTileArrangement(_:)), #selector(arrangeAsGrid(_:)),
+             #selector(arrangeAsMasterStack(_:)):
+            // Ticked while the tiles are still as this arrangement deals them; a drag since then
+            // leaves neither ticked. The menu bar's items only arrange: with nothing tiled they are
+            // dim rather than a second way to make a workspace.
+            guard let entry = item as? NSMenuItem else { return true }
+            let arrangement: CanvasTiling.Arrangement? = switch item.action {
+            case #selector(arrangeAsGrid(_:)): .grid
+            case #selector(arrangeAsMasterStack(_:)): .masterStack
+            default: (entry.representedObject as? String).flatMap(CanvasTiling.Arrangement.init(rawValue:))
+            }
+            entry.state = arrangement.map(isArranged(as:)) == true ? .on : .off
+            return isTiled || item.action != #selector(setTileArrangement(_:))
         case #selector(sizeColumnsToContent(_:)):
             // One column has the whole width whatever it holds.
             return (tiling?.columns.count ?? 0) > 1
@@ -2843,8 +2871,6 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // item out altogether: a grid has no master, and the master is already the master.
             guard let id = focusedTile else { return false }
             return tiling?.canPromote(id) == true
-        case #selector(goToCanvasCommand(_:)):
-            return isTiled
         case #selector(togglePinTileSize(_:)):
             (item as? NSMenuItem)?.title = pinTileTitle
             return pinnableTile != nil
