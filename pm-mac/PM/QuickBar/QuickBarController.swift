@@ -1259,6 +1259,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
+        // Its Return keys, with any modifiers, are its commands — never the board's behind it.
+        panel.keepsReturnKeys = true
         panel.delegate = self
         panel.isOpaque = false
         panel.backgroundColor = .clear

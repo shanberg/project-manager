@@ -20,6 +20,26 @@ final class KeyablePanel: NSPanel {
 
     override var canBecomeKey: Bool { acceptsKey }
 
+    /// Keep ⌘↩, ⌥↩, ⌃↩ and the rest for the panel's own keyboard rather than the menu bar's.
+    ///
+    /// A modified Return is a key equivalent before it is a keystroke, and when the panel's views
+    /// decline it AppKit hands it to the main menu — whose board commands then act on the *main*
+    /// window, the project window behind the panel, since a panel is never main. The quick bar reads
+    /// the modifiers on Return as part of its command, so ⌥⌘↩ in it maximized a tile in the window you
+    /// had left, and ⌘↩ (Create Workspace at the time) switched that window to the canvas without
+    /// adding the task you typed.
+    var keepsReturnKeys = false
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if super.performKeyEquivalent(with: event) { return true }
+        // 36 is Return, 76 the keypad's Enter.
+        guard keepsReturnKeys, event.type == .keyDown, [36, 76].contains(event.keyCode),
+              let responder = firstResponder else { return false }
+        // Where the window would have sent it had nothing claimed it as an equivalent.
+        responder.keyDown(with: event)
+        return true
+    }
+
     /// Take key focus deliberately. `canBecomeKey` is consulted at this moment, so the gate opens just
     /// long enough for the panel to become key; `FocusPanelController` shuts it again on resign.
     func takeKey() {

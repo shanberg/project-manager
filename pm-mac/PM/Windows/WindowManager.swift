@@ -50,6 +50,13 @@ final class WindowManager {
             // Every project window is the same window type at the same remembered frame, so a second
             // one would open exactly on top of the first. Step it off the frontmost window the way
             // AppKit cascades any other new window.
+            //
+            // At the frontmost window's size, not the size a window is made at: a later window doesn't
+            // claim the remembered frame, so it opened at the default size beside one you had sized to
+            // the work. A full-screen window's size is the screen's, which is no size for a new one.
+            if !front.styleMask.contains(.fullScreen) {
+                new.setFrame(NSRect(origin: new.frame.origin, size: front.frame.size), display: false)
+            }
             new.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY))
         }
         controller.show()

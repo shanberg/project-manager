@@ -150,6 +150,7 @@
 		6071D2539D1567A15E8B3F57 /* PMEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F024FD91F7AEB31A5D296AB /* PMEntities.swift */; };
 		6096BF95C43BE585B11BE3BF /* CanvasPageSnapshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EA2EC2B829AE947997FD11C /* CanvasPageSnapshots.swift */; };
 		60993D6807E881845F7EA185 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E520F8426CD4283C14108C35 /* HotKeyManager.swift */; };
+		619C1FB09A36DA74991A62A8 /* KeyablePanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4428FD2AA8CA78A4A092B4D /* KeyablePanelTests.swift */; };
 		61B2A580C3EE768B1D03D584 /* CanvasProjectsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931B6C39E7B533DBD249FFD /* CanvasProjectsCard.swift */; };
 		61DFF2CC132077EA17389BE6 /* NoteEditorReturnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2147A52B01C61E2E82C337A /* NoteEditorReturnTests.swift */; };
 		62808FC8DAD2E8A4027C29A0 /* ProjectIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17FA0B4FC52FB9DC24629BF6 /* ProjectIndex.swift */; };
@@ -413,6 +414,7 @@
 		ECC6C551BE4F6F9387B4B679 /* TaskLineLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2CEC36DE8B5CE633E8D1A6E /* TaskLineLayoutTests.swift */; };
 		ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D69731046CF949BED6A9B753 /* StatusItemController.swift */; };
 		EF13FDBC361FD2123FF4CD3D /* PMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A7709B2DE4D155EAE70CCF /* PMStore.swift */; };
+		F0B5690190D44DCAA8D2F76D /* KeyablePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30BC0AE688FEC42E1605AD5 /* KeyablePanel.swift */; };
 		F0FD6C6DA821B5CE50A4A8B8 /* CanvasPageVisitsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7195401E772BB74ADE128B7 /* CanvasPageVisitsTests.swift */; };
 		F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */; };
 		F19CE5910A5384C7435BC6F3 /* AppDelegate+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E583F2A7FC849845365F2B /* AppDelegate+Commands.swift */; };
@@ -721,6 +723,7 @@
 		D28E7B370599FD42B5FD57EA /* ImmersiveStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersiveStage.swift; sourceTree = "<group>"; };
 		D2ADA066EB499AE0DB3E79E8 /* PMViewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PMViewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D33D166BDD787AB3EB4A7141 /* WaitingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingModel.swift; sourceTree = "<group>"; };
+		D4428FD2AA8CA78A4A092B4D /* KeyablePanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyablePanelTests.swift; sourceTree = "<group>"; };
 		D494C843D2122BC5BAA735B0 /* CanvasDocCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDocCards.swift; sourceTree = "<group>"; };
 		D574BBA43BD3B35293A5CE81 /* CanvasTidy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTidy.swift; sourceTree = "<group>"; };
 		D58237340FEDA8330FA07488 /* ProjectLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLifecycle.swift; sourceTree = "<group>"; };
@@ -1238,6 +1241,7 @@
 				67BE510BEC3BAA46D3DEBDFC /* HeaderChromeMotionTests.swift */,
 				EAB8898C08D2730345688C09 /* HeaderMenuButtonTests.swift */,
 				7FD1105C811101E44B91CD44 /* HiddenPaneGeometryTests.swift */,
+				D4428FD2AA8CA78A4A092B4D /* KeyablePanelTests.swift */,
 				E2F8F56F78DF923A9D75CC79 /* MentionPopoverGeometryTests.swift */,
 				969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */,
 				52F033A07EBB7B9C5F100737 /* NoteEditorCompletionTests.swift */,
@@ -1777,6 +1781,8 @@
 				B9378BF4A8E83D1E9A830DBE /* HeaderChromeMotionTests.swift in Sources */,
 				23DAF2FCB7EA9C07761B0839 /* HeaderMenuButtonTests.swift in Sources */,
 				A0F5213BE92ADC6928B39D68 /* HiddenPaneGeometryTests.swift in Sources */,
+				F0B5690190D44DCAA8D2F76D /* KeyablePanel.swift in Sources */,
+				619C1FB09A36DA74991A62A8 /* KeyablePanelTests.swift in Sources */,
 				3FEC031D0F1B3A201EEC0567 /* MarkdownTextEditor.swift in Sources */,
 				788B84519EFA792C3B3E8523 /* MentionPopover.swift in Sources */,
 				02190215A502BD6840EA41E1 /* MentionPopoverGeometryTests.swift in Sources */,
@@ -1900,7 +1906,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.48.1;
+				MARKETING_VERSION = 0.49.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -2047,7 +2053,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.48.1;
+				MARKETING_VERSION = 0.49.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

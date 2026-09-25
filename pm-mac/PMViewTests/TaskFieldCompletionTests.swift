@@ -32,6 +32,33 @@ final class TaskFieldCompletionTests: XCTestCase {
         XCTAssertTrue(field.box.submitted)
     }
 
+    /// ⌘Return is a key equivalent, offered to the window's views before the field editor sees it —
+    /// so the field has to claim it there, or the board's or the menu bar's ⌘Return wins mid-typing.
+    func testCommandReturnSubmits() throws {
+        let field = try makeField()
+        field.field.onCommandReturn = { [coordinator = field.coordinator] in coordinator.submit() }
+        field.reset("Ordinary task")
+        XCTAssertTrue(field.window.performKeyEquivalent(with: try commandReturn(in: field.window)),
+                      "the field should claim ⌘Return while it is being edited")
+        XCTAssertTrue(field.box.submitted)
+    }
+
+    /// Only while typing: a field that isn't being edited leaves ⌘Return to whoever else wants it.
+    func testCommandReturnIsLeftAloneWhenTheFieldIsNotEditing() throws {
+        let field = try makeField()
+        field.field.onCommandReturn = { [coordinator = field.coordinator] in coordinator.submit() }
+        field.window.makeFirstResponder(nil)
+        XCTAssertFalse(field.window.performKeyEquivalent(with: try commandReturn(in: field.window)))
+        XCTAssertFalse(field.box.submitted)
+    }
+
+    private func commandReturn(in window: NSWindow) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                                       timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                       characters: "\r", charactersIgnoringModifiers: "\r",
+                                       isARepeat: false, keyCode: 36))
+    }
+
     func testEscapeWithNoListStillCancels() throws {
         let field = try makeField()
         field.reset("Ordinary task")

@@ -239,6 +239,7 @@ targets:
       - path: PM/Project/RenderedNote.swift
       - path: PM/Canvas/CanvasPageView.swift
       - path: PM/Task/CompletingTextField.swift
+      - path: PM/Windows/KeyablePanel.swift
       - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift
       - path: PM/Project/ProjectTab.swift

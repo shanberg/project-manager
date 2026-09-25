@@ -8,6 +8,8 @@ import PmLib
 /// intercept it from the delegate. This is the one place that can.
 final class TokenClickField: NSTextField {
     var onTokenClick: ((NSPoint) -> Bool)?
+    /// ⌘Return while editing: the same as Return. See `performKeyEquivalent`.
+    var onCommandReturn: (() -> Void)?
 
     /// This field's own typing history, lent to the field editor while it edits here.
     ///
@@ -24,6 +26,20 @@ final class TokenClickField: NSTextField {
     override func mouseDown(with event: NSEvent) {
         if onTokenClick?(event.locationInWindow) == true { return }
         super.mouseDown(with: event)
+    }
+
+    /// **⌘Return commits, like Return.** It is a key equivalent before it is a keystroke: the window
+    /// offers it to every view and then the menu bar before the field editor sees it. So whatever else
+    /// claimed it won while you were typing a task — it used to be Create Workspace, which switched the
+    /// window to the canvas. A field you are typing in is the one place it should mean "done".
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers == "\r",
+           let onCommandReturn, let editor = currentEditor(), window?.firstResponder === editor {
+            onCommandReturn()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
@@ -53,6 +69,9 @@ struct CompletingTextField: NSViewRepresentable {
         let field = TokenClickField(string: text)
         field.onTokenClick = { [weak coordinator = context.coordinator] point in
             coordinator?.openTokenIfClicked(at: point) ?? false
+        }
+        field.onCommandReturn = { [weak coordinator = context.coordinator] in
+            coordinator?.submit()
         }
         field.placeholderString = placeholder
         field.delegate = context.coordinator
@@ -99,6 +118,13 @@ struct CompletingTextField: NSViewRepresentable {
         let glyphHider = TokenLayoutManager()
 
         init(_ parent: CompletingTextField) { self.parent = parent }
+
+        /// Return, or ⌘Return from the field. A completion list that is up closes with the commit
+        /// rather than hanging over the field's replacement.
+        func submit() {
+            completions.dismissAll()
+            parent.onSubmit()
+        }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
             // Never over a real one: assigning here would replace a `TokenFieldEditor`'s layout manager
@@ -220,7 +246,7 @@ struct CompletingTextField: NSViewRepresentable {
             }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
-                parent.onSubmit()
+                submit()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 parent.onCancel()
