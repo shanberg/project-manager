@@ -65,7 +65,7 @@ export default function Command() {
       <List>
         <List.EmptyView
           title="No Active Task"
-          description="Edit requires an active task. Use Narrow Focus first."
+          description="Edit requires an active task. Focus a task first."
         />
       </List>
     );

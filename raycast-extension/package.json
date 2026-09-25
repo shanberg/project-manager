@@ -148,10 +148,12 @@
     },
     {
       "name": "add-focused-todo",
-      "title": "Narrow Focus",
-      "description": "Add a child to the current item",
+      "title": "Add Subtask",
+      "description": "Add a subtask under the focused task",
       "mode": "view",
       "keywords": [
+        "subtask",
+        "child",
         "narrow",
         "focus",
         "add",

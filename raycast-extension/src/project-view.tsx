@@ -280,7 +280,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
           {notes &&
             (nextTodo ? (
               <Action.Push
-                title="Narrow Focus"
+                title="Add Subtask"
                 icon={Icon.Plus}
                 target={
                   <AddChildTodoForm
@@ -727,11 +727,11 @@ export default function ProjectView({ projectName, basePath }: Props) {
         />
         {notes && (
           <List.Item
-            title={nextTodo ? "Narrow Focus" : "Add Task"}
+            title={nextTodo ? "Add Subtask" : "Add Task"}
             icon={Icon.Plus}
             detail={sectionDetail(
               nextTodo
-                ? "Add a child to the current task."
+                ? "Add a subtask under the focused task."
                 : "Add a task to the current session in the project notes.",
               "",
             )}
@@ -739,7 +739,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
               <ActionPanel>
                 {nextTodo ? (
                   <Action.Push
-                    title="Narrow Focus"
+                    title="Add Subtask"
                     icon={Icon.Plus}
                     target={
                       <AddChildTodoForm
