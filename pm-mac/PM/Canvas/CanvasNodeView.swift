@@ -826,7 +826,7 @@ class CanvasNodeView: NSView {
     /// Take the keyboard off this card's content, to wherever it goes when nothing in a card has it:
     /// the board in its own window, nothing in a satellite's.
     func giveUpFocus() {
-        if lentTo != nil { contentWindow?.makeFirstResponder(nil) } else { giveUpFocus() }
+        if lentTo != nil { contentWindow?.makeFirstResponder(nil) } else { window?.makeFirstResponder(board) }
     }
 
     /// Get ready to go out: a web card starts its page. Most cards have nothing to do.
