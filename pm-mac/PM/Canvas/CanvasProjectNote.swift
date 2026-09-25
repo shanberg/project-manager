@@ -627,7 +627,18 @@ struct CanvasProjectNote: View {
     private var quickAddEditor: some View {
         AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
                   onOpenProject: onOpenProject) { text, due in
-            store.addTodo(text: text, due: due)
+            // Selected and scrolled to, as a paste is (`pasteTasks`): on a Tasks card the editor sits
+            // at the foot of the list and the task lands near the top, so without this the add looked
+            // like it hadn't happened until the card was rebuilt. Found by focus rather than by a
+            // before/after diff of keys — an unanchored add takes focus, and when it starts a new
+            // sitting every "session:line" key on the card shifts.
+            store.addTodo(text: text, due: due) {
+                guard let added = store.focusedTodo.map(PMStore.key(for:)),
+                      visibleKeys.contains(added) else { return }
+                selection.select([added])
+                scrollToken &+= 1
+                scrollTarget = added
+            }
             activeEditor = nil
         } onCancel: { activeEditor = nil }
             .padding(.horizontal, Self.margin)

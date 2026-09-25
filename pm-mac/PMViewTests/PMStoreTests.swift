@@ -512,6 +512,42 @@ extension PMStoreTests {
         waitFor(store) { store.picks.isEmpty }
     }
 
+    /// What a project card scrolls to after its quick add: the task just added is the focused one by
+    /// the time `then` runs. An old sitting is the hard case — the add starts a new one, and every
+    /// "session:line" key shifts, so a before/after diff of keys would name every task on the card.
+    func testAnUnanchoredAddIsFocusedWhenItsCompletionRuns() throws {
+        let store = try store(withTasks: "Review the contract")
+        let path = try XCTUnwrap(store.notesPath)
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        let heading = try XCTUnwrap(text.split(separator: "\n").first { $0.hasPrefix("### ") })
+        try text.replacingOccurrences(of: heading, with: "### Wed, Sep 2, 2026")
+            .write(toFile: path, atomically: true, encoding: .utf8)
+        try loadAndWait(store)
+        let sittings = store.notes?.sessions.count
+        var focused: String?
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Call the caterer") {
+                focused = store.focusedTodo.map(PMStore.key(for:))
+                done()
+            }
+        }
+        XCTAssertEqual(store.notes?.sessions.count, sittings.map { $0 + 1 },
+                       "the fixture should make this add start a new sitting")
+        XCTAssertEqual(focused, PMStore.key(for: try task("Call the caterer", in: store)))
+    }
+
+    func testAnUnanchoredAddToTodaysSittingIsFocusedToo() throws {
+        let store = try store(withTasks: "First task\nSecond task")
+        var focused: String?
+        mutateAndWait(store) { done in
+            store.addTodo(text: "Third task") {
+                focused = store.focusedTodo.map(PMStore.key(for:))
+                done()
+            }
+        }
+        XCTAssertEqual(focused, PMStore.key(for: try task("Third task", in: store)))
+    }
+
     /// A new task beside a top-level one is a new task of that sitting, not work on a tree.
     func testAddingBesideAnOldTopLevelTaskPicksNothingUp() throws {
         let store = try storeWithAnOldSitting()
