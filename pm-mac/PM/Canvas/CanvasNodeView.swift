@@ -928,6 +928,7 @@ class CanvasNodeView: NSView {
             lentTo.replace(old, with: view, for: self)
             return
         }
+        rememberReadingPosition()
         clip.subviews.forEach { $0.removeFromSuperview() }
         // The links the old content reported went with it — a hosting view taken out of the window
         // cannot be relied on to say goodbye through `onDisappear`. The new content reports its own.
@@ -941,6 +942,75 @@ class CanvasNodeView: NSView {
             view.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -insets.right),
             view.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -insets.bottom),
         ])
+        restoreReadingPosition(in: view)
+    }
+
+    // MARK: Where you were reading
+
+    /// How far down each card's content was scrolled, as a share of how far it can scroll.
+    ///
+    /// **Kept for the card, not for the view**, as a page's place is (`CanvasPageHandover.resumes`). A
+    /// card's content is rebuilt far more often than it looks: stepping in and out of a note swaps the
+    /// rendered text for an editor and back, zooming out to names and in again swaps it for a summary
+    /// and back, and a card scrolled a screen away is thrown away whole and built again on return.
+    /// Every one of those put a long note back at its first line. A page never had the problem — its
+    /// place was already kept here — so it was only the cards that looked simpler that forgot.
+    ///
+    /// A share rather than points, so the place survives a change of width, of zoom, and of what is
+    /// doing the drawing: the editor and the rendered note lay the same text out to different heights.
+    private static var readingPositions: [String: Double] = [:]
+
+    /// How far down this card was last seen, as a share of the way — see `readingPositions`.
+    var readingShare: Double? { Self.readingPositions[readingKey] }
+
+    private var readingKey: String { CanvasPageHandover.key(canvas: board.store.url, card: node.id) }
+
+    /// Note how far down the content is, before it goes. Content that doesn't scroll — a summary, a
+    /// card that fits — says nothing, so it doesn't overwrite the place the full content was at.
+    func rememberReadingPosition() {
+        guard lentTo == nil, let content = clip.subviews.first,
+              let scroller = CanvasNodeView.scroller(in: content) else { return }
+        let range = CanvasNodeView.scrollRange(of: scroller)
+        guard range > 1 else { return }
+        Self.readingPositions[readingKey] = min(1, max(0, scroller.documentVisibleRect.minY / range))
+    }
+
+    /// Put new content back where the card was — at once if it can be laid out now, which a hosting
+    /// view usually can, so no frame is drawn at the top; otherwise as soon as it has a height to
+    /// scroll through.
+    private func restoreReadingPosition(in view: NSView, tries: Int = 4) {
+        guard let share = Self.readingPositions[readingKey], share > 0 else { return }
+        func apply() -> Bool {
+            // A card is built at no size and placed after, and text laid out at no width is a column
+            // of one letter many times too tall: the share would land far down it.
+            guard view.superview != nil, view.bounds.width > 1 else { return false }
+            view.layoutSubtreeIfNeeded()
+            // The same of what it scrolls: an editor's text view is given its width a turn after it is
+            // made, and until then its height is that same column of one letter.
+            guard let scroller = CanvasNodeView.scroller(in: view),
+                  let document = scroller.documentView, document.frame.width > 1 else { return false }
+            let range = CanvasNodeView.scrollRange(of: scroller)
+            guard range > 1 else { return false }
+            // Asked of the document, in its own coordinates. A clip view's bounds are not "how far down":
+            // the editor's document sits at a negative origin with the clip's bounds matching it (see
+            // `TopPinningScrollView`), and a clip scrolled to the share itself put the note thousands
+            // of points below where it was meant to be.
+            document.scroll(NSPoint(x: scroller.documentVisibleRect.minX, y: (share * range).rounded()))
+            scroller.reflectScrolledClipView(scroller.contentView)
+            return true
+        }
+        if tries == 4, apply() { return }
+        guard tries > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak view] in
+            guard let self, let view, !apply() else { return }
+            restoreReadingPosition(in: view, tries: tries - 1)
+        }
+    }
+
+    /// How far a scroll view's content can travel, top to bottom.
+    private static func scrollRange(of scroller: NSScrollView) -> CGFloat {
+        guard let document = scroller.documentView else { return 0 }
+        return max(0, document.frame.height - scroller.contentView.bounds.height)
     }
 }
 
@@ -1017,6 +1087,15 @@ final class CanvasTextNodeView: CanvasNodeView {
     override func engagementChanged() {
         if isEngaged {
             editing = CanvasCardEditing(opening: text)
+            // **Into the note where you were reading it.** With no caret to go back to, the editor
+            // puts one at the end and scrolls down to it, so stepping into a long note you had scrolled
+            // half way took you to its last line — and stepping out again left the note there. The
+            // caret goes to the start of the line at the same share of the text instead, which is on
+            // screen when the editor opens, so nothing moves.
+            if resumeAt == nil {
+                rememberReadingPosition()
+                resumeAt = CanvasTextNodeView.caret(at: readingShare, in: text)
+            }
             contentChanged()
             contentWindow?.makeFirstResponder(hosting)
             return
@@ -1039,6 +1118,16 @@ final class CanvasTextNodeView: CanvasNodeView {
             return
         }
         contentChanged()
+    }
+
+    /// The start of the line at `share` of the way through `text`, or nil for the top — where there is
+    /// no place to go back to, and the editor's own choice stands.
+    static func caret(at share: Double?, in text: String) -> NSRange? {
+        guard let share, share > 0 else { return nil }
+        let string = text as NSString
+        let at = min(string.length, Int((Double(string.length) * share).rounded()))
+        let line = string.lineRange(for: NSRange(location: at, length: 0))
+        return NSRange(location: line.location, length: 0)
     }
 
     private func showRendered() {

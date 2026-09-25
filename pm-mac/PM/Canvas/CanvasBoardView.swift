@@ -801,6 +801,7 @@ final class CanvasBoardView: NSView {
         for (id, view) in nodeViews where !wanted.contains(id)
             && (!view.isHeldElsewhere || document.node(id: id) == nil) {
             view.lentTo?.drop(view)
+            view.rememberReadingPosition()
             view.prepareForRemoval()
             view.removeFromSuperview()
             nodeViews.removeValue(forKey: id)
