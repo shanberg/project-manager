@@ -178,7 +178,7 @@ private struct NoteImageMenu: View {
 /// these at all: a picture replaced under the same name is a different key and reloads, and the entry
 /// it replaced ages out. `NSCache` evicts under memory pressure on its own, and the count limit keeps
 /// a note full of screenshots from being the thing that causes the pressure.
-private final class NoteImageCache {
+final class NoteImageCache {
     static let shared = NoteImageCache()
     private let cache = NSCache<NSString, NSImage>()
 

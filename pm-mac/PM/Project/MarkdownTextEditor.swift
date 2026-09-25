@@ -490,6 +490,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// The gutter the note was last laid out on, so a resize that doesn't change it restyles
         /// nothing. See `regutter`.
         private var appliedGutter: CGFloat?
+        /// The column width the note's pictures were last sized for, when one of them was narrowed to
+        /// fit it — the one case where a resize that keeps the gutter still has to restyle.
+        private var imagesFittedTo: CGFloat?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
@@ -653,6 +656,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
                 let ns = NSRange(span.range, in: text)
                 storage.addAttributes(markdownAttributes(for: span.kind, base: base), range: ns)
             }
+            makeRoomForImages(in: storage, text: text, columnWidth: textView.textContainer?.size.width ?? 0)
             storage.endEditing()
             // Deleting the last character puts the note back in the state that has nothing to carry the
             // style, so the caret has to be told again. See `makeNSView`.
@@ -663,6 +667,39 @@ struct MarkdownTextEditor: NSViewRepresentable {
             }
         }
 
+        /// Show each picture the note embeds under the paragraph that embeds it, while the embed itself
+        /// stays as typed.
+        ///
+        /// **Room, not an attachment.** The note is a markdown file, and a text attachment is a
+        /// character in the string — one the file can't hold. So the text is left exactly as it is and
+        /// the paragraph is given a taller `paragraphSpacing`, which TextKit lays out as empty room
+        /// below its last line; `TokenLayoutManager` draws the picture into that room. The caret and
+        /// the selection never meet it, and deleting the embed takes the picture with it.
+        ///
+        /// A picture that can't be found gets no room: the embed on the line already says what it
+        /// names, which is what the read view's missing-image line exists to say.
+        func makeRoomForImages(in storage: NSTextStorage, text: String, columnWidth: CGFloat) {
+            imagesFittedTo = nil
+            guard columnWidth > 0 else { return }
+            let ns = text as NSString
+            for embed in markdownImages(in: text) where isMarkdownImagePath(embed.destination) {
+                guard let url = markdownDestinationURL(embed.destination, relativeTo: parent.noteURL),
+                      let image = NoteImageCache.shared.image(at: url) else { continue }
+                let range = NSRange(embed.range, in: text)
+                let paragraph = ns.paragraphRange(for: range)
+                guard let style = storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
+                        as? NSParagraphStyle,
+                      let spaced = style.mutableCopy() as? NSMutableParagraphStyle else { continue }
+                let fit = NoteEditorImage.size(of: image, asked: embed.width,
+                                               room: columnWidth - style.headIndent)
+                if fit.narrowed { imagesFittedTo = columnWidth }
+                spaced.paragraphSpacing += fit.size.height + NoteEditorImage.gap
+                storage.addAttribute(.paragraphStyle, value: spaced, range: paragraph)
+                storage.addAttribute(.noteEditorImage, value: NoteEditorImage(image: image, size: fit.size),
+                                     range: range)
+            }
+        }
+
         /// Re-lay the note when its column has changed enough to change the gutter.
         ///
         /// Called on every frame change, so it asks the cheap question first: a live resize passes
@@ -670,9 +707,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// Only a different one pays for the restyle — and then the height too, because a different
         /// gutter wraps the prose differently.
         func regutter(_ textView: NSTextView) {
-            let grid = MarkdownGrid(base: parent.baseFont, advances: parent.gutterAdvances,
-                                    columnWidth: textView.textContainer?.size.width ?? 0)
-            guard grid.gutter != appliedGutter else { return }
+            let width = textView.textContainer?.size.width ?? 0
+            let grid = MarkdownGrid(base: parent.baseFont, advances: parent.gutterAdvances, columnWidth: width)
+            guard grid.gutter != appliedGutter || imagesFittedTo.map({ $0 != width }) == true else { return }
             highlight(textView)
             if (textView.string as NSString).length == 0 { textView.needsDisplay = true }
             // `DispatchQueue.main` for the reason `claimFocus` gives.
@@ -682,6 +719,38 @@ struct MarkdownTextEditor: NSViewRepresentable {
             }
         }
     }
+}
+
+/// A picture the editor draws under the paragraph that embeds it, at the size it was fitted to. Carried
+/// on the embed's characters as `.noteEditorImage`; see `Coordinator.makeRoomForImages`.
+final class NoteEditorImage: NSObject {
+    let image: NSImage
+    let size: NSSize
+
+    init(image: NSImage, size: NSSize) {
+        self.image = image
+        self.size = size
+    }
+
+    /// The air above each picture, and below the last.
+    static let gap: CGFloat = 6
+    /// The tallest a picture is drawn while writing. A screenshot at its natural height would put the
+    /// line after it a screen away from the line before, and the editor is for the words around it.
+    static let maxHeight: CGFloat = 360
+
+    /// How big to draw `image`: its own size, unless the note asked for narrower (`![[x.png|300]]`), the
+    /// column is narrower, or that would be taller than `maxHeight`. `narrowed` is whether the column
+    /// was what decided it, which is when a change of column width has to size it again.
+    static func size(of image: NSImage, asked: Double?, room: CGFloat) -> (size: NSSize, narrowed: Bool) {
+        let aspect = image.size.width / image.size.height
+        let others = min(image.size.width, asked.map { CGFloat($0) } ?? .greatestFiniteMagnitude, maxHeight * aspect)
+        let width = max(1, min(others, room))
+        return (NSSize(width: width.rounded(), height: (width / aspect).rounded()), room < others)
+    }
+}
+
+extension NSAttributedString.Key {
+    static let noteEditorImage = NSAttributedString.Key("PMNoteEditorImage")
 }
 
 /// A scroll view that keeps its document at the top whenever the whole of it fits.

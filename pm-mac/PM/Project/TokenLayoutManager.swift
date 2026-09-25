@@ -252,6 +252,59 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         }
     }
 
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+        for (picture, frame) in noteImageFrames(forGlyphRange: glyphsToShow) {
+            let rect = frame.offsetBy(dx: origin.x, dy: origin.y)
+            let shape = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+            NSGraphicsContext.saveGraphicsState()
+            shape.addClip()
+            picture.image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                               respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue])
+            NSGraphicsContext.restoreGraphicsState()
+            // The read view's hairline, so a screenshot with a white edge still has one on a white note.
+            let edge = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 7.5, yRadius: 7.5)
+            edge.lineWidth = 1
+            NSColor.labelColor.withAlphaComponent(0.08).setStroke()
+            edge.stroke()
+        }
+    }
+
+    /// Where each picture the editor shows goes, in text-container coordinates, for the paragraphs that
+    /// `glyphs` touches: under the paragraph's last line, on its text column, one after another when a
+    /// paragraph embeds several. The room for them is the paragraph spacing `MarkdownTextEditor`'s
+    /// highlight pass added, so this only has to find where that room starts.
+    func noteImageFrames(forGlyphRange glyphs: NSRange) -> [(NoteEditorImage, NSRect)] {
+        guard let storage = textStorage, storage.length > 0, glyphs.length > 0 else { return [] }
+        let text = storage.string as NSString
+        let chars = characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let paragraphs = text.paragraphRange(for: chars)
+        var frames: [(NoteEditorImage, NSRect)] = []
+        var location = paragraphs.location
+        while location < NSMaxRange(paragraphs) {
+            let paragraph = text.paragraphRange(for: NSRange(location: location, length: 0))
+            location = max(NSMaxRange(paragraph), location + 1)
+            var pictures: [NoteEditorImage] = []
+            storage.enumerateAttribute(.noteEditorImage, in: paragraph) { value, _, _ in
+                if let picture = value as? NoteEditorImage { pictures.append(picture) }
+            }
+            guard !pictures.isEmpty else { continue }
+            let endsInBreak = NSMaxRange(paragraph) > paragraph.location
+                && text.character(at: NSMaxRange(paragraph) - 1) == 0x0A
+            let last = max(paragraph.location, NSMaxRange(paragraph) - (endsInBreak ? 2 : 1))
+            let line = lineFragmentUsedRect(forGlyphAt: glyphIndexForCharacter(at: last), effectiveRange: nil)
+            let style = storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
+                as? NSParagraphStyle
+            var y = line.maxY + NoteEditorImage.gap
+            for picture in pictures {
+                frames.append((picture, NSRect(x: style?.headIndent ?? 0, y: y,
+                                               width: picture.size.width, height: picture.size.height)))
+                y += picture.size.height + NoteEditorImage.gap
+            }
+        }
+        return frames
+    }
+
     /// Where a token's pill goes, in text-container coordinates: one rect per line it sits on, so a
     /// token that wraps gets a pill on each line rather than one rectangle spanning the gap.
     ///
