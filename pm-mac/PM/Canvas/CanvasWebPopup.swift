@@ -32,6 +32,16 @@ import WebKit
 /// that board, and the modality is honest: you cannot half-finish a sign-in and go back to poking the
 /// card underneath. `CanvasSignInWindow` is still a real window, because that one is a *menu command*
 /// — something you chose to do, not something a page asked for mid-click.
+/// What a popup needs of the card whose page opened it: somewhere to go when it is moved onto the
+/// board. A web card is the one there is — see `CanvasLinkNodeView`.
+@MainActor
+protocol CanvasPopupOpener: AnyObject {
+    /// Whether the board is tiled, so the button can say where the popup will go.
+    var opensPopupsAsTiles: Bool { get }
+    /// Take the popup's running page onto the board as a card of its own.
+    func openPopupAsCard(_ page: WKWebView)
+}
+
 @MainActor
 final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     /// Held so a sheet isn't deallocated the moment the delegate method that made it returns.
@@ -45,7 +55,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     private let address: NSTextField
     /// The card whose page opened this, for moving it onto that card's board. Nil for a popup opened
     /// from somewhere that isn't a card — the sign-in window, or another popup.
-    private weak var opener: CanvasLinkNodeView?
+    private weak var opener: CanvasPopupOpener?
 
     // MARK: Deciding
 
@@ -83,7 +93,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
                         features: WKWindowFeatures,
                         userAgent: String?,
                         over parent: NSWindow?,
-                        opener: CanvasLinkNodeView? = nil) -> WKWebView {
+                        opener: CanvasPopupOpener? = nil) -> WKWebView {
         let popup = CanvasWebPopup(configuration: configuration, features: features, over: parent,
                                    opener: opener)
         popup.web.customUserAgent = userAgent
@@ -93,7 +103,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     }
 
     private init(configuration: WKWebViewConfiguration, features: WKWindowFeatures,
-                 over parent: NSWindow?, opener: CanvasLinkNodeView?) {
+                 over parent: NSWindow?, opener: CanvasPopupOpener?) {
         self.opener = opener
         // A popup that opens a further popup is ordinary in single sign-on — an identity provider
         // handing off to a second one, or to a device-approval window. The card says no to this
@@ -166,7 +176,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         // would hold the whole board hostage for as long as they run. So they can leave — onto the
         // board, still running, still talking to the page that opened them.
         if opener != nil {
-            let move = NSButton(title: opener?.board.isTiled == true ? "Open as Tile" : "Open as Card",
+            let move = NSButton(title: opener?.opensPopupsAsTiles == true ? "Open as Tile" : "Open as Card",
                                 target: self, action: #selector(moveToBoard))
             move.bezelStyle = .rounded
             move.sizeToFit()

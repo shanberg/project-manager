@@ -249,6 +249,18 @@ extension CanvasBoardView {
             // workspaces.md §7k). So only the overlay redraws on this event.
             dragPoint = now
             overlay.needsDisplay = true
+            // **Out past the window's edge, letting go opens a window there** — the tile, every tab of
+            // it, or the one tab being pulled. No tile is marked while it is out, and the cursor says
+            // what will happen instead. See `CanvasSatelliteWindow`.
+            if isOutsideWindow {
+                NSCursor.dragCopy.set()
+                if drop != nil {
+                    gesture = .placeTile(id, base: base, drop: nil, pulling: pulling)
+                    previewDrop(of: id, nil, pulling: pulling)
+                }
+                break
+            }
+            NSCursor.arrow.set()
             // What letting go here would do: near a tile's edge is a place beside it, the top band is
             // its tabs, and the middle is a swap. Marked on the tiles as they stand, and remarked only
             // when the answer changes.
@@ -446,9 +458,17 @@ extension CanvasBoardView {
             if let slide = tabSlide { moveTab(card, to: slide.to) }
             tabSlide = nil
 
-        case .placeTile(let id, _, let drop, let pulling):
+        case .placeTile(let id, let base, let drop, let pulling):
             // Let go: what the mark said happens, and the tiles move — once, now.
             dragPoint = nil
+            if isOutsideWindow {
+                NSCursor.arrow.set()
+                overlay.needsDisplay = true
+                previewDrop(of: id, nil, pulling: pulling)
+                let frame = satelliteFrame(for: base[id])
+                if pulling { moveToWindow([id], frame: frame) } else { moveTileToWindow(id, frame: frame) }
+                break
+            }
             finishDrop(of: id, drop, pulling: pulling)
         case .move(let from, _, _):
             store.endInteraction()

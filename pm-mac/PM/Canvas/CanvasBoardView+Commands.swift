@@ -790,7 +790,7 @@ extension CanvasBoardView {
             if selectedLinkCards.count == 1, let card = nodeViews[id] as? CanvasLinkNodeView,
                card.liveURL != nil {
                 add(menu, "Open Page as New Card", #selector(openMenuPageAsNewCard))
-                if card.satellite == nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
+                if !isTiled, card.lentTo == nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
             }
             add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             menu.addItem(.separator())
@@ -1432,6 +1432,9 @@ extension CanvasBoardView {
             add(menu, maximizeTileTitle, #selector(maximizeTile(_:)))
         }
         addArrange(menu)
+        // Out into a window of its own, every tab of it. See `CanvasSatelliteWindow`.
+        add(menu, tiling.hasTabs(id) ? "Move Tabs to Window" : "Move to Window",
+            #selector(moveMenuTileToWindow(_:)))
 
         // Everything else a tile can be told, one level down so the menu stays short. The workspace's
         // name is on its tab, so renaming it is the tab's and Canvas ▸ Workspace's, not a tile's.
@@ -1465,6 +1468,7 @@ extension CanvasBoardView {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tab"))
         add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
+        add(menu, "Move Tab to Window", #selector(moveMenuTabToWindow(_:)))
         menu.addItem(tabsPalette())
         addReplaceWith(menu)
         if tiling.tabs(of: id).count > 1 {
@@ -1547,6 +1551,16 @@ extension CanvasBoardView {
         guard let id = menuTile, let side = (sender as? NSMenuItem)?.representedObject as? Bool,
               tiling?.tabsOnSide(id) != side else { return }
         toggleTabsOnSide(id)
+    }
+
+    @objc func moveMenuTileToWindow(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        restoringMaximized { moveTileToWindow(id) }
+    }
+
+    @objc func moveMenuTabToWindow(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        restoringMaximized { moveToWindow([id]) }
     }
 
     @objc func pullMenuTabOut(_ sender: Any?) {
@@ -2798,7 +2812,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     /// Move to Window: the page into a window of its own, still running. See `CanvasSatelliteWindow`.
     @objc private func moveMenuCardToWindow() {
         guard selectedLinkCards.count == 1, let card = selectedLinkCards.first else { return }
-        moveToWindow(card.node.id)
+        moveToWindow([card.node.id])
     }
 
     @objc private func openMenuPageAsNewCard() {

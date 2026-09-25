@@ -34,7 +34,7 @@ class CanvasNodeView: NSView {
 
     /// True when the board is zoomed out past reading, and this card should stand for itself rather
     /// than render itself.
-    var isSimplified: Bool { scale < CanvasDetail.simplifiedBelow }
+    var isSimplified: Bool { lentTo == nil && scale < CanvasDetail.simplifiedBelow }
 
     /// True once you have stepped into this card, which is when it starts taking its own clicks.
     private(set) var isEngaged = false
@@ -282,7 +282,7 @@ class CanvasNodeView: NSView {
             return
         }
         engage(false)
-        window?.makeFirstResponder(board)
+        giveUpFocus()
     }
 
     // MARK: Chrome
@@ -765,8 +765,8 @@ class CanvasNodeView: NSView {
     var keepsPageRunning: Bool { false }
 
     /// Whether what this card shows is out in a window of its own, so the card has to stay built even
-    /// where the board would drop it. Web cards override. See `CanvasSatelliteWindow`.
-    var isHeldElsewhere: Bool { false }
+    /// where the board would drop it. See `CanvasSatelliteWindow`.
+    var isHeldElsewhere: Bool { lentTo != nil }
 
     /// The board's answer. Live means run; not live means freeze, keeping a picture of the page.
     func setPageLive(_ live: Bool) {}
@@ -803,6 +803,81 @@ class CanvasNodeView: NSView {
 
     func engagementChanged() {}
 
+    // MARK: Lent to a window of its own
+
+    /// The satellite this card's content is lent to, while it is. See `CanvasSatelliteWindow`.
+    ///
+    /// **Lent, not given**: the card goes on owning the content — its models, its store, its page —
+    /// and on being the one the board asks about it. What moves is the view. So everything that
+    /// rebuilds the content while it is out (`setContent`) sends the new view to the window, the card
+    /// is never simplified to a name while it is out (the window has no zoom), and the board keeps the
+    /// card built however far off it is (`isHeldElsewhere`).
+    private(set) weak var lentTo: CanvasSatelliteWindow?
+
+    /// The content that is out, while it is.
+    private(set) var lentContent: NSView?
+
+    /// The card's content, wherever it is — in the card, or out in a satellite.
+    var cardContent: NSView? { lentContent ?? clip.subviews.first }
+
+    /// The window the content is in, which is where focus is given and asked about.
+    var contentWindow: NSWindow? { lentTo?.window ?? window }
+
+    /// Take the keyboard off this card's content, to wherever it goes when nothing in a card has it:
+    /// the board in its own window, nothing in a satellite's.
+    func giveUpFocus() {
+        if lentTo != nil { contentWindow?.makeFirstResponder(nil) } else { giveUpFocus() }
+    }
+
+    /// Get ready to go out: a web card starts its page. Most cards have nothing to do.
+    func prepareToLend() {}
+
+    /// The link under a point in the satellite's window, while the content is out there — what the
+    /// board's `link(at:)` answers on the board. See `CanvasSatelliteWindow.watchLinks`.
+    func lentLink(atWindowPoint point: NSPoint) -> URL? {
+        guard lentTo != nil, let space = linkSpace else { return nil }
+        let local = space.convert(point, from: nil)
+        guard space.bounds.contains(local), let zone = linkZones.zone(at: local) else { return nil }
+        if !zone.fixed, let scroller = CanvasNodeView.scroller(in: space),
+           !scroller.bounds.contains(scroller.convert(point, from: nil)) {
+            return nil
+        }
+        return zone.url
+    }
+
+    /// Lend the content to `satellite`, leaving word in the card of where it has gone. Nil when there
+    /// is nothing to lend, or it is already out.
+    func lend(to satellite: CanvasSatelliteWindow) -> NSView? {
+        let wasSimplified = isSimplified
+        guard lentTo == nil, let content = clip.subviews.first else { return nil }
+        lentTo = satellite
+        lentContent = content
+        content.removeFromSuperview()
+        let away = NSTextField(labelWithString: "In its own window")
+        away.textColor = .secondaryLabelColor
+        away.alignment = .center
+        away.translatesAutoresizingMaskIntoConstraints = false
+        clip.addSubview(away)
+        NSLayoutConstraint.activate([away.centerXAnchor.constraint(equalTo: clip.centerXAnchor),
+                                     away.centerYAnchor.constraint(equalTo: clip.centerYAnchor)])
+        // A card zoomed out to its name comes into the window as itself.
+        if wasSimplified { simplificationChanged() }
+        return lentContent
+    }
+
+    /// Take the content back from its satellite and put it in the card again.
+    func takeBack() {
+        guard let content = lentContent else { return }
+        let wasEngaged = isEngaged
+        lentTo = nil
+        lentContent = nil
+        if wasEngaged { engage(false) }
+        content.removeFromSuperview()
+        setContent(content)
+        // Back at the board's zoom, whatever that is.
+        if isSimplified { simplificationChanged() }
+    }
+
     /// Put `view` in the card, filling it.
     ///
     /// Into `clip`, not into the card. This used to clear *all* of the card's subviews and add the
@@ -813,6 +888,15 @@ class CanvasNodeView: NSView {
     /// `insets` are still measured from the card's own edge, as the call sites read them; the hairline
     /// the clip is already inset by is taken off here.
     func setContent(_ view: NSView, insets: NSEdgeInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)) {
+        // Out in a satellite: the new content goes there, in place of what was showing.
+        if let lentTo {
+            linkZones.removeAll()
+            linkSpace = view
+            let old = lentContent
+            lentContent = view
+            lentTo.replace(old, with: view, for: self)
+            return
+        }
         clip.subviews.forEach { $0.removeFromSuperview() }
         // The links the old content reported went with it — a hosting view taken out of the window
         // cannot be relied on to say goodbye through `onDisappear`. The new content reports its own.
@@ -904,7 +988,7 @@ final class CanvasTextNodeView: CanvasNodeView {
         if isEngaged {
             editing = CanvasCardEditing(opening: text)
             contentChanged()
-            window?.makeFirstResponder(hosting)
+            contentWindow?.makeFirstResponder(hosting)
             return
         }
 
@@ -978,7 +1062,7 @@ final class CanvasTextNodeView: CanvasNodeView {
         hosting = view
         setContent(view, insets: NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6))
         DispatchQueue.main.async { [weak self] in
-            self?.window?.makeFirstResponder(view)
+            self?.contentWindow?.makeFirstResponder(view)
         }
     }
 }

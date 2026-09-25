@@ -325,11 +325,11 @@ final class CanvasViewNodeView: CanvasNodeView {
         case .projects, .time:
             break
         }
-        guard let content = subviews.first else { return }
+        guard let content = cardContent else { return }
         if isEngaged {
-            window?.makeFirstResponder(content)
-        } else if (window?.firstResponder as? NSView)?.isDescendant(of: content) == true {
-            window?.makeFirstResponder(board)
+            contentWindow?.makeFirstResponder(content)
+        } else if (contentWindow?.firstResponder as? NSView)?.isDescendant(of: content) == true {
+            giveUpFocus()
         }
     }
 

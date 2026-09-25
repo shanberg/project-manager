@@ -344,10 +344,10 @@ final class CanvasFileNodeView: CanvasNodeView {
         if isEngaged {
             // The keyboard has to reach the text fields inside. A hosting view takes it on behalf of
             // whatever SwiftUI has focused.
-            if let content = subviews.first { window?.makeFirstResponder(content) }
-        } else if let content = subviews.first,
-                  (window?.firstResponder as? NSView)?.isDescendant(of: content) == true {
-            window?.makeFirstResponder(board)
+            if let content = cardContent { contentWindow?.makeFirstResponder(content) }
+        } else if let content = cardContent,
+                  (contentWindow?.firstResponder as? NSView)?.isDescendant(of: content) == true {
+            giveUpFocus()
         }
     }
 
@@ -490,7 +490,7 @@ final class CanvasFileNodeView: CanvasNodeView {
             })
         DispatchQueue.main.async { [weak self, weak view] in
             guard let view, self?.document != nil else { return }
-            self?.window?.makeFirstResponder(view)
+            self?.contentWindow?.makeFirstResponder(view)
         }
         return view
     }

@@ -786,8 +786,11 @@ final class CanvasBoardView: NSView {
                 view.frame = viewRect(layout.frame(of: node))
             }
         }
-        // A card whose page is out in a satellite is kept, wherever it is: the page is still its.
-        for (id, view) in nodeViews where !wanted.contains(id) && !view.isHeldElsewhere {
+        // A card whose content is out in a satellite is kept, wherever it is: the content is still
+        // its. Unless the card itself has gone from the board, which takes its tab with it.
+        for (id, view) in nodeViews where !wanted.contains(id)
+            && (!view.isHeldElsewhere || document.node(id: id) == nil) {
+            view.lentTo?.drop(view)
             view.prepareForRemoval()
             view.removeFromSuperview()
             nodeViews.removeValue(forKey: id)

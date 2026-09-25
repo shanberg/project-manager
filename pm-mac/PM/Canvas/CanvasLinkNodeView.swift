@@ -31,10 +31,13 @@ import PmLib
 /// cost you anything — the live address in the window's own header, beside the controls that drive it.
 /// See `cardDescription` and `CanvasHeaderModel`.
 @MainActor
-final class CanvasLinkNodeView: CanvasNodeView {
+final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// The card's body. Holds the placeholder always, and the page over it once there is one.
     private let face = NSView()
-    private var web: WKWebView?
+    private var web: WKWebView? {
+        // A satellite showing this card follows its page — Back, Reload and the host are the page's.
+        didSet { if web !== oldValue { lentTo?.cardChanged(self) } }
+    }
     private var placeholder: NSView?
     /// The picture of the page that stands in for it while it is paused. See `freeze`.
     private var frozen: CanvasFrozenPageView?
@@ -133,43 +136,20 @@ final class CanvasLinkNodeView: CanvasNodeView {
 
     // MARK: Out in a window of its own
 
-    /// The window this card's page is lent to, while it is. See `CanvasSatelliteWindow`.
-    private(set) weak var satellite: CanvasSatelliteWindow?
+    /// The running page, for a satellite's Back, Reload and host. See `CanvasSatelliteWindow`.
+    var livePage: WKWebView? { web }
 
-    override var isHeldElsewhere: Bool { satellite != nil }
-
-    /// Lend the page to a window of its own, starting it first if it isn't running.
-    func moveToSatellite(frame: NSRect?) {
-        guard satellite == nil else { return }
+    /// A page goes out running: one that isn't yet is started, so the window isn't a globe.
+    override func prepareToLend() {
         if web == nil, let target = resumeURL ?? url { showPage(target) }
-        guard let page = web else { return }
-        if (window?.firstResponder as? NSView)?.isDescendant(of: page) == true { window?.makeFirstResponder(board) }
-        page.removeFromSuperview()
-        placeholder?.isHidden = false
-        say("In its own window")
-        let window = CanvasSatelliteWindow(card: self, page: page, frame: frame)
-        satellite = window
-        window.show()
-        board.pageStateChanged()
-    }
-
-    /// Take the page back from its window. Home to the workspace when you sent it there; left out of the
-    /// tiling when the workspace is only being put away, since it will be lent out again when it's back.
-    func returnFromSatellite(toWorkspace: Bool) {
-        satellite = nil
-        say(nil)
-        if let page = web {
-            fill(face, with: page, below: frozen ?? placeholder)
-            if revealed { uncover() }
-        }
-        board.pageStateChanged()
-        if toWorkspace { board.satelliteReturned(node.id) }
     }
 
     /// Whether this card's page is a popup that was moved onto the board, which is still connected to
     /// the page that opened it. When it closes itself — a call ending, a huddle left — the card goes
     /// with it, as the popup would have. Not kept across launches: by then it's an ordinary page.
     private var cameFromPopup = false
+
+    var opensPopupsAsTiles: Bool { board.isTiled }
 
     /// Move a popup this card's page opened onto the board, still running — see `CanvasWebPopup`.
     func openPopupAsCard(_ page: WKWebView) {
@@ -419,10 +399,10 @@ final class CanvasLinkNodeView: CanvasNodeView {
             waitForIt()
         }
         if isEngaged {
-            window?.makeFirstResponder(view)
-        } else if (window?.firstResponder as? NSView)?.isDescendant(of: view) == true {
+            contentWindow?.makeFirstResponder(view)
+        } else if (contentWindow?.firstResponder as? NSView)?.isDescendant(of: view) == true {
             // You were typing into it on the board you left. Here you have not stepped in yet.
-            window?.makeFirstResponder(board)
+            giveUpFocus()
         }
         board.pageStateChanged()
     }
@@ -435,7 +415,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// and if you come back to it zoomed out too far to run pages it should still say what it showed.
     private func giveUpPage() -> Handover? {
         // Not while it is out in a window: the window is showing it, and the page is still this card's.
-        guard let running = web, satellite == nil else { return nil }
+        guard let running = web, lentTo == nil else { return nil }
         let handover = Handover(web: running, revealed: revealed, loadedAt: loadedAt,
                                 capturingTitle: capturingTitle)
         // The page goes on running on the other board, which will record its own navigations from here
@@ -481,7 +461,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private func freeze() {
         // Not while it is full screen: the view is in WebKit's window, not this card, and a paused video
         // there is still what you are looking at.
-        guard let web, !freezing, web.fullscreenState == .notInFullscreen, satellite == nil else { return }
+        guard let web, !freezing, web.fullscreenState == .notInFullscreen, lentTo == nil else { return }
         freezing = true
         giveUp?.cancel()
         giveUp = nil
@@ -877,7 +857,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // Under whatever is standing in for the page — the picture from the last time it ran, or the
         // placeholder. Waking up should not flash anything.
         fill(face, with: view, below: frozen ?? placeholder)
-        if isEngaged { window?.makeFirstResponder(view) }
+        if isEngaged { contentWindow?.makeFirstResponder(view) }
         if frozen == nil { say("Loading…") }
         waitForIt()
     }
@@ -1017,9 +997,6 @@ final class CanvasLinkNodeView: CanvasNodeView {
     }
 
     private func tearDownPage() {
-        // A page that is ending takes its window with it, and the tile goes home: an empty window, or
-        // one left showing a page the card has let go of, would be a window that means nothing.
-        if let satellite { satellite.pageEnded() }
         giveUp?.cancel()
         giveUp = nil
         stopProbingForPaint()
@@ -1152,7 +1129,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
             // `decidePolicyFor` cannot see: a site that navigates itself in script, where the URL is
             // rewritten with no navigation for a delegate to be asked about at all.
             capturingTitle = false
-            if let web { window?.makeFirstResponder(web) }
+            if let web { contentWindow?.makeFirstResponder(web) }
         } else {
             // A page that still has the pointer when you've stepped out of it has the mouse for a card
             // that no longer takes clicks. Asked of the main frame only, which is where a page that
@@ -1160,8 +1137,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
             if let page = web as? CanvasPageView, page.holdsPointer {
                 page.evaluateJavaScript("document.exitPointerLock()")
             }
-            if let web, (window?.firstResponder as? NSView)?.isDescendant(of: web) == true {
-                window?.makeFirstResponder(board)
+            if let web, (contentWindow?.firstResponder as? NSView)?.isDescendant(of: web) == true {
+                giveUpFocus()
             }
         }
         board.pageStateChanged()
@@ -1860,7 +1837,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         guard !revealed else { return }
         // Out in a window, the page stays where it is: the window is all there is to show, and it has
         // its own Reload. See `CanvasSatelliteWindow`.
-        if satellite != nil {
+        if lentTo != nil {
             revealPage()
             return
         }
