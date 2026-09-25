@@ -263,6 +263,7 @@
 		9ABD95EC8E5E37FFC95FCEC1 /* TaskPasteboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2951CDF9FD603B6CDB53BA9 /* TaskPasteboard.swift */; };
 		9C28220BF94D3430243A4CCE /* CanvasTileOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8412C79D851A770C4DA72A0F /* CanvasTileOrderTests.swift */; };
 		9C7A8AA4984433BAF1022749 /* WindowSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B93A7E209760A3A260C8E79 /* WindowSettings.swift */; };
+		9D473605CD7C3F57BBE67E83 /* MenuPictures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D1B73E6D3D6F188C4DE96EB /* MenuPictures.swift */; };
 		9DF6EE2E39E4E192EB6C6D07 /* CanvasViewCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CB8CA5F34BEED44D2509E4E /* CanvasViewCalendar.swift */; };
 		9EAA799DD02106212FBBD6FA /* CanvasClippingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE7D0F7288EEEFE8CC72514 /* CanvasClippingTests.swift */; };
 		9F4A11F6B071D43DDA1DCF5D /* CanvasCardEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE1DC4CD3603ADBA53C7337 /* CanvasCardEditingTests.swift */; };
@@ -582,6 +583,7 @@
 		6B93A7E209760A3A260C8E79 /* WindowSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSettings.swift; sourceTree = "<group>"; };
 		6BA141AA64BCC78645BF2B29 /* CanvasViewSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewSpec.swift; sourceTree = "<group>"; };
 		6C6A3E4DB69C6E7602D699DC /* CanvasDayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDayCard.swift; sourceTree = "<group>"; };
+		6D1B73E6D3D6F188C4DE96EB /* MenuPictures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPictures.swift; sourceTree = "<group>"; };
 		6D875EB76F3DC60050396219 /* EmojiCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalog.swift; sourceTree = "<group>"; };
 		6DE496B1AB05F26705086349 /* TaskMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenu.swift; sourceTree = "<group>"; };
 		6EC9845DCA2208C734345817 /* CanvasBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBoardView.swift; sourceTree = "<group>"; };
@@ -1158,6 +1160,7 @@
 			children = (
 				54E583F2A7FC849845365F2B /* AppDelegate+Commands.swift */,
 				D1C48657562CC9C603C6F6D3 /* MainMenu.swift */,
+				6D1B73E6D3D6F188C4DE96EB /* MenuPictures.swift */,
 			);
 			path = Menu;
 			sourceTree = "<group>";
@@ -1554,6 +1557,7 @@
 				173B371DDE759BC440514326 /* MainMenu.swift in Sources */,
 				A31F5E7E03CD4DC12A3D4B47 /* MarkdownTextEditor.swift in Sources */,
 				8160DFD7CDF04EB531FD0223 /* MentionPopover.swift in Sources */,
+				9D473605CD7C3F57BBE67E83 /* MenuPictures.swift in Sources */,
 				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,
 				8D3DBFB46734C4922CCE8260 /* Motion.swift in Sources */,
 				1E225131408952F0B85493FE /* MouseMonitors.swift in Sources */,

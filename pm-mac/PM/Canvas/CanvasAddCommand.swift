@@ -1,4 +1,5 @@
 import Foundation
+import PmLib
 
 /// The things you can put on a canvas — the one list of them, what each is called, and which heading
 /// it sits under.
@@ -174,16 +175,28 @@ enum CanvasAddCommand: CaseIterable {
         return rows
     }
 
-    /// A view's name inside New View ▸, where "New" and "View" are already said.
-    var viewName: String? {
+    /// The kind of view this makes, whose name and glyph New View ▸ shows.
+    var viewKind: CanvasViewKind? {
         switch self {
-        case .dayView: return "Day"
-        case .leftoversView: return "Leftovers"
-        case .comingUpView: return "Coming Up"
-        case .projectsView: return "Projects"
-        case .timeView: return "Time"
-        case .waitingView: return "Waiting"
-        case .searchView: return "Search"
+        case .dayView: return .day
+        case .leftoversView: return .leftovers
+        case .comingUpView: return .comingUp
+        case .projectsView: return .projects
+        case .timeView: return .time
+        case .waitingView: return .waiting
+        case .searchView: return .search
+        default: return nil
+        }
+    }
+
+    /// A view's name inside New View ▸, where "New" and "View" are already said.
+    var viewName: String? { viewKind?.title }
+
+    /// Said only where the name can't say what the card lists.
+    var viewSubtitle: String? {
+        switch self {
+        case .leftoversView: return "Tasks still open from past sessions"
+        case .projectsView: return "Last activity, open tasks, next due"
         default: return nil
         }
     }

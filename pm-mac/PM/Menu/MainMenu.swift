@@ -423,12 +423,13 @@ enum MainMenu {
         menu.addItem(withTitle: "New Workspace", action: #selector(CanvasBoardView.tileSelection(_:)),
                      keyEquivalent: "")
         let arrange = NSMenu(title: "Arrange")
-        for arrangement in CanvasTiling.Arrangement.allCases {
-            let entry = arrange.addItem(withTitle: arrangement.title,
-                                        action: #selector(CanvasBoardView.setTileArrangement(_:)),
-                                        keyEquivalent: "")
+        arrange.addItem(MenuPictures.palette("Arrange", CanvasTiling.Arrangement.allCases.map { arrangement in
+            let entry = NSMenuItem(title: arrangement.title,
+                                   action: #selector(CanvasBoardView.setTileArrangement(_:)), keyEquivalent: "")
+            entry.image = MenuPictures.arrangement(arrangement)
             entry.representedObject = arrangement.rawValue
-        }
+            return entry
+        }))
         // ⌥⇧0 is the board's key rather than this item's — see `CanvasBoardView.tilingTakes`.
         arrange.addItem(.separator())
         arrange.addItem(withTitle: "Size Columns to Content",

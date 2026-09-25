@@ -163,6 +163,36 @@ struct CanvasViewSpec: Equatable {
     /// The layout drawn: the one set, when this view offers it and it fits the period — the rail is one
     /// day's, so a Day set to This Week draws its list — else the list. What's set is kept either way,
     /// so a card set back to one day is back on its rail.
+    /// The periods a Day or Coming Up card can show, each with the layouts that draw it (D9) — the
+    /// rows and cells of its Period menu. A day is a list or a rail; a week, a list or seven columns; a
+    /// month, a list or a grid. Empty for a kind that has no layout but the list. `pinned` are the
+    /// dated periods the selected cards already show, kept on offer so the tick has somewhere to be.
+    static func spans(for kind: Kind, pinned: [Period]) -> [(period: Period, layouts: [Layout])] {
+        switch kind {
+        case .day:
+            let dated = pinned.reduce(into: [Period]()) { if !$0.contains($1) { $0.append($1) } }
+            return (Period.relative + dated).map { period in
+                switch period {
+                case .week: return (period, [.list, .week])
+                case .month: return (period, [.list, .month])
+                default: return (period, [.list, .rail])
+                }
+            }
+        case .comingUp:
+            return [(.today, [.list]), (.week, [.list, .week]), (.month, [.list, .month])]
+        default:
+            return []
+        }
+    }
+
+    /// Whether this card is `period` drawn as `layout`, for the menu's tick. A Day paged to this week or
+    /// month by its header is `.today` laid out as a week or month, and reads as that row.
+    func shows(_ period: Period, as layout: Layout) -> Bool {
+        guard shownLayout == layout else { return false }
+        if self.period == period { return true }
+        return self.period == .today && ((period == .week && layout == .week) || (period == .month && layout == .month))
+    }
+
     var shownLayout: Layout {
         guard kind.layouts.contains(layout) else { return .list }
         if layout == .rail && period.isSpan { return .list }

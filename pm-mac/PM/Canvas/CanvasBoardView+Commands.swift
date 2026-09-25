@@ -365,14 +365,16 @@ extension CanvasBoardView {
     /// Targetless, so whichever board is answering gets it and ticks the proportion its cards share.
     static func sizeMenu() -> NSMenu {
         let menu = NSMenu(title: "Size")
+        // Text, under the three shapes a ratio can be: a proportion reads faster as numbers.
+        var shape: String?
         for (index, ratio) in CanvasCardSize.ratios.enumerated() {
+            let this = ratio.width > ratio.height ? "Landscape" : ratio.width == ratio.height ? "Square" : "Portrait"
+            if this != shape {
+                menu.addItem(.sectionHeader(title: this))
+                shape = this
+            }
             let item = menu.addItem(withTitle: ratio.title, action: #selector(setCardRatio(_:)), keyEquivalent: "")
             item.tag = index
-            // The square divides the landscape proportions from the portrait ones.
-            if ratio.width == ratio.height {
-                menu.insertItem(.separator(), at: menu.items.count - 1)
-                menu.addItem(.separator())
-            }
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Exact Size…", action: #selector(setCardSize(_:)), keyEquivalent: "")
@@ -935,6 +937,8 @@ extension CanvasBoardView {
         for preset in CanvasCardShows.menuCases {
             let entry = add(shows, preset.title, #selector(setShowsPreset(_:)))
             entry.representedObject = preset.rawValue
+            // Said only for the two a title can't tell apart.
+            if let subtitle = preset.menuSubtitle { entry.subtitle = subtitle }
             // Ticked only when every selected card agrees, which is how a mixed selection reads as
             // mixed rather than as whatever the first card happened to say. A radio list showing no
             // tick at all is the honest picture of six cards set six ways.
@@ -968,19 +972,25 @@ extension CanvasBoardView {
 
         text.addItem(.separator())
         text.addItem(.sectionHeader(title: "Line Width"))
-        for width in CanvasTextStyle.LineWidth.allCases {
-            let item = add(text, width.title, #selector(setProseLineWidth(_:)))
+        text.addItem(MenuPictures.palette("Line Width", CanvasTextStyle.LineWidth.allCases.map { width in
+            let item = NSMenuItem(title: width.title, action: #selector(setProseLineWidth(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = MenuPictures.lineWidth(width)
             item.representedObject = width.rawValue
             item.state = cards.allSatisfy { $0.textStyle.lineWidth == width } ? .on : .off
-        }
+            return item
+        }))
 
         text.addItem(.separator())
         text.addItem(.sectionHeader(title: "Font"))
-        for face in CanvasTextStyle.Face.allCases {
-            let item = add(text, face.title, #selector(setProseFace(_:)))
+        text.addItem(MenuPictures.palette("Font", CanvasTextStyle.Face.allCases.map { face in
+            let item = NSMenuItem(title: face.title, action: #selector(setProseFace(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = MenuPictures.face(face)
             item.representedObject = face.rawValue
             item.state = cards.allSatisfy { $0.textStyle.face == face } ? .on : .off
-        }
+            return item
+        }))
         // Show Link Syntax and Check Spelling are every note's, not this card's: Settings ▸ Notes.
 
         menu.addItem(withTitle: "Text", action: nil, keyEquivalent: "").submenu = text
@@ -1081,14 +1091,64 @@ extension CanvasBoardView {
         guard !cards.isEmpty else { return }
         // Only some views have a *when*: Waiting and Projects are about now, and a search is about words.
         // Coming up laid out on the calendar looks as far as it draws, so its horizon isn't a setting there.
-        if cards.allSatisfy({ $0.spec.kind.hasPeriod && !($0.spec.kind == .comingUp && $0.spec.shownLayout != .list) }) {
-            addPeriodMenu(menu, cards)
+        let kinds = Set(cards.map(\.spec.kind))
+        if kinds.count == 1, let kind = kinds.first, !CanvasViewSpec.spans(for: kind, pinned: []).isEmpty {
+            // One kind that is laid out in time: when and how in one menu, a row of layouts per period.
+            addSpanMenu(menu, cards, kind: kind)
+            addProjectsMenu(menu, cards)
+        } else {
+            if cards.allSatisfy({ $0.spec.kind.hasPeriod && !($0.spec.kind == .comingUp && $0.spec.shownLayout != .list) }) {
+                addPeriodMenu(menu, cards)
+            }
+            addProjectsMenu(menu, cards)
+            addLayoutMenu(menu, cards)
         }
-        addProjectsMenu(menu, cards)
-        addLayoutMenu(menu, cards)
         // Every view reads as text (docs/views.md D10): the same answer as a document, for the standup or
         // the client's update. Several cards are one document, in the order they were chosen.
         add(menu, cards.count > 1 ? "Copy \(cards.count) Views as Text" : "Copy as Text", #selector(copyViewsAsText(_:)))
+    }
+
+    /// Period ▸ for a Day or Coming Up card: each row a period, each picture a way to draw it, and only
+    /// the pairs that make sense — no week laid out down a rail, no month in seven columns. Choosing one
+    /// sets both, so Layout never rewrites Period behind the menu. See `CanvasViewSpec.spans`.
+    private func addSpanMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView], kind: CanvasViewKind) {
+        let pinned = cards.map(\.spec.period).filter { if case .day = $0 { return true }; return false }
+        let periods = NSMenu(title: "Period")
+        for (period, layouts) in CanvasViewSpec.spans(for: kind, pinned: pinned) {
+            periods.addItem(.sectionHeader(title: kind.title(of: period)))
+            periods.addItem(MenuPictures.palette(kind.title(of: period), layouts.map { layout in
+                let item = NSMenuItem(title: "\(kind.title(of: period)) as \(layout.title)",
+                                      action: #selector(setViewSpan(_:)), keyEquivalent: "")
+                item.target = self
+                item.image = MenuPictures.layout(layout)
+                item.representedObject = [period.value, layout.rawValue]
+                item.state = cards.allSatisfy { $0.spec.shows(period, as: layout) } ? .on : .off
+                return item
+            }))
+        }
+        menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
+    }
+
+    /// One cell of `addSpanMenu`: the period and the layout together, growing each card to what the
+    /// layout needs, as one undoable edit.
+    @objc func setViewSpan(_ sender: Any?) {
+        guard let pair = (sender as? NSMenuItem)?.representedObject as? [String], pair.count == 2,
+              let layout = CanvasViewSpec.Layout(rawValue: pair[1]) else { return }
+        let period = CanvasViewSpec.Period(value: pair[0])
+        let ids = Set(selectedViewCards.map(\.node.id))
+        guard !ids.isEmpty else { return }
+        store.change("Show \(period.title) as \(layout.title)") { doc in
+            for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
+                guard var spec = CanvasViewSpec.of(doc.nodes[index]) else { continue }
+                spec.period = period
+                spec.layout = layout
+                CanvasViewSpec.set(spec, on: &doc.nodes[index])
+                if let least = layout.minimumSize {
+                    doc.nodes[index].frame.width = max(doc.nodes[index].frame.width, least.width)
+                    doc.nodes[index].frame.height = max(doc.nodes[index].frame.height, least.height)
+                }
+            }
+        }
     }
 
     @objc func copyViewsAsText(_ sender: Any?) {
@@ -1317,10 +1377,14 @@ extension CanvasBoardView {
     /// as that arrangement deals them. See `isArranged(as:)`.
     private func addArrange(_ menu: NSMenu) {
         let arrange = NSMenu()
-        for option in CanvasTiling.Arrangement.allCases {
-            add(arrange, option.title, option == .grid ? #selector(arrangeAsGrid(_:))
-                                                       : #selector(arrangeAsMasterStack(_:)))
-        }
+        arrange.addItem(MenuPictures.palette("Arrange", CanvasTiling.Arrangement.allCases.map { option in
+            let item = NSMenuItem(title: option.title, action: option == .grid ? #selector(arrangeAsGrid(_:))
+                                                                               : #selector(arrangeAsMasterStack(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.image = MenuPictures.arrangement(option)
+            return item
+        }))
         if isTiled {
             arrange.addItem(.separator())
             add(arrange, "Size Columns to Content", #selector(sizeColumnsToContent(_:)))
@@ -1375,7 +1439,7 @@ extension CanvasBoardView {
         if pinnableTile != nil { add(options, pinTileTitle, #selector(togglePinTileSize(_:))) }
         // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
         if tiling.hasTabs(id), !wholeTile { add(options, "Pull Out of Tabs", #selector(pullMenuTabOut(_:))) }
-        if tiling.hasTabs(id) { add(options, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
+        if tiling.hasTabs(id) { options.addItem(tabsPalette()) }
         if !options.items.isEmpty { options.addItem(.separator()) }
         // Here as well as on the canvas's own menu, whose gaps are four points wide.
         if !wholeTile { addExistingCards(options); addReplaceWith(options) }
@@ -1399,7 +1463,7 @@ extension CanvasBoardView {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tab"))
         add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
-        add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:)))
+        menu.addItem(tabsPalette())
         addReplaceWith(menu)
         if tiling.tabs(of: id).count > 1 {
             add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
@@ -1465,10 +1529,21 @@ extension CanvasBoardView {
 
     /// A tile's tabs down its side or across its top — one checked item rather than two, since it is a
     /// setting of the tile's and a check says which it has.
-    var tabsOnSideTitle: String { "Tabs on the Side" }
+    /// Where a tile's tabs sit, as two pictures. Ticked by validation — see `setMenuTabsOnSide`.
+    private func tabsPalette() -> NSMenuItem {
+        MenuPictures.palette("Tabs", [false, true].map { side in
+            let item = NSMenuItem(title: side ? "Tabs on the Side" : "Tabs on Top",
+                                  action: #selector(setMenuTabsOnSide(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = MenuPictures.tabs(onSide: side)
+            item.representedObject = side
+            return item
+        })
+    }
 
-    @objc func toggleMenuTabsOnSide(_ sender: Any?) {
-        guard let id = menuTile else { return }
+    @objc func setMenuTabsOnSide(_ sender: Any?) {
+        guard let id = menuTile, let side = (sender as? NSMenuItem)?.representedObject as? Bool,
+              tiling?.tabsOnSide(id) != side else { return }
         toggleTabsOnSide(id)
     }
 
@@ -1716,7 +1791,10 @@ extension CanvasBoardView {
             case .views(let views):
                 let submenu = NSMenu(title: "New View")
                 for command in views {
-                    add(submenu, command.viewName ?? command.title, action).representedObject = command
+                    let item = add(submenu, command.viewName ?? command.title, action)
+                    item.representedObject = command
+                    item.image = command.viewKind.flatMap { MenuPictures.symbol($0.symbol, $0.title) }
+                    if let subtitle = command.viewSubtitle { item.subtitle = subtitle }
                 }
                 menu.addItem(withTitle: "New View", action: nil, keyEquivalent: "").submenu = submenu
             case .separator:
@@ -2903,9 +2981,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return hasProjectCommandTarget
         case #selector(removeMenuTile(_:)):
             return menuTile != nil
-        case #selector(toggleMenuTabsOnSide(_:)):
+        case #selector(setMenuTabsOnSide(_:)):
             guard let id = menuTile, let tiling else { return false }
-            (item as? NSMenuItem)?.state = tiling.tabsOnSide(id) ? .on : .off
+            let side = (item as? NSMenuItem)?.representedObject as? Bool
+            (item as? NSMenuItem)?.state = tiling.tabsOnSide(id) == side ? .on : .off
             return true
         case #selector(removeTile(_:)):
             return focusedTile != nil

@@ -680,4 +680,40 @@ extension CanvasViewSpecTests {
         // Still readable above where the card becomes its label.
         XCTAssertLessThan(CanvasDetail.simplifiedBelow, 0.75)
     }
+
+    // MARK: Period ▸ as a grid of periods and layouts
+
+    /// Only the pairs that draw something sensible: a day down a rail, a week in seven columns, a
+    /// month as a grid — and every period as a list.
+    func testTheDayGridOffersOnlyTheLayoutsEachPeriodCanTake() {
+        let rows = CanvasViewSpec.spans(for: .day, pinned: [])
+        XCTAssertEqual(rows.map(\.period), [.today, .yesterday, .week, .month])
+        XCTAssertEqual(rows.map(\.layouts), [[.list, .rail], [.list, .rail], [.list, .week], [.list, .month]])
+    }
+
+    /// Next 5 Weeks as a list is on offer; it used to exist only as the month grid.
+    func testComingUpOffersFiveWeeksAsAList() {
+        let rows = CanvasViewSpec.spans(for: .comingUp, pinned: [])
+        XCTAssertEqual(rows.map(\.period), [.today, .week, .month])
+        XCTAssertEqual(rows.last?.layouts, [.list, .month])
+        XCTAssertTrue(CanvasViewSpec.spans(for: .search, pinned: []).isEmpty)
+    }
+
+    func testAPinnedDayStaysOnOfferOnce() {
+        let rows = CanvasViewSpec.spans(for: .day, pinned: [.day("2026-06-03"), .day("2026-06-03")])
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertEqual(rows.last?.layouts, [.list, .rail])
+    }
+
+    /// A Day paged back to this week by its header is Today laid out as a week, and ticks This Week.
+    func testTheTickFollowsWhatTheCardDraws() {
+        var spec = CanvasViewSpec(kind: .day, period: .today, projects: .everything)
+        spec.layout = .week
+        XCTAssertTrue(spec.shows(.week, as: .week))
+        XCTAssertFalse(spec.shows(.today, as: .list))
+        spec.layout = .rail
+        XCTAssertTrue(spec.shows(.today, as: .rail))
+        spec.period = .week
+        XCTAssertTrue(spec.shows(.week, as: .list), "a rail over a week draws as a list")
+    }
 }

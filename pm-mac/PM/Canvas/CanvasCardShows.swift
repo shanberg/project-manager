@@ -55,6 +55,15 @@ enum CanvasCardShows: String, CaseIterable, Equatable {
     /// to name. A card whose sitting can't be found draws the project, as a typo in `pmShows` does.
     case sitting
 
+    /// The menu's line under a title that can't say it alone: Current and Tasks read alike.
+    var menuSubtitle: String? {
+        switch self {
+        case .current: return "Latest session\u{2019}s note, then all open tasks"
+        case .tasks: return "All open tasks, no notes"
+        default: return nil
+        }
+    }
+
     /// What the Shows menu offers: the four you can choose without naming a sitting.
     static let menuCases: [CanvasCardShows] = [.everything, .current, .tasks, .brief]
 
