@@ -159,6 +159,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
                     self.windowName)
         }
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
+        split.tabModel.openWorkspaceInNewWindow = { [weak self] name in self?.openWorkspaceInNewWindow(name) }
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
         watchColor()
@@ -422,6 +423,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             Log.write("canvas replace failed: \(path): \(error)")
             return nil
         }
+    }
+
+    /// A second window on what this one shows — the project, or the canvas file it was opened on — with
+    /// one of its workspaces up. This window is left as it is. See `WorkspaceCommands.openInNewWindow`.
+    func openWorkspaceInNewWindow(_ name: String) {
+        let other = WindowManager.shared.open(projectKey: projectKey, reusingExistingWindow: false,
+                                              canvas: openedCanvas)
+        other.split.openTab(.board(.workspace(name)))
     }
 
     func openProjectCanvas() {

@@ -61,6 +61,8 @@ struct ProjectTabBar: View {
     /// A label edited in place, by tab id and the typed name. Naming or renaming, depending on what the
     /// chip was — see `ProjectSplitViewController.renameTab`.
     var renameTab: (String, String) -> Void
+    /// A second window on this project, showing the workspace.
+    var openWorkspaceInNewWindow: (String) -> Void = { _ in }
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
     /// each carrying a permanent × is a row of things to click by accident — **the current one
@@ -258,6 +260,7 @@ struct ProjectTabBar: View {
     @ViewBuilder private func menu(_ item: ProjectTabItem) -> some View {
         if let name = item.workspaceName {
             WorkspaceCommands(name: name,
+                              openInNewWindow: { openWorkspaceInNewWindow(name) },
                               rename: { renameWorkspace(name) },
                               duplicate: { duplicateWorkspace(name) },
                               delete: { deleteWorkspace(name) })
@@ -528,6 +531,9 @@ final class ProjectTabModel {
     var duplicateWorkspace: (String) -> Void = { _ in }
     @ObservationIgnored
     var deleteWorkspace: (String) -> Void = { _ in }
+    /// A second window on the same project, showing this workspace — see `WorkspaceCommands`.
+    @ObservationIgnored
+    var openWorkspaceInNewWindow: (String) -> Void = { _ in }
     /// A chip's label, typed rather than picked. By tab id, because it covers both naming and renaming
     /// and only the tab knows which it was.
     @ObservationIgnored
@@ -561,7 +567,8 @@ struct ProjectTabBarHost: View {
                       renameWorkspace: model.renameWorkspace,
                       duplicateWorkspace: model.duplicateWorkspace,
                       deleteWorkspace: model.deleteWorkspace,
-                      renameTab: model.renameTab)
+                      renameTab: model.renameTab,
+                      openWorkspaceInNewWindow: model.openWorkspaceInNewWindow)
     }
 }
 
@@ -578,11 +585,19 @@ struct ProjectTabBarHost: View {
 /// the act that made it, and what is left of it is Rename.
 struct WorkspaceCommands: View {
     let name: String
+    /// **Open, not move.** This window keeps the workspace, and the new one shows it too — a workspace
+    /// belongs to the canvas, not to a window, so there is nothing to take from here. Moving a tab out
+    /// waits on whether the row goes back to native tabs, which would bring AppKit's own.
+    var openInNewWindow: (() -> Void)?
     var rename: () -> Void
     var duplicate: () -> Void
     var delete: () -> Void
 
     var body: some View {
+        if let openInNewWindow {
+            Button("Open in New Window", action: openInNewWindow)
+            Divider()
+        }
         Button("Rename “\(name)”…", action: rename)
         Button("Duplicate “\(name)”…", action: duplicate)
         Divider()
