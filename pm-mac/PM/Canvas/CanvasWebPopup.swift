@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-/// The window a page opens for itself, shown as a sheet over the window it was opened from.
+/// The window a page opens for itself, shown over the tile that opened it.
 ///
 /// **What was broken.** Every request for a new window went through `createWebViewWith`, and both
 /// answers PM gave threw away the one thing a popup is for. A card loaded the URL in place; the
@@ -26,12 +26,15 @@ import WebKit
 /// equivalent one is not equivalent. Everything here follows from returning it: `window.opener` is
 /// live, `postMessage` lands, and `webViewDidClose` arrives when the callback closes itself.
 ///
-/// **A sheet, not a window.** A popup belongs to the page that asked for it, the way an `alert()`
-/// does — see `CanvasWebDialogs`, which puts those on sheets for the same reason. It stays over the
-/// board it came from instead of becoming a stray window to lose behind something, it goes away with
-/// that board, and the modality is honest: you cannot half-finish a sign-in and go back to poking the
-/// card underneath. `CanvasSignInWindow` is still a real window, because that one is a *menu command*
-/// — something you chose to do, not something a page asked for mid-click.
+/// **Over its tile, not a window of its own.** A popup belongs to the page that asked for it, the way
+/// an `alert()` does — see `CanvasWebDialogs`, which puts those over the tile for the same reason. It
+/// stays with the card it came from instead of becoming a stray window to lose behind something, and
+/// the modality is honest but narrow: you can't half-finish a sign-in and go back to poking the card
+/// underneath, and everything else on the board carries on. It was a sheet over the whole window,
+/// which held the call in the next tile hostage to a sign-in in this one. See `CanvasTileAlert`, which
+/// places it, dims the tile, and follows the card — behind a tab, out into a window of its own.
+/// `CanvasSignInWindow` is still a real window, because that one is a *menu command* — something you
+/// chose to do, not something a page asked for mid-click; its popups go over its page.
 /// What a popup needs of the card whose page opened it: somewhere to go when it is moved onto the
 /// board. A web card is the one there is — see `CanvasLinkNodeView`.
 @MainActor
@@ -44,14 +47,20 @@ protocol CanvasPopupOpener: AnyObject {
 
 @MainActor
 final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
-    /// Held so a sheet isn't deallocated the moment the delegate method that made it returns.
+    /// Held so a popup isn't deallocated the moment the delegate method that made it returns.
     private static var open: Set<CanvasWebPopup> = []
 
     /// Tall enough for the host and a button, short enough not to read as a second title bar.
     private static let barHeight: CGFloat = 38
 
-    private let sheet: NSWindow
     private let web: WKWebView
+    /// The popup's bar and page, which is what goes over the tile.
+    private var content: NSView!
+    /// Up over the tile — or, with nothing to put it over, a window of its own.
+    private var overlay: CanvasTileAlert?
+    private var fallback: NSWindow?
+    /// What it is over: the card that opened it, which it follows, or a sign-in window's page.
+    private weak var asker: NSView?
     private let address: NSTextField
     /// The card whose page opened this, for moving it onto that card's board. Nil for a popup opened
     /// from somewhere that isn't a card — the sign-in window, or another popup.
@@ -82,28 +91,30 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
 
     // MARK: Presenting
 
-    /// Put WebKit's page on a sheet over `parent`, and hand WebKit back the view it will load into.
+    /// Put WebKit's page over `asker`, and hand WebKit back the view it will load into.
     ///
     /// - Parameter configuration: the one `createWebViewWith` was given, unexchanged. See above.
     /// - Parameter userAgent: the opener's `customUserAgent`. It belongs to the view, not the
     ///   configuration, so a popup would otherwise sign in as Safari for a site told to expect Chrome.
+    /// - Parameter asker: what it goes over — the card whose page asked (a `CanvasTileAlert.Asker`, so
+    ///   it follows the card), or a page that isn't a card's.
     /// - Parameter opener: the card whose page asked, which is what can take the popup onto the board.
     @discardableResult
     static func present(with configuration: WKWebViewConfiguration,
                         features: WKWindowFeatures,
                         userAgent: String?,
-                        over parent: NSWindow?,
+                        over asker: NSView?,
                         opener: CanvasPopupOpener? = nil) -> WKWebView {
-        let popup = CanvasWebPopup(configuration: configuration, features: features, over: parent,
-                                   opener: opener)
+        let popup = CanvasWebPopup(configuration: configuration, features: features, opener: opener)
         popup.web.customUserAgent = userAgent
+        popup.asker = asker
         open.insert(popup)
-        popup.show(over: parent)
+        popup.show(asked: Self.size(asked: features))
         return popup.web
     }
 
     private init(configuration: WKWebViewConfiguration, features: WKWindowFeatures,
-                 over parent: NSWindow?, opener: CanvasPopupOpener?) {
+                 opener: CanvasPopupOpener?) {
         self.opener = opener
         // A popup that opens a further popup is ordinary in single sign-on — an identity provider
         // handing off to a second one, or to a device-approval window. The card says no to this
@@ -116,21 +127,16 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         // wrong in is this one.
         CanvasWebSession.allowInspecting(web)
 
-        let size = Self.size(asked: features, over: parent)
-        sheet = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                         styleMask: [.titled, .fullSizeContentView],
-                         backing: .buffered, defer: false)
-
         address = NSTextField(labelWithString: "")
         super.init()
 
-        sheet.contentView = chrome(size: size)
+        content = chrome(size: Self.size(asked: features))
         web.uiDelegate = self
         web.navigationDelegate = self
         web.allowsBackForwardNavigationGestures = true
     }
 
-    /// The sheet's own furniture: who you are talking to, and the way out.
+    /// The popup's own furniture: who you are talking to, and the way out.
     private func chrome(size: NSSize) -> NSView {
         let content = NSView(frame: NSRect(origin: .zero, size: size))
 
@@ -142,8 +148,8 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
 
         // **The address is the point of the bar.** A sign-in is a chain of hosts — the site, then the
         // identity provider, then back — and the only way to know a password field is safe to type
-        // into is to be able to see whose it is. A sheet has no title bar to put it in, so the sheet
-        // brings one. Same reasoning as `CanvasSignInWindow`'s subtitle, which is the same problem.
+        // into is to be able to see whose it is. A popup over a tile has no title bar to put it in, so
+        // it brings one. Same reasoning as `CanvasSignInWindow`'s subtitle, which is the same problem.
         address.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         address.textColor = .secondaryLabelColor
         address.alignment = .center
@@ -172,8 +178,8 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         bar.addSubview(done)
 
         // **Some popups are the thing itself**, not a step in something else: a Slack huddle, a call,
-        // a player. A sheet is right for a sign-in, which is over in a minute, and wrong for those, which
-        // would hold the whole board hostage for as long as they run. So they can leave — onto the
+        // a player. Over the tile is right for a sign-in, which is over in a minute, and wrong for those,
+        // which would hold the tile hostage for as long as they run. So they can leave — onto the
         // board, still running, still talking to the page that opened them.
         if opener != nil {
             let move = NSButton(title: opener?.opensPopupsAsTiles == true ? "Open as Tile" : "Open as Card",
@@ -198,30 +204,42 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         return content
     }
 
-    /// The size the page asked for, kept inside the window it is a sheet on.
-    ///
-    /// A sheet wider than its parent is a sheet with its corners hanging off, and a popup that names
-    /// 1200 points on a board window at 900 would do exactly that. The floor matters as much: a site
-    /// that asks for 400 × 400 is describing a browser popup with no chrome, and this one has a bar.
-    private static func size(asked features: WKWindowFeatures, over parent: NSWindow?) -> NSSize {
-        let room = parent?.frame.size ?? NSScreen.main?.visibleFrame.size
-            ?? NSSize(width: 1280, height: 800)
-        let width = features.width?.doubleValue ?? 620
-        let height = (features.height?.doubleValue ?? 720) + barHeight
-        return NSSize(width: min(max(width, 480), max(room.width - 80, 480)),
-                      height: min(max(height, 560), max(room.height - 80, 560)))
+    /// The size the page asked for, with the bar: what the popup is when the tile has room. A site that
+    /// asks for 400 × 400 is describing a browser popup with no chrome, and this one has a bar, so it
+    /// gets no smaller than 480 × 560 on request — the tile may still trim it to `minimum`.
+    private static func size(asked features: WKWindowFeatures) -> NSSize {
+        NSSize(width: max(features.width?.doubleValue ?? 620, 480),
+               height: max((features.height?.doubleValue ?? 720) + barHeight, 560))
     }
 
-    private func show(over parent: NSWindow?) {
-        guard let parent else {
-            // No window to hang it on shouldn't happen from a card, and a web view that is in no
-            // window at all renders nothing at all — so it gets to be a window rather than nothing.
-            sheet.center()
-            sheet.makeKeyAndOrderFront(nil)
+    /// The least a popup is and still works as one: under this the tile is too small, and it goes over
+    /// the window instead.
+    ///
+    /// Small enough that a tile of an ordinary grid holds one: a sign-in page scrolls, and a tile it
+    /// fits is better than the whole window dimmed for it.
+    static let minimum = NSSize(width: 400, height: 320)
+
+    private func show(asked size: NSSize) {
+        if let asker, let overlay = CanvasTileAlert.present(
+            hosting: .init(view: content, preferred: size, minimum: Self.minimum, initialFirstResponder: web),
+            over: asker, gone: { [weak self] in self?.dismiss() }) {
+            self.overlay = overlay
             return
         }
-        parent.beginSheet(sheet) { _ in }
+        // Nothing to put it over shouldn't happen from a card, and a web view that is in no window at
+        // all renders nothing at all — so it gets to be a window rather than nothing.
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        fallback = window
     }
+
+    /// The popup's panel over the tile, for a test to find.
+    var panel: CanvasTileAlert? { overlay }
 
     // MARK: Ending
 
@@ -232,7 +250,7 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     @objc private func moveToBoard() {
         guard let opener, Self.open.contains(self) else { return }
         web.removeFromSuperview()
-        if let parent = sheet.sheetParent { parent.endSheet(sheet) } else { sheet.orderOut(nil) }
+        takeDown()
         Self.open.remove(self)
         opener.openPopupAsCard(web)
     }
@@ -242,12 +260,15 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         web.stopLoading()
         web.uiDelegate = nil
         web.navigationDelegate = nil
-        if let parent = sheet.sheetParent {
-            parent.endSheet(sheet)
-        } else {
-            sheet.orderOut(nil)
-        }
+        takeDown()
         Self.open.remove(self)
+    }
+
+    private func takeDown() {
+        overlay?.withdraw()
+        overlay = nil
+        fallback?.orderOut(nil)
+        fallback = nil
     }
 
     /// `window.close()`, which is how an OAuth callback signs off — and which WebKit only sends for a
@@ -265,25 +286,26 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
 
     // MARK: What the popup itself is allowed to put up
 
-    /// A popup that opens a popup gets the same treatment, on a sheet of its own over this one — an
-    /// identity provider handing off to another is a normal shape for this to take.
+    /// A popup that opens a popup gets the same treatment, over the same tile and on top of this one —
+    /// an identity provider handing off to another is a normal shape for this to take.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        Self.present(with: configuration, features: windowFeatures, userAgent: webView.customUserAgent, over: sheet)
+        Self.present(with: configuration, features: windowFeatures, userAgent: webView.customUserAgent,
+                     over: asker ?? web)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping () -> Void) {
-        CanvasWebDialogs.alert(message, from: frame.securityOrigin.host, in: sheet,
+        CanvasWebDialogs.alert(message, from: frame.securityOrigin.host, over: web, in: web.window,
                                then: completionHandler)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (Bool) -> Void) {
-        CanvasWebDialogs.confirm(message, from: frame.securityOrigin.host, in: sheet,
+        CanvasWebDialogs.confirm(message, from: frame.securityOrigin.host, over: web, in: web.window,
                                  then: completionHandler)
     }
 
@@ -291,19 +313,19 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (String?) -> Void) {
         CanvasWebDialogs.prompt(prompt, initial: defaultText ?? "", from: frame.securityOrigin.host,
-                                in: sheet, then: completionHandler)
+                                over: web, in: web.window, then: completionHandler)
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping ([URL]?) -> Void) {
-        CanvasWebDialogs.chooseFiles(parameters, in: sheet, then: completionHandler)
+        CanvasWebDialogs.chooseFiles(parameters, in: web.window, then: completionHandler)
     }
 
     /// A huddle or a call is exactly what a popup is for, so it asks the way a card does.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        CanvasWebDialogs.mediaAccess(for: origin.host, type, in: sheet, then: decisionHandler)
+        CanvasWebDialogs.mediaAccess(for: origin.host, type, over: web, in: web.window, then: decisionHandler)
     }
 }

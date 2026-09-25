@@ -1886,7 +1886,7 @@ extension CanvasLinkNodeView: WKUIDelegate {
             board.addLinkCard(url.absoluteString, beside: node.id)
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
             return CanvasWebPopup.present(with: configuration, features: windowFeatures,
-                                          userAgent: webView.customUserAgent, over: window, opener: self)
+                                          userAgent: webView.customUserAgent, over: self, opener: self)
         } else {
             capturingTitle = false
             webView.load(URLRequest(url: url))

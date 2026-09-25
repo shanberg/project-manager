@@ -27,8 +27,8 @@ final class CanvasWebPopupTests: XCTestCase {
                      windowFeatures: WKWindowFeatures) -> WKWebView? {
             if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
                 popup = CanvasWebPopup.present(with: configuration, features: windowFeatures, userAgent: nil,
-                                               over: parent)
-                // The popup's page opts into dark too; this covers the sheet before it paints.
+                                               over: webView)
+                // The popup's page opts into dark too; this covers the panel before it paints.
                 popup?.underPageBackgroundColor = .windowBackgroundColor
                 return popup
             }
@@ -76,6 +76,8 @@ final class CanvasWebPopupTests: XCTestCase {
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         opener = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 400),
                            configuration: configuration)
+        // In the window, since that is what a popup is put up over.
+        board.contentView?.addSubview(opener)
         opener.uiDelegate = card
         opener.loadHTMLString(Self.page, baseURL: URL(string: "https://opener.invalid/"))
         // Asked about the page's own function rather than `document.readyState`, which answers
@@ -88,7 +90,7 @@ final class CanvasWebPopupTests: XCTestCase {
 
     override func tearDown() async throws {
         opener?.uiDelegate = nil
-        if let sheet = board?.attachedSheet { board.endSheet(sheet) }
+        for panel in CanvasTileAlert.open { panel.withdraw() }
         board?.orderOut(nil)
         try await super.tearDown()
     }
@@ -113,15 +115,18 @@ final class CanvasWebPopupTests: XCTestCase {
         }
     }
 
-    /// A popup on a sheet over the board, and gone from it when the page closes itself — which is how
-    /// an OAuth callback signs off, and what used to leave a dead window standing.
-    func testAPopupIsASheetThatTheCallbackCanClose() async throws {
+    /// A popup over the page that opened it — not a sheet down over the window — and gone when the
+    /// page closes itself, which is how an OAuth callback signs off, and what used to leave a dead
+    /// window standing.
+    func testAPopupIsOverItsOpenerAndTheCallbackCanCloseIt() async throws {
         _ = try await opener.evaluateJavaScript("popup('width=600,height=600')")
         let popup = try XCTUnwrap(card.popup)
-        XCTAssertNotNil(board.attachedSheet, "The popup didn't land on the board's window.")
+        XCTAssertNil(board.attachedSheet, "No sheet came down.")
+        XCTAssertEqual(CanvasTileAlert.open.count, 1, "The popup is up over its opener.")
+        XCTAssertTrue(popup.isDescendant(of: try XCTUnwrap(CanvasTileAlert.open.first)))
 
         _ = try? await popup.evaluateJavaScript("window.close()")
-        try await until("the sheet goes away with the page") { self.board.attachedSheet == nil }
+        try await until("the popup goes away with the page") { CanvasTileAlert.open.isEmpty }
     }
 
     // MARK: What must not change

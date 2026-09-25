@@ -21,6 +21,10 @@ import AppKit
 /// or scrolled, a tab put behind another (the panel hides with it), a card lent to a window and taken
 /// back (the panel goes where it went). A card that goes altogether answers Cancel, since every one of
 /// these has a caller waiting on its answer.
+///
+/// **Or a view of the caller's own** (`present(hosting:)`): a page's popup — a sign-in, a huddle — is
+/// the same kind of thing, something one tile asked for, and goes over that tile the same way, as big
+/// as the page asked and the tile allows.
 @MainActor
 final class CanvasTileAlert: NSView {
     /// Something that asks from different places at different times — a card, which is on the board or
@@ -41,6 +45,16 @@ final class CanvasTileAlert: NSView {
         var buttons: [String]
     }
 
+    /// A view of the caller's own, in place of an alert's parts.
+    struct Hosted {
+        var view: NSView
+        /// The size wanted, which the tile may trim down to `minimum`, and below that the panel goes
+        /// over the window.
+        var preferred: NSSize
+        var minimum: NSSize
+        var initialFirstResponder: NSView?
+    }
+
     /// Every panel up, so a test (and the app) can find them.
     private(set) static var open: [CanvasTileAlert] = []
 
@@ -51,7 +65,22 @@ final class CanvasTileAlert: NSView {
                         then finish: @escaping (Int) -> Void) -> CanvasTileAlert? {
         let anchor = (asker as? Asker)?.alertAnchor ?? asker
         guard anchor.window != nil, let host = host(for: anchor) else { return nil }
-        let alert = CanvasTileAlert(content, anchor: asker, finish: finish)
+        let alert = CanvasTileAlert(content, hosted: nil, anchor: asker, finish: finish)
+        alert.move(to: host)
+        open.append(alert)
+        alert.focus()
+        alert.fadeIn()
+        return alert
+    }
+
+    /// Put the caller's own view up over `asker`, as a panel would be. `gone` hears if the asker goes
+    /// before the caller takes it down (`withdraw`) — the card deleted, say.
+    @discardableResult
+    static func present(hosting hosted: Hosted, over asker: NSView,
+                        gone: @escaping () -> Void) -> CanvasTileAlert? {
+        let anchor = (asker as? Asker)?.alertAnchor ?? asker
+        guard anchor.window != nil, let host = host(for: anchor) else { return nil }
+        let alert = CanvasTileAlert(Content(title: "", buttons: []), hosted: hosted, anchor: asker) { _ in gone() }
         alert.move(to: host)
         open.append(alert)
         alert.focus()
@@ -73,6 +102,7 @@ final class CanvasTileAlert: NSView {
     /// Where the panel is over now: the asker, or where the asker says it is.
     var anchor: NSView? { (asker as? Asker)?.alertAnchor ?? asker }
     private let content: Content
+    private let hosted: Hosted?
     private var finish: ((Int) -> Void)?
     let panel = NSView()
     private let glass = NSVisualEffectView()
@@ -86,13 +116,20 @@ final class CanvasTileAlert: NSView {
     private var checker: Timer?
     private var windowlessChecks = 0
 
-    private init(_ content: Content, anchor: NSView, finish: @escaping (Int) -> Void) {
+    private init(_ content: Content, hosted: Hosted?, anchor: NSView, finish: @escaping (Int) -> Void) {
         self.content = content
+        self.hosted = hosted
         self.asker = anchor
         self.finish = finish
         super.init(frame: .zero)
         wantsLayer = true
-        build()
+        if let hosted { build(hosting: hosted) } else { build() }
+    }
+
+    /// Take the panel down without an answer: the caller is done with its view.
+    func withdraw() {
+        finish = nil
+        close()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -138,6 +175,7 @@ final class CanvasTileAlert: NSView {
     @objc private func pressed(_ sender: NSButton) { answer(sender.tag) }
 
     override func keyDown(with event: NSEvent) {
+        if hosted != nil { return super.keyDown(with: event) }
         switch event.keyCode {
         case 36, 76: answer(0)                  // Return, Enter
         case 53: answer(cancelIndex)            // Escape
@@ -215,14 +253,24 @@ final class CanvasTileAlert: NSView {
         isHidden = anchor.isHiddenOrHasHiddenAncestor
         // Its own bounds too: a view isn't clipped to them, and its visible rect can run past them.
         let over = convert(anchor.visibleRect.intersection(anchor.bounds), from: anchor).intersection(bounds)
-        let size = panel.fittingSize
-        let room = NSSize(width: size.width + 2 * Self.margin, height: size.height + 2 * Self.margin)
+        let least = hosted?.minimum ?? panel.fittingSize
+        let margin = hosted == nil ? Self.margin : Self.hostedMargin
+        let room = NSSize(width: least.width + 2 * margin, height: least.height + 2 * margin)
         if over.width >= room.width, over.height >= room.height {
             region = over
             ring = nil
         } else {
             region = bounds
             ring = over.isEmpty ? nil : over
+        }
+        var size = least
+        if let hosted {
+            // As big as asked, as the region allows, and no smaller than the least it can be — unless
+            // even the window is smaller than that.
+            let most = NSSize(width: region.width - 2 * margin, height: region.height - 2 * margin)
+            size = NSSize(width: max(min(hosted.preferred.width, most.width), min(hosted.minimum.width, most.width)),
+                          height: max(min(hosted.preferred.height, most.height), min(hosted.minimum.height, most.height)))
+            size = NSSize(width: size.width.rounded(.down), height: size.height.rounded(.down))
         }
         panel.frame = NSRect(x: (region.midX - size.width / 2).rounded(),
                              y: (region.midY - size.height / 2).rounded(),
@@ -232,12 +280,14 @@ final class CanvasTileAlert: NSView {
 
     /// Room kept around the panel inside the tile before it gives up and goes over the window.
     static let margin: CGFloat = 16
+    /// Less for a popup, which wants the room more than it wants the air.
+    static let hostedMargin: CGFloat = 12
 
     // MARK: Taking the keys
 
     private func focus() {
         guard let window else { return }
-        if let first = content.initialFirstResponder, first.window === window {
+        if let first = hosted?.initialFirstResponder ?? content.initialFirstResponder, first.window === window {
             window.makeFirstResponder(first)
         } else {
             window.makeFirstResponder(self)
@@ -377,6 +427,32 @@ final class CanvasTileAlert: NSView {
     }
 
     static let width: CGFloat = 272
+
+    /// The caller's view, on a panel with the alert's corners and shadow, filling it.
+    private func build(hosting hosted: Hosted) {
+        panel.wantsLayer = true
+        panel.shadow = {
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+            shadow.shadowBlurRadius = 22
+            shadow.shadowOffset = NSSize(width: 0, height: -8)
+            return shadow
+        }()
+        let clip = NSView(frame: NSRect(origin: .zero, size: hosted.preferred))
+        clip.wantsLayer = true
+        clip.layer?.cornerRadius = 12
+        clip.layer?.cornerCurve = .continuous
+        clip.layer?.masksToBounds = true
+        clip.layer?.borderWidth = 0.5
+        clip.layer?.borderColor = NSColor.separatorColor.cgColor
+        clip.autoresizingMask = [.width, .height]
+        hosted.view.frame = clip.bounds
+        hosted.view.autoresizingMask = [.width, .height]
+        clip.addSubview(hosted.view)
+        panel.frame = clip.frame
+        panel.addSubview(clip)
+        addSubview(panel)
+    }
 
     /// Return in a field is the default button and Escape is Cancel, as in an alert: a field would
     /// otherwise keep both to itself.

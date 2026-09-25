@@ -98,7 +98,7 @@ final class CanvasSignInWindow: NSWindowController, WKUIDelegate, WKNavigationDe
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         CanvasWebPopup.present(with: configuration, features: windowFeatures,
-                               userAgent: webView.customUserAgent, over: window)
+                               userAgent: webView.customUserAgent, over: web)
     }
 }
 
