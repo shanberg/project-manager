@@ -59,10 +59,13 @@ struct CanvasTileCapsule: View {
                 // scope, different job", which is exactly the relation between a page and the tile it
                 // is in — a divider would say they were different scopes, and they are not.
                 if hasKindRun { HeaderGap() }
-                HeaderSymbolButton(symbol: tile.isMaximized ? "arrow.down.right.and.arrow.up.left"
-                                                            : "arrow.up.left.and.arrow.down.right",
-                                   help: maximizeHelp(tile),
-                                   action: model.maximizeTile)
+                if tile.isMaximized {
+                    HeaderRestoreButton(help: maximizeHelp(tile), action: model.maximizeTile)
+                } else {
+                    HeaderSymbolButton(symbol: "arrow.up.left.and.arrow.down.right",
+                                       help: maximizeHelp(tile),
+                                       action: model.maximizeTile)
+                }
             }
             // The menu joins the tile's own verbs at the ordinary spacing — it *is* the rest of them,
             // and a gap would make the maximize button a group of one. With no tile run to join it
@@ -71,12 +74,10 @@ struct CanvasTileCapsule: View {
             if focus.tile == nil, hasKindRun { HeaderGap() }
             overflow
         }
-        // Safe to animate because neither changes the capsule's width: a glyph swapped inside a hit
-        // area that is the same size either way. Nothing here may animate a change that alters the
-        // width — see `CanvasHeaderTrailingChrome`. Which is also why stepping from a web tile to a
-        // project tile is not animated at all: the capsule stays, its contents change, and the row
-        // takes the new width in one frame.
-        .animation(Motion.animation(.easeOut(duration: 0.18)), value: focus.tile?.isMaximized)
+        // Not animated: Restore is wider than the glyph it replaces, and nothing here may animate a
+        // change that alters the width — see `CanvasHeaderTrailingChrome`. Maximizing is the same kind
+        // of step as moving from a web tile to a project tile: the capsule stays, its contents change,
+        // and the row takes the new width in one frame.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(label))
     }
@@ -112,5 +113,44 @@ struct CanvasTileCapsule: View {
                          help: CanvasCardActions.help(count: focus.cards, tile: focus.tile?.isCard == false),
                          openToken: model.cardActionsToken,
                          open: model.showCardActions)
+    }
+}
+
+/// The way out of a maximized tile or card, while one fills the room: a word and a glyph in the accent,
+/// on a tinted capsule, where every other header control is a grey glyph.
+///
+/// **Louder than its neighbours on purpose.** Maximized is a mode, and the one this app has that hides
+/// most of what you had open — every other tile, or the whole board. A glyph-only button the same grey
+/// as Back and Reload said nothing about being in it. Escape isn't a dependable way out either: an
+/// engaged page takes the first press, and a web app that handles Escape itself takes them all. So the
+/// header says the state in words, where the window's own controls are, and the tile underneath keeps
+/// all of its room.
+struct HeaderRestoreButton: View {
+    var help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: HeaderMetrics.iconSize - 2, weight: .semibold))
+                Text("Restore")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .frame(height: HeaderMetrics.itemHeight)
+            .background {
+                Capsule().fill(Color.accentColor.opacity(hovering ? 0.24 : 0.16))
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(Motion.animation(.easeOut(duration: 0.12)), value: hovering)
+        .help(help)
+        .accessibilityLabel(Text("Restore"))
+        .accessibilityHint(Text(help))
     }
 }

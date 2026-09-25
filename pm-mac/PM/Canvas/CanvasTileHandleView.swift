@@ -530,10 +530,6 @@ final class CanvasTileGripView: NSView {
         for id in tiling.ids {
             guard let fade = handleFades[id], fade.isVisible, let handle = board.tileHandle(id) else { continue }
             let presence = fade.presence
-            if tiling.maximized == id {
-                drawRestore(in: board.viewRect(handle.bar), presence: presence)
-                continue
-            }
             // Widens a little as it fades in — from 70% of its length — so it arrives as a mark coming
             // up under the pointer rather than a rectangle switching on.
             var rect = board.viewRect(handle.bar)
@@ -559,51 +555,19 @@ final class CanvasTileGripView: NSView {
         }
     }
 
-    /// A maximized tile's grip: a pill with the restore glyph, the same glass-over-anything treatment as
-    /// the grip's line so it reads over a page of any colour. See `CanvasBoardView.tileHandle`.
-    private func drawRestore(in rect: NSRect, presence: Double) {
-        let radius = rect.height / 2
-        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.2 * presence)
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
-        shadow.shadowBlurRadius = 3
-        shadow.set()
-        NSColor.windowBackgroundColor.withAlphaComponent(0.92 * presence).setFill()
-        path.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        NSColor.separatorColor.withAlphaComponent(presence).setStroke()
-        path.lineWidth = 0.5
-        path.stroke()
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-            .applying(.init(paletteColors: [NSColor.secondaryLabelColor.withAlphaComponent(presence)]))
-        guard let glyph = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left",
-                                  accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return }
-        let size = glyph.size
-        glyph.draw(in: NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
-                              width: size.width, height: size.height),
-                   from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-    }
-
-    /// Over the grip that is showing, or nowhere. A maximized tile's Restore pill shows without the
-    /// pointer, so it is the one the catcher sits on while there is one.
+    /// Over the grip that is showing, or nowhere.
     private func placeCatcher(_ board: CanvasBoardView?) {
         // Never out from under a press it took: the rest of that drag is delivered to it.
         if board?.gesture != nil, !catcher.isHidden { return }
-        let restoring = board?.tiling?.maximized.flatMap { board?.showsTileHandle($0) == true ? $0 : nil }
-        guard let board, let id = restoring ?? board.gripTile, board.showsTileHandle(id),
-              let handle = board.tileHandle(id) else {
+        guard let board, let id = board.gripTile, board.showsTileHandle(id), let handle = board.tileHandle(id) else {
             if !catcher.isHidden { catcher.isHidden = true; window?.invalidateCursorRects(for: catcher) }
             return
         }
         let rect = board.viewRect(handle.hit)
-        let isRestore = restoring != nil
-        if catcher.frame != rect || catcher.isHidden || catcher.isRestore != isRestore {
+        if catcher.frame != rect || catcher.isHidden {
             if catcher.isHidden { catcher.frame = rect } else { catcher.move(to: rect) }
             catcher.isHidden = false
             catcher.board = board
-            catcher.isRestore = isRestore
             window?.invalidateCursorRects(for: catcher)
         }
     }
@@ -612,22 +576,8 @@ final class CanvasTileGripView: NSView {
     /// inside the transparent titlebar's band (see `CanvasTileHandleView.stripExcluders`).
     final class Catcher: WindowDragBlocker {
         weak var board: CanvasBoardView?
-        /// Over a maximized tile's Restore pill rather than a grip: a button, so it says so — to the
-        /// pointer, in a tooltip, and to VoiceOver.
-        var isRestore = false {
-            didSet {
-                toolTip = isRestore ? "Restore Tile" : nil
-                setAccessibilityElement(isRestore)
-                setAccessibilityRole(isRestore ? .button : nil)
-                setAccessibilityLabel(isRestore ? "Restore Tile" : nil)
-            }
-        }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func resetCursorRects() { addCursorRect(bounds, cursor: isRestore ? .arrow : .openHand) }
-        override func accessibilityPerformPress() -> Bool {
-            guard isRestore, let board else { return false }
-            return board.restoreMaximizedTile()
-        }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
         override func mouseDown(with event: NSEvent) { board?.mouseDown(with: event) }
         override func mouseDragged(with event: NSEvent) { board?.mouseDragged(with: event) }
         override func mouseUp(with event: NSEvent) { board?.mouseUp(with: event) }
