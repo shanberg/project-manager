@@ -191,3 +191,31 @@ public func carryingFrontmatter(from original: String, into rewritten: String) -
           frontmatterBody(rewritten.components(separatedBy: "\n")) == nil else { return rewritten }
     return old[0...body.upperBound].joined(separator: "\n") + "\n" + rewritten
 }
+
+// MARK: - SVG pasted as text
+
+/// The SVG in `text`, when `text` is one: what an icon site's Copy SVG button or a design tool's Copy
+/// as SVG puts on the clipboard, which is markup rather than a file. Nil for anything else, including
+/// markup that merely contains an SVG somewhere inside it — a page of HTML is not an icon.
+///
+/// An XML declaration, a doctype or a comment may come before the `<svg`, as they do in a file.
+public func pastedSVGMarkup(_ text: String) -> String? {
+    let markup = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard markup.hasSuffix("</svg>"), let open = markup.range(of: "<svg") else { return nil }
+    var head = markup[..<open.lowerBound]
+    // Whatever precedes the element has to be prolog: `<?…?>`, `<!…>` and space between them.
+    while let start = head.firstIndex(where: { !$0.isWhitespace }) {
+        head = head[start...]
+        guard head.hasPrefix("<?") || head.hasPrefix("<!"), let end = head.firstIndex(of: ">") else { return nil }
+        head = head[head.index(after: end)...]
+    }
+    let after = markup[open.upperBound...].first
+    guard after == " " || after == ">" || after == "\n" || after == "\t" || after == "\r" else { return nil }
+    return markup
+}
+
+/// Whether an SVG draws in `currentColor` — the colour of whatever it's placed in, which is how an
+/// icon set says its icons are meant to be tinted. Such an icon reads best in the project's colour.
+public func svgUsesCurrentColor(_ markup: String) -> Bool {
+    markup.range(of: "currentcolor", options: .caseInsensitive) != nil
+}

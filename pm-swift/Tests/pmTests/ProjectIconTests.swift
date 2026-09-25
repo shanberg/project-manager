@@ -127,4 +127,23 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertEqual(icon.flatMap { ProjectIcon(value: $0.value) }, icon)
         XCTAssertEqual(ProjectIcon.symbol("leaf").resolved(notesPath: "/p/n.md"), .symbol("leaf"))
     }
+
+    // MARK: SVG pasted as text
+
+    func testPastedSVGMarkupIsRecognised() {
+        let lucide = #"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="currentColor"><path d="M2 21"/></svg>"#
+        XCTAssertEqual(pastedSVGMarkup("  \n" + lucide + "\n"), lucide)
+        let file = "<?xml version=\"1.0\"?>\n<!DOCTYPE svg>\n<!-- by hand -->\n<svg viewBox=\"0 0 1 1\"></svg>"
+        XCTAssertEqual(pastedSVGMarkup(file), file)
+        XCTAssertTrue(svgUsesCurrentColor(lucide))
+        XCTAssertFalse(svgUsesCurrentColor("<svg><path fill=\"red\"/></svg>"))
+    }
+
+    func testTextThatOnlyContainsAnSVGIsNot() {
+        XCTAssertNil(pastedSVGMarkup("<html><body><svg></svg></body></html>"))
+        XCTAssertNil(pastedSVGMarkup("Here it is: <svg></svg>"))
+        XCTAssertNil(pastedSVGMarkup("<svgx></svgx></svg>"))
+        XCTAssertNil(pastedSVGMarkup("<svg viewBox=\"0 0 1 1\">"))
+        XCTAssertNil(pastedSVGMarkup("leaf.fill"))
+    }
 }

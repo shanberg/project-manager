@@ -24,11 +24,13 @@ struct ProjectIconImagePanel: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .foregroundStyle(model.iconImageName == nil ? .secondary : .primary)
-                    Text("An SVG or PNG.")
+                    Text("An SVG or PNG, or SVG code you've copied.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
+                Button("Paste") { pasteImage() }
+                    .help("Use the SVG or PNG on the clipboard — an icon site's Copy SVG works")
                 Button(model.iconImageName == nil ? "Choose…" : "Replace…") { chooseImage() }
             }
             HStack(spacing: 10) {
@@ -45,6 +47,46 @@ struct ProjectIconImagePanel: View {
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             Self.acceptDrop(providers) { model.chooseIconImage($0) }
         }
+        .onPasteCommand(of: [.fileURL, .svg, .png, .plainText]) { _ in pasteImage() }
+    }
+
+    private func pasteImage() {
+        guard let pasted = Self.pastedIcon(from: .general) else { NSSound.beep(); return }
+        model.chooseIconImage(pasted.file)
+        if pasted.tinted { model.iconRecolor = true }
+    }
+
+    /// The icon on a pasteboard, as a file to choose: an SVG or PNG file copied in the Finder, or SVG
+    /// markup — which is what an icon site's Copy SVG hands over — written to a file of its own. Nil
+    /// when there's neither.
+    ///
+    /// `tinted` is for markup drawn in `currentColor`: the icon set means it to take the colour of
+    /// wherever it's put, so it starts out in the project's colour rather than black.
+    static func pastedIcon(from pasteboard: NSPasteboard) -> (file: URL, tinted: Bool)? {
+        if let url = (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+                      as? [URL])?.first,
+           let type = UTType(filenameExtension: url.pathExtension), types.contains(where: type.conforms(to:)) {
+            return (url, false)
+        }
+        let text = pasteboard.data(forType: NSPasteboard.PasteboardType(UTType.svg.identifier))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? pasteboard.string(forType: .string)
+        if let markup = text.flatMap(pastedSVGMarkup), let file = try? written(Data(markup.utf8), named: "icon.svg") {
+            return (file, svgUsesCurrentColor(markup))
+        }
+        if let png = pasteboard.data(forType: .png), let file = try? written(png, named: "icon.png") {
+            return (file, false)
+        }
+        return nil
+    }
+
+    /// A file to hold a pasted icon until Save copies it in beside the notes.
+    private static func written(_ contents: Data, named name: String) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Folio pasted icon \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent(name)
+        try contents.write(to: file)
+        return file
     }
 
     /// The icon at the size of the preview, on the sheet's ground — or an empty well to drop onto.
