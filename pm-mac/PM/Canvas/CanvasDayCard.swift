@@ -94,6 +94,20 @@ final class CanvasDayModel {
         list.map(CanvasDayRows.summary) ?? ""
     }
 
+    /// Whether every row is the one project's — a card narrowed to one, by name or as the only project
+    /// on its canvas, and nothing in it from anywhere else (a master brings its members, which still
+    /// say whose they are). Then no row says the project: the card's place says it, and each name would
+    /// be the same word down the column. Calendar blocks lead with what the sitting was about instead.
+    var showsOneProject: Bool {
+        let scope: [String]? = switch spec.projects {
+        case .everything: nil
+        case .board: boardProjects
+        case .named(let names): names
+        }
+        guard scope?.count == 1, let list else { return false }
+        return Set(list.sittings.map(\.projectName) + list.elsewhere.map(\.projectName)).count <= 1
+    }
+
     func reload() {
         generation += 1
         let mine = generation
@@ -213,8 +227,9 @@ struct CanvasDayCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            // Said only when it's narrowed: across everything is what a Day card is unless told.
-            if model.spec.projects != .everything {
+            // Said only when it's narrowed by name: across everything is what a Day card is unless told,
+            // and the canvas's own projects are what a card on it would be expected to show.
+            if case .named = model.spec.projects {
                 Text(model.spec.projects.title)
                     .font(.system(size: 11 * zoom))
                     .foregroundStyle(.tertiary)
@@ -267,12 +282,13 @@ struct CanvasDayCard: View {
             // A week or a month is drawn even when it's empty: an empty week is still seven days.
             if model.spec.shownLayout == .week {
                 CanvasDayWeek(span: span, list: list, zoom: zoom, onScreen: onScreen, onOpenProject: onOpenProject,
-                              onOpenDay: onOpenDay, sittingCard: sittingCard)
+                              onOpenDay: onOpenDay, sittingCard: sittingCard, namesProjects: !model.showsOneProject)
             } else {
                 CanvasMonthGrid(span: span, zoom: zoom, isQuiet: { !$0.hasPrefix(span.month ?? $0) },
                                 onOpenDay: onOpenDay) { day, room in
                     CanvasDayMonthCell(sittings: CanvasTimeGrid.ordered(list.sittings.filter { $0.session == day }),
-                                       room: room, zoom: zoom, readable: onScreen.finePrintReadable)
+                                       room: room, zoom: zoom, readable: onScreen.finePrintReadable,
+                                       namesProjects: !model.showsOneProject)
                 }
             }
         } else if let list = model.list {
@@ -389,11 +405,13 @@ struct CanvasDayCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
                 Spacer(minLength: 4)
-                Text(item.projectName)
-                    .font(.system(size: 10 * zoom))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .fixedSize()
+                if !model.showsOneProject {
+                    Text(item.projectName)
+                        .font(.system(size: 10 * zoom))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
         .padding(.leading, 4)
@@ -467,7 +485,35 @@ struct CanvasDayCard: View {
 
     /// The project chip (views.md rule 3): its icon, else its colour as a dot, then its name — and the
     /// sitting's own name after it, and *now* on one still going.
+    ///
+    /// On a card of one project, the sitting's own name alone, in the project's place: the project is
+    /// the card's, and a sitting with no name is "Sitting", so the row still has a head to drag by.
+    @ViewBuilder
     private func chip(_ sitting: SittingEntry) -> some View {
+        if model.showsOneProject {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(sitting.name.isEmpty ? "Sitting" : sitting.name)
+                    .font(.system(size: 12 * zoom, weight: .semibold))
+                    .foregroundStyle(sitting.name.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if sitting.isCurrent { nowBadge }
+            }
+        } else {
+            projectChip(sitting)
+        }
+    }
+
+    private var nowBadge: some View {
+        Text("now")
+            .font(.system(size: 10 * zoom, weight: .medium))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+    }
+
+    private func projectChip(_ sitting: SittingEntry) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Button { onOpenProject(sitting.projectFolder) } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -487,14 +533,7 @@ struct CanvasDayCard: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if sitting.isCurrent {
-                Text("now")
-                    .font(.system(size: 10 * zoom, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-            }
+            if sitting.isCurrent { nowBadge }
         }
     }
 
@@ -625,7 +664,8 @@ struct CanvasDayCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .layoutPriority(1)
                     Spacer(minLength: 4)
-                    Text([item.projectName, Self.clock(item.at)].compactMap { $0 }.joined(separator: " · "))
+                    Text([model.showsOneProject ? nil : item.projectName, Self.clock(item.at)]
+                        .compactMap { $0 }.joined(separator: " · "))
                         .font(.system(size: 10 * zoom))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)

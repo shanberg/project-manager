@@ -69,6 +69,9 @@ struct CanvasDayWeek: View {
     var onOpenProject: (String) -> Void = { _ in }
     var onOpenDay: ((String) -> Void)?
     var sittingCard: ((SittingEntry) -> NSItemProvider?)?
+    /// False on a card of one project (`CanvasDayModel.showsOneProject`): a block leads with what the
+    /// sitting was about rather than the project every block would name.
+    var namesProjects = true
 
     private var gutter: CGFloat { 40 * zoom }
     private var blockHeight: CGFloat { 44 * zoom }
@@ -216,10 +219,10 @@ struct CanvasDayWeek: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Text(sitting.projectName)
+                Text(namesProjects ? sitting.projectName : lede.isEmpty ? "Sitting" : lede)
                     .font(.system(size: 10.5 * zoom, weight: .semibold))
-                    .lineLimit(1)
-                if says.lede > 0, !lede.isEmpty {
+                    .lineLimit(namesProjects ? 1 : 1 + says.lede)
+                if namesProjects, says.lede > 0, !lede.isEmpty {
                     Text(lede)
                         .font(.system(size: 10 * zoom))
                         .foregroundStyle(.secondary)
@@ -259,7 +262,7 @@ struct CanvasDayWeek: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(CanvasCalendarCells.help(sitting))
+        .help(CanvasCalendarCells.help(sitting, namesProject: namesProjects))
         .ifCondition(sittingCard != nil) { view in view.onDrag { sittingCard?(sitting) ?? NSItemProvider() } }
     }
 }
@@ -352,6 +355,8 @@ struct CanvasDayMonthCell: View {
     var room = CanvasMonthRoom(lines: 0, width: 0)
     var zoom: Double = 1
     var readable = true
+    /// See `CanvasDayWeek.namesProjects`.
+    var namesProjects = true
 
     var body: some View {
         let detail = CanvasCalendarDetail.monthCell(sittings: sittings.count, width: room.width, lines: room.lines,
@@ -375,7 +380,7 @@ struct CanvasDayMonthCell: View {
                 }
             }
         }
-        .help(sittings.map(CanvasCalendarCells.help).joined(separator: "\n"))
+        .help(sittings.map { CanvasCalendarCells.help($0, namesProject: namesProjects) }.joined(separator: "\n"))
     }
 
     /// A sitting's line: a bar in its project's colour, then its project, and the time where the cell is
@@ -392,11 +397,11 @@ struct CanvasDayMonthCell: View {
                             .font(.system(size: 9 * zoom).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    Text(sitting.projectName)
+                    Text(namesProjects ? sitting.projectName : about.isEmpty ? "Sitting" : about)
                         .font(.system(size: 9.5 * zoom, weight: .medium))
                         .lineLimit(1)
                 }
-                if lede, !about.isEmpty {
+                if lede, namesProjects, !about.isEmpty {
                     Text(about)
                         .font(.system(size: 9 * zoom))
                         .foregroundStyle(.secondary)
@@ -447,8 +452,9 @@ enum CanvasCalendarCells {
     }
 
     /// What a sitting says on hover: when, where, what about.
-    static func help(_ sitting: SittingEntry) -> String {
-        var parts = [sitting.startTime ?? "Earlier", sitting.projectName]
+    static func help(_ sitting: SittingEntry, namesProject: Bool = true) -> String {
+        var parts = [sitting.startTime ?? "Earlier"]
+        if namesProject { parts.append(sitting.projectName) }
         let lede = sittingLede(name: sitting.name, prose: sitting.prose)
         if !lede.isEmpty { parts.append(lede) }
         let counts = CanvasDayRows.counts(sitting)
