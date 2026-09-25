@@ -1365,7 +1365,7 @@ extension CanvasBoardView {
             add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
         }
         if tiling.hasTabs(id) { add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
-        if tiling.canPromote(id) { add(menu, "Make This the Master Tile", #selector(promoteMenuTile(_:))) }
+        if tiling.canPromote(id) { add(menu, "Make Master Tile", #selector(promoteMenuTile(_:))) }
         // Here as well as on the board's own menu, because the board's is reached by right-clicking a
         // gap between tiles, and the gaps are four points wide.
         if !wholeTile { addExistingCards(menu); addReplaceWith(menu) }
@@ -1710,6 +1710,14 @@ extension CanvasBoardView {
                 item.representedObject = command
             }
         }
+    }
+
+    /// File ▸ New Card. With no point, a card lands where the header's `+` puts one.
+    func fillNewCardMenu(_ menu: NSMenu) {
+        menuPoint = nil
+        menuDivider = nil
+        menuTile = nil
+        addCommandItems(menu, tabs: false)
     }
 
     @objc private func newHere(_ sender: Any?) {

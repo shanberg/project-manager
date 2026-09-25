@@ -21,12 +21,12 @@ enum CanvasPresentation: String, Codable, CaseIterable {
     /// The items' faces at one size, in a uniform grid — the visual index (D8).
     case grid
 
-    /// What the View menu calls it. The Finder's words, because it is the Finder's question.
-    var title: String {
+    /// What View ▸ Show Canvas As calls it.
+    var name: String {
         switch self {
-        case .board: return "as Freeform"
-        case .list: return "as List"
-        case .grid: return "as Grid"
+        case .board: return "Freeform"
+        case .list: return "List"
+        case .grid: return "Grid"
         }
     }
 

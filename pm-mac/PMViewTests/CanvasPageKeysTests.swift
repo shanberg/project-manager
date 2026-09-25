@@ -51,7 +51,7 @@ final class CanvasPageKeysTests: XCTestCase {
         XCTAssertFalse(offers("w", [.command]), "Close")
         XCTAssertFalse(offers("w", [.command, .option]), "Close All Windows")
         XCTAssertFalse(offers("w", [.command, .shift]), "Close Window")
-        XCTAssertFalse(offers("c", [.command, .shift]), "Open Project Canvas in New Window")
+        XCTAssertFalse(offers("c", [.command, .shift]), "Go ▸ Canvas in New Window")
         XCTAssertFalse(offers(",", [.command]), "Settings")
         XCTAssertFalse(offers("h", [.command]), "Hide")
         XCTAssertFalse(offers("l", [.command]), "the address bar, which is a browser's own way out")

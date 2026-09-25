@@ -65,7 +65,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .drop: return "Drop Focused Task"
         case .undoLast: return "Undo Last Completion"
         case .diveIn: return "Dive In"
-        case .narrowFocus: return "Narrow Focus…"
+        case .narrowFocus: return "Add Subtask…"
         case .addAfter: return "Add Task After…"
         case .addBefore: return "Add Task Before…"
         case .editTask: return "Edit Focused Task…"
@@ -145,13 +145,15 @@ enum PMCommand: String, CaseIterable, Identifiable {
 
     var menuSection: MenuSection? {
         switch self {
-        case .complete, .drop, .undoLast, .diveIn, .narrowFocus, .addAfter, .addBefore,
+        case .complete, .drop, .diveIn, .narrowFocus, .addAfter, .addBefore,
              .editTask, .setDue, .wrapTask:
             return .task
-        case .startSession, .sessionNote, .openWindow, .openInFinder, .openInObsidian, .openInEditor,
+        case .openInFinder, .openInObsidian, .openInEditor,
              .editDetails, .addLink, .projectSettings, .archiveProject, .unarchiveProject:
             return .project
-        case .newProject, .settings:
+        // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
+        // Session and Project ▸ Write Session Note…, and Edit ▸ Undo already names Undo Complete Task.
+        case .newProject, .settings, .openWindow, .startSession, .sessionNote, .undoLast:
             return nil
         }
     }
@@ -161,7 +163,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     var startsMenuGroup: Bool {
         switch self {
         case .diveIn, .narrowFocus, .setDue,             // Task: act, navigate, add around, schedule
-             .openWindow, .editDetails, .projectSettings:  // Project: open, edit, manage
+             .editDetails, .projectSettings:               // Project: open, edit, manage
             return true
         default:
             return false

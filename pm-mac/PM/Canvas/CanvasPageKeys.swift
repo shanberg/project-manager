@@ -50,7 +50,7 @@ enum CanvasPageKeys {
     private static let kept: [(key: String, modifiers: NSEvent.ModifierFlags)] = [
         ("q", [.command]),                                                     // Quit
         ("w", [.command]), ("w", [.command, .shift]), ("w", [.command, .option]), // Close, Close Window, Close All
-        ("w", [.command, .control]),                                           // Show Waiting
+        ("w", [.command, .control]),                                           // Window ▸ Waiting
         (",", [.command]),                                                     // Settings
         ("h", [.command]), ("h", [.command, .option]),                         // Hide, Hide Others
         ("m", [.command]),                                                     // Minimise
