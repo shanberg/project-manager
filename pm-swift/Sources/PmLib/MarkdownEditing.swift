@@ -265,33 +265,61 @@ private func isInList(_ line: String) -> Bool {
 ///
 /// A list whose first item is on a line in `typed` starts where that item says instead: it is the one
 /// just typed, and a number someone has just typed is the number they want.
-private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>, typed: Set<Int> = []) -> [Int: Int] {
+///
+/// **A new sublist counts the way the note's sublists already do.** One whose first item is on a line
+/// in `learn` — an item Tab or Shift-Tab has just made the head of a list inside another — takes the
+/// style of the last list before it at the same depth, under a parent counted the same way. So once the
+/// items under your 1, 2, 3 are a, b, c, the next one indented under 3 is an `a.` too. Typing its marker
+/// is still the override: a typed head isn't in `learn`, and says for itself how its list counts.
+private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>,
+                         typed: Set<Int> = [], learn: Set<Int> = []) -> [Int: Int] {
     // First which list each numbered item is in, then the numbers: a top-level list's start depends on
     // all of its items, so it isn't known until the last of them has been seen.
+    struct List {
+        let depth: Int
+        let parent: Int?
+        var items: [(line: Int, prefix: MarkdownListPrefix)]
+        var nested: Bool { parent != nil }
+    }
     var levels: [(width: Int, ordered: Bool, list: Int)] = []
-    var lists: [(nested: Bool, items: [(line: Int, prefix: MarkdownListPrefix)])] = []
+    var lists: [List] = []
     for i in range {
         guard let p = markdownListPrefix(of: lines[i]) else { continue }   // a continuation line
         let width = nestingWidth(p.indent)
         while let top = levels.last, top.width > width { levels.removeLast() }
         if let top = levels.last, top.width == width, top.ordered == p.isOrdered {
-            if p.isOrdered { lists[top.list].items.append((i, p)) }
+            lists[top.list].items.append((i, p))
             continue
         }
         if let top = levels.last, top.width == width { levels.removeLast() }
-        levels.append((width, p.isOrdered, lists.count))
-        lists.append((nested: levels.count > 1, items: p.isOrdered ? [(i, p)] : []))
+        lists.append(List(depth: levels.count, parent: levels.last?.list, items: [(i, p)]))
+        levels.append((width, p.isOrdered, lists.count - 1))
+    }
+    // How each list counts, in document order so a parent is settled before its children: its first
+    // item's style and delimiter, or for a learning head, those of the list it learns from. Nil for a
+    // bulleted list.
+    var counts: [(style: MarkdownListStyle, delimiter: Character)?] = []
+    for list in lists {
+        guard let head = list.items.first, head.prefix.isOrdered else { counts.append(nil); continue }
+        var count = (style: head.prefix.style ?? .decimal, delimiter: head.prefix.delimiter)
+        if learn.contains(head.line), let parent = list.parent {
+            let key = counts[parent].map { "\($0.style)\($0.delimiter)" }
+            let precedent = lists.indices.prefix(counts.count).last { j in
+                guard let other = lists[j].parent, lists[j].depth == list.depth, counts[j] != nil else { return false }
+                return counts[other].map { "\($0.style)\($0.delimiter)" } == key
+            }
+            if let precedent, let learned = counts[precedent] { count = learned }
+        }
+        counts.append(count)
     }
     var deltas: [Int: Int] = [:]
-    for list in lists {
-        guard let head = list.items.first?.prefix else { continue }
-        // The first item says how the list counts, and with what after the label.
-        let style = head.style ?? .decimal
+    for (list, count) in zip(lists, counts) {
+        guard let (style, delimiter) = count, let head = list.items.first?.prefix else { continue }
         var number = list.nested ? 1 : list.items.compactMap { style.value(of: $0.prefix.label) }.min() ?? 1
         if let first = list.items.first, typed.contains(first.line) { number = head.number ?? number }
         for (i, p) in list.items {
             defer { number += 1 }
-            let marker = style.label(number) + String(head.delimiter)
+            let marker = style.label(number) + String(delimiter)
             guard p.marker != marker else { continue }
             lines[i] = p.indent + marker + String(lines[i].dropFirst(p.indent.count + p.marker.count))
             deltas[i] = marker.count - p.marker.count
@@ -308,7 +336,8 @@ private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>, ty
 /// renumbered: a note is the user's file, and a list elsewhere in it that they numbered by hand is
 /// theirs.
 private func renumbered(_ r: (text: String, selection: Range<String.Index>),
-                        touching touched: [Int], typed: Set<Int> = []) -> (text: String, selection: Range<String.Index>) {
+                        touching touched: [Int], typed: Set<Int> = [],
+                        learn: Set<Int> = []) -> (text: String, selection: Range<String.Index>) {
     var lines = splitLines(r.text)
     let starts = lineStarts(lines)
     var deltas: [Int: Int] = [:]
@@ -318,7 +347,7 @@ private func renumbered(_ r: (text: String, selection: Range<String.Index>),
         while a > 0, isInList(lines[a - 1]) { a -= 1 }
         while b < lines.count - 1, isInList(lines[b + 1]) { b += 1 }
         done.insert(integersIn: a...b)
-        deltas.merge(numberLists(&lines, in: a...b, typed: typed)) { $1 }
+        deltas.merge(numberLists(&lines, in: a...b, typed: typed, learn: learn)) { $1 }
     }
     guard !deltas.isEmpty else { return r }
     let (lo, hi) = charOffsets(r.text, r.selection)
@@ -427,7 +456,8 @@ public func indentLines(_ text: String, selection: Range<String.Index>,
     let last = lineIndex(starts, hi)
     for i in first...last { lines[i] = unit + lines[i] }
     let touched = last - first + 1
-    return renumbered(rebuilt(lines, lo + unit.count, hi + unit.count * touched), touching: Array(first...last))
+    return renumbered(rebuilt(lines, lo + unit.count, hi + unit.count * touched), touching: Array(first...last),
+                      learn: Set(first...last))
 }
 
 /// Outdent every line the selection touches by one level, taking a tab or up to `unit.count` spaces off
@@ -455,7 +485,8 @@ public func outdentLines(_ text: String, selection: Range<String.Index>,
     }
     // Keep the caret over the same character, but never before its line's new start.
     let newLo = max(starts[first], lo - removedFromFirst)
-    return renumbered(rebuilt(lines, newLo, hi - removedTotal), touching: Array(first...last))
+    return renumbered(rebuilt(lines, newLo, hi - removedTotal), touching: Array(first...last),
+                      learn: Set(first...last))
 }
 
 /// Whether Tab should indent rather than do its usual thing: the caret is in a list item, or the

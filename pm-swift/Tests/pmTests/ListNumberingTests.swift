@@ -191,4 +191,30 @@ final class ListNumberingTests: XCTestCase {
         XCTAssertEqual(typed("5. |x\n2. y\n3. z"), "5. |x\n6. y\n7. z")
         XCTAssertEqual(typed("  3. |x\n  2. y"), "  3. |x\n  4. y")
     }
+
+    // MARK: Learning a sublist's style
+
+    func testANewSublistCountsTheWayTheOnesBeforeItDo() {
+        XCTAssertEqual(tab("1. Lot of good work\n  a. Including sublists\n2. This feels great\n3. |"),
+                       "1. Lot of good work\n  a. Including sublists\n2. This feels great\n  a. |")
+    }
+
+    func testLearningLooksAtSublistsUnderTheSameKindOfParent() {
+        // Under the bullets the sublists are roman, under the numbers lettered: each learns its own.
+        let note = "- x\n  i. r\n- y\n"
+        XCTAssertEqual(tab(note + "2. |"), note + "  i. |")
+        XCTAssertEqual(tab(note + "\n1. a\n  a. s\n2. |"), note + "\n1. a\n  a. s\n  b. |")
+    }
+
+    func testWithNothingToLearnFromASublistCountsInNumbers() {
+        XCTAssertEqual(tab("1. a\n2. b|"), "1. a\n  1. b|")
+    }
+
+    func testTypingAMarkerStillOverridesTheLearnedStyle() {
+        XCTAssertEqual(typed("1. a\n  a. s\n2. b\n  1. |x\n  c. y"), "1. a\n  a. s\n2. b\n  1. |x\n  2. y")
+    }
+
+    func testTheLearnedDelimiterComesToo() {
+        XCTAssertEqual(tab("1. a\n  a) s\n2. b\n3. |"), "1. a\n  a) s\n2. b\n  a) |")
+    }
 }
