@@ -356,6 +356,52 @@ enum PMCommand: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Picked task rows the Task menu acts on in place of the focused task — see `Selection`.
+    struct Selection {
+        let tasks: [Todo]
+        let run: (PMCommand) -> Void
+
+        var count: Int { tasks.count }
+        var open: Int { tasks.filter { !$0.checked }.count }
+        var allChecked: Bool { tasks.allSatisfy(\.checked) }
+
+        func countedTitle(_ verb: String, _ n: Int? = nil) -> String {
+            let n = n ?? count
+            return n == 1 ? "\(verb) Task" : "\(verb) \(n) Tasks"
+        }
+    }
+
+    /// Whether this command acts on picked rows when there are any. Dive In doesn't: it is about the
+    /// project's next task, not a row.
+    var followsSelection: Bool {
+        switch self {
+        case .complete, .drop, .setDue, .editTask, .wrapTask, .addAfter, .addBefore, .narrowFocus: true
+        default: false
+        }
+    }
+
+    /// The name on a selection, in the row menu's words (`TaskMenu`): the count, and Reopen for done
+    /// tasks. The focused-task names say "Focused" because that is who they're about; these don't.
+    func title(on selection: Selection) -> String {
+        switch self {
+        case .complete: selection.allChecked ? selection.countedTitle("Reopen") : selection.countedTitle("Complete")
+        case .drop: selection.countedTitle("Drop", selection.open)
+        case .editTask: "Edit Task…"
+        case .wrapTask: "Wrap Task…"
+        default: title
+        }
+    }
+
+    /// On a selection: the per-task commands need exactly one, and Drop needs one still open.
+    func isAvailable(on selection: Selection) -> Bool {
+        switch self {
+        case .complete, .setDue: selection.count > 0
+        case .drop: selection.open > 0
+        case .editTask, .wrapTask, .addAfter, .addBefore, .narrowFocus: selection.count == 1
+        default: false
+        }
+    }
+
     /// Whether this command has anything to act on. What can't run is greyed in a menu and left out of
     /// the quick bar's list — a command offered into a no-op is worse than one that isn't offered.
     @MainActor

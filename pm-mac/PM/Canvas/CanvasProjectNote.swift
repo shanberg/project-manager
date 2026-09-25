@@ -258,6 +258,40 @@ struct CanvasProjectNote: View {
                 guard selectedTodos.count == 1, let todo = selectedTodos.first else { return }
                 store.focus(todo)
             }
+            .onChange(of: commands.taskCommandRequest) { _, _ in runTaskCommand(commands.taskCommand) }
+            .onAppear {
+                // Read by the Task menu as it opens, to name and dim its items — a closure over the
+                // objects rather than over this view, which is a value SwiftUI replaces as it likes.
+                let holder = selectionHolder, store = store
+                commands.selectedTasks = { store.todos.filter { holder.value.contains(PMStore.key(for: $0)) } }
+            }
+    }
+
+    /// A Task menu command, on the picked rows — see `CanvasProjectCardCommands.requestTaskCommand`.
+    /// What each does is the row's contextual menu's (`TaskMenu`), so the two can't disagree.
+    private func runTaskCommand(_ command: PMCommand?) {
+        let todos = selectedTodos
+        guard let command, let first = todos.first else { return }
+        let single = todos.count == 1
+        switch command {
+        case .complete:
+            if single { store.toggle(first) } else { store.toggleAll(todos) }
+        case .drop:
+            let open = todos.filter { !$0.checked }
+            if !open.isEmpty { store.drop(open) }
+        // A batch date goes through one row's editor, as the contextual menu's does.
+        case .setDue:
+            open(.due, on: first)
+        case .editTask where single:
+            open(.edit, on: first)
+        case .wrapTask where single:
+            open(.wrap, on: first)
+        case .addAfter where single, .addBefore where single, .narrowFocus where single:
+            addPosition = command == .addBefore ? .before : command == .narrowFocus ? .child : .after
+            open(.add, on: first)
+        default:
+            break
+        }
     }
 
     /// The card itself. Split from `body` only because the two together are more than the type checker
@@ -1557,6 +1591,22 @@ final class CanvasProjectCardCommands {
     func requestCopyRows() { copyRowsRequest &+= 1 }
     func requestPasteRows() { pasteRowsRequest &+= 1 }
     func requestOpenRow() { openRowRequest &+= 1 }
+
+    // MARK: The Task menu
+
+    /// The Task menu, on the picked rows rather than the project's focused task, while there are any —
+    /// the menu bar acting on the selection, as it does in every Mac list. See `PMCommand.Selection`.
+    private(set) var taskCommandRequest = 0
+    @ObservationIgnored
+    private(set) var taskCommand: PMCommand?
+    /// The picked rows, as they are when asked. Supplied by the card.
+    @ObservationIgnored
+    var selectedTasks: () -> [Todo] = { [] }
+
+    func requestTaskCommand(_ command: PMCommand) {
+        taskCommand = command
+        taskCommandRequest &+= 1
+    }
 }
 
 /// How much of its project a card is drawing, published so a change made from the menu **redraws**

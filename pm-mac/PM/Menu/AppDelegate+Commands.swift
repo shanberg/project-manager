@@ -130,7 +130,34 @@ extension AppDelegate: NSMenuItemValidation {
     @objc func runCommand(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let command = PMCommand(rawValue: raw) else { return }
+        if Self.followsSelection(command, from: sender), let selection = Self.taskSelection() {
+            return selection.run(command)
+        }
         PMCommandRunner.run(command, store: store)
+    }
+
+    /// The task rows picked in the project card you're standing in, in the key window — what the Task
+    /// menu acts on instead of the focused task while there are any, the way a Mac app's menu bar acts
+    /// on the selection. Nil with none picked, and the menu goes back to the focused task.
+    ///
+    /// Found up the key window's responder chain rather than through the window controller: that is
+    /// where the keyboard is, and so where "the selection" is — a text view inside a card walks up to
+    /// its board like the board itself does.
+    /// Only the menu bar's own items, and keys, follow the selection. The Dock's "Complete: …" names the
+    /// focused task in its title, so it has to be the focused task it completes.
+    static func followsSelection(_ command: PMCommand, from item: NSMenuItem) -> Bool {
+        guard command.followsSelection, let bar = NSApp.mainMenu else { return false }
+        return item.menu?.supermenu === bar
+    }
+
+    static func taskSelection(in window: NSWindow? = NSApp.keyWindow) -> PMCommand.Selection? {
+        var responder = window?.firstResponder
+        while let current = responder, !(current is CanvasBoardView) { responder = current.nextResponder }
+        guard let board = responder as? CanvasBoardView,
+              let commands = board.engagedProjectCard?.projectCommands, commands.selectedRows > 0 else { return nil }
+        let tasks = commands.selectedTasks()
+        guard !tasks.isEmpty else { return nil }
+        return PMCommand.Selection(tasks: tasks, run: commands.requestTaskCommand)
     }
 
     /// The global shortcuts still bind to named methods rather than to `runCommand`, because a hotkey
@@ -169,6 +196,9 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(runCommand(_:)):
             guard let raw = item.representedObject as? String,
                   let command = PMCommand(rawValue: raw) else { return false }
+            if Self.followsSelection(command, from: item), let selection = Self.taskSelection() {
+                return command.isAvailable(on: selection)
+            }
             return command.isAvailable(in: PMCommand.Context(store: store))
         case #selector(completeFocused):
             return PMCommand.complete.isAvailable(in: PMCommand.Context(store: store))
@@ -197,9 +227,14 @@ extension AppDelegate: NSMenuItemValidation {
 extension AppDelegate: NSMenuDelegate {
     public func menuNeedsUpdate(_ menu: NSMenu) {
         let context = PMCommand.Context(store: store)
+        let selection = Self.taskSelection()
         for item in menu.items {
             guard let raw = item.representedObject as? String,
                   let command = PMCommand(rawValue: raw) else { continue }
+            if command.followsSelection, let selection {
+                item.title = command.title(on: selection)
+                continue
+            }
             item.title = command.title(in: context)
             // One of Archive and Unarchive, never one dim beside the other.
             switch command {
