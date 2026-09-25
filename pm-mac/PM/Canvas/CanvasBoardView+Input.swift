@@ -167,6 +167,8 @@ extension CanvasBoardView {
             // is already in people's hands; this is only the tiled reading of it. See
             // `toggleMaximizeTile`.
             if clicks == 2 { return toggleMaximizeTile(id) }
+            // A maximized tile's grip is only the way back — see `tileHandle(_:)`.
+            guard tiling?.maximized == nil else { return }
             gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
         }
@@ -982,7 +984,7 @@ extension CanvasBoardView {
         if isTiled, let position = window?.mouseLocationOutsideOfEventStream,
            tileHandle(at: canvasPoint(convert(position, from: nil))) != nil {
             cursorOwner = nil
-            return NSCursor.openHand.set()
+            return gripCursor.set()
         }
         let owner = cardUnderPointer
         defer { cursorOwner = owner }
@@ -996,7 +998,7 @@ extension CanvasBoardView {
         // stepped into, it is the only thing under the pointer that is not the open hand.
         if link(at: convert(position, from: nil)) != nil { return NSCursor.pointingHand.set() }
         if isTiled {
-            if tileHandle(at: where_) != nil { return NSCursor.openHand.set() }
+            if tileHandle(at: where_) != nil { return gripCursor.set() }
             if let divider = tileDivider(at: where_) {
                 return (divider.isVertical ? NSCursor.resizeLeftRight : .resizeUpDown).set()
             }
@@ -1023,6 +1025,9 @@ extension CanvasBoardView {
     private func cursor(for handle: CanvasHandle) -> NSCursor {
         .frameResize(position: handle.resizePosition, directions: .all)
     }
+
+    /// An open hand says a grip can be carried; a maximized tile's can only be double-clicked back.
+    private var gripCursor: NSCursor { tiling?.maximized == nil ? .openHand : .arrow }
 
     // MARK: Keys
 

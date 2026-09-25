@@ -51,9 +51,11 @@ extension CanvasBoardView {
     /// its side keeps its grip, over the card beside them: a column of tabs can be full to the bottom,
     /// with no bare strip left to take hold of.
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect)? {
-        // A maximized tile has no order to be dragged along. Restoring is Escape, a double-click on the
-        // grip that got you here, or the menu.
-        guard let tiling, !isPicking, tiling.maximized == nil, tiling.ids.count > 1,
+        // A maximized tile keeps its grip, and only so the double-click that got you here is there to
+        // take you back — as a zoomed window's title bar still unzooms it. It has no order to be
+        // dragged along, so a press on it carries nothing (`tiledMouseDown`). Escape and the menu
+        // restore it too, but they are not where the pointer already is.
+        guard let tiling, !isPicking, tiling.maximized == nil || tiling.maximized == id, tiling.ids.count > 1,
               !tiling.hasTabs(id) || tiling.tabsOnSide(id), let frame = tiling.layout.frames[id] else { return nil }
         let scale = liveScale
         let bar = CanvasRect(x: frame.midX - Self.gripLength / 2 / scale, y: frame.minY + Self.gripInset / scale,
