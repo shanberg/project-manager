@@ -1064,11 +1064,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Point the header's controls at the board and the window.
     private func wireHeader() {
         header.showAddMenu = { [weak self] anchor in self?.scroll.board.addMenu().popUpBelow(anchor) }
-        header.setMode = { [weak self] mode in self?.scroll.board.mode = mode }
-        header.zoomIn = { [weak self] in self?.scroll.zoom(by: 1.25) }
-        header.zoomOut = { [weak self] in self?.scroll.zoom(by: 1 / 1.25) }
-        header.zoomToFit = { [weak self] in self?.scroll.zoomToFit() }
-        header.zoomActualSize = { [weak self] in self?.scroll.zoomToActualSize() }
         header.pageBack = { [weak self] in self?.engagedCard?.goBack() }
         header.pageForward = { [weak self] in self?.engagedCard?.goForward() }
         header.pageReload = { [weak self] in self?.engagedCard?.reload() }
@@ -1082,7 +1077,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageBackTo = { [weak self] steps in self?.engagedCard?.goBack(steps) }
         header.findChanged = { [weak self] query in self?.search(query) }
         header.findClosed = { [weak self] in self?.closeFind() }
-        header.tile = { [weak self] in self?.scroll.board.tileSelection(nil) }
         // The focused tile's verbs, routed to the same commands the menu bar and the contextual menu
         // send — so a tile cannot be told one thing from the header and another from a menu.
         header.maximizeTile = { [weak self] in self?.scroll.board.maximizeTile(nil) }
@@ -1093,19 +1087,6 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // ⌃Return opens the same menu from the same button — the board has the command, the header
         // has the place.
         scroll.board.onShowCardActions = { [weak self] in self?.header.cardActionsToken += 1 }
-        header.setArrangement = { [weak self] arrangement in
-            guard let self else { return }
-            // The same "choosing an arrangement is a request to tile" rule the View menu follows —
-            // otherwise these two items are settings for a state you have to already be in to reach
-            // them. See `setTileArrangement`.
-            if scroll.board.isTiled { return scroll.board.setArrangement(arrangement) }
-            // Tiling from here makes a workspace, exactly as ⌘↩ does — see `offerAsWorkspace`. The
-            // arrangement you picked is the one it is made with.
-            let targets = scroll.board.tileTargets
-            guard !scroll.board.offerAsWorkspace(targets, arrangement: arrangement) else { return }
-            scroll.board.tile(targets, arrangement: arrangement)
-        }
-        header.sizeColumnsToContent = { [weak self] in self?.scroll.board.sizeTilesToContent() }
         header.findCommitted = { [weak self] in
             guard let self else { return }
             view.window?.makeFirstResponder(scroll.board)
@@ -1427,19 +1408,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.lastEditedProject = nil
         scroll.board.documentChanged()
         updateNotice()
-        // A frame tiles what is inside it, so what the tiling button promises can change without the
-        // selection changing at all.
+        // A frame's contents can change without the selection changing at all.
         refreshTileCommand()
     }
 
-    /// Keep the header's tiling button saying what it would actually do.
+    /// Keep the header's tile capsule and `…` about what is selected.
     ///
     /// Driven from the three things that change the answer — the selection, the document, and whether
-    /// a tiling is up. Deliberately not from scrolling: the wording only counts a *selection*, exactly
-    /// so this doesn't have to run at the rate a trackpad reports. See `CanvasTiling.commandTitle`.
+    /// a tiling is up. Deliberately not from scrolling, so this doesn't run at a trackpad's rate.
     private func refreshTileCommand() {
-        header.tileTitle = scroll.board.tileCommandTitle
-        header.canTile = scroll.board.canRunTileCommand
         // Assigned only on a change: this runs on every selection change, and the capsule animates
         // itself in and out on this value.
         let controls = scroll.board.tileControls

@@ -152,32 +152,39 @@ enum CanvasAddCommand: CaseIterable {
         allCases.filter { $0 != .projectNote || projectNote }
     }
 
-    /// A line of the menu: a heading, or an item under it.
+    /// A line of the menu.
     enum Row: Equatable {
-        case heading(Group)
         case item(CanvasAddCommand)
+        /// The views, under one New View ▸ — seven kinds of card that differ in what they list, not in
+        /// how you make them, so they are one choice rather than seven rows.
+        case views([CanvasAddCommand])
+        case separator
     }
 
-    /// Everything a menu writes for this list, headings included — the whole of what the four surfaces
-    /// draw, decided here.
-    ///
-    /// **Here rather than in the loop that builds the `NSMenu`**, because it is the same kind of
-    /// decision the list and the titles are, and because nothing in the test bundle can build a board
-    /// to ask one of those menus what it says. Assembling the rows first means the thing being checked
-    /// is the menu's contents rather than a second copy of the rule.
-    ///
-    /// A heading is written when the group changes, so a group with nothing left in it after `tabs`
-    /// has taken out what cannot be a tab gets no heading either — which is Frames, in every strip.
+    /// The add list every surface draws: the cards inline, the views one submenu, then the frame —
+    /// the one thing here that is not a card — after a line. A tile's strip leaves the frame out.
     static func rows(projectNote: Bool, tabs: Bool) -> [Row] {
-        var rows: [Row] = []
-        var written: Group?
-        for command in offered(projectNote: projectNote) where !tabs || command.makesTile {
-            if command.group != written {
-                written = command.group
-                rows.append(.heading(command.group))
-            }
-            rows.append(.item(command))
-        }
+        let offered = offered(projectNote: projectNote).filter { !tabs || $0.makesTile }
+        var rows: [Row] = offered.filter { $0.group == .cards }.map(Row.item)
+        let views = offered.filter { $0.group == .views }
+        if !views.isEmpty { rows.append(.views(views)) }
+        let frames = offered.filter { $0.group == .frames }
+        if !frames.isEmpty { rows.append(.separator) }
+        rows += frames.map(Row.item)
         return rows
+    }
+
+    /// A view's name inside New View ▸, where "New" and "View" are already said.
+    var viewName: String? {
+        switch self {
+        case .dayView: return "Day"
+        case .leftoversView: return "Leftovers"
+        case .comingUpView: return "Coming Up"
+        case .projectsView: return "Projects"
+        case .timeView: return "Time"
+        case .waitingView: return "Waiting"
+        case .searchView: return "Search"
+        default: return nil
+        }
     }
 }

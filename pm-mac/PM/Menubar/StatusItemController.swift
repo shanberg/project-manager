@@ -212,8 +212,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(switchProjectMenuItem())
             menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
                                    modifiers: [.control, .option]))
-            menu.addItem(actionItem("Waiting…", #selector(showWaiting), symbol: "clock", key: ""))
-            menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
+            menu.addItem(actionItem("Waiting", #selector(showWaiting), symbol: "clock", key: ""))
+            menu.addItem(actionItem("Open Project Window", #selector(showPanel), symbol: "macwindow", key: ""))
             menu.addItem(.separator())
             menu.addItem(settingsMenuItem())
             menu.addItem(actionItem("Quit Folio", #selector(quit), key: "q"))
@@ -274,8 +274,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // The menu is the focused project's, and this is the one item on it that isn't: what you're
         // waiting on is a question about everything, and this menu is where you are when you notice
         // there's nothing here you can pick up.
-        menu.addItem(actionItem("Waiting…", #selector(showWaiting), symbol: "clock", key: ""))
-        menu.addItem(actionItem("Open Window", #selector(showPanel), symbol: "macwindow", key: ""))
+        menu.addItem(actionItem("Waiting", #selector(showWaiting), symbol: "clock", key: ""))
+        menu.addItem(actionItem("Open Project Window", #selector(showPanel), symbol: "macwindow", key: ""))
 
         menu.addItem(.separator())
         menu.addItem(settingsMenuItem())
@@ -403,17 +403,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parts.joined(separator: "\n")
     }
 
-    /// "Settings…" — the app's real Settings window. The pin toggle stays here as well, because it's
-    /// one Raycast can flip too and it's useful to see its state without opening a window.
+    /// One Settings… item. Keep Open When Unfocused is in Settings ▸ General with everything else.
     private func settingsMenuItem() -> NSMenuItem {
-        let (item, sub) = submenu("Settings", symbol: "gearshape")
-        let s = settings()
-        let pin = actionItem("Keep Open When Unfocused", #selector(togglePin))
-        pin.state = s.pinned ? .on : .off
-        sub.addItem(pin)
-        sub.addItem(.separator())
-        sub.addItem(actionItem("All Settings…", #selector(openSettings), symbol: "gearshape", key: ","))
-        return item
+        actionItem("Settings\u{2026}", #selector(openSettings), symbol: "gearshape", key: ",")
     }
 
     @objc private func openSettings() { onOpenSettings() }
@@ -669,7 +661,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// to a project and the Waiting list isn't, so there's no state here for the app delegate to
     /// supply and nothing to route.
     @objc private func showWaiting() { WaitingWindowController.shared.show() }
-    @objc private func togglePin() { onSetPinned(!settings().pinned) }
     @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: Launch at Login (SMAppService, macOS 13+)

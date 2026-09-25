@@ -81,7 +81,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .openInFinder: return "Reveal in Finder"
         case .openInObsidian: return "Open in Obsidian"
         case .openInEditor: return "Open in Editor"
-        case .editDetails: return "Edit Project Details…"
+        case .editDetails: return "Edit Details…"
         case .addLink: return "Add Link…"
         case .projectSettings: return "Project Settings…"
         case .archiveProject: return "Archive Project"

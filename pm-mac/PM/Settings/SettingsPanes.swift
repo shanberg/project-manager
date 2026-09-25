@@ -190,6 +190,8 @@ private struct CanvasSitesSection: View {
             ForEach(sites.keys.sorted(), id: \.self) { key in
                 row(key)
             }
+            // Here rather than on a card: it is about every site at once and no card in particular.
+            Button("Sign Out of All Sites\u{2026}") { CanvasBoardView.signOutOfEverySite() }
         } header: {
             Text("Sites")
         } footer: {

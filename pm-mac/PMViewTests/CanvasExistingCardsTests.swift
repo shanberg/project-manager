@@ -189,41 +189,29 @@ final class CanvasExistingCardsTests: XCTestCase {
         XCTAssertEqual(offered.firstIndex(of: .privateWeb), offered.firstIndex(of: .web).map { $0 + 1 })
     }
 
-    /// Every line the board's menu and the header's + draw for this list, in order: what makes a card,
-    /// then the views, then the frame — which is alone under its own heading, being the one thing here
-    /// that is not a card. This is the menu's contents rather than a copy of the rule, since nothing in
-    /// this bundle can build a board to ask one.
-    func testTheMenuIsGroupedByWhatEachCommandMakes() {
+    /// Every line the board's menu and the header's + draw for this list, in order: the cards inline,
+    /// the views as one New View ▸, then the frame after a line — the one thing here that is not a card.
+    func testTheViewsAreOneSubmenuAndTheFrameComesLast() {
         XCTAssertEqual(CanvasAddCommand.rows(projectNote: true, tabs: false), [
-            .heading(.cards),
             .item(.card), .item(.web), .item(.privateWeb), .item(.file), .item(.folder), .item(.projectNote),
-            .heading(.views),
-            .item(.dayView), .item(.leftoversView), .item(.comingUpView), .item(.projectsView),
-            .item(.timeView), .item(.waitingView), .item(.searchView),
-            .heading(.frames),
+            .views([.dayView, .leftoversView, .comingUpView, .projectsView, .timeView, .waitingView, .searchView]),
+            .separator,
             .item(.frame),
         ])
-        XCTAssertEqual(CanvasAddCommand.Group.cards.title, "Cards")
+        XCTAssertEqual(CanvasAddCommand.dayView.viewName, "Day")
+        XCTAssertNil(CanvasAddCommand.card.viewName)
     }
 
-    /// A board that already has its project note doesn't offer one, and nothing else about the list
-    /// moves — the heading above it least of all.
-    func testTheCardsHeadingSurvivesTheProjectNoteGoingAway() {
-        XCTAssertEqual(CanvasAddCommand.rows(projectNote: false, tabs: false).prefix(6), [
-            .heading(.cards),
-            .item(.card), .item(.web), .item(.privateWeb), .item(.file), .item(.folder),
-        ])
+    /// A board that already has its project note doesn't offer one.
+    func testNoProjectNoteWhenTheBoardHasOne() {
         XCTAssertFalse(CanvasAddCommand.rows(projectNote: false, tabs: false).contains(.item(.projectNote)))
     }
 
-    /// A tile's strip offers what can be a tab: everything but a frame — and the Frames heading goes
-    /// with it, since a heading is only written when something follows it.
-    func testATabCanBeAnythingButAFrameAndTakesItsHeadingWithIt() {
+    /// A tile's strip offers what can be a tab: everything but a frame, and no line left dangling.
+    func testATabCanBeAnythingButAFrame() {
         let rows = CanvasAddCommand.rows(projectNote: true, tabs: true)
         XCTAssertFalse(rows.contains(.item(.frame)))
-        XCTAssertFalse(rows.contains(.heading(.frames)))
-        XCTAssertEqual(rows.last, .item(.searchView))
-        XCTAssertEqual(rows.filter { if case .heading = $0 { return true } else { return false } },
-                       [.heading(.cards), .heading(.views)])
+        XCTAssertFalse(rows.contains(.separator))
+        if case .views = rows.last {} else { XCTFail("\(rows)") }
     }
 }

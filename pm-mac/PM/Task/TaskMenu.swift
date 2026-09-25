@@ -5,8 +5,8 @@ import PmLib
 /// macOS per-task affordance: keyboard- and VoiceOver-accessible, and keeps the surface visually
 /// clean. Shared by the project window's task rows and the focus panel's card so both offer the same
 /// menu. Wording follows the rest of the app: the add positions match `AddEditor`'s Before/Subtask/After
-/// picker (and Raycast's "Add Before"/"Add After"), due wording matches Raycast's "Set Due Date"/
-/// "Remove Due Date", and an ellipsis marks actions that open a further input editor (as the
+/// picker (and Raycast's "Add Before"/"Add After"), due wording matches the due chip's "Set Due Date"/
+/// "Clear Due Date", and an ellipsis marks actions that open a further input editor (as the
 /// menubar does).
 struct TaskMenu: View {
     let todo: Todo
@@ -129,13 +129,13 @@ struct TaskMenu: View {
             Button { openEditor(.due) } label: { Label("Set Due Date…", systemImage: "calendar") }
             if scope.contains(where: { $0.dueDate != nil }) {
                 Button { store.setDueAll(scope, due: nil) } label: {
-                    Label("Remove Due Dates", systemImage: "calendar.badge.minus")
+                    Label("Clear Due Dates", systemImage: "calendar.badge.minus")
                 }
             }
         } else {
             Button { openEditor(.due) } label: { Label("Set Due Date…", systemImage: "calendar") }
             if todo.dueDate != nil {
-                Button { store.setDue(todo, due: nil) } label: { Label("Remove Due Date", systemImage: "calendar.badge.minus") }
+                Button { store.setDue(todo, due: nil) } label: { Label("Clear Due Date", systemImage: "calendar.badge.minus") }
             }
         }
         Divider()

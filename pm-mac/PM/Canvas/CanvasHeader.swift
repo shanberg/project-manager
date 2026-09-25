@@ -41,18 +41,6 @@ final class CanvasHeaderModel {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     var tiling: (long: String, short: String)?
-    /// What ⌘Return would do to the board as it stands — the same sentence the View menu and the
-    /// contextual menu use. See `CanvasTiling.commandTitle`.
-    ///
-    /// **The button no longer wears this as a tooltip**, and did. A tooltip that changes with the
-    /// selection is one you cannot have read before you act on it: it appears a second after you have
-    /// stopped moving, by which time you have either clicked or gone somewhere else. What it was
-    /// telling you — how many cards are about to become a workspace — the menus say in a place you are
-    /// already reading. This is now the title of that menu item and nothing else.
-    var tileTitle = "New Workspace"
-    /// Whether ⌘Return has anything to do. Dim on a canvas with nothing selected — a workspace is made
-    /// out of a selection or not at all.
-    var canTile = false
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
     var focusedTile: TileControls?
@@ -277,16 +265,6 @@ final class CanvasHeaderModel {
     @ObservationIgnored
     var showAddMenu: (NSView) -> Void = { _ in }
     @ObservationIgnored
-    var setMode: (CanvasMode) -> Void = { _ in }
-    @ObservationIgnored
-    var zoomIn: () -> Void = {}
-    @ObservationIgnored
-    var zoomOut: () -> Void = {}
-    @ObservationIgnored
-    var zoomToFit: () -> Void = {}
-    @ObservationIgnored
-    var zoomActualSize: () -> Void = {}
-    @ObservationIgnored
     var pageBack: () -> Void = {}
     @ObservationIgnored
     var pageForward: () -> Void = {}
@@ -319,12 +297,6 @@ final class CanvasHeaderModel {
     var findClosed: () -> Void = {}
     @ObservationIgnored
     var findCommitted: () -> Void = {}
-    @ObservationIgnored
-    var tile: () -> Void = {}
-    @ObservationIgnored
-    var setArrangement: (CanvasTiling.Arrangement) -> Void = { _ in }
-    @ObservationIgnored
-    var sizeColumnsToContent: () -> Void = {}
     /// The focused tile's verbs — see `CanvasTileCapsule`.
     @ObservationIgnored
     var maximizeTile: () -> Void = {}
@@ -432,8 +404,9 @@ struct CanvasControlCapsule: View {
                     model.find.focusToken &+= 1
                 }
             }
+            // No View options menu beside it: its items were View's and Canvas's, and the menu bar
+            // is where a Mac keeps them.
             addMenu
-            optionsMenu
         }
         // Nothing here animates its width. Find opening and the field narrowing with the window both
         // change it, and a capsule that animates its own width throws its own glyphs sideways for a
@@ -484,44 +457,6 @@ struct CanvasControlCapsule: View {
     /// SwiftUI copy asked for and did not get.
     private var addMenu: some View {
         HeaderMenuButton(symbol: "plus", help: "Add to this canvas", open: model.showAddMenu)
-    }
-
-    private var optionsMenu: some View {
-        Menu {
-            // This menu is called View options and holds the mode and the four zooms, all of which it
-            // turns off while tiled — so the one view option big enough to disable the others was the
-            // one thing not in it. First, because it is the largest of them.
-            Button(model.tileTitle, action: model.tile).disabled(!model.canTile)
-            Menu("Arrange Tiles") {
-                // Commands rather than a setting, so nothing is ticked — see
-                // `CanvasBoardView.setArrangement`.
-                ForEach(CanvasTiling.Arrangement.allCases, id: \.self) { arrangement in
-                    Button(arrangement.title) { model.setArrangement(arrangement) }
-                }
-                Divider()
-                Button("Size Columns to Content", action: model.sizeColumnsToContent)
-                    .disabled(model.tiling == nil)
-            }
-            Divider()
-            Toggle("Connect Cards", isOn: Binding(get: { model.mode == .connect },
-                                                  set: { model.setMode($0 ? .connect : .view) }))
-                .disabled(model.tiling != nil)
-            Divider()
-            Group {
-                Button("Zoom In", action: model.zoomIn)
-                Button("Zoom Out", action: model.zoomOut)
-                Button("Actual Size", action: model.zoomActualSize)
-                Button("Zoom to Fit", action: model.zoomToFit)
-            }
-            .disabled(model.tiling != nil)
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: HeaderMetrics.hitWidth, height: HeaderMetrics.itemHeight)
-        .headerHoverHighlight()
-        .help("View options")
     }
 
 }

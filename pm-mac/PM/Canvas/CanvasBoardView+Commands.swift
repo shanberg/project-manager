@@ -715,12 +715,14 @@ extension CanvasBoardView {
             // A project's notes card opens the project, and that item comes first: it is a card
             // *showing* a project (see `CanvasProjectNote`), and the board is read-only, so this is the
             // way in to actually doing something about what it says.
-            if (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName != nil {
+            if let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName {
+                // "Area" for an area, as the sidebar and File ▸ New Area… say it.
+                let noun = ProjectKind.of(folderName: folder).displayName
                 // "Go to" and not "Open", because from a board rendered inside a project window this
                 // retargets the window you are in — the same thing clicking the sidebar does. The
                 // alternate is the other verb, said out loud. See `openProjectForCard`.
-                add(menu, "Go to Project", #selector(openProjectForCard))
-                let newWindow = add(menu, "Open Project in New Window",
+                add(menu, "Go to \(noun)", #selector(openProjectForCard))
+                let newWindow = add(menu, "Open \(noun) in New Window",
                                     #selector(openProjectInNewWindowForCard))
                 newWindow.keyEquivalentModifierMask = [.option]
                 newWindow.isAlternate = true
@@ -731,7 +733,7 @@ extension CanvasBoardView {
                 // An explicit command rather than a side effect of clicking. Focus reaches outside this
                 // app, and a look across a board should not quietly repoint the things on the other end
                 // of it.
-                add(menu, "Focus This Project", #selector(focusProjectForCard))
+                add(menu, "Focus This \(noun)", #selector(focusProjectForCard))
                 menu.addItem(.separator())
                 // The two writes, carrying the keys they answer to. This is where somebody looks when
                 // they wonder what a card can be told to do, and the keys work from here whether or not
@@ -746,6 +748,7 @@ extension CanvasBoardView {
                 // double-clicking it. This item is for the case that gesture cannot serve: a project
                 // with no brief yet draws nothing on a card, so there is nothing to double-click.
                 add(menu, "Edit Details\u{2026}", #selector(editProjectDetails(_:)))
+                add(menu, "\(noun) Settings\u{2026}", #selector(projectSettingsForCard))
                 addShowsMenu(menu)
             }
             // A folder card's own two: where it points, and how it lays that out. First, as a project
@@ -781,67 +784,16 @@ extension CanvasBoardView {
             // These 6 Cards" says it: the hazard of a bulk command is doing more than you meant, and
             // that is worth knowing before you commit rather than after.
             add(menu, many("Open in Browser", "Open %d in Browser"), #selector(openLinkInBrowser))
-            add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             if selectedLinkCards.count == 1, let card = nodeViews[id] as? CanvasLinkNodeView,
                card.liveURL != nil {
                 add(menu, "Open Page as New Card", #selector(openMenuPageAsNewCard))
             }
+            add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             menu.addItem(.separator())
-            // The two ways a card's address changes, and they are genuinely different errands. One is
-            // "I navigated somewhere better and the card should point here now", which needs no typing
-            // and is only offered when the page has actually gone somewhere else. The other is "this
-            // address is wrong", which is a text edit and is always available.
-            if (nodeViews[id] as? CanvasLinkNodeView)?.hasWandered == true {
-                add(menu, "Set as This Card\u{2019}s Address", #selector(adoptCurrentAddress))
-            }
-            add(menu, "Edit Address\u{2026}", #selector(editLinkAddress))
-            menu.addItem(.separator())
-            // Where a page's navigation lives. Not in the card's header, which is a caption and has
-            // no room to become a toolbar, and not on a swipe, which on a trackpad is indistinguishable
-            // from scrolling a page sideways.
-            if (nodeViews[id] as? CanvasLinkNodeView)?.canGoBack == true {
-                add(menu, many("Back", "Back on %d Pages"), #selector(goBackInLink))
-            }
-            add(menu, many("Reload", "Reload %d Pages"), #selector(reloadLink))
+            addPageMenu(menu, id: id)
             if let card = nodeViews[id] as? CanvasLinkNodeView {
-                menu.addItem(.separator())
-                // These three are per *site*, not per card, so they count sites: four cards on one
-                // tracker are one sign-in, and naming the site is more use than naming the number
-                // whenever there is only one of it.
-                let sites = selectedSites()
-                let site = sites.count == 1 ? sites[0] : "\(sites.count) Sites"
-                add(menu, "Sign In to \(site)…", #selector(signInToLink))
-                // Signing in is per site, so signing out is too — and it reaches every card on every
-                // board that shows that site, because they were all one session to begin with.
-                add(menu, "Sign Out of \(site)", #selector(signOutOfLink))
-                add(menu, "Sign Out of All Sites…", #selector(signOutEverywhere))
-                menu.addItem(.separator())
-                // Per site, because that is the granularity at which blocking breaks a page: when a
-                // card comes up empty the question is always "is it this site?", and the answer has to
-                // be one click away from the card that is wrong.
-                let filtering = add(menu, "Block Ads on \(site)", #selector(toggleLinkFiltering))
-                filtering.state = card.isFiltered ? .on : .off
-                // Per site for the same reason: a site that turns Safari away turns away every card on it.
-                // A tick only where every selected site already agrees, as Size does.
-                let identify = NSMenu(title: "Identify As")
-                let identities = Set(selectedLinkCards.map(\.identity))
-                for (index, identity) in CanvasBrowserIdentity.allCases.enumerated() {
-                    let item = add(identify, identity.title, #selector(setLinkIdentity(_:)))
-                    item.tag = index
-                    item.state = identities == [identity] ? .on : .off
-                }
-                menu.addItem(withTitle: "Identify \(site) As", action: nil, keyEquivalent: "").submenu = identify
-                // Per card, unlike the three above: what a page is allowed to play is a fact about
-                // this card on this board — one embed you want running and the eleven beside it you
-                // don't — rather than about the site it happens to be on. See `CanvasCardMedia`.
-                let count = selectedLinkCards.count
-                let autoplay = add(menu, CanvasCardMedia.autoplayTitle(count), #selector(toggleAutoplay))
-                autoplay.state = selectedLinkCards.allSatisfy(\.autoplays) ? .on : .off
-                let muted = add(menu, CanvasCardMedia.muteTitle(count), #selector(toggleMuted))
-                muted.state = selectedLinkCards.allSatisfy(\.isMuted) ? .on : .off
-                let running = add(menu, CanvasCardMedia.keepRunningTitle(count), #selector(toggleKeepRunning))
-                running.state = selectedLinkCards.allSatisfy(\.keepsPageRunning) ? .on : .off
-                addSessionMenu(menu, card: card)
+                addSiteMenu(menu, card: card)
+                addCardOptionsMenu(menu, card: card)
             }
         case .text where nodeViews[id] is CanvasViewNodeView:
             // A view has no text to edit — its text is the one line Obsidian shows — so its menu is its
@@ -867,30 +819,95 @@ extension CanvasBoardView {
         }
     }
 
-    /// What every card answers to, whatever it is.
-    private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool) {
-        if includingTiling { addTiling(menu) }
-        // Every one of these is out while tiled (Tidy Up and Size included), and a separator with
-        // nothing under it would stack on the next one.
-        guard !isTiled else { return }
-        menu.addItem(.separator())
-        // All four carry their keys, for the reason Fill Window does — see `addTiling`. A contextual
-        // menu draws a key equivalent exactly as the menu bar does, and it is the one place a person
-        // is already looking when they wonder what else they can do to a card. Teaching one shortcut
-        // here and hiding the four beneath it was the odd arrangement: these are the commands somebody
-        // uses often enough to want the key for.
-        //
-        // Display, not dispatch. Only the main menu is searched for key equivalents, so nothing here
-        // claims a keystroke — which is what makes a bare ⌫ safe to print on Delete.
-        key(add(menu, "Cut", #selector(cut(_:))), "x")
-        key(add(menu, "Copy", #selector(copy(_:))), "c")
-        key(add(menu, "Duplicate", #selector(duplicate(_:))), "d")
-        if canTidy { key(add(menu, "Tidy Up", #selector(tidyUp(_:))), "t", modifiers: [.control, .option]) }
-        if canSize {
-            let size = Self.sizeMenu()
-            size.items.forEach { $0.target = self }
-            menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
+    /// Page ▸: where a web card's page goes, and the two ways its address changes. "Make This the
+    /// Card's Address" is offered only when the page has gone somewhere else; Edit Address… always.
+    private func addPageMenu(_ menu: NSMenu, id: String) {
+        let page = NSMenu(title: "Page")
+        if (nodeViews[id] as? CanvasLinkNodeView)?.canGoBack == true {
+            add(page, many("Back", "Back on %d Pages"), #selector(goBackInLink))
         }
+        add(page, many("Reload", "Reload %d Pages"), #selector(reloadLink))
+        page.addItem(.separator())
+        if (nodeViews[id] as? CanvasLinkNodeView)?.hasWandered == true {
+            add(page, "Make This the Card\u{2019}s Address", #selector(adoptCurrentAddress))
+        }
+        add(page, "Edit Address\u{2026}", #selector(editLinkAddress))
+        menu.addItem(withTitle: "Page", action: nil, keyEquivalent: "").submenu = page
+    }
+
+    /// The site's settings, in a submenu titled with the site so its items needn't say it again.
+    /// Signing in, blocking and identity are per site, not per card: four cards on one tracker are one
+    /// sign-in. Signing out of every site is in Settings ▸ Web, being about no card at all.
+    private func addSiteMenu(_ menu: NSMenu, card: CanvasLinkNodeView) {
+        let sites = selectedSites()
+        let site = NSMenu(title: sites.count == 1 ? sites[0] : "\(sites.count) Sites")
+        add(site, "Sign In\u{2026}", #selector(signInToLink))
+        add(site, "Sign Out", #selector(signOutOfLink))
+        site.addItem(.separator())
+        // When a card comes up empty the question is always "is it this site?".
+        add(site, "Block Ads", #selector(toggleLinkFiltering)).state = card.isFiltered ? .on : .off
+        // A tick only where every selected site already agrees, as Size does.
+        let identify = NSMenu(title: "Identify As")
+        let identities = Set(selectedLinkCards.map(\.identity))
+        for (index, identity) in CanvasBrowserIdentity.allCases.enumerated() {
+            let item = add(identify, identity.title, #selector(setLinkIdentity(_:)))
+            item.tag = index
+            item.state = identities == [identity] ? .on : .off
+        }
+        site.addItem(withTitle: "Identify As", action: nil, keyEquivalent: "").submenu = identify
+        menu.addItem(withTitle: site.title, action: nil, keyEquivalent: "").submenu = site
+    }
+
+    /// What is stored on this card: what its page may play, whether it keeps running, and which
+    /// browser session it is on. See `CanvasCardMedia`.
+    private func addCardOptionsMenu(_ menu: NSMenu, card: CanvasLinkNodeView) {
+        let options = NSMenu(title: "Card Options")
+        let count = selectedLinkCards.count
+        add(options, CanvasCardMedia.autoplayTitle(count), #selector(toggleAutoplay)).state =
+            selectedLinkCards.allSatisfy(\.autoplays) ? .on : .off
+        add(options, CanvasCardMedia.muteTitle(count), #selector(toggleMuted)).state =
+            selectedLinkCards.allSatisfy(\.isMuted) ? .on : .off
+        add(options, CanvasCardMedia.keepRunningTitle(count), #selector(toggleKeepRunning)).state =
+            selectedLinkCards.allSatisfy(\.keepsPageRunning) ? .on : .off
+        addSessionMenu(options, card: card)
+        menu.addItem(withTitle: "Card Options", action: nil, keyEquivalent: "").submenu = options
+    }
+
+    /// Share ▸, the system's, for the selected cards that have an address or a file.
+    private func addShareMenu(_ menu: NSMenu) {
+        let items: [Any] = selection.compactMap { id -> URL? in
+            guard let node = document.node(id: id) else { return nil }
+            switch node.content {
+            case .link(let address): return URL(string: address)
+            case .file(let path, _): return store.resolver.resolve(path).url
+            default: return nil
+            }
+        }
+        guard !items.isEmpty else { return }
+        menu.addItem(.separator())
+        menu.addItem(NSSharingServicePicker(items: items).standardShareMenuItem)
+    }
+
+    /// What every card answers to, whatever it is, in the template's order: Edit, Share, then the
+    /// arrangement. Delete follows from the caller, last.
+    private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool) {
+        // Every edit is out while tiled (Tidy Up and Size included), so the block and its separator go.
+        if !isTiled {
+            menu.addItem(.separator())
+            // Display, not dispatch: only the main menu is searched for key equivalents, so nothing
+            // here claims a keystroke — which is what makes a bare ⌫ safe to print on Delete.
+            key(add(menu, "Cut", #selector(cut(_:))), "x")
+            key(add(menu, "Copy", #selector(copy(_:))), "c")
+            key(add(menu, "Duplicate", #selector(duplicate(_:))), "d")
+            if canTidy { key(add(menu, "Tidy Up", #selector(tidyUp(_:))), "t", modifiers: [.control, .option]) }
+            if canSize {
+                let size = Self.sizeMenu()
+                size.items.forEach { $0.target = self }
+                menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
+            }
+        }
+        addShareMenu(menu)
+        if includingTiling { addTiling(menu) }
     }
 
     /// The project cards in the selection — what every project command acts on.
@@ -964,12 +981,7 @@ extension CanvasBoardView {
             item.representedObject = face.rawValue
             item.state = cards.allSatisfy { $0.textStyle.face == face } ? .on : .off
         }
-
-        text.addItem(.separator())
-        text.addItem(.sectionHeader(title: "Every Note"))
-        add(text, "Show Link Syntax", #selector(toggleLinkSyntax(_:))).state = TokenDisplay.showsSyntax ? .on : .off
-        add(text, "Check Spelling While Typing", #selector(toggleNoteSpelling(_:))).state =
-            MarkdownTextEditor.checksSpelling ? .on : .off
+        // Show Link Syntax and Check Spelling are every note's, not this card's: Settings ▸ Notes.
 
         menu.addItem(withTitle: "Text", action: nil, keyEquivalent: "").submenu = text
     }
@@ -1045,9 +1057,6 @@ extension CanvasBoardView {
             CanvasTextStyle.set(style, on: &node)
         }
     }
-
-    @objc func toggleLinkSyntax(_ sender: Any?) { TokenDisplay.showsSyntax.toggle() }
-    @objc func toggleNoteSpelling(_ sender: Any?) { MarkdownTextEditor.checksSpelling.toggle() }
 
     /// Quietly, as a zoom is: how a card is set is how you are looking at it, not an edit to it. See
     /// `setContentZoom`.
@@ -1301,7 +1310,6 @@ extension CanvasBoardView {
 
         menu.addItem(.separator())
         addArrange(menu)
-        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
     }
 
     /// Arrange's commands. An arrangement deals the tiles out into columns and is then forgotten
@@ -1353,27 +1361,26 @@ extension CanvasBoardView {
             let item = add(menu, maximizeTileTitle, #selector(maximizeMenuTile(_:)))
             item.keyEquivalent = "\r"
             item.keyEquivalentModifierMask = [.command, .option]
+        } else if maximizedCard != nil {
+            // A workspace of one tile already fills the room; this puts a maximized card back.
+            add(menu, maximizeTileTitle, #selector(maximizeTile(_:)))
         }
-        // The block `buildCardMenu` was told to skip: the way out, and this tile's pinned length. The
-        // header is the separator, so it doesn't want a second one above it.
-        addTiling(menu, separated: false)
-
-        // Only where it means something: a workspace not shaped as a master and a stack has no master,
-        // and the master is already the master.
-        // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
-        if tiling.hasTabs(id), !wholeTile {
-            add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
-        }
-        if tiling.hasTabs(id) { add(menu, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
-        if tiling.canPromote(id) { add(menu, "Make Master Tile", #selector(promoteMenuTile(_:))) }
-        // Here as well as on the board's own menu, because the board's is reached by right-clicking a
-        // gap between tiles, and the gaps are four points wide.
-        if !wholeTile { addExistingCards(menu); addReplaceWith(menu) }
-        add(menu, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
-
         addArrange(menu)
 
-        add(menu, "Rename Workspace\u{2026}", #selector(renameWorkspace(_:)))
+        // Everything else a tile can be told, one level down so the menu stays short. The workspace's
+        // name is on its tab, so renaming it is the tab's and Canvas ▸ Workspace's, not a tile's.
+        let options = NSMenu(title: "Tile Options")
+        if tiling.canPromote(id) { add(options, "Make Master Tile", #selector(promoteMenuTile(_:))) }
+        // The deliberate half of pinning: a drag can change a pin but never make one. See `togglePinTile`.
+        if pinnableTile != nil { add(options, pinTileTitle, #selector(togglePinTileSize(_:))) }
+        // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
+        if tiling.hasTabs(id), !wholeTile { add(options, "Pull Out of Tabs", #selector(pullMenuTabOut(_:))) }
+        if tiling.hasTabs(id) { add(options, tabsOnSideTitle, #selector(toggleMenuTabsOnSide(_:))) }
+        if !options.items.isEmpty { options.addItem(.separator()) }
+        // Here as well as on the canvas's own menu, whose gaps are four points wide.
+        if !wholeTile { addExistingCards(options); addReplaceWith(options) }
+        add(options, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
+        menu.addItem(withTitle: "Tile Options", action: nil, keyEquivalent: "").submenu = options
 
         menu.addItem(.separator())
         if wholeTile {
@@ -1579,10 +1586,10 @@ extension CanvasBoardView {
         // Enabled or not is `validateUserInterfaceItem`'s answer, not one set here: this menu
         // autoenables, so anything written onto `isEnabled` at build time is overwritten before the
         // menu is drawn. Setting it here was how Paste came to be live over an empty pasteboard.
-        add(menu, "Paste", #selector(pasteHere))
+        key(add(menu, "Paste", #selector(pasteHere)), "v")
         addTiling(menu)
         menu.addItem(.separator())
-        add(menu, "Select All", #selector(selectAll(_:)))
+        key(add(menu, "Select All", #selector(selectAll(_:))), "a")
     }
 
     /// New Workspace, in the menu you get to by right-clicking.
@@ -1700,14 +1707,20 @@ extension CanvasBoardView {
     /// header. `tabs` is a strip's list, which leaves out what can't be a tab and adds into `menuTile`.
     /// What is offered and how it is grouped are decided there; this only draws it.
     private func addCommandItems(_ menu: NSMenu, tabs: Bool) {
+        let action = tabs ? #selector(newTab(_:)) : #selector(newHere(_:))
         for row in CanvasAddCommand.rows(projectNote: offersProjectNoteCard, tabs: tabs) {
             switch row {
-            case .heading(let group):
-                menu.addItem(.sectionHeader(title: group.title))
             case .item(let command):
-                let item = add(menu, command.title(knowsFolder: knowsFolder),
-                               tabs ? #selector(newTab(_:)) : #selector(newHere(_:)))
+                let item = add(menu, command.title(knowsFolder: knowsFolder), action)
                 item.representedObject = command
+            case .views(let views):
+                let submenu = NSMenu(title: "New View")
+                for command in views {
+                    add(submenu, command.viewName ?? command.title, action).representedObject = command
+                }
+                menu.addItem(withTitle: "New View", action: nil, keyEquivalent: "").submenu = submenu
+            case .separator:
+                menu.addItem(.separator())
             }
         }
     }
@@ -2007,6 +2020,15 @@ extension CanvasBoardView {
     }
 
     /// Make this card's project the app's focused one.
+    /// The card's project in Project Settings — Project ▸ Project Settings… for a project that isn't
+    /// the focused one.
+    @objc private func projectSettingsForCard() {
+        guard let id = selection.first,
+              let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName else { return }
+        let key = ProjectIndex.shared.projectKey(forFolder: folder)
+        ProjectSettings.present(projectNamed: folder, isArchived: PMCommand.Context.isArchived(key: key))
+    }
+
     @objc private func focusProjectForCard() {
         guard let id = selection.first,
               let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName,
@@ -2203,7 +2225,8 @@ extension CanvasBoardView {
 
     /// Everything, everywhere, behind a confirmation — it is the one action here that cannot be
     /// undone by clicking something, and the number it costs you is however many sites you use.
-    @objc private func signOutEverywhere() {
+    /// Settings ▸ Web ▸ Sign Out of All Sites…. Every web card in every window reloads signed out.
+    static func signOutOfEverySite() {
         let alert = NSAlert()
         alert.messageText = "Sign out of every site?"
         alert.informativeText = "Web cards on every canvas will forget who you are, and each site will "
@@ -2214,7 +2237,11 @@ extension CanvasBoardView {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task { @MainActor in
             await CanvasWebSession.forgetEverything()
-            for view in nodeViews.values { (view as? CanvasLinkNodeView)?.reload() }
+            @MainActor func reload(in view: NSView) {
+                if let card = view as? CanvasLinkNodeView { card.reload() }
+                view.subviews.forEach(reload(in:))
+            }
+            for window in NSApp.windows { window.contentView.map(reload(in:)) }
         }
     }
 
