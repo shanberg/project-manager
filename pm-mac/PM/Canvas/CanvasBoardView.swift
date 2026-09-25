@@ -326,7 +326,7 @@ final class CanvasBoardView: NSView {
 
     var nodeViews: [String: CanvasNodeView] = [:]
     /// Where each tile moved out to a satellite goes back to. See `moveToWindow`.
-    var satelliteHomes: [String: CanvasTileSession.Placement] = [:]
+    var satelliteHomes: [String: CanvasSatelliteHome] = [:]
     /// The drag over the board right now, if there is one. See `CanvasBoardView+Dropping`.
     var dropSession: CanvasDropSession?
     let overlay = CanvasOverlayView()

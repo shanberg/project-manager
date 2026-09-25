@@ -106,9 +106,15 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// Borrow a card's content and add it as a tab.
     private func take(_ card: CanvasNodeView) {
         card.prepareToLend()
-        guard let content = card.lend(to: self) else { return }
+        // One of the tabs before it is lent: lending can rebuild the content (a card zoomed out to its
+        // name comes out as itself), and a rebuild arriving for a card this window didn't know was
+        // placed hidden, as a tab behind another.
         cards.append(card)
-        place(content)
+        guard let content = card.lend(to: self) else {
+            cards.removeLast()
+            return
+        }
+        if content.superview !== stage { place(content) }
     }
 
     private func place(_ content: NSView) {
@@ -126,7 +132,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     func replace(_ old: NSView?, with new: NSView, for card: CanvasNodeView) {
         old?.removeFromSuperview()
         place(new)
-        new.isHidden = card !== shownCard
+        new.isHidden = cards.count > 1 && card !== shownCard
         if card === shownCard { watchPage() }
         describe()
     }
@@ -171,7 +177,16 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     private func content() -> NSView {
         let root = NSView()
-        let bar = wash
+        // A plain view holds the controls, with the wash behind them: the wash is a board's ground,
+        // which takes no clicks (`CanvasColorWash.hitTest`), and controls inside it would take none
+        // either — Return, Back and the tabs drawn but dead.
+        let bar = NSView()
+        wash.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(wash)
+        NSLayoutConstraint.activate([
+            wash.topAnchor.constraint(equalTo: bar.topAnchor), wash.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+            wash.leadingAnchor.constraint(equalTo: bar.leadingAnchor), wash.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+        ])
         let line = NSBox()
         line.boxType = .separator
 
@@ -490,6 +505,13 @@ enum CanvasSatellites {
 
 // MARK: - The board's half
 
+/// Where a tile moved out to a satellite goes back to: beside which tile, and — for a tab pulled out
+/// of a tile of several — at which place among its tabs.
+struct CanvasSatelliteHome {
+    var placement: CanvasTileSession.Placement?
+    var tabIndex: Int?
+}
+
 extension CanvasBoardView {
     /// Which workspace a satellite belongs to: the named one that is up, or the canvas's own tiling.
     var satelliteScope: String { workspaceName ?? "" }
@@ -509,6 +531,8 @@ extension CanvasBoardView {
         let cards = ids.compactMap { nodeViews[$0] }.filter { $0.lentTo == nil }
         guard !cards.isEmpty else { return nil }
         let home = returnPlacement(for: cards.map(\.node.id))
+        let tabIndex = tiling.flatMap { t in cards.first.map { t.tabs(of: $0.node.id) } }
+            .flatMap { tabs in cards.first.flatMap { tabs.firstIndex(of: $0.node.id) } }
         // The content goes out first: a tile leaving the tiling is a card the board may stop keeping,
         // and being lent out is what tells the board to keep it (`isHeldElsewhere`).
         guard let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self)
@@ -516,7 +540,7 @@ extension CanvasBoardView {
         if let tiling {
             let tiled = satellite.cardIDs.filter(tiling.cards.contains)
             if !tiled.isEmpty, tiling.cards.count > tiled.count {
-                for id in tiled { satelliteHomes[id] = home }
+                for id in tiled { satelliteHomes[id] = CanvasSatelliteHome(placement: home, tabIndex: tabIndex) }
                 removeFromTiling(tiled)
             }
         }
@@ -538,16 +562,20 @@ extension CanvasBoardView {
         guard var session = tiling else { return }
         let back = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
         guard let first = back.first else { return }
-        let placement = homes.first.flatMap { session.cards.contains($0.target) ? $0 : nil } ?? nextPlacement
+        let placement = homes.first?.placement.flatMap { session.cards.contains($0.target) ? $0 : nil } ?? nextPlacement
         session.add(first, at: placement)
         for id in back.dropFirst() { session.add(id, at: .init(target: first, side: .tab)) }
         let front = showing.flatMap { back.contains($0) ? $0 : nil } ?? first
+        // A tab goes back to its place among the tabs it left, not onto the end of them.
+        if placement?.side == .tab, let index = homes.first?.tabIndex {
+            for (offset, id) in back.enumerated() { _ = session.moveTab(id, to: index + offset) }
+        }
         tiling = session
         select([front])
         setLayout(session.layout, animated: true)
         onTilingChanged?()
         announceTiling()
-        if back.count > 1 { showTab(front) }
+        if back.count > 1 || placement?.side == .tab { showTab(front) }
     }
 
     /// Put this board's satellites away, remembering them — its workspace has gone behind another, or
