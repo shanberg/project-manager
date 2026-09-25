@@ -446,6 +446,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
             scrollView.scrollerInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
         }
         if textView.string != text {
+            // Only a first fill is an opening. Every other outside change happens under a caret that is
+            // somewhere on purpose — a session note's save tidies the text and hands it back, and taking
+            // the caret to the start then sent the next paste to the top of the note.
+            let opening = textView.string.isEmpty
             // Through the undo stack, never `string =`. See `ShortcutTextView.replaceFromOutside`.
             if let shortcuts = textView as? ShortcutTextView {
                 shortcuts.replaceFromOutside(text)
@@ -456,7 +460,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             // been set outright, which doesn't run through `didChangeText`, where the empty note
             // otherwise notices it has gained or lost its placeholder.
             textView.needsDisplay = true
-            if opensAtStart {
+            if opensAtStart, opening {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
             }
             context.coordinator.highlight(textView)
