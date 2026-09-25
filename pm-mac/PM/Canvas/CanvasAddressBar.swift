@@ -26,6 +26,8 @@ struct CanvasAddressField: View {
     let openToken: Int
     let go: (String) -> Void
     let reload: () -> Void
+    let hardReload: () -> Void
+    let emptyCacheAndReload: () -> Void
     let stop: () -> Void
     let candidates: () -> [CanvasAddressSuggestions.Candidate]
 
@@ -121,8 +123,12 @@ struct CanvasAddressField: View {
 
     /// Reload, or Stop while the page is arriving — one button, so the swap is a glyph changing in
     /// place rather than a removal and an insertion. See `HeaderSymbolButton`.
+    ///
+    /// ⌥-click is a hard reload, the same ⌥ that turns Reload Page into Hard Reload in the Page menu.
+    /// Right-click lists the kinds of reload, and is offered while the page is loading too: a load that
+    /// is stuck on a stale file is the moment you want it.
     private var reloadButton: some View {
-        Button(action: page.isLoading ? stop : reload) {
+        Button(action: pressReload) {
             Image(systemName: page.isLoading ? "xmark" : "arrow.clockwise")
                 .font(.system(size: 10, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
@@ -133,6 +139,16 @@ struct CanvasAddressField: View {
         .buttonStyle(.plain)
         .help(page.isLoading ? "Stop loading" : "Reload")
         .accessibilityLabel(Text(page.isLoading ? "Stop loading" : "Reload"))
+        .contextMenu {
+            Button("Reload Page", action: reload)
+            Button("Hard Reload", action: hardReload)
+            Button("Empty Cache and Reload", action: emptyCacheAndReload)
+        }
+    }
+
+    private func pressReload() {
+        if page.isLoading { return stop() }
+        NSEvent.modifierFlags.contains(.option) ? hardReload() : reload()
     }
 
     /// Which jar this card drinks from, ahead of the address — and nothing at all for the shared

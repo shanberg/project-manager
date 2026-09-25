@@ -478,6 +478,12 @@ enum MainMenu {
         forward.keyEquivalentModifierMask = [.command]
         page.addItem(withTitle: "Reload Page", action: #selector(CanvasBoardView.pageReload(_:)),
                      keyEquivalent: "r")
+        // Under ⌥: revalidate everything rather than trust the cache — the button's ⌥-click too.
+        let hardReload = page.addItem(withTitle: "Hard Reload",
+                                      action: #selector(CanvasBoardView.pageHardReload(_:)),
+                                      keyEquivalent: "r")
+        hardReload.keyEquivalentModifierMask = [.command, .option]
+        hardReload.isAlternate = true
         // The button a browser doesn't have: back to the address the *board* saved for this card,
         // which is a different question from "what was I looking at before".
         page.addItem(withTitle: "Back to Card\u{2019}s Address",

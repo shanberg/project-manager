@@ -1072,6 +1072,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         header.pageBack = { [weak self] in self?.engagedCard?.goBack() }
         header.pageForward = { [weak self] in self?.engagedCard?.goForward() }
         header.pageReload = { [weak self] in self?.engagedCard?.reload() }
+        header.pageHardReload = { [weak self] in self?.engagedCard?.hardReload() }
+        header.pageEmptyCacheAndReload = { [weak self] in self?.engagedCard?.emptyCacheAndReload() }
         header.pageStop = { [weak self] in self?.engagedCard?.stopLoading() }
         header.pageGo = { [weak self] address in self?.engagedCard?.go(to: address) }
         header.addressCandidates = { [weak self] in self?.addressCandidates ?? [] }

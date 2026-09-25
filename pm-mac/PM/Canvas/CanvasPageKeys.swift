@@ -100,6 +100,7 @@ enum CanvasPageKeys {
     /// because none of those is a hand that thought it was talking to the page.
     private static let confirmed: [(key: String, modifiers: NSEvent.ModifierFlags)] = [
         ("r", [.command]),                                                     // Reload Page
+        ("r", [.command, .option]),                                            // Hard Reload
     ]
 
     /// Should PM wait for this keystroke to be pressed a second time before answering it?

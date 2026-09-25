@@ -2642,6 +2642,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func pageBack(_ sender: Any?) { pageTargets.forEach { $0.goBack() } }
     @objc func pageForward(_ sender: Any?) { pageTargets.forEach { $0.goForward() } }
     @objc func pageReload(_ sender: Any?) { pageTargets.forEach { $0.reload() } }
+    @objc func pageHardReload(_ sender: Any?) { pageTargets.forEach { $0.hardReload() } }
     @objc func pageHome(_ sender: Any?) { pageTargets.forEach { $0.goHome() } }
     @objc func pageOpenInBrowser(_ sender: Any?) { pageTargets.forEach { $0.openInBrowser() } }
     @objc func pageOpenAsNewCard(_ sender: Any?) { _ = openPageAsNewCard() }
@@ -2869,6 +2870,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             // Named for what it will do to how many, like the tiling command above it.
             (item as? NSMenuItem)?.title = pageTargets.count > 1 ? "Reload \(pageTargets.count) Pages"
                                                                  : "Reload Page"
+            return !pageTargets.isEmpty
+        case #selector(pageHardReload(_:)):
+            (item as? NSMenuItem)?.title = pageTargets.count > 1 ? "Hard Reload \(pageTargets.count) Pages"
+                                                                 : "Hard Reload"
             return !pageTargets.isEmpty
         case #selector(pageHome(_:)):
             // Only when there is somewhere to go back to: a card sitting on its own address is already

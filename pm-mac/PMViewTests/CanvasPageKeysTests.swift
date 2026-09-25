@@ -100,6 +100,7 @@ final class CanvasPageKeysTests: XCTestCase {
     func testReloadHandedBackWaitsForASecondPress() {
         XCTAssertTrue(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command]))
         XCTAssertTrue(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command, .capsLock]))
+        XCTAssertTrue(CanvasPageKeys.asksForASecondPress(key: "r", modifiers: [.command, .option]))
     }
 
     /// Everything else a page declines is answered at once, as it always was.

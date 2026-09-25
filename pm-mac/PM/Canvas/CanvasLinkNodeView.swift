@@ -1329,6 +1329,31 @@ final class CanvasLinkNodeView: CanvasNodeView {
         if let web, revealed { web.reload() } else { contentChanged() }
     }
 
+    /// Load it again without trusting anything cached: every subresource is revalidated with the server.
+    /// A card that had given up starts over, as `reload` does.
+    func hardReload() {
+        if let web, revealed { web.reloadFromOrigin() } else { contentChanged() }
+    }
+
+    /// Throw away this site's cached files in the card's own session, then hard reload.
+    ///
+    /// Only the cache: cookies and storage stay, so the card is still signed in afterwards. Scoped to
+    /// the card's site within the card's session, since every other card sharing that session is
+    /// relying on the rest of it.
+    func emptyCacheAndReload() {
+        guard let web else { return contentChanged() }
+        let store = web.configuration.websiteDataStore
+        let site = (web.url?.host() ?? host).lowercased()
+        let types: Set<String> = [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
+                                  WKWebsiteDataTypeFetchCache]
+        store.fetchDataRecords(ofTypes: types) { records in
+            let mine = records.filter { site == $0.displayName || site.hasSuffix("." + $0.displayName) }
+            store.removeData(ofTypes: types, for: mine) { [weak self] in
+                MainActor.assumeIsolated { self?.hardReload() }
+            }
+        }
+    }
+
     // MARK: Searching it, and keeping it fresh
 
     /// Look for `query` in the page, and say whether it was there.

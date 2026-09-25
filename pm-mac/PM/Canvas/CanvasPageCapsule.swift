@@ -97,7 +97,9 @@ struct CanvasPageControls: View {
             // `CanvasAddressField`.
             CanvasAddressField(page: page, width: model.room.addressWidth,
                                openToken: model.addressFocusToken, go: model.pageGo,
-                               reload: model.pageReload, stop: model.pageStop,
+                               reload: model.pageReload, hardReload: model.pageHardReload,
+                               emptyCacheAndReload: model.pageEmptyCacheAndReload,
+                               stop: model.pageStop,
                                candidates: model.addressCandidates)
 
             // Home and Pin are the two answers to "this card is not on its own address", and there is

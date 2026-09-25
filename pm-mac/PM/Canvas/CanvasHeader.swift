@@ -293,6 +293,10 @@ final class CanvasHeaderModel {
     @ObservationIgnored
     var pageReload: () -> Void = {}
     @ObservationIgnored
+    var pageHardReload: () -> Void = {}
+    @ObservationIgnored
+    var pageEmptyCacheAndReload: () -> Void = {}
+    @ObservationIgnored
     var pageStop: () -> Void = {}
     @ObservationIgnored
     var pageHome: () -> Void = {}
