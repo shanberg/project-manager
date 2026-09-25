@@ -328,16 +328,14 @@ extension CanvasBoardView {
         let fields = NSView(frame: NSRect(x: 0, y: 0, width: 208, height: 22))
         [width, by, height].forEach(fields.addSubview)
 
-        let alert = NSAlert()
-        alert.messageText = frames.count > 1 ? "Size of \(frames.count) Cards" : "Card Size"
-        alert.informativeText = "In points. A blank field leaves that side as it is."
-        alert.accessoryView = fields
-        alert.addButton(withTitle: "Set Size")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = width
-        guard let window else { return }
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
+        let panel = CanvasTileAlert.Content(
+            title: frames.count > 1 ? "Size of \(frames.count) Cards" : "Card Size",
+            message: "In points. A blank field leaves that side as it is.",
+            accessory: fields, initialFirstResponder: width, buttons: ["Set Size", "Cancel"])
+        // Over the card being sized, or over the board for several.
+        let anchor: NSView? = selection.count == 1 ? selection.first.flatMap { nodeViews[$0] } : enclosingScrollView
+        CanvasWebDialogs.run(panel, over: anchor ?? self, in: window) { [weak self] response in
+            guard response == 0 else { return }
             let w = Double(width.stringValue.trimmingCharacters(in: .whitespaces))
             let h = Double(height.stringValue.trimmingCharacters(in: .whitespaces))
             guard w != nil || h != nil else { return }

@@ -823,6 +823,10 @@ class CanvasNodeView: NSView {
     /// The window the content is in, which is where focus is given and asked about.
     var contentWindow: NSWindow? { lentTo?.window ?? window }
 
+    /// What a question from this card is put up over (`CanvasTileAlert`): the card, or what it shows when
+    /// that is out in a window of its own.
+    var alertAnchor: NSView { lentTo == nil ? self : cardContent ?? self }
+
     /// Take the keyboard off this card's content, to wherever it goes when nothing in a card has it:
     /// the board in its own window, nothing in a satellite's.
     func giveUpFocus() {
@@ -1158,3 +1162,5 @@ struct CanvasRenderedProse: View {
 extension CanvasNodeView: CanvasPageCard {
     var isCardHidden: Bool { isHidden }
 }
+
+extension CanvasNodeView: CanvasTileAlert.Asker {}

@@ -1748,7 +1748,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         }
         CanvasWebDialogs.signIn(to: challenge.protectionSpace.host,
                                 realm: challenge.protectionSpace.realm,
-                                in: window) { credential in
+                                over: self, in: contentWindow) { credential in
             if let credential { completionHandler(.useCredential, credential) }
             else { completionHandler(.cancelAuthenticationChallenge, nil) }
         }
@@ -1899,14 +1899,14 @@ extension CanvasLinkNodeView: WKUIDelegate {
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping () -> Void) {
-        CanvasWebDialogs.alert(message, from: frame.securityOrigin.host, in: window,
+        CanvasWebDialogs.alert(message, from: frame.securityOrigin.host, over: self, in: contentWindow,
                                then: completionHandler)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (Bool) -> Void) {
-        CanvasWebDialogs.confirm(message, from: frame.securityOrigin.host, in: window,
+        CanvasWebDialogs.confirm(message, from: frame.securityOrigin.host, over: self, in: contentWindow,
                                  then: completionHandler)
     }
 
@@ -1914,7 +1914,7 @@ extension CanvasLinkNodeView: WKUIDelegate {
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (String?) -> Void) {
         CanvasWebDialogs.prompt(prompt, initial: defaultText ?? "", from: frame.securityOrigin.host,
-                                in: window, then: completionHandler)
+                                over: self, in: contentWindow, then: completionHandler)
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
@@ -1931,7 +1931,7 @@ extension CanvasLinkNodeView: WKUIDelegate {
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        CanvasWebDialogs.mediaAccess(for: origin.host, type, in: window) { [weak self] decision in
+        CanvasWebDialogs.mediaAccess(for: origin.host, type, over: self, in: contentWindow) { [weak self] decision in
             if decision == .deny {
                 self?.board.report("\(origin.host) isn't allowed the camera or microphone. Change it in "
                     + "Settings, under Sites.")
