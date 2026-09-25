@@ -55,12 +55,101 @@ private func isSpace(_ c: Character) -> Bool { c == " " || c == "\t" }
 
 // MARK: - List and quote prefixes
 
+/// How an ordered list counts: `1.`, `a.`, `A.`, `i.` or `I.`.
+///
+/// **A list counts the way its first item does.** Change the `1.` that starts a list to `a.` and the
+/// rest follow the next time the list is renumbered (see `numberLists`), which is how a style is chosen
+/// here: by typing it, where a style is chosen in a word processor from a menu.
+public enum MarkdownListStyle: Equatable {
+    case decimal, lowerAlpha, upperAlpha, lowerRoman, upperRoman
+
+    /// The style a list starting with this label counts in, or nil when it isn't a label. `i` is a
+    /// roman one and any other single letter an alphabetic one — a list starting at `v.` more likely
+    /// began at `a.` and lost its head than began at five.
+    public init?(label: Substring) {
+        guard let first = label.first else { return nil }
+        if label.allSatisfy(\.isASCIIDigit) {
+            guard label.count <= 9 else { return nil }
+            self = .decimal
+        } else if label.count > 1 || first == "i" || first == "I" {
+            guard romanValue(label) != nil else { return nil }
+            self = first.isLowercase ? .lowerRoman : .upperRoman
+        } else if first.isASCIILetter {
+            self = first.isLowercase ? .lowerAlpha : .upperAlpha
+        } else {
+            return nil
+        }
+    }
+
+    /// The label for the `n`th item. An alphabetic list that runs past `z` goes on in numbers rather
+    /// than `aa`, which the editor would not read back as a list item.
+    public func label(_ n: Int) -> String {
+        switch self {
+        case .decimal: return String(n)
+        case .lowerAlpha, .upperAlpha:
+            guard (1...26).contains(n) else { return String(n) }
+            let letter = String(UnicodeScalar(UInt8(96 + n)))
+            return self == .lowerAlpha ? letter : letter.uppercased()
+        case .lowerRoman, .upperRoman:
+            guard let roman = romanLabel(n) else { return String(n) }
+            return self == .lowerRoman ? roman : roman.uppercased()
+        }
+    }
+
+    /// Which item a label names in this style — how a list that has some of its labels in another
+    /// style is still put back in order. Digits are read as numbers whatever the style.
+    public func value(of label: Substring) -> Int? {
+        if label.allSatisfy(\.isASCIIDigit) { return Int(label) }
+        switch self {
+        case .decimal: return nil
+        case .lowerAlpha, .upperAlpha:
+            guard label.count == 1, let c = label.first?.lowercased().unicodeScalars.first,
+                  (97...122).contains(c.value) else { return nil }
+            return Int(c.value) - 96
+        case .lowerRoman, .upperRoman:
+            return romanValue(label)
+        }
+    }
+}
+
+private extension Character {
+    var isASCIIDigit: Bool { ("0"..."9").contains(self) }
+    var isASCIILetter: Bool { ("a"..."z").contains(self) || ("A"..."Z").contains(self) }
+}
+
+/// Roman numerals as lists use them: `i` to `xxxix`. Larger ones would read back from prose — `mix.`,
+/// `DC.` — far more often than anybody writes a list that long in them.
+private func romanLabel(_ n: Int) -> String? {
+    guard (1...39).contains(n) else { return nil }
+    let tens = String(repeating: "x", count: n / 10)
+    let ones = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"][n % 10]
+    return tens + ones
+}
+
+/// The value of a roman label, or nil unless it is the canonical spelling of one `romanLabel` writes.
+private func romanValue(_ label: Substring) -> Int? {
+    let lower = label.lowercased()
+    guard lower.count <= 6, lower.allSatisfy({ "ivx".contains($0) }),
+          label.allSatisfy(\.isLowercase) || label.allSatisfy(\.isUppercase) else { return nil }
+    return (1...39).first { romanLabel($0) == lower }
+}
+
+/// The length of an ordered marker at the head of `rest` — its label and its `.` or `)` — or nil when
+/// `rest` doesn't start with one. Shared with the highlighter so a line the editor continues as a list
+/// is also the line it hangs and styles as one.
+public func markdownOrderedMarkerLength(_ rest: Substring) -> Int? {
+    let label = rest.prefix { $0.isASCIIDigit || $0.isASCIILetter }
+    guard !label.isEmpty, let delimiter = rest.dropFirst(label.count).first, delimiter == "." || delimiter == ")",
+          MarkdownListStyle(label: label) != nil else { return nil }
+    return label.count + 1
+}
+
 /// The head of a markdown list item: its indentation, its marker, the spacing after the marker, and a
 /// task checkbox when it carries one. Parsed rather than regexed so continuation can rebuild it exactly
 /// — same bullet character, same spacing, same nesting.
 public struct MarkdownListPrefix: Equatable {
     public let indent: String
-    /// `-`, `*`, `+`, or an ordered marker like `3.` / `3)`.
+    /// `-`, `*`, `+`, or an ordered marker like `3.`, `3)`, `c.` or `iii.`.
     public let marker: String
     public let spacing: String
     /// `[ ]`, `[x]`, `[X]` or `[-]` when the item is a task line, without the space that follows it.
@@ -74,14 +163,19 @@ public struct MarkdownListPrefix: Equatable {
     }
 
     public var isOrdered: Bool { marker.count > 1 }
-    public var number: Int? { isOrdered ? Int(marker.dropLast()) : nil }
+    /// The marker without its delimiter: `3`, `c`, `iii`.
+    public var label: Substring { isOrdered ? marker.dropLast() : "" }
+    /// The style this item's own label counts in, as if it started its list.
+    public var style: MarkdownListStyle? { isOrdered ? MarkdownListStyle(label: label) : nil }
+    /// Which item this is, read in its own style.
+    public var number: Int? { style?.value(of: label) }
     public var delimiter: Character { marker.last ?? "." }
     /// The prefix as it appears at the head of the line, checkbox and its trailing space included.
     public var text: String { indent + marker + spacing + (checkbox.map { $0 + " " } ?? "") }
     /// The same prefix for the *next* item: ordered markers advance, everything else repeats, and a
     /// checked box comes back unchecked (you're writing a new task, not a done one).
     public var next: String {
-        let marker = isOrdered ? "\((number ?? 0) + 1)\(delimiter)" : self.marker
+        let marker = isOrdered ? (style ?? .decimal).label((number ?? 0) + 1) + String(delimiter) : self.marker
         return indent + marker + spacing + (checkbox != nil ? "[ ] " : "")
     }
 }
@@ -97,16 +191,10 @@ public func markdownListPrefix(of line: String) -> MarkdownListPrefix? {
     if "-*+".contains(line[i]) {
         marker = String(line[i])
         i = line.index(after: i)
-    } else if line[i].isNumber {
-        var digits = ""
-        var j = i
-        while j < line.endIndex, line[j].isNumber, digits.count < 9 {
-            digits.append(line[j])
-            j = line.index(after: j)
-        }
-        guard j < line.endIndex, line[j] == "." || line[j] == ")" else { return nil }
-        marker = digits + String(line[j])
-        i = line.index(after: j)
+    } else if let length = markdownOrderedMarkerLength(line[i...]) {
+        let end = line.index(i, offsetBy: length)
+        marker = String(line[i..<end])
+        i = end
     } else {
         return nil
     }
@@ -174,7 +262,10 @@ private func isInList(_ line: String) -> Bool {
 ///
 /// A list nested inside another counts from 1. One at the top counts from its lowest number, so a
 /// list written to begin at 5 still does, and moving its 3 to the top doesn't make it begin at 3.
-private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>) -> [Int: Int] {
+///
+/// A list whose first item is on a line in `typed` starts where that item says instead: it is the one
+/// just typed, and a number someone has just typed is the number they want.
+private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>, typed: Set<Int> = []) -> [Int: Int] {
     // First which list each numbered item is in, then the numbers: a top-level list's start depends on
     // all of its items, so it isn't known until the last of them has been seen.
     var levels: [(width: Int, ordered: Bool, list: Int)] = []
@@ -192,12 +283,16 @@ private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>) ->
         lists.append((nested: levels.count > 1, items: p.isOrdered ? [(i, p)] : []))
     }
     var deltas: [Int: Int] = [:]
-    for list in lists where !list.items.isEmpty {
-        var number = list.nested ? 1 : list.items.compactMap(\.prefix.number).min() ?? 1
+    for list in lists {
+        guard let head = list.items.first?.prefix else { continue }
+        // The first item says how the list counts, and with what after the label.
+        let style = head.style ?? .decimal
+        var number = list.nested ? 1 : list.items.compactMap { style.value(of: $0.prefix.label) }.min() ?? 1
+        if let first = list.items.first, typed.contains(first.line) { number = head.number ?? number }
         for (i, p) in list.items {
             defer { number += 1 }
-            guard p.number != number else { continue }
-            let marker = "\(number)\(p.delimiter)"
+            let marker = style.label(number) + String(head.delimiter)
+            guard p.marker != marker else { continue }
             lines[i] = p.indent + marker + String(lines[i].dropFirst(p.indent.count + p.marker.count))
             deltas[i] = marker.count - p.marker.count
         }
@@ -213,7 +308,7 @@ private func numberLists(_ lines: inout [String], in range: ClosedRange<Int>) ->
 /// renumbered: a note is the user's file, and a list elsewhere in it that they numbered by hand is
 /// theirs.
 private func renumbered(_ r: (text: String, selection: Range<String.Index>),
-                        touching touched: [Int]) -> (text: String, selection: Range<String.Index>) {
+                        touching touched: [Int], typed: Set<Int> = []) -> (text: String, selection: Range<String.Index>) {
     var lines = splitLines(r.text)
     let starts = lineStarts(lines)
     var deltas: [Int: Int] = [:]
@@ -223,7 +318,7 @@ private func renumbered(_ r: (text: String, selection: Range<String.Index>),
         while a > 0, isInList(lines[a - 1]) { a -= 1 }
         while b < lines.count - 1, isInList(lines[b + 1]) { b += 1 }
         done.insert(integersIn: a...b)
-        deltas.merge(numberLists(&lines, in: a...b)) { $1 }
+        deltas.merge(numberLists(&lines, in: a...b, typed: typed)) { $1 }
     }
     guard !deltas.isEmpty else { return r }
     let (lo, hi) = charOffsets(r.text, r.selection)
@@ -284,6 +379,37 @@ public func continueList(_ text: String, selection: Range<String.Index>) -> (tex
         return carry(q)
     }
     return nil
+}
+
+// MARK: - Typing a marker: restyle the list
+
+/// Typing a new marker on the first item of a list — `a. ` where `1. ` was — restyles the rest of the
+/// list to match. Nil unless the caret sits just after a complete ordered marker on the first item of
+/// its list and the list's labels then change, meaning the keystroke should stand as typed.
+///
+/// Only the first item: that is the one that says how a list counts (`numberLists`), so it is the one
+/// where retyping a marker is a request. A different label typed further down is left alone until an
+/// edit that reshapes the list renumbers it.
+public func restyleList(_ text: String, selection: Range<String.Index>) -> (text: String, selection: Range<String.Index>)? {
+    guard selection.isEmpty else { return nil }
+    let lines = splitLines(text)
+    let starts = lineStarts(lines)
+    let (lo, _) = charOffsets(text, selection)
+    let li = lineIndex(starts, lo)
+    guard let p = markdownListPrefix(of: lines[li]), p.isOrdered,
+          lo - starts[li] == p.indent.count + p.marker.count + p.spacing.count else { return nil }
+    let width = nestingWidth(p.indent)
+    var i = li - 1
+    while i >= 0, isInList(lines[i]) {
+        if let above = markdownListPrefix(of: lines[i]) {
+            let w = nestingWidth(above.indent)
+            if w == width, above.isOrdered { return nil }   // an item before it in the same list
+            if w <= width { break }
+        }
+        i -= 1
+    }
+    let r = renumbered(result(text, lo, lo), touching: [li], typed: [li])
+    return r.text == text ? nil : r
 }
 
 // MARK: - Tab: indent and outdent
@@ -544,7 +670,7 @@ public func deleteLines(_ text: String, selection: Range<String.Index>) -> (text
     if lines.isEmpty { lines = [""] }
     if let head, headStartsList, first < lines.count,
        let next = markdownListPrefix(of: lines[first]), next.isOrdered, next.indent == head.indent {
-        lines[first] = next.indent + "\(head.number ?? 1)\(next.delimiter)"
+        lines[first] = next.indent + head.marker
             + String(lines[first].dropFirst(next.indent.count + next.marker.count))
     }
     let landing = min(first, lines.count - 1)

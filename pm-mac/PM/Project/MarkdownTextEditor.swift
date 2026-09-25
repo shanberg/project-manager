@@ -1424,6 +1424,11 @@ final class ShortcutTextView: NSTextView {
             return
         }
         super.insertText(string, replacementRange: replacementRange)
+        // The space that finishes `a. ` over what was `1. ` restyles the list it starts. Both are one
+        // keystroke, so one ⌘Z takes back both: the space and the new labels.
+        if typed == " ", !hasMarkedText() {
+            applyIfPossible { restyleList($0, selection: $1) }
+        }
     }
 
     /// Whether a paste is this view's own business rather than `NSTextView`'s: a picture, which the

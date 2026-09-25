@@ -113,4 +113,82 @@ final class ListNumberingTests: XCTestCase {
     func testTabIndentedNotesNestTheSameWay() {
         XCTAssertEqual(tab("1. a\n\t1. x\n2. b|"), "1. a\n\t1. x\n  2. b|")
     }
+
+    // MARK: Styles
+
+    func testRetypingTheFirstNumberAsALetterLettersTheList() {
+        XCTAssertEqual(enter("  a. x|\n  2. y\n  3. z"), "  a. x\n  b. |\n  c. y\n  d. z")
+    }
+
+    func testALetteredSublistUnderANumberedList() {
+        XCTAssertEqual(enter("1. a\n  a. x|\n2. b"), "1. a\n  a. x\n  b. |\n2. b")
+        XCTAssertEqual(tab("1. a\n  a. x\n2. y|\n3. b"), "1. a\n  a. x\n  b. y|\n2. b")
+    }
+
+    func testRomanNumerals() {
+        XCTAssertEqual(enter("i. a|"), "i. a\nii. |")
+        XCTAssertEqual(enter("i. a\nii. b\niii. c\niv. d|"), "i. a\nii. b\niii. c\niv. d\nv. |")
+        XCTAssertEqual(enter("I) a|\nII) b"), "I) a\nII) |\nIII) b")
+    }
+
+    func testAnHIsFollowedByAnI() {
+        XCTAssertEqual(enter("h. a|"), "h. a\ni. |")
+    }
+
+    func testTheFirstItemsDelimiterAndCaseCarry() {
+        XCTAssertEqual(enter("A) a|\n2. b"), "A) a\nB) |\nC) b")
+    }
+
+    func testDeletingTheFirstLetteredItemKeepsTheListAtA() {
+        XCTAssertEqual(run("a. x|\nb. y\nc. z") { deleteLines($0, selection: $1) }, "a. y|\nb. z")
+    }
+
+    func testLettersPastZGoOnInNumbers() {
+        XCTAssertEqual(MarkdownListStyle.lowerAlpha.label(26), "z")
+        XCTAssertEqual(MarkdownListStyle.lowerAlpha.label(27), "27")
+        XCTAssertEqual(MarkdownListStyle.upperRoman.label(14), "XIV")
+    }
+
+    func testProseThatLooksLikeAMarkerIsNotAList() {
+        for line in ["Mr. Smith", "OK. fine", "e.g. this", "mix. it", "DC. area", "vv. no", "abc. no"] {
+            XCTAssertNil(markdownListPrefix(of: line), line)
+        }
+        for line in ["a. x", "Z) x", "iv. x", "XX. x", "1) x"] {
+            XCTAssertNotNil(markdownListPrefix(of: line), line)
+        }
+    }
+
+    func testLetteredItemsHangInTheGutter() {
+        let text = "b. item"
+        let block = markdownBlocks(in: text).first
+        XCTAssertEqual(block.map { String(text[$0.marker]) }, "b. ")
+    }
+
+    // MARK: Retyping a marker
+
+    private func typed(_ marked: String) -> String? { run(marked) { restyleList($0, selection: $1) } }
+
+    func testTypingALetterOverTheFirstNumberRestylesTheList() {
+        XCTAssertEqual(typed("1. a\n  a. |x\n  2. y\n    1. deeper\n  3. z\n2. b"),
+                       "1. a\n  a. |x\n  b. y\n    1. deeper\n  c. z\n2. b")
+    }
+
+    func testRetypingALaterItemIsLeftAlone() {
+        XCTAssertNil(typed("1. a\nb. |x\n3. c"))
+    }
+
+    func testNothingToRestyleStandsAsTyped() {
+        XCTAssertNil(typed("1. |x\n2. y"))
+        XCTAssertNil(typed("a. x|\n2. y"))   // the caret isn't at the marker
+        XCTAssertNil(typed("- |x\n2. y"))
+    }
+
+    func testTheFirstItemUnderABulletCounts() {
+        XCTAssertEqual(typed("- a\n  i. |x\n  2. y"), "- a\n  i. |x\n  ii. y")
+    }
+
+    func testATypedStartingNumberIsKept() {
+        XCTAssertEqual(typed("5. |x\n2. y\n3. z"), "5. |x\n6. y\n7. z")
+        XCTAssertEqual(typed("  3. |x\n  2. y"), "  3. |x\n  4. y")
+    }
 }

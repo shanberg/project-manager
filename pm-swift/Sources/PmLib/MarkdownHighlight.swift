@@ -36,7 +36,7 @@ public struct MarkdownSpan: Equatable {
 private enum MarkdownRE {
     static let heading = try? NSRegularExpression(pattern: #"(?m)^(#{1,6}[ \t]+)(.*)$"#)
     static let blockquote = try? NSRegularExpression(pattern: #"(?m)^([ \t]*>[ \t]?)(.*)$"#)
-    static let list = try? NSRegularExpression(pattern: #"(?m)^([ \t]*(?:[-*+]|\d{1,9}\.)[ \t]+)"#)
+    static let list = try? NSRegularExpression(pattern: #"(?m)^([ \t]*(?:[-*+]|\d{1,9}[.)]|[A-Za-z][.)]|[ivx]{2,6}[.)]|[IVX]{2,6}[.)])[ \t]+)"#)
     static let code = try? NSRegularExpression(pattern: #"`([^`\n]+)`"#)
     // The label is allowed to be empty so `![](shot.png)` — an image pasted by something that had no
     // name for it — is still a construct rather than four stray characters of prose.
@@ -389,13 +389,12 @@ private func classifyBlock(_ text: String, _ line: Range<String.Index>,
         let space = (after.first == " " || after.first == "\t") ? 1 : 0
         return block(.blockquote, markerLength: 1 + space)
     }
-    // `-`/`*`/`+` or `1.`, then at least one space.
+    // `-`/`*`/`+` or an ordered marker — `1.`, `a)`, `iv.` — then at least one space.
     var markerLength = 0
     if let first = rest.first, first == "-" || first == "*" || first == "+" {
         markerLength = 1
     } else {
-        let digits = rest.prefix { $0.isNumber }.count
-        if digits >= 1, digits <= 9, rest.dropFirst(digits).first == "." { markerLength = digits + 1 }
+        markerLength = markdownOrderedMarkerLength(rest) ?? 0
     }
     if markerLength > 0 {
         let after = rest.dropFirst(markerLength)
