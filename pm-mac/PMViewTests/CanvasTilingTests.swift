@@ -226,14 +226,14 @@ final class CanvasTilingTests: XCTestCase {
     func testAnUntiledBoardOffersToMakeAWorkspaceOfTheSelection() {
         for targets in [1, 6, 9] {
             XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: targets),
-                           "Create Workspace from Selection")
+                           "New Workspace from Selection")
         }
     }
 
     /// **Nothing selected is nothing to make.** A workspace is saved, named and given a tab, so one
     /// made out of wherever the board happened to be scrolled is a surprise you then have to delete.
     func testNothingSelectedHasNoWorkspaceToOffer() {
-        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 0), "Create Workspace")
+        XCTAssertEqual(CanvasTiling.commandTitle(tiled: false, targets: 0), "New Workspace")
     }
 
     /// **Inside a workspace this is the way out, whatever is picked.** Looking at one tile on its own

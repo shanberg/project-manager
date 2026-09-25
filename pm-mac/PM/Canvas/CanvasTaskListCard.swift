@@ -304,7 +304,7 @@ struct CanvasTaskListCard: View {
     }
 
     private var emptyMessage: String {
-        if case .board = model.spec.projects, model.boardProjects.isEmpty { return "No project cards on this board." }
+        if case .board = model.spec.projects, model.boardProjects.isEmpty { return "No project cards on this canvas." }
         switch model.spec.kind {
         case .waiting: return "Nothing is waiting."
         case .search:

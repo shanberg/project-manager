@@ -49,7 +49,7 @@ final class CanvasHeaderModel {
     /// stopped moving, by which time you have either clicked or gone somewhere else. What it was
     /// telling you — how many cards are about to become a workspace — the menus say in a place you are
     /// already reading. This is now the title of that menu item and nothing else.
-    var tileTitle = "Create Workspace"
+    var tileTitle = "New Workspace"
     /// Whether ⌘Return has anything to do. Dim on a canvas with nothing selected — a workspace is made
     /// out of a selection or not at all.
     var canTile = false

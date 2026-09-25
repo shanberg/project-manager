@@ -1404,7 +1404,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         }
     }
 
-    /// View ▸ Sort Items By (docs/items.md D4).
+    /// View ▸ Sort Cards By (docs/items.md D4).
     @objc func sortCanvasBy(_ sender: Any?) {
         guard let order = (sender as? NSMenuItem)?.representedObject as? CanvasItemSort else { return }
         sort = order

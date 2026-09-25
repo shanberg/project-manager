@@ -27,7 +27,7 @@ final class SettingsWindowController: NSWindowController {
                                      symbol: "note.text", identifier: "notes"))
         tabs.addTabViewItem(Self.tab(TimeSettingsView(), title: "Time",
                                      symbol: "clock", identifier: "time"))
-        tabs.addTabViewItem(Self.tab(BoardsSettingsView(), title: "Boards",
+        tabs.addTabViewItem(Self.tab(BoardsSettingsView(), title: "Canvas",
                                      symbol: "rectangle.3.group", identifier: "boards"))
         tabs.addTabViewItem(Self.tab(ShortcutsSettingsView(), title: "Shortcuts",
                                      symbol: "keyboard", identifier: "shortcuts"))

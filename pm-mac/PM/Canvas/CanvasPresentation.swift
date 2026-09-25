@@ -24,7 +24,7 @@ enum CanvasPresentation: String, Codable, CaseIterable {
     /// What the View menu calls it. The Finder's words, because it is the Finder's question.
     var title: String {
         switch self {
-        case .board: return "as Board"
+        case .board: return "as Freeform"
         case .list: return "as List"
         case .grid: return "as Grid"
         }

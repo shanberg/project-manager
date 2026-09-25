@@ -331,16 +331,16 @@ enum MainMenu {
 
     /// Filling the window with a card, or with a handful of them.
     ///
-    /// One command at both ends: with one card selected Create Workspace is "show me this properly",
+    /// One command at both ends: with one card selected New Workspace is "show me this properly",
     /// which otherwise means zooming in and hunting for it, and with six it is a tiled view of the six.
     /// Escape backs out.
     private static func canvasTilingItems(_ menu: NSMenu) {
         // **No key equivalent, and it had ⌘↩.** Removed 2026-09-23: moving to and from the canvas is the
         // tab bar's, ⌘− and ⌥⌘C, and ⌘↩ goes back to the page in a web card.
-        menu.addItem(withTitle: "Create Workspace",
+        menu.addItem(withTitle: "New Workspace",
                      action: #selector(CanvasBoardView.tileSelection(_:)),
                      keyEquivalent: "")
-        // **The temporary one.** Create Workspace makes a workspace or leaves one; this fills the room with a single
+        // **The temporary one.** New Workspace makes a workspace; this fills the room with a single
         // tile for as long as you want it and puts the workspace back afterwards — maximizing a window
         // rather than narrowing the view. The ⌥ layer is one of the few web pages do not claim, which
         // matters on a board whose tiles are web apps.
@@ -375,7 +375,7 @@ enum MainMenu {
         menu.addItem(withTitle: "Pin Tile Width",
                      action: #selector(CanvasBoardView.togglePinTileSize(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Remove from Tiled View",
+        menu.addItem(withTitle: "Remove from Workspace",
                      action: #selector(CanvasBoardView.removeTile(_:)),
                      keyEquivalent: "")
         // Remove's other half. Its list is the board's, so it is filled as it opens rather than here —
@@ -385,7 +385,7 @@ enum MainMenu {
         menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = existing
         // The same, by where the cards sit rather than by name — ⌥B on the board itself. Retitled by
         // `validateUserInterfaceItem` to be the way back while it is up.
-        menu.addItem(withTitle: "Pick Cards on Board",
+        menu.addItem(withTitle: "Pick Cards on Canvas",
                      action: #selector(CanvasBoardView.pickCardsOnBoard(_:)),
                      keyEquivalent: "")
         // No "Show Canvas" here: View ▸ Show Canvas (⌥⌘C) is the one, and it leaves a workspace too.
@@ -552,8 +552,8 @@ enum MainMenu {
         }
         // The order the lenses read in (docs/items.md D4), in a submenu because it is four answers to
         // one question and because it is dimmed whole while a board is up.
-        let sorts = NSMenu(title: "Sort Items By")
-        menu.addItem(withTitle: "Sort Items By", action: nil, keyEquivalent: "").submenu = sorts
+        let sorts = NSMenu(title: "Sort Cards By")
+        menu.addItem(withTitle: "Sort Cards By", action: nil, keyEquivalent: "").submenu = sorts
         for order in CanvasItemSort.allCases {
             let item = sorts.addItem(withTitle: order.title,
                                      action: #selector(CanvasPaneController.sortCanvasBy(_:)),

@@ -4,7 +4,7 @@ import PmLib
 /// The board as a window manager: filling the window with a handful of cards, and the small grammar
 /// that applies while it is doing so.
 ///
-/// **Create Workspace is one command at both ends.** With one card selected it fills the window with that card,
+/// **New Workspace is one command at both ends.** With one card selected it fills the window with that card,
 /// which is today's most tedious manoeuvre on a board — zoom in, pan, find it. With six selected it is a
 /// grid. Fullscreen and tile are the same idea at different counts, and making them one key is what
 /// makes it worth learning.
@@ -28,7 +28,7 @@ extension CanvasBoardView {
 
     // MARK: Entering and leaving
 
-    /// Create Workspace. Make a workspace out of the selection — or, inside one, go back to the canvas.
+    /// New Workspace. Make a workspace out of the selection — or, inside one, go back to the canvas.
     ///
     /// No key equivalent since 2026-09-23; it was ⌘↩.
     ///
@@ -391,7 +391,7 @@ extension CanvasBoardView {
     /// `.layoutChanged` is what the system uses for a window rearranging itself, which is exactly what
     /// this is.
     private func announceTiling() {
-        setAccessibilityLabel(tilingSummary.map { "Canvas, tiled, \($0.long)" } ?? "Canvas")
+        setAccessibilityLabel(tilingSummary.map { "Workspace, \($0.long)" } ?? "Canvas")
         NSAccessibility.post(element: self, notification: .layoutChanged)
     }
 

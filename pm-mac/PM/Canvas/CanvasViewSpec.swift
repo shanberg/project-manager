@@ -144,7 +144,7 @@ struct CanvasViewSpec: Equatable {
         var title: String {
             switch self {
             case .everything: return "All Projects"
-            case .board: return "Projects on This Board"
+            case .board: return "Projects on This Canvas"
             case .named(let names):
                 return names.count == 1
                     ? (ProjectPartOf.writtenName(in: names[0]) ?? names[0])
@@ -249,10 +249,10 @@ struct CanvasViewSpec: Equatable {
         switch kind {
         case .day: return "\(period.title), \(scope): a Folio view."
         case .waiting: return "What I'm waiting on, \(scope): a Folio view."
-        case .search: return "A search of \(projects == .board ? "this board's" : "every project's") tasks: a Folio view."
+        case .search: return "A search of \(projects == .board ? "this canvas's" : "every project's") tasks: a Folio view."
         case .leftovers: return "Tasks left open \(period.beforeTitle.lowercased()), \(scope): a Folio view."
         case .comingUp: return "What's due, \(scope): a Folio view."
-        case .projects: return "\(projects == .board ? "This board's projects" : "Every project"), and when it was last worked on: a Folio view."
+        case .projects: return "\(projects == .board ? "This canvas's projects" : "Every project"), and when it was last worked on: a Folio view."
         case .time: return "Where the time went \(period.title.lowercased()), \(scope): a Folio view."
         }
     }

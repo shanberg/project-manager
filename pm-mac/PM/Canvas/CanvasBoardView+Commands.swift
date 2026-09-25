@@ -696,8 +696,16 @@ extension CanvasBoardView {
     }
 
     private func addDeleteCard(_ menu: NSMenu) {
-        key(add(menu, selection.count > 1 ? "Delete Cards" : "Delete Card", #selector(deleteSelected)),
+        key(add(menu, Self.deleteTitle(count: selection.count,
+                                       frames: selection.allSatisfy { cardKind($0) == .frame }),
+                #selector(deleteSelected)),
             "\u{8}", modifiers: [])
+    }
+
+    /// A frame is not a card, so a selection of frames says so; a count goes in the title.
+    static func deleteTitle(count: Int, frames: Bool) -> String {
+        let noun = frames ? "Frame" : "Card"
+        return count > 1 ? "Delete \(count) \(noun)s" : "Delete \(noun)"
     }
 
     /// The block a kind of card brings to its menu — a project's, a folder's, a page's.
@@ -792,9 +800,9 @@ extension CanvasBoardView {
             // no room to become a toolbar, and not on a swipe, which on a trackpad is indistinguishable
             // from scrolling a page sideways.
             if (nodeViews[id] as? CanvasLinkNodeView)?.canGoBack == true {
-                add(menu, many("Back", "Back on %d Cards"), #selector(goBackInLink))
+                add(menu, many("Back", "Back on %d Pages"), #selector(goBackInLink))
             }
-            add(menu, many("Reload", "Reload %d Cards"), #selector(reloadLink))
+            add(menu, many("Reload", "Reload %d Pages"), #selector(reloadLink))
             if let card = nodeViews[id] as? CanvasLinkNodeView {
                 menu.addItem(.separator())
                 // These three are per *site*, not per card, so they count sites: four cards on one
@@ -1203,7 +1211,7 @@ extension CanvasBoardView {
         let cards = selectedFolderCards
         guard !cards.isEmpty else { return }
         let options = cards.map { CanvasFolderOptions.of($0.node) }
-        let view = NSMenu(title: "View")
+        let view = NSMenu(title: "Show As")
         for layout in CanvasFolderView.allCases {
             let entry = add(view, layout.title, #selector(setFolderView(_:)))
             entry.representedObject = layout.rawValue
@@ -1216,7 +1224,7 @@ extension CanvasBoardView {
             entry.representedObject = sort.rawValue
             entry.state = options.allSatisfy { $0.sort == sort } ? .on : .off
         }
-        menu.addItem(withTitle: "View", action: nil, keyEquivalent: "").submenu = view
+        menu.addItem(withTitle: "Show As", action: nil, keyEquivalent: "").submenu = view
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -1321,7 +1329,7 @@ extension CanvasBoardView {
     /// thing you most often want from one is to open it, reload it or copy its address.
     ///
     /// Under a section header, which is what the header is for: the two blocks act on different objects
-    /// and "Delete Card" sitting a line above "Leave Tiled View" without one is a menu inviting the
+    /// and "Delete Card" sitting a line above "Remove from Workspace" without one is a menu inviting the
     /// mistake. `buildCardMenu` gets the matching header inserted above it by the caller.
     ///
     /// **Remove, not close**, and it is the last item for the same reason Delete is last everywhere
@@ -1369,11 +1377,11 @@ extension CanvasBoardView {
 
         menu.addItem(.separator())
         if wholeTile {
-            add(menu, "Remove Tile from Tiled View", #selector(removeMenuTileWithTabs(_:)))
+            add(menu, "Remove Tile from Workspace", #selector(removeMenuTileWithTabs(_:)))
         } else {
             // The card's Delete, held back by `buildTileMenu` so that both removals end the menu.
             addDeleteCard(menu)
-            add(menu, "Remove from Tiled View", #selector(removeMenuTile(_:)))
+            add(menu, "Remove from Workspace", #selector(removeMenuTile(_:)))
         }
     }
 
@@ -1446,7 +1454,7 @@ extension CanvasBoardView {
     @objc func pickCardsOnBoard(_ sender: Any?) { togglePicking() }
 
     /// What that command is called: which way it goes.
-    var pickCardsTitle: String { isPicking ? "Back to Workspace" : "Pick Cards on Board" }
+    var pickCardsTitle: String { isPicking ? "Back to Workspace" : "Pick Cards on Canvas" }
 
     /// A tile's tabs down its side or across its top — one checked item rather than two, since it is a
     /// setting of the tile's and a check says which it has.
@@ -1577,7 +1585,7 @@ extension CanvasBoardView {
         add(menu, "Select All", #selector(selectAll(_:)))
     }
 
-    /// Create Workspace, in the menu you get to by right-clicking.
+    /// New Workspace, in the menu you get to by right-clicking.
     ///
     /// The command was reachable from the View menu and from a key you had to already know, and from
     /// nowhere a pointer could find it — which for the board's largest gesture is the wrong way round.
@@ -2190,8 +2198,8 @@ extension CanvasBoardView {
     @objc private func signOutEverywhere() {
         let alert = NSAlert()
         alert.messageText = "Sign out of every site?"
-        alert.informativeText = "Web cards on every board will forget who you are, and each site will "
-            + "ask you to sign in again. Nothing on the boards themselves changes."
+        alert.informativeText = "Web cards on every canvas will forget who you are, and each site will "
+            + "ask you to sign in again. Nothing on the canvases themselves changes."
         alert.addButton(withTitle: "Sign Out")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning

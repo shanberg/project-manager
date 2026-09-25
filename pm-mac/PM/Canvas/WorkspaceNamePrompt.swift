@@ -23,7 +23,7 @@ enum WorkspaceNamePrompt {
         field.stringValue = seed
         let alert = NSAlert()
         alert.messageText = title
-        alert.informativeText = "Kept for this board, so a tab can open straight into it."
+        alert.informativeText = "Kept for this canvas, so a tab can open straight into it."
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")

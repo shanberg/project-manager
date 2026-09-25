@@ -301,7 +301,7 @@ struct CanvasDayCard: View {
     /// is done in a project, not here.
     private var emptyMessage: String {
         switch model.spec.projects {
-        case .board where model.boardProjects.isEmpty: return "No project cards on this board."
+        case .board where model.boardProjects.isEmpty: return "No project cards on this canvas."
         default:
             switch model.spec.period {
             case .today: return "No work today."

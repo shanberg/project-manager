@@ -391,7 +391,7 @@ final class CanvasItemListTests: XCTestCase {
         let header = try XCTUnwrap(headerRow)
         let menu = try XCTUnwrap(table.menu(for: press(atRow: header)))
         XCTAssertEqual(menu.items.map(\.title),
-                       ["Sort Items By"] + CanvasItemSort.allCases.map(\.title))
+                       ["Sort Cards By"] + CanvasItemSort.allCases.map(\.title))
         XCTAssertEqual(menu.items.first(where: { $0.state == .on })?.title, "Reading Order")
 
         let byName = try XCTUnwrap(menu.items.first { $0.title == "Name" })

@@ -93,7 +93,7 @@ struct CanvasTileCapsule: View {
     /// the toggle's direction is the same fact its glyph is already showing.
     private func maximizeHelp(_ tile: CanvasHeaderModel.TileControls) -> String {
         switch (tile.isMaximized, tile.isCard) {
-        case (true, true): return "Put the board back"
+        case (true, true): return "Put the canvas back"
         case (false, true): return "Fill the window with this card"
         case (true, false): return "Put the workspace back"
         case (false, false): return "Fill the window with this tile"

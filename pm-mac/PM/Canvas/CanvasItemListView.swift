@@ -324,7 +324,7 @@ final class CanvasItemListView: NSView {
     /// would press, and because this menu would otherwise be nothing at all.
     fileprivate func sortMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(.sectionHeader(title: "Sort Items By"))
+        menu.addItem(.sectionHeader(title: "Sort Cards By"))
         for order in CanvasItemSort.allCases {
             let item = menu.addItem(withTitle: order.title, action: #selector(sortPicked(_:)),
                                     keyEquivalent: "")
