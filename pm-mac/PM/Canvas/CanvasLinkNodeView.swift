@@ -115,7 +115,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
-        setContent(face)
+        // Out to the card's edge, under its border: a page is opaque to its edges. See `setContent`.
+        setContent(face, insets: NSEdgeInsets())
         showPlaceholder()
         // What this card was last showing, from this session or the last one. A board opened cold used
         // to come up as a screen of globes and fill in over the next several seconds as the budget

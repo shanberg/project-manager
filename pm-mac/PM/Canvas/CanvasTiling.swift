@@ -124,7 +124,7 @@ enum CanvasTiling {
 
         /// The same corners, `distance` further in. A curve inset from another curve stays parallel to
         /// it only when its radius drops by the inset; equal radii pinch shut at the corners. Used for
-        /// the clip inside the hairline — see `CanvasNodeView.layout`.
+        /// the hairline drawn inside a card's edge — see `CanvasNodeView.drawRim`.
         func inset(by distance: Double) -> Radii {
             Radii(topLeft: max(0, topLeft - distance), topRight: max(0, topRight - distance),
                   bottomRight: max(0, bottomRight - distance), bottomLeft: max(0, bottomLeft - distance))

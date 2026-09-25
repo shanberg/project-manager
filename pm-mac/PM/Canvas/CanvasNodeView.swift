@@ -79,15 +79,23 @@ class CanvasNodeView: NSView {
         clip.layer?.cornerCurve = .continuous
         clip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clip)
-        // Inset by the hairline the card draws, so the content is clipped to the *inside* of the
-        // border rather than over it — and so the clip's corner can be concentric with the card's
-        // rather than a second curve of a different radius sitting on top of the first.
-        NSLayoutConstraint.activate([
-            clip.topAnchor.constraint(equalTo: topAnchor, constant: CanvasNodeView.hairline),
-            clip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CanvasNodeView.hairline),
-            clip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CanvasNodeView.hairline),
-            clip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CanvasNodeView.hairline),
-        ])
+        // The card's own shape, out to its edge — **not** inset by the hairline, which it used to be.
+        // Two edges meant to meet exactly, the inside of the border and the outside of the content,
+        // are each rounded to the pixel on their own, and at any zoom or frame that puts them between
+        // pixels they miss by one: a device pixel of the card's surface showing between the border
+        // and a page, a near-white line round every dark page in light appearance. The content now
+        // runs under the border instead, and `rim` draws the border over it — see `setContent`.
+        rim.card = self
+        rim.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rim)
+        for edge in [clip, rim] {
+            NSLayoutConstraint.activate([
+                edge.topAnchor.constraint(equalTo: topAnchor),
+                edge.leadingAnchor.constraint(equalTo: leadingAnchor),
+                edge.trailingAnchor.constraint(equalTo: trailingAnchor),
+                edge.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
     }
 
     /// Holds the card's content and rounds it off. See the shadow note in `init`.
@@ -118,8 +126,18 @@ class CanvasNodeView: NSView {
         override var isFlipped: Bool { true }
     }
 
-    /// The card's border, and so the width the clip is inset by.
+    /// The card's border, drawn over the content by `rim`.
     static let hairline: Double = 1
+
+    /// The border, above `clip` so it lies over whatever runs under it. Takes no clicks.
+    private let rim = Rim()
+
+    private final class Rim: NSView {
+        weak var card: CanvasNodeView?
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func draw(_ dirty: NSRect) { card?.drawRim() }
+    }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -426,6 +444,7 @@ class CanvasNodeView: NSView {
         drawn = now
         needsLayout = true
         needsDisplay = true
+        rim.needsDisplay = true
     }
 
     override func draw(_ dirty: NSRect) {
@@ -433,12 +452,16 @@ class CanvasNodeView: NSView {
     }
 
     private func drawBody() {
+        CanvasPalette.card.setFill()
+        CanvasNodeView.path(in: bounds, radii: chromeRadii).fill()
+    }
+
+    /// The border, for `rim`: a hairline just inside the card's edge, over the content.
+    fileprivate func drawRim() {
         let path = CanvasNodeView.path(in: bounds.insetBy(dx: 0.5, dy: 0.5),
                                        radii: chromeRadii.inset(by: 0.5))
-        CanvasPalette.card.setFill()
-        path.fill()
         chromeBorder.setStroke()
-        path.lineWidth = 1
+        path.lineWidth = CanvasNodeView.hairline
         path.stroke()
     }
 
@@ -495,16 +518,15 @@ class CanvasNodeView: NSView {
         let shape = Shape(bounds: bounds, radii: radii)
         guard shape != shaped else { return }
         shaped = shape
-        // Concentric: a curve inset from another curve keeps a constant gap only when its radius is
-        // reduced by that inset. Equal radii would leave the border pinching shut at the corners.
-        let inside = radii.inset(by: CanvasNodeView.hairline)
+        // The clip is the card's own shape — see `init` — so its corners are the card's.
+        rim.needsDisplay = true
 
         if radii.isUniform {
             // A card, and the cheap path: the layer rounds itself, keeps `.continuous` — which a mask
             // cut from a path cannot have — and costs nothing to resize.
             clip.layer?.mask = nil
             clipMask = nil
-            clip.layer?.cornerRadius = inside.topLeft
+            clip.layer?.cornerRadius = radii.topLeft
         } else {
             // A tile with a seam on one side and the frame on the other. `cornerRadius` is one number
             // and `maskedCorners` only turns that one number on and off, so the only way to hold two
@@ -513,7 +535,7 @@ class CanvasNodeView: NSView {
             let mask = clipMask ?? CAShapeLayer()
             clipMask = mask
             mask.frame = clip.bounds
-            mask.path = CanvasNodeView.path(in: clip.bounds, radii: inside).cgPath
+            mask.path = CanvasNodeView.path(in: clip.bounds, radii: radii).cgPath
             if clip.layer?.mask !== mask { clip.layer?.mask = mask }
         }
 
@@ -869,6 +891,9 @@ class CanvasNodeView: NSView {
         return lentContent
     }
 
+    /// What the content was last put in with, so content back from a satellite goes back the same.
+    private var contentInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)
+
     /// Take the content back from its satellite and put it in the card again.
     func takeBack() {
         guard let content = lentContent else { return }
@@ -877,7 +902,7 @@ class CanvasNodeView: NSView {
         lentContent = nil
         if wasEngaged { engage(false) }
         content.removeFromSuperview()
-        setContent(content)
+        setContent(content, insets: contentInsets)
         // Back at the board's zoom, whatever that is.
         if isSimplified { simplificationChanged() }
     }
@@ -889,9 +914,11 @@ class CanvasNodeView: NSView {
     /// unclipped for the rest of its life — invisible for content that stops short of the corners, and
     /// a set of square corners on a rounded card for content that doesn't.
     ///
-    /// `insets` are still measured from the card's own edge, as the call sites read them; the hairline
-    /// the clip is already inset by is taken off here.
+    /// `insets` are measured from the card's own edge. The default keeps content inside the border;
+    /// content that is opaque to its edges — a page — passes zero and runs under it, which is the only
+    /// way its edge and the border's can't disagree about a pixel. See `init`.
     func setContent(_ view: NSView, insets: NSEdgeInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)) {
+        contentInsets = insets
         // Out in a satellite: the new content goes there, in place of what was showing.
         if let lentTo {
             linkZones.removeAll()
@@ -906,14 +933,13 @@ class CanvasNodeView: NSView {
         // cannot be relied on to say goodbye through `onDisappear`. The new content reports its own.
         linkZones.removeAll()
         linkSpace = view
-        let hairline = CanvasNodeView.hairline
         view.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(view)
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: clip.topAnchor, constant: insets.top - hairline),
-            view.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: insets.left - hairline),
-            view.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -(insets.right - hairline)),
-            view.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -(insets.bottom - hairline)),
+            view.topAnchor.constraint(equalTo: clip.topAnchor, constant: insets.top),
+            view.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: insets.left),
+            view.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -insets.right),
+            view.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -insets.bottom),
         ])
     }
 }
