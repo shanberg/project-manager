@@ -55,7 +55,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private var markWidth: NSLayoutConstraint?
     private let titleLabel = NSTextField(labelWithString: "")
     private let hostLabel = NSTextField(labelWithString: "")
-    private let tabs = NSStackView()
+    private let tabs = CanvasSatelliteTabs()
+    private var barHeight: NSLayoutConstraint?
+    private var backLeading: NSLayoutConstraint?
     private let back = NSButton()
     private let reload = NSButton()
     private var pageWatches: [NSKeyValueObservation] = []
@@ -93,9 +95,17 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 320, height: 240)
         window.tabbingMode = .disallowed
+        // An empty compact toolbar, for its title bar: the traffic lights centred in a band the height of
+        // the header, as the project window's unified one centres them in its own. See `fitToTitleBar`.
+        let toolbar = NSToolbar(identifier: "PMSatelliteTitlebar")
+        toolbar.allowsUserCustomization = false
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
         super.init(window: window)
         window.delegate = self
         window.contentView = content()
+        fitToTitleBar()
         watchLinks()
     }
 
@@ -171,8 +181,6 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         remember()
     }
 
-    @objc private func tabClicked(_ sender: NSButton) { showTab(sender.tag) }
-
     // MARK: The window
 
     private func content() -> NSView {
@@ -213,8 +221,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         let markWidth = mark.widthAnchor.constraint(equalToConstant: 16)
         self.markWidth = markWidth
         NSLayoutConstraint.activate([markWidth, mark.heightAnchor.constraint(equalToConstant: 16)])
-        tabs.orientation = .horizontal
-        tabs.spacing = 2
+        tabs.onSelect = { [weak self] in self?.showTab($0) }
         tabs.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         let words = NSStackView(views: [mark, titleLabel, hostLabel, tabs])
         words.orientation = .horizontal
@@ -228,19 +235,24 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         root.addSubview(stage)
         root.addSubview(bar)
         for view in [line, back, reload, home, words] as [NSView] { bar.addSubview(view) }
-        // Clear of the traffic lights, which sit at the leading edge of the title bar.
-        let lights = window?.standardWindowButton(.zoomButton).map { $0.frame.maxX + 14 } ?? 78
+        // Clear of the traffic lights, which sit at the leading edge of the title bar; measured again once
+        // the window has its title bar (`fitToTitleBar`).
+        let lights: CGFloat = 78
+        let barHeight = bar.heightAnchor.constraint(equalToConstant: Self.headerHeight)
+        let backLeading = back.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: lights)
+        self.barHeight = barHeight
+        self.backLeading = backLeading
         let centred = words.centerXAnchor.constraint(equalTo: bar.centerXAnchor)
         centred.priority = .defaultLow
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: root.topAnchor),
             bar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            bar.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            barHeight,
             line.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
             line.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
             line.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-            back.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: lights),
+            backLeading,
             back.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             reload.leadingAnchor.constraint(equalTo: back.trailingAnchor, constant: 2),
             reload.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
@@ -248,7 +260,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             home.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             centred,
             words.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            words.leadingAnchor.constraint(greaterThanOrEqualTo: bar.leadingAnchor, constant: lights + 64),
+            words.leadingAnchor.constraint(greaterThanOrEqualTo: back.leadingAnchor, constant: 64),
             words.trailingAnchor.constraint(lessThanOrEqualTo: home.leadingAnchor, constant: -12),
             stage.topAnchor.constraint(equalTo: bar.bottomAnchor),
             stage.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -272,30 +284,31 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         button.heightAnchor.constraint(equalToConstant: 24).isActive = true
     }
 
-    /// One tab per card, when there is more than one: its icon and name, the one showing in the label
-    /// colour and bold and the rest in grey, as a tile's own strip draws them.
+    /// One tab per card, when there is more than one: its icon and name. See `CanvasSatelliteTabs`.
     private func rebuildTabs() {
-        tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        guard cards.count > 1 else { return }
-        for (index, card) in cards.enumerated() {
-            let described = board?.describeCard(card.node.id)
-            let showing = index == shown
-            let button = NSButton(title: described?.title ?? "Card", target: self, action: #selector(tabClicked(_:)))
-            button.tag = index
-            button.bezelStyle = .accessoryBarAction
-            button.isBordered = showing
-            button.font = .systemFont(ofSize: 12, weight: showing ? .semibold : .regular)
-            button.contentTintColor = showing ? .labelColor : .secondaryLabelColor
-            button.image = Self.symbol(for: described?.kind)
-            button.imagePosition = .imageLeading
-            button.lineBreakMode = .byTruncatingTail
-            button.toolTip = described?.title
-            button.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
-            button.setContentCompressionResistancePriority(.defaultLow - 2, for: .horizontal)
-            button.setAccessibilityValue(showing ? "Showing" : nil)
-            tabs.addArrangedSubview(button)
+        guard cards.count > 1 else {
+            tabs.show([], selected: 0)
+            tabs.isHidden = true
+            return
         }
+        tabs.isHidden = false
+        tabs.show(cards.map { card in
+            let described = board?.describeCard(card.node.id)
+            return .init(title: described?.title ?? "Card", image: Self.symbol(for: described?.kind))
+        }, selected: shown)
     }
+
+    /// The header as tall as the title bar, and its first control clear of the traffic lights — so the
+    /// lights sit centred in the header rather than high in it. Asked once the window has its toolbar,
+    /// and again when it comes out of full screen, which lays the title bar out anew.
+    private func fitToTitleBar() {
+        guard let window, let metrics = window.titlebarButtonMetrics(), !window.styleMask.contains(.fullScreen)
+        else { return }
+        barHeight?.constant = (metrics.buttonCenterY * 2).rounded()
+        backLeading?.constant = metrics.leadingInset + 2
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) { fitToTitleBar() }
 
     private static func symbol(for kind: CanvasItem.Kind?) -> NSImage? {
         let name: String
@@ -662,5 +675,196 @@ extension CanvasBoardView {
         let pointer = Self.pointerOnScreen()
         return NSRect(x: pointer.x - min(120, size.width / 2), y: pointer.y - size.height + 14,
                       width: size.width, height: size.height)
+    }
+}
+
+/// A satellite's tabs: one per card, its icon and name, and a chip under the one showing.
+///
+/// **The chip is a view of its own and travels**, 0.2s from the tab that was showing to the one that is,
+/// the way a tile's strip slides its chip (`CanvasTileHandleView.chipRect`). And the names keep one
+/// weight, so a tab is the same width chosen or not and the row never shifts under the pointer: which is
+/// showing is said by the chip and the colour of the name.
+///
+/// **Raised, not tinted.** On the board the chip is a wash of the label colour on a card, which reads;
+/// on a project's coloured wash the same grey all but vanished. So here it is the control-background
+/// colour, lifted by a rim and a small shadow — a segmented control's chosen segment.
+@MainActor
+final class CanvasSatelliteTabs: NSView {
+    struct Tab: Equatable {
+        var title: String
+        var image: NSImage?
+    }
+
+    var onSelect: (Int) -> Void = { _ in }
+    private(set) var selected = 0
+    private let row = NSStackView()
+    private let chip = CanvasSatelliteTabChip()
+    private var buttons: [CanvasSatelliteTabButton] { row.arrangedSubviews.compactMap { $0 as? CanvasSatelliteTabButton } }
+    /// Set while the chip is on its way, so a layout pass meanwhile doesn't snap it to the end.
+    private var travelling = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        row.orientation = .horizontal
+        row.spacing = 2
+        row.translatesAutoresizingMaskIntoConstraints = false
+        chip.isHidden = true
+        addSubview(chip)
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Show these tabs with this one chosen. The buttons are kept when the tabs are the same number —
+    /// a page's title changing renames its tab rather than rebuilding the row — and the chip travels
+    /// when the choice changed.
+    func show(_ tabs: [Tab], selected index: Int) {
+        let moving = index != selected && !chip.isHidden && buttons.count == tabs.count
+        if buttons.count != tabs.count {
+            row.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            for i in tabs.indices {
+                let button = CanvasSatelliteTabButton()
+                button.tag = i
+                button.target = self
+                button.action = #selector(clicked(_:))
+                row.addArrangedSubview(button)
+            }
+        }
+        selected = index
+        for (i, (button, tab)) in zip(buttons, tabs).enumerated() {
+            button.set(tab.title, image: tab.image, showing: i == index)
+        }
+        chip.isHidden = tabs.isEmpty
+        layoutSubtreeIfNeeded()
+        guard let target = chipFrame else { return }
+        guard moving else {
+            if !travelling { chip.frame = target }
+            return
+        }
+        travelling = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            chip.animator().frame = target
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.travelling = false
+                self?.needsLayout = true
+            }
+        })
+    }
+
+    private var chipFrame: NSRect? {
+        guard buttons.indices.contains(selected) else { return nil }
+        return convert(buttons[selected].bounds, from: buttons[selected])
+    }
+
+    override func layout() {
+        super.layout()
+        if !travelling, let target = chipFrame { chip.frame = target }
+    }
+
+    @objc private func clicked(_ sender: NSButton) { onSelect(sender.tag) }
+}
+
+/// The chip under the tab showing. See `CanvasSatelliteTabs`.
+@MainActor
+final class CanvasSatelliteTabChip: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 0.5
+        layer?.shadowOffset = CGSize(width: 0, height: -1)
+        layer?.shadowRadius = 1.5
+        layer?.masksToBounds = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateLayer() {
+        guard let layer else { return }
+        let dark = effectiveAppearance.isDark
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer.backgroundColor = (dark ? NSColor.white.withAlphaComponent(0.2)
+                                          : NSColor.white.withAlphaComponent(0.92)).cgColor
+            layer.borderColor = (dark ? NSColor.white.withAlphaComponent(0.14)
+                                      : NSColor.black.withAlphaComponent(0.12)).cgColor
+        }
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = dark ? 0.35 : 0.14
+    }
+}
+
+/// One tab: borderless, its icon and name, a faint fill under the pointer when it isn't the one showing.
+/// An `NSButton` because the header lies in the title bar's drag band, and only controls take clicks
+/// there.
+@MainActor
+final class CanvasSatelliteTabButton: NSButton {
+    private var showing = false
+    private var hovered = false { didSet { needsDisplay = true } }
+
+    init() {
+        super.init(frame: .zero)
+        bezelStyle = .accessoryBarAction
+        isBordered = false
+        imagePosition = .imageLeading
+        imageHugsTitle = true
+        lineBreakMode = .byTruncatingTail
+        font = .systemFont(ofSize: 12)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
+        heightAnchor.constraint(equalToConstant: 24).isActive = true
+        setContentCompressionResistancePriority(.defaultLow - 2, for: .horizontal)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func set(_ title: String, image: NSImage?, showing: Bool) {
+        self.showing = showing
+        self.title = title
+        self.image = image
+        toolTip = title
+        contentTintColor = showing ? .labelColor : .secondaryLabelColor
+        setAccessibilityLabel(title)
+        setAccessibilityValue(showing ? "Showing" : nil)
+        needsDisplay = true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        // Room either side of the icon and name: the chip is the button's own frame.
+        size.width += image == nil ? 16 : 22
+        return size
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) { hovered = false }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        super.updateLayer()
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = hovered && !showing ? NSColor.labelColor.withAlphaComponent(0.07).cgColor : nil
+        }
     }
 }
