@@ -241,15 +241,8 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         for token in tokens(in: text) {
             let glyphs = glyphRange(forCharacterRange: token.span, actualCharacterRange: nil)
             guard NSIntersectionRange(glyphs, glyphsToShow).length > 0 else { continue }
-            // Per line fragment, so a token that wraps gets a pill on each line rather than one
-            // rectangle spanning the gap between them.
-            enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                                    in: textContainers[0]) { rect, _ in
-                // The whole line fragment, not an inset of it. Insetting made the pill shorter than
-                // the line it sits on, which is what left the horizontal padding looking oversized
-                // next to nothing vertical.
-                let pill = NSRect(x: rect.minX + origin.x, y: rect.minY + origin.y,
-                                  width: rect.width, height: rect.height)
+            for rect in pillRects(forCharacterRange: token.span) {
+                let pill = rect.offsetBy(dx: origin.x, dy: origin.y)
                 // A wash off the text colour rather than a grey of its own: `quaternaryLabelColor` is
                 // already light in dark mode, and at any alpha strong enough to see it read as a
                 // filled button rather than as a marked word.
@@ -257,6 +250,33 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                 NSBezierPath(roundedRect: pill, xRadius: self.radius, yRadius: self.radius).fill()
             }
         }
+    }
+
+    /// Where a token's pill goes, in text-container coordinates: one rect per line it sits on, so a
+    /// token that wraps gets a pill on each line rather than one rectangle spanning the gap.
+    ///
+    /// **The line, not the line fragment.** A fragment carries the paragraph's `lineSpacing` below its
+    /// text on every line but the last, where AppKit leaves it off — so a pill as tall as its fragment
+    /// was over-tall everywhere except on the note's final line. The note editor puts its slack below
+    /// the text (see `MarkdownTextEditor.lineHeightMultiple`), so the fragment's top is already the
+    /// line's top; the height is the token's own font's line height, which is what the last line
+    /// always got. Full height rather than an inset of it: insetting made the pill shorter than the
+    /// line it sits on, which left the horizontal padding looking oversized next to nothing vertical.
+    func pillRects(forCharacterRange span: NSRange) -> [NSRect] {
+        guard let container = textContainers.first, let storage = textStorage,
+              span.location < storage.length else { return [] }
+        let font = storage.attribute(.font, at: span.location, effectiveRange: nil) as? NSFont
+            ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = defaultLineHeight(for: font)
+        let glyphs = glyphRange(forCharacterRange: span, actualCharacterRange: nil)
+        var rects: [NSRect] = []
+        enumerateEnclosingRects(forGlyphRange: glyphs,
+                                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                in: container) { rect, _ in
+            rects.append(NSRect(x: rect.minX, y: rect.minY,
+                                width: rect.width, height: min(rect.height, lineHeight)))
+        }
+        return rects
     }
 
 }

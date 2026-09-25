@@ -91,6 +91,36 @@ final class TokenDrawingTests: XCTestCase {
         let rect = editor.layoutManager.boundingRect(forGlyphRange: glyphs, in: editor.container)
         return NSPoint(x: rect.midX, y: rect.midY)
     }
+    // MARK: the pill's height
+
+    /// Every pill is as tall as its line, wherever the line is. A pill as tall as its line fragment
+    /// took the paragraph's `lineSpacing` with it on every line but the last — where AppKit adds none —
+    /// so it was over-tall everywhere except on the note's final line.
+    func testAPillIsTheSameHeightOnEveryLine() throws {
+        let editor = NoteEditor()
+        editor.reset("one [[W-1 Alpha]]\ntwo [[W-2 Beta]]\nthree [[W-3 Gamma]]")
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 6
+        let storage = try XCTUnwrap(editor.view.textStorage)
+        storage.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: storage.length))
+        editor.layoutManager.ensureLayout(for: editor.container)
+
+        let text = editor.text as NSString
+        let pills = ["[[W-1 Alpha]]", "[[W-2 Beta]]", "[[W-3 Gamma]]"].map { token in
+            editor.layoutManager.pillRects(forCharacterRange: text.range(of: token))
+        }
+        XCTAssertEqual(pills.map(\.count), [1, 1, 1])
+        let heights = pills.map { $0[0].height }
+        XCTAssertEqual(Set(heights).count, 1, "one height on every line, got \(heights)")
+
+        // Against the quantity it should be, measured another way: the first line's fragment is that
+        // line plus the spacing below it, and the pill is the line alone.
+        let first = text.range(of: "[[W-1 Alpha]]")
+        let glyph = editor.layoutManager.glyphIndexForCharacter(at: first.location)
+        let fragment = editor.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        XCTAssertEqual(pills[0][0].height, fragment.height - style.lineSpacing, accuracy: 0.5)
+        XCTAssertEqual(pills[0][0].minY, fragment.minY, "the slack is below the text, so the tops agree")
+    }
 }
 
 /// What the row's label reports when SwiftUI asks how big it wants to be.
@@ -166,4 +196,5 @@ final class TokenLabelSizingTests: XCTestCase {
         XCTAssertGreaterThan(contributed, 6, "contributed \(contributed)pt")
         XCTAssertLessThan(contributed, 10, "contributed \(contributed)pt")
     }
+
 }
