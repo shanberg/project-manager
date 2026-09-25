@@ -166,9 +166,18 @@ extension CanvasBoardView {
             // and double-clicking a title bar is how a window is zoomed on this platform. The gesture
             // is already in people's hands; this is only the tiled reading of it. See
             // `toggleMaximizeTile`.
-            if clicks == 2 { return toggleMaximizeTile(id) }
-            // A maximized tile's grip is only the way back — see `tileHandle(_:)`.
-            guard tiling?.maximized == nil else { return }
+            // A maximized tile's grip is its Restore button: one click, nothing to carry — see
+            // `tileHandle(_:)`. Someone double-clicking it, as they did to get here, has their second
+            // click land on the ordinary grip underneath, which would maximize it straight back.
+            if tiling?.maximized == id {
+                if clicks == 1 { restoredFromGrip = true; toggleMaximizeTile(id) }
+                return
+            }
+            if clicks == 2 {
+                if restoredFromGrip { restoredFromGrip = false; return }
+                return toggleMaximizeTile(id)
+            }
+            restoredFromGrip = false
             gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
         }
@@ -1026,7 +1035,7 @@ extension CanvasBoardView {
         .frameResize(position: handle.resizePosition, directions: .all)
     }
 
-    /// An open hand says a grip can be carried; a maximized tile's can only be double-clicked back.
+    /// An open hand says a grip can be carried; a maximized tile's is a button.
     private var gripCursor: NSCursor { tiling?.maximized == nil ? .openHand : .arrow }
 
     // MARK: Keys

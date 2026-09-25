@@ -466,6 +466,9 @@ final class CanvasBoardView: NSView {
     }
     /// The tile whose top centre the pointer is near, which is the one tile showing its grip.
     var gripTile: String?
+    /// Set when a click on a maximized tile's Restore pill put the workspace back, so the second click
+    /// of a double-click — landing on the grip that is there now — doesn't maximize it again.
+    var restoredFromGrip = false
     /// Which match ⌘G steps to next.
     var findCursor = 0
     /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
