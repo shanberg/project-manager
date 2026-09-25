@@ -325,6 +325,8 @@ final class CanvasBoardView: NSView {
     }
 
     var nodeViews: [String: CanvasNodeView] = [:]
+    /// Where each tile moved out to a satellite goes back to. See `moveToWindow`.
+    var satelliteHomes: [String: CanvasTileSession.Placement] = [:]
     /// The drag over the board right now, if there is one. See `CanvasBoardView+Dropping`.
     var dropSession: CanvasDropSession?
     let overlay = CanvasOverlayView()
@@ -689,6 +691,25 @@ final class CanvasBoardView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         refreshNodeViews()
+        if window != nil { restoreSatellites() }
+    }
+
+    // **A workspace's satellites come and go with it** (see `CanvasSatelliteWindow`). Its tab going
+    // behind another hides this board, and its window closing takes the board out of it; either way the
+    // satellites are put away and remembered, and come back out when the board is up again.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil { putSatellitesAway() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        putSatellitesAway()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        restoreSatellites()
     }
 
     /// Build the card views the layout needs, and put them where it says.
@@ -765,7 +786,8 @@ final class CanvasBoardView: NSView {
                 view.frame = viewRect(layout.frame(of: node))
             }
         }
-        for (id, view) in nodeViews where !wanted.contains(id) {
+        // A card whose page is out in a satellite is kept, wherever it is: the page is still its.
+        for (id, view) in nodeViews where !wanted.contains(id) && !view.isHeldElsewhere {
             view.prepareForRemoval()
             view.removeFromSuperview()
             nodeViews.removeValue(forKey: id)

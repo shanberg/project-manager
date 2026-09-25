@@ -764,6 +764,10 @@ class CanvasNodeView: NSView {
     /// Whether the card is set to keep its page running. Web cards override.
     var keepsPageRunning: Bool { false }
 
+    /// Whether what this card shows is out in a window of its own, so the card has to stay built even
+    /// where the board would drop it. Web cards override. See `CanvasSatelliteWindow`.
+    var isHeldElsewhere: Bool { false }
+
     /// The board's answer. Live means run; not live means freeze, keeping a picture of the page.
     func setPageLive(_ live: Bool) {}
 

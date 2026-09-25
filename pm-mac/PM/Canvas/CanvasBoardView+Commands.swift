@@ -790,6 +790,7 @@ extension CanvasBoardView {
             if selectedLinkCards.count == 1, let card = nodeViews[id] as? CanvasLinkNodeView,
                card.liveURL != nil {
                 add(menu, "Open Page as New Card", #selector(openMenuPageAsNewCard))
+                if card.satellite == nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
             }
             add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             menu.addItem(.separator())
@@ -2794,6 +2795,12 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     /// Open Page as New Card from a card's own menu: the card the menu is about, which is the
     /// selection rather than whichever page happens to be engaged.
+    /// Move to Window: the page into a window of its own, still running. See `CanvasSatelliteWindow`.
+    @objc private func moveMenuCardToWindow() {
+        guard selectedLinkCards.count == 1, let card = selectedLinkCards.first else { return }
+        moveToWindow(card.node.id)
+    }
+
     @objc private func openMenuPageAsNewCard() {
         guard selectedLinkCards.count == 1, let card = selectedLinkCards.first else { return }
         _ = openPageAsNewCard(from: card)

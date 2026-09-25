@@ -370,6 +370,7 @@ extension CanvasBoardView {
         setLayout(session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
+        restoreSatellites()
     }
 
     /// What is worth remembering about a tiling: everything except where the window happened to be.
@@ -390,7 +391,7 @@ extension CanvasBoardView {
     /// cannot see happen if you are not looking at it. `NSAccessibility.post` with
     /// `.layoutChanged` is what the system uses for a window rearranging itself, which is exactly what
     /// this is.
-    private func announceTiling() {
+    func announceTiling() {
         setAccessibilityLabel(tilingSummary.map { "Workspace, \($0.long)" } ?? "Canvas")
         NSAccessibility.post(element: self, notification: .layoutChanged)
     }

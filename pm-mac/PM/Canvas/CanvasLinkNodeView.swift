@@ -131,6 +131,41 @@ final class CanvasLinkNodeView: CanvasNodeView {
         }
     }
 
+    // MARK: Out in a window of its own
+
+    /// The window this card's page is lent to, while it is. See `CanvasSatelliteWindow`.
+    private(set) weak var satellite: CanvasSatelliteWindow?
+
+    override var isHeldElsewhere: Bool { satellite != nil }
+
+    /// Lend the page to a window of its own, starting it first if it isn't running.
+    func moveToSatellite(frame: NSRect?) {
+        guard satellite == nil else { return }
+        if web == nil, let target = resumeURL ?? url { showPage(target) }
+        guard let page = web else { return }
+        if (window?.firstResponder as? NSView)?.isDescendant(of: page) == true { window?.makeFirstResponder(board) }
+        page.removeFromSuperview()
+        placeholder?.isHidden = false
+        say("In its own window")
+        let window = CanvasSatelliteWindow(card: self, page: page, frame: frame)
+        satellite = window
+        window.show()
+        board.pageStateChanged()
+    }
+
+    /// Take the page back from its window. Home to the workspace when you sent it there; left out of the
+    /// tiling when the workspace is only being put away, since it will be lent out again when it's back.
+    func returnFromSatellite(toWorkspace: Bool) {
+        satellite = nil
+        say(nil)
+        if let page = web {
+            fill(face, with: page, below: frozen ?? placeholder)
+            if revealed { uncover() }
+        }
+        board.pageStateChanged()
+        if toWorkspace { board.satelliteReturned(node.id) }
+    }
+
     /// Whether this card's page is a popup that was moved onto the board, which is still connected to
     /// the page that opened it. When it closes itself — a call ending, a huddle left — the card goes
     /// with it, as the popup would have. Not kept across launches: by then it's an ordinary page.
@@ -399,7 +434,8 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// in between is lost. The picture is `freeze`'s, for `freeze`'s reason — this card is out of sight,
     /// and if you come back to it zoomed out too far to run pages it should still say what it showed.
     private func giveUpPage() -> Handover? {
-        guard let running = web else { return nil }
+        // Not while it is out in a window: the window is showing it, and the page is still this card's.
+        guard let running = web, satellite == nil else { return nil }
         let handover = Handover(web: running, revealed: revealed, loadedAt: loadedAt,
                                 capturingTitle: capturingTitle)
         // The page goes on running on the other board, which will record its own navigations from here
@@ -445,7 +481,7 @@ final class CanvasLinkNodeView: CanvasNodeView {
     private func freeze() {
         // Not while it is full screen: the view is in WebKit's window, not this card, and a paused video
         // there is still what you are looking at.
-        guard let web, !freezing, web.fullscreenState == .notInFullscreen else { return }
+        guard let web, !freezing, web.fullscreenState == .notInFullscreen, satellite == nil else { return }
         freezing = true
         giveUp?.cancel()
         giveUp = nil
@@ -981,6 +1017,9 @@ final class CanvasLinkNodeView: CanvasNodeView {
     }
 
     private func tearDownPage() {
+        // A page that is ending takes its window with it, and the tile goes home: an empty window, or
+        // one left showing a page the card has let go of, would be a window that means nothing.
+        if let satellite { satellite.pageEnded() }
         giveUp?.cancel()
         giveUp = nil
         stopProbingForPaint()
@@ -1819,6 +1858,12 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         giveUp = nil
         stopProbingForPaint()
         guard !revealed else { return }
+        // Out in a window, the page stays where it is: the window is all there is to show, and it has
+        // its own Reload. See `CanvasSatelliteWindow`.
+        if satellite != nil {
+            revealPage()
+            return
+        }
         tearDownPage()
         // The picture from the last time the page ran is what the card showed while it tried. Once the
         // answer is that it couldn't, a page drawn under "Couldn't load" contradicts it. Marked as
