@@ -43,6 +43,9 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     private let sheet: NSWindow
     private let web: WKWebView
     private let address: NSTextField
+    /// The card whose page opened this, for moving it onto that card's board. Nil for a popup opened
+    /// from somewhere that isn't a card — the sign-in window, or another popup.
+    private weak var opener: CanvasLinkNodeView?
 
     // MARK: Deciding
 
@@ -74,12 +77,15 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     /// - Parameter configuration: the one `createWebViewWith` was given, unexchanged. See above.
     /// - Parameter userAgent: the opener's `customUserAgent`. It belongs to the view, not the
     ///   configuration, so a popup would otherwise sign in as Safari for a site told to expect Chrome.
+    /// - Parameter opener: the card whose page asked, which is what can take the popup onto the board.
     @discardableResult
     static func present(with configuration: WKWebViewConfiguration,
                         features: WKWindowFeatures,
                         userAgent: String?,
-                        over parent: NSWindow?) -> WKWebView {
-        let popup = CanvasWebPopup(configuration: configuration, features: features, over: parent)
+                        over parent: NSWindow?,
+                        opener: CanvasLinkNodeView? = nil) -> WKWebView {
+        let popup = CanvasWebPopup(configuration: configuration, features: features, over: parent,
+                                   opener: opener)
         popup.web.customUserAgent = userAgent
         open.insert(popup)
         popup.show(over: parent)
@@ -87,13 +93,15 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     }
 
     private init(configuration: WKWebViewConfiguration, features: WKWindowFeatures,
-                 over parent: NSWindow?) {
+                 over parent: NSWindow?, opener: CanvasLinkNodeView?) {
+        self.opener = opener
         // A popup that opens a further popup is ordinary in single sign-on — an identity provider
         // handing off to a second one, or to a device-approval window. The card says no to this
         // because a card is not a place for a window to appear from nowhere; inside a popup the
         // question has already been answered.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        web = WKWebView(frame: .zero, configuration: configuration)
+        // A card's kind of page, so that one moved onto the board is the same as any other card's.
+        web = CanvasPageView(frame: .zero, configuration: configuration)
         // The popup most of all: single sign-on is the flow that goes wrong, and the window it goes
         // wrong in is this one.
         CanvasWebSession.allowInspecting(web)
@@ -153,6 +161,25 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
         bar.addSubview(address)
         bar.addSubview(done)
 
+        // **Some popups are the thing itself**, not a step in something else: a Slack huddle, a call,
+        // a player. A sheet is right for a sign-in, which is over in a minute, and wrong for those, which
+        // would hold the whole board hostage for as long as they run. So they can leave — onto the
+        // board, still running, still talking to the page that opened them.
+        if opener != nil {
+            let move = NSButton(title: opener?.board.isTiled == true ? "Open as Tile" : "Open as Card",
+                                target: self, action: #selector(moveToBoard))
+            move.bezelStyle = .rounded
+            move.sizeToFit()
+            move.frame = NSRect(x: 12, y: (Self.barHeight - move.frame.height) / 2,
+                                width: move.frame.width, height: move.frame.height)
+            move.autoresizingMask = [.maxXMargin]
+            move.toolTip = "Put this on the board, where it keeps running beside your other cards"
+            bar.addSubview(move)
+            let clear = max(80, move.frame.maxX + 8)
+            address.frame = NSRect(x: clear, y: address.frame.minY, width: size.width - 2 * clear,
+                                   height: address.frame.height)
+        }
+
         web.frame = NSRect(x: 0, y: 0, width: size.width, height: size.height - Self.barHeight)
         web.autoresizingMask = [.width, .height]
 
@@ -189,6 +216,16 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
     // MARK: Ending
 
     @objc private func dismissed() { dismiss() }
+
+    /// Hand the running page to a new card beside the one that opened it, and go. The page isn't
+    /// stopped and its delegates aren't cleared: the card takes both over as it adopts it.
+    @objc private func moveToBoard() {
+        guard let opener, Self.open.contains(self) else { return }
+        web.removeFromSuperview()
+        if let parent = sheet.sheetParent { parent.endSheet(sheet) } else { sheet.orderOut(nil) }
+        Self.open.remove(self)
+        opener.openPopupAsCard(web)
+    }
 
     private func dismiss() {
         guard Self.open.contains(self) else { return }

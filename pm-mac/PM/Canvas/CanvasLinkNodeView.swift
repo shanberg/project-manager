@@ -124,6 +124,35 @@ final class CanvasLinkNodeView: CanvasNodeView {
         // A card built into a board you have just switched to — a tile the workspace had not needed
         // until now — comes up showing the page the tab behind was running, not a globe.
         reclaimPage()
+        // A popup moved onto the board: its page is running already, and is this card's from the start.
+        if web == nil, let parked = CanvasPageHandover.parked.removeValue(forKey: pageKey) {
+            cameFromPopup = true
+            adopt(Handover(web: parked, revealed: true, loadedAt: Date(), capturingTitle: false))
+        }
+    }
+
+    /// Whether this card's page is a popup that was moved onto the board, which is still connected to
+    /// the page that opened it. When it closes itself — a call ending, a huddle left — the card goes
+    /// with it, as the popup would have. Not kept across launches: by then it's an ordinary page.
+    private var cameFromPopup = false
+
+    /// Move a popup this card's page opened onto the board, still running — see `CanvasWebPopup`.
+    func openPopupAsCard(_ page: WKWebView) {
+        board.addLinkCard(page.url?.absoluteString ?? address, beside: node.id, joined: false,
+                          profile: profile, adopting: page)
+    }
+
+    /// `window.close()` from a page that was a popup. Anything else asking is ignored, as a browser tab
+    /// ignores a page it didn't open.
+    func webViewDidClose(_ webView: WKWebView) {
+        guard cameFromPopup, webView === web else { return }
+        let id = node.id
+        Task { @MainActor [board] in
+            board.store.change("Close Popup") { doc in
+                doc.nodes.removeAll { $0.id == id }
+                doc.edges.removeAll { $0.fromNode == id || $0.toNode == id }
+            }
+        }
     }
 
     override var isPageCard: Bool { true }
@@ -323,6 +352,11 @@ final class CanvasLinkNodeView: CanvasNodeView {
     /// Move `donor`'s running page into this card, exactly as it is.
     private func adopt(from donor: CanvasLinkNodeView) {
         guard let handover = donor.giveUpPage() else { return }
+        adopt(handover)
+    }
+
+    /// Put a running page in this card, exactly as it is.
+    private func adopt(_ handover: Handover) {
         // The page is running, so there is nothing to resume — and a state left behind would be what
         // the next card to start this page from scratch went back to, older than where it is now.
         resumeState = nil
@@ -1830,7 +1864,7 @@ extension CanvasLinkNodeView: WKUIDelegate {
             board.addLinkCard(url.absoluteString, beside: node.id)
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
             return CanvasWebPopup.present(with: configuration, features: windowFeatures,
-                                          userAgent: webView.customUserAgent, over: window)
+                                          userAgent: webView.customUserAgent, over: window, opener: self)
         } else {
             capturingTitle = false
             webView.load(URLRequest(url: url))

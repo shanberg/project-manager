@@ -1,4 +1,5 @@
 import Foundation
+import WebKit
 
 /// Which board a card's page runs on, when more than one board is showing the card.
 ///
@@ -51,6 +52,11 @@ enum CanvasPageHandover {
     /// and woken in a workspace is one page, and it should come back where you left it rather than at
     /// the address. Keyed by `key(canvas:card:)`; a card forgets its entry when its address changes.
     static var resumes: [String: Resume] = [:]
+
+    /// Running pages waiting for a card that is about to be built — a popup moved onto the board, which
+    /// has to keep its renderer (and with it `window.opener`) rather than load its address again. Put
+    /// here before the card is added and taken by it as it is built. Keyed by `key(canvas:card:)`.
+    static var parked: [String: WKWebView] = [:]
 
     /// One card, whichever board it is on: the canvas file and the card's id in it.
     static func key(canvas: URL, card: String) -> String {

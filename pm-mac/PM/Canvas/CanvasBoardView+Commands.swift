@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import UniformTypeIdentifiers
 import PmLib
 
@@ -2430,16 +2431,22 @@ extension CanvasBoardView {
     ///     of a page, no for a second card on the same page.
     ///   - resuming: a page's `interactionState` for the new card to open with, so it arrives where the
     ///     source was — scrolled, with its Back — rather than at the top.
-    func addLinkCard(_ address: String, beside id: String, joined: Bool = true, resuming: Any? = nil) {
+    ///   - profile: the browser session the new card uses, when it isn't the shared one.
+    ///   - adopting: a running page for the card to take as it is, not load again — a popup moved onto
+    ///     the board. See `CanvasPageHandover.parked`.
+    func addLinkCard(_ address: String, beside id: String, joined: Bool = true, resuming: Any? = nil,
+                     profile: String? = nil, adopting page: WKWebView? = nil) {
         guard let source = document.node(id: id), let normalized = CanvasAddress.normalized(address)
         else { return }
         let frame = freeFrame(rightOf: source.frame)
-        let node = CanvasNode(content: .link(url: normalized), frame: frame)
+        var node = CanvasNode(content: .link(url: normalized), frame: frame)
+        CanvasCardSession.set(profile, on: &node)
         // Before the card exists, since its view reads the handover as it is built.
+        let key = CanvasPageHandover.key(canvas: store.url, card: node.id)
         if let resuming {
-            CanvasPageHandover.resumes[CanvasPageHandover.key(canvas: store.url, card: node.id)] =
-                .init(state: resuming, url: URL(string: normalized))
+            CanvasPageHandover.resumes[key] = .init(state: resuming, url: URL(string: normalized))
         }
+        if let page { CanvasPageHandover.parked[key] = page }
         // From the source's right to the new card's left: the direction you read the board in, and the
         // direction the page was actually followed in.
         let edge = CanvasEdge(fromNode: id, fromSide: .right, toNode: node.id, toSide: .left)
