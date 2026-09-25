@@ -181,6 +181,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         // which takes no clicks (`CanvasColorWash.hitTest`), and controls inside it would take none
         // either — Return, Back and the tabs drawn but dead.
         let bar = NSView()
+        // Clipped, both: the wash fills whatever it is asked to redraw, and a view isn't clipped to its
+        // bounds unless it says so — on a board it lies under everything, but here it is in front of
+        // the page and painted the board's ground over all of it.
+        bar.clipsToBounds = true
+        wash.clipsToBounds = true
         wash.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(wash)
         NSLayoutConstraint.activate([
