@@ -138,6 +138,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
+        // Held through a press, and settled together at the release — see `CanvasBoardView.isPressed`.
+        scroll.board.onPressEnded = { [weak self] in
+            self?.refreshTileCommand()
+            self?.pageStateChanged()
+        }
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
@@ -1127,7 +1132,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // this runs whenever you step into or out of a card, which is exactly when the answer changes.
         header.find.scope = findScope
         guard let card = engagedCard else {
-            if header.page != nil { header.page = nil }
+            guard header.page != nil else { return }
+            // Held through a press: pressing the next web card lets go of this one on the way down,
+            // and the next one steps in on the way up. See `CanvasBoardView.isPressed`.
+            if scroll.board.isPressed { return }
+            header.page = nil
             return
         }
         // **Assigned only on a change**, for the reason `refreshTileCommand` does it: this runs on every
@@ -1424,6 +1433,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Driven from the three things that change the answer — the selection, the document, and whether
     /// a tiling is up. Deliberately not from scrolling, so this doesn't run at a trackpad's rate.
     private func refreshTileCommand() {
+        // Held through a press, and asked again at the release — see `CanvasBoardView.isPressed`.
+        guard !scroll.board.isPressed else { return }
         // Assigned only on a change: this runs on every selection change, and the capsule animates
         // itself in and out on this value.
         let controls = scroll.board.tileControls

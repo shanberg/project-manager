@@ -277,6 +277,16 @@ final class CanvasBoardView: NSView {
         }
     }
 
+    /// Whether the button is down on the board, from its mouse-down to its mouse-up.
+    ///
+    /// The header holds still while it is, and hears about the click once, at `onPressEnded`. A click
+    /// is two acts a press apart — the selection moves on the way down, a card is stepped into on the
+    /// way up (`stepIn`), because until then the press may be a drag — and a header following each as
+    /// it happened changed twice per click: from one web card to the next its page controls left and
+    /// came back, and onto a web card from nothing it arrived narrow and widened a press later.
+    var isPressed = false
+    var onPressEnded: (() -> Void)?
+
     /// What the pointer is currently doing. Nil between gestures.
     var gesture: Gesture?
     enum Gesture {

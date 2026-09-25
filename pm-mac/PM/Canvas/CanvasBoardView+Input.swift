@@ -30,6 +30,7 @@ extension CanvasBoardView {
     // MARK: Pressing
 
     override func mouseDown(with event: NSEvent) {
+        isPressed = true
         window?.makeFirstResponder(self)
         // Space held is the hand: the press takes hold of the board, and nothing else. See
         // `holdForPanning`.
@@ -430,6 +431,7 @@ extension CanvasBoardView {
     // MARK: Releasing
 
     override func mouseUp(with event: NSEvent) {
+        isPressed = false
         if spaceGrab != nil {
             spaceGrab = nil
             return refreshCursor()
@@ -440,6 +442,9 @@ extension CanvasBoardView {
             overlay.ghost = nil
             overlay.needsDisplay = true
             showGrid(false)
+            // The header held still through the press — see `isPressed`. Whatever the release
+            // selected and stepped into, or didn't, it is told once, now.
+            onPressEnded?()
         }
         switch gesture {
         case .swap(let from, let over):
