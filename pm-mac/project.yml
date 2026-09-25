@@ -122,6 +122,10 @@ targets:
         INAlternativeAppNames:
           - INAlternativeAppName: Project Manager
           - INAlternativeAppName: PM Projects
+        # What macOS shows the first time a web page — a call, a huddle — asks for these. Folio asks
+        # per site first (CanvasWebDialogs.mediaAccess); without these keys the request would crash.
+        NSMicrophoneUsageDescription: A web page you allowed, such as a call or huddle, wants to use the microphone.
+        NSCameraUsageDescription: A web page you allowed, such as a call or huddle, wants to use the camera.
     scheme:
       testTargets:
         - PMViewTests
@@ -133,6 +137,10 @@ targets:
         com.apple.security.app-sandbox: false
         # Explicitly non-debuggable so TCC treats it as a normal app (see CODE_SIGN_INJECT... above).
         com.apple.security.get-task-allow: false
+        # Under the hardened runtime a signed app gets no microphone or camera without these, whatever
+        # the user answers. For calls in web pages the user has allowed; see NSMicrophoneUsageDescription.
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.camera: true
 
   # The AppKit views, driven with real events and asserted through the layout manager.
   #

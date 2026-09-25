@@ -70,9 +70,25 @@ enum CanvasBrowserIdentity: String, CaseIterable {
 struct CanvasSite: Equatable {
     var identity: CanvasBrowserIdentity = .safari
     var blocksAds = true
+    /// Whether the site may turn on the camera and microphone. Asked the first time it wants them, and
+    /// the answer kept — see `CanvasWebDialogs.mediaAccess`.
+    var media: CanvasMediaAccess = .ask
 
     /// A site with nothing changed isn't stored, so the list in Settings is exactly the exceptions.
     var isDefault: Bool { self == CanvasSite() }
+}
+
+/// A site's standing answer about the camera and microphone.
+enum CanvasMediaAccess: String, CaseIterable {
+    case ask, allow, deny
+
+    var title: String {
+        switch self {
+        case .ask: "Ask"
+        case .allow: "Allow"
+        case .deny: "Don't Allow"
+        }
+    }
 }
 
 /// The per-site store — `CanvasSite` by `CanvasBlockPolicy.siteKey`, in user defaults.
@@ -138,6 +154,7 @@ enum CanvasSiteSettings {
             site.identity = identity
         }
         if let blocks = fields["blocksAds"] as? Bool { site.blocksAds = blocks }
+        if let raw = fields["media"] as? String, let media = CanvasMediaAccess(rawValue: raw) { site.media = media }
         return site
     }
 
@@ -145,6 +162,7 @@ enum CanvasSiteSettings {
         var fields: [String: Any] = [:]
         if site.identity != .safari { fields["identity"] = site.identity.rawValue }
         if !site.blocksAds { fields["blocksAds"] = false }
+        if site.media != .ask { fields["media"] = site.media.rawValue }
         return fields
     }
 

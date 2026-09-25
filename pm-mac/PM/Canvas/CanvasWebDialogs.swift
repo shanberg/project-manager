@@ -93,6 +93,42 @@ enum CanvasWebDialogs {
         }
     }
 
+    /// A page asking for the camera or the microphone — a call, a huddle, a voice note.
+    ///
+    /// **Asked once per site, and the answer kept** in `CanvasSiteSettings`, where Settings lists it and
+    /// can change it. Once, because a site that holds calls asks at the start of every call, and a
+    /// question put that often stops being read. Per site rather than per card, because that is the
+    /// unit someone trusts: Slack in any card, or the huddle it pops out, is the same Slack.
+    ///
+    /// Requests that arrive while the question is up — a page that asks for the camera and the
+    /// microphone separately — wait for the same answer rather than stacking a second sheet.
+    static func mediaAccess(for host: String, _ type: WKMediaCaptureType, in window: NSWindow?,
+                            then finish: @escaping (WKPermissionDecision) -> Void) {
+        switch CanvasSiteSettings.site(for: host).media {
+        case .allow: return finish(.grant)
+        case .deny: return finish(.deny)
+        case .ask: break
+        }
+        let key = CanvasBlockPolicy.siteKey(for: host)
+        if pendingMedia[key] != nil { pendingMedia[key]?.append(finish); return }
+        pendingMedia[key] = [finish]
+        let wants = type == .camera ? "the camera" : type == .microphone ? "the microphone"
+                                                                        : "the camera and microphone"
+        let panel = NSAlert()
+        panel.messageText = "Allow \(host) to use \(wants)?"
+        panel.informativeText = "Folio remembers this for \(key). You can change it in Settings, under Sites."
+        panel.addButton(withTitle: "Allow")
+        panel.addButton(withTitle: "Don't Allow")
+        run(panel, in: window) { response in
+            let allowed = response == .alertFirstButtonReturn
+            CanvasSiteSettings.update(host) { $0.media = allowed ? .allow : .deny }
+            let waiting = pendingMedia.removeValue(forKey: key) ?? []
+            waiting.forEach { $0(allowed ? .grant : .deny) }
+        }
+    }
+
+    private static var pendingMedia: [String: [(WKPermissionDecision) -> Void]] = [:]
+
     // MARK: The shape of them
 
     /// A page's own words, said as the page's.

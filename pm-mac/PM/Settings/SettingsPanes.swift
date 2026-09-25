@@ -195,7 +195,7 @@ private struct CanvasSitesSection: View {
         } header: {
             Text("Sites")
         } footer: {
-            Text("A site is added here when you change how Folio treats it from a web card's menu. Identifying as another browser helps with a site that turns Safari away; the page is still drawn by Safari's engine, so a site that relies on another browser's features can still misbehave.")
+            Text("A site is added here when you change how Folio treats it from a web card's menu, or answer whether it may use the camera and microphone. Identifying as another browser helps with a site that turns Safari away; the page is still drawn by Safari's engine, so a site that relies on another browser's features can still misbehave.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -221,6 +221,14 @@ private struct CanvasSitesSection: View {
             Toggle("Block Ads", isOn: Binding(
                 get: { site.blocksAds },
                 set: { on in change(key) { $0.blocksAds = on } }))
+            Picker("Camera & Mic", selection: Binding(
+                get: { site.media },
+                set: { media in change(key) { $0.media = media } })) {
+                ForEach(CanvasMediaAccess.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help("Whether \(key) may use the camera and microphone")
             Button {
                 change(key) { $0 = CanvasSite() }
             } label: {

@@ -252,4 +252,11 @@ final class CanvasWebPopup: NSObject, WKUIDelegate, WKNavigationDelegate {
                  completionHandler: @escaping ([URL]?) -> Void) {
         CanvasWebDialogs.chooseFiles(parameters, in: sheet, then: completionHandler)
     }
+
+    /// A huddle or a call is exactly what a popup is for, so it asks the way a card does.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        CanvasWebDialogs.mediaAccess(for: origin.host, type, in: sheet, then: decisionHandler)
+    }
 }

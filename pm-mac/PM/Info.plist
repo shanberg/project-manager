@@ -63,6 +63,10 @@
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>A web page you allowed, such as a call or huddle, wants to use the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A web page you allowed, such as a call or huddle, wants to use the microphone.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

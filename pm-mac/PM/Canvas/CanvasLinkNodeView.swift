@@ -1867,22 +1867,21 @@ extension CanvasLinkNodeView: WKUIDelegate {
         CanvasWebDialogs.chooseFiles(parameters, in: window, then: completionHandler)
     }
 
-    /// The camera and the microphone, which a card does not get.
+    /// The camera and the microphone: asked once per site, then remembered. See
+    /// `CanvasWebDialogs.mediaAccess`.
     ///
-    /// **Refused deliberately, and said out loud.** This is the one answer in the file that stays no:
-    /// a clipping on a board is not where a call belongs, granting it would mean the app carrying
-    /// camera and microphone permissions for the life of every window, and a page that can turn on a
-    /// camera from inside a document you opened is a larger claim than a canvas should make. What
-    /// changes is that it is now a refusal rather than a dead button — the request was denied without
-    /// asking and without saying, which looked exactly like a broken page.
+    /// A refusal is still said out loud. Denied without a word, a call's buttons look exactly like a
+    /// broken page — which is how this looked when every request was refused.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        let wants = type == .camera ? "the camera" : type == .microphone ? "the microphone"
-                                                                        : "the camera and microphone"
-        board.report("\(origin.host) asked for \(wants). Web cards don't get it — open it in your "
-            + "browser.")
-        decisionHandler(.deny)
+        CanvasWebDialogs.mediaAccess(for: origin.host, type, in: window) { [weak self] decision in
+            if decision == .deny {
+                self?.board.report("\(origin.host) isn't allowed the camera or microphone. Change it in "
+                    + "Settings, under Sites.")
+            }
+            decisionHandler(decision)
+        }
     }
 
     // MARK: Pointer lock
