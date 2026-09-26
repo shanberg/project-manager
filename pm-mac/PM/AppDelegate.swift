@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the menu is built or a name is written anywhere: a preference that moved keys has to
         // finish moving before anything reads the new one.
         ProjectCodes.migrateLegacyKey()
+        // Before any project's notes are read: a project's links are kept in step from the first read.
+        ProjectLinksSync.install()
         // Off the critical path, and once ever: web cards moved from the app's default store to one of
         // their own, and the sessions you were already signed in to should come with them.
         Task { @MainActor in await CanvasWebSession.migrateOldSessions() }

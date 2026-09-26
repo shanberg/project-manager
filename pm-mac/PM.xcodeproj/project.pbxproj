@@ -232,6 +232,7 @@
 		89D53A40AFCC45BDAED0AB7E /* CanvasTileAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E03667C6A7CC82FD2A1178 /* CanvasTileAlert.swift */; };
 		8A0D5F773B09992201E04086 /* TaskFieldCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */; };
 		8A0E1B631A1A4B6042323E10 /* CanvasFileWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5777295DD7D05D1BE7063F31 /* CanvasFileWatch.swift */; };
+		8B7ADDF0DCE84CCBB488D5CA /* ProjectLinksSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50AC718D11E77175EF2AE2E0 /* ProjectLinksSync.swift */; };
 		8B8A5D35B1A8E5AAF6470676 /* RenderedNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D6333FACDEDA9883A2E9F89 /* RenderedNote.swift */; };
 		8BEFC845AED6A37600C4823F /* NotesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7BC1A474E416FCA301CB2C /* NotesSettings.swift */; };
 		8D02EA313A017B77AE4CF8BF /* CanvasItemListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B67C552B7394F4746C6B17 /* CanvasItemListTests.swift */; };
@@ -548,6 +549,7 @@
 		4F2E570425622AEFD9713966 /* CanvasDocumentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDocumentStoreTests.swift; sourceTree = "<group>"; };
 		4F76094B9162CBB804EEE118 /* CanvasSnapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSnapping.swift; sourceTree = "<group>"; };
 		500B5EC5B4576F53C05C426A /* ProjectTexturePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTexturePicker.swift; sourceTree = "<group>"; };
+		50AC718D11E77175EF2AE2E0 /* ProjectLinksSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLinksSync.swift; sourceTree = "<group>"; };
 		52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFieldCompletionTests.swift; sourceTree = "<group>"; };
 		52F033A07EBB7B9C5F100737 /* NoteEditorCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorCompletionTests.swift; sourceTree = "<group>"; };
 		5364DCBFBD2787BA5E6F4772 /* NoteEditorCaretTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorCaretTests.swift; sourceTree = "<group>"; };
@@ -1002,6 +1004,7 @@
 				AEB4BC2DF1073FE4608E2138 /* ProjectCodes.swift */,
 				17FA0B4FC52FB9DC24629BF6 /* ProjectIndex.swift */,
 				D58237340FEDA8330FA07488 /* ProjectLifecycle.swift */,
+				50AC718D11E77175EF2AE2E0 /* ProjectLinksSync.swift */,
 				3DEAC5A29157104A97390627 /* StoreRegistry.swift */,
 				7D7548520C03B6F6076B86CC /* TaskTiming.swift */,
 				6B93A7E209760A3A260C8E79 /* WindowSettings.swift */,
@@ -1597,6 +1600,7 @@
 				62808FC8DAD2E8A4027C29A0 /* ProjectIndex.swift in Sources */,
 				9563B3FC2439B4B4F7EE402F /* ProjectLifecycle.swift in Sources */,
 				A084FBD06D0629B2E24178EA /* ProjectLinks.swift in Sources */,
+				8B7ADDF0DCE84CCBB488D5CA /* ProjectLinksSync.swift in Sources */,
 				C4A9E3D04122D318D057D921 /* ProjectPrompts.swift in Sources */,
 				E6B127AADEDAC13C797897D4 /* ProjectRendererMemory.swift in Sources */,
 				293A88CB3E2076E821D917BE /* ProjectSearch.swift in Sources */,

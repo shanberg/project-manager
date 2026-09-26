@@ -47,8 +47,18 @@ final class CanvasDocumentStore {
         watchers.removeAll { $0.owner == id }
     }
 
-    private func documentChanged() { for watcher in watchers { watcher.changed() } }
-    private func documentReloaded() { for watcher in watchers { watcher.reloaded() } }
+    private func documentChanged() {
+        for watcher in watchers { watcher.changed() }
+        Self.onDocumentChanged?(self)
+    }
+    private func documentReloaded() {
+        for watcher in watchers { watcher.reloaded() }
+        Self.onDocumentChanged?(self)
+    }
+
+    /// Told of every change to every board's document, whoever made it. For the app's own bookkeeping
+    /// across boards — a project's links (`ProjectLinksSync`) — and unset wherever there is no app.
+    static var onDocumentChanged: ((CanvasDocumentStore) -> Void)?
 
     /// This document's undo stack, which every window showing it shares. A window hands it back from
     /// `windowWillReturnUndoManager` so ⌘Z reaches the board rather than whatever text field last had

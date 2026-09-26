@@ -370,6 +370,10 @@ final class PMStore {
     /// `then` runs on the main actor once the re-read has landed and been published, so a caller that
     /// needs to act on the *new* document — pointing an editor at a session it just added — can wait
     /// for the indices to be real rather than guessing at them.
+    /// Told each time a project's notes have been read, with the notes and project paths — for the
+    /// app's bookkeeping that follows the notes (`ProjectLinksSync`). Unset wherever there is no app.
+    static var onNotesRead: ((_ notesPath: String, _ projectPath: String) -> Void)?
+
     func reload(then: (@MainActor () -> Void)? = nil) {
         let key = boundKey
         guard let key, let name = PMFiles.projectName(fromKey: key) else {
@@ -464,6 +468,7 @@ final class PMStore {
                     self.errorMessage = nil
                     self.hasLoaded = true
                     self.refreshCanvasPath(projectPath: projectPath)
+                    PMStore.onNotesRead?(path, projectPath)
                     let newHero = self.makeHeroSnapshot(output.todos)
                     if !projectChanged {
                         let move = self.classifyHeroMove(from: self.heroSnapshot, to: newHero)
