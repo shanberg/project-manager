@@ -203,6 +203,31 @@ of a screen rather than as a screen.
 happens; dropping the row would send the very next lookup back to a disk that still has the old picture
 — and the next lookup is usually immediate, because changing a card's address rebuilds the card.
 
+## Suspending a page, instead of freezing it
+
+Measured 2026-09-25 on macOS 26, one page timestamping a 100ms timer and every animation frame
+(harness test `ScriptFreezeTests`).
+
+| Way | Timers/s | Frames/s | Renderer CPU | Page state |
+|---|---|---|---|---|
+| On screen | 9.7 | 60 | 1.5% | kept |
+| View hidden, out of its window, or window ordered out | 1.3 | 0 | — | kept |
+| `setAllMediaPlaybackSuspended(true)` | 9.7 | 60 | — | kept |
+| `_suspendPage:` | 0 | 0 | 0.0% | kept |
+| Freeze as built (snapshot, then tear down) | — | — | none | lost; restored from `interactionState` |
+
+- WebKit throttles a page on its own once its view isn't visible: `visibilityState` goes to hidden, frames stop and timers drop to about 1 per second.
+- `setAllMediaPlaybackSuspended` stops media only; scripts run on.
+- `_suspendPage:` / `_resumePage:` are private WebKit API (`WKWebViewPrivate`), present on macOS 26, each with a completion block.
+  - Suspended, the page runs no timers and draws no frames.
+  - It resumes where it was: script variables are kept, and timers carry on.
+  - The renderer process and its memory stay (28 MB for the test page). Suspending saves CPU, not memory.
+- Freezing as built saves memory and loses page state: a web app's in-memory state and unsaved form input don't survive `interactionState`.
+- Also present, not tried: `WKPreferences` `_setHiddenPageDOMTimerThrottlingEnabled:`, `_setHiddenPageDOMTimerThrottlingAutoIncreases:` and `_setPageVisibilityBasedProcessSuppressionEnabled:`.
+- Why a frozen card looks like a picture: it *is* one. It's a JPEG capped at 1400px on its longest edge, drawn scaled to the card, with no hover, no selection and no live text. A suspended page keeps its own layers in the view.
+- Not measured: whether a suspended page's layers stay sharp when the board zooms.
+- A third page-budget state (live, suspended, frozen) would trade memory for keeping state. A per-site switch in `CanvasSiteSettings` would choose it for the pages that can't afford to lose state. Not built.
+
 ## Which of the two addresses each command means
 
 Every command on a web card has to answer this, and the answer is not the same one twice in a row. It
