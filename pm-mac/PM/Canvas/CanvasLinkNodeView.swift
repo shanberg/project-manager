@@ -95,6 +95,10 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// yanking you back to the placeholder — you are reading something, and a subresource that 404s
     /// is not a reason to take the page away.
     private var revealed = false
+    /// Why the last load gave up, while the card is sitting on "Couldn't load". The budget starts a
+    /// card with no page again on its next pass, and a retry that fails in a few milliseconds — a dev
+    /// server that is down — would otherwise flicker the status to "Loading…" and back every time.
+    private var lastFailure: String?
     private var giveUp: DispatchWorkItem?
     /// When the load now running started, or nil when nothing is. Only the chrome reads it — see
     /// `showsLoad`.
@@ -283,6 +287,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // A different address makes everything the card remembered about the old one worthless.
         resumeURL = nil
         resumeState = nil
+        // A Reload you asked for, or a different address: either way a fresh try, and it says so.
+        lastFailure = nil
         wanted = false
         showPlaceholder()
         reconsiderLoading(scale: board.liveScale)
@@ -382,6 +388,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         view.uiDelegate = self
         (view as? CanvasPageView)?.dropFallback = board
         (view as? CanvasPageView)?.linkHost = self
+        view.alphaValue = handover.revealed ? 1 : 0
         web = view
         capturingTitle = handover.capturingTitle
         watchTitle(of: view)
@@ -835,7 +842,11 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // renders perfectly and is unreadable. Letting the view draw its own background hands that
         // decision back to WebKit, which is the only party that knows which default the page presumes:
         // white for a page that never mentions `color-scheme`, WebKit's dark canvas for one that opts
-        // in. Nothing flashes, because the placeholder is over the page until `revealPage`.
+        // in. Nothing flashes, because the view is invisible until `revealPage` — the placeholder is
+        // transparent, and over a view drawing white it was no cover at all: a card whose server was
+        // down flashed white on every retry. Alpha rather than `isHidden`, so WebKit still counts the
+        // page as on screen and paints it for `probeForPaint`.
+        view.alphaValue = 0
         if let resumeState {
             // Puts the page, the scroll position and the back-forward list back as they were, and
             // starts the navigation itself — so no `load` here.
@@ -859,7 +870,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // placeholder. Waking up should not flash anything.
         fill(face, with: view, below: frozen ?? placeholder)
         if isEngaged { contentWindow?.makeFirstResponder(view) }
-        if frozen == nil { say("Loading…") }
+        if frozen == nil { say(lastFailure == nil ? "Loading…" : "Couldn't load", tooltip: lastFailure) }
         waitForIt()
     }
 
@@ -966,9 +977,10 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         giveUp?.cancel()
         giveUp = nil
         stopProbingForPaint()
-        guard web != nil else { return }
+        guard let web else { return }
         let first = !revealed
         revealed = true
+        lastFailure = nil
         loadedAt = Date()
         describeYourself()
 
@@ -978,6 +990,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
                 context.duration = Motion.duration(Self.revealDuration)
                 context.allowsImplicitAnimation = true
                 for view in going { view.animator().alphaValue = 0 }
+                web.animator().alphaValue = 1
             } completionHandler: { [weak self] in self?.uncover() }
         } else {
             uncover()
@@ -991,6 +1004,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// fails, or a card that is frozen and woken, comes back through it. Its alpha is put back at the
     /// same time, or it would come back invisible.
     private func uncover() {
+        web?.alphaValue = 1
         placeholder?.isHidden = true
         placeholder?.alphaValue = 1
         frozen?.removeFromSuperview()
@@ -1851,7 +1865,8 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         frozen = nil
         pictureIsTiled = board.isTiled
         placeholder?.isHidden = false
-        say("Couldn't load", tooltip: ns.localizedDescription)
+        lastFailure = ns.localizedDescription
+        say("Couldn't load", tooltip: lastFailure)
     }
 
     /// A failure the card rides out — the page is still there — still ends the load, and the header is
