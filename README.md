@@ -4,6 +4,8 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 **Assumptions:** You use Obsidian and Raycast, follow the PARA model for file management, and have mid-size projects that benefit from some structure but aren’t epics (e.g. no full project-management tooling).
 
+What each thing is — project, area, session, task, pick, canvas, workspace, link — is listed in [docs/concepts.md](docs/concepts.md).
+
 PM tracks two kinds of thing. A **project** is numbered, lives in `active/`, and ends. An **area** is the ongoing sort — a standing responsibility, a recurring meeting — is named rather than numbered, lives in `areas/`, and doesn’t. They share everything else: the same notes file, tasks, sessions, focus and capture. See [docs/areas.md](docs/areas.md).
 
 ## Install
