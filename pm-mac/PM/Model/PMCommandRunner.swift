@@ -70,6 +70,9 @@ enum PMCommandRunner {
             guard let name = store.projectName else { return }
             ProjectSettings.present(projectNamed: name,
                                     isArchived: PMCommand.Context.isArchived(key: store.projectKey))
+        case .showEvents:
+            guard let name = store.projectName else { return }
+            ProjectEventsSheet.present(projectNamed: name)
         case .archiveProject, .unarchiveProject:
             guard let name = store.projectName else { return }
             do {

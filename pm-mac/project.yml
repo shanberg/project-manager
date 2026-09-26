@@ -126,6 +126,9 @@ targets:
         # per site first (CanvasWebDialogs.mediaAccess); without these keys the request would crash.
         NSMicrophoneUsageDescription: A web page you allowed, such as a call or huddle, wants to use the microphone.
         NSCameraUsageDescription: A web page you allowed, such as a call or huddle, wants to use the camera.
+        # Read-only, for a project's Show Events From… (views.md, Calendars C1). Asked for from that sheet,
+        # never at launch.
+        NSCalendarsFullAccessUsageDescription: Shows events from the calendars you choose beside their projects. Read only.
     scheme:
       testTargets:
         - PMViewTests
@@ -141,6 +144,8 @@ targets:
         # the user answers. For calls in web pages the user has allowed; see NSMicrophoneUsageDescription.
         com.apple.security.device.audio-input: true
         com.apple.security.device.camera: true
+        # EventKit reads nothing under the hardened runtime without this, whatever the user answers.
+        com.apple.security.personal-information.calendars: true
 
   # The AppKit views, driven with real events and asserted through the layout manager.
   #

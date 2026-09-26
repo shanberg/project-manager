@@ -282,3 +282,73 @@ private func yamlWriting(_ text: String) -> String {
         && Double(text) == nil
     return plain ? text : yamlQuoted(text)
 }
+
+// MARK: - Choosing calendars
+
+/// One calendar in the app's Show Events From… sheet: a calendar on this Mac, or a saved entry this Mac
+/// doesn't have. Rows go in, sources come out — the sheet itself only draws them.
+public struct ProjectEventChoice: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    /// Nil only for a saved entry that names no account and matched nothing here.
+    public let account: String?
+    public let isOnThisMac: Bool
+    public var isOn: Bool
+    public var queries: [String]
+    /// The saved entry named its account, so saving keeps naming it.
+    public let namesAccount: Bool
+    /// Its place in the file, so saving keeps the file's order. New ones go last.
+    public let order: Int
+}
+
+/// A row per calendar on this Mac, in the order given and checked where a source names it, then a row
+/// per source that names none of them.
+public func projectEventChoices(calendars: [(title: String, account: String)],
+                                sources: [ProjectEventSource]) -> [ProjectEventChoice] {
+    func names(_ source: ProjectEventSource, _ calendar: (title: String, account: String)) -> Bool {
+        ProjectEventSource(calendar: source.calendar, account: source.account)
+            .matches(calendar: calendar.title, account: calendar.account, title: "")
+    }
+    var choices = calendars.map { calendar in
+        let index = sources.firstIndex { names($0, calendar) }
+        let source = index.map { sources[$0] }
+        return ProjectEventChoice(id: choiceID(calendar.title, calendar.account), title: calendar.title,
+                                  account: calendar.account, isOnThisMac: true, isOn: source != nil,
+                                  queries: source?.match ?? [], namesAccount: source?.account != nil,
+                                  order: index ?? Int.max)
+    }
+    for (index, source) in sources.enumerated() where !calendars.contains(where: { names(source, $0) }) {
+        choices.append(ProjectEventChoice(id: choiceID(source.calendar, source.account), title: source.calendar,
+                                          account: source.account, isOnThisMac: false, isOn: true,
+                                          queries: source.match, namesAccount: source.account != nil,
+                                          order: index))
+    }
+    return choices
+}
+
+/// What saving the rows writes: the checked ones, in the file's order, blank queries dropped.
+///
+/// An account is written only when it's needed (C2): the file named one, or two calendars here share
+/// the title and aren't checked alike. Two rows found through one account-less entry and left as they
+/// were go back as that one entry, so opening the sheet and saving changes nothing.
+public func projectEventSources(from choices: [ProjectEventChoice]) -> [ProjectEventSource] {
+    func key(_ title: String) -> String { title.trimmingCharacters(in: .whitespaces).lowercased() }
+    func cleaned(_ queries: [String]) -> [String] {
+        queries.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+    let byTitle = Dictionary(grouping: choices, by: { key($0.title) })
+    var entries: [(order: Int, source: ProjectEventSource)] = []
+    for (position, choice) in choices.enumerated() where choice.isOn {
+        let twins = byTitle[key(choice.title)] ?? [choice]
+        let alike = twins.allSatisfy { !$0.namesAccount && $0.isOn && cleaned($0.queries) == cleaned(choice.queries) }
+        let account = choice.namesAccount || (twins.count > 1 && !alike) ? choice.account : nil
+        let source = ProjectEventSource(calendar: choice.title, account: account, match: cleaned(choice.queries))
+        guard !entries.contains(where: { $0.source == source }) else { continue }
+        entries.append((choice.order == Int.max ? Int.max / 2 + position : choice.order, source))
+    }
+    return entries.sorted { $0.order < $1.order }.map(\.source)
+}
+
+private func choiceID(_ title: String, _ account: String?) -> String {
+    "\(account?.lowercased() ?? "")\u{1f}\(title.lowercased())"
+}

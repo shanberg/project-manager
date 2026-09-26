@@ -750,6 +750,7 @@ extension CanvasBoardView {
                 // with no brief yet draws nothing on a card, so there is nothing to double-click.
                 add(menu, "Edit Details\u{2026}", #selector(editProjectDetails(_:)))
                 add(menu, "\(noun) Settings\u{2026}", #selector(projectSettingsForCard))
+                add(menu, PMCommand.showEvents.title, #selector(showEventsForCard))
                 addShowsMenu(menu)
             }
             // A folder card's own two: where it points, and how it lays that out. First, as a project
@@ -2119,6 +2120,13 @@ extension CanvasBoardView {
               let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName else { return }
         let key = ProjectIndex.shared.projectKey(forFolder: folder)
         ProjectSettings.present(projectNamed: folder, isArchived: PMCommand.Context.isArchived(key: key))
+    }
+
+    /// Show Events From… for the card's project, focused or not.
+    @objc private func showEventsForCard() {
+        guard let id = selection.first,
+              let folder = (nodeViews[id] as? CanvasFileNodeView)?.projectFolderName else { return }
+        ProjectEventsSheet.present(projectNamed: folder)
     }
 
     @objc private func focusProjectForCard() {

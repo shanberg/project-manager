@@ -135,6 +135,7 @@
 		54340DB057B2B613E3E9DE83 /* RowSelectionBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC91C59007ABC53958980A0C /* RowSelectionBand.swift */; };
 		558C1EA2742C73C2A639DB02 /* AttentionKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492EF47D503135DF9A6D100B /* AttentionKeeper.swift */; };
 		559F6E1B49BEC7F380B1DF70 /* CanvasPaneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B2306FD03B435C83C0588A /* CanvasPaneController.swift */; };
+		55E328A5AED79386BFBFC19D /* ProjectEventsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAABD83B68718F243C8107B0 /* ProjectEventsSheet.swift */; };
 		586FDE837EFB0F824560F189 /* CanvasBlockPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B693908982BE1960D0F08898 /* CanvasBlockPolicy.swift */; };
 		5905F9871F9DC7B8E6F0D3F3 /* CanvasTileReplaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF9779A59B89964D13DE4C2 /* CanvasTileReplaceTests.swift */; };
 		592A7378AE3279B5F9F87630 /* OutsideClick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */; };
@@ -394,6 +395,7 @@
 		DCA91E87D94059C934F94FC1 /* NoteEditorMeasureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 247D713E81E2FEE83B569154 /* NoteEditorMeasureTests.swift */; };
 		DCBE3727B1ACF185A4794A10 /* TaskDropResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D173E62227C8FC949D07AF0 /* TaskDropResolverTests.swift */; };
 		DF0BF2DC5FA2C8EE946A7501 /* CanvasAddCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7067433262B37D02B5188FA8 /* CanvasAddCommand.swift */; };
+		E08DD21B11A6482A5E20CB20 /* CalendarEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E6B9205603A3A1F97B4FE6 /* CalendarEvents.swift */; };
 		E0EA6383128FFAE94C27E576 /* CanvasFrozenPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9AA0649A13D2116BE4BD38 /* CanvasFrozenPageView.swift */; };
 		E142CE361ED59A68B79B1741 /* TokenLayoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0F632CE9606E7BB260271F /* TokenLayoutManager.swift */; };
 		E156B63F77BE44F4081ACA7A /* ProjectWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */; };
@@ -665,7 +667,9 @@
 		A78CE3055A350C714EB9865C /* CanvasPageBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageBudget.swift; sourceTree = "<group>"; };
 		A8678BD777CB24842940F9B5 /* CanvasWebPopupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasWebPopupTests.swift; sourceTree = "<group>"; };
 		A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickBarController.swift; sourceTree = "<group>"; };
+		A8E6B9205603A3A1F97B4FE6 /* CalendarEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEvents.swift; sourceTree = "<group>"; };
 		A973E66B4AE194690B4FE7FC /* AtomicTokenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomicTokenTests.swift; sourceTree = "<group>"; };
+		AAABD83B68718F243C8107B0 /* ProjectEventsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectEventsSheet.swift; sourceTree = "<group>"; };
 		AABAA1D39A0CA679864E9DFD /* CanvasGroupResizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasGroupResizeTests.swift; sourceTree = "<group>"; };
 		ABC42AED0A93C0A262E4E443 /* HotKeyRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyRecorder.swift; sourceTree = "<group>"; };
 		ADC5D63FE645083B45B998FF /* CanvasUserAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasUserAgentTests.swift; sourceTree = "<group>"; };
@@ -917,6 +921,7 @@
 				17B150B9DBBA6E56C93A1ADE /* ProjectAppearancePreview.swift */,
 				27B4587A012B30694D82E4D8 /* ProjectColorPicker.swift */,
 				ADD9FCB322CC884666C6E5DC /* ProjectDetails.swift */,
+				AAABD83B68718F243C8107B0 /* ProjectEventsSheet.swift */,
 				F1882764C277BA7AAE6751C2 /* ProjectIconImagePanel.swift */,
 				E29E425C060C5A184CAC91C0 /* ProjectLinks.swift */,
 				572129A651DA79D128E42804 /* ProjectPrompts.swift */,
@@ -985,6 +990,7 @@
 			isa = PBXGroup;
 			children = (
 				19EFCE48163B4933B104DA26 /* AppIcons.swift */,
+				A8E6B9205603A3A1F97B4FE6 /* CalendarEvents.swift */,
 				57121E3E580CB310F5C374DF /* CodeEditor.swift */,
 				6025B31DBDB751A05489F337 /* ConfigStore.swift */,
 				9831EB99DF551250EFC4CAD8 /* DueLabels.swift */,
@@ -1435,6 +1441,7 @@
 				ECA021765D64B690699581FE /* AppDelegate.swift in Sources */,
 				33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */,
 				24303FA69FF5DF1DBF4D2730 /* AttentionKeeper.swift in Sources */,
+				E08DD21B11A6482A5E20CB20 /* CalendarEvents.swift in Sources */,
 				DF0BF2DC5FA2C8EE946A7501 /* CanvasAddCommand.swift in Sources */,
 				BD9B0642122BF6D6218ED08C /* CanvasAddress.swift in Sources */,
 				84403089A4C02B5D6EDB36CC /* CanvasAddressBar.swift in Sources */,
@@ -1596,6 +1603,7 @@
 				18FED8A7D190A1B6D35CF728 /* ProjectColorPicker.swift in Sources */,
 				C9E966262C9254FED6D53571 /* ProjectContentPane.swift in Sources */,
 				3962C95F533643BFDC9C53FA /* ProjectDetails.swift in Sources */,
+				55E328A5AED79386BFBFC19D /* ProjectEventsSheet.swift in Sources */,
 				87298B201FA080B3505A1ED2 /* ProjectIconImagePanel.swift in Sources */,
 				62808FC8DAD2E8A4027C29A0 /* ProjectIndex.swift in Sources */,
 				9563B3FC2439B4B4F7EE402F /* ProjectLifecycle.swift in Sources */,

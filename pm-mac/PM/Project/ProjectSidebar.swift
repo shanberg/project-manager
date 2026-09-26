@@ -1071,6 +1071,9 @@ private struct ProjectMenu: View {
             Button { onSettings(only) } label: {
                 Label("\(only.kind.displayName) Settings…", systemImage: "slider.horizontal.3")
             }
+            Button { ProjectEventsSheet.present(projectNamed: only.name) } label: {
+                Label(PMCommand.showEvents.title, systemImage: PMCommand.showEvents.symbol)
+            }
             if !only.isArchived {
                 Button { ProjectLifecycle.choosePartOf(for: only) } label: {
                     Label("Part Of…", systemImage: "square.stack.3d.up")

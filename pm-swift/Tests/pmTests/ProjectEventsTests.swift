@@ -144,3 +144,64 @@ final class ProjectEventsTests: XCTestCase {
         XCTAssertFalse([ProjectEventSource]().matches(calendar: "Work", account: nil, title: "x"))
     }
 }
+
+final class ProjectEventChoiceTests: XCTestCase {
+    private let mac: [(title: String, account: String)] = [
+        ("Work", "iCloud"), ("Home", "iCloud"), ("Work", "Google"), ("Launch", "Google"),
+    ]
+
+    private func sources(_ raw: [ProjectEventSource]) -> [ProjectEventSource] {
+        projectEventSources(from: projectEventChoices(calendars: mac, sources: raw))
+    }
+
+    /// Opening the sheet and saving writes back exactly what was read.
+    func testUntouchedRoundTrips() {
+        let cases: [[ProjectEventSource]] = [
+            [],
+            [ProjectEventSource(calendar: "Launch", match: ["go/no-go"]), ProjectEventSource(calendar: "Home")],
+            [ProjectEventSource(calendar: "Work", account: "Google", match: ["1:1"])],
+            // No account, and two calendars answer to it: still one entry.
+            [ProjectEventSource(calendar: "Work", match: ["Priya"])],
+            // Not on this Mac: kept.
+            [ProjectEventSource(calendar: "Personal", account: "Exchange"), ProjectEventSource(calendar: "Home")],
+        ]
+        for original in cases { XCTAssertEqual(sources(original), original) }
+    }
+
+    func testRows() {
+        let choices = projectEventChoices(calendars: mac, sources: [
+            ProjectEventSource(calendar: "Work", match: ["Priya"]),
+            ProjectEventSource(calendar: "Personal"),
+        ])
+        XCTAssertEqual(choices.map(\.title), ["Work", "Home", "Work", "Launch", "Personal"])
+        XCTAssertEqual(choices.map(\.isOn), [true, false, true, false, true])
+        XCTAssertEqual(choices.map(\.isOnThisMac), [true, true, true, true, false])
+        XCTAssertEqual(choices[2].queries, ["Priya"])
+    }
+
+    /// Checking one of two calendars that share a title names its account; a unique title doesn't.
+    func testAccountOnlyWhenNeeded() {
+        var choices = projectEventChoices(calendars: mac, sources: [])
+        choices[0].isOn = true                          // Work, iCloud
+        choices[1].isOn = true                          // Home, iCloud
+        choices[1].queries = ["  ", "dentist "]
+        XCTAssertEqual(projectEventSources(from: choices), [
+            ProjectEventSource(calendar: "Work", account: "iCloud"),
+            ProjectEventSource(calendar: "Home", match: ["dentist"]),
+        ])
+    }
+
+    /// New rows go after the file's entries, whatever their place in the list.
+    func testKeepsFileOrder() {
+        var choices = projectEventChoices(calendars: mac, sources: [ProjectEventSource(calendar: "Launch")])
+        choices[1].isOn = true                          // Home, listed before Launch
+        XCTAssertEqual(projectEventSources(from: choices).map(\.calendar), ["Launch", "Home"])
+    }
+
+    /// Splitting an account-less entry — one twin unchecked — names the account of the one left.
+    func testSplittingTwins() {
+        var choices = projectEventChoices(calendars: mac, sources: [ProjectEventSource(calendar: "Work")])
+        choices[2].isOn = false                         // Work, Google
+        XCTAssertEqual(projectEventSources(from: choices), [ProjectEventSource(calendar: "Work", account: "iCloud")])
+    }
+}

@@ -3,7 +3,7 @@
 **Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers), 7 (Coming up, Projects, Copy as Text) and 9 (Time) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
-goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); step 1 (PmLib) is built. An inbox was considered and decided against.
+goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); steps 1 (PmLib) and 2 (the app) are built. An inbox was considered and decided against.
 
 ## The problem
 
@@ -575,7 +575,7 @@ choosing Period: Week/Month while Layout is Rail resets Layout to List.
 
 ## Calendars
 
-Decided 2026-09-18. Step 1 built 2026-09-25.
+Decided 2026-09-18. Steps 1 and 2 built 2026-09-25.
 
 **The ask:** subscribe to a calendar, associate it with a project or area, and see its events among the
 sittings, in the views that cover that project.
@@ -641,8 +641,21 @@ the plain list, and how, waits until they've been seen on the rail. Copy as Text
    - Writes a canonical block: `match` always as a quoted flow list; titles quoted only when YAML needs it.
    - Rewriting drops unknown keys inside `pm-events`.
    - Clearing the last frontmatter key removes the block, as `settingFrontmatterValue` does.
-2. **The app.** An EventKit reader, the usage string, and **Show Events From…** on the project and area
+2. ✓ **The app.** An EventKit reader, the usage string, and **Show Events From…** on the project and area
    menus: pick calendars, add query strings, and it writes the frontmatter.
+   As built:
+   - `CalendarEvents` (app): EventKit access, the calendars, and `events(in:for:)` filtered by
+     `ProjectEventSource`. Searches only the calendars the sources name. Nothing is kept.
+   - `NSCalendarsFullAccessUsageDescription` and `com.apple.security.personal-information.calendars`
+     (hardened runtime). Access is asked for from the sheet, never at launch.
+   - `PMCommand.showEvents`, "Show Events From…": Project menu, menu extra, quick bar (`calendar`,
+     `events`, `meetings`), sidebar row menu, board card menu.
+   - `ProjectEventsSheet`: calendars by account, a checkbox each, "Title contains" strings under a
+     checked one, and a count and next event over 30 days. Saved calendars this Mac lacks are listed
+     under Not on This Mac and kept. Writes on Save, only when changed.
+   - Rows ⇄ sources are PmLib (`projectEventChoices`, `projectEventSources(from:)`). An account is
+     written when the file named one, or two calendars here share the title and aren't checked alike.
+     Opening and saving unchanged writes nothing.
 3. **The views.** Events for the card's projects, drawn in the rail, week and month.
 4. **Later.** A sitting started during an associated event takes the event's title, so the meeting and
    its notes read as one row. A period anchored to an event ("since the last 1:1" as the calendar says

@@ -42,6 +42,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     case editDetails
     case addLink
     case projectSettings
+    case showEvents
     case archiveProject
     case unarchiveProject
 
@@ -84,6 +85,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .editDetails: return "Edit Details…"
         case .addLink: return "Add Link…"
         case .projectSettings: return "Project Settings…"
+        case .showEvents: return "Show Events From…"
         case .archiveProject: return "Archive Project"
         case .unarchiveProject: return "Unarchive Project"
         case .newProject: return "New Project…"
@@ -125,6 +127,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .editDetails: return "text.justify.left"
         case .addLink: return "link"
         case .projectSettings: return "slider.horizontal.3"
+        case .showEvents: return "calendar"
         case .archiveProject: return "archivebox"
         case .unarchiveProject: return "arrow.up.bin"
         case .newProject: return "plus.square"
@@ -149,7 +152,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
              .editTask, .setDue, .wrapTask:
             return .task
         case .openInFinder, .openInObsidian, .openInEditor,
-             .editDetails, .addLink, .projectSettings, .archiveProject, .unarchiveProject:
+             .editDetails, .addLink, .projectSettings, .showEvents, .archiveProject, .unarchiveProject:
             return .project
         // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
         // Session and Project ▸ Write Session Note…, and Edit ▸ Undo already names Undo Complete Task.
@@ -196,7 +199,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .narrowFocus, .addAfter, .addBefore, .editTask, .setDue, .wrapTask:
             return .add
-        case .openInFinder, .openInObsidian, .openInEditor, .openWindow, .projectSettings,
+        case .openInFinder, .openInObsidian, .openInEditor, .openWindow, .projectSettings, .showEvents,
              .sessionNote, .startSession, .addLink, .editDetails, .archiveProject, .unarchiveProject:
             return .project
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
@@ -283,6 +286,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .editDetails: return ["summary", "problem", "goals", "approach", "learnings", "brief"]
         case .addLink: return ["url", "bookmark"]
         case .projectSettings: return ["rename", "title", "icon", "emoji", "symbol", "info"]
+        case .showEvents: return ["calendar", "events", "meetings", "schedule"]
         case .archiveProject: return ["archive", "shelve", "done"]
         case .unarchiveProject: return ["unarchive", "restore", "reopen"]
         case .newProject: return ["create", "start"]
