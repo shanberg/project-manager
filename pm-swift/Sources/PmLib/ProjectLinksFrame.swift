@@ -118,6 +118,30 @@ public enum ProjectLinksFrame {
         return out == rawText ? nil : out
     }
 
+    /// `sync`, on the files: a project's notes and its canvas, made if the project has links and no
+    /// board. For a writer with no board open to go through — `notes.addLink`, from `pm`, the MCP
+    /// server or Raycast, which may run while the app isn't — so a link added there is a card already,
+    /// not one waiting for the app to next read the project.
+    @discardableResult
+    public static func syncFiles(projectPath: String, notesPath: String, io: NotesIO) throws -> Synced? {
+        let raw = try io.readContent(path: notesPath)
+        let links = try parseNotes(markdown: raw).links
+        var canvasPath = try resolveProjectCanvasPath(projectPath: projectPath)
+        if canvasPath == nil {
+            guard hasLinks(links) else { return nil }
+            canvasPath = try createProjectCanvas(projectPath: projectPath, notesPath: notesPath)
+        }
+        guard let canvasPath else { return nil }
+        let url = URL(fileURLWithPath: canvasPath)
+        var document = try CanvasDocument.read(contentsOf: url)
+        let synced = sync(notes: links, canvas: &document)
+        if synced.canvasChanged { try document.write(to: url) }
+        if synced.notesChanged, let out = try notes(raw, with: synced.links, notesPath: notesPath) {
+            try io.writeContent(path: notesPath, content: out)
+        }
+        return synced
+    }
+
     /// What `sync` did.
     public struct Synced: Equatable {
         /// The project's links, as the notes should now say them — the frame's, with a blank row for a

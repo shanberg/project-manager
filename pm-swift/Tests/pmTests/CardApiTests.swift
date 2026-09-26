@@ -214,3 +214,31 @@ final class CardApiTests: XCTestCase {
         XCTAssertEqual(try board.nodes.filter { !$0.isGroup }.count, 0, "the card is gone again")
     }
 }
+
+// MARK: Links are cards (ProjectLinksFrame)
+
+extension CardApiTests {
+    func testAddingALinkOverTheApiPutsACardInTheLinksFrameWithNoAppRunning() throws {
+        var input = ApiInput()
+        input.text = "https://example.com/brief"
+        input.label = "Brief"
+        _ = try call("notes.addLink", input)
+        let links = ProjectLinksFrame.links(of: try board)
+        XCTAssertEqual(links.map(\.url), ["https://example.com/brief"])
+        XCTAssertEqual(links.first?.label, "Brief")
+
+        _ = try call("notes.addLink", input, dryRun: false)
+        XCTAssertEqual(ProjectLinksFrame.links(of: try board).count, 1, "the same address twice is one card")
+    }
+
+    func testAPreviewOfAddingALinkWritesNoBoard() throws {
+        var input = ApiInput()
+        input.text = "https://example.com/x"
+        _ = try call("notes.addLink", input, dryRun: true)
+        let path = try resolveProjectCanvasPath(projectPath: try resolveProjectPath(nameOrPrefix: "W-1"))
+        if let path {
+            let document = try CanvasDocument.parse(Data(contentsOf: URL(fileURLWithPath: path)))
+            XCTAssertNil(ProjectLinksFrame.frame(of: document))
+        }
+    }
+}

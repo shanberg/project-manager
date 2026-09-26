@@ -408,6 +408,15 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         // Links are common to both kinds, so this can't trip the header guard — the kind is passed
         // because the writer always wants one, not because this action has a decision to make.
         let linkKind = ProjectKind.of(folderName: try folderName(of: try resolvedProject(input)))
+        // A link is a card in the project's Links frame, with `## Links` its mirror (ProjectLinksFrame).
+        // The notes are written as they always were, so the journal and its undo are unchanged, and
+        // then the board is brought up to them — here, because this may run while the app isn't.
+        defer {
+            if !options.dryRun, let handle = try? resolveNotesHandle(project: try resolvedProject(input)) {
+                _ = try? ProjectLinksFrame.syncFiles(projectPath: handle.projectPath,
+                                                     notesPath: handle.notesPath, io: handle.io)
+            }
+        }
         return try document(spec, input, options) { rawText in
             guard let url = input.text, !url.isEmpty else { throw PmError.emptyTodoText }
             var notes = try parseNotes(markdown: rawText)

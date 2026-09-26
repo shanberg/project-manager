@@ -8,6 +8,11 @@ import PmLib
 /// agree about two things a caller would otherwise decide twice: that the blank row a project with no
 /// links carries is filled rather than pushed down, and that a link nobody named is named after the
 /// page it points at.
+///
+/// **Into the notes, still, though a link is a card.** A project's links are web cards in its Links
+/// frame, and `## Links` is their mirror (`ProjectLinksFrame`, kept in step by `ProjectLinksSync`). This
+/// goes on writing the mirror because that is where its ⌘Z lives — the project's notes history — and
+/// the line it writes is a card by the time the notes have been read back, a moment later.
 @MainActor
 enum ProjectLinks {
 
