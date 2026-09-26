@@ -228,6 +228,16 @@ Measured 2026-09-25 on macOS 26, one page timestamping a 100ms timer and every a
 - Not measured: whether a suspended page's layers stay sharp when the board zooms.
 - A third page-budget state (live, suspended, frozen) would trade memory for keeping state. A per-site switch in `CanvasSiteSettings` would choose it for the pages that can't afford to lose state. Not built.
 
+How stable `_suspendPage:` is:
+
+- Added May 2021: [WebKit bug 225333](https://bugs.webkit.org/show_bug.cgi?id=225333), r277356, `WK_API_AVAILABLE(macos(12.0), ios(15.0))`. Unchanged in WebKit main as of 2026-09.
+- Covered by WebKit's own API tests (`ProcessSuspension.mm`).
+- Made for an Apple-internal client (a private radar); no public documentation or promise of support.
+- It suspends the page in place, as the back/forward cache does, without a history item.
+- On a suspended view most calls throw — script evaluation, find and snapshots among them. URL, title, `isLoading` and `canGoBack` still answer. Navigating resumes the page first. Deallocating or closing a suspended view is safe.
+- `_isSuspended` read 0 while the test page was suspended, so it can't be relied on.
+- If built: check `responds(to:)` and fall back to freezing; route every call on a suspended card's view through one wrapper that resumes first; offer it per site only. Decided 2026-09-25: not now.
+
 ## Which of the two addresses each command means
 
 Every command on a web card has to answer this, and the answer is not the same one twice in a row. It
