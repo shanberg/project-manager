@@ -3,7 +3,7 @@
 **Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers), 7 (Coming up, Projects, Copy as Text) and 9 (Time) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
-goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below) but not built. An inbox was considered and decided against.
+goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); step 1 (PmLib) is built. An inbox was considered and decided against.
 
 ## The problem
 
@@ -575,7 +575,7 @@ choosing Period: Week/Month while Layout is Rail resets Layout to List.
 
 ## Calendars
 
-Decided 2026-09-18. Not built.
+Decided 2026-09-18. Step 1 built 2026-09-25.
 
 **The ask:** subscribe to a calendar, associate it with a project or area, and see its events among the
 sittings, in the views that cover that project.
@@ -628,9 +628,19 @@ the plain list, and how, waits until they've been seen on the rail. Copy as Text
 
 ### Build order
 
-1. **PmLib, no EventKit.** Read and write `pm-events`, and a pure matcher (a calendar title, an account
+1. ✓ **PmLib, no EventKit.** Read and write `pm-events`, and a pure matcher (a calendar title, an account
    and an event title against a project's entries). Tests cover several `match` strings, no `match`,
    a missing account, and a calendar that isn't there.
+   As built (`ProjectEvents.swift`, `ProjectEventsTests`):
+   - `ProjectEventSource`; `projectEventSources(rawText:)`, `settingProjectEventSources(_:in:)`,
+     `setProjectEventSources(project:to:)`; `matches(calendar:account:title:)` on a source and on a list.
+   - Calendar and account titles compare ignoring case and surrounding space.
+   - A source with an account doesn't match an event with no account.
+   - Blank `match` strings are ignored; none left means the whole calendar.
+   - Reads block or flow `match`, a single string, quotes, comments, and a sequence at the key's indent.
+   - Writes a canonical block: `match` always as a quoted flow list; titles quoted only when YAML needs it.
+   - Rewriting drops unknown keys inside `pm-events`.
+   - Clearing the last frontmatter key removes the block, as `settingFrontmatterValue` does.
 2. **The app.** An EventKit reader, the usage string, and **Show Events From…** on the project and area
    menus: pick calendars, add query strings, and it writes the frontmatter.
 3. **The views.** Events for the card's projects, drawn in the rail, week and month.
