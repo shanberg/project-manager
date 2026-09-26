@@ -156,12 +156,12 @@ struct ProjectEventsView: View {
                     .truncationMode(.middle)
             }
 
-            if model.access != .granted { accessNotice }
-
-            if model.rows.isEmpty {
-                Text(model.access == .granted ? "No calendars on this Mac" : "No calendars chosen")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
+            // Without access, nothing below can be chosen or checked, so the ask takes the list's place.
+            if model.access != .granted {
+                accessPlaceholder.modifier(ListWell())
+            } else if model.rows.isEmpty {
+                ContentUnavailableView("No Calendars on This Mac", systemImage: "calendar")
+                    .modifier(ListWell())
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -181,8 +181,7 @@ struct ProjectEventsView: View {
                 }
                 .frame(minHeight: 120, maxHeight: 380)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+                .modifier(ListWell())
             }
 
             HStack {
@@ -197,19 +196,29 @@ struct ProjectEventsView: View {
         .frame(width: 440)
     }
 
-    @ViewBuilder
-    private var accessNotice: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.secondary)
-            Text(model.access == .notAsked ? "Folio can't read calendars yet" : "Calendar access is off for Folio")
-            Spacer()
+    private var accessPlaceholder: some View {
+        ContentUnavailableView {
+            Label(model.access == .notAsked ? "Calendar Access Needed" : "Calendar Access Is Off",
+                  systemImage: model.access == .notAsked ? "calendar" : "calendar.badge.exclamationmark")
+        } description: {
+            Text("Read only")
+        } actions: {
             if model.access == .notAsked {
                 Button("Allow Access…") { model.requestAccess() }
             } else {
                 Button("Open Privacy Settings") { CalendarEvents.openPrivacySettings() }
             }
         }
-        .controlSize(.small)
+        .frame(maxWidth: .infinity, minHeight: 220)
+    }
+}
+
+/// The rounded, bordered ground the calendar list sits in — and whatever stands in for it.
+private struct ListWell: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
     }
 }
 
