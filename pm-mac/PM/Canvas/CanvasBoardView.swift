@@ -575,6 +575,12 @@ final class CanvasBoardView: NSView {
     /// Told when a page is stepped into or out of, or navigates — so the window can offer the controls
     /// for it, and only then.
     var onPageStateChanged: (() -> Void)?
+    /// Escape with nothing smaller to cancel on the board; true if it was taken. Focus mode's.
+    var onEscape: (() -> Bool)?
+    /// Set while focus mode is on: no tile shows a grip or can be picked up by one.
+    var tileGripsHeld = false {
+        didSet { if tileGripsHeld != oldValue { refreshTileHandles() } }
+    }
     func pageStateChanged() { onPageStateChanged?() }
 
     /// Told when the mode changes, so the window's header can say which one the board is in.

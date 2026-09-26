@@ -87,6 +87,15 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// The full-screen bar's window whose moves this pane is following, while there is one.
     private weak var followedTitlebar: NSWindow?
     private var titlebarReach: CGFloat = 0
+    /// Focus mode's state while it's on — see the extension at the foot of this file.
+    fileprivate var focusMode: CanvasFocusModeState?
+    fileprivate var revealStrip: CanvasFocusRevealStrip?
+    fileprivate var focusClearanceTimer: Timer?
+    fileprivate var grabStrip: CanvasFocusGrabStrip?
+    fileprivate var focusHideTimer: Timer?
+    /// How focus mode asks the window to leave it — Escape, from the board or the pane.
+    var onLeaveFocus: (() -> Void)?
+    fileprivate var titlebarReachForFocus: CGFloat { titlebarReach }
 
     /// How far the header's leading edge starts in from the pane's own edge.
     ///
@@ -1723,4 +1732,279 @@ extension CanvasPaneController: ProjectTabContent {
     }
 
     func paneWillClose() { teardown() }
+}
+
+// MARK: - Focus mode
+
+/// ⌘. and ⌥⌘. — the window taken down to what you're reading or writing. The window controller folds
+/// the sidebar and says when; this is the pane's half: the header's controls and the window's buttons
+/// slide away, the tiles take the room, a strip along the top edge brings the header back while the
+/// pointer is up there, and ⌥⌘. fills the window with the one card. Chosen in the focus-mode mock,
+/// 2026-09-26; a doc's reading column is the card's own and applies whether or not this is on.
+extension CanvasPaneController {
+    /// On or off, and whether the one card was asked for. Nothing happens for a state it's already in.
+    func setFocus(_ on: Bool, card: Bool) {
+        let focusMode = self.focusMode
+        if on {
+            if focusMode == nil {
+                self.focusMode = CanvasFocusModeState()
+                easeTopClearance(to: 0)
+                setFocusedChrome(hidden: true)
+                scroll.board.tileGripsHeld = true
+                installRevealStrip()
+                showFocusHint()
+                scroll.board.onEscape = { [weak self] in self?.onLeaveFocus?(); return self?.onLeaveFocus != nil }
+            }
+            setFocusOnCard(card)
+        } else {
+            guard focusMode != nil else { return }
+            setFocusOnCard(false)
+            self.focusMode = nil
+            scroll.board.onEscape = nil
+            easeTopClearance(to: CanvasBoardView.headerClearance)
+            revealStrip?.removeFromSuperview()
+            revealStrip = nil
+            grabStrip?.removeFromSuperview()
+            grabStrip = nil
+            focusHideTimer?.invalidate()
+            focusHideTimer = nil
+            scroll.board.tileGripsHeld = false
+            setFocusedChrome(hidden: false)
+        }
+    }
+
+    var isFocusedOnCard: Bool { focusMode?.maximized != nil }
+
+    /// Move the band the tiles keep clear of, over the header's own 0.3 s, re-fitting the tiling on
+    /// every tick. **One clock for the tiles**: the sidebar folding re-fits the same tiling on every
+    /// frame of its slide (`coveredRegionChanged`), so an animated re-fit of our own would be a second
+    /// layout racing it — which is what flashed: the tiles flicked between the two mid-slide and landed
+    /// on the stale one's target. Stepping the clearance and re-fitting keeps both on one answer.
+    private func easeTopClearance(to target: Double) {
+        focusClearanceTimer?.invalidate()
+        let board: CanvasBoardView = scroll.board
+        let from = board.topClearance
+        guard !Motion.isReduced, from != target else {
+            board.topClearance = target
+            if board.isTiled { board.retileForWindowSize() }
+            return
+        }
+        let start = CACurrentMediaTime()
+        let duration = 0.3
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                let t = min(1, (CACurrentMediaTime() - start) / duration)
+                let eased = 1 - pow(1 - t, 3)
+                board.topClearance = from + (target - from) * eased
+                if board.isTiled { board.retileForWindowSize() }
+                if t >= 1 { timer.invalidate(); self?.focusClearanceTimer = nil }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        focusClearanceTimer = timer
+    }
+
+    /// Fill the window with the one card, or put back what this filled it with. A tile or card you
+    /// maximized yourself is yours, and stays.
+    private func setFocusOnCard(_ on: Bool) {
+        guard var state = focusMode else { return }
+        let board: CanvasBoardView = scroll.board
+        if on, state.maximized == nil {
+            if board.isTiled, board.maximizedTile == nil, let id = board.focusedTile ?? board.selection.first,
+               board.tiling?.ids.contains(id) == true {
+                board.toggleMaximizeTile(id)
+                state.maximized = .tile(id)
+            } else if !board.isTiled, let id = board.maximizableCard {
+                board.maximizeCard(id)
+                state.maximized = .card(id)
+            }
+        } else if !on, let maximized = state.maximized {
+            switch maximized {
+            case .tile(let id): if board.maximizedTile == id { board.toggleMaximizeTile(id) }
+            case .card(let id): if board.maximizedCard == id { board.restoreMaximizedCard() }
+            }
+            state.maximized = nil
+        }
+        focusMode = state
+    }
+
+    /// The header's three pieces and the window's buttons, away or back: a short slide up and a fade,
+    /// on the board's clock; just the fade under Reduce Motion.
+    fileprivate func setFocusedChrome(hidden: Bool, revealing: Bool = false) {
+        let pieces: [NSView] = [pill, tabBar, capsule]
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { view.window?.standardWindowButton($0) }
+        let lift: CGFloat = Motion.isReduced ? 0 : -18
+        if !hidden { (pieces + buttons).forEach { $0.isHidden = false } }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Motion.isReduced ? 0.15 : (revealing ? 0.2 : 0.3)
+            context.allowsImplicitAnimation = true
+            for piece in pieces + buttons { piece.animator().alphaValue = hidden ? 0 : 1 }
+            for top in chromeTops { top.animator().constant = titlebarReachForFocus + (hidden ? lift : 0) }
+        }, completionHandler: { [weak self] in
+            // Hidden, not just clear, so a click up there reaches the board rather than a control
+            // nobody can see. Unless it came back in the meantime.
+            guard let self, hidden, self.focusMode != nil, self.focusMode?.revealed != true else { return }
+            (pieces + buttons).forEach { $0.isHidden = true }
+        })
+    }
+
+    private func installRevealStrip() {
+        let strip = CanvasFocusRevealStrip()
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.topAnchor.constraint(equalTo: container.topAnchor),
+            strip.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            strip.heightAnchor.constraint(equalToConstant: CanvasFocusRevealStrip.height),
+        ])
+        strip.onReveal = { [weak self] shown in self?.revealHeader(shown) }
+        revealStrip = strip
+        // The gap above the tiles is the window's: a press there moves it, as a titlebar would.
+        let grab = CanvasFocusGrabStrip()
+        grab.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(grab)
+        NSLayoutConstraint.activate([
+            grab.topAnchor.constraint(equalTo: container.topAnchor),
+            grab.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            grab.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            grab.heightAnchor.constraint(equalToConstant: CanvasFocusRevealStrip.reach),
+        ])
+        grabStrip = grab
+    }
+
+    /// The header back, with the tiles stepping down out of its way; or, 0.8 s after the pointer has
+    /// gone, away again with the tiles rising to meet the top. Never over the tiles.
+    private func revealHeader(_ shown: Bool) {
+        focusHideTimer?.invalidate()
+        focusHideTimer = nil
+        guard let state = focusMode, state.revealed != shown else { return }
+        guard !shown else { return setRevealed(true) }
+        let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.focusHideTimer = nil
+                self?.setRevealed(false)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        focusHideTimer = timer
+    }
+
+    private func setRevealed(_ shown: Bool) {
+        guard var state = focusMode, state.revealed != shown else { return }
+        state.revealed = shown
+        focusMode = state
+        setFocusedChrome(hidden: !shown, revealing: true)
+        easeTopClearance(to: shown ? CanvasBoardView.headerClearance : 0)
+    }
+
+    /// "⌘. to leave focus mode", at the foot of the window for a moment each time you go in.
+    private func showFocusHint() {
+        let hint = CanvasFocusHint()
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hint)
+        NSLayoutConstraint.activate([
+            hint.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            hint.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18),
+        ])
+        hint.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; hint.animator().alphaValue = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak hint] in
+            guard let hint else { return }
+            NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; hint.animator().alphaValue = 0 },
+                                                 completionHandler: { hint.removeFromSuperview() })
+        }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        // The list lens's table doesn't take Escape for anything; the pane does, in focus mode.
+        if focusMode != nil, let leave = onLeaveFocus { return leave() }
+        super.cancelOperation(sender)
+    }
+}
+
+/// What focus mode is holding: what it maximized, if anything, and whether the header is out.
+struct CanvasFocusModeState {
+    enum Maximized { case tile(String), card(String) }
+    var maximized: Maximized?
+    var revealed = false
+}
+
+/// The gap above the tiles in focus mode, which moves the window rather than reaching the board.
+final class CanvasFocusGrabStrip: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        if event.clickCount == 2 {
+            // What a double-click on a titlebar does, as System Settings has it.
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": window.performMiniaturize(nil)
+            case "None": break
+            default: window.performZoom(nil)
+            }
+            return
+        }
+        window.performDrag(with: event)
+    }
+}
+
+/// A strip along the top of the pane, in focus mode: the pointer reaching the very top brings the
+/// header back, and leaving the strip sends it away. Takes no clicks.
+final class CanvasFocusRevealStrip: NSView {
+    static let height: CGFloat = 54
+    /// How near the top the pointer has to come.
+    static let reach: CGFloat = 6
+    var onReveal: (Bool) -> Void = { _ in }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let fromTop = isFlipped ? point.y : bounds.maxY - point.y
+        if fromTop <= Self.reach { onReveal(true) }
+    }
+
+    override func mouseExited(with event: NSEvent) { onReveal(false) }
+}
+
+/// The glass capsule the hint is written on.
+final class CanvasFocusHint: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        let glass = NSGlassEffectView()
+        let label = NSTextField(labelWithString: "\u{2318}. to leave focus mode")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        glass.cornerRadius = 14
+        // The glass sizes its content view to itself, so the label is centred in one rather than
+        // handed over as the content and pinned to its corner.
+        let content = NSView()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(label)
+        glass.contentView = content
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glass)
+        NSLayoutConstraint.activate([
+            glass.topAnchor.constraint(equalTo: topAnchor),
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
+            label.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 28),
+            widthAnchor.constraint(equalTo: label.widthAnchor, constant: 28),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

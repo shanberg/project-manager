@@ -398,3 +398,29 @@ All on 2026-09-10.
   edge dissolves the choice. It only shows when something passes under it, so it is on in both views,
   does real work on the canvas, is invisible over a workspace, and never switches. Nothing in the
   header changes between the canvas and a workspace except the tile capsule.
+
+## 8. Focus mode (⌘. and ⌥⌘.)
+
+Built 2026-09-26.
+
+- ⌘. — Enter / Leave Focus Mode, in the View menu under Show Sidebar. Esc also leaves.
+- ⌥⌘. — Focus on Card: focus mode with the active card filling the window (a tile maximized, or a
+  board card maximized). Inside focus mode it switches between the two.
+- What goes: the sidebar folds; the title pill, tab bar, capsule and window buttons slide up 18pt and
+  fade, 0.3s. Reduce Motion: a 0.15s fade.
+- The tiles take the header's room: `topClearance` eases 40 → 0 over 0.3s, re-fitting the tiling on
+  every tick. One clock for the tiles — an animated re-fit of its own raced the sidebar's per-frame
+  re-fit and flashed.
+- The sidebar's fold is started first. Starting it holds the main thread 140–200ms (the sidebar-jank
+  task); anything started before it spends its first frames in that wait and jumps.
+- The 6pt gap above the tiles moves the window (`CanvasFocusGrabStrip`); a double-click there does what
+  System Settings says a titlebar double-click does.
+- No tile grips while focused (`tileGripsHeld`): the top of a tile is where a hand reaching for the
+  window lands.
+- The pointer entering the gap brings the header back; the tiles step down 40pt so it never sits over
+  them. It goes 0.8s after the pointer leaves a 54pt strip; coming back cancels the going.
+- "⌘. to leave focus mode" shows on glass at the foot of the window for 2.2s each time you go in.
+- What focus mode maximized is put back on leaving; a tile or card you maximized yourself stays.
+- Known gaps: quitting while focused leaves the sidebar folded; switching tabs while focused shows the
+  new tab's header.
+- Chosen by mock: https://claude.ai/artifact/2Ny7QtZiJbotRSPxjp6btJ

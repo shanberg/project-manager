@@ -82,6 +82,8 @@ extension CanvasBoardView {
     /// carried — the grips belong to where tiles are, and a drag's preview is drawing where they would be.
     func showsTileHandle(_ id: String) -> Bool {
         if case .placeTile? = gesture { return false }
+        // Focus mode puts the grips away: the top of a tile is where a hand reaching for the window lands.
+        if tileGripsHeld { return false }
         return gripTile == id && tileHandle(id) != nil
     }
 

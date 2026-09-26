@@ -58,6 +58,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     private var lastCanvasAnswer: CanvasAnswer?
 
     let state = ProjectWindowState()
+    /// While focus mode is on: whether the sidebar was already folded when it came on, which is what
+    /// leaving puts back. Nil when it's off. See `toggleFocusMode`.
+    var focusSidebarWasCollapsed: Bool?
+    /// The pane focus mode was entered in, which is the one to tell when it ends.
+    weak var focusedPane: CanvasPaneController?
     private let split: ProjectSplitViewController
 
     /// The board showing in this window's content, if a board is what it is showing.
@@ -686,6 +691,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(toggleFocusMode(_:)):
+            item.title = focusSidebarWasCollapsed == nil ? "Enter Focus Mode" : "Leave Focus Mode"
+            return canvasPane != nil
+        case #selector(focusOnCard(_:)):
+            item.state = canvasPane?.isFocusedOnCard == true ? .on : .off
+            return canvasPane != nil
         case #selector(newTask(_:)), #selector(newSession(_:)), #selector(startNewSession(_:)):
             return store.projectName != nil
         case #selector(toggleCanvasRenderer(_:)):
@@ -778,5 +789,59 @@ final class TextFocusWindow: NSWindow {
     override func fieldEditor(_ createFlag: Bool, for client: Any?) -> NSText? {
         guard TokenFieldEditor.wants(client) else { return super.fieldEditor(createFlag, for: client) }
         return tokenEditor
+    }
+}
+
+// MARK: - Focus mode
+
+extension ProjectWindowController {
+    /// ⌘. — take the window down to what's on screen: the sidebar folds, the header's controls and the
+    /// window's buttons slide away, the tiles take the room. ⌘. again, or Escape, puts it all back.
+    /// The pane does its half — see `CanvasPaneController.setFocus`.
+    @objc func toggleFocusMode(_ sender: Any?) {
+        if focusSidebarWasCollapsed != nil { leaveFocusMode() } else { enterFocusMode(card: false) }
+    }
+
+    /// ⌥⌘. — the same, with the one card filling the window. Inside focus mode, it switches between
+    /// the card and everything that was on screen.
+    @objc func focusOnCard(_ sender: Any?) {
+        guard let pane = canvasPane else { return NSSound.beep() }
+        if focusSidebarWasCollapsed != nil { return pane.setFocus(true, card: !pane.isFocusedOnCard) }
+        enterFocusMode(card: true)
+    }
+
+    private func enterFocusMode(card: Bool) {
+        guard let pane = canvasPane else { return NSSound.beep() }
+        let sidebar = split.splitViewItems.first
+        focusSidebarWasCollapsed = sidebar?.isCollapsed ?? true
+        focusedPane = pane
+        pane.onLeaveFocus = { [weak self] in self?.leaveFocusMode() }
+        // The sidebar first: starting its fold holds the main thread for a moment, and the pane's
+        // animations started before it would spend their first frames in that wait and then jump.
+        if let sidebar, !sidebar.isCollapsed { setSidebar(sidebar, collapsed: true) }
+        pane.setFocus(true, card: card)
+        Log.write("focus mode: on\(card ? " (card)" : "")")
+    }
+
+    func leaveFocusMode() {
+        guard let wasCollapsed = focusSidebarWasCollapsed else { return }
+        focusSidebarWasCollapsed = nil
+        // The sidebar first, for the same reason as on the way in.
+        if let sidebar = split.splitViewItems.first, sidebar.isCollapsed != wasCollapsed {
+            setSidebar(sidebar, collapsed: wasCollapsed)
+        }
+        focusedPane?.setFocus(false, card: false)
+        focusedPane?.onLeaveFocus = nil
+        focusedPane = nil
+        Log.write("focus mode: off")
+    }
+
+    private func setSidebar(_ item: NSSplitViewItem, collapsed: Bool) {
+        guard !Motion.isReduced else { item.isCollapsed = collapsed; return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.allowsImplicitAnimation = true
+            item.animator().isCollapsed = collapsed
+        }
     }
 }

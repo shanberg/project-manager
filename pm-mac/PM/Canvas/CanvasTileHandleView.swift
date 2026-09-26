@@ -138,7 +138,7 @@ final class CanvasTileHandleView: NSView {
 
     // MARK: The strips, carved out of the window drag (canvas-backlog.md 22)
 
-    /// One invisible view over each tab strip, and they exist for a single property.
+    /// One invisible view over each tab, and over each strip's +, and they exist for a single property.
     ///
     /// The project window runs the board under a transparent titlebar, and an empty unified toolbar
     /// makes that band **66pt** deep (measured, `WindowDragBandTests`). Tiles begin at 46 —
@@ -152,10 +152,11 @@ final class CanvasTileHandleView: NSView {
     /// `mouseDownCanMoveWindow` suggests; see `WindowDragBlocker`. Without these, dragging a tab moved
     /// the window.
     ///
-    /// **Only the strips, and that is the decision rather than the cheap way out.** One line on
+    /// **Only the tabs, and that is the decision rather than the cheap way out.** One line on
     /// `CanvasBoardView` would have carved out the entire board, and taken the whole band with it: the
     /// empty top of a board is somewhere to grab the window, which is worth keeping in a window whose
-    /// titlebar is otherwise invisible. These carve out the part of that band that is a control.
+    /// titlebar is otherwise invisible — and that goes for the empty end of a strip too. These carve out
+    /// the parts of that band that are controls.
     ///
     /// **In front of or behind anything, it makes no difference.** The region is built from the
     /// blockers alone, so a view answering true over the top of the pane (the soft edge was one) puts nothing back.
@@ -181,7 +182,12 @@ final class CanvasTileHandleView: NSView {
         // board is picking there are none on screen to carve out.
         var bands: [NSRect] = []
         if let board, !board.isPicking, let session = board.tiling {
-            bands = session.tabStrips.map { board.viewRect($0.band) }
+            // The tabs and the +, not the whole band: the strip's empty stretch is the window's to
+            // move, like the empty top of any other tile.
+            bands = session.tabStrips.flatMap { strip in
+                (strip.tabs + [strip.newTabButton]).map { board.viewRect($0).intersection(board.viewRect(strip.band)) }
+                    .filter { !$0.isEmpty }
+            }
         }
         while stripExcluders.count < bands.count {
             let view = Excluder(frame: .zero)

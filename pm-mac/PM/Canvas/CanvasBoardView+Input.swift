@@ -1081,6 +1081,9 @@ extension CanvasBoardView {
         if isPicking { return peeking != nil ? endPeek() : endPicking() }
         // Where the next card was going, first: the smallest thing there is to cancel.
         if cancelPlacement() { return }
+        // Focus mode is the outermost thing on, and one Escape is the way out of it — it puts back a
+        // card it maximized itself. See `ProjectWindowController.toggleFocusMode`.
+        if onEscape?() == true { return }
         if restoreMaximizedTile() { return }
         if restoreMaximizedCard() { return }
         if !isTiled { selection = [] }
